@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: feature-enricher-service
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

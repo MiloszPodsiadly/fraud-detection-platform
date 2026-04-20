@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: transaction-ingest-service
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

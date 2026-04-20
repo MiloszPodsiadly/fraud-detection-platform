@@ -1,0 +1,7 @@
+.git
+.idea
+.m2repo
+**/target
+node_modules
+dist
+

@@ -1,0 +1,36 @@
+FROM maven:3.9.9-eclipse-temurin-21 AS build
+
+ARG MODULE_NAME
+
+WORKDIR /workspace
+
+COPY pom.xml .
+COPY common-events/pom.xml common-events/pom.xml
+COPY common-test-support/pom.xml common-test-support/pom.xml
+COPY transaction-ingest-service/pom.xml transaction-ingest-service/pom.xml
+COPY transaction-simulator-service/pom.xml transaction-simulator-service/pom.xml
+COPY feature-enricher-service/pom.xml feature-enricher-service/pom.xml
+COPY fraud-scoring-service/pom.xml fraud-scoring-service/pom.xml
+COPY alert-service/pom.xml alert-service/pom.xml
+
+COPY common-events/src common-events/src
+COPY common-test-support/src common-test-support/src
+COPY transaction-ingest-service/src transaction-ingest-service/src
+COPY transaction-simulator-service/src transaction-simulator-service/src
+COPY feature-enricher-service/src feature-enricher-service/src
+COPY fraud-scoring-service/src fraud-scoring-service/src
+COPY alert-service/src alert-service/src
+
+RUN mvn -q -pl ${MODULE_NAME} -am -DskipTests package
+
+FROM eclipse-temurin:21-jre
+
+ARG MODULE_NAME
+
+WORKDIR /app
+
+COPY --from=build /workspace/${MODULE_NAME}/target/*.jar app.jar
+
+EXPOSE 8080
+
+ENTRYPOINT ["java", "-jar", "/app/app.jar"]
