@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: fraud-scoring-service
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

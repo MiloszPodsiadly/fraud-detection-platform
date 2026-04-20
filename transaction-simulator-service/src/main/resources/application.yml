@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: transaction-simulator-service
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
