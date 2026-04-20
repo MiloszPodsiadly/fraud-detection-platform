@@ -22,6 +22,21 @@ services:
       timeout: 10s
       retries: 10
 
+  kafka-topics-init:
+    image: apache/kafka:3.8.0
+    container_name: fraud-kafka-topics-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./init-kafka-topics.sh:/opt/init/init-kafka-topics.sh:ro
+    environment:
+      BOOTSTRAP_SERVER: kafka:9092
+    restart: "no"
+    command:
+      - /bin/bash
+      - /opt/init/init-kafka-topics.sh
+
   mongodb:
     image: mongo:7.0
     container_name: fraud-mongodb
@@ -54,6 +69,8 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      kafka-topics-init:
+        condition: service_completed_successfully
       mongodb:
         condition: service_healthy
       redis:
@@ -74,6 +91,8 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      kafka-topics-init:
+        condition: service_completed_successfully
       mongodb:
         condition: service_healthy
       redis:
@@ -94,6 +113,8 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      kafka-topics-init:
+        condition: service_completed_successfully
       mongodb:
         condition: service_healthy
       redis:
@@ -114,6 +135,8 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      kafka-topics-init:
+        condition: service_completed_successfully
       mongodb:
         condition: service_healthy
       redis:
@@ -134,6 +157,8 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      kafka-topics-init:
+        condition: service_completed_successfully
       mongodb:
         condition: service_healthy
       redis:
