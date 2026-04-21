@@ -6,3 +6,5 @@ dist/
 .DS_Store
 *.iml
 *.log
+data/generated/*
+!data/generated/.gitkeep
