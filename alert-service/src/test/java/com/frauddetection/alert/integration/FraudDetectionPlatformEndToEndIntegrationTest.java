@@ -46,6 +46,7 @@ import java.math.BigDecimal;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -85,20 +86,28 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
                 "app.kafka.topics.transaction-raw", TRANSACTION_RAW_TOPIC
         ));
 
-        featureEnricherContext = startWorkerApplication(FeatureEnricherServiceApplication.class, Map.of(
-                "spring.kafka.bootstrap-servers", FraudPlatformContainers.kafka().getBootstrapServers(),
-                "spring.data.redis.host", FraudPlatformContainers.redis().getHost(),
-                "spring.data.redis.port", FraudPlatformContainers.redis().getMappedPort(6379),
-                "app.kafka.topics.transaction-raw", TRANSACTION_RAW_TOPIC,
-                "app.kafka.topics.transaction-enriched", TRANSACTION_ENRICHED_TOPIC,
-                "app.kafka.topics.transactions-dead-letter", DEAD_LETTER_TOPIC
+        featureEnricherContext = startWorkerApplication(FeatureEnricherServiceApplication.class, Map.ofEntries(
+                Map.entry("spring.kafka.bootstrap-servers", FraudPlatformContainers.kafka().getBootstrapServers()),
+                Map.entry("spring.data.redis.host", FraudPlatformContainers.redis().getHost()),
+                Map.entry("spring.data.redis.port", FraudPlatformContainers.redis().getMappedPort(6379)),
+                Map.entry("app.kafka.topics.transaction-raw", TRANSACTION_RAW_TOPIC),
+                Map.entry("app.kafka.topics.transaction-enriched", TRANSACTION_ENRICHED_TOPIC),
+                Map.entry("app.kafka.topics.transactions-dead-letter", DEAD_LETTER_TOPIC),
+                Map.entry("app.feature-store.recent-transaction-window", "PT15M"),
+                Map.entry("app.feature-store.merchant-frequency-window", "P7D"),
+                Map.entry("app.feature-store.transaction-key-ttl", "P8D"),
+                Map.entry("app.feature-store.known-device-ttl", "P180D"),
+                Map.entry("app.feature-store.last-transaction-ttl", "P30D")
         ));
 
         fraudScoringContext = startWorkerApplication(FraudScoringServiceApplication.class, Map.of(
                 "spring.kafka.bootstrap-servers", FraudPlatformContainers.kafka().getBootstrapServers(),
                 "app.kafka.topics.transaction-enriched", TRANSACTION_ENRICHED_TOPIC,
                 "app.kafka.topics.transaction-scored", TRANSACTION_SCORED_TOPIC,
-                "app.kafka.topics.transactions-dead-letter", DEAD_LETTER_TOPIC
+                "app.kafka.topics.transactions-dead-letter", DEAD_LETTER_TOPIC,
+                "app.scoring.high-threshold", "0.75",
+                "app.scoring.critical-threshold", "0.90",
+                "app.scoring.mode", "RULE_BASED"
         ));
 
         alertContext = startWebApplication(AlertServiceApplication.class, Map.of(
@@ -237,15 +246,21 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
 
     private ConfigurableApplicationContext startWebApplication(Class<?> applicationClass, Map<String, Object> properties) {
         return new SpringApplicationBuilder(applicationClass)
-                .properties(properties)
-                .run();
+                .run(commandLineArgs(properties));
     }
 
     private ConfigurableApplicationContext startWorkerApplication(Class<?> applicationClass, Map<String, Object> properties) {
         return new SpringApplicationBuilder(applicationClass)
-                .properties(properties)
-                .properties("spring.main.web-application-type=none")
-                .run();
+                .run(commandLineArgs(properties, "spring.main.web-application-type=none"));
+    }
+
+    private String[] commandLineArgs(Map<String, Object> properties, String... additionalProperties) {
+        List<String> args = new ArrayList<>();
+        properties.forEach((name, value) -> args.add("--" + name + "=" + value));
+        Arrays.stream(additionalProperties)
+                .map(property -> "--" + property)
+                .forEach(args::add);
+        return args.toArray(String[]::new);
     }
 
     private void closeContext(ConfigurableApplicationContext context) {

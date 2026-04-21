@@ -29,7 +29,7 @@ ARG MODULE_NAME
 
 WORKDIR /app
 
-COPY --from=build /workspace/${MODULE_NAME}/target/*.jar app.jar
+COPY --from=build /workspace/${MODULE_NAME}/target/*-exec.jar app.jar
 
 USER 10001:10001
 
