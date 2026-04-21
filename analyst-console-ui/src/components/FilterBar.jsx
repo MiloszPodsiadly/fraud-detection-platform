@@ -1,7 +1,16 @@
 const RISK_LEVELS = ["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"];
 const STATUSES = ["ALL", "OPEN", "IN_REVIEW", "ESCALATED", "RESOLVED", "CLOSED"];
 
-export function FilterBar({ filters, onChange }) {
+export function FilterBar({
+  filters,
+  onChange,
+  placeholder = "Alert, transaction, customer, reason",
+  riskLevels = RISK_LEVELS,
+  statusOptions = STATUSES,
+  showRisk = true,
+  showStatus = true,
+  statusLabel = "Status"
+}) {
   function updateFilter(field, value) {
     onChange({ ...filters, [field]: value });
   }
@@ -13,25 +22,29 @@ export function FilterBar({ filters, onChange }) {
         <input
           value={filters.query}
           onChange={(event) => updateFilter("query", event.target.value)}
-          placeholder="Alert, transaction, customer, reason"
+          placeholder={placeholder}
         />
       </label>
-      <label>
-        Risk
-        <select value={filters.riskLevel} onChange={(event) => updateFilter("riskLevel", event.target.value)}>
-          {RISK_LEVELS.map((riskLevel) => (
-            <option key={riskLevel} value={riskLevel}>{riskLevel}</option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Status
-        <select value={filters.status} onChange={(event) => updateFilter("status", event.target.value)}>
-          {STATUSES.map((status) => (
-            <option key={status} value={status}>{status}</option>
-          ))}
-        </select>
-      </label>
+      {showRisk && (
+        <label>
+          Risk
+          <select value={filters.riskLevel} onChange={(event) => updateFilter("riskLevel", event.target.value)}>
+            {riskLevels.map((riskLevel) => (
+              <option key={riskLevel} value={riskLevel}>{riskLevel}</option>
+            ))}
+          </select>
+        </label>
+      )}
+      {showStatus && (
+        <label>
+          {statusLabel}
+          <select value={filters.status} onChange={(event) => updateFilter("status", event.target.value)}>
+            {statusOptions.map((status) => (
+              <option key={status} value={status}>{status}</option>
+            ))}
+          </select>
+        </label>
+      )}
     </div>
   );
 }

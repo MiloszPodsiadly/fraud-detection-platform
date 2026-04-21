@@ -31,8 +31,20 @@ async function request(path, options = {}) {
   return response.json();
 }
 
-export function listAlerts() {
-  return request("/api/v1/alerts");
+export function listAlerts({ page = 0, size = 10 } = {}) {
+  const params = new URLSearchParams({
+    page: String(page),
+    size: String(size)
+  });
+  return request(`/api/v1/alerts?${params.toString()}`);
+}
+
+export function listFraudCases({ page = 0, size = 4 } = {}) {
+  const params = new URLSearchParams({
+    page: String(page),
+    size: String(size)
+  });
+  return request(`/api/v1/fraud-cases?${params.toString()}`);
 }
 
 export function listScoredTransactions({ page = 0, size = 25 } = {}) {
@@ -45,6 +57,21 @@ export function listScoredTransactions({ page = 0, size = 25 } = {}) {
 
 export function getAlert(alertId) {
   return request(`/api/v1/alerts/${encodeURIComponent(alertId)}`);
+}
+
+export function getAssistantSummary(alertId) {
+  return request(`/api/v1/alerts/${encodeURIComponent(alertId)}/assistant-summary`);
+}
+
+export function getFraudCase(caseId) {
+  return request(`/api/v1/fraud-cases/${encodeURIComponent(caseId)}`);
+}
+
+export function updateFraudCase(caseId, decision) {
+  return request(`/api/v1/fraud-cases/${encodeURIComponent(caseId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(decision)
+  });
 }
 
 export function submitAnalystDecision(alertId, decision) {

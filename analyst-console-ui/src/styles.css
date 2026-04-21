@@ -85,7 +85,7 @@ code {
 
 .heroStats {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 0.8rem;
 }
 
@@ -148,6 +148,126 @@ code {
   max-width: 48rem;
   margin: 0.35rem 0 0;
   color: var(--muted);
+}
+
+.fraudCasePanel {
+  border-color: rgba(180, 52, 52, 0.26);
+}
+
+.fraudCaseCounter {
+  min-width: 10rem;
+  border: 1px solid rgba(180, 52, 52, 0.18);
+  border-radius: 1rem;
+  background: rgba(180, 52, 52, 0.08);
+  padding: 0.9rem 1rem;
+  text-align: right;
+}
+
+.fraudCaseCounter strong {
+  display: block;
+  color: var(--red);
+  font-size: 1.8rem;
+}
+
+.fraudCaseCounter span,
+.fraudCaseEmpty span,
+.fraudCaseFacts dt,
+.fraudCaseTransactions span {
+  color: var(--muted);
+}
+
+.fraudCaseEmpty {
+  display: grid;
+  gap: 0.25rem;
+  border: 1px dashed rgba(82, 97, 60, 0.28);
+  border-radius: 1rem;
+  padding: 1rem;
+}
+
+.fraudCaseGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.fraudCaseCard {
+  display: grid;
+  gap: 1rem;
+  border: 1px solid rgba(180, 52, 52, 0.18);
+  border-radius: 1rem;
+  background: rgba(255, 253, 247, 0.74);
+  padding: 1rem;
+}
+
+.fraudCaseCardHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.fraudCaseCardHeader h3 {
+  margin: 0.55rem 0 0;
+  font-size: 1rem;
+}
+
+.fraudCaseCardHeader > strong {
+  color: var(--red);
+  font-size: 1.35rem;
+  white-space: nowrap;
+}
+
+.fraudCaseFacts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.fraudCaseFacts div {
+  min-width: 0;
+}
+
+.fraudCaseFacts dt {
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.fraudCaseFacts dd {
+  margin: 0.25rem 0 0;
+  overflow-wrap: anywhere;
+  font-weight: 800;
+}
+
+.fraudCaseTransactions {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.fraudCaseTransaction {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+  border-top: 1px solid rgba(82, 97, 60, 0.12);
+  padding-top: 0.55rem;
+}
+
+.fraudCaseTransaction div:first-child {
+  min-width: 0;
+}
+
+.fraudCaseTransaction strong,
+.fraudCaseTransaction span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.fraudCaseRisk {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.5rem;
+  align-items: center;
 }
 
 .subPanel {
@@ -220,6 +340,10 @@ textarea:focus {
   padding: 1rem;
   border-bottom: 1px solid rgba(82, 97, 60, 0.14);
   vertical-align: middle;
+}
+
+.alertTable .numericCell {
+  text-align: right;
 }
 
 .alertTable td strong,
@@ -441,6 +565,140 @@ textarea:focus {
   padding: 1rem;
 }
 
+.assistantPanel {
+  margin: 1rem 0;
+}
+
+.assistantHeader,
+.assistantReason,
+.assistantFacts div,
+.assistantError {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.assistantHeader {
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.assistantHeader h3 {
+  margin: 0;
+}
+
+.assistantContent {
+  display: grid;
+  gap: 1rem;
+}
+
+.assistantAction {
+  display: grid;
+  gap: 0.35rem;
+  border-left: 4px solid var(--olive);
+  padding-left: 0.9rem;
+}
+
+.assistantAction span,
+.assistantNarrative p,
+.assistantNarrative small,
+.assistantReason span,
+.assistantReason p,
+.assistantSteps span {
+  color: var(--muted);
+}
+
+.assistantNarrative {
+  display: grid;
+  gap: 0.65rem;
+  border: 1px solid rgba(82, 97, 60, 0.16);
+  border-radius: 0.75rem;
+  background: rgba(82, 97, 60, 0.08);
+  padding: 0.9rem;
+}
+
+.assistantNarrative p {
+  margin: 0;
+}
+
+.assistantObservationList {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.assistantObservationList span {
+  display: block;
+  color: var(--ink);
+}
+
+.assistantReasonGrid {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.assistantReason {
+  align-items: flex-start;
+  border: 1px solid rgba(82, 97, 60, 0.14);
+  border-radius: 0.75rem;
+  background: rgba(255, 253, 247, 0.7);
+  padding: 0.85rem;
+}
+
+.assistantReason div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.assistantReason p {
+  flex: 1;
+  margin: 0;
+}
+
+.assistantSteps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.assistantSteps span {
+  border-radius: 999px;
+  background: rgba(82, 97, 60, 0.1);
+  padding: 0.45rem 0.65rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.assistantFacts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin: 0;
+}
+
+.assistantFacts div {
+  display: grid;
+  border: 1px solid rgba(82, 97, 60, 0.14);
+  border-radius: 0.75rem;
+  background: rgba(255, 253, 247, 0.7);
+  padding: 0.75rem;
+}
+
+.assistantFacts dt {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.assistantFacts dd {
+  margin: 0.2rem 0 0;
+  font-weight: 800;
+}
+
+.assistantError {
+  align-items: center;
+  color: var(--red);
+}
+
 .decisionForm {
   display: grid;
   gap: 1rem;
@@ -521,7 +779,10 @@ textarea:focus {
   .filterBar,
   .metricGrid,
   .summaryGrid,
-  .splitGrid {
+  .splitGrid,
+  .assistantFacts,
+  .fraudCaseGrid,
+  .fraudCaseFacts {
     grid-template-columns: 1fr 1fr;
   }
 }
@@ -541,14 +802,24 @@ textarea:focus {
   .filterBar,
   .metricGrid,
   .summaryGrid,
-  .splitGrid {
+  .splitGrid,
+  .assistantFacts,
+  .fraudCaseGrid,
+  .fraudCaseFacts {
     grid-template-columns: 1fr;
   }
 
   .panelHeader,
   .detailsHeader,
   .paginationBar,
-  .paginationActions {
+  .paginationActions,
+  .fraudCaseCardHeader,
+  .fraudCaseTransaction {
     display: grid;
+  }
+
+  .fraudCaseCounter,
+  .fraudCaseCardHeader > strong {
+    text-align: left;
   }
 }
