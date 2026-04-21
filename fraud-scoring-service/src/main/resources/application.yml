@@ -1,9 +1,39 @@
 spring:
   application:
     name: fraud-scoring-service
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      auto-offset-reset: earliest
+      group-id: ${spring.application.name}
 
 management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
   endpoints:
     web:
       exposure:
         include: health,info
+
+app:
+  kafka:
+    topics:
+      transaction-enriched: transactions.enriched
+      transaction-scored: transactions.scored
+      transactions-dead-letter: transactions.dead-letter
+    consumer:
+      concurrency: 1
+      retry-attempts: 3
+      retry-backoff-millis: 1000
+  scoring:
+    high-threshold: 0.75
+    critical-threshold: 0.90
+    mode: RULE_BASED
