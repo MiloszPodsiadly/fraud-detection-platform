@@ -3,11 +3,6 @@ package com.frauddetection.alert.api;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
 import com.frauddetection.common.events.enums.RiskLevel;
-import com.frauddetection.common.events.model.CustomerContext;
-import com.frauddetection.common.events.model.DeviceInfo;
-import com.frauddetection.common.events.model.LocationInfo;
-import com.frauddetection.common.events.model.MerchantInfo;
-import com.frauddetection.common.events.model.Money;
 
 import java.time.Instant;
 import java.util.List;
@@ -25,11 +20,11 @@ public record AlertDetailsResponse(
         AlertStatus alertStatus,
         String alertReason,
         List<String> reasonCodes,
-        Money transactionAmount,
-        MerchantInfo merchantInfo,
-        DeviceInfo deviceInfo,
-        LocationInfo locationInfo,
-        CustomerContext customerContext,
+        MoneyResponse transactionAmount,
+        MerchantInfoResponse merchantInfo,
+        DeviceInfoResponse deviceInfo,
+        LocationInfoResponse locationInfo,
+        CustomerContextResponse customerContext,
         Map<String, Object> scoreDetails,
         Map<String, Object> featureSnapshot,
         AnalystDecision analystDecision,

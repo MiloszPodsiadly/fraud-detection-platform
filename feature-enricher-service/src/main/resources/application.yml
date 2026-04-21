@@ -38,7 +38,7 @@ app:
       retry-attempts: 3
       retry-backoff-millis: 1000
   feature-store:
-    recent-transaction-window: PT15M
+    recent-transaction-window: PT1M
     merchant-frequency-window: P7D
     transaction-key-ttl: P8D
     known-device-ttl: P180D

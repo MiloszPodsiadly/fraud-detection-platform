@@ -3,6 +3,7 @@ package com.frauddetection.alert.integration;
 import com.frauddetection.alert.AlertServiceApplication;
 import com.frauddetection.alert.api.AlertDetailsResponse;
 import com.frauddetection.alert.api.AlertSummaryResponse;
+import com.frauddetection.alert.api.PagedResponse;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
@@ -37,6 +38,7 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.RequestEntity;
 import org.springframework.http.ResponseEntity;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
@@ -93,7 +95,7 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
                 Map.entry("app.kafka.topics.transaction-raw", TRANSACTION_RAW_TOPIC),
                 Map.entry("app.kafka.topics.transaction-enriched", TRANSACTION_ENRICHED_TOPIC),
                 Map.entry("app.kafka.topics.transactions-dead-letter", DEAD_LETTER_TOPIC),
-                Map.entry("app.feature-store.recent-transaction-window", "PT15M"),
+                Map.entry("app.feature-store.recent-transaction-window", "PT1M"),
                 Map.entry("app.feature-store.merchant-frequency-window", "P7D"),
                 Map.entry("app.feature-store.transaction-key-ttl", "P8D"),
                 Map.entry("app.feature-store.known-device-ttl", "P180D"),
@@ -182,8 +184,7 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
         assertThat(enrichedRecord.value().featureFlags()).contains(
                 "DEVICE_NOVELTY",
                 "COUNTRY_MISMATCH",
-                "PROXY_OR_VPN",
-                "HIGH_AMOUNT_ACTIVITY"
+                "PROXY_OR_VPN"
         );
 
         ConsumerRecord<String, TransactionScoredEvent> scoredRecord = awaitKafkaRecord(
@@ -353,19 +354,20 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
     }
 
     private Optional<AlertSummaryResponse> findAlertSummary(String transactionId) {
-        ResponseEntity<AlertSummaryResponse[]> response = restTemplate.exchange(
-                alertUrl("/api/v1/alerts"),
+        ResponseEntity<PagedResponse<AlertSummaryResponse>> response = restTemplate.exchange(
+                alertUrl("/api/v1/alerts?page=0&size=100"),
                 HttpMethod.GET,
                 new HttpEntity<>(null, new HttpHeaders()),
-                AlertSummaryResponse[].class
+                new ParameterizedTypeReference<>() {
+                }
         );
 
-        AlertSummaryResponse[] body = response.getBody();
-        if (body == null) {
+        PagedResponse<AlertSummaryResponse> body = response.getBody();
+        if (body == null || body.content() == null) {
             return Optional.empty();
         }
 
-        return Arrays.stream(body)
+        return body.content().stream()
                 .filter(alert -> transactionId.equals(alert.transactionId()))
                 .findFirst();
     }

@@ -57,34 +57,40 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
         FraudScoreResult ruleResult = ruleBasedFraudScoringEngine.score(request);
         FraudScoreResult mlResult = mlFraudScoringEngine.score(request);
 
-        return withDiagnostics(ruleResult, Map.of(
-                "mode", ScoringMode.SHADOW.name(),
-                "finalDecisionSource", "RULE_BASED",
-                "shadowModelAvailable", isModelAvailable(mlResult),
-                "shadowModelName", mlResult.modelName(),
-                "shadowModelVersion", mlResult.modelVersion(),
-                "shadowFraudScore", mlResult.fraudScore(),
-                "shadowRiskLevel", mlResult.riskLevel().name(),
-                "shadowFallbackReason", fallbackReason(mlResult)
-        ));
+        Map<String, Object> diagnostics = new LinkedHashMap<>();
+        diagnostics.put("mode", ScoringMode.SHADOW.name());
+        diagnostics.put("finalDecisionSource", "RULE_BASED");
+        diagnostics.put("shadowModelAvailable", isModelAvailable(mlResult));
+        diagnostics.put("shadowModelName", mlResult.modelName());
+        diagnostics.put("shadowModelVersion", mlResult.modelVersion());
+        diagnostics.put("shadowFraudScore", mlResult.fraudScore());
+        diagnostics.put("shadowRiskLevel", mlResult.riskLevel().name());
+        if (!isModelAvailable(mlResult)) {
+            diagnostics.put("shadowFallbackReason", fallbackReason(mlResult));
+        }
+
+        return withDiagnostics(ruleResult, diagnostics);
     }
 
     private FraudScoreResult scoreWithComparison(FraudScoringRequest request) {
         FraudScoreResult ruleResult = ruleBasedFraudScoringEngine.score(request);
         FraudScoreResult mlResult = mlFraudScoringEngine.score(request);
 
-        return withDiagnostics(ruleResult, Map.of(
-                "mode", ScoringMode.COMPARE.name(),
-                "finalDecisionSource", "RULE_BASED",
-                "mlModelAvailable", isModelAvailable(mlResult),
-                "mlModelName", mlResult.modelName(),
-                "mlModelVersion", mlResult.modelVersion(),
-                "mlFraudScore", mlResult.fraudScore(),
-                "mlRiskLevel", mlResult.riskLevel().name(),
-                "scoreDelta", ruleResult.fraudScore() - mlResult.fraudScore(),
-                "riskLevelMatch", ruleResult.riskLevel() == mlResult.riskLevel(),
-                "mlFallbackReason", fallbackReason(mlResult)
-        ));
+        Map<String, Object> diagnostics = new LinkedHashMap<>();
+        diagnostics.put("mode", ScoringMode.COMPARE.name());
+        diagnostics.put("finalDecisionSource", "RULE_BASED");
+        diagnostics.put("mlModelAvailable", isModelAvailable(mlResult));
+        diagnostics.put("mlModelName", mlResult.modelName());
+        diagnostics.put("mlModelVersion", mlResult.modelVersion());
+        diagnostics.put("mlFraudScore", mlResult.fraudScore());
+        diagnostics.put("mlRiskLevel", mlResult.riskLevel().name());
+        diagnostics.put("scoreDelta", ruleResult.fraudScore() - mlResult.fraudScore());
+        diagnostics.put("riskLevelMatch", ruleResult.riskLevel() == mlResult.riskLevel());
+        if (!isModelAvailable(mlResult)) {
+            diagnostics.put("mlFallbackReason", fallbackReason(mlResult));
+        }
+
+        return withDiagnostics(ruleResult, diagnostics);
     }
 
     private boolean isModelAvailable(FraudScoreResult result) {

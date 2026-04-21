@@ -36,7 +36,8 @@ import java.util.Map;
 @Configuration
 @EnableConfigurationProperties({
         KafkaTopicProperties.class,
-        KafkaConsumerProperties.class
+        KafkaConsumerProperties.class,
+        AssistantProperties.class
 })
 public class AlertKafkaConfig {
 

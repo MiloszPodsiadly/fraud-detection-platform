@@ -34,6 +34,30 @@ jobs:
       - name: Build and test backend modules
         run: mvn -B verify
 
+  ml:
+    name: Python ML Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run ML unit tests
+        run: python -m unittest discover -s ml-inference-service/tests
+        env:
+          PYTHONPATH: ml-inference-service
+
+      - name: Validate trained model artifact loads
+        run: python -m app.train_model --examples 1000 --epochs 20 --output /tmp/model_artifact.json
+        env:
+          PYTHONPATH: ml-inference-service
+
   frontend:
     name: Frontend Build
     runs-on: ubuntu-latest
@@ -66,6 +90,7 @@ jobs:
     timeout-minutes: 25
     needs:
       - backend
+      - ml
       - frontend
 
     steps:

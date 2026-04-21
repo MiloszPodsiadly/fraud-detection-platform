@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-count=10000
+count=50000
 seed=7341
 dimensions_path="data/generated/dimensions.json"
 output_path="data/generated/canonical-replay.jsonl"
 labels_output_path=""
 reference_instant="2026-01-01T08:00:00Z"
 
-normal_percentage=80
-new_device_percentage=10
-high_proxy_percentage=7
+normal_percentage=93
+rapid_transfer_seed_percentage=2
+rapid_transfer_percentage=1
+new_device_percentage=1
+high_proxy_percentage=1
 country_mismatch_percentage=1
-account_takeover_percentage=2
+account_takeover_percentage=1
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -23,6 +25,8 @@ while [[ $# -gt 0 ]]; do
     --labels-output) labels_output_path="$2"; shift 2 ;;
     --reference-instant) reference_instant="$2"; shift 2 ;;
     --normal-percentage) normal_percentage="$2"; shift 2 ;;
+    --rapid-transfer-seed-percentage) rapid_transfer_seed_percentage="$2"; shift 2 ;;
+    --rapid-transfer-percentage) rapid_transfer_percentage="$2"; shift 2 ;;
     --new-device-percentage) new_device_percentage="$2"; shift 2 ;;
     --high-proxy-percentage) high_proxy_percentage="$2"; shift 2 ;;
     --country-mismatch-percentage) country_mismatch_percentage="$2"; shift 2 ;;
@@ -45,7 +49,8 @@ if [[ -z "$python_bin" ]]; then
 fi
 
 "$python_bin" - "$count" "$seed" "$dimensions_path" "$output_path" "$labels_output_path" "$reference_instant" \
-  "$normal_percentage" "$new_device_percentage" "$high_proxy_percentage" "$country_mismatch_percentage" "$account_takeover_percentage" <<'PY'
+  "$normal_percentage" "$rapid_transfer_seed_percentage" "$rapid_transfer_percentage" \
+  "$new_device_percentage" "$high_proxy_percentage" "$country_mismatch_percentage" "$account_takeover_percentage" <<'PY'
 import csv
 import json
 import random
@@ -62,10 +67,12 @@ labels_output_path = Path(sys.argv[5]) if sys.argv[5] else None
 reference_instant = datetime.fromisoformat(sys.argv[6].replace("Z", "+00:00"))
 weights = {
     "normal": int(sys.argv[7]),
-    "new_device": int(sys.argv[8]),
-    "high_proxy_purchase": int(sys.argv[9]),
-    "country_mismatch": int(sys.argv[10]),
-    "account_takeover": int(sys.argv[11]),
+    "rapid_transfer_seed": int(sys.argv[8]),
+    "rapid_transfer_burst": int(sys.argv[9]),
+    "new_device": int(sys.argv[10]),
+    "high_proxy_purchase": int(sys.argv[11]),
+    "country_mismatch": int(sys.argv[12]),
+    "account_takeover": int(sys.argv[13]),
 }
 if any(value < 0 for value in weights.values()) or sum(weights.values()) != 100:
     raise SystemExit(f"Scenario percentages must be non-negative and sum to 100. Current sum: {sum(weights.values())}")
@@ -84,6 +91,8 @@ amount_ranges = {
 }
 scenario_meta = {
     "normal": ("LOW", False, "BASELINE_BEHAVIOUR"),
+    "rapid_transfer_seed": ("LOW", False, "BASELINE_BEHAVIOUR"),
+    "rapid_transfer_burst": ("HIGH", True, "RAPID_PLN_20K_BURST"),
     "new_device": ("MEDIUM", False, "DEVICE_NOVELTY|PROXY_OR_VPN"),
     "high_proxy_purchase": ("HIGH", True, "DEVICE_NOVELTY|PROXY_OR_VPN|HIGH_TRANSACTION_AMOUNT"),
     "country_mismatch": ("MEDIUM", False, "COUNTRY_MISMATCH|DEVICE_NOVELTY"),
@@ -104,22 +113,76 @@ def build_scenario_sequence(total_count):
     for _, name in sorted(fractions, reverse=True)[:total_count - allocated]:
         allocations[name] += 1
 
+    default_weights = {
+        "normal": 93,
+        "rapid_transfer_seed": 2,
+        "rapid_transfer_burst": 1,
+        "new_device": 1,
+        "high_proxy_purchase": 1,
+        "country_mismatch": 1,
+        "account_takeover": 1,
+    }
+    if weights == default_weights:
+        sequence = []
+        block_index = 0
+        while len(sequence) < total_count:
+            block = ["normal"] * 993
+            if block_index % 2 == 0:
+                block.append("rapid_transfer_seed")
+            else:
+                block.append("normal")
+            block.extend([
+                "rapid_transfer_seed",
+                "rapid_transfer_burst",
+                "new_device",
+                "high_proxy_purchase",
+                "country_mismatch",
+                "account_takeover" if block_index % 2 == 0 else "normal",
+            ])
+            sequence.extend(block)
+            block_index += 1
+        return sequence[:total_count]
+
     sequence = []
     for name, allocated_count in allocations.items():
         sequence.extend([name] * allocated_count)
     rng.shuffle(sequence)
     return sequence
 
-def amount_for(category, scenario):
+def rapid_amount_for_index(index):
+    bucket = index % 1000
+    block = index // 1000
+    variant = block % 4
+    three_transfer_cases = [
+        (7400.00, 8600.00, 6800.00),
+        (7750.00, 8350.00, 7150.00),
+        (6900.00, 9100.00, 7450.00),
+        (8200.00, 7800.00, 7300.00),
+    ]
+    two_transfer_cases = [
+        (11250.00, 9300.00),
+        (10400.00, 10150.00),
+        (9800.00, 10850.00),
+        (12100.00, 8450.00),
+    ]
+    if block % 2 == 0:
+        return three_transfer_cases[variant][max(0, min(bucket - 993, 2))]
+    return two_transfer_cases[variant][0 if bucket == 994 else 1]
+
+def amount_for(category, scenario, index):
     low, high = amount_ranges.get(category, (25, 250))
     multiplier = {
         "normal": 1.0,
+        "rapid_transfer_seed": 1.0,
+        "rapid_transfer_burst": 1.0,
         "new_device": 1.15,
         "high_proxy_purchase": 5.5,
         "country_mismatch": 1.25,
         "account_takeover": 6.5,
     }[scenario]
     amount = (low + rng.random() * (high - low)) * multiplier
+    if scenario in {"rapid_transfer_seed", "rapid_transfer_burst"}:
+        amount = rapid_amount_for_index(index)
     if scenario in {"new_device", "country_mismatch"}:
         amount = min(amount, 940 + rng.random() * 40)
     if scenario in {"high_proxy_purchase", "account_takeover"}:
@@ -136,8 +199,9 @@ with output_path.open("w", encoding="utf-8", newline="\n") as out:
     for index in range(count):
         scenario = scenario_sequence[index]
         risk_level, expected_fraud, reason_codes = scenario_meta[scenario]
-        customer = rng.choice(customers)
-        merchant = rng.choice(risk_merchants if scenario != "normal" else merchants)
+        rapid_transfer = scenario in {"rapid_transfer_seed", "rapid_transfer_burst"}
+        customer = customers[(index // 1000) % len(customers)] if rapid_transfer else rng.choice(customers)
+        merchant = rng.choice(risk_merchants if scenario not in {"normal", "rapid_transfer_seed", "rapid_transfer_burst"} else merchants)
         home = customer["homeLocation"]
         known_devices = customer["knownDeviceIds"]
         home_country = customer["homeCountryCode"]
@@ -173,8 +237,13 @@ with output_path.open("w", encoding="utf-8", newline="\n") as out:
             phone_verified = False
             account_age_days = max(account_age_days - 40, 5)
 
-        amount = amount_for(merchant["merchantCategory"], scenario)
+        amount = amount_for(merchant["merchantCategory"], scenario, index)
+        currency = "PLN" if rapid_transfer else customer["preferredCurrency"]
         transaction_id = f"syn-txn-{index + 1}"
+        if rapid_transfer:
+            transaction_timestamp = reference_instant + timedelta(minutes=index // 1000, seconds=max(index % 1000 - 993, 0) * 20)
+        else:
+            transaction_timestamp = reference_instant + timedelta(seconds=index * 45 + rng.randrange(15))
         event = {
             "eventId": str(uuid.uuid4()),
             "transactionId": transaction_id,
@@ -183,8 +252,8 @@ with output_path.open("w", encoding="utf-8", newline="\n") as out:
             "accountId": customer["accountId"],
             "paymentInstrumentId": customer["paymentInstrumentId"],
             "createdAt": datetime.now(timezone.utc).isoformat(),
-            "transactionTimestamp": (reference_instant + timedelta(seconds=index * 45 + rng.randrange(15))).isoformat(),
-            "transactionAmount": {"amount": amount, "currency": customer["preferredCurrency"]},
+            "transactionTimestamp": transaction_timestamp.isoformat(),
+            "transactionAmount": {"amount": amount, "currency": currency},
             "merchantInfo": {
                 "merchantId": merchant["merchantId"],
                 "merchantName": merchant["merchantName"],

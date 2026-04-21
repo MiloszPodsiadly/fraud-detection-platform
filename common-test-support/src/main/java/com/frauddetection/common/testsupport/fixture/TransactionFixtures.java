@@ -104,6 +104,7 @@ public final class TransactionFixtures {
         private String paymentInstrumentId = "card-1001";
         private Instant createdAt = Instant.parse("2026-04-20T10:15:30Z");
         private Instant transactionTimestamp = Instant.parse("2026-04-20T10:15:28Z");
+        private Money transactionAmount = defaultMoney();
 
         public TransactionRawEventBuilder withTransactionId(String transactionId) {
             this.transactionId = transactionId;
@@ -112,6 +113,11 @@ public final class TransactionFixtures {
 
         public TransactionRawEventBuilder withCustomerId(String customerId) {
             this.customerId = customerId;
+            return this;
+        }
+
+        public TransactionRawEventBuilder withAmount(BigDecimal amount, String currency) {
+            this.transactionAmount = new Money(amount, currency);
             return this;
         }
 
@@ -125,7 +131,7 @@ public final class TransactionFixtures {
                     paymentInstrumentId,
                     createdAt,
                     transactionTimestamp,
-                    defaultMoney(),
+                    transactionAmount,
                     defaultMerchantInfo(),
                     defaultDeviceInfo(),
                     defaultLocationInfo(),
@@ -169,7 +175,7 @@ public final class TransactionFixtures {
                     defaultLocationInfo(),
                     defaultCustomerContext(),
                     8,
-                    "PT15M",
+                    "PT1M",
                     new Money(new BigDecimal("5830.24"), "USD"),
                     "PT24H",
                     1.9d,
@@ -197,8 +203,25 @@ public final class TransactionFixtures {
         private String accountId = "acct-1001";
         private Instant createdAt = Instant.parse("2026-04-20T10:15:33Z");
         private Instant transactionTimestamp = Instant.parse("2026-04-20T10:15:28Z");
+        private Money transactionAmount = defaultMoney();
         private Double fraudScore = 0.94d;
         private RiskLevel riskLevel = RiskLevel.HIGH;
+        private Map<String, Object> featureSnapshot = Map.of("recentTransactionCount", 8, "deviceNovelty", true);
+
+        public TransactionScoredEventBuilder withTransactionId(String transactionId) {
+            this.transactionId = transactionId;
+            return this;
+        }
+
+        public TransactionScoredEventBuilder withCustomerId(String customerId) {
+            this.customerId = customerId;
+            return this;
+        }
+
+        public TransactionScoredEventBuilder withAmount(BigDecimal amount, String currency) {
+            this.transactionAmount = new Money(amount, currency);
+            return this;
+        }
 
         public TransactionScoredEventBuilder withFraudScore(Double fraudScore) {
             this.fraudScore = fraudScore;
@@ -207,6 +230,11 @@ public final class TransactionFixtures {
 
         public TransactionScoredEventBuilder withRiskLevel(RiskLevel riskLevel) {
             this.riskLevel = riskLevel;
+            return this;
+        }
+
+        public TransactionScoredEventBuilder withFeatureSnapshot(Map<String, Object> featureSnapshot) {
+            this.featureSnapshot = featureSnapshot;
             return this;
         }
 
@@ -219,7 +247,7 @@ public final class TransactionFixtures {
                     accountId,
                     createdAt,
                     transactionTimestamp,
-                    defaultMoney(),
+                    transactionAmount,
                     defaultMerchantInfo(),
                     defaultDeviceInfo(),
                     defaultLocationInfo(),
@@ -232,7 +260,7 @@ public final class TransactionFixtures {
                     Instant.parse("2026-04-20T10:15:33Z"),
                     List.of("HIGH_AMOUNT", "DEVICE_NOVELTY", "HIGH_VELOCITY"),
                     Map.of("baseScore", 0.72d, "velocityBoost", 0.12d, "deviceBoost", 0.10d),
-                    Map.of("recentTransactionCount", 8, "deviceNovelty", true),
+                    featureSnapshot,
                     true
             );
         }

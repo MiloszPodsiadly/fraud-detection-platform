@@ -36,4 +36,8 @@ app:
   scoring:
     high-threshold: 0.75
     critical-threshold: 0.90
-    mode: RULE_BASED
+    mode: ${SCORING_MODE:RULE_BASED}
+    ml:
+      base-url: ${ML_MODEL_BASE_URL:http://localhost:8090}
+      connect-timeout: ${ML_MODEL_CONNECT_TIMEOUT:500ms}
+      read-timeout: ${ML_MODEL_READ_TIMEOUT:1500ms}

@@ -23,6 +23,8 @@ import java.util.stream.Stream;
 @Component
 public class SyntheticReplayDataSource implements ReplayDataSource {
 
+    private static final int SCENARIO_CYCLE = 1_000;
+
     private static final String[] HOME_COUNTRIES = {"US", "GB", "DE", "PL", "FR", "NL"};
     private static final String[] HIGH_RISK_COUNTRIES = {"BR", "NG", "RO", "MX"};
     private static final String[] NORMAL_CATEGORIES = {"Groceries", "Fuel", "Retail", "Travel", "Electronics"};
@@ -51,9 +53,14 @@ public class SyntheticReplayDataSource implements ReplayDataSource {
     private TransactionRawEvent buildEvent(int index, String runId) {
         SplittableRandom random = new SplittableRandom(7_341L + index);
         SyntheticScenario scenario = scenarioFor(index);
-        boolean elevatedRisk = scenario != SyntheticScenario.NORMAL;
+        boolean rapidTransfer = scenario == SyntheticScenario.RAPID_TRANSFER_SEED
+                || scenario == SyntheticScenario.RAPID_TRANSFER_BURST;
+        boolean elevatedRisk = scenario != SyntheticScenario.NORMAL && !rapidTransfer;
+        boolean suspicious = elevatedRisk || scenario == SyntheticScenario.RAPID_TRANSFER_BURST;
         boolean criticalRisk = scenario == SyntheticScenario.CRITICAL_ACCOUNT_TAKEOVER;
-        int customerNumber = random.nextInt(Math.max(syntheticReplayProperties.customerCount(), 1)) + 1;
+        int customerNumber = rapidTransfer
+                ? (index / 100) % Math.max(syntheticReplayProperties.customerCount(), 1) + 1
+                : random.nextInt(Math.max(syntheticReplayProperties.customerCount(), 1)) + 1;
         int merchantNumber = random.nextInt(Math.max(syntheticReplayProperties.merchantCount(), 1)) + 1;
 
         String customerId = "syn-customer-" + customerNumber;
@@ -64,7 +71,7 @@ public class SyntheticReplayDataSource implements ReplayDataSource {
         String trustedDeviceId = deviceBase + "-primary";
         String fallbackDeviceId = deviceBase + "-backup";
         String deviceId = switch (scenario) {
-            case NORMAL -> index % 5 == 0 ? fallbackDeviceId : trustedDeviceId;
+            case NORMAL, RAPID_TRANSFER_SEED, RAPID_TRANSFER_BURST -> index % 5 == 0 ? fallbackDeviceId : trustedDeviceId;
             case MEDIUM_NEW_DEVICE, HIGH_PROXY_PURCHASE, COUNTRY_MISMATCH -> "syn-device-new-" + (index + 1);
             case CRITICAL_ACCOUNT_TAKEOVER -> "syn-device-ato-" + (index + 1);
         };
@@ -78,10 +85,15 @@ public class SyntheticReplayDataSource implements ReplayDataSource {
         boolean proxyDetected = scenario == SyntheticScenario.MEDIUM_NEW_DEVICE || scenario == SyntheticScenario.HIGH_PROXY_PURCHASE || criticalRisk;
         boolean vpnDetected = criticalRisk || (scenario == SyntheticScenario.HIGH_PROXY_PURCHASE && index % 2 == 0);
         boolean cardPresent = scenario == SyntheticScenario.NORMAL && index % 3 != 0;
-        BigDecimal amount = amountForScenario(random, scenario);
-        Instant transactionTimestamp = syntheticReplayProperties.referenceInstant()
-                .plusSeconds((long) index * syntheticReplayProperties.secondsBetweenEvents())
-                .plusSeconds(random.nextInt(15));
+        BigDecimal amount = amountForScenario(random, scenario, index);
+        int bucket = index % SCENARIO_CYCLE;
+        Instant transactionTimestamp = rapidTransfer
+                ? syntheticReplayProperties.referenceInstant()
+                        .plusSeconds((long) (index / SCENARIO_CYCLE) * 60L)
+                        .plusSeconds((long) Math.max(bucket - 993, 0) * 20L)
+                : syntheticReplayProperties.referenceInstant()
+                        .plusSeconds((long) index * syntheticReplayProperties.secondsBetweenEvents())
+                        .plusSeconds(random.nextInt(15));
 
         return new TransactionRawEvent(
                 UUID.randomUUID().toString(),
@@ -92,7 +104,7 @@ public class SyntheticReplayDataSource implements ReplayDataSource {
                 paymentInstrumentId,
                 Instant.now(),
                 transactionTimestamp,
-                new Money(amount, homeCurrency(homeCountry)),
+                new Money(amount, rapidTransfer ? "PLN" : homeCurrency(homeCountry)),
                 new MerchantInfo(
                         "syn-merchant-" + merchantNumber,
                         elevatedRisk ? "Risk Merchant " + merchantNumber : "Trusted Merchant " + merchantNumber,
@@ -156,7 +168,7 @@ public class SyntheticReplayDataSource implements ReplayDataSource {
                 "trace-syn-" + runId + "-" + (index + 1),
                 Map.of(
                         "generator", "synthetic",
-                        "suspicious", elevatedRisk,
+                        "suspicious", suspicious,
                         "scenario", scenario.scenarioName(),
                         "expectedRiskLevel", scenario.expectedRiskLevel()
                 )
@@ -164,20 +176,30 @@ public class SyntheticReplayDataSource implements ReplayDataSource {
     }
 
     private SyntheticScenario scenarioFor(int index) {
-        int bucket = index % 100;
-        if (bucket < 80) {
-            return SyntheticScenario.NORMAL;
+        int bucket = index % SCENARIO_CYCLE;
+        int block = index / SCENARIO_CYCLE;
+        if (bucket == 993 && block % 2 == 0) {
+            return SyntheticScenario.RAPID_TRANSFER_SEED;
         }
-        if (bucket < 90) {
+        if (bucket == 994) {
+            return SyntheticScenario.RAPID_TRANSFER_SEED;
+        }
+        if (bucket == 995) {
+            return SyntheticScenario.RAPID_TRANSFER_BURST;
+        }
+        if (bucket == 996) {
             return SyntheticScenario.MEDIUM_NEW_DEVICE;
         }
-        if (bucket < 97) {
+        if (bucket == 997) {
             return SyntheticScenario.HIGH_PROXY_PURCHASE;
         }
-        if (bucket < 98) {
+        if (bucket == 998) {
             return SyntheticScenario.COUNTRY_MISMATCH;
         }
-        return SyntheticScenario.CRITICAL_ACCOUNT_TAKEOVER;
+        if (bucket == 999 && block % 2 == 0) {
+            return SyntheticScenario.CRITICAL_ACCOUNT_TAKEOVER;
+        }
+        return SyntheticScenario.NORMAL;
     }
 
     private BigDecimal normalAmount(SplittableRandom random) {
@@ -190,9 +212,10 @@ public class SyntheticReplayDataSource implements ReplayDataSource {
                 .setScale(2, RoundingMode.HALF_UP);
     }
 
-    private BigDecimal amountForScenario(SplittableRandom random, SyntheticScenario scenario) {
+    private BigDecimal amountForScenario(SplittableRandom random, SyntheticScenario scenario, int index) {
         return switch (scenario) {
             case NORMAL -> normalAmount(random);
+            case RAPID_TRANSFER_SEED, RAPID_TRANSFER_BURST -> rapidTransferAmount(index);
             case MEDIUM_NEW_DEVICE -> BigDecimal.valueOf(220 + (random.nextDouble() * 520))
                     .setScale(2, RoundingMode.HALF_UP);
             case COUNTRY_MISMATCH -> BigDecimal.valueOf(180 + (random.nextDouble() * 620))
@@ -201,6 +224,32 @@ public class SyntheticReplayDataSource implements ReplayDataSource {
                     .setScale(2, RoundingMode.HALF_UP);
             case CRITICAL_ACCOUNT_TAKEOVER -> suspiciousAmount(random);
         };
+    }
+
+    private BigDecimal rapidTransferAmount(int index) {
+        int bucket = index % SCENARIO_CYCLE;
+        int block = index / SCENARIO_CYCLE;
+        int variant = block % 4;
+        BigDecimal[][] threeTransferCases = {
+                {new BigDecimal("7400.00"), new BigDecimal("8600.00"), new BigDecimal("6800.00")},
+                {new BigDecimal("7750.00"), new BigDecimal("8350.00"), new BigDecimal("7150.00")},
+                {new BigDecimal("6900.00"), new BigDecimal("9100.00"), new BigDecimal("7450.00")},
+                {new BigDecimal("8200.00"), new BigDecimal("7800.00"), new BigDecimal("7300.00")}
+        };
+        BigDecimal[][] twoTransferCases = {
+                {new BigDecimal("11250.00"), new BigDecimal("9300.00")},
+                {new BigDecimal("10400.00"), new BigDecimal("10150.00")},
+                {new BigDecimal("9800.00"), new BigDecimal("10850.00")},
+                {new BigDecimal("12100.00"), new BigDecimal("8450.00")}
+        };
+
+        if (block % 2 == 0) {
+            int amountIndex = Math.max(0, Math.min(bucket - 993, 2));
+            return threeTransferCases[variant][amountIndex];
+        }
+
+        int amountIndex = bucket == 994 ? 0 : 1;
+        return twoTransferCases[variant][amountIndex];
     }
 
     private String homeCurrency(String countryCode) {
@@ -224,6 +273,8 @@ public class SyntheticReplayDataSource implements ReplayDataSource {
 
     private enum SyntheticScenario {
         NORMAL("normal-customer-journey", "NORMAL", "LOW"),
+        RAPID_TRANSFER_SEED("rapid-transfer-seed", "NORMAL", "LOW"),
+        RAPID_TRANSFER_BURST("rapid-transfer-burst", "AGGREGATE_FRAUD", "HIGH"),
         MEDIUM_NEW_DEVICE("new-device-review", "ELEVATED", "MEDIUM"),
         HIGH_PROXY_PURCHASE("high-risk-proxy-purchase", "HIGH", "HIGH"),
         COUNTRY_MISMATCH("country-mismatch-review", "ELEVATED", "MEDIUM"),

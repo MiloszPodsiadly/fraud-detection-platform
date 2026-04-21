@@ -18,6 +18,8 @@ import com.frauddetection.common.events.enums.AlertStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -36,6 +38,7 @@ public class AlertManagementService implements AlertManagementUseCase {
     private final AnalystDecisionStatusMapper analystDecisionStatusMapper;
     private final FraudAlertEventPublisher fraudAlertEventPublisher;
     private final FraudDecisionEventPublisher fraudDecisionEventPublisher;
+    private final FraudCaseManagementService fraudCaseManagementService;
 
     public AlertManagementService(
             AlertRepository alertRepository,
@@ -45,7 +48,8 @@ public class AlertManagementService implements AlertManagementUseCase {
             AlertCaseFactory alertCaseFactory,
             AnalystDecisionStatusMapper analystDecisionStatusMapper,
             FraudAlertEventPublisher fraudAlertEventPublisher,
-            FraudDecisionEventPublisher fraudDecisionEventPublisher
+            FraudDecisionEventPublisher fraudDecisionEventPublisher,
+            FraudCaseManagementService fraudCaseManagementService
     ) {
         this.alertRepository = alertRepository;
         this.alertDocumentMapper = alertDocumentMapper;
@@ -55,10 +59,13 @@ public class AlertManagementService implements AlertManagementUseCase {
         this.analystDecisionStatusMapper = analystDecisionStatusMapper;
         this.fraudAlertEventPublisher = fraudAlertEventPublisher;
         this.fraudDecisionEventPublisher = fraudDecisionEventPublisher;
+        this.fraudCaseManagementService = fraudCaseManagementService;
     }
 
     @Override
     public void handleScoredTransaction(TransactionScoredEvent event) {
+        fraudCaseManagementService.handleScoredTransaction(event);
+
         if (!Boolean.TRUE.equals(event.alertRecommended()) || alertRepository.existsByTransactionId(event.transactionId())) {
             return;
         }
@@ -85,6 +92,11 @@ public class AlertManagementService implements AlertManagementUseCase {
     @Override
     public List<AlertCase> listAlerts() {
         return alertRepository.findAll().stream().map(alertDocumentMapper::toDomain).toList();
+    }
+
+    @Override
+    public Page<AlertCase> listAlerts(Pageable pageable) {
+        return alertRepository.findAll(pageable).map(alertDocumentMapper::toDomain);
     }
 
     @Override

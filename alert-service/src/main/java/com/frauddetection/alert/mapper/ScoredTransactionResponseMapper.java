@@ -7,6 +7,12 @@ import org.springframework.stereotype.Component;
 @Component
 public class ScoredTransactionResponseMapper {
 
+    private final AlertResponseMapper alertResponseMapper;
+
+    public ScoredTransactionResponseMapper(AlertResponseMapper alertResponseMapper) {
+        this.alertResponseMapper = alertResponseMapper;
+    }
+
     public ScoredTransactionResponse toResponse(ScoredTransaction transaction) {
         return new ScoredTransactionResponse(
                 transaction.transactionId(),
@@ -14,8 +20,8 @@ public class ScoredTransactionResponseMapper {
                 transaction.correlationId(),
                 transaction.transactionTimestamp(),
                 transaction.scoredAt(),
-                transaction.transactionAmount(),
-                transaction.merchantInfo(),
+                alertResponseMapper.toMoneyResponse(transaction.transactionAmount()),
+                alertResponseMapper.toMerchantInfoResponse(transaction.merchantInfo()),
                 transaction.fraudScore(),
                 transaction.riskLevel(),
                 transaction.alertRecommended(),

@@ -3,6 +3,12 @@ package com.frauddetection.alert.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
 import com.frauddetection.alert.api.SubmitAnalystDecisionResponse;
+import com.frauddetection.alert.assistant.AnalystCaseSummaryResponse;
+import com.frauddetection.alert.assistant.AnalystCaseSummaryUseCase;
+import com.frauddetection.alert.assistant.CustomerRecentBehaviorSummary;
+import com.frauddetection.alert.assistant.FraudReasonSummary;
+import com.frauddetection.alert.assistant.RecommendedNextAction;
+import com.frauddetection.alert.assistant.TransactionSummary;
 import com.frauddetection.alert.domain.AlertCase;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
@@ -21,6 +27,8 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
@@ -29,6 +37,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -47,13 +56,29 @@ class AlertControllerTest {
     @MockBean
     private AlertManagementUseCase alertManagementUseCase;
 
+    @MockBean
+    private AnalystCaseSummaryUseCase analystCaseSummaryUseCase;
+
     @Test
     void shouldListAlerts() throws Exception {
-        when(alertManagementUseCase.listAlerts()).thenReturn(List.of(sampleAlert()));
+        when(alertManagementUseCase.listAlerts(any(Pageable.class))).thenReturn(new PageImpl<>(List.of(sampleAlert())));
 
         mockMvc.perform(get("/api/v1/alerts"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].alertId").value("alert-1"));
+                .andExpect(jsonPath("$.content[0].alertId").value("alert-1"))
+                .andExpect(jsonPath("$.totalElements").value(1));
+    }
+
+    @Test
+    void shouldReturnAssistantSummary() throws Exception {
+        when(analystCaseSummaryUseCase.generateSummary(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(sampleAssistantSummary());
+
+        mockMvc.perform(get("/api/v1/alerts/alert-1/assistant-summary"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.alertId").value("alert-1"))
+                .andExpect(jsonPath("$.mainFraudReasons[0].reasonCode").value("DEVICE_NOVELTY"))
+                .andExpect(jsonPath("$.recommendedNextAction.actionCode").value("STEP_UP_REVIEW"));
     }
 
     @Test
@@ -129,6 +154,33 @@ class AlertControllerTest {
                 null,
                 List.of(),
                 null
+        );
+    }
+
+    private AnalystCaseSummaryResponse sampleAssistantSummary() {
+        AlertCase alert = sampleAlert();
+        return new AnalystCaseSummaryResponse(
+                alert.alertId(),
+                alert.transactionId(),
+                alert.customerId(),
+                alert.correlationId(),
+                new TransactionSummary(
+                        alert.transactionId(),
+                        alert.alertTimestamp(),
+                        alert.transactionAmount(),
+                        alert.merchantInfo().merchantId(),
+                        alert.merchantInfo().merchantName(),
+                        alert.merchantInfo().merchantCategory(),
+                        alert.merchantInfo().channel(),
+                        alert.locationInfo().countryCode(),
+                        alert.fraudScore(),
+                        alert.riskLevel()
+                ),
+                List.of(new FraudReasonSummary("DEVICE_NOVELTY", "New or unusual device", "Device differs from known behavior.", 0.4d, Map.of())),
+                new CustomerRecentBehaviorSummary(alert.customerId(), "STANDARD", 500, 6, alert.transactionAmount(), 0.4d, 3, true, false, false, null, Map.of()),
+                new RecommendedNextAction("STEP_UP_REVIEW", "Review identity and device signals", "Device signal requires review.", List.of("Inspect device novelty")),
+                Map.of(),
+                Instant.parse("2026-04-20T10:01:00Z")
         );
     }
 }

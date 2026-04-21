@@ -59,6 +59,48 @@ services:
       timeout: 10s
       retries: 10
 
+  ml-inference-service:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.ml-inference
+    container_name: ml-inference-service
+    ports:
+      - "127.0.0.1:8090:8090"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health', timeout=2).read()"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: fraud-ollama
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  ollama-model-init:
+    image: ollama/ollama:latest
+    container_name: fraud-ollama-model-init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: llama3.2:3b
+    entrypoint:
+      - /bin/sh
+      - -c
+    command:
+      - ollama pull "$$OLLAMA_MODEL"
+    restart: "no"
+
   transaction-ingest-service:
     build:
       context: ..
@@ -104,7 +146,7 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       AUTO_REPLAY_ENABLED: "true"
       AUTO_REPLAY_SOURCE_TYPE: SYNTHETIC
-      AUTO_REPLAY_MAX_EVENTS: "300"
+      AUTO_REPLAY_MAX_EVENTS: "50000"
       AUTO_REPLAY_THROTTLE_MILLIS: "5"
       AUTO_REPLAY_START_DELAY_MILLIS: "15000"
     volumes:
@@ -153,10 +195,14 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      ml-inference-service:
+        condition: service_healthy
     environment:
       SERVER_PORT: 8080
       SPRING_PROFILES_ACTIVE: docker
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      ML_MODEL_BASE_URL: http://ml-inference-service:8090
+      SCORING_MODE: SHADOW
     ports:
       - "127.0.0.1:8084:8080"
 
@@ -176,11 +222,17 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      ollama-model-init:
+        condition: service_completed_successfully
     environment:
       SERVER_PORT: 8080
       SPRING_PROFILES_ACTIVE: docker
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       MONGODB_URI: mongodb://mongodb:27017/fraud_alerts
+      ASSISTANT_MODE: OLLAMA
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: llama3.2:3b
+      ASSISTANT_READ_TIMEOUT: 45s
     ports:
       - "127.0.0.1:8085:8080"
 
@@ -194,3 +246,6 @@ services:
         condition: service_started
     ports:
       - "127.0.0.1:4173:80"
+
+volumes:
+  ollama-data:
