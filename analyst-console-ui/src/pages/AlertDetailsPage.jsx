@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { getAlert } from "../api/alertsApi.js";
+import { getAlert, getAssistantSummary } from "../api/alertsApi.js";
 import { AnalystDecisionForm } from "../components/AnalystDecisionForm.jsx";
+import { AssistantSummaryPanel } from "../components/AssistantSummaryPanel.jsx";
 import { EmptyState } from "../components/EmptyState.jsx";
 import { ErrorState } from "../components/ErrorState.jsx";
 import { JsonInspector } from "../components/JsonInspector.jsx";
@@ -11,6 +12,9 @@ import { formatDateTime, formatScore } from "../utils/format.js";
 
 export function AlertDetailsPage({ alertId, alertSummary, onBack, onDecisionSubmitted }) {
   const [alert, setAlert] = useState(null);
+  const [assistantSummary, setAssistantSummary] = useState(null);
+  const [isAssistantLoading, setIsAssistantLoading] = useState(false);
+  const [assistantError, setAssistantError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -21,12 +25,28 @@ export function AlertDetailsPage({ alertId, alertSummary, onBack, onDecisionSubm
   async function loadAlert() {
     setIsLoading(true);
     setError("");
+    setAssistantSummary(null);
+    setAssistantError("");
     try {
-      setAlert(await getAlert(alertId));
+      const nextAlert = await getAlert(alertId);
+      setAlert(nextAlert);
+      loadAssistantSummary();
     } catch (apiError) {
       setError(apiError.message);
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function loadAssistantSummary() {
+    setIsAssistantLoading(true);
+    setAssistantError("");
+    try {
+      setAssistantSummary(await getAssistantSummary(alertId));
+    } catch (apiError) {
+      setAssistantError(apiError.message);
+    } finally {
+      setIsAssistantLoading(false);
     }
   }
 
@@ -92,6 +112,13 @@ export function AlertDetailsPage({ alertId, alertSummary, onBack, onDecisionSubm
                 </dl>
               </section>
             </div>
+
+            <AssistantSummaryPanel
+              summary={assistantSummary}
+              isLoading={isAssistantLoading}
+              error={assistantError}
+              onRetry={loadAssistantSummary}
+            />
 
             <JsonInspector title="Feature snapshot" value={alert.featureSnapshot} />
             <JsonInspector title="Score details" value={alert.scoreDetails} />

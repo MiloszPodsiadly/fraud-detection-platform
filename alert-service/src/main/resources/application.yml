@@ -37,3 +37,9 @@ app:
       concurrency: 1
       retry-attempts: 3
       retry-backoff-millis: 1000
+  assistant:
+    mode: ${ASSISTANT_MODE:DETERMINISTIC}
+    ollama-base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+    ollama-model: ${OLLAMA_MODEL:llama3.2:3b}
+    connect-timeout: ${ASSISTANT_CONNECT_TIMEOUT:500ms}
+    read-timeout: ${ASSISTANT_READ_TIMEOUT:45s}

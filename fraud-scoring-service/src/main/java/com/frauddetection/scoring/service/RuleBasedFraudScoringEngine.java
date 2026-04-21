@@ -38,6 +38,7 @@ public class RuleBasedFraudScoringEngine implements FraudScoringEngine {
         score = addFlagWeight(event.featureFlags(), "HIGH_VELOCITY", score, 0.20d, reasonCodes, scoreDetails);
         score = addFlagWeight(event.featureFlags(), "MERCHANT_CONCENTRATION", score, 0.08d, reasonCodes, scoreDetails);
         score = addFlagWeight(event.featureFlags(), "HIGH_AMOUNT_ACTIVITY", score, 0.14d, reasonCodes, scoreDetails);
+        score = addFlagWeight(event.featureFlags(), "RAPID_PLN_20K_BURST", score, 0.45d, reasonCodes, scoreDetails);
 
         if (Boolean.TRUE.equals(event.countryMismatch())) {
             score += 0.12d;
@@ -59,22 +60,25 @@ public class RuleBasedFraudScoringEngine implements FraudScoringEngine {
             reasonCodes.add("RECENT_TRANSACTION_SPIKE");
             scoreDetails.put("recentTransactionSpikeBoost", 0.10d);
         }
-        if (event.transactionVelocityPerMinute() != null && event.transactionVelocityPerMinute() >= 0.30d) {
+        if (event.transactionVelocityPerMinute() != null && event.transactionVelocityPerMinute() >= 5.0d) {
             score += 0.12d;
             reasonCodes.add("TRANSACTION_VELOCITY");
             scoreDetails.put("transactionVelocityBoost", 0.12d);
+        }
+        if (event.transactionAmount() != null && event.transactionAmount().amount().compareTo(BigDecimal.valueOf(1000)) >= 0) {
+            reasonCodes.add("HIGH_TRANSACTION_AMOUNT");
+            scoreDetails.put("highTransactionAmountDiagnostic", true);
         }
         if (event.recentAmountSum() != null && event.recentAmountSum().amount().compareTo(BigDecimal.valueOf(5000)) >= 0) {
             score += 0.10d;
             reasonCodes.add("RECENT_AMOUNT_ACCUMULATION");
             scoreDetails.put("recentAmountAccumulationBoost", 0.10d);
         }
-        if (event.transactionAmount() != null && event.transactionAmount().amount().compareTo(BigDecimal.valueOf(1000)) >= 0) {
-            score += 0.08d;
-            reasonCodes.add("HIGH_TRANSACTION_AMOUNT");
-            scoreDetails.put("highAmountBoost", 0.08d);
+        if (event.featureSnapshot() != null && Boolean.TRUE.equals(event.featureSnapshot().get("rapidTransferFraudCaseCandidate"))) {
+            score += 0.20d;
+            reasonCodes.add("RAPID_TRANSFER_FRAUD_CASE");
+            scoreDetails.put("rapidTransferFraudCaseBoost", 0.20d);
         }
-
         double cappedScore = Math.min(score, 0.99d);
         RiskLevel riskLevel = mapRiskLevel(cappedScore);
         boolean alertRecommended = riskLevel == RiskLevel.HIGH || riskLevel == RiskLevel.CRITICAL;

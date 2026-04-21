@@ -18,15 +18,22 @@ import java.util.Map;
 @Component
 public class TransactionFeatureCalculator {
 
-    private final FeatureStoreProperties featureStoreProperties;
+    private static final BigDecimal RAPID_TRANSFER_PLN_THRESHOLD = BigDecimal.valueOf(20_000);
+    private static final int HIGH_VELOCITY_TRANSACTION_COUNT = 5;
 
-    public TransactionFeatureCalculator(FeatureStoreProperties featureStoreProperties) {
+    private final FeatureStoreProperties featureStoreProperties;
+    private final CurrencyAmountConverter currencyAmountConverter;
+
+    public TransactionFeatureCalculator(FeatureStoreProperties featureStoreProperties, CurrencyAmountConverter currencyAmountConverter) {
         this.featureStoreProperties = featureStoreProperties;
+        this.currencyAmountConverter = currencyAmountConverter;
     }
 
     public EnrichedTransactionFeatures calculate(TransactionRawEvent event, FeatureStoreSnapshot snapshot) {
         int recentTransactionCount = snapshot.recentTransactionCount() + 1;
         BigDecimal recentAmountSum = snapshot.recentAmountSum().add(event.transactionAmount().amount());
+        BigDecimal currentAmountPln = currencyAmountConverter.toPln(event.transactionAmount().amount(), event.transactionAmount().currency());
+        BigDecimal recentAmountSumPln = snapshot.recentAmountSumPln().add(currentAmountPln);
         int merchantFrequency7d = snapshot.merchantFrequency7d() + 1;
 
         boolean knownFromContext = event.customerContext().knownDeviceIds() != null
@@ -50,15 +57,18 @@ public class TransactionFeatureCalculator {
         if (proxyOrVpnDetected) {
             featureFlags.add("PROXY_OR_VPN");
         }
-        if (velocityPerMinute >= 0.3d || recentTransactionCount >= 5) {
+        if (recentTransactionCount >= HIGH_VELOCITY_TRANSACTION_COUNT) {
             featureFlags.add("HIGH_VELOCITY");
         }
         if (merchantFrequency7d >= 5) {
             featureFlags.add("MERCHANT_CONCENTRATION");
         }
-        if (event.transactionAmount().amount().compareTo(BigDecimal.valueOf(1000)) >= 0
-                || recentAmountSum.compareTo(BigDecimal.valueOf(5000)) >= 0) {
+        if (recentTransactionCount >= 2 && recentAmountSum.compareTo(BigDecimal.valueOf(5000)) >= 0) {
             featureFlags.add("HIGH_AMOUNT_ACTIVITY");
+        }
+        boolean rapidPln20kBurst = recentTransactionCount >= 2 && recentAmountSumPln.compareTo(RAPID_TRANSFER_PLN_THRESHOLD) >= 0;
+        if (rapidPln20kBurst) {
+            featureFlags.add("RAPID_PLN_20K_BURST");
         }
 
         Map<String, Object> featureSnapshot = new LinkedHashMap<>();
@@ -66,6 +76,14 @@ public class TransactionFeatureCalculator {
         featureSnapshot.put("recentTransactionCountWindow", featureStoreProperties.recentTransactionWindow().toString());
         featureSnapshot.put("recentAmountSum", recentAmountSum);
         featureSnapshot.put("recentAmountSumWindow", featureStoreProperties.recentTransactionWindow().toString());
+        featureSnapshot.put("recentAmountSumPln", recentAmountSumPln);
+        featureSnapshot.put("currentTransactionAmountPln", currentAmountPln);
+        featureSnapshot.put("rapidTransferWindow", featureStoreProperties.recentTransactionWindow().toString());
+        featureSnapshot.put("rapidTransferThresholdPln", RAPID_TRANSFER_PLN_THRESHOLD);
+        featureSnapshot.put("rapidTransferFraudCaseCandidate", rapidPln20kBurst);
+        featureSnapshot.put("rapidTransferCount", recentTransactionCount);
+        featureSnapshot.put("rapidTransferTotalPln", recentAmountSumPln);
+        featureSnapshot.put("rapidTransferTransactionIds", rapidTransferTransactionIds(snapshot, event));
         featureSnapshot.put("transactionVelocityPerMinute", velocityPerMinute);
         featureSnapshot.put("merchantFrequency7d", merchantFrequency7d);
         featureSnapshot.put("deviceNovelty", deviceNovelty);
@@ -89,5 +107,12 @@ public class TransactionFeatureCalculator {
                 List.copyOf(featureFlags),
                 featureSnapshot
         );
+    }
+
+    private List<String> rapidTransferTransactionIds(FeatureStoreSnapshot snapshot, TransactionRawEvent event) {
+        List<String> transactionIds = new ArrayList<>();
+        snapshot.recentTransactions().forEach(transaction -> transactionIds.add(transaction.transactionId()));
+        transactionIds.add(event.transactionId());
+        return List.copyOf(transactionIds);
     }
 }

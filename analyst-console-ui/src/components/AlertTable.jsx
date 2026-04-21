@@ -10,9 +10,9 @@ export function AlertTable({ alerts, onOpenAlert }) {
             <th>Risk</th>
             <th>Alert</th>
             <th>Customer</th>
-            <th>Score</th>
             <th>Status</th>
             <th>Created</th>
+            <th className="numericCell">Score</th>
             <th aria-label="Actions" />
           </tr>
         </thead>
@@ -25,9 +25,9 @@ export function AlertTable({ alerts, onOpenAlert }) {
                 <span>{alert.transactionId}</span>
               </td>
               <td>{alert.customerId}</td>
-              <td>{formatScore(alert.fraudScore)}</td>
               <td><span className="statusPill">{alert.alertStatus}</span></td>
               <td>{formatDateTime(alert.alertTimestamp)}</td>
+              <td className="numericCell">{formatScore(alert.fraudScore)}</td>
               <td>
                 <button className="rowButton" type="button" onClick={() => onOpenAlert(alert.alertId)}>
                   Review

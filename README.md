@@ -62,6 +62,8 @@ This split supports clearer ownership, independent scaling, failure isolation, a
 - MongoDB
 - Redis
 - Docker Compose
+- Python 3.12 for ML inference service
+- Ollama for local LLM assistant runtime in Docker
 - React
 - Vite
 - Nginx for serving the built UI in Docker
@@ -110,12 +112,12 @@ The Docker stack automatically starts a synthetic replay bootstrap. Wait about 2
 
 Public datasets such as Kaggle files should stay local and outside public Git history. The supported default data sources are platform-owned synthetic generators.
 
-The generated target scenario mix is:
+The generated target scenario mix is intentionally dominated by legitimate traffic:
 
-- `LOW`: 80%
-- `MEDIUM`: 10% new-device plus 1% country-mismatch review cases
-- `HIGH`: 7%
-- `CRITICAL`: 2%
+- `LOW`: about 99.55%
+- `MEDIUM`: about 0.20%
+- `HIGH`: about 0.20%
+- `CRITICAL`: about 0.05%
 
 `LOW` and `MEDIUM` transactions are visible in the scored transaction monitor. Only `HIGH` and `CRITICAL` transactions create analyst alerts.
 
@@ -126,12 +128,12 @@ The generated target scenario mix is:
 ```yaml
 AUTO_REPLAY_ENABLED: "true"
 AUTO_REPLAY_SOURCE_TYPE: SYNTHETIC
-AUTO_REPLAY_MAX_EVENTS: "300"
+AUTO_REPLAY_MAX_EVENTS: "50000"
 AUTO_REPLAY_THROTTLE_MILLIS: "5"
 AUTO_REPLAY_START_DELAY_MILLIS: "15000"
 ```
 
-This publishes 300 generated transactions after a short delay. The current generator uses a deterministic 100-event cycle: 80 normal, 10 medium new-device, 7 high-risk, 1 country-mismatch, and 2 critical account-takeover events.
+This publishes 50,000 generated transactions after a short delay. The current generator uses a deterministic 1,000-event cycle with mostly normal LOW traffic and rare review scenarios near the end of each block. Rapid-transfer cases use 2 or 3 varied transfer amounts inside 1 minute, each transfer can still score LOW on its own, and the grouped case is created when the combined converted value reaches at least 20,000 PLN. This keeps the dataset large while preventing the alert queue from being flooded by thousands of suspicious transactions.
 
 ### Bash Data Scripts
 
@@ -146,31 +148,33 @@ bash scripts/generate-dimensions.sh
 Generate canonical `TransactionRawEvent` JSONL:
 
 ```bash
-bash scripts/generate-canonical-replay.sh --count 10000
+bash scripts/generate-canonical-replay.sh --count 50000
 ```
 
 Generate replay data plus CSV labels:
 
 ```bash
-bash scripts/generate-labelled-dataset.sh --count 10000
+bash scripts/generate-labelled-dataset.sh --count 50000
 ```
 
 Override distribution:
 
 ```bash
 bash scripts/generate-labelled-dataset.sh \
-  --count 10000 \
-  --normal-percentage 80 \
-  --new-device-percentage 10 \
-  --high-proxy-percentage 7 \
+  --count 50000 \
+  --normal-percentage 93 \
+  --rapid-transfer-seed-percentage 2 \
+  --rapid-transfer-percentage 1 \
+  --new-device-percentage 1 \
+  --high-proxy-percentage 1 \
   --country-mismatch-percentage 1 \
-  --account-takeover-percentage 2
+  --account-takeover-percentage 1
 ```
 
 Generate durable replay JSONL:
 
 ```bash
-bash scripts/generate-synthetic-replay.sh --count 10000
+bash scripts/generate-synthetic-replay.sh --count 50000
 ```
 
 Replay generated JSONL:
@@ -205,7 +209,10 @@ The UI contains:
 - pagination for browsing all scored transactions
 - legitimate vs suspicious classification
 - alert review queue for `HIGH` and `CRITICAL` cases
+- paginated alert review queue capped at 100 alerts per request
+- rapid-transfer burst fraud case panel for `RAPID_TRANSFER_BURST_20K_PLN`
 - alert details page
+- AI assistant case summary with fraud reasons, behavior facts, and suggested review actions
 - analyst decision form
 
 For local frontend development:
@@ -225,6 +232,8 @@ The Vite dev server proxies `/api` requests to `alert-service` on `http://localh
 - `feature-enricher-service`: `8083`
 - `fraud-scoring-service`: `8084`
 - `alert-service`: `8085`
+- `ml-inference-service`: `8090`
+- `ollama`: `11434`
 - `analyst-console-ui`: `4173`
 - Kafka: `9092`
 - MongoDB: `27017`
@@ -237,6 +246,8 @@ Health endpoints:
 - `http://localhost:8083/actuator/health`
 - `http://localhost:8084/actuator/health`
 - `http://localhost:8085/actuator/health`
+- `http://localhost:8090/health`
+- `http://localhost:11434`
 
 All backend services also expose liveness/readiness health groups and `/actuator/info`.
 
@@ -262,6 +273,7 @@ Main local endpoints:
 - `GET http://localhost:8085/api/v1/transactions/scored?page=0&size=25`: paged scored transaction monitor data.
 - `GET http://localhost:8085/api/v1/alerts`: alert queue.
 - `GET http://localhost:8085/api/v1/alerts/{alertId}`: alert details.
+- `GET http://localhost:8085/api/v1/alerts/{alertId}/assistant-summary`: AI assistant case summary.
 - `POST http://localhost:8085/api/v1/alerts/{alertId}/decision`: submit analyst decision.
 
 `/api/v1/transactions/scored` returns:
@@ -303,11 +315,20 @@ Local defaults are provided for development, but invalid overrides fail fast.
 `fraud-scoring-service` supports:
 
 - `RULE_BASED`: default final scoring path.
-- `ML`: intended ML final path, with rule-based fallback if unavailable.
+- `ML`: Python ML final path, with rule-based fallback if unavailable.
 - `SHADOW`: rule-based final decision with ML diagnostics attached.
 - `COMPARE`: rule-based final decision with rule-vs-ML comparison diagnostics.
 
-The current ML adapter is a placeholder, so `ML` falls back to rule-based scoring until a model runtime is configured.
+The Docker stack starts `ml-inference-service`, a Python HTTP model service exposed on port `8090`. Docker defaults `fraud-scoring-service` to `SHADOW` mode so rule-based decisions remain final while Python ML diagnostics are attached. Override `SCORING_MODE=ML` to use the Python model as the final decision source with rule-based fallback.
+
+ML runtime configuration:
+
+```yaml
+SCORING_MODE: SHADOW
+ML_MODEL_BASE_URL: http://ml-inference-service:8090
+ML_MODEL_CONNECT_TIMEOUT: 500ms
+ML_MODEL_READ_TIMEOUT: 1500ms
+```
 
 ## Reliability: Retry And DLT
 
@@ -464,7 +485,7 @@ Integration tests are skipped automatically when Docker/Testcontainers is unavai
 
 ## AI/ML Roadmap
 
-Rule-based scoring remains the default production-safe path while the platform keeps stable seams for future ML inference.
+Rule-based scoring remains the local default production-safe path while Docker now runs a Python ML inference service in shadow mode.
 
 Current scoring flow:
 
@@ -492,10 +513,21 @@ public class MlFraudScoringEngine implements FraudScoringEngine {
 }
 ```
 
+Current Python inference boundary:
+
+- service path: `ml-inference-service`
+- scoring endpoint: `POST /v1/fraud/score`
+- health endpoint: `GET /health`
+- model family: versioned logistic fraud model implemented and trained in Python without external runtime dependencies
+- model artifact: `ml-inference-service/app/model_artifact.json`
+- training entrypoint: `python -m app.train_model --output ml-inference-service/app/model_artifact.json`
+- response contract: `MlModelOutput`, including model name, version, timestamp, reason codes, score details, and explanation metadata
+
 Explanation strategy:
 
 - rule-based explanations use weighted reason codes
-- ML explanations should populate `explanationMetadata` with methods such as `SHAP`, `FEATURE_IMPORTANCE`, or `MODEL_NATIVE_REASON_CODES`
+- ML explanations populate `explanationMetadata` and `scoreDetails` with model feature contributions
+- future model versions can add methods such as `SHAP`, `FEATURE_IMPORTANCE`, or `MODEL_NATIVE_REASON_CODES`
 - detailed explanation values should live in `scoreDetails`
 
 Deployment guidance:
@@ -507,7 +539,7 @@ Deployment guidance:
 
 ## AI Analyst Assistant Roadmap
 
-The future AI analyst assistant should help analysts understand cases faster, but it must not own fraud decisions or bypass the alert workflow.
+The AI analyst assistant helps analysts understand cases faster, but it does not own fraud decisions or bypass the alert workflow.
 
 Current preparation exists under:
 
@@ -532,10 +564,37 @@ The response is designed around:
 Recommended implementation path:
 
 1. Keep `alert-service` as owner of alert/case data.
-2. Implement deterministic summaries first.
+2. Keep deterministic summaries as the default reliable assistant path.
 3. Add an optional LLM adapter behind a port such as `CaseNarrativeGenerator`.
 4. Keep analyst decisions flowing through `/api/v1/alerts/{alertId}/decision`.
 5. Emit decisions as `FraudDecisionEvent`.
+
+Current endpoint:
+
+```text
+GET /api/v1/alerts/{alertId}/assistant-summary
+```
+
+The response includes transaction summary, main fraud reasons, customer recent behavior, a recommended next action, supporting evidence, and generation timestamp. The analyst console renders this on the alert detail page.
+
+Local LLM runtime:
+
+- Docker Compose starts `ollama` on port `11434`.
+- `ollama-model-init` pulls `llama3.2:3b` on first startup.
+- `alert-service` uses `ASSISTANT_MODE=OLLAMA` in Docker.
+- If Ollama or the model is unavailable, the service falls back to deterministic assistant output.
+
+Assistant runtime configuration:
+
+```yaml
+ASSISTANT_MODE: OLLAMA
+OLLAMA_BASE_URL: http://ollama:11434
+OLLAMA_MODEL: llama3.2:3b
+ASSISTANT_CONNECT_TIMEOUT: 500ms
+ASSISTANT_READ_TIMEOUT: 45s
+```
+
+No OpenAI API key or external LLM provider is required. The first Docker startup needs network access to download the Ollama model into the `ollama-data` volume.
 
 Guardrails:
 
@@ -554,6 +613,7 @@ transaction-ingest-service/      External REST transaction ingestion
 transaction-simulator-service/   Synthetic replay and generated traffic
 feature-enricher-service/        Redis-backed feature enrichment
 fraud-scoring-service/           Rule-based and future ML scoring
+ml-inference-service/            Python ML model inference service
 alert-service/                   Scored transaction projection, alerts, analyst decisions
 analyst-console-ui/              React analyst console
 deployment/                      Docker Compose and Dockerfiles
@@ -575,7 +635,8 @@ The repository currently includes:
 - structured logging and correlation propagation
 - idempotency safeguards
 - rule-based scoring with ML extension contracts
-- future AI analyst assistant contracts
+- Python ML inference service wired in Docker shadow mode
+- AI analyst assistant backend and UI summary panel
 
 ## 👤 Maintainer
 

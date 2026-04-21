@@ -1,0 +1,27 @@
+{
+  "bias": -6.732499,
+  "modelFamily": "LOGISTIC_REGRESSION",
+  "modelName": "python-logistic-fraud-model",
+  "modelVersion": "2026-04-21.trained.v1",
+  "thresholds": {
+    "critical": 0.9,
+    "high": 0.75,
+    "medium": 0.45
+  },
+  "training": {
+    "algorithm": "batch-gradient-descent",
+    "examples": 50000,
+    "source": "synthetic-fraud-scenarios"
+  },
+  "weights": {
+    "countryMismatch": 0.174,
+    "deviceNovelty": 1.50195,
+    "highRiskFlagCount": 2.138746,
+    "merchantFrequency7d": -0.260885,
+    "proxyOrVpnDetected": 2.036939,
+    "rapidTransferBurst": 3.715112,
+    "recentAmountSum": 3.128722,
+    "recentTransactionCount": 0.871211,
+    "transactionVelocityPerMinute": 2.096025
+  }
+}

@@ -33,10 +33,10 @@ class RuleBasedFraudScoringEngineTest {
                 TransactionFixtures.enrichedTransaction().build().locationInfo(),
                 TransactionFixtures.enrichedTransaction().build().customerContext(),
                 7,
-                "PT15M",
+                "PT1M",
                 new com.frauddetection.common.events.model.Money(new BigDecimal("6400.00"), "USD"),
-                "PT15M",
-                0.50d,
+                "PT1M",
+                7.0d,
                 7,
                 true,
                 true,
@@ -49,7 +49,7 @@ class RuleBasedFraudScoringEngineTest {
 
         assertThat(result.fraudScore()).isGreaterThanOrEqualTo(0.90d);
         assertThat(result.riskLevel()).isEqualTo(RiskLevel.CRITICAL);
-        assertThat(result.reasonCodes()).contains("DEVICE_NOVELTY", "COUNTRY_MISMATCH", "TRANSACTION_VELOCITY");
+        assertThat(result.reasonCodes()).contains("DEVICE_NOVELTY", "COUNTRY_MISMATCH", "TRANSACTION_VELOCITY", "HIGH_TRANSACTION_AMOUNT");
         assertThat(result.modelName()).isEqualTo("rule-based-engine");
         assertThat(result.modelVersion()).isEqualTo("v1");
         assertThat(result.inferenceTimestamp()).isNotNull();
@@ -75,9 +75,9 @@ class RuleBasedFraudScoringEngineTest {
                 TransactionFixtures.enrichedTransaction().build().locationInfo(),
                 TransactionFixtures.enrichedTransaction().build().customerContext(),
                 1,
-                "PT15M",
+                "PT1M",
                 new com.frauddetection.common.events.model.Money(new BigDecimal("45.50"), "USD"),
-                "PT15M",
+                "PT1M",
                 0.06d,
                 1,
                 false,
@@ -91,6 +91,41 @@ class RuleBasedFraudScoringEngineTest {
 
         assertThat(result.fraudScore()).isLessThan(0.45d);
         assertThat(result.riskLevel()).isEqualTo(RiskLevel.LOW);
+        assertThat(result.alertRecommended()).isFalse();
+    }
+
+    @Test
+    void shouldKeepSingleHighAmountTransactionLowWhileKeepingDiagnosticReason() {
+        var event = new com.frauddetection.common.events.contract.TransactionEnrichedEvent(
+                java.util.UUID.randomUUID().toString(),
+                "txn-amount-only",
+                "corr-amount-only",
+                "cust-amount-only",
+                "acct-amount-only",
+                java.time.Instant.now(),
+                java.time.Instant.now(),
+                new com.frauddetection.common.events.model.Money(new BigDecimal("10000.00"), "PLN"),
+                TransactionFixtures.enrichedTransaction().build().merchantInfo(),
+                TransactionFixtures.enrichedTransaction().build().deviceInfo(),
+                TransactionFixtures.enrichedTransaction().build().locationInfo(),
+                TransactionFixtures.enrichedTransaction().build().customerContext(),
+                1,
+                "PT1M",
+                new com.frauddetection.common.events.model.Money(new BigDecimal("10000.00"), "PLN"),
+                "PT1M",
+                1.0d,
+                1,
+                false,
+                false,
+                false,
+                List.of(),
+                Map.of("recentTransactionCount", 1)
+        );
+
+        var result = engine.score(FraudScoringRequest.from(event));
+
+        assertThat(result.riskLevel()).isEqualTo(RiskLevel.LOW);
+        assertThat(result.reasonCodes()).contains("HIGH_TRANSACTION_AMOUNT");
         assertThat(result.alertRecommended()).isFalse();
     }
 }

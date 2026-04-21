@@ -5,7 +5,13 @@ import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.config.ScoringMode;
 import com.frauddetection.scoring.config.ScoringProperties;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
+import com.frauddetection.scoring.domain.MlModelInput;
+import com.frauddetection.scoring.domain.MlModelOutput;
 import org.junit.jupiter.api.Test;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -46,11 +52,35 @@ class CompositeFraudScoringEngineTest {
         var result = engine.score(request);
 
         assertThat(result.scoringStrategy()).isEqualTo("RULE_BASED");
-        assertThat(result.riskLevel()).isEqualTo(RiskLevel.CRITICAL);
+        assertThat(result.riskLevel()).isEqualTo(RiskLevel.MEDIUM);
         assertThat(mlDiagnostics(result))
                 .containsEntry("mode", "SHADOW")
                 .containsEntry("finalDecisionSource", "RULE_BASED")
                 .containsEntry("shadowModelName", "ml-placeholder");
+    }
+
+    @Test
+    void shouldNotReportShadowFallbackWhenMlModelIsAvailable() {
+        CompositeFraudScoringEngine engine = engine(ScoringMode.SHADOW, input -> new MlModelOutput(
+                true,
+                0.42d,
+                RiskLevel.LOW,
+                "python-logistic-fraud-model",
+                "test-version",
+                Instant.now(),
+                List.of("LOW_MODEL_RISK"),
+                Map.of("modelAvailable", true),
+                Map.of("modelAvailable", true),
+                null
+        ));
+        FraudScoringRequest request = FraudScoringRequest.from(TransactionFixtures.enrichedTransaction().build());
+
+        var result = engine.score(request);
+
+        assertThat(mlDiagnostics(result))
+                .containsEntry("shadowModelAvailable", true)
+                .containsEntry("shadowModelName", "python-logistic-fraud-model")
+                .doesNotContainKey("shadowFallbackReason");
     }
 
     @Test
@@ -69,10 +99,14 @@ class CompositeFraudScoringEngineTest {
     }
 
     private CompositeFraudScoringEngine engine(ScoringMode mode) {
+        return engine(mode, new PlaceholderMlModelScoringClient());
+    }
+
+    private CompositeFraudScoringEngine engine(ScoringMode mode, MlModelScoringClient mlModelScoringClient) {
         ScoringProperties properties = new ScoringProperties(0.75d, 0.90d, mode);
         return new CompositeFraudScoringEngine(
                 new RuleBasedFraudScoringEngine(properties),
-                new MlFraudScoringEngine(new PlaceholderMlModelScoringClient()),
+                new MlFraudScoringEngine(mlModelScoringClient),
                 properties
         );
     }

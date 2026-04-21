@@ -36,7 +36,8 @@ import java.util.Map;
 @EnableConfigurationProperties({
         KafkaTopicProperties.class,
         KafkaConsumerProperties.class,
-        ScoringProperties.class
+        ScoringProperties.class,
+        MlModelClientProperties.class
 })
 public class FraudScoringKafkaConfig {
 

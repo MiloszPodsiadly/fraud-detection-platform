@@ -14,7 +14,7 @@ app:
     auto:
       enabled: ${AUTO_REPLAY_ENABLED:false}
       source-type: ${AUTO_REPLAY_SOURCE_TYPE:SYNTHETIC}
-      max-events: ${AUTO_REPLAY_MAX_EVENTS:300}
+      max-events: ${AUTO_REPLAY_MAX_EVENTS:50000}
       throttle-millis: ${AUTO_REPLAY_THROTTLE_MILLIS:5}
       start-delay-millis: ${AUTO_REPLAY_START_DELAY_MILLIS:15000}
     jsonl:

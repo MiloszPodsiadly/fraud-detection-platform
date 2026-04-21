@@ -40,8 +40,9 @@ class AlertManagementServiceTest {
         FraudDecisionEventMapper decisionEventMapper = new FraudDecisionEventMapper();
         AlertCaseFactory alertCaseFactory = new AlertCaseFactory();
         AnalystDecisionStatusMapper statusMapper = new AnalystDecisionStatusMapper();
+        FraudCaseManagementService fraudCaseManagementService = mock(FraudCaseManagementService.class);
 
-        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher);
+        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher, fraudCaseManagementService);
         var event = TransactionFixtures.scoredTransaction().build();
 
         when(repository.existsByTransactionId(event.transactionId())).thenReturn(false);
@@ -63,8 +64,9 @@ class AlertManagementServiceTest {
         FraudDecisionEventMapper decisionEventMapper = new FraudDecisionEventMapper();
         AlertCaseFactory alertCaseFactory = new AlertCaseFactory();
         AnalystDecisionStatusMapper statusMapper = new AnalystDecisionStatusMapper();
+        FraudCaseManagementService fraudCaseManagementService = mock(FraudCaseManagementService.class);
 
-        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher);
+        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher, fraudCaseManagementService);
         var event = TransactionFixtures.scoredTransaction().build();
 
         when(repository.existsByTransactionId(event.transactionId())).thenReturn(false);
@@ -85,8 +87,9 @@ class AlertManagementServiceTest {
         FraudDecisionEventMapper decisionEventMapper = new FraudDecisionEventMapper();
         AlertCaseFactory alertCaseFactory = new AlertCaseFactory();
         AnalystDecisionStatusMapper statusMapper = new AnalystDecisionStatusMapper();
+        FraudCaseManagementService fraudCaseManagementService = mock(FraudCaseManagementService.class);
 
-        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher);
+        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher, fraudCaseManagementService);
         AlertDocument document = new AlertDocument();
         document.setAlertId("alert-1");
         document.setTransactionId("txn-1");

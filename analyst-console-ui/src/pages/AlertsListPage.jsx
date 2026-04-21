@@ -3,30 +3,48 @@ import { AlertTable } from "../components/AlertTable.jsx";
 import { EmptyState } from "../components/EmptyState.jsx";
 import { ErrorState } from "../components/ErrorState.jsx";
 import { FilterBar } from "../components/FilterBar.jsx";
+import { FraudCasePanel } from "../components/FraudCasePanel.jsx";
 import { LoadingPanel } from "../components/LoadingPanel.jsx";
 import { PaginationControls } from "../components/PaginationControls.jsx";
 import { TransactionMonitorTable } from "../components/TransactionMonitorTable.jsx";
 
 export function AlertsListPage({
-  alerts,
+  alertPage,
+  fraudCasePage,
   transactionPage,
   isLoading,
   error,
   onRetry,
   onTransactionPageChange,
   onTransactionPageSizeChange,
-  onOpenAlert
+  onAlertPageChange,
+  onAlertPageSizeChange,
+  onFraudCasePageChange,
+  onFraudCasePageSizeChange,
+  onOpenAlert,
+  onOpenFraudCase
 }) {
   const [filters, setFilters] = useState({
     query: "",
     riskLevel: "ALL",
     status: "ALL"
   });
+  const [transactionFilters, setTransactionFilters] = useState({
+    query: "",
+    riskLevel: "ALL",
+    status: "ALL"
+  });
+  const [fraudCaseFilters, setFraudCaseFilters] = useState({
+    query: "",
+    status: "ALL"
+  });
   const deferredQuery = useDeferredValue(filters.query);
+  const deferredTransactionQuery = useDeferredValue(transactionFilters.query);
+  const deferredFraudCaseQuery = useDeferredValue(fraudCaseFilters.query);
 
   const filteredAlerts = useMemo(() => {
     const query = deferredQuery.trim().toLowerCase();
-    return alerts.filter((alert) => {
+    return (alertPage.content || []).filter((alert) => {
       const matchesRisk = filters.riskLevel === "ALL" || alert.riskLevel === filters.riskLevel;
       const matchesStatus = filters.status === "ALL" || alert.alertStatus === filters.status;
       const searchable = [
@@ -37,12 +55,52 @@ export function AlertsListPage({
       ].join(" ").toLowerCase();
       return matchesRisk && matchesStatus && (!query || searchable.includes(query));
     });
-  }, [alerts, deferredQuery, filters.riskLevel, filters.status]);
+  }, [alertPage.content, deferredQuery, filters.riskLevel, filters.status]);
 
   const transactions = transactionPage.content || [];
+  const filteredTransactions = useMemo(() => {
+    const query = deferredTransactionQuery.trim().toLowerCase();
+    return transactions.filter((transaction) => {
+      const matchesRisk = transactionFilters.riskLevel === "ALL" || transaction.riskLevel === transactionFilters.riskLevel;
+      const classification = transaction.alertRecommended ? "SUSPICIOUS" : "LEGITIMATE";
+      const matchesClassification = transactionFilters.status === "ALL" || classification === transactionFilters.status;
+      const searchable = [
+        transaction.transactionId,
+        transaction.customerId,
+        transaction.merchantInfo?.merchantName,
+        transaction.merchantInfo?.merchantId,
+        transaction.transactionAmount?.currency
+      ].filter(Boolean).join(" ").toLowerCase();
+      return matchesRisk && matchesClassification && (!query || searchable.includes(query));
+    });
+  }, [transactions, deferredTransactionQuery, transactionFilters.riskLevel, transactionFilters.status]);
+
+  const filteredFraudCases = useMemo(() => {
+    const query = deferredFraudCaseQuery.trim().toLowerCase();
+    return (fraudCasePage.content || []).filter((fraudCase) => {
+      const matchesStatus = fraudCaseFilters.status === "ALL" || fraudCase.status === fraudCaseFilters.status;
+      const searchable = [
+        fraudCase.caseId,
+        fraudCase.customerId,
+        fraudCase.suspicionType,
+        fraudCase.reason,
+        ...(fraudCase.transactionIds || [])
+      ].filter(Boolean).join(" ").toLowerCase();
+      return matchesStatus && (!query || searchable.includes(query));
+    });
+  }, [fraudCasePage.content, deferredFraudCaseQuery, fraudCaseFilters.status]);
 
   return (
     <div className="dashboardGrid pageEnter">
+      <FraudCasePanel
+        fraudCasePage={{ ...fraudCasePage, content: filteredFraudCases }}
+        filters={fraudCaseFilters}
+        onFiltersChange={setFraudCaseFilters}
+        onPageChange={onFraudCasePageChange}
+        onPageSizeChange={onFraudCasePageSizeChange}
+        onOpenCase={onOpenFraudCase}
+      />
+
       <section className="panel">
         <div className="panelHeader">
           <div>
@@ -57,17 +115,25 @@ export function AlertsListPage({
           </button>
         </div>
 
+        <FilterBar
+          filters={transactionFilters}
+          onChange={setTransactionFilters}
+          placeholder="Transaction, customer, merchant, currency"
+          statusOptions={["ALL", "LEGITIMATE", "SUSPICIOUS"]}
+          statusLabel="Classification"
+        />
+
         {isLoading && <LoadingPanel label="Loading scored transactions..." />}
         {!isLoading && error && <ErrorState message={error} onRetry={onRetry} />}
-        {!isLoading && !error && transactions.length === 0 && (
+        {!isLoading && !error && filteredTransactions.length === 0 && (
           <EmptyState
-            title="No scored transactions yet"
-            message="Start synthetic replay to populate legitimate and suspicious transaction monitoring."
+            title="No scored transactions match this view"
+            message="Adjust filters or generate synthetic traffic to populate transaction monitoring."
           />
         )}
-        {!isLoading && !error && transactions.length > 0 && (
+        {!isLoading && !error && filteredTransactions.length > 0 && (
           <>
-            <TransactionMonitorTable transactions={transactions} />
+            <TransactionMonitorTable transactions={filteredTransactions} />
             <PaginationControls
               page={transactionPage.page}
               size={transactionPage.size}
@@ -99,7 +165,18 @@ export function AlertsListPage({
           />
         )}
         {!isLoading && !error && filteredAlerts.length > 0 && (
-          <AlertTable alerts={filteredAlerts} onOpenAlert={onOpenAlert} />
+          <>
+            <AlertTable alerts={filteredAlerts} onOpenAlert={onOpenAlert} />
+            <PaginationControls
+              label="alerts"
+              page={alertPage.page}
+              size={alertPage.size}
+              totalPages={alertPage.totalPages}
+              totalElements={alertPage.totalElements}
+              onPageChange={onAlertPageChange}
+              onSizeChange={onAlertPageSizeChange}
+            />
+          </>
         )}
       </section>
     </div>

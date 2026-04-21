@@ -32,12 +32,12 @@ class TransactionFeatureEnricherServiceTest {
 
         var service = new TransactionFeatureEnricherService(featureStore, calculator, mapper, publisher);
         var event = TransactionFixtures.rawTransaction().build();
-        var snapshot = new FeatureStoreSnapshot(1, BigDecimal.TEN, 2, Instant.now(), true);
+        var snapshot = new FeatureStoreSnapshot(1, BigDecimal.TEN, BigDecimal.TEN, List.of(), 2, Instant.now(), true);
         var features = new EnrichedTransactionFeatures(
                 2,
-                "PT15M",
+                "PT1M",
                 new Money(new BigDecimal("20.00"), "USD"),
-                "PT15M",
+                "PT1M",
                 0.13d,
                 3,
                 false,

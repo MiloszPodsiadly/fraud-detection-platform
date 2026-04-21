@@ -11,9 +11,9 @@ export function TransactionMonitorTable({ transactions }) {
             <th>Transaction</th>
             <th>Merchant</th>
             <th>Amount</th>
-            <th>Score</th>
             <th>Classification</th>
             <th>Scored</th>
+            <th className="numericCell">Score</th>
           </tr>
         </thead>
         <tbody>
@@ -29,13 +29,13 @@ export function TransactionMonitorTable({ transactions }) {
                 <span>{transaction.merchantInfo?.channel || "Unknown channel"}</span>
               </td>
               <td>{formatAmount(transaction.transactionAmount)}</td>
-              <td>{formatScore(transaction.fraudScore)}</td>
               <td>
                 <span className={`classificationPill ${transaction.alertRecommended ? "classificationReview" : "classificationClear"}`}>
                   {transaction.alertRecommended ? "Suspicious" : "Legitimate"}
                 </span>
               </td>
               <td>{formatDateTime(transaction.scoredAt)}</td>
+              <td className="numericCell">{formatScore(transaction.fraudScore)}</td>
             </tr>
           ))}
         </tbody>

@@ -1,0 +1,135 @@
+package com.frauddetection.alert.service;
+
+import com.frauddetection.alert.domain.FraudCaseStatus;
+import com.frauddetection.alert.persistence.FraudCaseDocument;
+import com.frauddetection.alert.persistence.FraudCaseRepository;
+import com.frauddetection.alert.persistence.ScoredTransactionDocument;
+import com.frauddetection.alert.persistence.ScoredTransactionRepository;
+import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.model.Money;
+import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
+
+class FraudCaseManagementServiceTest {
+
+    @Test
+    void shouldCreateRapidTransferCaseWithGroupedTransactionDetails() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
+        FraudCaseManagementService service = new FraudCaseManagementService(fraudCaseRepository, scoredTransactionRepository);
+
+        var previousTransaction = scoredTransaction("rapid-txn-1", "rapid-customer-1", new BigDecimal("10000.00"));
+        var currentEvent = TransactionFixtures.scoredTransaction()
+                .withTransactionId("rapid-txn-2")
+                .withCustomerId("rapid-customer-1")
+                .withAmount(new BigDecimal("10000.00"), "PLN")
+                .withRiskLevel(RiskLevel.CRITICAL)
+                .withFeatureSnapshot(Map.of(
+                        "rapidTransferFraudCaseCandidate", true,
+                        "rapidTransferTransactionIds", List.of("rapid-txn-1", "rapid-txn-2"),
+                        "rapidTransferTotalPln", new BigDecimal("20000.00"),
+                        "rapidTransferThresholdPln", new BigDecimal("20000.00"),
+                        "rapidTransferWindow", "PT1M",
+                        "currentTransactionAmountPln", new BigDecimal("10000.00")
+                ))
+                .build();
+
+        when(fraudCaseRepository.findByCaseKey("rapid-customer-1:RAPID_TRANSFER_BURST_20K_PLN:rapid-txn-1"))
+                .thenReturn(Optional.empty());
+        when(scoredTransactionRepository.findAllById(List.of("rapid-txn-1", "rapid-txn-2")))
+                .thenReturn(List.of(previousTransaction));
+
+        service.handleScoredTransaction(currentEvent);
+
+        ArgumentCaptor<FraudCaseDocument> captor = ArgumentCaptor.forClass(FraudCaseDocument.class);
+        verify(fraudCaseRepository).save(captor.capture());
+
+        FraudCaseDocument savedCase = captor.getValue();
+        assertThat(savedCase.getStatus()).isEqualTo(FraudCaseStatus.OPEN);
+        assertThat(savedCase.getSuspicionType()).isEqualTo("RAPID_TRANSFER_BURST_20K_PLN");
+        assertThat(savedCase.getTransactionIds()).containsExactly("rapid-txn-1", "rapid-txn-2");
+        assertThat(savedCase.getTotalAmountPln()).isEqualByComparingTo("20000.00");
+        assertThat(savedCase.getFirstTransactionAt()).isEqualTo(Instant.parse("2026-04-20T10:10:28Z"));
+        assertThat(savedCase.getLastTransactionAt()).isEqualTo(Instant.parse("2026-04-20T10:15:28Z"));
+        assertThat(savedCase.getTransactions())
+                .extracting("transactionId")
+                .containsExactly("rapid-txn-1", "rapid-txn-2");
+        assertThat(savedCase.getTransactions())
+                .extracting("amountPln")
+                .containsExactly(new BigDecimal("10000.00"), new BigDecimal("10000.00"));
+    }
+
+    @Test
+    void shouldBackfillMissingGroupedTransactionsWhenCaseIsRead() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
+        FraudCaseManagementService service = new FraudCaseManagementService(fraudCaseRepository, scoredTransactionRepository);
+
+        FraudCaseDocument storedCase = new FraudCaseDocument();
+        storedCase.setCaseId("case-1");
+        storedCase.setCaseKey("rapid-customer-1:RAPID_TRANSFER_BURST_20K_PLN:rapid-txn-1");
+        storedCase.setCustomerId("rapid-customer-1");
+        storedCase.setSuspicionType("RAPID_TRANSFER_BURST_20K_PLN");
+        storedCase.setStatus(FraudCaseStatus.OPEN);
+        storedCase.setTransactionIds(List.of("rapid-txn-1", "rapid-txn-2", "rapid-txn-3"));
+        storedCase.setTransactions(List.of(scoredCaseTransaction("rapid-txn-3", new BigDecimal("6800.00"))));
+        storedCase.setFirstTransactionAt(Instant.parse("2026-04-20T10:15:28Z"));
+        storedCase.setLastTransactionAt(Instant.parse("2026-04-20T10:15:28Z"));
+
+        when(fraudCaseRepository.findById("case-1")).thenReturn(Optional.of(storedCase));
+        when(scoredTransactionRepository.findAllById(storedCase.getTransactionIds())).thenReturn(List.of(
+                scoredTransaction("rapid-txn-1", "rapid-customer-1", new BigDecimal("7400.00"), Instant.parse("2026-04-20T10:10:28Z")),
+                scoredTransaction("rapid-txn-2", "rapid-customer-1", new BigDecimal("8600.00"), Instant.parse("2026-04-20T10:12:28Z")),
+                scoredTransaction("rapid-txn-3", "rapid-customer-1", new BigDecimal("6800.00"), Instant.parse("2026-04-20T10:15:28Z"))
+        ));
+        when(fraudCaseRepository.save(any(FraudCaseDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        FraudCaseDocument hydrated = service.getCase("case-1");
+
+        assertThat(hydrated.getTransactions())
+                .extracting("transactionId")
+                .containsExactly("rapid-txn-1", "rapid-txn-2", "rapid-txn-3");
+        assertThat(hydrated.getFirstTransactionAt()).isEqualTo(Instant.parse("2026-04-20T10:10:28Z"));
+        assertThat(hydrated.getLastTransactionAt()).isEqualTo(Instant.parse("2026-04-20T10:15:28Z"));
+        verify(fraudCaseRepository).save(hydrated);
+    }
+
+    private ScoredTransactionDocument scoredTransaction(String transactionId, String customerId, BigDecimal amount) {
+        return scoredTransaction(transactionId, customerId, amount, Instant.parse("2026-04-20T10:10:28Z"));
+    }
+
+    private ScoredTransactionDocument scoredTransaction(String transactionId, String customerId, BigDecimal amount, Instant transactionTimestamp) {
+        ScoredTransactionDocument document = new ScoredTransactionDocument();
+        document.setTransactionId(transactionId);
+        document.setCustomerId(customerId);
+        document.setCorrelationId("corr-" + transactionId);
+        document.setTransactionTimestamp(transactionTimestamp);
+        document.setTransactionAmount(new Money(amount, "PLN"));
+        document.setFraudScore(0.42d);
+        document.setRiskLevel(RiskLevel.LOW);
+        return document;
+    }
+
+    private com.frauddetection.alert.persistence.FraudCaseTransactionDocument scoredCaseTransaction(String transactionId, BigDecimal amountPln) {
+        com.frauddetection.alert.persistence.FraudCaseTransactionDocument document = new com.frauddetection.alert.persistence.FraudCaseTransactionDocument();
+        document.setTransactionId(transactionId);
+        document.setTransactionTimestamp(Instant.parse("2026-04-20T10:15:28Z"));
+        document.setAmountPln(amountPln);
+        document.setFraudScore(0.94d);
+        document.setRiskLevel(RiskLevel.CRITICAL);
+        return document;
+    }
+}

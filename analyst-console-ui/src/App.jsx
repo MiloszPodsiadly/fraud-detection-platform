@@ -1,14 +1,34 @@
 import { useEffect, useMemo, useState } from "react";
-import { listAlerts, listScoredTransactions } from "./api/alertsApi.js";
+import { listAlerts, listFraudCases, listScoredTransactions } from "./api/alertsApi.js";
 import { AlertDetailsPage } from "./pages/AlertDetailsPage.jsx";
 import { AlertsListPage } from "./pages/AlertsListPage.jsx";
+import { FraudCaseDetailsPage } from "./pages/FraudCaseDetailsPage.jsx";
 
 function getInitialAlertId() {
   return new URLSearchParams(window.location.search).get("alertId");
 }
 
+function getInitialFraudCaseId() {
+  return new URLSearchParams(window.location.search).get("fraudCaseId");
+}
+
 export default function App() {
-  const [alerts, setAlerts] = useState([]);
+  const [alertPage, setAlertPage] = useState({
+    content: [],
+    totalElements: 0,
+    totalPages: 0,
+    page: 0,
+    size: 10
+  });
+  const [alertPageRequest, setAlertPageRequest] = useState({ page: 0, size: 10 });
+  const [fraudCasePage, setFraudCasePage] = useState({
+    content: [],
+    totalElements: 0,
+    totalPages: 0,
+    page: 0,
+    size: 4
+  });
+  const [fraudCasePageRequest, setFraudCasePageRequest] = useState({ page: 0, size: 4 });
   const [transactionPage, setTransactionPage] = useState({
     content: [],
     totalElements: 0,
@@ -18,33 +38,39 @@ export default function App() {
   });
   const [transactionPageRequest, setTransactionPageRequest] = useState({ page: 0, size: 25 });
   const [selectedAlertId, setSelectedAlertId] = useState(getInitialAlertId);
+  const [selectedFraudCaseId, setSelectedFraudCaseId] = useState(getInitialFraudCaseId);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    loadDashboard(transactionPageRequest);
-  }, [transactionPageRequest]);
+    loadDashboard({ transaction: transactionPageRequest, alert: alertPageRequest, fraudCase: fraudCasePageRequest });
+  }, [transactionPageRequest, alertPageRequest, fraudCasePageRequest]);
 
   useEffect(() => {
-    const handlePopState = () => setSelectedAlertId(getInitialAlertId());
+    const handlePopState = () => {
+      setSelectedAlertId(getInitialAlertId());
+      setSelectedFraudCaseId(getInitialFraudCaseId());
+    };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
   const selectedAlertSummary = useMemo(
-    () => alerts.find((alert) => alert.alertId === selectedAlertId),
-    [alerts, selectedAlertId]
+    () => alertPage.content.find((alert) => alert.alertId === selectedAlertId),
+    [alertPage.content, selectedAlertId]
   );
 
-  async function loadDashboard(nextPageRequest = transactionPageRequest) {
+  async function loadDashboard(nextRequests = { transaction: transactionPageRequest, alert: alertPageRequest, fraudCase: fraudCasePageRequest }) {
     setIsLoading(true);
     setError("");
     try {
-      const [nextAlerts, nextTransactionPage] = await Promise.all([
-        listAlerts(),
-        listScoredTransactions(nextPageRequest)
+      const [nextAlerts, nextFraudCasePage, nextTransactionPage] = await Promise.all([
+        listAlerts(nextRequests.alert),
+        listFraudCases(nextRequests.fraudCase),
+        listScoredTransactions(nextRequests.transaction)
       ]);
-      setAlerts(nextAlerts);
+      setAlertPage(nextAlerts);
+      setFraudCasePage(nextFraudCasePage);
       setTransactionPage(nextTransactionPage);
     } catch (apiError) {
       setError(apiError.message);
@@ -54,7 +80,7 @@ export default function App() {
   }
 
   function refreshDashboard() {
-    loadDashboard(transactionPageRequest);
+    loadDashboard({ transaction: transactionPageRequest, alert: alertPageRequest, fraudCase: fraudCasePageRequest });
   }
 
   function changeTransactionPage(page) {
@@ -65,15 +91,44 @@ export default function App() {
     setTransactionPageRequest({ page: 0, size });
   }
 
+  function changeAlertPage(page) {
+    setAlertPageRequest((current) => ({ ...current, page }));
+  }
+
+  function changeAlertPageSize(size) {
+    setAlertPageRequest({ page: 0, size });
+  }
+
+  function changeFraudCasePage(page) {
+    setFraudCasePageRequest((current) => ({ ...current, page }));
+  }
+
+  function changeFraudCasePageSize(size) {
+    setFraudCasePageRequest({ page: 0, size });
+  }
+
   function openAlert(alertId) {
     const nextUrl = `${window.location.pathname}?alertId=${encodeURIComponent(alertId)}`;
     window.history.pushState({}, "", nextUrl);
     setSelectedAlertId(alertId);
+    setSelectedFraudCaseId(null);
   }
 
   function closeAlert() {
     window.history.pushState({}, "", window.location.pathname);
     setSelectedAlertId(null);
+  }
+
+  function openFraudCase(caseId) {
+    const nextUrl = `${window.location.pathname}?fraudCaseId=${encodeURIComponent(caseId)}`;
+    window.history.pushState({}, "", nextUrl);
+    setSelectedFraudCaseId(caseId);
+    setSelectedAlertId(null);
+  }
+
+  function closeFraudCase() {
+    window.history.pushState({}, "", window.location.pathname);
+    setSelectedFraudCaseId(null);
   }
 
   return (
@@ -93,16 +148,12 @@ export default function App() {
             <small>Scored transactions</small>
           </div>
           <div>
-            <span>{transactionPage.content.filter((transaction) => !transaction.alertRecommended).length}</span>
-            <small>Page legitimate</small>
+            <span>{alertPage.totalElements}</span>
+            <small>Alert queue</small>
           </div>
           <div>
-            <span>{transactionPage.content.filter((transaction) => transaction.alertRecommended).length}</span>
-            <small>Page suspicious</small>
-          </div>
-          <div>
-            <span>{alerts.filter((alert) => alert.alertStatus === "OPEN").length}</span>
-            <small>Open alerts</small>
+            <span>{fraudCasePage.totalElements}</span>
+            <small>Fraud cases</small>
           </div>
         </div>
       </header>
@@ -115,16 +166,28 @@ export default function App() {
             onBack={closeAlert}
             onDecisionSubmitted={refreshDashboard}
           />
+        ) : selectedFraudCaseId ? (
+          <FraudCaseDetailsPage
+            caseId={selectedFraudCaseId}
+            onBack={closeFraudCase}
+            onCaseUpdated={refreshDashboard}
+          />
         ) : (
           <AlertsListPage
-            alerts={alerts}
+            alertPage={alertPage}
+            fraudCasePage={fraudCasePage}
             transactionPage={transactionPage}
             isLoading={isLoading}
             error={error}
             onRetry={refreshDashboard}
             onTransactionPageChange={changeTransactionPage}
             onTransactionPageSizeChange={changeTransactionPageSize}
+            onAlertPageChange={changeAlertPage}
+            onAlertPageSizeChange={changeAlertPageSize}
+            onFraudCasePageChange={changeFraudCasePage}
+            onFraudCasePageSizeChange={changeFraudCasePageSize}
             onOpenAlert={openAlert}
+            onOpenFraudCase={openFraudCase}
           />
         )}
       </main>
