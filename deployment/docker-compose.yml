@@ -3,7 +3,7 @@ services:
     image: apache/kafka:3.8.0
     container_name: fraud-kafka
     ports:
-      - "9092:9092"
+      - "127.0.0.1:9092:9092"
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -41,7 +41,7 @@ services:
     image: mongo:7.0
     container_name: fraud-mongodb
     ports:
-      - "27017:27017"
+      - "127.0.0.1:27017:27017"
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 15s
@@ -52,7 +52,7 @@ services:
     image: redis:7.2-alpine
     container_name: fraud-redis
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 15s
@@ -62,7 +62,7 @@ services:
   transaction-ingest-service:
     build:
       context: ..
-      dockerfile: deployment/Dockerfile
+      dockerfile: deployment/Dockerfile.backend
       args:
         MODULE_NAME: transaction-ingest-service
     container_name: transaction-ingest-service
@@ -78,13 +78,14 @@ services:
     environment:
       SERVER_PORT: 8080
       SPRING_PROFILES_ACTIVE: docker
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     ports:
-      - "8081:8080"
+      - "127.0.0.1:8081:8080"
 
   transaction-simulator-service:
     build:
       context: ..
-      dockerfile: deployment/Dockerfile
+      dockerfile: deployment/Dockerfile.backend
       args:
         MODULE_NAME: transaction-simulator-service
     container_name: transaction-simulator-service
@@ -100,13 +101,21 @@ services:
     environment:
       SERVER_PORT: 8080
       SPRING_PROFILES_ACTIVE: docker
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      AUTO_REPLAY_ENABLED: "true"
+      AUTO_REPLAY_SOURCE_TYPE: SYNTHETIC
+      AUTO_REPLAY_MAX_EVENTS: "300"
+      AUTO_REPLAY_THROTTLE_MILLIS: "5"
+      AUTO_REPLAY_START_DELAY_MILLIS: "15000"
+    volumes:
+      - ../data/generated:/app/data/generated
     ports:
-      - "8082:8080"
+      - "127.0.0.1:8082:8080"
 
   feature-enricher-service:
     build:
       context: ..
-      dockerfile: deployment/Dockerfile
+      dockerfile: deployment/Dockerfile.backend
       args:
         MODULE_NAME: feature-enricher-service
     container_name: feature-enricher-service
@@ -122,13 +131,16 @@ services:
     environment:
       SERVER_PORT: 8080
       SPRING_PROFILES_ACTIVE: docker
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
     ports:
-      - "8083:8080"
+      - "127.0.0.1:8083:8080"
 
   fraud-scoring-service:
     build:
       context: ..
-      dockerfile: deployment/Dockerfile
+      dockerfile: deployment/Dockerfile.backend
       args:
         MODULE_NAME: fraud-scoring-service
     container_name: fraud-scoring-service
@@ -144,13 +156,14 @@ services:
     environment:
       SERVER_PORT: 8080
       SPRING_PROFILES_ACTIVE: docker
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     ports:
-      - "8084:8080"
+      - "127.0.0.1:8084:8080"
 
   alert-service:
     build:
       context: ..
-      dockerfile: deployment/Dockerfile
+      dockerfile: deployment/Dockerfile.backend
       args:
         MODULE_NAME: alert-service
     container_name: alert-service
@@ -166,5 +179,18 @@ services:
     environment:
       SERVER_PORT: 8080
       SPRING_PROFILES_ACTIVE: docker
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MONGODB_URI: mongodb://mongodb:27017/fraud_alerts
     ports:
-      - "8085:8080"
+      - "127.0.0.1:8085:8080"
+
+  analyst-console-ui:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.frontend
+    container_name: analyst-console-ui
+    depends_on:
+      alert-service:
+        condition: service_started
+    ports:
+      - "127.0.0.1:4173:80"
