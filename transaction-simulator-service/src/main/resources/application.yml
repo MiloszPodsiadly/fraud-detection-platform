@@ -1,8 +1,42 @@
 spring:
   application:
     name: transaction-simulator-service
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
+app:
+  kafka:
+    topics:
+      transaction-raw: transactions.raw
+  replay:
+    throttle-millis: 250
+    source-type: synthetic
+    auto:
+      enabled: ${AUTO_REPLAY_ENABLED:false}
+      source-type: ${AUTO_REPLAY_SOURCE_TYPE:SYNTHETIC}
+      max-events: ${AUTO_REPLAY_MAX_EVENTS:300}
+      throttle-millis: ${AUTO_REPLAY_THROTTLE_MILLIS:5}
+      start-delay-millis: ${AUTO_REPLAY_START_DELAY_MILLIS:15000}
+    jsonl:
+      file: ${JSONL_REPLAY_FILE:data/generated/synthetic-replay.jsonl}
+    synthetic:
+      reference-instant: 2026-01-01T08:00:00Z
+      customer-count: 200
+      merchant-count: 40
+      suspicious-every: 25
+      seconds-between-events: 45
 
 management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
   endpoints:
     web:
       exposure:
