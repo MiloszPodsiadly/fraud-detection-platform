@@ -56,7 +56,14 @@ class CompositeFraudScoringEngineTest {
         assertThat(mlDiagnostics(result))
                 .containsEntry("mode", "SHADOW")
                 .containsEntry("finalDecisionSource", "RULE_BASED")
-                .containsEntry("shadowModelName", "ml-placeholder");
+                .containsEntry("shadowModelName", "ml-placeholder")
+                .containsKey("modelMonitoring");
+        assertThat(modelMonitoring(result))
+                .containsEntry("mode", "SHADOW")
+                .containsEntry("modelVersion", "unavailable")
+                .containsEntry("finalDecisionSource", "RULE_BASED")
+                .containsKey("prometheusSamples")
+                .containsKey("modelPerformanceByVersion");
     }
 
     @Test
@@ -81,6 +88,9 @@ class CompositeFraudScoringEngineTest {
                 .containsEntry("shadowModelAvailable", true)
                 .containsEntry("shadowModelName", "python-logistic-fraud-model")
                 .doesNotContainKey("shadowFallbackReason");
+        assertThat(modelMonitoring(result))
+                .containsEntry("modelAvailable", true)
+                .containsEntry("mlScoreBucket", "0.25-0.50");
     }
 
     @Test
@@ -96,6 +106,38 @@ class CompositeFraudScoringEngineTest {
                 .containsEntry("finalDecisionSource", "RULE_BASED")
                 .containsKey("scoreDelta")
                 .containsKey("riskLevelMatch");
+        assertThat(modelMonitoring(result))
+                .containsEntry("mode", "COMPARE")
+                .containsKey("scoreDelta")
+                .containsKey("absoluteScoreDelta")
+                .containsKey("decisionDisagreementSample")
+                .containsKey("riskLevelMismatchSample");
+    }
+
+    @Test
+    void shouldTrackRiskMismatchAndDisagreementForAvailableCompareModel() {
+        CompositeFraudScoringEngine engine = engine(ScoringMode.COMPARE, input -> new MlModelOutput(
+                true,
+                0.95d,
+                RiskLevel.CRITICAL,
+                "python-logistic-fraud-model",
+                "test-version",
+                Instant.now(),
+                List.of("MODEL_HIGH_RISK"),
+                Map.of("modelAvailable", true),
+                Map.of("modelAvailable", true),
+                null
+        ));
+        FraudScoringRequest request = FraudScoringRequest.from(TransactionFixtures.enrichedTransaction().build());
+
+        var result = engine.score(request);
+
+        assertThat(result.scoringStrategy()).isEqualTo("RULE_BASED");
+        assertThat(modelMonitoring(result))
+                .containsEntry("modelVersion", "test-version")
+                .containsEntry("riskLevelMismatch", true)
+                .containsEntry("riskLevelMismatchSample", 1)
+                .containsEntry("decisionDisagreementSample", 1);
     }
 
     private CompositeFraudScoringEngine engine(ScoringMode mode) {
@@ -114,5 +156,10 @@ class CompositeFraudScoringEngineTest {
     @SuppressWarnings("unchecked")
     private java.util.Map<String, Object> mlDiagnostics(com.frauddetection.scoring.domain.FraudScoreResult result) {
         return (java.util.Map<String, Object>) result.scoreDetails().get("mlDiagnostics");
+    }
+
+    @SuppressWarnings("unchecked")
+    private java.util.Map<String, Object> modelMonitoring(com.frauddetection.scoring.domain.FraudScoreResult result) {
+        return (java.util.Map<String, Object>) mlDiagnostics(result).get("modelMonitoring");
     }
 }

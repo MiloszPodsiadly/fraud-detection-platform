@@ -12,8 +12,10 @@ import com.frauddetection.common.events.contract.FraudAlertEvent;
 import com.frauddetection.common.events.contract.FraudDecisionEvent;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
+import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DuplicateKeyException;
 
 import java.time.Instant;
@@ -98,6 +100,9 @@ class AlertManagementServiceTest {
         document.setCreatedAt(Instant.now());
         document.setAlertTimestamp(Instant.now());
         document.setAlertStatus(AlertStatus.OPEN);
+        document.setRiskLevel(RiskLevel.HIGH);
+        document.setFraudScore(0.82d);
+        document.setFeatureSnapshot(Map.of("recentTransactionCount", 5));
 
         when(repository.findById("alert-1")).thenReturn(Optional.of(document));
         when(repository.save(any(AlertDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -111,6 +116,12 @@ class AlertManagementServiceTest {
         ));
 
         assertThat(response.resultingStatus()).isEqualTo(AlertStatus.RESOLVED);
-        verify(decisionPublisher).publish(any(FraudDecisionEvent.class));
+        ArgumentCaptor<FraudDecisionEvent> eventCaptor = ArgumentCaptor.forClass(FraudDecisionEvent.class);
+        verify(decisionPublisher).publish(eventCaptor.capture());
+        assertThat(eventCaptor.getValue().decisionMetadata())
+                .containsEntry("modelScore", 0.82d)
+                .containsEntry("featureSnapshot", Map.of("recentTransactionCount", 5))
+                .containsEntry("modelFeedbackVersion", "2026-04-22.v1")
+                .containsEntry("queue", "night-shift");
     }
 }
