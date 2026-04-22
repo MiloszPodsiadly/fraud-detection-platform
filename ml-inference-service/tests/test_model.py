@@ -1,7 +1,7 @@
 import unittest
 import json
+import importlib.util
 from pathlib import Path
-from unittest.mock import patch
 
 from app.data.dataset import Dataset
 from app.data.generator import generate_fraud_behavior, generate_normal_behavior
@@ -14,8 +14,8 @@ from app.model import FraudModel
 from app.models.model_loader import ModelConfigurationError, load_model_from_artifact
 from app.registry.model_registry import ModelRegistry
 from app.models.xgboost_model import XGBoostFraudModel
-from app.training.retraining import compare_retrained_model
-from app.training.train import train, train_with_evaluation, write_artifact
+from app.training.retraining import PromotionThresholds, compare_retrained_model
+from app.training.train import train, train_model, train_with_evaluation, write_artifact
 
 
 class FraudModelTest(unittest.TestCase):
@@ -156,6 +156,32 @@ class FraudModelTest(unittest.TestCase):
         self.assertEqual(normalized["highRiskFlagCount"], 0.5)
         self.assertEqual(normalized["rapidTransferBurst"], 0.0)
 
+    def test_production_training_features_match_java_inference_schema(self):
+        dataset = generate_fraud_behavior(count=300, seed=337, user_count=8, fraud_ratio=0.03)
+        _, weights, evaluation = train_with_evaluation(dataset, epochs=2, learning_rate=0.1)
+        payload = {
+            "recentTransactionCount": 5,
+            "recentAmountSum": {"amount": 5000.0, "currency": "PLN"},
+            "transactionVelocityPerMinute": 5.0,
+            "merchantFrequency7d": 6,
+            "deviceNovelty": True,
+            "countryMismatch": False,
+            "proxyOrVpnDetected": True,
+            "featureFlags": ["DEVICE_NOVELTY", "PROXY_OR_VPN", "HIGH_VELOCITY"],
+            "rapidTransferFraudCaseCandidate": False,
+            "rapidTransferTotalPln": 10000.0,
+        }
+        inference_features = FeaturePipeline().transform_single(payload, mode="production")
+
+        self.assertEqual(list(weights), evaluation["featureSetUsed"])
+        self.assertEqual(list(inference_features), evaluation["featureSetUsed"])
+        self.assertEqual(set(inference_features), set(FEATURE_CONTRACT.production_inference_features))
+        self.assertEqual(
+            [name for name in evaluation["featureSetUsed"] if name not in inference_features],
+            [],
+            "missing production inference features",
+        )
+
     def test_feature_pipeline_reports_missing_required_production_features(self):
         compatibility = FeaturePipeline().validate_production_snapshot(
             {
@@ -225,7 +251,7 @@ class FraudModelTest(unittest.TestCase):
         self.assertTrue(all("scenarioDebug" in row["metadata"] for row in dataset.X if row["metadata"]["scenario"] != "normal_behavior"))
 
     def test_training_artifact_contains_model_metadata_and_feature_schema(self):
-        dataset = generate_fraud_behavior(count=100, seed=321, user_count=8, fraud_ratio=0.02)
+        dataset = generate_fraud_behavior(count=300, seed=321, user_count=8, fraud_ratio=0.03)
         bias, weights, evaluation = train_with_evaluation(dataset, epochs=2, learning_rate=0.1)
 
         artifact_path = Path.cwd() / "test-model-artifact.json"
@@ -242,20 +268,38 @@ class FraudModelTest(unittest.TestCase):
         self.assertIn("evaluation", artifact)
         self.assertIn("prAuc", artifact["evaluation"])
         self.assertIn("splitMetadata", artifact["evaluation"])
+        self.assertIn("outOfTimeEvaluation", artifact["evaluation"])
+        self.assertIn("evaluationComparison", artifact["evaluation"])
         self.assertEqual(artifact["evaluation"]["selectedThresholdSource"], "validation")
+        self.assertEqual(artifact["trainingMode"], "production")
+        self.assertEqual(artifact["featureSetUsed"], list(weights))
         self.assertEqual(set(artifact["featureSchema"]), set(weights))
 
     def test_dataset_split_prefers_temporal_order_and_separate_row_sets(self):
-        dataset = generate_fraud_behavior(count=30, seed=222, user_count=4, fraud_ratio=0.02)
+        dataset = generate_fraud_behavior(count=300, seed=222, user_count=4, fraud_ratio=0.03)
         splits = split_dataset(dataset)
 
-        self.assertEqual(splits.metadata["strategy"], "temporal")
+        self.assertEqual(splits.metadata["strategy"], "stratified_temporal")
         self.assertTrue(set(splits.metadata["trainIndices"]).isdisjoint(splits.metadata["validationIndices"]))
         self.assertTrue(set(splits.metadata["trainIndices"]).isdisjoint(splits.metadata["testIndices"]))
         self.assertTrue(set(splits.metadata["validationIndices"]).isdisjoint(splits.metadata["testIndices"]))
         self.assertGreater(splits.train.size, 0)
         self.assertGreater(splits.validation.size, 0)
         self.assertGreater(splits.test.size, 0)
+        self.assertGreater(splits.metadata["classDistribution"]["train"]["fraud"], 0)
+        self.assertGreater(splits.metadata["classDistribution"]["validation"]["fraud"], 0)
+        self.assertGreater(splits.metadata["classDistribution"]["test"]["fraud"], 0)
+        rates = list(splits.metadata["fraudRate"].values())
+        self.assertLessEqual(max(rates) - min(rates), 0.05)
+
+    def test_out_of_time_split_uses_later_test_window(self):
+        dataset = generate_fraud_behavior(count=300, seed=223, user_count=5, fraud_ratio=0.03)
+        splits = split_dataset(dataset, mode="out_of_time", cutoff_ratio=0.6)
+
+        train_timestamps = [row["timestamp"] for row in splits.train.X]
+        test_timestamps = [row["timestamp"] for row in splits.test.X]
+        self.assertEqual(splits.metadata["strategy"], "out_of_time")
+        self.assertLess(max(train_timestamps), min(test_timestamps))
 
     def test_evaluation_metrics_include_ranking_business_and_thresholds(self):
         report = evaluate_scores(
@@ -273,6 +317,8 @@ class FraudModelTest(unittest.TestCase):
         self.assertEqual(report["recallAtK"]["2"], 1.0)
         self.assertEqual(len(report["thresholds"]), 2)
         self.assertIn("optimalThreshold", report)
+        self.assertIn("costEvaluation", report)
+        self.assertIn("optimalCostThreshold", report["costEvaluation"])
         self.assertIn("alertRate", report["optimalThreshold"])
         self.assertIn("prAuc=1.0", cli_summary(report))
 
@@ -356,13 +402,23 @@ class FraudModelTest(unittest.TestCase):
         self.assertEqual(updated[0].analyst_decision, "MARKED_LEGITIMATE")
 
     def test_retraining_comparison_reports_challenger_metrics(self):
-        dataset = generate_fraud_behavior(count=120, seed=654, user_count=8, fraud_ratio=0.02)
-        current_evaluation = {"prAuc": 0.0}
+        dataset = generate_fraud_behavior(count=300, seed=654, user_count=8, fraud_ratio=0.03)
+        current_evaluation = {
+            "prAuc": 0.0,
+            "optimalThreshold": {"falsePositiveRate": 0.0, "alertRate": 0.05},
+            "costEvaluation": {"optimalCostThreshold": {"totalCost": 10000.0}},
+        }
 
-        comparison = compare_retrained_model(dataset, current_evaluation, epochs=2, learning_rate=0.1)
+        comparison = compare_retrained_model(
+            dataset,
+            current_evaluation,
+            epochs=2,
+            learning_rate=0.1,
+            thresholds=PromotionThresholds(max_alert_rate=1.0),
+        )
 
         self.assertGreaterEqual(comparison.challenger_pr_auc, 0.0)
-        self.assertTrue(comparison.promote_challenger)
+        self.assertIn("criteria", comparison.decision)
         self.assertIn("prAuc", comparison.challenger_evaluation)
         self.assertIn("splitMetadata", comparison.challenger_evaluation)
 
@@ -463,6 +519,81 @@ class FraudModelTest(unittest.TestCase):
                         child.rmdir()
                 registry_path.rmdir()
 
+    def test_runtime_compares_champion_and_challenger_models(self):
+        champion_artifact = Path.cwd() / "registry-compare-champion.json"
+        challenger_artifact = Path.cwd() / "registry-compare-challenger.json"
+        registry_path = Path.cwd() / "registry-compare"
+        feature_schema = list(FeaturePipeline.PRODUCTION_FEATURE_NAMES)
+        try:
+            champion_artifact.write_text(
+                json.dumps(
+                    {
+                        "modelName": "python-logistic-fraud-model",
+                        "modelVersion": "champion-v1",
+                        "modelType": "logistic",
+                        "modelFamily": "LOGISTIC_REGRESSION",
+                        "trainingMode": "production",
+                        "bias": -2.0,
+                        "weights": {name: 0.0 for name in feature_schema},
+                        "featureSchema": feature_schema,
+                        "thresholds": {"medium": 0.45, "high": 0.75, "critical": 0.9},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            challenger_artifact.write_text(
+                json.dumps(
+                    {
+                        "modelName": "python-logistic-fraud-model",
+                        "modelVersion": "challenger-v2",
+                        "modelType": "logistic",
+                        "modelFamily": "LOGISTIC_REGRESSION",
+                        "trainingMode": "production",
+                        "bias": -1.0,
+                        "weights": {name: 0.1 for name in feature_schema},
+                        "featureSchema": feature_schema,
+                        "thresholds": {"medium": 0.40, "high": 0.70, "critical": 0.88},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            registry = ModelRegistry(registry_path)
+            registry.register(champion_artifact, "champion-v1", "logistic", role="champion")
+            registry.register(challenger_artifact, "challenger-v2", "logistic", role="challenger")
+            model = FraudModel(artifact_path=Path.cwd() / "missing-artifact.json", registry=registry)
+
+            comparison = model.compare_with(
+                {
+                    "recentTransactionCount": 5,
+                    "recentAmountSum": {"amount": 5000.0},
+                    "transactionVelocityPerMinute": 2.0,
+                    "merchantFrequency7d": 4,
+                    "deviceNovelty": True,
+                    "countryMismatch": False,
+                    "proxyOrVpnDetected": True,
+                    "featureFlags": ["DEVICE_NOVELTY", "PROXY_OR_VPN"],
+                },
+                artifact_path=Path.cwd() / "missing-artifact.json",
+                registry=registry,
+            )
+        finally:
+            for artifact_path in (champion_artifact, challenger_artifact):
+                if artifact_path.exists():
+                    artifact_path.unlink()
+            if registry_path.exists():
+                for child in sorted(registry_path.rglob("*"), reverse=True):
+                    if child.is_file():
+                        child.unlink()
+                    elif child.is_dir():
+                        child.rmdir()
+                registry_path.rmdir()
+
+        self.assertEqual(comparison["mode"], "ML_COMPARE")
+        self.assertEqual(comparison["modelA"]["modelVersion"], "champion-v1")
+        self.assertEqual(comparison["modelB"]["modelVersion"], "challenger-v2")
+        self.assertIn("thresholdDifferences", comparison)
+        self.assertIn("comparisonMetricsByVersion", comparison)
+
     def test_model_loader_uses_logistic_artifact_type(self):
         artifact_path = Path.cwd() / "loader-logistic-artifact.json"
         try:
@@ -503,20 +634,30 @@ class FraudModelTest(unittest.TestCase):
             if artifact_path.exists():
                 artifact_path.unlink()
 
-    def test_xgboost_runtime_path_fails_clearly_when_dependency_exists_but_loading_is_unsupported(self):
-        artifact_path = Path.cwd() / "loader-xgboost-runtime-artifact.json"
+    def test_optional_xgboost_model_fails_clearly_when_dependency_is_missing(self):
+        if importlib.util.find_spec("xgboost") is None:
+            with self.assertRaisesRegex(RuntimeError, "xgboost"):
+                XGBoostFraudModel()
+
+    @unittest.skipUnless(importlib.util.find_spec("xgboost") is not None, "optional xgboost package is not installed")
+    def test_xgboost_training_inference_and_artifact_loading_when_dependency_exists(self):
+        dataset = generate_fraud_behavior(count=300, seed=987, user_count=6, fraud_ratio=0.03)
+        model = train_model(dataset, "xgboost", epochs=2, learning_rate=0.1)
+        sample = FeaturePipeline().fit(dataset).transform(dataset, mode="production")[0]
+        score = model.predict_proba(sample)
+        artifact_path = Path.cwd() / "xgboost-artifact.json"
         try:
-            artifact_path.write_text(json.dumps({"modelType": "xgboost"}), encoding="utf-8")
-            with patch("importlib.util.find_spec", return_value=object()):
-                with self.assertRaisesRegex(RuntimeError, "not fully supported"):
-                    load_model_from_artifact(artifact_path)
+            model.save(artifact_path, metadata={"examples": dataset.size})
+            loaded = load_model_from_artifact(artifact_path)
+            loaded_score = loaded.predict_proba(sample)
         finally:
             if artifact_path.exists():
                 artifact_path.unlink()
 
-    def test_optional_xgboost_model_fails_clearly_when_dependency_is_missing(self):
-        with self.assertRaisesRegex(RuntimeError, "xgboost"):
-            XGBoostFraudModel()
+        self.assertGreaterEqual(score, 0.0)
+        self.assertLessEqual(score, 1.0)
+        self.assertGreaterEqual(loaded_score, 0.0)
+        self.assertLessEqual(loaded_score, 1.0)
 
 
 if __name__ == "__main__":
