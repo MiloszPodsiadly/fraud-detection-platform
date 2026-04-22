@@ -20,6 +20,7 @@ The repository intentionally does not contain third-party fraud datasets. Synthe
 - [Idempotency And Performance](#idempotency-and-performance)
 - [Security Hardening](#security-hardening)
 - [Testing](#testing)
+- [ML Inference Service](#ml-inference-service)
 - [AI/ML Roadmap](#aiml-roadmap)
 - [AI Analyst Assistant Roadmap](#ai-analyst-assistant-roadmap)
 - [Project Structure](#project-structure)
@@ -483,6 +484,108 @@ Testing layers:
 
 Integration tests are skipped automatically when Docker/Testcontainers is unavailable.
 
+## ML Inference Service
+
+`ml-inference-service` is the Python fraud model runtime used by `fraud-scoring-service`.
+The public scoring API remains compatible with the Java scoring client:
+
+```text
+POST /v1/fraud/score
+GET /health
+```
+
+`fraud-scoring-service` sends `MlModelInput`, where `features` is the Java-enriched feature snapshot.
+The ML service responds with the existing `MlModelOutput` shape: `fraudScore`, `riskLevel`, `modelName`,
+`modelVersion`, `reasonCodes`, `scoreDetails`, and `explanationMetadata`.
+
+### ML Package Layout
+
+```text
+ml-inference-service/app/
+  data/          synthetic datasets and Dataset abstraction
+  evaluation/    fraud metrics and threshold reports
+  features/      shared feature contract and FeaturePipeline
+  feedback/      analyst feedback datasets
+  inference/     runtime response assembly
+  models/        logistic baseline and optional model adapters
+  registry/      local model registry
+  training/      training and retraining workflows
+```
+
+### Training And Evaluation
+
+Run a small local training smoke test:
+
+```bash
+cd ml-inference-service
+python -m app.train_model \
+  --output tmp_model_artifact.json \
+  --evaluation-output tmp_evaluation_report.json \
+  --examples 500 \
+  --epochs 5 \
+  --learning-rate 0.1 \
+  --seed 7341 \
+  --model-type logistic
+```
+
+Training writes an evaluation report with fraud-focused metrics:
+
+- PR-AUC
+- ROC-AUC
+- precision@k
+- recall@k
+- alert rate
+- fraud capture rate
+- false positive rate
+- threshold analysis
+- optimal threshold by F1
+
+### Local Model Registry
+
+The local registry stores copied model artifacts plus metadata:
+
+- `modelVersion`
+- `modelType`
+- metrics
+- training metadata
+- role: `champion`, `challenger`, or `archived`
+
+Register a trained artifact:
+
+```bash
+cd ml-inference-service
+python -m app.train_model \
+  --output tmp_model_artifact.json \
+  --evaluation-output tmp_evaluation_report.json \
+  --register-model \
+  --registry-role challenger
+```
+
+Runtime loading order:
+
+1. explicit `model_version`
+2. champion registry entry
+3. latest registry entry
+4. legacy `app/model_artifact.json`
+
+### Analyst Feedback
+
+Analyst feedback rows are privacy-safe JSONL records derived from `FraudDecisionEvent` metadata.
+Transaction identifiers are hashed, delayed labels are supported, and only resolved analyst decisions
+are used for training:
+
+- `CONFIRMED_FRAUD` -> `1`
+- `MARKED_LEGITIMATE` -> `0`
+- unresolved decisions are excluded until updated
+
+### ML Verification
+
+```bash
+cd ml-inference-service
+python -m unittest discover -s tests
+python -m compileall app tests
+```
+
 ## AI/ML Roadmap
 
 Rule-based scoring remains the local default production-safe path while Docker now runs a Python ML inference service in shadow mode.
@@ -522,6 +625,17 @@ Current Python inference boundary:
 - model artifact: `ml-inference-service/app/model_artifact.json`
 - training entrypoint: `python -m app.train_model --output ml-inference-service/app/model_artifact.json`
 - response contract: `MlModelOutput`, including model name, version, timestamp, reason codes, score details, and explanation metadata
+
+Current ML capabilities:
+
+- clean Python pipeline architecture for data, features, training, evaluation, inference, feedback, registry, and models
+- user-sequence synthetic data generation with normal behavior and labelled fraud scenarios
+- shared Java/Python feature contract in `common-events`
+- fraud-specific evaluation metrics and JSON reports
+- analyst feedback datasets with delayed label updates
+- retraining comparison for challenger models
+- local registry with latest, version, champion, challenger, and promotion support
+- SHADOW and COMPARE monitoring for score distribution, score deltas, disagreement, risk mismatch, and model version tracking
 
 Explanation strategy:
 
