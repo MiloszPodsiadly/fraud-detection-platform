@@ -68,6 +68,9 @@ class XGBoostFraudModel:
         """Persist the XGBoost artifact."""
         if self.booster is None:
             raise RuntimeError("XGBoost model is not fitted.")
+        metadata = metadata or {}
+        evaluation = metadata.get("evaluation") if isinstance(metadata.get("evaluation"), dict) else {}
+        training_metadata = {key: value for key, value in metadata.items() if key != "evaluation"}
         artifact = {
             "modelName": self.model_name,
             "modelVersion": self.model_version,
@@ -79,11 +82,12 @@ class XGBoostFraudModel:
             "thresholds": self.thresholds,
             "featureImportance": self.feature_importance(),
             "training": {
-                **(metadata or {}),
+                **training_metadata,
                 "trainingMode": self.training_mode,
                 "featureSetUsed": self.feature_schema,
             },
-            "modelDataBase64": base64.b64encode(self.booster.save_raw()).decode("ascii"),
+            "evaluation": evaluation,
+            "modelDataBase64": base64.b64encode(self._booster_bytes()).decode("ascii"),
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -118,6 +122,15 @@ class XGBoostFraudModel:
             temp_path = Path(handle.name)
         try:
             self.booster.load_model(str(temp_path))
+        finally:
+            temp_path.unlink(missing_ok=True)
+
+    def _booster_bytes(self) -> bytes:
+        with tempfile.NamedTemporaryFile(delete=False) as handle:
+            temp_path = Path(handle.name)
+        try:
+            self.booster.save_model(str(temp_path))
+            return temp_path.read_bytes()
         finally:
             temp_path.unlink(missing_ok=True)
 

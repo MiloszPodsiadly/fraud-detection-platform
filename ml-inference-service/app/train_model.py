@@ -7,7 +7,7 @@ from app.data.generator import generate_examples
 from app.evaluation.evaluate import cli_summary, write_report
 from app.model import DEFAULT_ARTIFACT_PATH, FraudModel
 from app.registry.model_registry import ModelRegistry, default_registry_path
-from app.training.train import train_model, train_with_evaluation, write_artifact
+from app.training.train import train_model_with_evaluation, write_model_artifact
 
 
 def main() -> None:
@@ -27,26 +27,14 @@ def main() -> None:
     args = parser.parse_args()
 
     dataset = generate_examples(args.examples, args.seed)
-    if args.model_type == "xgboost":
-        model = train_model(dataset, "xgboost", args.epochs, args.learning_rate, training_mode=args.training_mode)
-        model.save(args.output, metadata={"examples": dataset.size})
-        evaluation = {"modelType": "xgboost", "trainingMode": args.training_mode}
-    else:
-        bias, weights, evaluation = train_with_evaluation(
-            dataset,
-            args.epochs,
-            args.learning_rate,
-            training_mode=args.training_mode,
-        )
-        write_artifact(
-            args.output,
-            bias,
-            weights,
-            dataset.size,
-            model_type=args.model_type,
-            evaluation=evaluation,
-            training_mode=args.training_mode,
-        )
+    model, evaluation = train_model_with_evaluation(
+        dataset,
+        args.model_type,
+        args.epochs,
+        args.learning_rate,
+        training_mode=args.training_mode,
+    )
+    write_model_artifact(args.output, model, dataset.size, evaluation)
     evaluation_output = args.evaluation_output or args.output.with_suffix(".evaluation.json")
     write_report(evaluation, evaluation_output)
     if args.register_model:
