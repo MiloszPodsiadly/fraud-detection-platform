@@ -7,6 +7,7 @@ from typing import Any
 
 from app.features.feature_pipeline import FeaturePipeline
 from app.models.logistic_model import LogisticFraudModel
+from app.models.model_loader import load_model_from_artifact
 from app.registry.model_registry import ModelRegistry, default_registry_path
 
 
@@ -36,12 +37,13 @@ class FraudModelRuntime:
             registry_role: str = "champion",
     ) -> None:
         self.feature_pipeline = feature_pipeline or FeaturePipeline()
-        self.model = model or LogisticFraudModel.load(self._resolve_artifact_path(
+        artifact = self._resolve_artifact_path(
             artifact_path=artifact_path,
             registry=registry or ModelRegistry(default_registry_path()),
             model_version=model_version,
             registry_role=registry_role,
-        ))
+        )
+        self.model = model or load_model_from_artifact(artifact)
 
     def _resolve_artifact_path(
             self,
@@ -79,6 +81,7 @@ class FraudModelRuntime:
 
     def score(self, features: dict[str, Any]) -> dict[str, Any]:
         """Score a fraud feature payload without changing the public response contract."""
+        compatibility = self.feature_pipeline.validate_production_snapshot(features)
         normalized = self.feature_pipeline.transform_single(features)
         contributions = [
             FeatureContribution(name, normalized[name], weight)
@@ -102,6 +105,7 @@ class FraudModelRuntime:
                 "bias": self.model.bias,
                 "logit": round(logit, 4),
                 "normalizedFeatures": normalized,
+                "featureCompatibility": compatibility,
                 "featureContributions": {
                     item.reason_code: round(item.contribution, 4)
                     for item in contributions
