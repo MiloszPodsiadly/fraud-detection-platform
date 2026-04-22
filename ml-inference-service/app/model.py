@@ -46,6 +46,23 @@ class FraudModel:
         """Score feature payloads using the production runtime."""
         return self._runtime.score(features)
 
+    def compare_with(
+            self,
+            features: dict[str, Any],
+            artifact_path: Path = DEFAULT_ARTIFACT_PATH,
+            model_version: str | None = None,
+            registry_role: str = "challenger",
+            registry: ModelRegistry | None = None,
+    ) -> dict[str, Any]:
+        """Compare this model with another ML runtime, typically champion vs challenger."""
+        other = FraudModelRuntime(
+            artifact_path,
+            model_version=model_version,
+            registry_role=registry_role,
+            registry=registry,
+        )
+        return self._runtime.compare_with(other, features)
+
 
 _DEFAULT_MODEL = FraudModel()
 MODEL_NAME = _DEFAULT_MODEL.model_name

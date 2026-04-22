@@ -82,13 +82,15 @@ class FraudModelRuntime:
     def score(self, features: dict[str, Any]) -> dict[str, Any]:
         """Score a fraud feature payload without changing the public response contract."""
         compatibility = self.feature_pipeline.validate_production_snapshot(features)
-        normalized = self.feature_pipeline.transform_single(features)
+        training_mode = getattr(self.model, "training_mode", "production")
+        normalized = self.feature_pipeline.transform_single(features, mode=training_mode)
+        weights = getattr(self.model, "weights", {}) or getattr(self.model, "feature_importance")()
         contributions = [
             FeatureContribution(name, normalized[name], weight)
-            for name, weight in self.model.weights.items()
-            if normalized[name] > 0 and weight != 0
+            for name, weight in weights.items()
+            if name in normalized and normalized[name] > 0 and weight != 0
         ]
-        logit = self.model.bias + sum(item.contribution for item in contributions)
+        logit = getattr(self.model, "bias", 0.0) + sum(item.contribution for item in contributions)
         fraud_score = round(self.model.predict_proba(normalized), 4)
         risk_level = self._risk_level(fraud_score)
 
@@ -102,7 +104,7 @@ class FraudModelRuntime:
             "reasonCodes": self._reason_codes(contributions),
             "scoreDetails": {
                 "modelFamily": self.model_family,
-                "bias": self.model.bias,
+                "bias": getattr(self.model, "bias", 0.0),
                 "logit": round(logit, 4),
                 "normalizedFeatures": normalized,
                 "featureCompatibility": compatibility,
@@ -121,6 +123,30 @@ class FraudModelRuntime:
             "fallbackReason": None,
         }
 
+    def compare_with(self, other: FraudModelRuntime, features: dict[str, Any]) -> dict[str, Any]:
+        """Compare this model with another ML runtime on the same feature payload."""
+        model_a = self.score(features)
+        model_b = other.score(features)
+        threshold_a = getattr(self.model, "thresholds", {})
+        threshold_b = getattr(other.model, "thresholds", {})
+        return {
+            "mode": "ML_COMPARE",
+            "modelA": _model_summary(model_a),
+            "modelB": _model_summary(model_b),
+            "scoreDelta": round(float(model_a["fraudScore"]) - float(model_b["fraudScore"]), 6),
+            "absoluteScoreDelta": round(abs(float(model_a["fraudScore"]) - float(model_b["fraudScore"])), 6),
+            "riskLevelMismatch": model_a["riskLevel"] != model_b["riskLevel"],
+            "decisionDisagreement": self._alert(model_a["riskLevel"]) != self._alert(model_b["riskLevel"]),
+            "thresholdDifferences": {
+                name: round(float(threshold_a.get(name, 0.0)) - float(threshold_b.get(name, 0.0)), 6)
+                for name in sorted(set(threshold_a) | set(threshold_b))
+            },
+            "comparisonMetricsByVersion": {
+                str(model_a["modelVersion"]): _model_summary(model_a),
+                str(model_b["modelVersion"]): _model_summary(model_b),
+            },
+        }
+
     def _reason_codes(self, contributions: list[FeatureContribution]) -> list[str]:
         sorted_contributions = sorted(contributions, key=lambda item: item.contribution, reverse=True)
         return [item.reason_code for item in sorted_contributions[:5]]
@@ -133,3 +159,15 @@ class FraudModelRuntime:
         if fraud_score >= self.model.thresholds["medium"]:
             return "MEDIUM"
         return "LOW"
+
+    def _alert(self, risk_level: str) -> bool:
+        return risk_level in {"HIGH", "CRITICAL"}
+
+
+def _model_summary(result: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "modelName": result["modelName"],
+        "modelVersion": result["modelVersion"],
+        "fraudScore": result["fraudScore"],
+        "riskLevel": result["riskLevel"],
+    }
