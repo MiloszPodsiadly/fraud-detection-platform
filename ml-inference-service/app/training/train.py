@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from app.data.dataset import Dataset
+from app.data.splitting import split_dataset
 from app.evaluation.evaluate import evaluate_scores
 from app.features.feature_pipeline import FeaturePipeline
 from app.models.logistic_model import LogisticFraudModel
@@ -23,12 +24,24 @@ def train_with_evaluation(
         epochs: int,
         learning_rate: float,
 ) -> tuple[float, dict[str, float], dict[str, object]]:
-    """Train the logistic model and evaluate it on the generated dataset."""
-    feature_rows = FeaturePipeline().fit(dataset).transform(dataset)
+    """Train on train split, tune threshold on validation, and report test metrics."""
+    splits = split_dataset(dataset)
+    feature_pipeline = FeaturePipeline().fit(splits.train)
+    train_rows = feature_pipeline.transform(splits.train)
+    validation_rows = feature_pipeline.transform(splits.validation)
+    test_rows = feature_pipeline.transform(splits.test)
+
     model = LogisticFraudModel()
-    model.fit(feature_rows, dataset.y, epochs=epochs, learning_rate=learning_rate)
-    scores = [model.predict_proba(features) for features in feature_rows]
-    return model.bias, model.weights, evaluate_scores(dataset.y, scores)
+    model.fit(train_rows, splits.train.y, epochs=epochs, learning_rate=learning_rate)
+    validation_scores = [model.predict_proba(features) for features in validation_rows]
+    validation_report = evaluate_scores(splits.validation.y, validation_scores)
+    selected_threshold = float(validation_report["optimalThreshold"]["threshold"])
+    test_scores = [model.predict_proba(features) for features in test_rows]
+    test_report = evaluate_scores(splits.test.y, test_scores, thresholds=[selected_threshold])
+    test_report["validationEvaluation"] = validation_report
+    test_report["splitMetadata"] = splits.metadata
+    test_report["selectedThresholdSource"] = "validation"
+    return model.bias, model.weights, test_report
 
 
 def train_model(dataset: Dataset, model_type: str, epochs: int, learning_rate: float) -> LogisticFraudModel | XGBoostFraudModel:
