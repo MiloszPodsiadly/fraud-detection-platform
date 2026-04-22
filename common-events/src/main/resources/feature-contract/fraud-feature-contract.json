@@ -50,6 +50,35 @@
     "HIGH_AMOUNT_ACTIVITY",
     "RAPID_PLN_20K_BURST"
   ],
+  "productionInferenceFeatures": [
+    "recentTransactionCount",
+    "recentAmountSum",
+    "transactionVelocityPerMinute",
+    "merchantFrequency7d",
+    "deviceNovelty",
+    "countryMismatch",
+    "proxyOrVpnDetected",
+    "highRiskFlagCount",
+    "rapidTransferBurst"
+  ],
+  "featureAvailability": {
+    "recentTransactionCount": "providedByJava",
+    "recentAmountSum": "providedByJava",
+    "transactionVelocityPerMinute": "providedByJava",
+    "transactionVelocityPerHour": "trainingOnly",
+    "transactionVelocityPerDay": "trainingOnly",
+    "recentAmountAverage": "trainingOnly",
+    "recentAmountStdDev": "trainingOnly",
+    "amountDeviationFromUserMean": "trainingOnly",
+    "merchantEntropy": "trainingOnly",
+    "countryEntropy": "trainingOnly",
+    "merchantFrequency7d": "providedByJava",
+    "deviceNovelty": "providedByJava",
+    "countryMismatch": "providedByJava",
+    "proxyOrVpnDetected": "providedByJava",
+    "highRiskFlagCount": "derivedInPython",
+    "rapidTransferBurst": "derivedInPython"
+  },
   "normalization": {
     "recentTransactionCount": {"source": "count", "scale": 10.0, "clipMax": 1.0},
     "recentAmountSum": {"source": "money.amount", "scale": 10000.0, "clipMax": 1.0},

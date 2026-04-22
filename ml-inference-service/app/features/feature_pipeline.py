@@ -12,6 +12,7 @@ class FeaturePipeline:
     """Normalizes fraud scoring features for training and inference."""
 
     FEATURE_NAMES = FEATURE_CONTRACT.ml_feature_names
+    PRODUCTION_FEATURE_NAMES = FEATURE_CONTRACT.production_inference_features
 
     def __init__(self) -> None:
         self._user_mean_amounts: dict[str, float] = {}
@@ -79,6 +80,35 @@ class FeaturePipeline:
             "highRiskFlagCount": min(len(feature_flags) / 6.0, 1.0) if isinstance(feature_flags, list) else 0.0,
             "rapidTransferBurst": self._rapid_transfer_burst(event, feature_flags),
         }
+
+    def validate_production_snapshot(self, event: dict[str, Any]) -> dict[str, Any]:
+        """Report production feature compatibility for a Java-enriched snapshot."""
+        if self._is_raw_event(event):
+            return {
+                "compatible": True,
+                "source": "raw_sequence",
+                "missingRequiredFeatures": [],
+                "trainingOnlyFeatures": self._features_by_availability("trainingOnly"),
+            }
+        required = [
+            name for name in self.PRODUCTION_FEATURE_NAMES
+            if FEATURE_CONTRACT.feature_availability.get(name) == "providedByJava"
+        ]
+        missing = [name for name in required if name not in event]
+        return {
+            "compatible": not missing,
+            "source": "java_enriched_snapshot",
+            "missingRequiredFeatures": missing,
+            "providedByJava": self._features_by_availability("providedByJava"),
+            "derivedInPython": self._features_by_availability("derivedInPython"),
+            "trainingOnlyFeatures": self._features_by_availability("trainingOnly"),
+        }
+
+    def _features_by_availability(self, availability: str) -> list[str]:
+        return [
+            name for name, value in FEATURE_CONTRACT.feature_availability.items()
+            if value == availability
+        ]
 
     def _transform_raw_sequence(self, rows: list[dict[str, Any]]) -> list[dict[str, float]]:
         history_by_user: dict[str, list[dict[str, Any]]] = defaultdict(list)

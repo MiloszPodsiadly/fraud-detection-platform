@@ -33,7 +33,12 @@ class FeatureContract:
         self.ml_feature_names = self._list(contract.get("mlFeatureNames"), _FALLBACK_ML_FEATURE_NAMES)
         self.java_enriched_feature_names = self._list(contract.get("javaEnrichedFeatureNames"), [])
         self.feature_flags = self._list(contract.get("featureFlags"), [])
+        self.production_inference_features = self._list(
+            contract.get("productionInferenceFeatures"),
+            self.ml_feature_names,
+        )
         self.normalization = contract.get("normalization") if isinstance(contract.get("normalization"), dict) else {}
+        self.feature_availability = contract.get("featureAvailability") if isinstance(contract.get("featureAvailability"), dict) else {}
 
     @staticmethod
     def load() -> FeatureContract:
