@@ -1,14 +1,17 @@
 import unittest
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 from app.data.dataset import Dataset
 from app.data.generator import generate_fraud_behavior, generate_normal_behavior
+from app.data.splitting import split_dataset
 from app.evaluation.evaluate import cli_summary, evaluate_scores
 from app.feedback.feedback_dataset import FeedbackDatasetStore, dataset_from_feedback, feedback_from_decision_event
 from app.features.feature_contract import FEATURE_CONTRACT
 from app.features.feature_pipeline import FeaturePipeline
 from app.model import FraudModel
+from app.models.model_loader import ModelConfigurationError, load_model_from_artifact
 from app.registry.model_registry import ModelRegistry
 from app.models.xgboost_model import XGBoostFraudModel
 from app.training.retraining import compare_retrained_model
@@ -123,22 +126,26 @@ class FraudModelTest(unittest.TestCase):
         self.assertIn("RAPID_PLN_20K_BURST", FEATURE_CONTRACT.feature_flags)
 
     def test_java_enriched_snapshot_normalizes_to_contract_features(self):
-        normalized = FeaturePipeline().transform_single(
-            {
-                "recentTransactionCount": 5,
-                "recentAmountSum": {"amount": 5000.0, "currency": "PLN"},
-                "transactionVelocityPerMinute": 5.0,
-                "merchantFrequency7d": 6,
-                "deviceNovelty": True,
-                "countryMismatch": False,
-                "proxyOrVpnDetected": True,
-                "featureFlags": ["DEVICE_NOVELTY", "PROXY_OR_VPN", "HIGH_VELOCITY"],
-                "rapidTransferFraudCaseCandidate": False,
-                "rapidTransferTotalPln": 10000.0,
-            }
-        )
+        payload = {
+            "recentTransactionCount": 5,
+            "recentAmountSum": {"amount": 5000.0, "currency": "PLN"},
+            "transactionVelocityPerMinute": 5.0,
+            "merchantFrequency7d": 6,
+            "deviceNovelty": True,
+            "countryMismatch": False,
+            "proxyOrVpnDetected": True,
+            "featureFlags": ["DEVICE_NOVELTY", "PROXY_OR_VPN", "HIGH_VELOCITY"],
+            "rapidTransferFraudCaseCandidate": False,
+            "rapidTransferTotalPln": 10000.0,
+        }
+        pipeline = FeaturePipeline()
+        normalized = pipeline.transform_single(payload)
+        compatibility = pipeline.validate_production_snapshot(payload)
 
         self.assertEqual(set(normalized), set(FEATURE_CONTRACT.ml_feature_names))
+        self.assertTrue(compatibility["compatible"])
+        self.assertIn("transactionVelocityPerHour", compatibility["trainingOnlyFeatures"])
+        self.assertIn("highRiskFlagCount", compatibility["derivedInPython"])
         self.assertEqual(normalized["recentTransactionCount"], 0.5)
         self.assertEqual(normalized["recentAmountSum"], 0.5)
         self.assertEqual(normalized["transactionVelocityPerMinute"], 1.0)
@@ -148,6 +155,18 @@ class FraudModelTest(unittest.TestCase):
         self.assertEqual(normalized["proxyOrVpnDetected"], 1.0)
         self.assertEqual(normalized["highRiskFlagCount"], 0.5)
         self.assertEqual(normalized["rapidTransferBurst"], 0.0)
+
+    def test_feature_pipeline_reports_missing_required_production_features(self):
+        compatibility = FeaturePipeline().validate_production_snapshot(
+            {
+                "recentTransactionCount": 5,
+                "recentAmountSum": {"amount": 5000.0},
+            }
+        )
+
+        self.assertFalse(compatibility["compatible"])
+        self.assertIn("transactionVelocityPerMinute", compatibility["missingRequiredFeatures"])
+        self.assertIn("merchantFrequency7d", compatibility["missingRequiredFeatures"])
 
     def test_feature_pipeline_transforms_raw_sequence_features(self):
         dataset = generate_fraud_behavior(count=200, seed=789, user_count=10, fraud_ratio=0.02)
@@ -222,7 +241,21 @@ class FraudModelTest(unittest.TestCase):
         self.assertIn("featureImportance", artifact)
         self.assertIn("evaluation", artifact)
         self.assertIn("prAuc", artifact["evaluation"])
+        self.assertIn("splitMetadata", artifact["evaluation"])
+        self.assertEqual(artifact["evaluation"]["selectedThresholdSource"], "validation")
         self.assertEqual(set(artifact["featureSchema"]), set(weights))
+
+    def test_dataset_split_prefers_temporal_order_and_separate_row_sets(self):
+        dataset = generate_fraud_behavior(count=30, seed=222, user_count=4, fraud_ratio=0.02)
+        splits = split_dataset(dataset)
+
+        self.assertEqual(splits.metadata["strategy"], "temporal")
+        self.assertTrue(set(splits.metadata["trainIndices"]).isdisjoint(splits.metadata["validationIndices"]))
+        self.assertTrue(set(splits.metadata["trainIndices"]).isdisjoint(splits.metadata["testIndices"]))
+        self.assertTrue(set(splits.metadata["validationIndices"]).isdisjoint(splits.metadata["testIndices"]))
+        self.assertGreater(splits.train.size, 0)
+        self.assertGreater(splits.validation.size, 0)
+        self.assertGreater(splits.test.size, 0)
 
     def test_evaluation_metrics_include_ranking_business_and_thresholds(self):
         report = evaluate_scores(
@@ -331,6 +364,7 @@ class FraudModelTest(unittest.TestCase):
         self.assertGreaterEqual(comparison.challenger_pr_auc, 0.0)
         self.assertTrue(comparison.promote_challenger)
         self.assertIn("prAuc", comparison.challenger_evaluation)
+        self.assertIn("splitMetadata", comparison.challenger_evaluation)
 
     def test_model_registry_tracks_latest_champion_challenger_and_versions(self):
         artifact_path = Path.cwd() / "registry-test-artifact.json"
@@ -428,6 +462,57 @@ class FraudModelTest(unittest.TestCase):
                     elif child.is_dir():
                         child.rmdir()
                 registry_path.rmdir()
+
+    def test_model_loader_uses_logistic_artifact_type(self):
+        artifact_path = Path.cwd() / "loader-logistic-artifact.json"
+        try:
+            artifact_path.write_text(
+                json.dumps(
+                    {
+                        "modelType": "logistic",
+                        "modelVersion": "loader-logistic-v1",
+                        "weights": {name: 0.0 for name in FeaturePipeline.FEATURE_NAMES},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            model = load_model_from_artifact(artifact_path)
+        finally:
+            if artifact_path.exists():
+                artifact_path.unlink()
+
+        self.assertEqual(model.model_version, "loader-logistic-v1")
+
+    def test_model_loader_rejects_unknown_artifact_type(self):
+        artifact_path = Path.cwd() / "loader-unknown-artifact.json"
+        try:
+            artifact_path.write_text(json.dumps({"modelType": "svm"}), encoding="utf-8")
+            with self.assertRaisesRegex(ModelConfigurationError, "Unsupported modelType"):
+                load_model_from_artifact(artifact_path)
+        finally:
+            if artifact_path.exists():
+                artifact_path.unlink()
+
+    def test_model_loader_does_not_fallback_from_xgboost_to_logistic(self):
+        artifact_path = Path.cwd() / "loader-xgboost-artifact.json"
+        try:
+            artifact_path.write_text(json.dumps({"modelType": "xgboost"}), encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "xgboost"):
+                load_model_from_artifact(artifact_path)
+        finally:
+            if artifact_path.exists():
+                artifact_path.unlink()
+
+    def test_xgboost_runtime_path_fails_clearly_when_dependency_exists_but_loading_is_unsupported(self):
+        artifact_path = Path.cwd() / "loader-xgboost-runtime-artifact.json"
+        try:
+            artifact_path.write_text(json.dumps({"modelType": "xgboost"}), encoding="utf-8")
+            with patch("importlib.util.find_spec", return_value=object()):
+                with self.assertRaisesRegex(RuntimeError, "not fully supported"):
+                    load_model_from_artifact(artifact_path)
+        finally:
+            if artifact_path.exists():
+                artifact_path.unlink()
 
     def test_optional_xgboost_model_fails_clearly_when_dependency_is_missing(self):
         with self.assertRaisesRegex(RuntimeError, "xgboost"):
