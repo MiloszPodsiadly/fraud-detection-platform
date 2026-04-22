@@ -13,6 +13,7 @@ class FeaturePipeline:
 
     FEATURE_NAMES = FEATURE_CONTRACT.ml_feature_names
     PRODUCTION_FEATURE_NAMES = FEATURE_CONTRACT.production_inference_features
+    TRAINING_MODES = {"full", "production"}
 
     def __init__(self) -> None:
         self._user_mean_amounts: dict[str, float] = {}
@@ -48,21 +49,34 @@ class FeaturePipeline:
         self._known_countries = dict(countries_by_user)
         return self
 
-    def transform(self, dataset: Any) -> list[dict[str, float]]:
+    def get_training_features(self, mode: str = "production") -> list[str]:
+        """Return the ordered feature schema allowed for a training mode."""
+        if mode not in self.TRAINING_MODES:
+            raise ValueError("training_mode must be 'full' or 'production'.")
+        if mode == "production":
+            features = list(self.PRODUCTION_FEATURE_NAMES)
+            training_only = set(self._features_by_availability("trainingOnly"))
+            invalid = [name for name in features if name in training_only]
+            if invalid:
+                raise ValueError(f"production training features include training-only fields: {invalid}")
+            return features
+        return list(self.FEATURE_NAMES)
+
+    def transform(self, dataset: Any, mode: str = "full") -> list[dict[str, float]]:
         """Transform every feature row in a dataset into model-ready features."""
         rows = getattr(dataset, "X", dataset)
         if rows and all(self._is_raw_event(row) for row in rows):
-            return self._transform_raw_sequence(rows)
-        return [self.transform_single(row) for row in rows]
+            return [self._select_features(row, mode) for row in self._transform_raw_sequence(rows)]
+        return [self.transform_single(row, mode=mode) for row in rows]
 
-    def transform_single(self, event: dict[str, Any]) -> dict[str, float]:
+    def transform_single(self, event: dict[str, Any], mode: str = "full") -> dict[str, float]:
         """Transform one scoring event into the model feature schema."""
         if self._is_raw_event(event):
-            return self._raw_features(event, history=[])
+            return self._select_features(self._raw_features(event, history=[]), mode)
 
         feature_flags = event.get("featureFlags") or []
         amount_sum = self._money_amount(event.get("recentAmountSum"))
-        return {
+        features = {
             "recentTransactionCount": min(self._number(event.get("recentTransactionCount")) / 10.0, 1.0),
             "recentAmountSum": min(amount_sum / 10000.0, 1.0),
             "transactionVelocityPerMinute": min(self._number(event.get("transactionVelocityPerMinute")) / 5.0, 1.0),
@@ -80,6 +94,7 @@ class FeaturePipeline:
             "highRiskFlagCount": min(len(feature_flags) / 6.0, 1.0) if isinstance(feature_flags, list) else 0.0,
             "rapidTransferBurst": self._rapid_transfer_burst(event, feature_flags),
         }
+        return self._select_features(features, mode)
 
     def validate_production_snapshot(self, event: dict[str, Any]) -> dict[str, Any]:
         """Report production feature compatibility for a Java-enriched snapshot."""
@@ -109,6 +124,13 @@ class FeaturePipeline:
             name for name, value in FEATURE_CONTRACT.feature_availability.items()
             if value == availability
         ]
+
+    def _select_features(self, features: dict[str, float], mode: str) -> dict[str, float]:
+        allowed = self.get_training_features(mode)
+        missing = [name for name in allowed if name not in features]
+        if missing:
+            raise ValueError(f"feature transform missing required {mode} features: {missing}")
+        return {name: features[name] for name in allowed}
 
     def _transform_raw_sequence(self, rows: list[dict[str, Any]]) -> list[dict[str, float]]:
         history_by_user: dict[str, list[dict[str, Any]]] = defaultdict(list)
