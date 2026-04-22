@@ -525,7 +525,8 @@ python -m app.train_model \
   --epochs 5 \
   --learning-rate 0.1 \
   --seed 7341 \
-  --model-type logistic
+  --model-type logistic \
+  --training-mode production
 ```
 
 Training writes an evaluation report with fraud-focused metrics:
@@ -537,13 +538,24 @@ Training writes an evaluation report with fraud-focused metrics:
 - alert rate
 - fraud capture rate
 - false positive rate
+- cost curves
 - threshold analysis
 - optimal threshold by F1
+- optimal threshold by expected cost
 
 Evaluation is split-based, not in-sample. The training pipeline uses train,
-validation, and test splits, preferring temporal ordering when rows contain
-timestamps. The validation split selects the operating threshold, and the test
-split reports final metrics.
+validation, and test splits. The default `training-mode=production` trains only
+on `productionInferenceFeatures` from the shared feature contract, so the model
+feature schema matches the Java-enriched production inference payload. `full`
+mode remains available for offline experiments that intentionally include
+training-only synthetic features.
+
+Splitting supports `random`, `temporal`, and `out_of_time` modes. Temporal
+splits preserve timestamp ordering and, when enough fraud cases exist, stratify
+fraud labels across train, validation, and test. The validation split selects the
+operating threshold, the test split reports final metrics, and the evaluation
+report also includes out-of-time metrics to show degradation on a later unseen
+time window.
 
 ### Local Model Registry
 
@@ -574,9 +586,10 @@ Runtime loading order:
 4. legacy `app/model_artifact.json`
 
 Artifact metadata controls runtime model loading. `modelType=logistic` loads the
-logistic adapter. `modelType=xgboost` is an optional extension point and does not
-fall back to logistic. The default runnable path is logistic unless optional
-XGBoost dependencies and full runtime support are explicitly added.
+logistic adapter. `modelType=xgboost` loads the optional XGBoost adapter when the
+`xgboost` Python package is installed. Unknown model types fail clearly instead
+of falling back to logistic. Artifacts store `trainingMode`, `featureSetUsed`,
+and `featureSchema` for inference-time parity checks.
 
 ### Feature Parity
 
@@ -612,6 +625,30 @@ from the Java production path:
 The inference runtime reports feature compatibility in `scoreDetails` so missing
 required production fields can be detected without pretending every training
 feature is available in production.
+
+Training artifacts store the exact feature set used by the model. Runtime scoring
+uses the artifact training mode, so a production-trained model sees the same
+ordered feature schema during training and inference.
+
+### Retraining Decisions
+
+Challenger promotion uses multiple criteria instead of PR-AUC alone:
+
+- PR-AUC must improve.
+- false positive rate must stay within the configured increase threshold.
+- alert rate must remain inside the configured business range.
+- expected cost must not worsen.
+
+The comparison output includes a structured decision object with pass/fail
+criteria, threshold settings, and the current/challenger metrics used for the
+decision.
+
+### ML Compare
+
+The Python runtime can compare two ML runtimes, typically registry champion vs
+challenger. The comparison reports per-model version metrics, score delta,
+absolute score delta, risk-level mismatch, decision disagreement, and threshold
+differences.
 
 ### Analyst Feedback
 
@@ -677,15 +714,18 @@ Current ML capabilities:
 - user-sequence synthetic data generation with normal behavior and labelled fraud scenarios
 - shared Java/Python feature contract in `common-events`
 - split-based fraud-specific evaluation metrics and JSON reports
+- production feature training mode with artifact feature schema parity
+- stratified temporal and out-of-time validation support
+- cost-based threshold analysis
 - analyst feedback datasets with delayed label updates
-- retraining comparison for challenger models
+- multi-criteria retraining comparison for challenger models
 - local registry with latest, version, champion, challenger, and promotion support
-- SHADOW and COMPARE monitoring for score distribution, score deltas, disagreement, risk mismatch, and model version tracking
+- SHADOW and COMPARE monitoring for score distribution, score deltas, disagreement, risk mismatch, model version tracking, and ML-vs-ML comparison
 
 Model support:
 
 - logistic regression is the default runnable model type
-- XGBoost is intentionally optional and currently treated as an extension point unless its dependency and runtime artifact support are explicitly enabled
+- XGBoost is optional; when the `xgboost` package is installed, the adapter supports fit, predict, save, load, registry artifacts, and inference through the same feature pipeline
 
 Explanation strategy:
 
