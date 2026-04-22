@@ -15,6 +15,9 @@ class ThresholdMetrics:
     alert_rate: float
     fraud_capture_rate: float
     false_positive_rate: float
+    false_positives: int
+    false_negatives: int
+    total_cost: float
 
 
 def evaluate_scores(
@@ -22,6 +25,8 @@ def evaluate_scores(
         y_score: list[float],
         thresholds: list[float] | None = None,
         top_k: list[int] | None = None,
+        cost_false_positive: float = 25.0,
+        cost_false_negative: float = 500.0,
 ) -> dict[str, object]:
     """Evaluate fraud model scores with ranking and business metrics."""
     if len(y_true) != len(y_score):
@@ -34,10 +39,19 @@ def evaluate_scores(
     positives = sum(1 for label in y_true if label == 1)
     negatives = len(y_true) - positives
     threshold_reports = [
-        _threshold_metrics(y_true, y_score, threshold, positives, negatives)
+        _threshold_metrics(
+            y_true,
+            y_score,
+            threshold,
+            positives,
+            negatives,
+            cost_false_positive,
+            cost_false_negative,
+        )
         for threshold in thresholds
     ]
     optimal = max(threshold_reports, key=lambda item: (_f1(item.precision, item.recall), item.precision))
+    optimal_cost = min(threshold_reports, key=lambda item: (item.total_cost, -item.fraud_capture_rate))
 
     return {
         "rows": len(y_true),
@@ -63,6 +77,9 @@ def evaluate_scores(
                 "alertRate": round(item.alert_rate, 6),
                 "fraudCaptureRate": round(item.fraud_capture_rate, 6),
                 "falsePositiveRate": round(item.false_positive_rate, 6),
+                "falsePositives": item.false_positives,
+                "falseNegatives": item.false_negatives,
+                "totalCost": round(item.total_cost, 6),
                 "f1": round(_f1(item.precision, item.recall), 6),
             }
             for item in threshold_reports
@@ -75,6 +92,25 @@ def evaluate_scores(
             "fraudCaptureRate": round(optimal.fraud_capture_rate, 6),
             "falsePositiveRate": round(optimal.false_positive_rate, 6),
             "f1": round(_f1(optimal.precision, optimal.recall), 6),
+        },
+        "costEvaluation": {
+            "costFalsePositive": cost_false_positive,
+            "costFalseNegative": cost_false_negative,
+            "costCurves": [
+                {
+                    "threshold": item.threshold,
+                    "falsePositives": item.false_positives,
+                    "falseNegatives": item.false_negatives,
+                    "totalCost": round(item.total_cost, 6),
+                }
+                for item in threshold_reports
+            ],
+            "optimalCostThreshold": {
+                "threshold": optimal_cost.threshold,
+                "totalCost": round(optimal_cost.total_cost, 6),
+                "falsePositives": optimal_cost.false_positives,
+                "falseNegatives": optimal_cost.false_negatives,
+            },
         },
     }
 
@@ -104,10 +140,13 @@ def _threshold_metrics(
         threshold: float,
         positives: int,
         negatives: int,
+        cost_false_positive: float,
+        cost_false_negative: float,
 ) -> ThresholdMetrics:
     predicted = [score >= threshold for score in y_score]
     true_positive = sum(1 for label, is_alert in zip(y_true, predicted) if label == 1 and is_alert)
     false_positive = sum(1 for label, is_alert in zip(y_true, predicted) if label == 0 and is_alert)
+    false_negative = sum(1 for label, is_alert in zip(y_true, predicted) if label == 1 and not is_alert)
     alert_count = sum(1 for is_alert in predicted if is_alert)
     precision = true_positive / alert_count if alert_count else 0.0
     recall = true_positive / positives if positives else 0.0
@@ -119,6 +158,9 @@ def _threshold_metrics(
         alert_rate=alert_count / len(y_true),
         fraud_capture_rate=recall,
         false_positive_rate=false_positive_rate,
+        false_positives=false_positive,
+        false_negatives=false_negative,
+        total_cost=false_positive * cost_false_positive + false_negative * cost_false_negative,
     )
 
 
