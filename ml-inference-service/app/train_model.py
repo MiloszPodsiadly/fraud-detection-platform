@@ -7,7 +7,7 @@ from app.data.generator import generate_examples
 from app.evaluation.evaluate import cli_summary, write_report
 from app.model import DEFAULT_ARTIFACT_PATH, FraudModel
 from app.registry.model_registry import ModelRegistry, default_registry_path
-from app.training.train import train_with_evaluation, write_artifact
+from app.training.train import train_model, train_with_evaluation, write_artifact
 
 
 def main() -> None:
@@ -19,6 +19,7 @@ def main() -> None:
     parser.add_argument("--learning-rate", type=float, default=0.9)
     parser.add_argument("--seed", type=int, default=7341)
     parser.add_argument("--model-type", choices=["logistic", "xgboost"], default="logistic")
+    parser.add_argument("--training-mode", choices=["production", "full"], default="production")
     parser.add_argument("--evaluation-output", type=Path)
     parser.add_argument("--register-model", action="store_true")
     parser.add_argument("--registry-path", type=Path, default=default_registry_path())
@@ -26,15 +27,26 @@ def main() -> None:
     args = parser.parse_args()
 
     dataset = generate_examples(args.examples, args.seed)
-    if args.model_type != "logistic":
-        raise RuntimeError(
-            "model_type=xgboost is an extension point only. "
-            "Install the optional xgboost dependency and complete runtime artifact support before training with it. "
-            "Use --model-type logistic for the default runnable path."
+    if args.model_type == "xgboost":
+        model = train_model(dataset, "xgboost", args.epochs, args.learning_rate, training_mode=args.training_mode)
+        model.save(args.output, metadata={"examples": dataset.size})
+        evaluation = {"modelType": "xgboost", "trainingMode": args.training_mode}
+    else:
+        bias, weights, evaluation = train_with_evaluation(
+            dataset,
+            args.epochs,
+            args.learning_rate,
+            training_mode=args.training_mode,
         )
-
-    bias, weights, evaluation = train_with_evaluation(dataset, args.epochs, args.learning_rate)
-    write_artifact(args.output, bias, weights, dataset.size, model_type=args.model_type, evaluation=evaluation)
+        write_artifact(
+            args.output,
+            bias,
+            weights,
+            dataset.size,
+            model_type=args.model_type,
+            evaluation=evaluation,
+            training_mode=args.training_mode,
+        )
     evaluation_output = args.evaluation_output or args.output.with_suffix(".evaluation.json")
     write_report(evaluation, evaluation_output)
     if args.register_model:
