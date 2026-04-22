@@ -557,6 +557,11 @@ operating threshold, the test split reports final metrics, and the evaluation
 report also includes out-of-time metrics to show degradation on a later unseen
 time window.
 
+Logistic regression and XGBoost use the same training lifecycle: split dataset,
+fit on train, select threshold on validation, evaluate on test, evaluate an
+out-of-time window, write the same report schema, save the artifact, and
+optionally register it.
+
 ### Local Model Registry
 
 The local registry stores copied model artifacts plus metadata:
@@ -638,10 +643,24 @@ Challenger promotion uses multiple criteria instead of PR-AUC alone:
 - false positive rate must stay within the configured increase threshold.
 - alert rate must remain inside the configured business range.
 - expected cost must not worsen.
+- budget-constrained performance must not regress when an alert budget is configured.
+- high-priority segment performance must not severely regress.
+- out-of-time stability must stay within configured degradation thresholds.
 
 The comparison output includes a structured decision object with pass/fail
 criteria, threshold settings, and the current/challenger metrics used for the
 decision.
+
+The rollout decision object is governance-oriented:
+
+- `decision`: `promote`, `shadow_only`, or `reject`
+- `summary`
+- `passed_checks`
+- `failed_checks`
+- `key_metrics`
+- `recommended_rollout_mode`
+- `recommended_alert_budget`
+- `evaluation_window_metadata`
 
 ### ML Compare
 
@@ -717,8 +736,11 @@ Current ML capabilities:
 - production feature training mode with artifact feature schema parity
 - stratified temporal and out-of-time validation support
 - cost-based threshold analysis
+- fixed alert-budget evaluation for analyst queue constraints
+- segment evaluation by customer segment, merchant category, country, and fraud scenario when available
+- stability assessment across temporal and out-of-time windows
 - analyst feedback datasets with delayed label updates
-- multi-criteria retraining comparison for challenger models
+- model-agnostic multi-criteria retraining comparison for challenger models
 - local registry with latest, version, champion, challenger, and promotion support
 - SHADOW and COMPARE monitoring for score distribution, score deltas, disagreement, risk mismatch, model version tracking, and ML-vs-ML comparison
 
