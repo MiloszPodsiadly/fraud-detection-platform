@@ -42,6 +42,8 @@ class LogisticFraudModel:
         self.model_version = str(artifact.get("modelVersion", "unversioned"))
         self.model_family = str(artifact.get("modelFamily", "LOGISTIC_REGRESSION"))
         self.weights = self._weights(artifact.get("weights"))
+        self.feature_schema = self._feature_schema(artifact.get("featureSchema"), self.weights)
+        self.training_mode = self._training_mode(artifact, self.feature_schema)
         self.thresholds = self._thresholds(artifact.get("thresholds"))
         self.bias = self._signed_number(artifact.get("bias"), self.DEFAULT_BIAS)
 
@@ -51,11 +53,12 @@ class LogisticFraudModel:
 
     def fit(self, X: list[dict[str, float]], y: list[int], epochs: int = 1100, learning_rate: float = 0.9) -> None:
         """Fit logistic weights with batch gradient descent."""
-        weights = {name: 0.0 for name in self.feature_names()}
+        feature_names = list(X[0].keys()) if X else self.feature_names()
+        weights = {name: 0.0 for name in feature_names}
         bias = 0.0
 
         for _ in range(epochs):
-            gradients = {name: 0.0 for name in self.feature_names()}
+            gradients = {name: 0.0 for name in feature_names}
             bias_gradient = 0.0
 
             for features, label in zip(X, y):
@@ -72,6 +75,7 @@ class LogisticFraudModel:
 
         self.bias = round(bias, 6)
         self.weights = {name: round(weight, 6) for name, weight in weights.items()}
+        self.feature_schema = list(weights)
 
     def save(self, path: Path, metadata: dict[str, object] | None = None) -> None:
         """Persist a logistic model artifact."""
@@ -83,9 +87,13 @@ class LogisticFraudModel:
             "bias": self.bias,
             "weights": self.weights,
             "thresholds": self.thresholds,
-            "featureSchema": self.feature_names(),
+            "featureSchema": self.runtime_feature_names(),
             "featureImportance": self.feature_importance(),
-            "training": metadata or {},
+            "training": {
+                **(metadata or {}),
+                "trainingMode": self.training_mode,
+                "featureSetUsed": self.runtime_feature_names(),
+            },
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -120,13 +128,32 @@ class LogisticFraudModel:
         """Return the ordered feature schema used by the model."""
         return list(FeaturePipeline.FEATURE_NAMES)
 
+    def runtime_feature_names(self) -> list[str]:
+        """Return the artifact feature schema used at inference."""
+        return list(self.feature_schema)
+
     def _weights(self, value: Any) -> dict[str, float]:
         if not isinstance(value, dict):
             return dict(self.DEFAULT_WEIGHTS)
         return {
-            name: self._number(value.get(name), default_weight)
-            for name, default_weight in self.DEFAULT_WEIGHTS.items()
+            str(name): self._signed_number(weight, 0.0)
+            for name, weight in value.items()
         }
+
+    def _feature_schema(self, value: Any, weights: dict[str, float]) -> list[str]:
+        if isinstance(value, list) and all(isinstance(name, str) for name in value):
+            return list(value)
+        return list(weights)
+
+    def _training_mode(self, artifact: dict[str, Any], feature_schema: list[str]) -> str:
+        value = artifact.get("trainingMode")
+        training = artifact.get("training")
+        if value is None and isinstance(training, dict):
+            value = training.get("trainingMode")
+        if value is not None:
+            return str(value)
+        production = set(FeaturePipeline.PRODUCTION_FEATURE_NAMES)
+        return "production" if set(feature_schema).issubset(production) else "full"
 
     def _thresholds(self, value: Any) -> dict[str, float]:
         if not isinstance(value, dict):
