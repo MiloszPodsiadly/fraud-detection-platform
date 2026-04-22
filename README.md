@@ -540,6 +540,11 @@ Training writes an evaluation report with fraud-focused metrics:
 - threshold analysis
 - optimal threshold by F1
 
+Evaluation is split-based, not in-sample. The training pipeline uses train,
+validation, and test splits, preferring temporal ordering when rows contain
+timestamps. The validation split selects the operating threshold, and the test
+split reports final metrics.
+
 ### Local Model Registry
 
 The local registry stores copied model artifacts plus metadata:
@@ -567,6 +572,46 @@ Runtime loading order:
 2. champion registry entry
 3. latest registry entry
 4. legacy `app/model_artifact.json`
+
+Artifact metadata controls runtime model loading. `modelType=logistic` loads the
+logistic adapter. `modelType=xgboost` is an optional extension point and does not
+fall back to logistic. The default runnable path is logistic unless optional
+XGBoost dependencies and full runtime support are explicitly added.
+
+### Feature Parity
+
+The shared fraud feature contract distinguishes production inference features
+from training-only synthetic features.
+
+Current production Java snapshots provide:
+
+- `recentTransactionCount`
+- `recentAmountSum`
+- `transactionVelocityPerMinute`
+- `merchantFrequency7d`
+- `deviceNovelty`
+- `countryMismatch`
+- `proxyOrVpnDetected`
+
+Python derives these production inference features from the Java snapshot:
+
+- `highRiskFlagCount`
+- `rapidTransferBurst`
+
+These features are currently training-only/synthetic-only and are not required
+from the Java production path:
+
+- `transactionVelocityPerHour`
+- `transactionVelocityPerDay`
+- `recentAmountAverage`
+- `recentAmountStdDev`
+- `amountDeviationFromUserMean`
+- `merchantEntropy`
+- `countryEntropy`
+
+The inference runtime reports feature compatibility in `scoreDetails` so missing
+required production fields can be detected without pretending every training
+feature is available in production.
 
 ### Analyst Feedback
 
@@ -631,11 +676,16 @@ Current ML capabilities:
 - clean Python pipeline architecture for data, features, training, evaluation, inference, feedback, registry, and models
 - user-sequence synthetic data generation with normal behavior and labelled fraud scenarios
 - shared Java/Python feature contract in `common-events`
-- fraud-specific evaluation metrics and JSON reports
+- split-based fraud-specific evaluation metrics and JSON reports
 - analyst feedback datasets with delayed label updates
 - retraining comparison for challenger models
 - local registry with latest, version, champion, challenger, and promotion support
 - SHADOW and COMPARE monitoring for score distribution, score deltas, disagreement, risk mismatch, and model version tracking
+
+Model support:
+
+- logistic regression is the default runnable model type
+- XGBoost is intentionally optional and currently treated as an extension point unless its dependency and runtime artifact support are explicitly enabled
 
 Explanation strategy:
 
