@@ -27,6 +27,8 @@ def evaluate_scores(
         top_k: list[int] | None = None,
         cost_false_positive: float = 25.0,
         cost_false_negative: float = 500.0,
+        alert_budgets: list[float] | None = None,
+        segment_rows: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     """Evaluate fraud model scores with ranking and business metrics."""
     if len(y_true) != len(y_score):
@@ -36,6 +38,7 @@ def evaluate_scores(
 
     thresholds = thresholds or [0.10, 0.20, 0.30, 0.45, 0.60, 0.75, 0.90]
     top_k = top_k or [10, 50, 100]
+    alert_budgets = alert_budgets or [0.005, 0.01, 0.02, 0.05]
     positives = sum(1 for label in y_true if label == 1)
     negatives = len(y_true) - positives
     threshold_reports = [
@@ -53,7 +56,7 @@ def evaluate_scores(
     optimal = max(threshold_reports, key=lambda item: (_f1(item.precision, item.recall), item.precision))
     optimal_cost = min(threshold_reports, key=lambda item: (item.total_cost, -item.fraud_capture_rate))
 
-    return {
+    report = {
         "rows": len(y_true),
         "positiveLabels": positives,
         "negativeLabels": negatives,
@@ -112,7 +115,23 @@ def evaluate_scores(
                 "falseNegatives": optimal_cost.false_negatives,
             },
         },
+        "budgetEvaluation": _budget_evaluation(
+            y_true,
+            y_score,
+            alert_budgets,
+            cost_false_positive,
+            cost_false_negative,
+        ),
     }
+    if segment_rows is not None:
+        report["segmentEvaluation"] = _segment_evaluation(
+            y_true,
+            y_score,
+            segment_rows,
+            cost_false_positive,
+            cost_false_negative,
+        )
+    return report
 
 
 def write_report(report: dict[str, object], path: Path) -> None:
@@ -162,6 +181,106 @@ def _threshold_metrics(
         false_negatives=false_negative,
         total_cost=false_positive * cost_false_positive + false_negative * cost_false_negative,
     )
+
+
+def _budget_evaluation(
+        y_true: list[int],
+        y_score: list[float],
+        alert_budgets: list[float],
+        cost_false_positive: float,
+        cost_false_negative: float,
+) -> dict[str, object]:
+    ranked = sorted(zip(y_true, y_score), key=lambda item: item[1], reverse=True)
+    budgets = []
+    for budget in alert_budgets:
+        alert_count = max(1, min(len(ranked), int(round(len(ranked) * budget))))
+        threshold = ranked[alert_count - 1][1] if ranked else 1.0
+        metrics = _threshold_metrics(
+            y_true,
+            y_score,
+            threshold,
+            sum(y_true),
+            len(y_true) - sum(y_true),
+            cost_false_positive,
+            cost_false_negative,
+        )
+        budgets.append({
+            "alertBudget": budget,
+            "recommendedThreshold": round(threshold, 6),
+            "alertCount": alert_count,
+            "precision": round(metrics.precision, 6),
+            "fraudCaptureRate": round(metrics.fraud_capture_rate, 6),
+            "falsePositiveCount": metrics.false_positives,
+            "expectedCost": round(metrics.total_cost, 6),
+        })
+    best = min(budgets, key=lambda item: (item["expectedCost"], -item["fraudCaptureRate"]))
+    return {
+        "budgets": budgets,
+        "recommended": best,
+    }
+
+
+def _segment_evaluation(
+        y_true: list[int],
+        y_score: list[float],
+        segment_rows: list[dict[str, object]],
+        cost_false_positive: float,
+        cost_false_negative: float,
+) -> dict[str, object]:
+    if len(segment_rows) != len(y_true):
+        raise ValueError("segment_rows must match y_true length.")
+    dimensions = {
+        "customerSegment": lambda row: row.get("customerSegment") or row.get("customer_segment"),
+        "merchantCategory": lambda row: row.get("merchantCategory") or row.get("merchant_category"),
+        "country": lambda row: row.get("country") or _raw_value(row, "country"),
+        "fraudScenario": lambda row: _scenario(row),
+    }
+    output: dict[str, object] = {}
+    for dimension, extractor in dimensions.items():
+        grouped: dict[str, list[int]] = {}
+        for index, row in enumerate(segment_rows):
+            value = extractor(row)
+            if value is None:
+                continue
+            grouped.setdefault(str(value), []).append(index)
+        segments = {}
+        for segment, indices in grouped.items():
+            labels = [y_true[index] for index in indices]
+            scores = [y_score[index] for index in indices]
+            if len(labels) < 2:
+                continue
+            segment_report = evaluate_scores(
+                labels,
+                scores,
+                thresholds=[0.45],
+                top_k=[min(10, len(labels))],
+                cost_false_positive=cost_false_positive,
+                cost_false_negative=cost_false_negative,
+            )
+            optimal = segment_report["optimalThreshold"]
+            cost = segment_report["costEvaluation"]["optimalCostThreshold"]
+            segments[segment] = {
+                "rows": segment_report["rows"],
+                "positiveLabels": segment_report["positiveLabels"],
+                "prAuc": segment_report["prAuc"],
+                "fraudCaptureRate": optimal["fraudCaptureRate"],
+                "falsePositiveRate": optimal["falsePositiveRate"],
+                "alertRate": optimal["alertRate"],
+                "expectedCost": cost["totalCost"],
+            }
+        if segments:
+            output[dimension] = segments
+    return output
+
+
+def _raw_value(row: dict[str, object], name: str) -> object:
+    raw = row.get("raw_transaction")
+    return raw.get(name) if isinstance(raw, dict) else None
+
+
+def _scenario(row: dict[str, object]) -> object:
+    metadata = row.get("metadata")
+    return metadata.get("scenario") if isinstance(metadata, dict) else row.get("fraudScenario")
 
 
 def _precision_at_k(y_true: list[int], y_score: list[float], k: int) -> float:
