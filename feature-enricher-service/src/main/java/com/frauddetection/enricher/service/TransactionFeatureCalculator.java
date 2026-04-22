@@ -1,6 +1,7 @@
 package com.frauddetection.enricher.service;
 
 import com.frauddetection.common.events.contract.TransactionRawEvent;
+import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.model.Money;
 import com.frauddetection.enricher.config.FeatureStoreProperties;
 import com.frauddetection.enricher.domain.EnrichedTransactionFeatures;
@@ -49,50 +50,50 @@ public class TransactionFeatureCalculator {
 
         List<String> featureFlags = new ArrayList<>();
         if (deviceNovelty) {
-            featureFlags.add("DEVICE_NOVELTY");
+            featureFlags.add(FraudFeatureContract.FLAG_DEVICE_NOVELTY);
         }
         if (countryMismatch) {
-            featureFlags.add("COUNTRY_MISMATCH");
+            featureFlags.add(FraudFeatureContract.FLAG_COUNTRY_MISMATCH);
         }
         if (proxyOrVpnDetected) {
-            featureFlags.add("PROXY_OR_VPN");
+            featureFlags.add(FraudFeatureContract.FLAG_PROXY_OR_VPN);
         }
         if (recentTransactionCount >= HIGH_VELOCITY_TRANSACTION_COUNT) {
-            featureFlags.add("HIGH_VELOCITY");
+            featureFlags.add(FraudFeatureContract.FLAG_HIGH_VELOCITY);
         }
         if (merchantFrequency7d >= 5) {
-            featureFlags.add("MERCHANT_CONCENTRATION");
+            featureFlags.add(FraudFeatureContract.FLAG_MERCHANT_CONCENTRATION);
         }
         if (recentTransactionCount >= 2 && recentAmountSum.compareTo(BigDecimal.valueOf(5000)) >= 0) {
-            featureFlags.add("HIGH_AMOUNT_ACTIVITY");
+            featureFlags.add(FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY);
         }
         boolean rapidPln20kBurst = recentTransactionCount >= 2 && recentAmountSumPln.compareTo(RAPID_TRANSFER_PLN_THRESHOLD) >= 0;
         if (rapidPln20kBurst) {
-            featureFlags.add("RAPID_PLN_20K_BURST");
+            featureFlags.add(FraudFeatureContract.FLAG_RAPID_PLN_20K_BURST);
         }
 
         Map<String, Object> featureSnapshot = new LinkedHashMap<>();
-        featureSnapshot.put("recentTransactionCount", recentTransactionCount);
-        featureSnapshot.put("recentTransactionCountWindow", featureStoreProperties.recentTransactionWindow().toString());
-        featureSnapshot.put("recentAmountSum", recentAmountSum);
-        featureSnapshot.put("recentAmountSumWindow", featureStoreProperties.recentTransactionWindow().toString());
-        featureSnapshot.put("recentAmountSumPln", recentAmountSumPln);
-        featureSnapshot.put("currentTransactionAmountPln", currentAmountPln);
-        featureSnapshot.put("rapidTransferWindow", featureStoreProperties.recentTransactionWindow().toString());
-        featureSnapshot.put("rapidTransferThresholdPln", RAPID_TRANSFER_PLN_THRESHOLD);
-        featureSnapshot.put("rapidTransferFraudCaseCandidate", rapidPln20kBurst);
-        featureSnapshot.put("rapidTransferCount", recentTransactionCount);
-        featureSnapshot.put("rapidTransferTotalPln", recentAmountSumPln);
-        featureSnapshot.put("rapidTransferTransactionIds", rapidTransferTransactionIds(snapshot, event));
-        featureSnapshot.put("transactionVelocityPerMinute", velocityPerMinute);
-        featureSnapshot.put("merchantFrequency7d", merchantFrequency7d);
-        featureSnapshot.put("deviceNovelty", deviceNovelty);
-        featureSnapshot.put("countryMismatch", countryMismatch);
-        featureSnapshot.put("proxyOrVpnDetected", proxyOrVpnDetected);
-        featureSnapshot.put("customerSegment", event.customerContext().segment());
-        featureSnapshot.put("merchantCategory", event.merchantInfo().merchantCategory());
-        featureSnapshot.put("currency", event.transactionAmount().currency().toUpperCase(Locale.ROOT));
-        featureSnapshot.put("featureFlags", List.copyOf(featureFlags));
+        featureSnapshot.put(FraudFeatureContract.RECENT_TRANSACTION_COUNT, recentTransactionCount);
+        featureSnapshot.put(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, featureStoreProperties.recentTransactionWindow().toString());
+        featureSnapshot.put(FraudFeatureContract.RECENT_AMOUNT_SUM, recentAmountSum);
+        featureSnapshot.put(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, featureStoreProperties.recentTransactionWindow().toString());
+        featureSnapshot.put(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, recentAmountSumPln);
+        featureSnapshot.put(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, currentAmountPln);
+        featureSnapshot.put(FraudFeatureContract.RAPID_TRANSFER_WINDOW, featureStoreProperties.recentTransactionWindow().toString());
+        featureSnapshot.put(FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN, RAPID_TRANSFER_PLN_THRESHOLD);
+        featureSnapshot.put(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, rapidPln20kBurst);
+        featureSnapshot.put(FraudFeatureContract.RAPID_TRANSFER_COUNT, recentTransactionCount);
+        featureSnapshot.put(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, recentAmountSumPln);
+        featureSnapshot.put(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, rapidTransferTransactionIds(snapshot, event));
+        featureSnapshot.put(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, velocityPerMinute);
+        featureSnapshot.put(FraudFeatureContract.MERCHANT_FREQUENCY_7D, merchantFrequency7d);
+        featureSnapshot.put(FraudFeatureContract.DEVICE_NOVELTY, deviceNovelty);
+        featureSnapshot.put(FraudFeatureContract.COUNTRY_MISMATCH, countryMismatch);
+        featureSnapshot.put(FraudFeatureContract.PROXY_OR_VPN_DETECTED, proxyOrVpnDetected);
+        featureSnapshot.put(FraudFeatureContract.CUSTOMER_SEGMENT, event.customerContext().segment());
+        featureSnapshot.put(FraudFeatureContract.MERCHANT_CATEGORY, event.merchantInfo().merchantCategory());
+        featureSnapshot.put(FraudFeatureContract.CURRENCY, event.transactionAmount().currency().toUpperCase(Locale.ROOT));
+        featureSnapshot.put(FraudFeatureContract.FEATURE_FLAGS, List.copyOf(featureFlags));
 
         return new EnrichedTransactionFeatures(
                 recentTransactionCount,

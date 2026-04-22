@@ -20,6 +20,7 @@ The repository intentionally does not contain third-party fraud datasets. Synthe
 - [Idempotency And Performance](#idempotency-and-performance)
 - [Security Hardening](#security-hardening)
 - [Testing](#testing)
+- [ML Inference Service](#ml-inference-service)
 - [AI/ML Roadmap](#aiml-roadmap)
 - [AI Analyst Assistant Roadmap](#ai-analyst-assistant-roadmap)
 - [Project Structure](#project-structure)
@@ -483,6 +484,209 @@ Testing layers:
 
 Integration tests are skipped automatically when Docker/Testcontainers is unavailable.
 
+## ML Inference Service
+
+`ml-inference-service` is the Python fraud model runtime used by `fraud-scoring-service`.
+The public scoring API remains compatible with the Java scoring client:
+
+```text
+POST /v1/fraud/score
+GET /health
+```
+
+`fraud-scoring-service` sends `MlModelInput`, where `features` is the Java-enriched feature snapshot.
+The ML service responds with the existing `MlModelOutput` shape: `fraudScore`, `riskLevel`, `modelName`,
+`modelVersion`, `reasonCodes`, `scoreDetails`, and `explanationMetadata`.
+
+### ML Package Layout
+
+```text
+ml-inference-service/app/
+  data/          synthetic datasets and Dataset abstraction
+  evaluation/    fraud metrics and threshold reports
+  features/      shared feature contract and FeaturePipeline
+  feedback/      analyst feedback datasets
+  inference/     runtime response assembly
+  models/        logistic baseline and optional model adapters
+  registry/      local model registry
+  training/      training and retraining workflows
+```
+
+### Training And Evaluation
+
+Run a small local training smoke test:
+
+```bash
+cd ml-inference-service
+python -m app.train_model \
+  --output tmp_model_artifact.json \
+  --evaluation-output tmp_evaluation_report.json \
+  --examples 500 \
+  --epochs 5 \
+  --learning-rate 0.1 \
+  --seed 7341 \
+  --model-type logistic \
+  --training-mode production
+```
+
+Training writes an evaluation report with fraud-focused metrics:
+
+- PR-AUC
+- ROC-AUC
+- precision@k
+- recall@k
+- alert rate
+- fraud capture rate
+- false positive rate
+- cost curves
+- threshold analysis
+- optimal threshold by F1
+- optimal threshold by expected cost
+
+Evaluation is split-based, not in-sample. The training pipeline uses train,
+validation, and test splits. The default `training-mode=production` trains only
+on `productionInferenceFeatures` from the shared feature contract, so the model
+feature schema matches the Java-enriched production inference payload. `full`
+mode remains available for offline experiments that intentionally include
+training-only synthetic features.
+
+Splitting supports `random`, `temporal`, and `out_of_time` modes. Temporal
+splits preserve timestamp ordering and, when enough fraud cases exist, stratify
+fraud labels across train, validation, and test. The validation split selects the
+operating threshold, the test split reports final metrics, and the evaluation
+report also includes out-of-time metrics to show degradation on a later unseen
+time window.
+
+Logistic regression and XGBoost use the same training lifecycle: split dataset,
+fit on train, select threshold on validation, evaluate on test, evaluate an
+out-of-time window, write the same report schema, save the artifact, and
+optionally register it.
+
+### Local Model Registry
+
+The local registry stores copied model artifacts plus metadata:
+
+- `modelVersion`
+- `modelType`
+- metrics
+- training metadata
+- role: `champion`, `challenger`, or `archived`
+
+Register a trained artifact:
+
+```bash
+cd ml-inference-service
+python -m app.train_model \
+  --output tmp_model_artifact.json \
+  --evaluation-output tmp_evaluation_report.json \
+  --register-model \
+  --registry-role challenger
+```
+
+Runtime loading order:
+
+1. explicit `model_version`
+2. champion registry entry
+3. latest registry entry
+4. legacy `app/model_artifact.json`
+
+Artifact metadata controls runtime model loading. `modelType=logistic` loads the
+logistic adapter. `modelType=xgboost` loads the optional XGBoost adapter when the
+`xgboost` Python package is installed. Unknown model types fail clearly instead
+of falling back to logistic. Artifacts store `trainingMode`, `featureSetUsed`,
+and `featureSchema` for inference-time parity checks.
+
+### Feature Parity
+
+The shared fraud feature contract distinguishes production inference features
+from training-only synthetic features.
+
+Current production Java snapshots provide:
+
+- `recentTransactionCount`
+- `recentAmountSum`
+- `transactionVelocityPerMinute`
+- `merchantFrequency7d`
+- `deviceNovelty`
+- `countryMismatch`
+- `proxyOrVpnDetected`
+
+Python derives these production inference features from the Java snapshot:
+
+- `highRiskFlagCount`
+- `rapidTransferBurst`
+
+These features are currently training-only/synthetic-only and are not required
+from the Java production path:
+
+- `transactionVelocityPerHour`
+- `transactionVelocityPerDay`
+- `recentAmountAverage`
+- `recentAmountStdDev`
+- `amountDeviationFromUserMean`
+- `merchantEntropy`
+- `countryEntropy`
+
+The inference runtime reports feature compatibility in `scoreDetails` so missing
+required production fields can be detected without pretending every training
+feature is available in production.
+
+Training artifacts store the exact feature set used by the model. Runtime scoring
+uses the artifact training mode, so a production-trained model sees the same
+ordered feature schema during training and inference.
+
+### Retraining Decisions
+
+Challenger promotion uses multiple criteria instead of PR-AUC alone:
+
+- PR-AUC must improve.
+- false positive rate must stay within the configured increase threshold.
+- alert rate must remain inside the configured business range.
+- expected cost must not worsen.
+- budget-constrained performance must not regress when an alert budget is configured.
+- high-priority segment performance must not severely regress.
+- out-of-time stability must stay within configured degradation thresholds.
+
+The comparison output includes a structured decision object with pass/fail
+criteria, threshold settings, and the current/challenger metrics used for the
+decision.
+
+The rollout decision object is governance-oriented:
+
+- `decision`: `promote`, `shadow_only`, or `reject`
+- `summary`
+- `passed_checks`
+- `failed_checks`
+- `key_metrics`
+- `recommended_rollout_mode`
+- `recommended_alert_budget`
+- `evaluation_window_metadata`
+
+### ML Compare
+
+The Python runtime can compare two ML runtimes, typically registry champion vs
+challenger. The comparison reports per-model version metrics, score delta,
+absolute score delta, risk-level mismatch, decision disagreement, and threshold
+differences.
+
+### Analyst Feedback
+
+Analyst feedback rows are privacy-safe JSONL records derived from `FraudDecisionEvent` metadata.
+Transaction identifiers are hashed, delayed labels are supported, and only resolved analyst decisions
+are used for training:
+
+- `CONFIRMED_FRAUD` -> `1`
+- `MARKED_LEGITIMATE` -> `0`
+- unresolved decisions are excluded until updated
+
+### ML Verification
+
+```bash
+cd ml-inference-service
+python -m unittest discover -s tests
+python -m compileall app tests
+```
+
 ## AI/ML Roadmap
 
 Rule-based scoring remains the local default production-safe path while Docker now runs a Python ML inference service in shadow mode.
@@ -522,6 +726,28 @@ Current Python inference boundary:
 - model artifact: `ml-inference-service/app/model_artifact.json`
 - training entrypoint: `python -m app.train_model --output ml-inference-service/app/model_artifact.json`
 - response contract: `MlModelOutput`, including model name, version, timestamp, reason codes, score details, and explanation metadata
+
+Current ML capabilities:
+
+- clean Python pipeline architecture for data, features, training, evaluation, inference, feedback, registry, and models
+- user-sequence synthetic data generation with normal behavior and labelled fraud scenarios
+- shared Java/Python feature contract in `common-events`
+- split-based fraud-specific evaluation metrics and JSON reports
+- production feature training mode with artifact feature schema parity
+- stratified temporal and out-of-time validation support
+- cost-based threshold analysis
+- fixed alert-budget evaluation for analyst queue constraints
+- segment evaluation by customer segment, merchant category, country, and fraud scenario when available
+- stability assessment across temporal and out-of-time windows
+- analyst feedback datasets with delayed label updates
+- model-agnostic multi-criteria retraining comparison for challenger models
+- local registry with latest, version, champion, challenger, and promotion support
+- SHADOW and COMPARE monitoring for score distribution, score deltas, disagreement, risk mismatch, model version tracking, and ML-vs-ML comparison
+
+Model support:
+
+- logistic regression is the default runnable model type
+- XGBoost is optional; when the `xgboost` package is installed, the adapter supports fit, predict, save, load, registry artifacts, and inference through the same feature pipeline
 
 Explanation strategy:
 

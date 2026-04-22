@@ -4,6 +4,8 @@ import com.frauddetection.scoring.config.ScoringMode;
 import com.frauddetection.scoring.config.ScoringProperties;
 import com.frauddetection.scoring.domain.FraudScoreResult;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 
@@ -13,6 +15,8 @@ import java.util.Map;
 @Component
 @Primary
 public class CompositeFraudScoringEngine implements FraudScoringEngine {
+
+    private static final Logger log = LoggerFactory.getLogger(CompositeFraudScoringEngine.class);
 
     private final RuleBasedFraudScoringEngine ruleBasedFraudScoringEngine;
     private final MlFraudScoringEngine mlFraudScoringEngine;
@@ -65,10 +69,12 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
         diagnostics.put("shadowModelVersion", mlResult.modelVersion());
         diagnostics.put("shadowFraudScore", mlResult.fraudScore());
         diagnostics.put("shadowRiskLevel", mlResult.riskLevel().name());
+        diagnostics.put("modelMonitoring", ModelMonitoringMetrics.from(ScoringMode.SHADOW, ruleResult, mlResult, isModelAvailable(mlResult)));
         if (!isModelAvailable(mlResult)) {
             diagnostics.put("shadowFallbackReason", fallbackReason(mlResult));
         }
 
+        logModelMonitoring(request, diagnostics);
         return withDiagnostics(ruleResult, diagnostics);
     }
 
@@ -84,12 +90,14 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
         diagnostics.put("mlModelVersion", mlResult.modelVersion());
         diagnostics.put("mlFraudScore", mlResult.fraudScore());
         diagnostics.put("mlRiskLevel", mlResult.riskLevel().name());
-        diagnostics.put("scoreDelta", ruleResult.fraudScore() - mlResult.fraudScore());
+        diagnostics.put("scoreDelta", score(ruleResult) - score(mlResult));
         diagnostics.put("riskLevelMatch", ruleResult.riskLevel() == mlResult.riskLevel());
+        diagnostics.put("modelMonitoring", ModelMonitoringMetrics.from(ScoringMode.COMPARE, ruleResult, mlResult, isModelAvailable(mlResult)));
         if (!isModelAvailable(mlResult)) {
             diagnostics.put("mlFallbackReason", fallbackReason(mlResult));
         }
 
+        logModelMonitoring(request, diagnostics);
         return withDiagnostics(ruleResult, diagnostics);
     }
 
@@ -100,6 +108,10 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
     private String fallbackReason(FraudScoreResult result) {
         Object reason = result.explanationMetadata().get("fallbackReason");
         return reason == null ? "ML model result is unavailable." : reason.toString();
+    }
+
+    private double score(FraudScoreResult result) {
+        return result.fraudScore() == null ? 0.0d : result.fraudScore();
     }
 
     private FraudScoreResult withDiagnostics(FraudScoreResult result, Map<String, Object> diagnostics) {
@@ -122,5 +134,21 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
                 explanationMetadata,
                 result.alertRecommended()
         );
+    }
+
+    @SuppressWarnings("unchecked")
+    private void logModelMonitoring(FraudScoringRequest request, Map<String, Object> diagnostics) {
+        Map<String, Object> monitoring = (Map<String, Object>) diagnostics.get("modelMonitoring");
+        log.atInfo()
+                .addKeyValue("transactionId", request.event().transactionId())
+                .addKeyValue("correlationId", request.event().correlationId())
+                .addKeyValue("mode", monitoring.get("mode"))
+                .addKeyValue("modelName", monitoring.get("modelName"))
+                .addKeyValue("modelVersion", monitoring.get("modelVersion"))
+                .addKeyValue("mlScoreBucket", monitoring.get("mlScoreBucket"))
+                .addKeyValue("scoreDelta", monitoring.get("scoreDelta"))
+                .addKeyValue("decisionDisagreement", monitoring.get("decisionDisagreement"))
+                .addKeyValue("riskLevelMismatch", monitoring.get("riskLevelMismatch"))
+                .log("Recorded ML model monitoring sample.");
     }
 }
