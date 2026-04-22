@@ -27,7 +27,11 @@ def main() -> None:
 
     dataset = generate_examples(args.examples, args.seed)
     if args.model_type != "logistic":
-        raise RuntimeError("Only model_type=logistic is runnable until optional XGBoost dependencies are installed.")
+        raise RuntimeError(
+            "model_type=xgboost is an extension point only. "
+            "Install the optional xgboost dependency and complete runtime artifact support before training with it. "
+            "Use --model-type logistic for the default runnable path."
+        )
 
     bias, weights, evaluation = train_with_evaluation(dataset, args.epochs, args.learning_rate)
     write_artifact(args.output, bias, weights, dataset.size, model_type=args.model_type, evaluation=evaluation)

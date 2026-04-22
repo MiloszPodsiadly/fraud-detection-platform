@@ -36,7 +36,11 @@ class XGBoostFraudModel:
     @classmethod
     def load(cls, artifact_path: Path) -> XGBoostFraudModel:
         """Load an XGBoost model artifact."""
-        return cls()
+        cls()
+        raise RuntimeError(
+            "modelType=xgboost artifact loading is not fully supported yet. "
+            "Install and wire the optional XGBoost runtime before using this artifact in inference."
+        )
 
     def feature_importance(self) -> dict[str, float]:
         """Return XGBoost feature importances."""
