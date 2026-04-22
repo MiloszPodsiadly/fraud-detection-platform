@@ -14,8 +14,8 @@ from app.model import FraudModel
 from app.models.model_loader import ModelConfigurationError, load_model_from_artifact
 from app.registry.model_registry import ModelRegistry
 from app.models.xgboost_model import XGBoostFraudModel
-from app.training.retraining import PromotionThresholds, compare_retrained_model
-from app.training.train import train, train_model, train_with_evaluation, write_artifact
+from app.training.retraining import PromotionThresholds, _promotion_decision, compare_retrained_model
+from app.training.train import train, train_model, train_model_with_evaluation, train_with_evaluation, write_artifact
 
 
 class FraudModelTest(unittest.TestCase):
@@ -275,6 +275,56 @@ class FraudModelTest(unittest.TestCase):
         self.assertEqual(artifact["featureSetUsed"], list(weights))
         self.assertEqual(set(artifact["featureSchema"]), set(weights))
 
+    def test_model_lifecycle_report_schema_is_consistent_for_logistic(self):
+        dataset = generate_fraud_behavior(count=300, seed=322, user_count=8, fraud_ratio=0.03)
+        model, evaluation = train_model_with_evaluation(dataset, "logistic", epochs=2, learning_rate=0.1)
+        expected_keys = {
+            "rows",
+            "positiveLabels",
+            "negativeLabels",
+            "prAuc",
+            "rocAuc",
+            "precisionAtK",
+            "recallAtK",
+            "thresholds",
+            "optimalThreshold",
+            "costEvaluation",
+            "budgetEvaluation",
+            "splitMetadata",
+            "validationEvaluation",
+            "outOfTimeEvaluation",
+            "evaluationComparison",
+            "stabilityAssessment",
+            "trainingMode",
+            "featureSetUsed",
+            "segmentEvaluation",
+        }
+
+        self.assertEqual(model.model_family, "LOGISTIC_REGRESSION")
+        self.assertTrue(expected_keys.issubset(evaluation))
+        self.assertEqual(evaluation["trainingMode"], "production")
+
+    def test_budget_and_segment_evaluation_are_reported(self):
+        report = evaluate_scores(
+            y_true=[0, 1, 0, 1, 0, 0],
+            y_score=[0.05, 0.95, 0.40, 0.80, 0.10, 0.02],
+            thresholds=[0.50],
+            alert_budgets=[0.5],
+            segment_rows=[
+                {"country": "PL", "metadata": {"scenario": "normal_behavior"}},
+                {"country": "PL", "metadata": {"scenario": "account_takeover"}},
+                {"country": "DE", "metadata": {"scenario": "normal_behavior"}},
+                {"country": "DE", "metadata": {"scenario": "card_testing"}},
+                {"country": "PL", "metadata": {"scenario": "normal_behavior"}},
+                {"country": "DE", "metadata": {"scenario": "normal_behavior"}},
+            ],
+        )
+
+        self.assertIn("budgetEvaluation", report)
+        self.assertEqual(report["budgetEvaluation"]["recommended"]["alertBudget"], 0.5)
+        self.assertIn("segmentEvaluation", report)
+        self.assertIn("country", report["segmentEvaluation"])
+
     def test_dataset_split_prefers_temporal_order_and_separate_row_sets(self):
         dataset = generate_fraud_behavior(count=300, seed=222, user_count=4, fraud_ratio=0.03)
         splits = split_dataset(dataset)
@@ -419,8 +469,23 @@ class FraudModelTest(unittest.TestCase):
 
         self.assertGreaterEqual(comparison.challenger_pr_auc, 0.0)
         self.assertIn("criteria", comparison.decision)
+        self.assertIn(comparison.decision["decision"], {"promote", "shadow_only", "reject"})
+        self.assertIn("recommended_rollout_mode", comparison.decision)
         self.assertIn("prAuc", comparison.challenger_evaluation)
         self.assertIn("splitMetadata", comparison.challenger_evaluation)
+
+    def test_rollout_decision_promote_shadow_and_reject_outcomes(self):
+        current = self._evaluation_for_decision(pr_auc=0.6, fpr=0.05, alert_rate=0.05, cost=1000.0)
+        promote = self._evaluation_for_decision(pr_auc=0.8, fpr=0.05, alert_rate=0.05, cost=900.0)
+        shadow = self._evaluation_for_decision(pr_auc=0.8, fpr=0.05, alert_rate=0.05, cost=900.0)
+        shadow["stabilityAssessment"] = {"prAucDelta": 0.4, "expectedCostDelta": 10.0}
+        reject = self._evaluation_for_decision(pr_auc=0.4, fpr=0.30, alert_rate=0.80, cost=2000.0)
+
+        thresholds = PromotionThresholds(alert_budget=0.01, max_alert_rate=0.5)
+
+        self.assertEqual(_promotion_decision(current, promote, thresholds)["decision"], "promote")
+        self.assertEqual(_promotion_decision(current, shadow, thresholds)["decision"], "shadow_only")
+        self.assertEqual(_promotion_decision(current, reject, thresholds)["decision"], "reject")
 
     def test_model_registry_tracks_latest_champion_challenger_and_versions(self):
         artifact_path = Path.cwd() / "registry-test-artifact.json"
@@ -658,6 +723,28 @@ class FraudModelTest(unittest.TestCase):
         self.assertLessEqual(score, 1.0)
         self.assertGreaterEqual(loaded_score, 0.0)
         self.assertLessEqual(loaded_score, 1.0)
+
+    def _evaluation_for_decision(self, pr_auc: float, fpr: float, alert_rate: float, cost: float) -> dict[str, object]:
+        return {
+            "prAuc": pr_auc,
+            "optimalThreshold": {
+                "falsePositiveRate": fpr,
+                "alertRate": alert_rate,
+                "fraudCaptureRate": 0.8,
+            },
+            "costEvaluation": {"optimalCostThreshold": {"totalCost": cost}},
+            "budgetEvaluation": {
+                "budgets": [
+                    {
+                        "alertBudget": 0.01,
+                        "expectedCost": cost,
+                        "fraudCaptureRate": 0.8,
+                    }
+                ]
+            },
+            "stabilityAssessment": {"prAucDelta": 0.02, "expectedCostDelta": 10.0},
+            "splitMetadata": {"testRows": 10},
+        }
 
 
 if __name__ == "__main__":
