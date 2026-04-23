@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { submitAnalystDecision } from "../api/alertsApi.js";
+import { AUTHORITIES } from "../auth/session.js";
 import { formatScore } from "../utils/format.js";
+import { PermissionNotice } from "./SecurityStatePanels.jsx";
 import { RiskBadge } from "./RiskBadge.jsx";
 
 const DECISIONS = [
@@ -10,17 +12,21 @@ const DECISIONS = [
   "ESCALATED"
 ];
 
-export function AnalystDecisionForm({ alertId, summary, disabled, onSubmitted }) {
-  const [analystId, setAnalystId] = useState("analyst.local");
+export function AnalystDecisionForm({ alertId, summary, session, canSubmit, disabled, onSubmitted }) {
   const [decision, setDecision] = useState("REQUIRE_MORE_EVIDENCE");
   const [decisionReason, setDecisionReason] = useState("");
   const [tags, setTags] = useState("manual-review");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
+  const actionDisabled = disabled || isSubmitting || !canSubmit;
+  const analystId = session?.userId || "";
 
   async function handleSubmit(event) {
     event.preventDefault();
+    if (actionDisabled) {
+      return;
+    }
     setIsSubmitting(true);
     setError("");
     setResult(null);
@@ -51,6 +57,14 @@ export function AnalystDecisionForm({ alertId, summary, disabled, onSubmitted })
         <h2>Case action</h2>
       </div>
 
+      {!canSubmit && (
+        <PermissionNotice
+          session={session}
+          authority={AUTHORITIES.ALERT_DECISION_SUBMIT}
+          action="submitting an analyst decision"
+        />
+      )}
+
       {summary && (
         <div className="caseMiniCard">
           <RiskBadge riskLevel={summary.riskLevel} />
@@ -61,12 +75,12 @@ export function AnalystDecisionForm({ alertId, summary, disabled, onSubmitted })
 
       <label>
         Analyst ID
-        <input value={analystId} onChange={(event) => setAnalystId(event.target.value)} disabled={disabled || isSubmitting} />
+        <input value={analystId} readOnly disabled />
       </label>
 
       <label>
         Decision
-        <select value={decision} onChange={(event) => setDecision(event.target.value)} disabled={disabled || isSubmitting}>
+        <select value={decision} onChange={(event) => setDecision(event.target.value)} disabled={actionDisabled}>
           {DECISIONS.map((option) => (
             <option key={option} value={option}>{option}</option>
           ))}
@@ -78,7 +92,7 @@ export function AnalystDecisionForm({ alertId, summary, disabled, onSubmitted })
         <textarea
           value={decisionReason}
           onChange={(event) => setDecisionReason(event.target.value)}
-          disabled={disabled || isSubmitting}
+          disabled={actionDisabled}
           placeholder="Document the evidence behind this decision."
           required
           minLength="3"
@@ -91,7 +105,7 @@ export function AnalystDecisionForm({ alertId, summary, disabled, onSubmitted })
         <input
           value={tags}
           onChange={(event) => setTags(event.target.value)}
-          disabled={disabled || isSubmitting}
+          disabled={actionDisabled}
           placeholder="manual-review, account-takeover"
         />
       </label>
@@ -99,7 +113,7 @@ export function AnalystDecisionForm({ alertId, summary, disabled, onSubmitted })
       {error && <p className="formError">{error}</p>}
       {result && <p className="formSuccess">Decision saved. Status: {result.resultingStatus}</p>}
 
-      <button className="primaryButton" type="submit" disabled={disabled || isSubmitting}>
+      <button className="primaryButton" type="submit" disabled={actionDisabled}>
         {isSubmitting ? "Submitting..." : "Submit decision"}
       </button>
     </form>

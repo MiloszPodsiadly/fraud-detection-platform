@@ -60,7 +60,7 @@ code {
 
 .hero {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto minmax(18rem, 24rem);
   gap: 1.5rem;
   align-items: end;
   padding: 2rem;
@@ -85,22 +85,84 @@ code {
 
 .heroStats {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 0.8rem;
 }
 
 .heroStats div,
 .metricCard,
 .summaryItem,
-.caseMiniCard {
+.caseMiniCard,
+.sessionBadge {
   border: 1px solid rgba(82, 97, 60, 0.18);
-  border-radius: 1.2rem;
+  border-radius: 1rem;
   background: rgba(255, 252, 244, 0.72);
 }
 
 .heroStats div {
   min-width: 8rem;
   padding: 1rem;
+}
+
+.sessionBadge {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+}
+
+.sessionIdentity {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.sessionIdentity strong,
+.sessionIdentity small {
+  display: block;
+}
+
+.sessionIdentity small {
+  color: var(--muted);
+}
+
+.sessionDot {
+  width: 0.75rem;
+  height: 0.75rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--red);
+}
+
+.sessionDotActive {
+  background: var(--green);
+}
+
+.sessionModePill {
+  margin-left: auto;
+  border: 1px solid rgba(63, 123, 85, 0.2);
+  border-radius: 999px;
+  padding: 0.25rem 0.55rem;
+  background: rgba(63, 123, 85, 0.1);
+  color: var(--green);
+  font-size: 0.72rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.sessionModePillMuted {
+  border-color: rgba(180, 52, 52, 0.2);
+  background: rgba(180, 52, 52, 0.08);
+  color: var(--red);
+}
+
+.authorityList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.authorityList .tag {
+  font-size: 0.68rem;
 }
 
 .heroStats span,
@@ -711,7 +773,8 @@ textarea:focus {
 }
 
 .formError,
-.formSuccess {
+.formSuccess,
+.permissionNotice {
   border-radius: 0.9rem;
   padding: 0.75rem;
   margin: 0;
@@ -727,6 +790,18 @@ textarea:focus {
   color: var(--green);
 }
 
+.permissionNotice {
+  display: grid;
+  gap: 0.25rem;
+  border: 1px solid rgba(180, 52, 52, 0.18);
+  background: rgba(180, 52, 52, 0.1);
+  color: var(--red);
+}
+
+.permissionNotice span {
+  color: var(--muted);
+}
+
 .statePanel {
   display: grid;
   place-items: center;
@@ -738,6 +813,36 @@ textarea:focus {
 
 .errorPanel {
   color: var(--red);
+}
+
+.securityStatePanel {
+  border: 1px solid rgba(82, 97, 60, 0.18);
+  border-radius: 1rem;
+  background: rgba(255, 253, 247, 0.74);
+  padding: 1.5rem;
+}
+
+.securityStateIcon {
+  display: inline-grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 999px;
+  background: rgba(180, 52, 52, 0.12);
+  color: var(--red);
+  font-weight: 900;
+}
+
+.unauthorizedPanel h3,
+.accessDeniedPanel h3 {
+  margin: 0;
+  color: var(--ink);
+}
+
+.unauthorizedPanel p,
+.accessDeniedPanel p {
+  max-width: 34rem;
+  margin: 0;
 }
 
 .spinner {
