@@ -1,19 +1,21 @@
 import { useEffect, useState } from "react";
 import { getFraudCase, updateFraudCase } from "../api/alertsApi.js";
+import { AUTHORITIES, hasAuthority } from "../auth/session.js";
 import { ErrorState } from "../components/ErrorState.jsx";
 import { LoadingPanel } from "../components/LoadingPanel.jsx";
 import { RiskBadge } from "../components/RiskBadge.jsx";
+import { PermissionNotice } from "../components/SecurityStatePanels.jsx";
 import { formatAmount, formatDateTime, formatScore } from "../utils/format.js";
 
 const CASE_STATUSES = ["IN_REVIEW", "CONFIRMED_FRAUD", "FALSE_POSITIVE", "CLOSED"];
 
-export function FraudCaseDetailsPage({ caseId, onBack, onCaseUpdated }) {
+export function FraudCaseDetailsPage({ caseId, session, onBack, onCaseUpdated }) {
   const [fraudCase, setFraudCase] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [form, setForm] = useState({
     status: "IN_REVIEW",
-    analystId: "analyst-1",
+    analystId: "",
     decisionReason: "",
     tags: "rapid-transfer, grouped-low-risk"
   });
@@ -31,7 +33,7 @@ export function FraudCaseDetailsPage({ caseId, onBack, onCaseUpdated }) {
       setFraudCase(nextCase);
       setForm({
         status: nextCase.status === "OPEN" ? "IN_REVIEW" : nextCase.status,
-        analystId: nextCase.analystId || "analyst-1",
+        analystId: session.userId || nextCase.analystId || "",
         decisionReason: nextCase.decisionReason || "",
         tags: (nextCase.decisionTags || ["rapid-transfer", "grouped-low-risk"]).join(", ")
       });
@@ -44,11 +46,14 @@ export function FraudCaseDetailsPage({ caseId, onBack, onCaseUpdated }) {
 
   async function submitDecision(event) {
     event.preventDefault();
+    if (!canUpdateCase) {
+      return;
+    }
     setSubmitState({ isSubmitting: true, error: "", success: "" });
     try {
       const updated = await updateFraudCase(caseId, {
         status: form.status,
-        analystId: form.analystId,
+        analystId: session.userId,
         decisionReason: form.decisionReason,
         tags: form.tags.split(",").map((tag) => tag.trim()).filter(Boolean)
       });
@@ -67,6 +72,9 @@ export function FraudCaseDetailsPage({ caseId, onBack, onCaseUpdated }) {
   if (error) {
     return <ErrorState message={error} onRetry={loadCase} />;
   }
+
+  const canUpdateCase = hasAuthority(session, AUTHORITIES.FRAUD_CASE_UPDATE);
+  const actionDisabled = submitState.isSubmitting || !canUpdateCase;
 
   return (
     <div className="pageEnter">
@@ -140,28 +148,35 @@ export function FraudCaseDetailsPage({ caseId, onBack, onCaseUpdated }) {
         <aside className="panel decisionRail">
           <p className="eyebrow">Decision</p>
           <h2>Update case</h2>
+          {!canUpdateCase && (
+            <PermissionNotice
+              session={session}
+              authority={AUTHORITIES.FRAUD_CASE_UPDATE}
+              action="updating a fraud case"
+            />
+          )}
           <form className="decisionForm" onSubmit={submitDecision}>
             <label>
               Status
-              <select value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value }))}>
+              <select value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value }))} disabled={actionDisabled}>
                 {CASE_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
               </select>
             </label>
             <label>
               Analyst
-              <input value={form.analystId} onChange={(event) => setForm((current) => ({ ...current, analystId: event.target.value }))} />
+              <input value={session.userId || form.analystId} readOnly disabled />
             </label>
             <label>
               Reason
-              <textarea rows="5" required value={form.decisionReason} onChange={(event) => setForm((current) => ({ ...current, decisionReason: event.target.value }))} />
+              <textarea rows="5" required value={form.decisionReason} onChange={(event) => setForm((current) => ({ ...current, decisionReason: event.target.value }))} disabled={actionDisabled} />
             </label>
             <label>
               Tags
-              <input value={form.tags} onChange={(event) => setForm((current) => ({ ...current, tags: event.target.value }))} />
+              <input value={form.tags} onChange={(event) => setForm((current) => ({ ...current, tags: event.target.value }))} disabled={actionDisabled} />
             </label>
             {submitState.error && <p className="formError">{submitState.error}</p>}
             {submitState.success && <p className="formSuccess">{submitState.success}</p>}
-            <button className="primaryButton" type="submit" disabled={submitState.isSubmitting}>
+            <button className="primaryButton" type="submit" disabled={actionDisabled}>
               {submitState.isSubmitting ? "Saving..." : "Save case decision"}
             </button>
           </form>

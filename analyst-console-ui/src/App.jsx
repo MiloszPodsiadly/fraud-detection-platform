@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { listAlerts, listFraudCases, listScoredTransactions } from "./api/alertsApi.js";
+import { listAlerts, listFraudCases, listScoredTransactions, setApiSession } from "./api/alertsApi.js";
+import { getInitialDemoSession, saveDemoSession } from "./auth/demoSession.js";
+import { normalizeSession } from "./auth/session.js";
+import { SessionBadge } from "./components/SessionBadge.jsx";
 import { AlertDetailsPage } from "./pages/AlertDetailsPage.jsx";
 import { AlertsListPage } from "./pages/AlertsListPage.jsx";
 import { FraudCaseDetailsPage } from "./pages/FraudCaseDetailsPage.jsx";
@@ -39,12 +42,19 @@ export default function App() {
   const [transactionPageRequest, setTransactionPageRequest] = useState({ page: 0, size: 25 });
   const [selectedAlertId, setSelectedAlertId] = useState(getInitialAlertId);
   const [selectedFraudCaseId, setSelectedFraudCaseId] = useState(getInitialFraudCaseId);
+  const [session, setSession] = useState(getInitialDemoSession);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(null);
 
   useEffect(() => {
+    setApiSession(session);
+    saveDemoSession(session);
+  }, [session]);
+
+  useEffect(() => {
+    setApiSession(session);
     loadDashboard({ transaction: transactionPageRequest, alert: alertPageRequest, fraudCase: fraudCasePageRequest });
-  }, [transactionPageRequest, alertPageRequest, fraudCasePageRequest]);
+  }, [transactionPageRequest, alertPageRequest, fraudCasePageRequest, session]);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -62,7 +72,7 @@ export default function App() {
 
   async function loadDashboard(nextRequests = { transaction: transactionPageRequest, alert: alertPageRequest, fraudCase: fraudCasePageRequest }) {
     setIsLoading(true);
-    setError("");
+    setError(null);
     try {
       const [nextAlerts, nextFraudCasePage, nextTransactionPage] = await Promise.all([
         listAlerts(nextRequests.alert),
@@ -73,7 +83,7 @@ export default function App() {
       setFraudCasePage(nextFraudCasePage);
       setTransactionPage(nextTransactionPage);
     } catch (apiError) {
-      setError(apiError.message);
+      setError(apiError);
     } finally {
       setIsLoading(false);
     }
@@ -81,6 +91,10 @@ export default function App() {
 
   function refreshDashboard() {
     loadDashboard({ transaction: transactionPageRequest, alert: alertPageRequest, fraudCase: fraudCasePageRequest });
+  }
+
+  function changeSession(nextSession) {
+    setSession(normalizeSession(nextSession));
   }
 
   function changeTransactionPage(page) {
@@ -156,6 +170,7 @@ export default function App() {
             <small>Fraud cases</small>
           </div>
         </div>
+        <SessionBadge session={session} onSessionChange={changeSession} />
       </header>
 
       <main>
@@ -163,12 +178,14 @@ export default function App() {
           <AlertDetailsPage
             alertId={selectedAlertId}
             alertSummary={selectedAlertSummary}
+            session={session}
             onBack={closeAlert}
             onDecisionSubmitted={refreshDashboard}
           />
         ) : selectedFraudCaseId ? (
           <FraudCaseDetailsPage
             caseId={selectedFraudCaseId}
+            session={session}
             onBack={closeFraudCase}
             onCaseUpdated={refreshDashboard}
           />

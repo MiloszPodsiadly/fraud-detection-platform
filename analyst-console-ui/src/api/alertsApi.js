@@ -1,9 +1,18 @@
+import { ApiError } from "./apiError.js";
+import { demoAuthHeaders } from "../auth/demoSession.js";
+
 const API_BASE_URL = import.meta.env.VITE_ALERT_API_BASE_URL ?? "";
+let activeSession = null;
+
+export function setApiSession(session) {
+  activeSession = session;
+}
 
 async function request(path, options = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
       "Content-Type": "application/json",
+      ...demoAuthHeaders(activeSession),
       ...options.headers
     },
     ...options
@@ -15,10 +24,15 @@ async function request(path, options = {}) {
       const errorBody = await response.json();
       const details = errorBody.details || errorBody.validationErrors || [];
       const detailText = Array.isArray(details) && details.length > 0 ? ` ${details.join(" ")}` : "";
-      throw new Error(`${errorBody.message || fallback}${detailText}`);
+      throw new ApiError({
+        status: response.status,
+        error: errorBody.error,
+        message: `${errorBody.message || fallback}${detailText}`,
+        details
+      });
     } catch (error) {
       if (error instanceof SyntaxError) {
-        throw new Error(fallback);
+        throw new ApiError({ status: response.status, message: fallback });
       }
       throw error;
     }

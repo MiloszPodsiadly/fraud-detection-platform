@@ -1,8 +1,22 @@
-export function ErrorState({ message, onRetry }) {
+import { securityErrorKind, securityErrorMessage } from "../auth/securityErrors.js";
+import { AccessDeniedPanel, UnauthorizedPanel } from "./SecurityStatePanels.jsx";
+
+export function ErrorState({ error, message, onRetry }) {
+  const displayMessage = securityErrorMessage(error || message);
+  const kind = securityErrorKind(error || message);
+
+  if (kind === "unauthorized") {
+    return <UnauthorizedPanel onRetry={onRetry} />;
+  }
+
+  if (kind === "forbidden") {
+    return <AccessDeniedPanel onRetry={onRetry} />;
+  }
+
   return (
     <div className="statePanel errorPanel">
       <h3>Unable to load data</h3>
-      <p>{message}</p>
+      <p>{displayMessage}</p>
       <button className="secondaryButton" type="button" onClick={onRetry}>Try again</button>
     </div>
   );

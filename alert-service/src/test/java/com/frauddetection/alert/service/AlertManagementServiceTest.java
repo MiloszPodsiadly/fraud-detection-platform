@@ -1,6 +1,9 @@
 package com.frauddetection.alert.service;
 
 import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
+import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.audit.AuditResourceType;
+import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.mapper.AlertDocumentMapper;
 import com.frauddetection.alert.mapper.FraudAlertEventMapper;
 import com.frauddetection.alert.mapper.FraudDecisionEventMapper;
@@ -8,6 +11,7 @@ import com.frauddetection.alert.messaging.FraudAlertEventPublisher;
 import com.frauddetection.alert.messaging.FraudDecisionEventPublisher;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
+import com.frauddetection.alert.security.principal.AnalystActorResolver;
 import com.frauddetection.common.events.contract.FraudAlertEvent;
 import com.frauddetection.common.events.contract.FraudDecisionEvent;
 import com.frauddetection.common.events.enums.AlertStatus;
@@ -25,6 +29,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -43,8 +48,10 @@ class AlertManagementServiceTest {
         AlertCaseFactory alertCaseFactory = new AlertCaseFactory();
         AnalystDecisionStatusMapper statusMapper = new AnalystDecisionStatusMapper();
         FraudCaseManagementService fraudCaseManagementService = mock(FraudCaseManagementService.class);
+        AuditService auditService = mock(AuditService.class);
+        AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
 
-        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher, fraudCaseManagementService);
+        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher, fraudCaseManagementService, auditService, analystActorResolver);
         var event = TransactionFixtures.scoredTransaction().build();
 
         when(repository.existsByTransactionId(event.transactionId())).thenReturn(false);
@@ -67,8 +74,10 @@ class AlertManagementServiceTest {
         AlertCaseFactory alertCaseFactory = new AlertCaseFactory();
         AnalystDecisionStatusMapper statusMapper = new AnalystDecisionStatusMapper();
         FraudCaseManagementService fraudCaseManagementService = mock(FraudCaseManagementService.class);
+        AuditService auditService = mock(AuditService.class);
+        AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
 
-        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher, fraudCaseManagementService);
+        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher, fraudCaseManagementService, auditService, analystActorResolver);
         var event = TransactionFixtures.scoredTransaction().build();
 
         when(repository.existsByTransactionId(event.transactionId())).thenReturn(false);
@@ -90,8 +99,10 @@ class AlertManagementServiceTest {
         AlertCaseFactory alertCaseFactory = new AlertCaseFactory();
         AnalystDecisionStatusMapper statusMapper = new AnalystDecisionStatusMapper();
         FraudCaseManagementService fraudCaseManagementService = mock(FraudCaseManagementService.class);
+        AuditService auditService = mock(AuditService.class);
+        AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
 
-        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher, fraudCaseManagementService);
+        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher, fraudCaseManagementService, auditService, analystActorResolver);
         AlertDocument document = new AlertDocument();
         document.setAlertId("alert-1");
         document.setTransactionId("txn-1");
@@ -106,6 +117,8 @@ class AlertManagementServiceTest {
 
         when(repository.findById("alert-1")).thenReturn(Optional.of(document));
         when(repository.save(any(AlertDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(analystActorResolver.resolveActorId(eq("analyst-7"), eq("SUBMIT_ANALYST_DECISION"), eq("alert-1")))
+                .thenReturn("principal-7");
 
         var response = service.submitDecision("alert-1", new SubmitAnalystDecisionRequest(
                 "analyst-7",
@@ -116,6 +129,10 @@ class AlertManagementServiceTest {
         ));
 
         assertThat(response.resultingStatus()).isEqualTo(AlertStatus.RESOLVED);
+        ArgumentCaptor<AlertDocument> documentCaptor = ArgumentCaptor.forClass(AlertDocument.class);
+        verify(repository).save(documentCaptor.capture());
+        assertThat(documentCaptor.getValue().getAnalystId()).isEqualTo("principal-7");
+
         ArgumentCaptor<FraudDecisionEvent> eventCaptor = ArgumentCaptor.forClass(FraudDecisionEvent.class);
         verify(decisionPublisher).publish(eventCaptor.capture());
         assertThat(eventCaptor.getValue().decisionMetadata())
@@ -123,5 +140,13 @@ class AlertManagementServiceTest {
                 .containsEntry("featureSnapshot", Map.of("recentTransactionCount", 5))
                 .containsEntry("modelFeedbackVersion", "2026-04-22.v1")
                 .containsEntry("queue", "night-shift");
+        verify(auditService).audit(
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT,
+                "alert-1",
+                "corr-1",
+                "principal-7"
+        );
+        assertThat(eventCaptor.getValue().analystId()).isEqualTo("principal-7");
     }
 }

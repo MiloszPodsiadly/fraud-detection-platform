@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getAlert, getAssistantSummary } from "../api/alertsApi.js";
+import { AUTHORITIES, hasAuthority } from "../auth/session.js";
 import { AnalystDecisionForm } from "../components/AnalystDecisionForm.jsx";
 import { AssistantSummaryPanel } from "../components/AssistantSummaryPanel.jsx";
 import { EmptyState } from "../components/EmptyState.jsx";
@@ -10,7 +11,7 @@ import { RiskBadge } from "../components/RiskBadge.jsx";
 import { TransactionSummary } from "../components/TransactionSummary.jsx";
 import { formatDateTime, formatScore } from "../utils/format.js";
 
-export function AlertDetailsPage({ alertId, alertSummary, onBack, onDecisionSubmitted }) {
+export function AlertDetailsPage({ alertId, alertSummary, session, onBack, onDecisionSubmitted }) {
   const [alert, setAlert] = useState(null);
   const [assistantSummary, setAssistantSummary] = useState(null);
   const [isAssistantLoading, setIsAssistantLoading] = useState(false);
@@ -129,6 +130,8 @@ export function AlertDetailsPage({ alertId, alertSummary, onBack, onDecisionSubm
       <aside className="panel decisionRail">
         <AnalystDecisionForm
           alertId={alertId}
+          session={session}
+          canSubmit={hasAuthority(session, AUTHORITIES.ALERT_DECISION_SUBMIT)}
           disabled={isLoading || Boolean(error)}
           summary={alert || alertSummary}
           onSubmitted={handleDecisionSubmitted}

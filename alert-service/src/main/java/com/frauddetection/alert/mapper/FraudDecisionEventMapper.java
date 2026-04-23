@@ -14,7 +14,7 @@ import java.util.UUID;
 @Component
 public class FraudDecisionEventMapper {
 
-    public FraudDecisionEvent toEvent(AlertCase alertCase, SubmitAnalystDecisionRequest request, AlertStatus resultingStatus) {
+    public FraudDecisionEvent toEvent(AlertCase alertCase, SubmitAnalystDecisionRequest request, AlertStatus resultingStatus, String actorId) {
         return new FraudDecisionEvent(
                 UUID.randomUUID().toString(),
                 UUID.randomUUID().toString(),
@@ -22,7 +22,7 @@ public class FraudDecisionEventMapper {
                 alertCase.transactionId(),
                 alertCase.customerId(),
                 alertCase.correlationId(),
-                request.analystId(),
+                actorId,
                 request.decision(),
                 resultingStatus,
                 request.decisionReason(),

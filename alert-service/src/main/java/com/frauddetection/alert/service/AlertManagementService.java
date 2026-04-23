@@ -2,6 +2,9 @@ package com.frauddetection.alert.service;
 
 import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
 import com.frauddetection.alert.api.SubmitAnalystDecisionResponse;
+import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.audit.AuditResourceType;
+import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.domain.AlertCase;
 import com.frauddetection.alert.exception.AlertNotFoundException;
 import com.frauddetection.alert.mapper.AlertDocumentMapper;
@@ -11,6 +14,7 @@ import com.frauddetection.alert.messaging.FraudAlertEventPublisher;
 import com.frauddetection.alert.messaging.FraudDecisionEventPublisher;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
+import com.frauddetection.alert.security.principal.AnalystActorResolver;
 import com.frauddetection.common.events.contract.FraudAlertEvent;
 import com.frauddetection.common.events.contract.FraudDecisionEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
@@ -39,6 +43,8 @@ public class AlertManagementService implements AlertManagementUseCase {
     private final FraudAlertEventPublisher fraudAlertEventPublisher;
     private final FraudDecisionEventPublisher fraudDecisionEventPublisher;
     private final FraudCaseManagementService fraudCaseManagementService;
+    private final AuditService auditService;
+    private final AnalystActorResolver analystActorResolver;
 
     public AlertManagementService(
             AlertRepository alertRepository,
@@ -49,7 +55,9 @@ public class AlertManagementService implements AlertManagementUseCase {
             AnalystDecisionStatusMapper analystDecisionStatusMapper,
             FraudAlertEventPublisher fraudAlertEventPublisher,
             FraudDecisionEventPublisher fraudDecisionEventPublisher,
-            FraudCaseManagementService fraudCaseManagementService
+            FraudCaseManagementService fraudCaseManagementService,
+            AuditService auditService,
+            AnalystActorResolver analystActorResolver
     ) {
         this.alertRepository = alertRepository;
         this.alertDocumentMapper = alertDocumentMapper;
@@ -60,6 +68,8 @@ public class AlertManagementService implements AlertManagementUseCase {
         this.fraudAlertEventPublisher = fraudAlertEventPublisher;
         this.fraudDecisionEventPublisher = fraudDecisionEventPublisher;
         this.fraudCaseManagementService = fraudCaseManagementService;
+        this.auditService = auditService;
+        this.analystActorResolver = analystActorResolver;
     }
 
     @Override
@@ -108,18 +118,26 @@ public class AlertManagementService implements AlertManagementUseCase {
     public SubmitAnalystDecisionResponse submitDecision(String alertId, SubmitAnalystDecisionRequest request) {
         AlertDocument document = alertRepository.findById(alertId).orElseThrow(() -> new AlertNotFoundException(alertId));
         AlertStatus resultingStatus = analystDecisionStatusMapper.toAlertStatus(request);
+        String actorId = analystActorResolver.resolveActorId(request.analystId(), "SUBMIT_ANALYST_DECISION", alertId);
 
         document.setAlertStatus(resultingStatus);
         document.setAnalystDecision(request.decision());
-        document.setAnalystId(request.analystId());
+        document.setAnalystId(actorId);
         document.setDecisionReason(request.decisionReason());
         document.setDecisionTags(request.tags());
         document.setDecidedAt(Instant.now());
 
         AlertDocument saved = alertRepository.save(document);
         AlertCase alertCase = alertDocumentMapper.toDomain(saved);
-        FraudDecisionEvent event = fraudDecisionEventMapper.toEvent(alertCase, request, resultingStatus);
+        FraudDecisionEvent event = fraudDecisionEventMapper.toEvent(alertCase, request, resultingStatus, actorId);
         fraudDecisionEventPublisher.publish(event);
+        auditService.audit(
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT,
+                saved.getAlertId(),
+                saved.getCorrelationId(),
+                actorId
+        );
 
         return new SubmitAnalystDecisionResponse(alertId, request.decision(), resultingStatus, event.eventId(), event.decidedAt());
     }

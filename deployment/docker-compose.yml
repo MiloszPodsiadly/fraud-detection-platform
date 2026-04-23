@@ -226,7 +226,8 @@ services:
         condition: service_completed_successfully
     environment:
       SERVER_PORT: 8080
-      SPRING_PROFILES_ACTIVE: docker
+      SPRING_PROFILES_ACTIVE: docker,docker-local
+      APP_SECURITY_DEMO_AUTH_ENABLED: "true"
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       MONGODB_URI: mongodb://mongodb:27017/fraud_alerts
       ASSISTANT_MODE: OLLAMA
