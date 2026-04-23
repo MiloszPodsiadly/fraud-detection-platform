@@ -6,6 +6,7 @@ import com.frauddetection.alert.api.AlertSummaryResponse;
 import com.frauddetection.alert.api.PagedResponse;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
+import com.frauddetection.alert.security.auth.DemoAuthHeaders;
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.contract.TransactionRawEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
@@ -62,7 +63,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 @EnabledIf("dockerAvailable")
 class FraudDetectionPlatformEndToEndIntegrationTest {
 
+    private static final String DISABLE_DEFAULT_SECURITY_AUTO_CONFIG =
+            "org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration,"
+                    + "org.springframework.boot.actuate.autoconfigure.security.servlet.ManagementWebSecurityAutoConfiguration";
     private static final String TOPIC_SUFFIX = UUID.randomUUID().toString().substring(0, 8);
+    private static final String E2E_ANALYST_USER = "e2e-analyst";
+    private static final String E2E_ANALYST_ROLE = "FRAUD_OPS_ADMIN";
     private static final String TRANSACTION_RAW_TOPIC = "transactions.raw.e2e." + TOPIC_SUFFIX;
     private static final String TRANSACTION_ENRICHED_TOPIC = "transactions.enriched.e2e." + TOPIC_SUFFIX;
     private static final String TRANSACTION_SCORED_TOPIC = "transactions.scored.e2e." + TOPIC_SUFFIX;
@@ -84,11 +90,13 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
 
         transactionIngestContext = startWebApplication(TransactionIngestServiceApplication.class, Map.of(
                 "server.port", 0,
+                "spring.autoconfigure.exclude", DISABLE_DEFAULT_SECURITY_AUTO_CONFIG,
                 "spring.kafka.bootstrap-servers", FraudPlatformContainers.kafka().getBootstrapServers(),
                 "app.kafka.topics.transaction-raw", TRANSACTION_RAW_TOPIC
         ));
 
         featureEnricherContext = startWorkerApplication(FeatureEnricherServiceApplication.class, Map.ofEntries(
+                Map.entry("spring.autoconfigure.exclude", DISABLE_DEFAULT_SECURITY_AUTO_CONFIG),
                 Map.entry("spring.kafka.bootstrap-servers", FraudPlatformContainers.kafka().getBootstrapServers()),
                 Map.entry("spring.data.redis.host", FraudPlatformContainers.redis().getHost()),
                 Map.entry("spring.data.redis.port", FraudPlatformContainers.redis().getMappedPort(6379)),
@@ -103,6 +111,7 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
         ));
 
         fraudScoringContext = startWorkerApplication(FraudScoringServiceApplication.class, Map.of(
+                "spring.autoconfigure.exclude", DISABLE_DEFAULT_SECURITY_AUTO_CONFIG,
                 "spring.kafka.bootstrap-servers", FraudPlatformContainers.kafka().getBootstrapServers(),
                 "app.kafka.topics.transaction-enriched", TRANSACTION_ENRICHED_TOPIC,
                 "app.kafka.topics.transaction-scored", TRANSACTION_SCORED_TOPIC,
@@ -114,8 +123,10 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
 
         alertContext = startWebApplication(AlertServiceApplication.class, Map.of(
                 "server.port", 0,
+                "spring.profiles.active", "test",
                 "spring.kafka.bootstrap-servers", FraudPlatformContainers.kafka().getBootstrapServers(),
                 "spring.data.mongodb.uri", FraudPlatformContainers.mongodb().getReplicaSetUrl(MONGODB_DATABASE),
+                "app.security.demo-auth.enabled", true,
                 "app.kafka.topics.transaction-scored", TRANSACTION_SCORED_TOPIC,
                 "app.kafka.topics.fraud-alerts", FRAUD_ALERTS_TOPIC,
                 "app.kafka.topics.fraud-decisions", FRAUD_DECISIONS_TOPIC,
@@ -221,7 +232,7 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
         AlertDetailsResponse details = restTemplate.exchange(
                 alertUrl("/api/v1/alerts/" + summary.alertId()),
                 HttpMethod.GET,
-                HttpEntity.EMPTY,
+                analystApiRequest(),
                 AlertDetailsResponse.class
         ).getBody();
 
@@ -357,7 +368,7 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
         ResponseEntity<PagedResponse<AlertSummaryResponse>> response = restTemplate.exchange(
                 alertUrl("/api/v1/alerts?page=0&size=100"),
                 HttpMethod.GET,
-                new HttpEntity<>(null, new HttpHeaders()),
+                analystApiRequest(),
                 new ParameterizedTypeReference<>() {
                 }
         );
@@ -419,5 +430,12 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
         }
 
         throw new AssertionError("Condition was not met within the timeout.");
+    }
+
+    private HttpEntity<Void> analystApiRequest() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.add(DemoAuthHeaders.USER_ID, E2E_ANALYST_USER);
+        headers.add(DemoAuthHeaders.ROLES, E2E_ANALYST_ROLE);
+        return new HttpEntity<>(headers);
     }
 }
