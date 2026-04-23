@@ -24,6 +24,7 @@ Frontend:
 - The local demo session provider is isolated in `src/auth/demoSession.js`.
 - Security states distinguish unauthenticated, forbidden, and missing-permission action states.
 - Frontend action gating is UX only; backend authorization remains authoritative.
+- A small contract guard test checks that frontend authority names stay aligned with backend `AnalystAuthority` constants.
 
 ## Scope
 

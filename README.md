@@ -511,6 +511,8 @@ Testing layers:
 
 Integration tests are skipped automatically when Docker/Testcontainers is unavailable.
 
+The GitHub Actions frontend job runs `npm test` before `npm run build`, so Vitest failures block UI packaging.
+
 ## ML Inference Service
 
 `ml-inference-service` is the Python fraud model runtime used by `fraud-scoring-service`.
