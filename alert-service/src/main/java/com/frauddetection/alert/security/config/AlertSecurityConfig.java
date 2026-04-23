@@ -22,6 +22,20 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 @EnableWebSecurity
 public class AlertSecurityConfig {
 
+    /**
+     * Security Foundation v1 is intentionally scoped to analyst business APIs.
+     *
+     * Public:
+     * - health/info actuator endpoints needed for local orchestration
+     *
+     * Protected:
+     * - analyst workflow endpoints under /api/v1/**
+     *
+     * Fallback:
+     * - unknown /api/v1/** routes are denied explicitly
+     * - non-API routes remain permitted for local UI/static usage
+     */
+
     @Bean
     UserDetailsService userDetailsService() {
         return username -> {
@@ -45,7 +59,10 @@ public class AlertSecurityConfig {
                         .accessDeniedHandler(accessDeniedHandler)
                 )
                 .authorizeHttpRequests(authorize -> authorize
+                        // Public technical endpoints for local orchestration and health checks.
                         .requestMatchers("/actuator/health/**", "/actuator/info").permitAll()
+
+                        // Protected analyst business endpoints.
                         .requestMatchers(HttpMethod.GET, "/api/v1/alerts").hasAuthority(AnalystAuthority.ALERT_READ)
                         .requestMatchers(HttpMethod.GET, "/api/v1/alerts/{alertId}").hasAuthority(AnalystAuthority.ALERT_READ)
                         .requestMatchers(HttpMethod.GET, "/api/v1/alerts/{alertId}/assistant-summary").hasAuthority(AnalystAuthority.ASSISTANT_SUMMARY_READ)
@@ -54,7 +71,11 @@ public class AlertSecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/fraud-cases/{caseId}").hasAuthority(AnalystAuthority.FRAUD_CASE_READ)
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/fraud-cases/{caseId}").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
                         .requestMatchers(HttpMethod.GET, "/api/v1/transactions/scored").hasAuthority(AnalystAuthority.TRANSACTION_MONITOR_READ)
+
+                        // Guardrail for future analyst endpoints added under /api/v1/** without explicit rules.
                         .requestMatchers("/api/v1/**").denyAll()
+
+                        // Keep non-business routes open for local UI/static delivery.
                         .anyRequest().permitAll()
                 );
         demoAuthFilter.ifAvailable(filter -> http.addFilterBefore(filter, UsernamePasswordAuthenticationFilter.class));
