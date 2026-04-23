@@ -124,7 +124,7 @@ export function AlertsListPage({
         />
 
         {isLoading && <LoadingPanel label="Loading scored transactions..." />}
-        {!isLoading && error && <ErrorState message={error} onRetry={onRetry} />}
+        {!isLoading && error && <ErrorState error={error} onRetry={onRetry} />}
         {!isLoading && !error && filteredTransactions.length === 0 && (
           <EmptyState
             title="No scored transactions match this view"
@@ -157,7 +157,7 @@ export function AlertsListPage({
         <FilterBar filters={filters} onChange={setFilters} />
 
         {isLoading && <LoadingPanel label="Loading fraud alerts..." />}
-        {!isLoading && error && <ErrorState message={error} onRetry={onRetry} />}
+        {!isLoading && error && <ErrorState error={error} onRetry={onRetry} />}
         {!isLoading && !error && filteredAlerts.length === 0 && (
           <EmptyState
             title="No alerts match this view"
