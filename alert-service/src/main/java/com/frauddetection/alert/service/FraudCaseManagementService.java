@@ -2,11 +2,15 @@ package com.frauddetection.alert.service;
 
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.api.UpdateFraudCaseRequest;
+import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.audit.AuditResourceType;
+import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.persistence.FraudCaseRepository;
 import com.frauddetection.alert.persistence.FraudCaseTransactionDocument;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
+import com.frauddetection.alert.security.principal.AnalystActorResolver;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -31,10 +35,19 @@ public class FraudCaseManagementService {
 
     private final FraudCaseRepository fraudCaseRepository;
     private final ScoredTransactionRepository scoredTransactionRepository;
+    private final AuditService auditService;
+    private final AnalystActorResolver analystActorResolver;
 
-    public FraudCaseManagementService(FraudCaseRepository fraudCaseRepository, ScoredTransactionRepository scoredTransactionRepository) {
+    public FraudCaseManagementService(
+            FraudCaseRepository fraudCaseRepository,
+            ScoredTransactionRepository scoredTransactionRepository,
+            AuditService auditService,
+            AnalystActorResolver analystActorResolver
+    ) {
         this.fraudCaseRepository = fraudCaseRepository;
         this.scoredTransactionRepository = scoredTransactionRepository;
+        this.auditService = auditService;
+        this.analystActorResolver = analystActorResolver;
     }
 
     public void handleScoredTransaction(TransactionScoredEvent event) {
@@ -83,13 +96,30 @@ public class FraudCaseManagementService {
     public FraudCaseDocument updateCase(String caseId, UpdateFraudCaseRequest request) {
         FraudCaseDocument document = getCase(caseId);
         Instant now = Instant.now();
+        String actorId = analystActorResolver.resolveActorId(request.analystId(), "UPDATE_FRAUD_CASE", caseId);
         document.setStatus(request.status());
-        document.setAnalystId(request.analystId());
+        document.setAnalystId(actorId);
         document.setDecisionReason(request.decisionReason());
         document.setDecisionTags(request.tags() == null ? List.of() : List.copyOf(request.tags()));
         document.setDecidedAt(now);
         document.setUpdatedAt(now);
-        return fraudCaseRepository.save(document);
+        FraudCaseDocument saved = fraudCaseRepository.save(document);
+        auditService.audit(
+                AuditAction.UPDATE_FRAUD_CASE,
+                AuditResourceType.FRAUD_CASE,
+                saved.getCaseId(),
+                correlationId(saved),
+                actorId
+        );
+        return saved;
+    }
+
+    private String correlationId(FraudCaseDocument document) {
+        return (document.getTransactions() == null ? List.<FraudCaseTransactionDocument>of() : document.getTransactions()).stream()
+                .map(FraudCaseTransactionDocument::getCorrelationId)
+                .filter(value -> value != null && !value.isBlank())
+                .findFirst()
+                .orElse(null);
     }
 
     private FraudCaseDocument newCase(String caseKey, TransactionScoredEvent event) {
