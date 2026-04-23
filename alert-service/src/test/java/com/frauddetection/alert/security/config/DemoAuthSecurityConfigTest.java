@@ -38,4 +38,14 @@ class DemoAuthSecurityConfigTest {
                 .isInstanceOf(BeanCreationException.class)
                 .hasMessageContaining("Demo header authentication can only be enabled");
     }
+
+    @Test
+    void shouldRejectDemoAuthWhenDockerLocalProfileIsMissing() {
+        MockEnvironment environment = new MockEnvironment();
+        environment.setActiveProfiles("docker");
+
+        assertThatThrownBy(() -> config.demoAuthFilter(resolver, authenticationFactory, entryPoint, environment))
+                .isInstanceOf(BeanCreationException.class)
+                .hasMessageContaining("Demo header authentication can only be enabled");
+    }
 }
