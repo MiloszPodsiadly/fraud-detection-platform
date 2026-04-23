@@ -27,6 +27,9 @@ management:
         include: health,info
 
 app:
+  security:
+    demo-auth:
+      enabled: ${APP_SECURITY_DEMO_AUTH_ENABLED:false}
   kafka:
     topics:
       transaction-scored: transactions.scored
