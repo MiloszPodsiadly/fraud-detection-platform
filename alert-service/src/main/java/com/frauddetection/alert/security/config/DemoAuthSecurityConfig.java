@@ -8,7 +8,7 @@ import com.frauddetection.alert.security.error.ApiAuthenticationEntryPoint;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.BeanCreationException;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -21,7 +21,7 @@ public class DemoAuthSecurityConfig {
     private static final Logger log = LoggerFactory.getLogger(DemoAuthSecurityConfig.class);
 
     @Bean
-    @ConditionalOnProperty(prefix = "app.security.demo-auth", name = "enabled", havingValue = "true")
+    @ConditionalOnExpression("${app.security.demo-auth.enabled:false} and !${app.security.jwt.enabled:false}")
     DemoAuthFilter demoAuthFilter(
             AnalystPrincipalResolver principalResolver,
             AnalystAuthenticationFactory authenticationFactory,

@@ -1,6 +1,7 @@
 package com.frauddetection.alert.security.config;
 
 import com.frauddetection.alert.security.auth.DemoAuthFilter;
+import com.frauddetection.alert.security.auth.JwtAnalystAuthenticationConverter;
 import com.frauddetection.alert.security.authorization.AnalystAuthority;
 import com.frauddetection.alert.security.error.ApiAccessDeniedHandler;
 import com.frauddetection.alert.security.error.ApiAuthenticationEntryPoint;
@@ -15,6 +16,7 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
@@ -47,6 +49,8 @@ public class AlertSecurityConfig {
     SecurityFilterChain alertSecurityFilterChain(
             HttpSecurity http,
             ObjectProvider<DemoAuthFilter> demoAuthFilter,
+            ObjectProvider<JwtDecoder> jwtDecoder,
+            ObjectProvider<JwtAnalystAuthenticationConverter> jwtAnalystAuthenticationConverter,
             ApiAuthenticationEntryPoint authenticationEntryPoint,
             ApiAccessDeniedHandler accessDeniedHandler
     ) throws Exception {
@@ -78,6 +82,17 @@ public class AlertSecurityConfig {
                         // Keep non-business routes open for local UI/static delivery.
                         .anyRequest().permitAll()
                 );
+
+        // Production auth path: enable JWT Resource Server only when a decoder is configured.
+        if (jwtDecoder.getIfAvailable() != null) {
+            http.oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt
+                    .jwtAuthenticationConverter(token -> jwtAnalystAuthenticationConverter
+                            .getObject()
+                            .convert(token))
+            ));
+        }
+
+        // Local/dev auth path: demo headers remain an explicit opt-in adapter.
         demoAuthFilter.ifAvailable(filter -> http.addFilterBefore(filter, UsernamePasswordAuthenticationFilter.class));
         return http.build();
     }

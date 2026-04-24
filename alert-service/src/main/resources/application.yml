@@ -24,12 +24,33 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,metrics,prometheus
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http:
+          server:
+            requests: true
 
 app:
   security:
     demo-auth:
       enabled: ${APP_SECURITY_DEMO_AUTH_ENABLED:false}
+    jwt:
+      enabled: ${APP_SECURITY_JWT_ENABLED:false}
+      # Required when APP_SECURITY_JWT_ENABLED=true.
+      # Prefer jwk-set-uri for explicit key discovery in local/integration setups.
+      issuer-uri: ${APP_SECURITY_JWT_ISSUER_URI:}
+      jwk-set-uri: ${APP_SECURITY_JWT_JWK_SET_URI:}
+      user-id-claim: ${APP_SECURITY_JWT_USER_ID_CLAIM:sub}
+      access-claim: ${APP_SECURITY_JWT_ACCESS_CLAIM:groups}
+      role-mapping:
+        fraud-readonly-analyst: READ_ONLY_ANALYST
+        fraud-analyst: ANALYST
+        fraud-reviewer: REVIEWER
+        fraud-ops-admin: FRAUD_OPS_ADMIN
   kafka:
     topics:
       transaction-scored: transactions.scored
