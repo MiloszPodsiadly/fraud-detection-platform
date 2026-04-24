@@ -5,6 +5,7 @@ import com.frauddetection.alert.api.UpdateFraudCaseRequest;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.AuditService;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.persistence.FraudCaseRepository;
 import com.frauddetection.alert.persistence.FraudCaseTransactionDocument;
@@ -37,17 +38,20 @@ public class FraudCaseManagementService {
     private final ScoredTransactionRepository scoredTransactionRepository;
     private final AuditService auditService;
     private final AnalystActorResolver analystActorResolver;
+    private final AlertServiceMetrics metrics;
 
     public FraudCaseManagementService(
             FraudCaseRepository fraudCaseRepository,
             ScoredTransactionRepository scoredTransactionRepository,
             AuditService auditService,
-            AnalystActorResolver analystActorResolver
+            AnalystActorResolver analystActorResolver,
+            AlertServiceMetrics metrics
     ) {
         this.fraudCaseRepository = fraudCaseRepository;
         this.scoredTransactionRepository = scoredTransactionRepository;
         this.auditService = auditService;
         this.analystActorResolver = analystActorResolver;
+        this.metrics = metrics;
     }
 
     public void handleScoredTransaction(TransactionScoredEvent event) {
@@ -111,6 +115,7 @@ public class FraudCaseManagementService {
                 correlationId(saved),
                 actorId
         );
+        metrics.recordFraudCaseUpdated();
         return saved;
     }
 

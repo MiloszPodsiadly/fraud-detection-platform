@@ -5,6 +5,7 @@ import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.domain.FraudCaseStatus;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.persistence.FraudCaseRepository;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
@@ -37,7 +38,8 @@ class FraudCaseManagementServiceTest {
         ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
         AuditService auditService = mock(AuditService.class);
         AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
-        FraudCaseManagementService service = new FraudCaseManagementService(fraudCaseRepository, scoredTransactionRepository, auditService, analystActorResolver);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        FraudCaseManagementService service = new FraudCaseManagementService(fraudCaseRepository, scoredTransactionRepository, auditService, analystActorResolver, metrics);
 
         var previousTransaction = scoredTransaction("rapid-txn-1", "rapid-customer-1", new BigDecimal("10000.00"));
         var currentEvent = TransactionFixtures.scoredTransaction()
@@ -86,7 +88,8 @@ class FraudCaseManagementServiceTest {
         ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
         AuditService auditService = mock(AuditService.class);
         AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
-        FraudCaseManagementService service = new FraudCaseManagementService(fraudCaseRepository, scoredTransactionRepository, auditService, analystActorResolver);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        FraudCaseManagementService service = new FraudCaseManagementService(fraudCaseRepository, scoredTransactionRepository, auditService, analystActorResolver, metrics);
 
         FraudCaseDocument storedCase = new FraudCaseDocument();
         storedCase.setCaseId("case-1");
@@ -123,7 +126,8 @@ class FraudCaseManagementServiceTest {
         ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
         AuditService auditService = mock(AuditService.class);
         AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
-        FraudCaseManagementService service = new FraudCaseManagementService(fraudCaseRepository, scoredTransactionRepository, auditService, analystActorResolver);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        FraudCaseManagementService service = new FraudCaseManagementService(fraudCaseRepository, scoredTransactionRepository, auditService, analystActorResolver, metrics);
 
         FraudCaseDocument storedCase = new FraudCaseDocument();
         storedCase.setCaseId("case-1");
@@ -155,6 +159,7 @@ class FraudCaseManagementServiceTest {
                 "corr-rapid-txn-1",
                 "principal-9"
         );
+        verify(metrics).recordFraudCaseUpdated();
     }
 
     private ScoredTransactionDocument scoredTransaction(String transactionId, String customerId, BigDecimal amount) {

@@ -1,5 +1,6 @@
 package com.frauddetection.alert.audit;
 
+import com.frauddetection.alert.observability.AlertServiceMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -8,6 +9,11 @@ import org.springframework.stereotype.Component;
 public class StructuredAuditEventPublisher implements AuditEventPublisher {
 
     private static final Logger log = LoggerFactory.getLogger(StructuredAuditEventPublisher.class);
+    private final AlertServiceMetrics metrics;
+
+    public StructuredAuditEventPublisher(AlertServiceMetrics metrics) {
+        this.metrics = metrics;
+    }
 
     @Override
     public void publish(AuditEvent event) {
@@ -23,5 +29,6 @@ public class StructuredAuditEventPublisher implements AuditEventPublisher {
                 .addKeyValue("auditOutcome", event.outcome())
                 .addKeyValue("failureReason", event.failureReason())
                 .log("Audit event recorded.");
+        metrics.recordAuditEventPublished(event.action(), event.outcome());
     }
 }

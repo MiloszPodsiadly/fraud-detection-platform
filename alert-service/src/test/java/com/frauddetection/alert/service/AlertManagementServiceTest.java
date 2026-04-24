@@ -9,6 +9,7 @@ import com.frauddetection.alert.mapper.FraudAlertEventMapper;
 import com.frauddetection.alert.mapper.FraudDecisionEventMapper;
 import com.frauddetection.alert.messaging.FraudAlertEventPublisher;
 import com.frauddetection.alert.messaging.FraudDecisionEventPublisher;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.security.principal.AnalystActorResolver;
@@ -50,8 +51,9 @@ class AlertManagementServiceTest {
         FraudCaseManagementService fraudCaseManagementService = mock(FraudCaseManagementService.class);
         AuditService auditService = mock(AuditService.class);
         AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
 
-        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher, fraudCaseManagementService, auditService, analystActorResolver);
+        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher, fraudCaseManagementService, auditService, analystActorResolver, metrics);
         var event = TransactionFixtures.scoredTransaction().build();
 
         when(repository.existsByTransactionId(event.transactionId())).thenReturn(false);
@@ -76,8 +78,9 @@ class AlertManagementServiceTest {
         FraudCaseManagementService fraudCaseManagementService = mock(FraudCaseManagementService.class);
         AuditService auditService = mock(AuditService.class);
         AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
 
-        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher, fraudCaseManagementService, auditService, analystActorResolver);
+        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher, fraudCaseManagementService, auditService, analystActorResolver, metrics);
         var event = TransactionFixtures.scoredTransaction().build();
 
         when(repository.existsByTransactionId(event.transactionId())).thenReturn(false);
@@ -101,8 +104,9 @@ class AlertManagementServiceTest {
         FraudCaseManagementService fraudCaseManagementService = mock(FraudCaseManagementService.class);
         AuditService auditService = mock(AuditService.class);
         AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
 
-        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher, fraudCaseManagementService, auditService, analystActorResolver);
+        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher, fraudCaseManagementService, auditService, analystActorResolver, metrics);
         AlertDocument document = new AlertDocument();
         document.setAlertId("alert-1");
         document.setTransactionId("txn-1");
@@ -147,6 +151,7 @@ class AlertManagementServiceTest {
                 "corr-1",
                 "principal-7"
         );
+        verify(metrics).recordAnalystDecisionSubmitted();
         assertThat(eventCaptor.getValue().analystId()).isEqualTo("principal-7");
     }
 }

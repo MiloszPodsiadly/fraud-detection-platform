@@ -2,6 +2,7 @@ package com.frauddetection.alert.messaging;
 
 import com.frauddetection.alert.config.KafkaTopicProperties;
 import com.frauddetection.common.events.contract.FraudAlertEvent;
+import com.frauddetection.common.events.observability.TraceContext;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.slf4j.Logger;
@@ -28,9 +29,10 @@ public class KafkaFraudAlertEventPublisher implements FraudAlertEventPublisher {
     public void publish(FraudAlertEvent event) {
         try {
             ProducerRecord<String, FraudAlertEvent> record = new ProducerRecord<>(kafkaTopicProperties.fraudAlerts(), event.alertId(), event);
-            record.headers().add(new RecordHeader("correlationId", event.correlationId().getBytes(StandardCharsets.UTF_8)));
-            record.headers().add(new RecordHeader("alertId", event.alertId().getBytes(StandardCharsets.UTF_8)));
-            record.headers().add(new RecordHeader("transactionId", event.transactionId().getBytes(StandardCharsets.UTF_8)));
+            record.headers().add(new RecordHeader(TraceContext.KAFKA_CORRELATION_ID_HEADER, event.correlationId().getBytes(StandardCharsets.UTF_8)));
+            record.headers().add(new RecordHeader(TraceContext.KAFKA_ALERT_ID_HEADER, event.alertId().getBytes(StandardCharsets.UTF_8)));
+            record.headers().add(new RecordHeader(TraceContext.KAFKA_TRANSACTION_ID_HEADER, event.transactionId().getBytes(StandardCharsets.UTF_8)));
+            addTraceHeaderIfPresent(record, TraceContext.currentTraceId());
             kafkaTemplate.send(record).get();
             log.atInfo()
                     .addKeyValue("alertId", event.alertId())
@@ -41,5 +43,12 @@ public class KafkaFraudAlertEventPublisher implements FraudAlertEventPublisher {
         } catch (Exception exception) {
             throw new IllegalStateException("Failed to publish fraud alert event.", exception);
         }
+    }
+
+    private void addTraceHeaderIfPresent(ProducerRecord<String, FraudAlertEvent> record, String traceId) {
+        if (traceId == null || traceId.isBlank()) {
+            return;
+        }
+        record.headers().add(new RecordHeader(TraceContext.KAFKA_TRACE_ID_HEADER, traceId.getBytes(StandardCharsets.UTF_8)));
     }
 }

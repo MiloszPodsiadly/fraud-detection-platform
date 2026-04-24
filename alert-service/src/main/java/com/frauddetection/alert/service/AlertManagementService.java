@@ -12,6 +12,7 @@ import com.frauddetection.alert.mapper.FraudAlertEventMapper;
 import com.frauddetection.alert.mapper.FraudDecisionEventMapper;
 import com.frauddetection.alert.messaging.FraudAlertEventPublisher;
 import com.frauddetection.alert.messaging.FraudDecisionEventPublisher;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.security.principal.AnalystActorResolver;
@@ -45,6 +46,7 @@ public class AlertManagementService implements AlertManagementUseCase {
     private final FraudCaseManagementService fraudCaseManagementService;
     private final AuditService auditService;
     private final AnalystActorResolver analystActorResolver;
+    private final AlertServiceMetrics metrics;
 
     public AlertManagementService(
             AlertRepository alertRepository,
@@ -57,7 +59,8 @@ public class AlertManagementService implements AlertManagementUseCase {
             FraudDecisionEventPublisher fraudDecisionEventPublisher,
             FraudCaseManagementService fraudCaseManagementService,
             AuditService auditService,
-            AnalystActorResolver analystActorResolver
+            AnalystActorResolver analystActorResolver,
+            AlertServiceMetrics metrics
     ) {
         this.alertRepository = alertRepository;
         this.alertDocumentMapper = alertDocumentMapper;
@@ -70,6 +73,7 @@ public class AlertManagementService implements AlertManagementUseCase {
         this.fraudCaseManagementService = fraudCaseManagementService;
         this.auditService = auditService;
         this.analystActorResolver = analystActorResolver;
+        this.metrics = metrics;
     }
 
     @Override
@@ -138,6 +142,7 @@ public class AlertManagementService implements AlertManagementUseCase {
                 saved.getCorrelationId(),
                 actorId
         );
+        metrics.recordAnalystDecisionSubmitted();
 
         return new SubmitAnalystDecisionResponse(alertId, request.decision(), resultingStatus, event.eventId(), event.decidedAt());
     }
