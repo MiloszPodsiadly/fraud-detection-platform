@@ -116,6 +116,10 @@ code {
   align-items: center;
 }
 
+.sessionIdentityCopy {
+  min-width: 0;
+}
+
 .sessionIdentity strong,
 .sessionIdentity small {
   display: block;
@@ -153,6 +157,38 @@ code {
   border-color: rgba(180, 52, 52, 0.2);
   background: rgba(180, 52, 52, 0.08);
   color: var(--red);
+}
+
+.sessionModeBlock {
+  margin-left: auto;
+  display: grid;
+  justify-items: end;
+  gap: 0.2rem;
+}
+
+.sessionModeBlock small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.sessionFacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.sessionFact {
+  border: 1px solid rgba(82, 97, 60, 0.14);
+  border-radius: 999px;
+  background: rgba(82, 97, 60, 0.06);
+  padding: 0.3rem 0.65rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.sessionFact strong {
+  color: var(--ink);
+  margin-right: 0.25rem;
 }
 
 .authorityList {
