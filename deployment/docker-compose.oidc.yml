@@ -1,0 +1,39 @@
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.1.4
+    container_name: fraud-keycloak
+    command:
+      - start-dev
+      - --import-realm
+      - --hostname=http://localhost:8086
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    ports:
+      - "127.0.0.1:8086:8080"
+    volumes:
+      - ./keycloak/realm-fraud-detection.json:/opt/keycloak/data/import/realm-fraud-detection.json:ro
+
+  alert-service:
+    depends_on:
+      keycloak:
+        condition: service_started
+    environment:
+      APP_SECURITY_DEMO_AUTH_ENABLED: "false"
+      APP_SECURITY_JWT_ENABLED: "true"
+      APP_SECURITY_JWT_ISSUER_URI: http://localhost:8086/realms/fraud-detection
+      APP_SECURITY_JWT_JWK_SET_URI: http://keycloak:8080/realms/fraud-detection/protocol/openid-connect/certs
+      APP_SECURITY_JWT_USER_ID_CLAIM: sub
+      APP_SECURITY_JWT_ACCESS_CLAIM: groups
+
+  analyst-console-ui:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.frontend
+      args:
+        VITE_AUTH_PROVIDER: oidc
+        VITE_OIDC_AUTHORITY: http://localhost:8086/realms/fraud-detection
+        VITE_OIDC_CLIENT_ID: analyst-console-ui
+        VITE_OIDC_REDIRECT_URI: http://localhost:4173/auth/callback
+        VITE_OIDC_POST_LOGOUT_REDIRECT_URI: http://localhost:4173/
+        VITE_OIDC_SCOPE: openid profile email
