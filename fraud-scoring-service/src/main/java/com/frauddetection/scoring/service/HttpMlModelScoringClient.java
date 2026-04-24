@@ -3,6 +3,7 @@ package com.frauddetection.scoring.service;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.scoring.domain.MlModelInput;
 import com.frauddetection.scoring.domain.MlModelOutput;
+import com.frauddetection.scoring.observability.ScoringMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Primary;
@@ -22,13 +23,16 @@ public class HttpMlModelScoringClient implements MlModelScoringClient {
     private static final Logger log = LoggerFactory.getLogger(HttpMlModelScoringClient.class);
 
     private final RestClient mlModelRestClient;
+    private final ScoringMetrics scoringMetrics;
 
-    public HttpMlModelScoringClient(RestClient mlModelRestClient) {
+    public HttpMlModelScoringClient(RestClient mlModelRestClient, ScoringMetrics scoringMetrics) {
         this.mlModelRestClient = mlModelRestClient;
+        this.scoringMetrics = scoringMetrics;
     }
 
     @Override
     public MlModelOutput score(MlModelInput input) {
+        long startedAt = System.nanoTime();
         try {
             MlModelOutput output = mlModelRestClient
                     .post()
@@ -39,10 +43,14 @@ public class HttpMlModelScoringClient implements MlModelScoringClient {
                     .body(MlModelOutput.class);
 
             if (output == null) {
-                return unavailable("ML inference service returned an empty response.");
+                MlModelOutput unavailable = unavailable("ML inference service returned an empty response.");
+                scoringMetrics.recordMlClientResponse(false, System.nanoTime() - startedAt);
+                return unavailable;
             }
+            scoringMetrics.recordMlClientResponse(output.available(), System.nanoTime() - startedAt);
             return output;
         } catch (RestClientException exception) {
+            scoringMetrics.recordMlClientFailure(System.nanoTime() - startedAt);
             log.atWarn()
                     .addKeyValue("transactionId", input.transactionId())
                     .addKeyValue("correlationId", input.correlationId())
