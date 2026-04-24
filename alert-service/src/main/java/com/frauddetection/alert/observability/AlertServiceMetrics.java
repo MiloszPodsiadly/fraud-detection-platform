@@ -1,0 +1,109 @@
+package com.frauddetection.alert.observability;
+
+import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.audit.AuditOutcome;
+import com.frauddetection.alert.security.error.SecurityFailureClassifier;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.Authentication;
+import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
+
+@Component
+public class AlertServiceMetrics {
+
+    private final MeterRegistry meterRegistry;
+
+    public AlertServiceMetrics(MeterRegistry meterRegistry) {
+        this.meterRegistry = meterRegistry;
+    }
+
+    public void recordAnalystDecisionSubmitted() {
+        counter("fraud.alert.decision.submissions", "outcome", "success").increment();
+    }
+
+    public void recordFraudCaseUpdated() {
+        counter("fraud.alert.fraud_case.updates", "outcome", "success").increment();
+    }
+
+    public void recordAuditEventPublished(AuditAction action, AuditOutcome outcome) {
+        counter(
+                "fraud.alert.audit.events",
+                "action", normalize(action),
+                "outcome", normalize(outcome)
+        ).increment();
+    }
+
+    public void recordAuthenticationFailure(HttpServletRequest request, AuthenticationException exception) {
+        counter(
+                "fraud.security.auth.failures",
+                "auth_type", SecurityFailureClassifier.authType(request),
+                "endpoint", endpoint(request),
+                "reason", SecurityFailureClassifier.authenticationFailureReason(request, exception)
+        ).increment();
+    }
+
+    public void recordAccessDenied(HttpServletRequest request, Authentication authentication) {
+        counter(
+                "fraud.security.access.denied",
+                "auth_type", SecurityFailureClassifier.authType(request),
+                "endpoint", endpoint(request),
+                "reason", SecurityFailureClassifier.accessDeniedReason(authentication),
+                "actor_type", SecurityFailureClassifier.actorType(authentication)
+        ).increment();
+    }
+
+    public void recordActorMismatch(String action) {
+        counter(
+                "fraud.security.actor.mismatches",
+                "action", normalizeAction(action)
+        ).increment();
+    }
+
+    private Counter counter(String name, String... tags) {
+        return Counter.builder(name)
+                .tags(tags)
+                .register(meterRegistry);
+    }
+
+    private String endpoint(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        String method = request.getMethod();
+
+        if ("POST".equalsIgnoreCase(method)
+                && path != null
+                && path.startsWith("/api/v1/alerts/")
+                && path.endsWith("/decision")) {
+            return "alerts_decision";
+        }
+        if (path == null) {
+            return "unknown";
+        }
+        if (path.startsWith("/api/v1/alerts")) {
+            return "alerts";
+        }
+        if (path.startsWith("/api/v1/fraud-cases")) {
+            return "fraud_cases";
+        }
+        if (path.startsWith("/api/v1/transactions/scored")) {
+            return "scored_transactions";
+        }
+        if (path.startsWith("/actuator")) {
+            return "actuator";
+        }
+        return "unknown";
+    }
+
+    private String normalize(Enum<?> value) {
+        return value.name().toLowerCase();
+    }
+
+    private String normalizeAction(String action) {
+        if (!StringUtils.hasText(action)) {
+            return "unknown";
+        }
+        return action.trim().toLowerCase().replaceAll("[^a-z0-9]+", "_");
+    }
+}

@@ -1,5 +1,7 @@
 package com.frauddetection.alert.security.principal;
 
+import com.frauddetection.alert.observability.AlertServiceMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import com.frauddetection.alert.security.authorization.AnalystRole;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -12,7 +14,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class AnalystActorResolverTest {
 
-    private final AnalystActorResolver resolver = new AnalystActorResolver(new CurrentAnalystUser());
+    private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+    private final AnalystActorResolver resolver = new AnalystActorResolver(
+            new CurrentAnalystUser(),
+            new AlertServiceMetrics(meterRegistry)
+    );
 
     @AfterEach
     void clearSecurityContext() {
@@ -35,6 +41,10 @@ class AnalystActorResolverTest {
         String actorId = resolver.resolveActorId("payload-analyst", "UPDATE_FRAUD_CASE", "case-1");
 
         assertThat(actorId).isEqualTo("principal-1");
+        assertThat(meterRegistry.get("fraud.security.actor.mismatches")
+                .tags("action", "update_fraud_case")
+                .counter()
+                .count()).isEqualTo(1.0d);
     }
 
     @Test
