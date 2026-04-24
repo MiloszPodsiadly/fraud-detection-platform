@@ -1,10 +1,12 @@
 package com.frauddetection.alert.security.error;
 
+import com.frauddetection.alert.observability.AlertServiceMetrics;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.stereotype.Component;
 
@@ -14,14 +16,23 @@ import java.io.IOException;
 public class ApiAccessDeniedHandler implements AccessDeniedHandler {
 
     private final SecurityErrorResponseWriter responseWriter;
+    private final AlertServiceMetrics metrics;
 
-    public ApiAccessDeniedHandler(SecurityErrorResponseWriter responseWriter) {
+    public ApiAccessDeniedHandler(SecurityErrorResponseWriter responseWriter, AlertServiceMetrics metrics) {
         this.responseWriter = responseWriter;
+        this.metrics = metrics;
     }
 
     @Override
     public void handle(HttpServletRequest request, HttpServletResponse response, AccessDeniedException accessDeniedException)
             throws IOException, ServletException {
-        responseWriter.write(response, HttpStatus.FORBIDDEN, "Insufficient permissions.");
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        metrics.recordAccessDenied(request, authentication);
+        responseWriter.write(
+                response,
+                HttpStatus.FORBIDDEN,
+                "Insufficient permissions.",
+                java.util.List.of("reason:" + SecurityFailureClassifier.accessDeniedReason(authentication))
+        );
     }
 }

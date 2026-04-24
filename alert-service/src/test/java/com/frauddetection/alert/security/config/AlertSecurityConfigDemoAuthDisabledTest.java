@@ -4,6 +4,7 @@ import com.frauddetection.alert.assistant.AnalystCaseSummaryUseCase;
 import com.frauddetection.alert.controller.AlertController;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.security.auth.AnalystAuthenticationFactory;
 import com.frauddetection.alert.security.auth.DemoAuthHeaderParser;
 import com.frauddetection.alert.security.auth.DemoAuthHeaders;
@@ -49,6 +50,9 @@ class AlertSecurityConfigDemoAuthDisabledTest {
     @MockBean
     private AnalystCaseSummaryUseCase analystCaseSummaryUseCase;
 
+    @MockBean
+    private AlertServiceMetrics alertServiceMetrics;
+
     @Test
     void shouldIgnoreDemoHeadersWhenDemoAuthIsDisabled() throws Exception {
         mockMvc.perform(get("/api/v1/alerts")
@@ -57,7 +61,8 @@ class AlertSecurityConfigDemoAuthDisabledTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.status").value(401))
-                .andExpect(jsonPath("$.message").value("Authentication is required."));
+                .andExpect(jsonPath("$.message").value("Authentication is required."))
+                .andExpect(jsonPath("$.details[0]").value("reason:invalid_demo_auth"));
     }
 
     @Test
@@ -68,13 +73,15 @@ class AlertSecurityConfigDemoAuthDisabledTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.status").value(401))
-                .andExpect(jsonPath("$.message").value("Authentication is required."));
+                .andExpect(jsonPath("$.message").value("Authentication is required."))
+                .andExpect(jsonPath("$.details[0]").value("reason:invalid_demo_auth"));
     }
 
     @Test
     void shouldNotProvideImplicitFallbackWhenDemoAuthIsDisabledByDefault() throws Exception {
         mockMvc.perform(get("/api/v1/alerts"))
                 .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.status").value(401));
+                .andExpect(jsonPath("$.status").value(401))
+                .andExpect(jsonPath("$.details[0]").value("reason:missing_credentials"));
     }
 }
