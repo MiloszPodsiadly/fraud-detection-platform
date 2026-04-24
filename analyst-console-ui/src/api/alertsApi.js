@@ -1,18 +1,21 @@
 import { ApiError } from "./apiError.js";
-import { demoAuthHeaders } from "../auth/demoSession.js";
+import { authHeadersForSession } from "../auth/authHeaders.js";
+import { getConfiguredAuthProvider } from "../auth/authProvider.js";
 
 const API_BASE_URL = import.meta.env.VITE_ALERT_API_BASE_URL ?? "";
 let activeSession = null;
+let activeAuthProvider = getConfiguredAuthProvider();
 
-export function setApiSession(session) {
+export function setApiSession(session, authProvider = activeAuthProvider) {
   activeSession = session;
+  activeAuthProvider = authProvider;
 }
 
 async function request(path, options = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
       "Content-Type": "application/json",
-      ...demoAuthHeaders(activeSession),
+      ...authHeadersForSession(activeAuthProvider, activeSession),
       ...options.headers
     },
     ...options
