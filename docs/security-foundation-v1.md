@@ -2,7 +2,7 @@
 
 Single technical reference for the analyst workflow security foundation in `fraud-detection-platform`.
 
-This document consolidates the previous RBAC, local demo auth, audit logging, frontend session, JWT/OIDC migration, ADR, plan, and review notes into one reviewer-friendly entry point. `README.md` stays the high-level project entry point.
+This document consolidates RBAC, local demo auth, local OIDC, audit logging, frontend session behavior, JWT validation, and review notes into one reviewer-friendly entry point. `README.md` stays the high-level project entry point.
 
 ## Current State
 
@@ -13,16 +13,22 @@ Backend:
 - Spring Security protects analyst APIs under `/api/v1/**`.
 - Health and info actuator endpoints remain public for local orchestration.
 - Local/demo auth is disabled by default and can only be enabled in `local`, `dev`, `docker-local`, or `test` profiles.
+- JWT Resource Server can be enabled explicitly through `app.security.jwt.enabled`.
+- JWT claims can be mapped into `AnalystPrincipal` through configurable claim names and role mapping.
 - Authorization checks authorities, not role names.
 - Write actions use authenticated principal identity as the actor source of truth.
 - Audit logging v1 records analyst write actions through structured logs.
-- JWT/OIDC extension points exist, but production token validation is not implemented yet.
+- Demo auth is ignored when JWT auth is active.
 
 Frontend:
 
 - The UI uses a stable session contract: `userId`, `roles`, and `authorities`.
 - The local demo session provider is isolated in `src/auth/demoSession.js`.
-- Security states distinguish unauthenticated, forbidden, and missing-permission action states.
+- Auth request header generation is now behind `src/auth/authProvider.js`.
+- `src/auth/oidcClient.js` is the SDK-facing OIDC adapter boundary.
+- `src/auth/oidcSessionSource.js` is now a real provider-backed session source for local Keycloak.
+- Local OIDC login flow is implemented for browser login, callback handling, bearer propagation, and logout.
+- Security states distinguish `loading`, `authenticated`, `unauthenticated`, `expired`, `access_denied`, `auth_error`, and missing-permission action states.
 - Frontend action gating is UX only; backend authorization remains authoritative.
 - A small contract guard test checks that frontend authority names stay aligned with backend `AnalystAuthority` constants.
 
@@ -41,12 +47,12 @@ In scope:
 
 Out of scope:
 
-- production JWT/OIDC validation
+- production deployment hardening for JWT/OIDC
 - service-to-service authentication
 - shared security module extraction
 - persistent audit store
 - read-access audit
-- full production login flow in the frontend
+- silent refresh or refresh-token-heavy frontend session manager
 
 ## Architecture Decision
 
@@ -58,6 +64,7 @@ Decision:
 - Keep controllers and business services independent from demo header names and future identity-provider claim names.
 - Use the authenticated principal as the actor source of truth when available.
 - Make JWT/OIDC replace identity extraction, not endpoint authorization rules.
+- OIDC replaces identity source only. Authorization RBAC, authority mapping, and endpoint protection remain unchanged.
 
 Rationale:
 
@@ -76,14 +83,19 @@ Backend implementation lives under `alert-service`:
 - `com.frauddetection.alert.security.principal.CurrentAnalystUser`
 - `com.frauddetection.alert.security.principal.AnalystActorResolver`
 - `com.frauddetection.alert.security.auth.DemoAuthFilter`
+- `com.frauddetection.alert.security.auth.JwtAnalystAuthenticationConverter`
+- `com.frauddetection.alert.security.auth.JwtSecurityProperties`
 - `com.frauddetection.alert.security.config.AlertSecurityConfig`
 - `com.frauddetection.alert.security.config.DemoAuthSecurityConfig`
+- `com.frauddetection.alert.security.config.JwtResourceServerSecurityConfig`
 - `com.frauddetection.alert.audit.AuditService`
 
 Frontend implementation:
 
 - `analyst-console-ui/src/auth/session.js`
 - `analyst-console-ui/src/auth/demoSession.js`
+- `analyst-console-ui/src/auth/authProvider.js`
+- `analyst-console-ui/src/auth/oidcSessionSource.js`
 - `analyst-console-ui/src/auth/securityErrors.js`
 - `analyst-console-ui/src/components/SessionBadge.jsx`
 - `analyst-console-ui/src/components/SecurityStatePanels.jsx`
@@ -137,6 +149,8 @@ It requires both:
 If demo auth is enabled outside those profiles, `alert-service` rejects startup.
 
 When demo auth is disabled, `X-Demo-*` headers are ignored and do not create an implicit session.
+
+When JWT auth is enabled, demo auth is also ignored even if demo-related headers are present.
 
 ### Headers
 
@@ -221,7 +235,9 @@ Future sinks can be added behind `AuditEventPublisher`:
 
 ## Frontend Security UX
 
-The analyst console sends the local demo auth headers expected by `alert-service`:
+The analyst console keeps one stable session contract and one auth provider boundary.
+
+Current default provider behavior sends the local demo auth headers expected by `alert-service`:
 
 - `X-Demo-User-Id`
 - `X-Demo-Roles`
@@ -244,10 +260,53 @@ Session behavior:
 - selecting `Unauthenticated` removes demo auth headers and should produce HTTP 401 states from protected API calls
 - selecting `READ_ONLY_ANALYST` keeps reads enabled but disables write actions requiring `alert:decision:submit` or `fraud-case:update`
 - unavailable write actions show an inline permission notice with the required authority
-- HTTP 401 shows a session-required panel
+- session lifecycle distinguishes:
+  - `loading`
+  - `authenticated`
+  - `unauthenticated`
+  - `expired`
+  - `access_denied`
+  - `auth_error`
+- HTTP 401 can render a session-required or session-expired panel depending on known lifecycle context
 - HTTP 403 shows an access-denied panel
 
-This is intentionally not a login flow. Later OIDC work should replace `src/auth/demoSession.js`, while preserving `src/auth/session.js` and the UI security states.
+The frontend now supports two local auth modes:
+
+- demo auth as the default quickstart
+- OIDC auth through local Keycloak when `VITE_AUTH_PROVIDER=oidc`
+
+Current provider boundary:
+
+- `src/auth/authProvider.js` decides how request headers are produced and how session state is persisted.
+- `src/auth/demoSession.js` remains the local editable source.
+- `src/auth/oidcClient.js` hides `oidc-client-ts` behind a small adapter surface.
+- `src/auth/oidcSessionSource.js` normalizes a provider snapshot into UI session, token, and lifecycle state.
+- bearer token propagation is active through the provider/header boundary
+- `SessionBadge` can render both editable demo mode and read-only provider-driven mode, including auth mode, identity, role, authority scope, login, and logout actions.
+
+Local OIDC browser flow:
+
+```text
+Browser
+  -> Keycloak (login)
+  -> redirect /auth/callback
+  -> SPA (oidc-client-ts)
+  -> Authorization: Bearer
+  -> alert-service (JWT Resource Server)
+  -> RBAC enforcement
+```
+
+Current OIDC lifecycle behavior:
+
+- app bootstrap checks the configured provider before dashboard data loads
+- callback completion hydrates the normalized session before returning to `/`
+- provider `groups` may map into existing frontend role names for UX only
+- backend JWT validation and authority checks remain authoritative for RBAC
+- expired provider sessions render the dedicated `expired` UI state
+- expired, unauthenticated, access-denied, and auth-error states block automatic dashboard fetches
+- logout clears the local provider-backed session view and then redirects to IdP logout
+- no silent refresh is implemented in v1
+- Docker OIDC mode rebuilds `analyst-console-ui` with exact `VITE_OIDC_*` callback/logout URLs for the nginx UI on `http://localhost:4173`
 
 ## 401/403 Error Contract
 
@@ -259,7 +318,7 @@ Security failures use the same `ApiErrorResponse` shape as other `alert-service`
   "status": 401,
   "error": "Unauthorized",
   "message": "Authentication is required.",
-  "details": []
+  "details": ["reason:missing_credentials"]
 }
 ```
 
@@ -267,30 +326,60 @@ Frontend handling:
 
 - HTTP 401 means no valid session context exists.
 - HTTP 403 means the session is valid but lacks the required authority.
-- `details` is intentionally empty for security failures.
+- `details` may include one machine-readable security reason entry for lifecycle-aware clients.
+- current values are:
+  - `reason:missing_credentials`
+  - `reason:invalid_demo_auth`
+  - `reason:invalid_jwt`
+  - `reason:insufficient_authority`
 - The frontend should not depend on backend exception text.
 
-## JWT/OIDC Migration Path
+## JWT And Local OIDC Implementation
 
-Security Foundation v1 keeps local/demo authentication behind adapter boundaries. JWT/OIDC should replace identity resolution, not rewrite controller authorization, current-user access, audit logging, or frontend security states.
+Security Foundation v1 keeps local/demo authentication behind adapter boundaries. Local OIDC now provides a real browser login flow for Keycloak, while JWT validation in `alert-service` keeps the same internal principal and authority model.
 
-Recommended migration:
+Implemented backend path:
 
-1. Add `spring-boot-starter-oauth2-resource-server` to `alert-service`.
-2. Add environment-specific issuer/JWK configuration.
-3. Implement a JWT authentication converter that maps external claims, groups, or scopes into existing `AnalystAuthority` strings.
-4. Emit an `AnalystPrincipal` or compatible principal from the converter.
-5. Reuse `AnalystAuthenticationFactory` if a custom authentication token is assembled manually, or keep authority mapping equivalent if Spring builds the token.
-6. Keep `DemoAuthSecurityConfig` disabled outside local/dev/test and remove demo auth from non-local deployment manifests.
-7. Keep the endpoint authorization matrix unchanged.
-8. Update `analyst-console-ui` to obtain session context from the OIDC client, then map it into the same user/roles/authorities shape.
+1. `spring-boot-starter-oauth2-resource-server` is added to `alert-service`.
+2. JWT auth is enabled only when `app.security.jwt.enabled=true`.
+3. `JwtResourceServerSecurityConfig` creates a `JwtDecoder` from `jwk-set-uri` or `issuer-uri`.
+4. `JwtAnalystAuthenticationConverter` reads:
+   - `app.security.jwt.user-id-claim`, default `sub`
+   - `app.security.jwt.access-claim`, default `groups`
+   - `app.security.jwt.role-mapping.*`
+5. External access values map to internal `AnalystRole`.
+6. Internal roles expand to `AnalystAuthority`.
+7. `AnalystPrincipal` is placed into the Spring Security context through `AnalystAuthenticationFactory`.
+8. Endpoint authorization, actor identity, and audit logging continue to operate on the same internal model.
 
-Review decisions before OIDC:
+Text architecture diagram:
 
-- Which external claim is the stable analyst user id?
-- Do roles come from groups, scopes, app roles, or an authorization service?
-- Should `FRAUD_OPS_ADMIN` be granted directly by the identity provider or composed inside `alert-service`?
-- When can request DTO `analystId` be removed or ignored completely?
+```text
+Browser
+  -> Keycloak (login)
+  -> redirect /auth/callback
+  -> SPA (oidc-client-ts)
+  -> Authorization: Bearer
+  -> alert-service (JWT Resource Server)
+  -> RBAC enforcement
+```
+
+Current default JWT claim mapping:
+
+| JWT element | Default | Purpose |
+| --- | --- | --- |
+| user id claim | `sub` | Stable internal `AnalystPrincipal.userId` |
+| access claim | `groups` | External membership / role source |
+| `fraud-readonly-analyst` | `READ_ONLY_ANALYST` | read-only analyst persona |
+| `fraud-analyst` | `ANALYST` | standard analyst persona |
+| `fraud-reviewer` | `REVIEWER` | reviewer persona |
+| `fraud-ops-admin` | `FRAUD_OPS_ADMIN` | full v1 access |
+
+Still not implemented:
+
+- real environment-specific deployment config for an IdP
+- silent refresh / token renewal flow
+- service-to-service authentication
 
 ## Review Focus
 
@@ -306,19 +395,20 @@ Reviewers should check:
 
 ## Known Limitations
 
-- No production JWT/OIDC validation flow yet.
+- JWT validation path exists, but no production IdP setup is shipped in this repo.
 - No service-to-service authentication yet.
 - No persistent audit sink yet; v1 logs structured events only.
 - No read-access audit yet.
-- No full login flow in the frontend.
+- The frontend still defaults to demo auth unless OIDC env vars are set explicitly.
+- The frontend OIDC path is a local OIDC integration and foundation for production auth, not a production-ready SSO setup.
 - Backend and frontend currently duplicate authority names.
 - `analystId` is still accepted in write DTOs for compatibility.
 - `anyRequest().permitAll()` intentionally leaves non-API local routes public; protected business APIs are under `/api/v1/**`.
 
 ## Suggested Next Steps
 
-1. Implement JWT/OIDC Resource Server support behind the existing adapter boundary.
-2. Remove request-body actor fields once API compatibility allows it.
-3. Add a durable audit sink if retention requirements appear.
-4. Decide whether a shared security module is justified after another service needs the same model.
-5. Add service-to-service authentication and transport controls for non-local deployment.
+1. Wire real JWT issuer/JWK configuration per environment and finalize deployment claim names.
+2. Harden the existing frontend OIDC client path for deployment environments and finalize operational login/logout behavior.
+3. Remove request-body actor fields once API compatibility allows it.
+4. Add a durable audit sink if retention requirements appear.
+5. Decide whether a shared security module is justified after another service needs the same model.

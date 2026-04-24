@@ -1,6 +1,7 @@
 package com.frauddetection.ingest.messaging;
 
 import com.frauddetection.common.events.contract.TransactionRawEvent;
+import com.frauddetection.common.events.observability.TraceContext;
 import com.frauddetection.ingest.config.KafkaTopicProperties;
 import com.frauddetection.ingest.exception.KafkaPublishException;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -33,9 +34,9 @@ public class KafkaTransactionRawEventProducer implements TransactionRawEventProd
         String topic = kafkaTopicProperties.transactionRaw();
         try {
             ProducerRecord<String, TransactionRawEvent> record = new ProducerRecord<>(topic, event.transactionId(), event);
-            record.headers().add(new RecordHeader("correlationId", event.correlationId().getBytes(StandardCharsets.UTF_8)));
-            record.headers().add(new RecordHeader("traceId", event.traceId().getBytes(StandardCharsets.UTF_8)));
-            record.headers().add(new RecordHeader("transactionId", event.transactionId().getBytes(StandardCharsets.UTF_8)));
+            record.headers().add(new RecordHeader(TraceContext.KAFKA_CORRELATION_ID_HEADER, event.correlationId().getBytes(StandardCharsets.UTF_8)));
+            record.headers().add(new RecordHeader(TraceContext.KAFKA_TRACE_ID_HEADER, event.traceId().getBytes(StandardCharsets.UTF_8)));
+            record.headers().add(new RecordHeader(TraceContext.KAFKA_TRANSACTION_ID_HEADER, event.transactionId().getBytes(StandardCharsets.UTF_8)));
             kafkaTemplate.send(record).get();
             log.atInfo()
                     .addKeyValue("transactionId", event.transactionId())

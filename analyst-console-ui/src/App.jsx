@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { listAlerts, listFraudCases, listScoredTransactions, setApiSession } from "./api/alertsApi.js";
-import { getInitialDemoSession, saveDemoSession } from "./auth/demoSession.js";
+import { getConfiguredAuthProvider } from "./auth/authProvider.js";
+import { isOidcCallbackPath } from "./auth/oidcClient.js";
 import { normalizeSession } from "./auth/session.js";
+import { SESSION_STATES, getSessionStateForApiError, getSessionStateForProvider } from "./auth/sessionState.js";
 import { SessionBadge } from "./components/SessionBadge.jsx";
 import { AlertDetailsPage } from "./pages/AlertDetailsPage.jsx";
 import { AlertsListPage } from "./pages/AlertsListPage.jsx";
@@ -16,6 +18,7 @@ function getInitialFraudCaseId() {
 }
 
 export default function App() {
+  const authProvider = useMemo(() => getConfiguredAuthProvider(), []);
   const [alertPage, setAlertPage] = useState({
     content: [],
     totalElements: 0,
@@ -42,19 +45,111 @@ export default function App() {
   const [transactionPageRequest, setTransactionPageRequest] = useState({ page: 0, size: 25 });
   const [selectedAlertId, setSelectedAlertId] = useState(getInitialAlertId);
   const [selectedFraudCaseId, setSelectedFraudCaseId] = useState(getInitialFraudCaseId);
-  const [session, setSession] = useState(getInitialDemoSession);
+  const [session, setSession] = useState(() => authProvider.getInitialSession());
+  const [sessionState, setSessionState] = useState(() => getSessionStateForProvider(authProvider.getInitialSession(), authProvider));
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [callbackError, setCallbackError] = useState(null);
+  const handlingOidcCallback = authProvider.kind === "oidc" && isOidcCallbackPath();
+  const [sessionBootstrapPending, setSessionBootstrapPending] = useState(authProvider.kind === "oidc");
 
   useEffect(() => {
-    setApiSession(session);
-    saveDemoSession(session);
-  }, [session]);
+    setApiSession(session, authProvider);
+    authProvider.persistSession(session);
+    setSessionState(getSessionStateForProvider(session, authProvider));
+  }, [authProvider, session]);
 
   useEffect(() => {
-    setApiSession(session);
+    if (authProvider.kind !== "oidc" || handlingOidcCallback || typeof authProvider.refreshSession !== "function") {
+      setSessionBootstrapPending(false);
+      return;
+    }
+
+    let cancelled = false;
+    setSessionBootstrapPending(true);
+    setIsLoading(true);
+    setError(null);
+    setSessionState({ status: SESSION_STATES.LOADING });
+
+    authProvider.refreshSession()
+      .then((nextSession) => {
+        if (cancelled) {
+          return;
+        }
+        setSession(normalizeSession(nextSession));
+        setSessionState(getSessionStateForProvider(nextSession, authProvider));
+      })
+      .catch((refreshFailure) => {
+        if (cancelled) {
+          return;
+        }
+        setCallbackError(refreshFailure);
+        setSessionState({ status: SESSION_STATES.AUTH_ERROR });
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setSessionBootstrapPending(false);
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authProvider, handlingOidcCallback]);
+
+  useEffect(() => {
+    if (handlingOidcCallback) {
+      return;
+    }
+    if (sessionBootstrapPending) {
+      return;
+    }
+    if (shouldBlockDashboardFetch(sessionState)) {
+      setIsLoading(false);
+      return;
+    }
+    setApiSession(session, authProvider);
     loadDashboard({ transaction: transactionPageRequest, alert: alertPageRequest, fraudCase: fraudCasePageRequest });
-  }, [transactionPageRequest, alertPageRequest, fraudCasePageRequest, session]);
+  }, [authProvider, transactionPageRequest, alertPageRequest, fraudCasePageRequest, handlingOidcCallback, session, sessionBootstrapPending]);
+
+  useEffect(() => {
+    if (!handlingOidcCallback || typeof authProvider.completeLoginCallback !== "function") {
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoading(true);
+    setError(null);
+    setCallbackError(null);
+    setSessionState({ status: SESSION_STATES.LOADING });
+
+    authProvider.completeLoginCallback()
+      .then((nextSession) => {
+        if (cancelled) {
+          return;
+        }
+        setSession(normalizeSession(nextSession));
+        window.history.replaceState({}, "", "/");
+        setSessionState(getSessionStateForProvider(nextSession, authProvider));
+      })
+      .catch((callbackFailure) => {
+        if (cancelled) {
+          return;
+        }
+        setCallbackError(callbackFailure);
+        setSessionState({ status: SESSION_STATES.AUTH_ERROR });
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authProvider, handlingOidcCallback, session]);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -84,6 +179,7 @@ export default function App() {
       setTransactionPage(nextTransactionPage);
     } catch (apiError) {
       setError(apiError);
+      setSessionState(getSessionStateForApiError(session, apiError) || getSessionStateForProvider(session, authProvider));
     } finally {
       setIsLoading(false);
     }
@@ -145,6 +241,26 @@ export default function App() {
     setSelectedFraudCaseId(null);
   }
 
+  if (handlingOidcCallback) {
+    return (
+      <div className="appShell">
+        <main>
+          <section className="panelStack" aria-label="OIDC callback">
+            <article className="panel">
+              <p className="eyebrow">OIDC callback</p>
+              <h1>{callbackError ? "Sign-in callback failed" : "Completing sign-in"}</h1>
+              <p>
+                {callbackError
+                  ? callbackError.message || "The configured OIDC provider did not complete the redirect."
+                  : "Finishing the provider redirect before returning to the analyst console."}
+              </p>
+            </article>
+          </section>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="appShell">
       <header className="hero">
@@ -170,7 +286,12 @@ export default function App() {
             <small>Fraud cases</small>
           </div>
         </div>
-        <SessionBadge session={session} onSessionChange={changeSession} />
+        <SessionBadge
+          session={session}
+          sessionState={sessionState}
+          authProvider={authProvider}
+          onSessionChange={changeSession}
+        />
       </header>
 
       <main>
@@ -196,6 +317,7 @@ export default function App() {
             transactionPage={transactionPage}
             isLoading={isLoading}
             error={error}
+            sessionState={sessionState}
             onRetry={refreshDashboard}
             onTransactionPageChange={changeTransactionPage}
             onTransactionPageSizeChange={changeTransactionPageSize}
@@ -210,4 +332,13 @@ export default function App() {
       </main>
     </div>
   );
+}
+
+function shouldBlockDashboardFetch(sessionState) {
+  return [
+    SESSION_STATES.UNAUTHENTICATED,
+    SESSION_STATES.EXPIRED,
+    SESSION_STATES.ACCESS_DENIED,
+    SESSION_STATES.AUTH_ERROR
+  ].includes(sessionState?.status);
 }

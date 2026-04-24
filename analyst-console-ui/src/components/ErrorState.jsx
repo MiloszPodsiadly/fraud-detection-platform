@@ -1,5 +1,5 @@
 import { securityErrorKind, securityErrorMessage } from "../auth/securityErrors.js";
-import { AccessDeniedPanel, UnauthorizedPanel } from "./SecurityStatePanels.jsx";
+import { AccessDeniedPanel, AuthErrorPanel, SessionExpiredPanel, UnauthorizedPanel } from "./SecurityStatePanels.jsx";
 
 export function ErrorState({ error, message, onRetry }) {
   const displayMessage = securityErrorMessage(error || message);
@@ -11,6 +11,14 @@ export function ErrorState({ error, message, onRetry }) {
 
   if (kind === "forbidden") {
     return <AccessDeniedPanel onRetry={onRetry} />;
+  }
+
+  if (kind === "expired") {
+    return <SessionExpiredPanel onRetry={onRetry} />;
+  }
+
+  if (kind === "auth_error") {
+    return <AuthErrorPanel onRetry={onRetry} />;
   }
 
   return (

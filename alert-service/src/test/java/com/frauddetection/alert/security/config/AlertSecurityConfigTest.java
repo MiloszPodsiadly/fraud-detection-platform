@@ -13,6 +13,7 @@ import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.mapper.ScoredTransactionResponseMapper;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.security.auth.AnalystAuthenticationFactory;
 import com.frauddetection.alert.security.auth.DemoAuthHeaderParser;
@@ -92,6 +93,9 @@ class AlertSecurityConfigTest {
     @MockBean
     private TransactionMonitoringUseCase transactionMonitoringUseCase;
 
+    @MockBean
+    private AlertServiceMetrics alertServiceMetrics;
+
     @Test
     void shouldReturn401WhenAuthenticationIsMissingForAnalystEndpoints() throws Exception {
         mockMvc.perform(get("/api/v1/alerts"))
@@ -99,7 +103,7 @@ class AlertSecurityConfigTest {
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.status").value(401))
                 .andExpect(jsonPath("$.error").value("Unauthorized"))
-                .andExpect(jsonPath("$.details").isEmpty())
+                .andExpect(jsonPath("$.details[0]").value("reason:missing_credentials"))
                 .andExpect(jsonPath("$.message").value("Authentication is required."));
         mockMvc.perform(get("/api/v1/alerts/alert-1"))
                 .andExpect(status().isUnauthorized());
@@ -129,7 +133,7 @@ class AlertSecurityConfigTest {
                 .andExpect(jsonPath("$.status").value(401))
                 .andExpect(jsonPath("$.error").value("Unauthorized"))
                 .andExpect(jsonPath("$.message").value("Authentication is required."))
-                .andExpect(jsonPath("$.details").isEmpty());
+                .andExpect(jsonPath("$.details[0]").value("reason:invalid_demo_auth"));
     }
 
     @Test
@@ -169,7 +173,7 @@ class AlertSecurityConfigTest {
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.status").value(403))
                 .andExpect(jsonPath("$.error").value("Forbidden"))
-                .andExpect(jsonPath("$.details").isEmpty())
+                .andExpect(jsonPath("$.details[0]").value("reason:insufficient_authority"))
                 .andExpect(jsonPath("$.message").value("Insufficient permissions."));
     }
 
@@ -221,7 +225,7 @@ class AlertSecurityConfigTest {
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.status").value(403))
                 .andExpect(jsonPath("$.error").value("Forbidden"))
-                .andExpect(jsonPath("$.details").isEmpty())
+                .andExpect(jsonPath("$.details[0]").value("reason:insufficient_authority"))
                 .andExpect(jsonPath("$.message").value("Insufficient permissions."));
     }
 
@@ -235,7 +239,7 @@ class AlertSecurityConfigTest {
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.status").value(403))
                 .andExpect(jsonPath("$.error").value("Forbidden"))
-                .andExpect(jsonPath("$.details").isEmpty())
+                .andExpect(jsonPath("$.details[0]").value("reason:insufficient_authority"))
                 .andExpect(jsonPath("$.message").value("Insufficient permissions."));
     }
 

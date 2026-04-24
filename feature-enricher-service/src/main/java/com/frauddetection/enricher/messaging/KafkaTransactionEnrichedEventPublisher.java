@@ -1,6 +1,7 @@
 package com.frauddetection.enricher.messaging;
 
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
+import com.frauddetection.common.events.observability.TraceContext;
 import com.frauddetection.enricher.config.KafkaTopicProperties;
 import com.frauddetection.enricher.exception.FeatureEnrichmentException;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -33,8 +34,9 @@ public class KafkaTransactionEnrichedEventPublisher implements TransactionEnrich
         String topic = kafkaTopicProperties.transactionEnriched();
         try {
             ProducerRecord<String, TransactionEnrichedEvent> record = new ProducerRecord<>(topic, event.transactionId(), event);
-            record.headers().add(new RecordHeader("correlationId", event.correlationId().getBytes(StandardCharsets.UTF_8)));
-            record.headers().add(new RecordHeader("transactionId", event.transactionId().getBytes(StandardCharsets.UTF_8)));
+            record.headers().add(new RecordHeader(TraceContext.KAFKA_CORRELATION_ID_HEADER, event.correlationId().getBytes(StandardCharsets.UTF_8)));
+            record.headers().add(new RecordHeader(TraceContext.KAFKA_TRANSACTION_ID_HEADER, event.transactionId().getBytes(StandardCharsets.UTF_8)));
+            addTraceHeaderIfPresent(record, TraceContext.currentTraceId());
             kafkaTemplate.send(record).get();
             log.atInfo()
                     .addKeyValue("transactionId", event.transactionId())
@@ -44,5 +46,12 @@ public class KafkaTransactionEnrichedEventPublisher implements TransactionEnrich
         } catch (Exception exception) {
             throw new FeatureEnrichmentException("Failed to publish enriched transaction event.", exception);
         }
+    }
+
+    private void addTraceHeaderIfPresent(ProducerRecord<String, TransactionEnrichedEvent> record, String traceId) {
+        if (traceId == null || traceId.isBlank()) {
+            return;
+        }
+        record.headers().add(new RecordHeader(TraceContext.KAFKA_TRACE_ID_HEADER, traceId.getBytes(StandardCharsets.UTF_8)));
     }
 }

@@ -3,6 +3,7 @@ package com.frauddetection.scoring.service;
 import com.frauddetection.scoring.config.ScoringMode;
 import com.frauddetection.scoring.config.ScoringProperties;
 import com.frauddetection.scoring.domain.FraudScoreResult;
+import com.frauddetection.scoring.observability.ScoringMetrics;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,15 +22,18 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
     private final RuleBasedFraudScoringEngine ruleBasedFraudScoringEngine;
     private final MlFraudScoringEngine mlFraudScoringEngine;
     private final ScoringProperties scoringProperties;
+    private final ScoringMetrics scoringMetrics;
 
     public CompositeFraudScoringEngine(
             RuleBasedFraudScoringEngine ruleBasedFraudScoringEngine,
             MlFraudScoringEngine mlFraudScoringEngine,
-            ScoringProperties scoringProperties
+            ScoringProperties scoringProperties,
+            ScoringMetrics scoringMetrics
     ) {
         this.ruleBasedFraudScoringEngine = ruleBasedFraudScoringEngine;
         this.mlFraudScoringEngine = mlFraudScoringEngine;
         this.scoringProperties = scoringProperties;
+        this.scoringMetrics = scoringMetrics;
     }
 
     @Override
@@ -47,6 +51,7 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
         if (isModelAvailable(mlResult)) {
             return mlResult;
         }
+        scoringMetrics.recordFallback(ScoringMode.ML, fallbackReason(mlResult));
 
         return withDiagnostics(ruleBasedFraudScoringEngine.score(request), Map.of(
                 "mode", ScoringMode.ML.name(),
@@ -72,6 +77,9 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
         diagnostics.put("modelMonitoring", ModelMonitoringMetrics.from(ScoringMode.SHADOW, ruleResult, mlResult, isModelAvailable(mlResult)));
         if (!isModelAvailable(mlResult)) {
             diagnostics.put("shadowFallbackReason", fallbackReason(mlResult));
+            scoringMetrics.recordFallback(ScoringMode.SHADOW, fallbackReason(mlResult));
+        } else {
+            recordDisagreements(ScoringMode.SHADOW, ruleResult, mlResult);
         }
 
         logModelMonitoring(request, diagnostics);
@@ -95,6 +103,9 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
         diagnostics.put("modelMonitoring", ModelMonitoringMetrics.from(ScoringMode.COMPARE, ruleResult, mlResult, isModelAvailable(mlResult)));
         if (!isModelAvailable(mlResult)) {
             diagnostics.put("mlFallbackReason", fallbackReason(mlResult));
+            scoringMetrics.recordFallback(ScoringMode.COMPARE, fallbackReason(mlResult));
+        } else {
+            recordDisagreements(ScoringMode.COMPARE, ruleResult, mlResult);
         }
 
         logModelMonitoring(request, diagnostics);
@@ -112,6 +123,15 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
 
     private double score(FraudScoreResult result) {
         return result.fraudScore() == null ? 0.0d : result.fraudScore();
+    }
+
+    private void recordDisagreements(ScoringMode mode, FraudScoreResult ruleResult, FraudScoreResult mlResult) {
+        if (Boolean.TRUE.equals(ruleResult.alertRecommended()) != Boolean.TRUE.equals(mlResult.alertRecommended())) {
+            scoringMetrics.recordModelDisagreement(mode, "decision");
+        }
+        if (ruleResult.riskLevel() != mlResult.riskLevel()) {
+            scoringMetrics.recordModelDisagreement(mode, "risk_level");
+        }
     }
 
     private FraudScoreResult withDiagnostics(FraudScoreResult result, Map<String, Object> diagnostics) {

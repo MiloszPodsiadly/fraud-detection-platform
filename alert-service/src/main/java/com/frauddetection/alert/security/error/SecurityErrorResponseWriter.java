@@ -21,6 +21,10 @@ public class SecurityErrorResponseWriter {
     }
 
     public void write(HttpServletResponse response, HttpStatus status, String message) throws IOException {
+        write(response, status, message, List.of());
+    }
+
+    public void write(HttpServletResponse response, HttpStatus status, String message, List<String> details) throws IOException {
         response.setStatus(status.value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         objectMapper.writeValue(response.getOutputStream(), new ApiErrorResponse(
@@ -28,7 +32,7 @@ public class SecurityErrorResponseWriter {
                 status.value(),
                 status.getReasonPhrase(),
                 message,
-                List.of()
+                details
         ));
     }
 }

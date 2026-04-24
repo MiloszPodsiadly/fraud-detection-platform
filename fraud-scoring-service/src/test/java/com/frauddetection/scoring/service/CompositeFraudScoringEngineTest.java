@@ -7,6 +7,8 @@ import com.frauddetection.scoring.config.ScoringProperties;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
 import com.frauddetection.scoring.domain.MlModelInput;
 import com.frauddetection.scoring.domain.MlModelOutput;
+import com.frauddetection.scoring.observability.ScoringMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -31,7 +33,8 @@ class CompositeFraudScoringEngineTest {
 
     @Test
     void shouldFallbackToRuleBasedWhenMlModeHasNoModelRuntime() {
-        CompositeFraudScoringEngine engine = engine(ScoringMode.ML);
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        CompositeFraudScoringEngine engine = engine(ScoringMode.ML, new PlaceholderMlModelScoringClient(), new ScoringMetrics(meterRegistry));
         FraudScoringRequest request = FraudScoringRequest.from(TransactionFixtures.enrichedTransaction().build());
 
         var result = engine.score(request);
@@ -42,6 +45,10 @@ class CompositeFraudScoringEngineTest {
         assertThat(mlDiagnostics(result))
                 .containsEntry("fallbackUsed", true)
                 .containsEntry("mlModelName", "ml-placeholder");
+        assertThat(meterRegistry.get("fraud.scoring.fallbacks")
+                .tags("mode", "ml", "reason", "no_ml_model_runtime_is_configured_yet")
+                .counter()
+                .count()).isEqualTo(1.0d);
     }
 
     @Test
@@ -116,6 +123,7 @@ class CompositeFraudScoringEngineTest {
 
     @Test
     void shouldTrackRiskMismatchAndDisagreementForAvailableCompareModel() {
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
         CompositeFraudScoringEngine engine = engine(ScoringMode.COMPARE, input -> new MlModelOutput(
                 true,
                 0.95d,
@@ -127,7 +135,7 @@ class CompositeFraudScoringEngineTest {
                 Map.of("modelAvailable", true),
                 Map.of("modelAvailable", true),
                 null
-        ));
+        ), new ScoringMetrics(meterRegistry));
         FraudScoringRequest request = FraudScoringRequest.from(TransactionFixtures.enrichedTransaction().build());
 
         var result = engine.score(request);
@@ -138,18 +146,31 @@ class CompositeFraudScoringEngineTest {
                 .containsEntry("riskLevelMismatch", true)
                 .containsEntry("riskLevelMismatchSample", 1)
                 .containsEntry("decisionDisagreementSample", 1);
+        assertThat(meterRegistry.get("fraud.scoring.ml.diagnostics.disagreements")
+                .tags("mode", "compare", "signal", "decision")
+                .counter()
+                .count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.get("fraud.scoring.ml.diagnostics.disagreements")
+                .tags("mode", "compare", "signal", "risk_level")
+                .counter()
+                .count()).isEqualTo(1.0d);
     }
 
     private CompositeFraudScoringEngine engine(ScoringMode mode) {
-        return engine(mode, new PlaceholderMlModelScoringClient());
+        return engine(mode, new PlaceholderMlModelScoringClient(), new ScoringMetrics(new SimpleMeterRegistry()));
     }
 
     private CompositeFraudScoringEngine engine(ScoringMode mode, MlModelScoringClient mlModelScoringClient) {
+        return engine(mode, mlModelScoringClient, new ScoringMetrics(new SimpleMeterRegistry()));
+    }
+
+    private CompositeFraudScoringEngine engine(ScoringMode mode, MlModelScoringClient mlModelScoringClient, ScoringMetrics scoringMetrics) {
         ScoringProperties properties = new ScoringProperties(0.75d, 0.90d, mode);
         return new CompositeFraudScoringEngine(
                 new RuleBasedFraudScoringEngine(properties),
                 new MlFraudScoringEngine(mlModelScoringClient),
-                properties
+                properties,
+                scoringMetrics
         );
     }
 

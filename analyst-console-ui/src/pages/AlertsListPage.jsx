@@ -6,7 +6,9 @@ import { FilterBar } from "../components/FilterBar.jsx";
 import { FraudCasePanel } from "../components/FraudCasePanel.jsx";
 import { LoadingPanel } from "../components/LoadingPanel.jsx";
 import { PaginationControls } from "../components/PaginationControls.jsx";
+import { SessionStatePanel } from "../components/SecurityStatePanels.jsx";
 import { TransactionMonitorTable } from "../components/TransactionMonitorTable.jsx";
+import { SESSION_STATES } from "../auth/sessionState.js";
 
 export function AlertsListPage({
   alertPage,
@@ -14,6 +16,7 @@ export function AlertsListPage({
   transactionPage,
   isLoading,
   error,
+  sessionState,
   onRetry,
   onTransactionPageChange,
   onTransactionPageSizeChange,
@@ -90,6 +93,8 @@ export function AlertsListPage({
     });
   }, [fraudCasePage.content, deferredFraudCaseQuery, fraudCaseFilters.status]);
 
+  const sessionBlocksDashboard = shouldBlockDashboard(sessionState, error);
+
   return (
     <div className="dashboardGrid pageEnter">
       <FraudCasePanel
@@ -123,15 +128,16 @@ export function AlertsListPage({
           statusLabel="Classification"
         />
 
+        {sessionBlocksDashboard && <SessionStatePanel sessionState={sessionState} onRetry={onRetry} />}
         {isLoading && <LoadingPanel label="Loading scored transactions..." />}
-        {!isLoading && error && <ErrorState error={error} onRetry={onRetry} />}
-        {!isLoading && !error && filteredTransactions.length === 0 && (
+        {!sessionBlocksDashboard && !isLoading && error && <ErrorState error={error} onRetry={onRetry} />}
+        {!sessionBlocksDashboard && !isLoading && !error && filteredTransactions.length === 0 && (
           <EmptyState
             title="No scored transactions match this view"
             message="Adjust filters or generate synthetic traffic to populate transaction monitoring."
           />
         )}
-        {!isLoading && !error && filteredTransactions.length > 0 && (
+        {!sessionBlocksDashboard && !isLoading && !error && filteredTransactions.length > 0 && (
           <>
             <TransactionMonitorTable transactions={filteredTransactions} />
             <PaginationControls
@@ -156,15 +162,16 @@ export function AlertsListPage({
 
         <FilterBar filters={filters} onChange={setFilters} />
 
+        {sessionBlocksDashboard && <SessionStatePanel sessionState={sessionState} onRetry={onRetry} />}
         {isLoading && <LoadingPanel label="Loading fraud alerts..." />}
-        {!isLoading && error && <ErrorState error={error} onRetry={onRetry} />}
-        {!isLoading && !error && filteredAlerts.length === 0 && (
+        {!sessionBlocksDashboard && !isLoading && error && <ErrorState error={error} onRetry={onRetry} />}
+        {!sessionBlocksDashboard && !isLoading && !error && filteredAlerts.length === 0 && (
           <EmptyState
             title="No alerts match this view"
             message="Adjust filters or generate synthetic high-risk traffic to populate the queue."
           />
         )}
-        {!isLoading && !error && filteredAlerts.length > 0 && (
+        {!sessionBlocksDashboard && !isLoading && !error && filteredAlerts.length > 0 && (
           <>
             <AlertTable alerts={filteredAlerts} onOpenAlert={onOpenAlert} />
             <PaginationControls
@@ -181,4 +188,17 @@ export function AlertsListPage({
       </section>
     </div>
   );
+}
+
+function shouldBlockDashboard(sessionState, error) {
+  if (error) {
+    return false;
+  }
+
+  return [
+    SESSION_STATES.UNAUTHENTICATED,
+    SESSION_STATES.EXPIRED,
+    SESSION_STATES.ACCESS_DENIED,
+    SESSION_STATES.AUTH_ERROR
+  ].includes(sessionState?.status);
 }

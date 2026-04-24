@@ -4,7 +4,9 @@ import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
 import com.frauddetection.scoring.domain.MlModelInput;
+import com.frauddetection.scoring.observability.ScoringMetrics;
 import org.junit.jupiter.api.Test;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
@@ -20,7 +22,8 @@ class HttpMlModelScoringClientTest {
     void shouldMapSuccessfulModelResponse() {
         RestClient.Builder builder = RestClient.builder().baseUrl("http://ml-test");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        HttpMlModelScoringClient client = new HttpMlModelScoringClient(builder.build());
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        HttpMlModelScoringClient client = new HttpMlModelScoringClient(builder.build(), new ScoringMetrics(meterRegistry));
 
         server.expect(requestTo("http://ml-test/v1/fraud/score"))
                 .andRespond(withSuccess("""
@@ -45,6 +48,10 @@ class HttpMlModelScoringClientTest {
         assertThat(result.riskLevel()).isEqualTo(RiskLevel.HIGH);
         assertThat(result.modelName()).isEqualTo("python-logistic-fraud-model");
         assertThat(result.reasonCodes()).containsExactly("countryMismatch");
+        assertThat(meterRegistry.get("fraud.scoring.ml.client.requests")
+                .tags("outcome", "available")
+                .counter()
+                .count()).isEqualTo(1.0d);
         server.verify();
     }
 
@@ -52,7 +59,8 @@ class HttpMlModelScoringClientTest {
     void shouldReturnUnavailableOutputWhenModelRequestFails() {
         RestClient.Builder builder = RestClient.builder().baseUrl("http://ml-test");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        HttpMlModelScoringClient client = new HttpMlModelScoringClient(builder.build());
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        HttpMlModelScoringClient client = new HttpMlModelScoringClient(builder.build(), new ScoringMetrics(meterRegistry));
 
         server.expect(requestTo("http://ml-test/v1/fraud/score"))
                 .andRespond(withServerError());
@@ -62,6 +70,10 @@ class HttpMlModelScoringClientTest {
         assertThat(result.available()).isFalse();
         assertThat(result.riskLevel()).isEqualTo(RiskLevel.LOW);
         assertThat(result.explanationMetadata()).containsEntry("modelAvailable", false);
+        assertThat(meterRegistry.get("fraud.scoring.ml.client.requests")
+                .tags("outcome", "error")
+                .counter()
+                .count()).isEqualTo(1.0d);
         server.verify();
     }
 
