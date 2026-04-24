@@ -1,10 +1,10 @@
 package com.frauddetection.ingest.observability;
 
+import com.frauddetection.common.events.observability.TraceContext;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -25,12 +25,9 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
 
         request.setAttribute(CorrelationIdContext.CORRELATION_ID_ATTRIBUTE, correlationId);
         response.setHeader(CorrelationIdContext.CORRELATION_ID_HEADER, correlationId);
-        MDC.put("correlationId", correlationId);
 
-        try {
+        try (TraceContext.Scope ignored = TraceContext.open(correlationId, null, null, null)) {
             filterChain.doFilter(request, response);
-        } finally {
-            MDC.remove("correlationId");
         }
     }
 }
