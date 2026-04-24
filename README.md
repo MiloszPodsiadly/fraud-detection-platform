@@ -21,6 +21,7 @@ The repository intentionally uses platform-owned synthetic data generators. Thir
 - [Configuration](#configuration)
 - [Reliability Retry And DLT](#reliability-retry-and-dlt)
 - [Logging And Correlation](#logging-and-correlation)
+- [Operations And Observability](#operations-and-observability)
 - [Idempotency And Performance](#idempotency-and-performance)
 - [Testing](#testing)
 - [ML Inference Service](#ml-inference-service)
@@ -97,12 +98,14 @@ Security Foundation v1 protects the analyst workflow owned by `alert-service` an
 Implemented:
 
 - Authentication skeleton for local/dev demo auth.
+- Spring OAuth2 Resource Server skeleton for JWT validation.
+- JWT to `AnalystPrincipal` conversion with configurable claim mapping.
 - RBAC with `AnalystRole` personas and `AnalystAuthority` enforcement strings.
 - Endpoint protection for analyst APIs under `alert-service` `/api/v1/**`.
 - Stable JSON HTTP 401/403 responses.
 - Principal-based actor identity for analyst write paths.
 - Audit logging v1 for alert decisions and fraud case updates.
-- Frontend session awareness, role-aware action disabling, and dedicated 401/403 states.
+- Frontend session awareness, explicit session lifecycle states, role-aware action disabling, and dedicated auth/security states.
 - JWT/OIDC migration extension points.
 
 Important security boundaries:
@@ -110,8 +113,9 @@ Important security boundaries:
 - Demo auth is local/dev only. It is disabled by default and controlled by `app.security.demo-auth.enabled`.
 - Demo auth requires an allowed profile: `local`, `dev`, `docker-local`, or `test`.
 - If demo auth is enabled outside those profiles, `alert-service` rejects startup.
+- Demo auth does not coexist with JWT auth. If JWT is enabled, demo auth headers are ignored.
 - Demo auth is not the production authentication path.
-- Production authentication should use JWT/OIDC Resource Server support and map external claims into the same internal authority model.
+- JWT auth uses Spring Resource Server and maps external claims into the same internal principal and authority model used by demo auth.
 - Backend authorization is authoritative. Frontend gating is UX only.
 - For secured write requests, actor identity comes from the authenticated principal, not from request payload `analystId`.
 
@@ -228,9 +232,25 @@ http://localhost:4173
 
 The Docker stack starts synthetic replay automatically. Wait about 20-30 seconds after startup and refresh the UI if the first page still shows zero records.
 
-### Demo Auth In Local Runs
+### Auth Modes
 
-The Docker Compose local stack enables demo auth for `alert-service` with:
+Two local analyst-auth modes are supported today.
+
+#### 1. Demo Auth (default quickstart)
+
+Start the default quickstart:
+
+```bash
+docker compose -f deployment/docker-compose.yml up --build
+```
+
+Behavior:
+
+- uses `X-Demo-*` headers between `analyst-console-ui` and `alert-service`
+- no browser login UI
+- local/dev only
+
+The Docker Compose quickstart enables demo auth for `alert-service` with:
 
 ```text
 APP_SECURITY_DEMO_AUTH_ENABLED=true
@@ -274,6 +294,109 @@ Expected behavior:
 
 Full details: [Security Foundation v1](docs/security-foundation-v1.md).
 
+#### 2. Local OIDC (Keycloak)
+
+Start the local OIDC stack:
+
+```bash
+docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml up --build
+```
+
+Behavior:
+
+- real login via browser
+- Keycloak at `http://localhost:8086`
+- UI at `http://localhost:4173`
+
+Imported local realm:
+
+- realm: `fraud-detection`
+- client: `analyst-console-ui`
+
+How this differs from the default quickstart:
+
+- default `deployment/docker-compose.yml` keeps `alert-service` on demo auth
+- `deployment/docker-compose.oidc.yml` adds local Keycloak and switches `alert-service` to JWT validation for analyst APIs
+- `deployment/docker-compose.oidc.yml` also rebuilds `analyst-console-ui` with OIDC-specific `VITE_*` values for the Docker UI on `http://localhost:4173`
+
+#### Local OIDC Login Flow
+
+- click `Sign in with OIDC`
+- browser redirects to Keycloak
+- log in with one of the local test users
+- Keycloak redirects back to `/auth/callback`
+- `oidc-client-ts` completes the callback and restores the provider-backed session
+- session becomes authenticated in the SPA
+- API calls use `Authorization: Bearer <access_token>`
+
+Text architecture diagram:
+
+```text
+Browser
+  -> Keycloak (login)
+  -> redirect /auth/callback
+  -> SPA (oidc-client-ts)
+  -> Authorization: Bearer
+  -> alert-service (JWT Resource Server)
+  -> RBAC enforcement
+```
+
+Local JWT wiring in OIDC mode:
+
+- issuer visible to browser and validated by backend:
+  - `http://localhost:8086/realms/fraud-detection`
+- JWKS fetched by `alert-service` through Docker network:
+  - `http://keycloak:8080/realms/fraud-detection/protocol/openid-connect/certs`
+- backend canonical actor id claim:
+  - `sub`
+- backend access claim:
+  - `groups`
+
+This keeps issuer validation enabled while still letting the backend fetch keys over the Docker network.
+
+Docker UI OIDC settings in this override:
+
+- `VITE_AUTH_PROVIDER=oidc`
+- `VITE_OIDC_AUTHORITY=http://localhost:8086/realms/fraud-detection`
+- `VITE_OIDC_CLIENT_ID=analyst-console-ui`
+- `VITE_OIDC_REDIRECT_URI=http://localhost:4173/auth/callback`
+- `VITE_OIDC_POST_LOGOUT_REDIRECT_URI=http://localhost:4173/`
+- `VITE_OIDC_SCOPE=openid profile email`
+
+Test users:
+
+| Username | Password | Role |
+| --- | --- | --- |
+| `readonly` | `readonly` | `READ_ONLY_ANALYST` |
+| `analyst` | `analyst` | `ANALYST` |
+| `reviewer` | `reviewer` | `REVIEWER` |
+| `opsadmin` | `opsadmin` | `FRAUD_OPS_ADMIN` |
+
+These credentials are local-only and must not be reused outside local test environments.
+
+#### Manual verification
+
+- login redirect works
+- callback completes on `/auth/callback`
+- bearer token is present in API requests
+- `readonly` receives `403` on write actions
+- logout works
+- expired session shows the correct UI state
+
+### Current OIDC limitations
+
+- no silent refresh
+- no token refresh flow
+- no service-to-service auth
+- no production IdP config
+- tokens are managed by `oidc-client-ts` for local/dev use, not as hardened production storage
+
+Keycloak is available at:
+
+```text
+http://localhost:8086
+```
+
 ## Frontend Analyst Console
 
 URL:
@@ -297,10 +420,17 @@ Security UX:
 - The session model uses `userId`, `roles`, and `authorities`.
 - `src/auth/session.js` is the UI-facing session contract.
 - `src/auth/demoSession.js` is the local demo provider.
-- The UI sends demo headers from one API injection point.
+- `src/auth/authProvider.js` is the provider boundary for request headers and session persistence.
+- `src/auth/oidcClient.js` is the SDK-facing OIDC adapter boundary.
+- `src/auth/oidcSessionSource.js` is the real provider-backed session source that normalizes `profile`, `access_token`, and expiry state into the stable UI session contract.
+- The UI sends auth headers from one provider-based API injection point.
+- Session lifecycle states distinguish `loading`, `authenticated`, `unauthenticated`, `expired`, `access_denied`, and `auth_error`.
+- OIDC mode supports login redirect, callback handling, local session bootstrap from provider-managed storage, bearer propagation, logout redirect, and expired-session UX without silent refresh.
+- The Docker OIDC override rebuilds the frontend with exact callback URLs for `http://localhost:4173`.
 - Write actions are disabled when the session lacks the required authority.
-- HTTP 401 shows a session-required state.
+- HTTP 401 can render a session-required or session-expired state depending on the known lifecycle context.
 - HTTP 403 shows an access-denied state.
+- SessionBadge surfaces auth mode, identity, role, and authority scope.
 
 Frontend checks are not enforcement. They keep the analyst workflow clear while backend authorization remains authoritative.
 
@@ -310,21 +440,18 @@ Full details: [Security Foundation v1](docs/security-foundation-v1.md).
 
 Current non-production gaps:
 
-- No JWT/OIDC token validation is implemented yet.
 - No service-to-service authentication or mTLS is implemented.
 - No durable audit store exists yet.
 - No read-access audit exists yet.
-- The frontend has no production login/OIDC client flow yet.
+- The frontend still uses demo auth by default in development.
+- The frontend OIDC path is a local OIDC integration and foundation for production auth, but it does not yet implement silent refresh or production deployment hardening.
 - Request DTOs still accept `analystId` for compatibility, although secured write paths use the principal as actor source of truth.
 
 Planned production path:
 
-- Add Spring OAuth2 Resource Server support to `alert-service`.
-- Configure issuer/JWK settings per environment.
-- Map external claims, groups, scopes, or app roles into existing `AnalystAuthority` strings.
-- Emit an internal principal shape compatible with `AnalystPrincipal` and `CurrentAnalystUser`.
-- Keep the endpoint authorization matrix unchanged.
-- Replace the frontend demo provider with an OIDC-backed session source while preserving the `userId`/`roles`/`authorities` UI contract.
+- Configure real issuer/JWK settings per environment.
+- Finalize IdP claim naming and group/role mapping for deployment.
+- Harden the existing frontend OIDC flow for deployment environments while preserving the `userId`/`roles`/`authorities` UI contract and lifecycle states.
 - Add durable audit sink if retention or compliance requirements need searchable audit history.
 
 Migration notes: [Security Foundation v1](docs/security-foundation-v1.md).
@@ -410,6 +537,8 @@ Expected runtime inputs:
 - `AUTO_REPLAY_ENABLED`
 - optional replay dataset paths for `transaction-simulator-service`
 - `APP_SECURITY_DEMO_AUTH_ENABLED` for local/dev analyst auth only
+- `APP_SECURITY_JWT_ENABLED` for JWT auth path enablement
+- `APP_SECURITY_JWT_JWK_SET_URI` or `APP_SECURITY_JWT_ISSUER_URI` for JWT key discovery
 
 Local defaults are provided for development, but invalid overrides fail fast.
 
@@ -451,6 +580,14 @@ Kafka propagation:
 
 - every event carries `correlationId`
 - producers add operational headers such as `correlationId`, `transactionId`, `traceId`, and `alertId`
+- Kafka listeners restore correlation and trace context into MDC on message-processing boundaries
+
+Current foundation:
+
+- `common-events` defines a shared `TraceContext`
+- ingest HTTP requests populate MDC from `X-Correlation-Id`
+- Kafka propagation preserves `correlationId` and forwards `traceId` when present
+- listener boundaries in enrichment, scoring, and alert processing restore MDC for downstream logs
 
 Structured logs include:
 
@@ -460,6 +597,26 @@ Structured logs include:
 - `topic` where applicable
 - retry `partition`, `offset`, and `deliveryAttempt`
 - audit actor/action/resource/outcome for analyst writes
+
+## Operations And Observability
+
+Current v1 operations foundation includes:
+
+- Micrometer metrics in `alert-service`
+- Micrometer metrics in `fraud-scoring-service`
+- security telemetry for `401`, `403`, actor mismatch, and audit volume
+- scoring and ML runtime telemetry for latency, fallback, and ML availability
+- shared correlation and trace context propagation across HTTP and Kafka boundaries
+
+Current metrics exposure:
+
+- `alert-service`: `/actuator/metrics`, `/actuator/prometheus`
+- `fraud-scoring-service`: `/actuator/metrics`, `/actuator/prometheus`
+- `ml-inference-service`: not instrumented with a dedicated metrics endpoint yet
+
+Reviewer-facing operations spec:
+
+- [Operations And Observability v1](docs/operations-observability-v1.md)
 
 ## Idempotency And Performance
 
@@ -612,6 +769,7 @@ scripts/                         Synthetic dataset and replay scripts
 Security and architecture:
 
 - [Security Foundation v1](docs/security-foundation-v1.md): consolidated technical reference for RBAC, local demo auth, actor identity, audit logging, frontend security UX, JWT/OIDC migration, review notes, known limitations, and next steps.
+- [Operations And Observability v1](docs/operations-observability-v1.md): dashboard and alert spec for analyst workflow, platform operations, security monitoring, ML/runtime monitoring, and triage guidance.
 
 TODO: If future work adds docs for ML governance, operations, data generation, or deployment, keep them as a small set of consolidated feature documents instead of many prompt-sized files.
 
@@ -635,17 +793,18 @@ Implemented:
 - AI analyst assistant backend and UI summary panel
 - Security Foundation v1 for analyst workflow
 - local/dev demo auth guardrails
+- JWT Resource Server skeleton and JWT claim mapping into `AnalystPrincipal`
 - RBAC endpoint protection
 - principal-based actor identity
 - audit logging v1
+- local Keycloak OIDC login, callback, bearer propagation, and logout flow
 
 Known production gaps:
 
-- JWT/OIDC Resource Server integration is not implemented yet.
 - Service-to-service authentication is not implemented yet.
 - Durable audit storage is not implemented yet.
 - DLT inspection/replay tooling is not implemented yet.
-- The frontend uses local demo session plumbing, not a production login flow.
+- The frontend defaults to demo auth in quickstart mode and supports local OIDC through the Keycloak override, but it is not a production-ready SSO setup.
 
 ## Maintainer
 
