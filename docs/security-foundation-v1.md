@@ -300,7 +300,8 @@ Current OIDC lifecycle behavior:
 
 - app bootstrap checks the configured provider before dashboard data loads
 - callback completion hydrates the normalized session before returning to `/`
-- provider `groups` map into existing frontend role names
+- provider `groups` may map into existing frontend role names for UX only
+- backend JWT validation and authority checks remain authoritative for RBAC
 - expired provider sessions render the dedicated `expired` UI state
 - expired, unauthenticated, access-denied, and auth-error states block automatic dashboard fetches
 - logout clears the local provider-backed session view and then redirects to IdP logout

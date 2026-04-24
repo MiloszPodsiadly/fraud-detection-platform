@@ -327,6 +327,7 @@ How this differs from the default quickstart:
 - Keycloak redirects back to `/auth/callback`
 - `oidc-client-ts` completes the callback and restores the provider-backed session
 - session becomes authenticated in the SPA
+- frontend may normalize provider `groups` into existing UI role labels for UX, but backend JWT validation remains authoritative for RBAC
 - API calls use `Authorization: Bearer <access_token>`
 
 Text architecture diagram:
@@ -424,6 +425,7 @@ Security UX:
 - `src/auth/oidcClient.js` is the SDK-facing OIDC adapter boundary.
 - `src/auth/oidcSessionSource.js` is the real provider-backed session source that normalizes `profile`, `access_token`, and expiry state into the stable UI session contract.
 - The UI sends auth headers from one provider-based API injection point.
+- Any frontend group-to-role normalization is UX only; backend authority checks remain the enforcement contract.
 - Session lifecycle states distinguish `loading`, `authenticated`, `unauthenticated`, `expired`, `access_denied`, and `auth_error`.
 - OIDC mode supports login redirect, callback handling, local session bootstrap from provider-managed storage, bearer propagation, logout redirect, and expired-session UX without silent refresh.
 - The Docker OIDC override rebuilds the frontend with exact callback URLs for `http://localhost:4173`.
