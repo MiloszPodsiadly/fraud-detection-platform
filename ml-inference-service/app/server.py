@@ -7,12 +7,44 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import urlparse
 
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
+
 from app.model import MODEL_NAME, MODEL_VERSION, FraudModel
 
 
 HOST = "0.0.0.0"
 PORT = 8090
 MODEL = FraudModel()
+REQUEST_COUNTER = Counter(
+    "fraud_ml_inference_requests_total",
+    "Total ML inference HTTP requests by endpoint, method, status, and outcome.",
+    ("endpoint", "method", "status", "outcome"),
+)
+REQUEST_LATENCY = Histogram(
+    "fraud_ml_inference_request_latency_seconds",
+    "Latency of ML inference HTTP requests.",
+    ("endpoint", "method", "status", "outcome"),
+    buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
+)
+ERROR_COUNTER = Counter(
+    "fraud_ml_inference_errors_total",
+    "Rejected or failed ML inference requests.",
+    ("endpoint", "method", "outcome"),
+)
+MODEL_LOAD_STATUS = Gauge(
+    "fraud_ml_model_load_status",
+    "Model load status for the active runtime.",
+    ("outcome", "model_name", "model_version"),
+)
+MODEL_INFO = Gauge(
+    "fraud_ml_model_info",
+    "Active model metadata for the ML inference runtime.",
+    ("model_name", "model_version"),
+)
+
+MODEL_LOAD_STATUS.labels("success", MODEL_NAME, MODEL_VERSION).set(1)
+MODEL_LOAD_STATUS.labels("failure", MODEL_NAME, MODEL_VERSION).set(0)
+MODEL_INFO.labels(MODEL_NAME, MODEL_VERSION).set(1)
 
 
 class FraudInferenceHandler(BaseHTTPRequestHandler):
@@ -21,10 +53,16 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         if path == "/health":
+            started_at = time.perf_counter()
             self._send_json(200, {"status": "UP", "modelName": MODEL_NAME, "modelVersion": MODEL_VERSION})
+            self._record_request(path, "GET", 200, "success", started_at)
             self._log_event("health_check", statusCode=200)
             return
+        if path == "/metrics":
+            self._send_metrics()
+            return
         self._send_json(404, {"error": "Not found"})
+        self._record_request(path, "GET", 404, "not_found")
         self._log_event("not_found", method="GET", path=path, statusCode=404)
 
     def do_POST(self) -> None:
@@ -32,18 +70,23 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path != "/v1/fraud/score":
             self._send_json(404, {"error": "Not found"})
+            self._record_request(path, "POST", 404, "not_found", started_at)
             self._log_event("not_found", method="POST", path=path, statusCode=404)
             return
 
         payload = self._read_json()
         if payload is None:
             self._send_json(400, {"error": "Malformed JSON request."})
+            self._record_error(path, "POST", "rejected")
+            self._record_request(path, "POST", 400, "rejected", started_at)
             self._log_event("score_rejected", statusCode=400, reason="malformed_json")
             return
 
         features = payload.get("features")
         if not isinstance(features, dict):
             self._send_json(422, {"error": "Field 'features' must be an object."})
+            self._record_error(path, "POST", "rejected")
+            self._record_request(path, "POST", 422, "rejected", started_at)
             self._log_event(
                 "score_rejected",
                 transactionId=payload.get("transactionId"),
@@ -53,8 +96,17 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             )
             return
 
-        response = MODEL.score(features)
+        try:
+            response = MODEL.score(features)
+        except Exception:
+            self._send_json(500, {"error": "Model inference failed."})
+            self._record_error(path, "POST", "inference_error")
+            self._record_request(path, "POST", 500, "inference_error", started_at)
+            self._log_event("score_failed", statusCode=500)
+            return
+
         self._send_json(200, response)
+        self._record_request(path, "POST", 200, "success", started_at)
         self._log_score(payload, features, response, started_at)
 
     def log_message(self, format: str, *args: Any) -> None:
@@ -130,6 +182,16 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_metrics(self) -> None:
+        started_at = time.perf_counter()
+        body = generate_latest()
+        self.send_response(200)
+        self.send_header("Content-Type", CONTENT_TYPE_LATEST)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+        self._record_request("/metrics", "GET", 200, "success", started_at)
+
     def _log_score(
             self,
             payload: dict[str, Any],
@@ -151,6 +213,28 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             featureFlags=features.get("featureFlags", []),
             latencyMs=elapsed_ms,
         )
+
+    def _record_request(
+            self,
+            endpoint: str,
+            method: str,
+            status_code: int,
+            outcome: str,
+            started_at: float | None = None,
+    ) -> None:
+        normalized_endpoint = self._normalized_endpoint(endpoint)
+        status = str(status_code)
+        REQUEST_COUNTER.labels(normalized_endpoint, method, status, outcome).inc()
+        if started_at is not None:
+            REQUEST_LATENCY.labels(normalized_endpoint, method, status, outcome).observe(
+                max(time.perf_counter() - started_at, 0.0)
+            )
+
+    def _record_error(self, endpoint: str, method: str, outcome: str) -> None:
+        ERROR_COUNTER.labels(self._normalized_endpoint(endpoint), method, outcome).inc()
+
+    def _normalized_endpoint(self, path: str) -> str:
+        return path if path in {"/health", "/metrics", "/v1/fraud/score"} else "/unknown"
 
     def _log_event(self, event: str, **fields: Any) -> None:
         payload = {
