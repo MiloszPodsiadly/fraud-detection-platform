@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
@@ -67,6 +67,8 @@ import App from "./App.jsx";
 describe("App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.history.replaceState({}, "", "/");
+    window.scrollTo = vi.fn();
     callbackPath.value = true;
     refreshSession.mockResolvedValue({ userId: "", roles: [], extraAuthorities: [], authorities: [] });
     providerState.value = {
@@ -89,6 +91,7 @@ describe("App", () => {
   });
 
   it("handles the dedicated OIDC callback path before loading dashboard data", async () => {
+    window.history.replaceState({}, "", "/auth/callback?state=test-state&code=test-code");
     completeLoginCallback.mockImplementation(async () => {
       callbackPath.value = false;
       return {
@@ -109,6 +112,9 @@ describe("App", () => {
     expect(listFraudCases).toHaveBeenCalledTimes(1);
     expect(listScoredTransactions).toHaveBeenCalledTimes(1);
     expect(setApiSession).toHaveBeenCalled();
+    expect(window.location.pathname).toBe("/");
+    expect(window.location.search).toBe("");
+    expect(window.scrollTo).toHaveBeenCalledWith(0, 0);
   });
 
   it("does not load dashboard data when oidc bootstrap reports an expired session", async () => {
@@ -128,6 +134,27 @@ describe("App", () => {
 
     await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
     expect(screen.getAllByRole("heading", { name: "Session expired" })).toHaveLength(2);
+    expect(listAlerts).not.toHaveBeenCalled();
+    expect(listFraudCases).not.toHaveBeenCalled();
+    expect(listScoredTransactions).not.toHaveBeenCalled();
+  });
+
+  it("allows restarting OIDC sign-in when callback state is missing", async () => {
+    const beginLogin = vi.fn().mockResolvedValue(undefined);
+    completeLoginCallback.mockRejectedValue(new Error("No matching state found in storage"));
+    providerState.value = {
+      ...providerState.value,
+      beginLogin
+    };
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Sign-in callback failed" })).toBeInTheDocument();
+    expect(screen.getByText("No matching state found in storage")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Restart OIDC sign-in" }));
+
+    await waitFor(() => expect(beginLogin).toHaveBeenCalledTimes(1));
     expect(listAlerts).not.toHaveBeenCalled();
     expect(listFraudCases).not.toHaveBeenCalled();
     expect(listScoredTransactions).not.toHaveBeenCalled();

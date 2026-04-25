@@ -137,7 +137,9 @@ export default function App() {
         }
         setSession(normalizeSession(nextSession));
         skipNextOidcBootstrapRef.current = true;
-        window.history.replaceState({}, "", "/");
+        returnToApplicationHome();
+        setSelectedAlertId(null);
+        setSelectedFraudCaseId(null);
         setSessionState(getSessionStateForProvider(nextSession, authProvider));
       })
       .catch((callbackFailure) => {
@@ -248,6 +250,21 @@ export default function App() {
     setSelectedFraudCaseId(null);
   }
 
+  async function restartOidcLogin() {
+    if (typeof authProvider.beginLogin !== "function") {
+      return;
+    }
+
+    try {
+      setCallbackError(null);
+      setSessionState({ status: SESSION_STATES.LOADING });
+      await authProvider.beginLogin();
+    } catch (loginFailure) {
+      setCallbackError(loginFailure);
+      setSessionState({ status: SESSION_STATES.AUTH_ERROR });
+    }
+  }
+
   if (handlingOidcCallback) {
     return (
       <div className="appShell">
@@ -261,6 +278,16 @@ export default function App() {
                   ? callbackError.message || "The configured OIDC provider did not complete the redirect."
                   : "Finishing the provider redirect before returning to the analyst console."}
               </p>
+              {callbackError && typeof authProvider.beginLogin === "function" && (
+                <button
+                  type="button"
+                  className="primaryButton"
+                  onClick={restartOidcLogin}
+                  disabled={!authProvider.hasLoginConfiguration?.()}
+                >
+                  Restart OIDC sign-in
+                </button>
+              )}
             </article>
           </section>
         </main>
@@ -348,4 +375,10 @@ function shouldBlockDashboardFetch(sessionState) {
     SESSION_STATES.ACCESS_DENIED,
     SESSION_STATES.AUTH_ERROR
   ].includes(sessionState?.status);
+}
+
+function returnToApplicationHome() {
+  window.history.replaceState({}, "", "/");
+  window.dispatchEvent(new Event("popstate"));
+  window.scrollTo?.(0, 0);
 }
