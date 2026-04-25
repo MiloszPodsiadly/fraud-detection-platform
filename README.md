@@ -244,6 +244,17 @@ Start the default quickstart:
 docker compose -f deployment/docker-compose.yml up --build
 ```
 
+This now brings up the local monitoring stack too:
+
+- Prometheus at `http://localhost:9090`
+- Grafana at `http://localhost:3000`
+
+If you already built the images once on this machine and only want to restart containers, you can use:
+
+```bash
+docker compose -f deployment/docker-compose.yml up -d --no-build
+```
+
 Behavior:
 
 - uses `X-Demo-*` headers between `analyst-console-ui` and `alert-service`
@@ -302,11 +313,26 @@ Start the local OIDC stack:
 docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml up --build
 ```
 
+This starts:
+
+- the full application stack
+- local Keycloak for browser login
+- Prometheus
+- Grafana
+
+If the images were already built locally and you only want to restart the full OIDC stack:
+
+```bash
+docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml up -d --no-build
+```
+
 Behavior:
 
 - real login via browser
 - Keycloak at `http://localhost:8086`
 - UI at `http://localhost:4173`
+- Prometheus at `http://localhost:9090`
+- Grafana at `http://localhost:3000`
 
 Imported local realm:
 
@@ -383,6 +409,8 @@ These credentials are local-only and must not be reused outside local test envir
 - `readonly` receives `403` on write actions
 - logout works
 - expired session shows the correct UI state
+- Prometheus target page shows `fraud-scoring-service` and `ml-inference-service`
+- Grafana contains the `FDP-5 ML Observability` dashboard
 
 ### Current OIDC limitations
 
@@ -396,6 +424,27 @@ Keycloak is available at:
 
 ```text
 http://localhost:8086
+```
+
+### Docker First-Run Notes
+
+For a fresh clone on a new machine:
+
+- Docker needs internet access to pull public base images from Docker Hub and other registries during the first `up --build`
+- after the first successful build, `up -d --no-build` is enough for normal local restarts
+
+If runtime behavior does not match the current repo state after code changes, rebuild the changed services explicitly:
+
+```bash
+docker compose -f deployment/docker-compose.yml build ml-inference-service analyst-console-ui
+docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml up -d
+```
+
+If you suspect stale local images or containers, rebuild cleanly:
+
+```bash
+docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml down
+docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml up --build -d
 ```
 
 ## Frontend Analyst Console
@@ -614,7 +663,7 @@ Current metrics exposure:
 
 - `alert-service`: `/actuator/metrics`, `/actuator/prometheus`
 - `fraud-scoring-service`: `/actuator/metrics`, `/actuator/prometheus`
-- `ml-inference-service`: not instrumented with a dedicated metrics endpoint yet
+- `ml-inference-service`: `/metrics`
 
 Reviewer-facing operations spec:
 
@@ -681,6 +730,7 @@ Runtime API:
 ```text
 POST /v1/fraud/score
 GET /health
+GET /metrics
 ```
 
 The Java scoring service sends `MlModelInput`, where `features` is the Java-enriched feature snapshot. The Python service responds with `MlModelOutput`: fraud score, risk level, model metadata, reason codes, score details, and explanation metadata.
