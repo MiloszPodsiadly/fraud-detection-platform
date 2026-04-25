@@ -1,0 +1,52 @@
+groups:
+  - name: fdp5-ml-observability
+    rules:
+      - alert: MlInferenceLatencyHigh
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (
+              rate(fraud_ml_inference_request_latency_seconds_bucket{endpoint="/v1/fraud/score",method="POST"}[5m])
+            )
+          ) > 0.25
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: ML p95 latency is above warning threshold
+          description: ML scoring p95 latency has stayed above 250ms for 10 minutes.
+
+      - alert: MlInferenceErrorsHigh
+        expr: |
+          sum(rate(fraud_ml_inference_errors_total{endpoint="/v1/fraud/score",outcome="inference_error"}[5m]))
+          /
+          clamp_min(sum(rate(fraud_ml_inference_requests_total{endpoint="/v1/fraud/score",method="POST"}[5m])), 0.001)
+          > 0.01
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: ML inference error rate is above warning threshold
+          description: ML inference errors exceed 1 percent of scoring requests for 10 minutes.
+
+      - alert: MlModelLoadFailure
+        expr: fraud_ml_model_load_status{outcome="failure"} > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: ML model load failure is exposed by runtime metrics
+          description: The active ML runtime reports model load failure.
+
+      - alert: ScoringFallbackSpike
+        expr: |
+          sum(rate(fraud_scoring_fallbacks_total[5m]))
+          /
+          clamp_min(sum(rate(fraud_scoring_requests_total[5m])), 0.001)
+          > 0.02
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Fraud scoring fallback rate is above warning threshold
+          description: Rule-based fallback usage is above 2 percent for 10 minutes.
