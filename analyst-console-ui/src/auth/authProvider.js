@@ -69,6 +69,7 @@ export function createOidcAuthProvider(
       return source.getSession();
     },
     beginLogin() {
+      source.clear?.();
       return oidcClient.beginLogin();
     },
     completeLoginCallback() {

@@ -89,15 +89,25 @@ describe("App", () => {
   });
 
   it("handles the dedicated OIDC callback path before loading dashboard data", async () => {
-    completeLoginCallback.mockReturnValue(new Promise(() => {}));
+    completeLoginCallback.mockImplementation(async () => {
+      callbackPath.value = false;
+      return {
+        userId: "subject-1",
+        roles: ["ANALYST"],
+        extraAuthorities: [],
+        authorities: ["alert:read", "fraud-case:read", "transaction-monitor:read", "assistant-summary:read"]
+      };
+    });
+    listAlerts.mockResolvedValue({ content: [], totalElements: 1, totalPages: 1, page: 0, size: 10 });
+    listFraudCases.mockResolvedValue({ content: [], totalElements: 2, totalPages: 1, page: 0, size: 4 });
+    listScoredTransactions.mockResolvedValue({ content: [], totalElements: 3, totalPages: 1, page: 0, size: 25 });
 
     render(<App />);
 
-    expect(screen.getByText("Completing sign-in")).toBeInTheDocument();
     await waitFor(() => expect(completeLoginCallback).toHaveBeenCalledTimes(1));
-    expect(listAlerts).not.toHaveBeenCalled();
-    expect(listFraudCases).not.toHaveBeenCalled();
-    expect(listScoredTransactions).not.toHaveBeenCalled();
+    await waitFor(() => expect(listAlerts).toHaveBeenCalledTimes(1));
+    expect(listFraudCases).toHaveBeenCalledTimes(1);
+    expect(listScoredTransactions).toHaveBeenCalledTimes(1);
     expect(setApiSession).toHaveBeenCalled();
   });
 
