@@ -783,6 +783,8 @@ POST /v1/fraud/score
 GET /health
 GET /metrics
 GET /governance/model
+GET /governance/model/current
+GET /governance/model/lifecycle
 GET /governance/profile/reference
 GET /governance/profile/inference
 GET /governance/drift
@@ -801,9 +803,9 @@ Current ML capabilities:
 - production feature training mode for inference parity
 - SHADOW and COMPARE monitoring
 - analyst feedback dataset support
-- ML governance and drift v1 with model lineage, synthetic/local reference profile quality, process-local inference profile lifecycle, drift confidence, advisory drift actions, bounded MongoDB snapshot history, and low-cardinality governance metrics
+- ML governance and drift v1 with model lineage, read-only model lifecycle visibility, synthetic/local reference profile quality, process-local inference profile lifecycle, drift confidence, advisory drift actions, bounded MongoDB snapshot history, and low-cardinality governance metrics
 
-Governance snapshot persistence uses the existing local MongoDB service and is optional for scoring:
+Governance snapshot and lifecycle persistence use the existing local MongoDB service and are optional for scoring:
 
 | Env var | Default |
 | --- | --- |
@@ -811,9 +813,12 @@ Governance snapshot persistence uses the existing local MongoDB service and is o
 | `GOVERNANCE_SNAPSHOT_COLLECTION` | `ml_governance_snapshots` |
 | `GOVERNANCE_SNAPSHOT_RETENTION_LIMIT` | `500` |
 | `GOVERNANCE_SNAPSHOT_INTERVAL_REQUESTS` | `50` |
+| `MODEL_LIFECYCLE_COLLECTION` | `ml_model_lifecycle_events` |
+| `MODEL_LIFECYCLE_RETENTION_LIMIT` | `200` |
 
 MongoDB outage pauses persisted governance history but does not fail scoring.
 Drift actions are advisory operator signals only; they do not block transactions, change scores, switch models, retrain models, or trigger external alerting workflows.
+Model lifecycle visibility is read-only; it exposes current model metadata and bounded lifecycle events for operator context, but it does not switch models, retrain, rollback, validate model quality, or change Java fallback behavior.
 
 Training smoke test:
 
@@ -931,7 +936,7 @@ Known production gaps:
 - Durable audit storage is not implemented yet.
 - DLT inspection/replay tooling is not implemented yet.
 - The frontend defaults to demo auth in quickstart mode and supports local OIDC through the Keycloak override, but it is not a production-ready SSO setup.
-- ML governance uses a synthetic/local reference profile and aggregate MongoDB snapshots; the synthetic reference is not suitable for production drift decisions and FDP-7 does not implement automatic retraining, rollback, approval UI, or production alert routing.
+- ML governance uses a synthetic/local reference profile plus aggregate MongoDB snapshots and lifecycle events; the synthetic reference is not suitable for production drift decisions and the governance layer does not implement automatic retraining, rollback, model switching, approval UI, model quality validation, or production alert routing.
 
 ## Maintainer
 

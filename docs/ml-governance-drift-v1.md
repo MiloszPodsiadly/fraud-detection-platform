@@ -17,6 +17,8 @@ Operators need to answer:
 ## Current Capabilities
 
 - `GET /governance/model` exposes active model metadata and artifact lineage.
+- `GET /governance/model/current` exposes read-only current model lifecycle metadata.
+- `GET /governance/model/lifecycle` exposes bounded read-only model lifecycle events.
 - `GET /governance/profile/reference` exposes the loaded aggregate reference profile.
 - `GET /governance/profile/inference` exposes process-local aggregate inference stats.
 - `GET /governance/drift` compares inference stats against the reference profile and returns status, confidence, sample size, lifecycle status, and bounded signal details.
@@ -134,6 +136,80 @@ Retention:
 - Default retention limit is `500`.
 - Retention deletion is best-effort. Failure to delete stale snapshots does not affect scoring.
 
+## Model Lifecycle Visibility
+
+FDP-9 adds read-only lifecycle visibility. It provides operational context for drift investigation, but it is not lifecycle control.
+
+It does not switch models, retrain models, rollback models, approve models, validate model quality, change scoring behavior, or change Java fallback behavior.
+
+`GET /governance/model/current` returns current model lifecycle metadata:
+
+```json
+{
+  "model_lifecycle": {
+    "model_name": "python-logistic-fraud-model",
+    "model_version": "2026-04-21.trained.v1",
+    "model_family": "LOGISTIC_REGRESSION",
+    "loaded_at": "2026-04-25T00:00:00+00:00",
+    "artifact_path_or_id": "model_artifact.json",
+    "artifact_source": "synthetic-fraud-scenarios",
+    "artifact_checksum": "sha256",
+    "feature_set_version": null,
+    "training_mode": "production",
+    "reference_profile_id": "2026-04-25.synthetic.v1",
+    "runtime_environment": {
+      "service": "ml-inference-service",
+      "runtime": "python"
+    },
+    "lifecycle_mode": "READ_ONLY"
+  }
+}
+```
+
+The endpoint does not expose raw model artifact contents, weights, thresholds, filesystem secrets, credentials, or host-specific secret paths. `artifact_checksum` is metadata only.
+
+`GET /governance/model/lifecycle` returns current metadata plus bounded lifecycle events:
+
+```json
+{
+  "status": "AVAILABLE",
+  "count": 1,
+  "model_lifecycle": {},
+  "events": [
+    {
+      "eventId": "uuid",
+      "eventType": "MODEL_LOADED",
+      "occurredAt": "2026-04-25T00:00:00+00:00",
+      "modelName": "python-logistic-fraud-model",
+      "modelVersion": "2026-04-21.trained.v1",
+      "previousModelVersion": null,
+      "source": "ml-inference-service",
+      "reason": "runtime_startup",
+      "metadataSummary": {
+        "lifecycle_mode": "READ_ONLY"
+      }
+    }
+  ]
+}
+```
+
+Lifecycle event types are `MODEL_LOADED`, `MODEL_METADATA_DETECTED`, `REFERENCE_PROFILE_LOADED`, `GOVERNANCE_HISTORY_AVAILABLE`, and `GOVERNANCE_HISTORY_UNAVAILABLE`.
+
+Lifecycle history status:
+
+- `AVAILABLE`: MongoDB lifecycle history is available.
+- `PARTIAL`: MongoDB lifecycle history is unavailable, so the endpoint returns bounded in-memory events.
+- `UNAVAILABLE`: neither persisted nor in-memory lifecycle events are available.
+
+Lifecycle persistence:
+
+- Collection: `ml_model_lifecycle_events`
+- Config: `MODEL_LIFECYCLE_COLLECTION`, default `ml_model_lifecycle_events`
+- Config: `MODEL_LIFECYCLE_RETENTION_LIMIT`, default `200`
+- Indexes: `occurredAt` descending and `modelName`, `modelVersion`, `occurredAt` descending
+- Retention is per `modelName` and `modelVersion`.
+- MongoDB write, index, or retention failure does not affect scoring.
+
 ## Drift Status
 
 `GET /governance/drift` returns a normalized response:
@@ -218,7 +294,13 @@ FDP-8 starts operationalizing drift without making automated business decisions.
     "triggers_retraining": false
   },
   "evaluated_at": "2026-04-25T00:00:00+00:00",
-  "explanation": "score p95 increased by 18% compared to reference profile"
+  "explanation": "score p95 increased by 18% compared to reference profile",
+  "model_lifecycle": {
+    "current_model_version": "2026-04-21.trained.v1",
+    "model_loaded_at": "2026-04-25T00:00:00+00:00",
+    "model_changed_recently": true,
+    "recent_lifecycle_event_count": 3
+  }
 }
 ```
 
@@ -244,10 +326,14 @@ Explanation is deterministic, short, and aggregate-only. It may mention aggregat
 
 These are operational recommendations only. They do not block transactions, change risk scores, switch models, retrain models, create analyst alerts, or call external alerting platforms. Actions exist for operator decision-making outside the scoring path.
 
+Drift/lifecycle correlation is context only. The system may show that drift was observed after recent model lifecycle activity, but it must not claim that a model lifecycle event caused drift.
+
 ## Endpoint Contracts
 
 ```text
 GET /governance/model
+GET /governance/model/current
+GET /governance/model/lifecycle
 GET /governance/profile/reference
 GET /governance/profile/inference
 GET /governance/drift
@@ -293,8 +379,11 @@ Governance metrics:
 - `fraud_ml_governance_snapshots_persisted_total{model_name,model_version,status}`
 - `fraud_ml_governance_snapshot_persistence_failures_total{model_name,model_version,status}`
 - `fraud_ml_governance_snapshot_history_available{model_name,model_version,status}`
+- `fraud_ml_model_lifecycle_info{model_name,model_version,lifecycle_mode}`
+- `fraud_ml_model_lifecycle_events_total{event_type,model_name,model_version,status}`
+- `fraud_ml_model_lifecycle_history_available{model_name,model_version,status}`
 
-Allowed labels are bounded to model metadata and status/severity. Feature-level details stay in JSON endpoints to avoid high-cardinality Prometheus series.
+Allowed labels are bounded to model metadata, status/severity, lifecycle mode, and lifecycle event type. Feature-level details stay in JSON endpoints to avoid high-cardinality Prometheus series.
 
 Forbidden metric labels:
 
@@ -310,6 +399,10 @@ Forbidden metric labels:
 - collection name
 - exception message
 - reason text
+- artifact path
+- checksum
+- event ID
+- timestamp
  
 Action metric labels are bounded enums only. They must never include action text, escalation text, explanation text, feature names, raw drift reasons, snapshot IDs, user identifiers, or exception messages.
 
@@ -345,21 +438,24 @@ For `DRIFT`:
 
 1. Confirm the signal is not caused by low traffic or a local synthetic workload mismatch.
 2. Inspect `/governance/drift/actions` to distinguish baseline/data investigation from model-owner escalation.
-3. Verify model version and feature contract version.
-4. Inspect Java fallback and ML runtime health metrics to separate data drift from service failure.
-5. Escalate for model review or retraining analysis outside this runtime path.
-6. Do not rely on drift detection as a fraud decision or automatic rollback trigger.
+3. Inspect `/governance/model/lifecycle` for recent read-only lifecycle events.
+4. Verify model version and feature contract version.
+5. Inspect Java fallback and ML runtime health metrics to separate data drift from service failure.
+6. Escalate for model review or retraining analysis outside this runtime path.
+7. Do not rely on drift detection as a fraud decision or automatic rollback trigger.
 
 ## Limitations
 
 - The reference profile is synthetic/local, not production traffic.
 - Runtime inference profile is in-memory and resets on process restart.
 - Persisted governance history survives `ml-inference-service` restart when MongoDB is available.
+- Persisted lifecycle history survives `ml-inference-service` restart when MongoDB is available.
 - MongoDB outage pauses persisted history but does not break scoring.
 - Synthetic reference confidence is intentionally capped at `LOW`.
 - Quantiles for inference are histogram approximations.
 - No automatic retraining, rollback, approval workflow, feature store, or alert routing is implemented.
 - Drift actions are advisory and do not create tickets, notify PagerDuty, mutate scoring, or trigger workflows.
+- Model lifecycle visibility is read-only and does not implement lifecycle control.
 - No model quality monitoring is claimed; FDP-7 monitors input and output distribution shift only.
 - Drift thresholds are starting guardrails and need calibration against real baselines.
 

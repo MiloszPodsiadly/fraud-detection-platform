@@ -92,6 +92,18 @@ Prometheus metric contract:
   - Type: gauge
   - Meaning: active model metadata for the running runtime
   - Labels: `model_name`, `model_version`
+- `fraud_ml_model_lifecycle_info`
+  - Type: gauge
+  - Meaning: read-only lifecycle mode for the active ML runtime model
+  - Labels: `model_name`, `model_version`, `lifecycle_mode`
+- `fraud_ml_model_lifecycle_events_total`
+  - Type: counter
+  - Meaning: read-only lifecycle events recorded by the ML runtime
+  - Labels: `event_type`, `model_name`, `model_version`, `status`
+- `fraud_ml_model_lifecycle_history_available`
+  - Type: gauge
+  - Meaning: read-only lifecycle history availability
+  - Labels: `model_name`, `model_version`, `status`
 - `fraud_ml_governance_drift_status`
   - Type: gauge
   - Meaning: current governance drift status after the latest drift check
@@ -145,6 +157,8 @@ Allowed bounded labels:
 - `outcome`
 - `model_name`
 - `model_version`
+- `lifecycle_mode`
+- `event_type`
 - `severity`
 - `status`
 - `confidence`
@@ -159,6 +173,11 @@ Forbidden labels and payload-derived fields:
 - raw exception messages
 - request feature names and values
 - merchant, customer, device, or country identifiers
+- artifact paths
+- checksums
+- event IDs
+- timestamps
+- reason text
 
 Use logs for sample-level investigation. Use metrics for bounded aggregation only.
 Use `/governance/drift` for feature-level drift details instead of feature labels in Prometheus.
@@ -168,6 +187,8 @@ Use `/governance/drift` for feature-level drift details instead of feature label
 `ml-inference-service` exposes additive governance endpoints:
 
 - `GET /governance/model`
+- `GET /governance/model/current`
+- `GET /governance/model/lifecycle`
 - `GET /governance/profile/reference`
 - `GET /governance/profile/inference`
 - `GET /governance/drift`
@@ -175,6 +196,16 @@ Use `/governance/drift` for feature-level drift details instead of feature label
 - `GET /governance/history`
 
 These endpoints expose aggregate operational metadata only. They do not change `POST /v1/fraud/score`, Java fallback behavior, alert thresholds, or fraud decision semantics.
+
+Model lifecycle visibility:
+
+- `GET /governance/model/current` returns current read-only model lifecycle metadata.
+- `GET /governance/model/lifecycle` returns current model metadata plus bounded lifecycle events.
+- Lifecycle mode is always `READ_ONLY`.
+- Lifecycle events are persisted to `ml_model_lifecycle_events` when MongoDB is available.
+- Retention keeps the latest 200 lifecycle events per model/version by default.
+- MongoDB outage degrades lifecycle history to bounded in-memory `PARTIAL` status and does not break scoring.
+- Lifecycle visibility does not switch models, retrain, rollback, validate model quality, or create an approval workflow.
 
 Current drift status semantics:
 
@@ -203,9 +234,11 @@ Drift actions:
 
 - `GET /governance/drift/actions` converts drift into advisory operator guidance.
 - Recommendations are bounded enums such as `COLLECT_MORE_DATA`, `INVESTIGATE_DATA_SHIFT`, and `ESCALATE_MODEL_REVIEW`.
-- The response uses a stable bounded contract: `severity`, `confidence`, `drift_status`, `trend`, `recommended_actions`, `escalation`, `automation_policy`, `evaluated_at`, and `explanation`.
+- The response uses a stable bounded contract: `severity`, `confidence`, `drift_status`, `trend`, `recommended_actions`, `escalation`, `automation_policy`, `evaluated_at`, `explanation`, and `model_lifecycle`.
 - Trend is bounded to `STABLE`, `INCREASING`, and `DECREASING` and is computed from the latest bounded snapshot window.
 - Explanation is deterministic, short, and aggregate-only; it does not include raw feature values, identifiers, payload fragments, or exception text.
+- `model_lifecycle` context shows current model version, load time, recent lifecycle activity, and bounded recent event count.
+- Drift/lifecycle correlation is context only and must not claim model lifecycle activity caused drift.
 - The endpoint never blocks transactions, changes scores, switches models, retrains models, or calls external alerting systems. Actions are for operator decision-making only.
 
 Detailed contract and playbook: [ML Governance And Drift v1](ml-governance-drift-v1.md).
@@ -278,8 +311,10 @@ Expected end-to-end checks after startup:
 4. Sending malformed requests increments the ML error/rejected signal.
 5. Java fallback ratio becomes visible when scoring continues while ML becomes unavailable.
 6. Calling `GET /governance/drift` returns `UNKNOWN`, `OK`, `WATCH`, or `DRIFT`.
-7. Calling `GET /governance/drift/actions` returns advisory operator guidance with `automation_policy.advisory_only=true`.
-8. Calling `GET /governance/history?limit=10` returns bounded persisted history or `UNAVAILABLE` with a current fallback snapshot.
+7. Calling `GET /governance/model/current` returns read-only lifecycle metadata with `lifecycle_mode=READ_ONLY`.
+8. Calling `GET /governance/model/lifecycle?limit=10` returns bounded lifecycle events or `PARTIAL` in-memory fallback.
+9. Calling `GET /governance/drift/actions` returns advisory operator guidance with `automation_policy.advisory_only=true`.
+10. Calling `GET /governance/history?limit=10` returns bounded persisted history or `UNAVAILABLE` with a current fallback snapshot.
 
 Useful runtime checks:
 
@@ -288,6 +323,8 @@ curl http://localhost:9090/api/v1/targets
 curl http://localhost:9090/api/v1/rules
 curl http://localhost:8090/metrics
 curl http://localhost:8090/governance/model
+curl http://localhost:8090/governance/model/current
+curl "http://localhost:8090/governance/model/lifecycle?limit=10"
 curl http://localhost:8090/governance/drift
 curl http://localhost:8090/governance/drift/actions
 curl "http://localhost:8090/governance/history?limit=10"
@@ -462,6 +499,8 @@ No Java runtime behavior change is required. Java should continue using existing
 - Governance v1 describes aggregate input/output drift only, not model quality or automatic remediation.
 - The shipped reference profile is synthetic and not suitable for production drift decisions.
 - Governance history depends on MongoDB availability for persistence, but scoring and current in-memory governance endpoints continue without MongoDB.
+- Lifecycle history depends on MongoDB availability for persistence, but scoring and current lifecycle metadata continue without MongoDB.
+- Lifecycle visibility is read-only and does not implement model switching, retraining, rollback, approval, or model quality validation.
 - Drift action recommendations are advisory operator signals only.
 - Logs remain necessary for request-level investigation.
 - First build on a new machine still requires Docker access to upstream registries for base images.

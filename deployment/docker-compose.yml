@@ -73,6 +73,8 @@ services:
       GOVERNANCE_SNAPSHOT_COLLECTION: ml_governance_snapshots
       GOVERNANCE_SNAPSHOT_RETENTION_LIMIT: "500"
       GOVERNANCE_SNAPSHOT_INTERVAL_REQUESTS: "50"
+      MODEL_LIFECYCLE_COLLECTION: ml_model_lifecycle_events
+      MODEL_LIFECYCLE_RETENTION_LIMIT: "200"
     ports:
       - "127.0.0.1:8090:8090"
     healthcheck:
