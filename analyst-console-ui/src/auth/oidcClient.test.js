@@ -23,12 +23,14 @@ describe("oidcClient", () => {
     const getUser = vi.fn().mockResolvedValue({ profile: { sub: "user-1" } });
     const signinRedirectCallback = vi.fn().mockResolvedValue({ profile: { sub: "user-1" } });
     const signoutRedirect = vi.fn().mockResolvedValue(undefined);
+    const removeUser = vi.fn().mockResolvedValue(undefined);
     const userManagerFactory = vi.fn(function UserManager(settings) {
       this.settings = settings;
       this.getUser = getUser;
       this.signinRedirect = signinRedirect;
       this.signinRedirectCallback = signinRedirectCallback;
       this.signoutRedirect = signoutRedirect;
+      this.removeUser = removeUser;
     });
     const stateStoreFactory = vi.fn(function WebStorageStateStore({ store }) {
       this.store = store;
@@ -64,6 +66,7 @@ describe("oidcClient", () => {
     }));
     expect(stateStoreFactory).toHaveBeenCalledWith({ store: window.sessionStorage });
     expect(getUser).toHaveBeenCalledTimes(1);
+    expect(removeUser).toHaveBeenCalledTimes(2);
     expect(signinRedirect).toHaveBeenCalledTimes(1);
     expect(signinRedirectCallback).toHaveBeenCalledTimes(1);
     expect(signoutRedirect).toHaveBeenCalledTimes(1);

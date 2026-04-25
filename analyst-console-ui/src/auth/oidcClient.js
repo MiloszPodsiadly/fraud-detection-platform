@@ -32,6 +32,9 @@ export function createOidcClient({
     },
     async beginLogin() {
       const userManager = await getUserManager();
+      if (typeof userManager.removeUser === "function") {
+        await userManager.removeUser();
+      }
       return userManager.signinRedirect();
     },
     async completeLoginCallback() {
@@ -40,6 +43,9 @@ export function createOidcClient({
     },
     async beginLogout() {
       const userManager = await getUserManager();
+      if (typeof userManager.removeUser === "function") {
+        await userManager.removeUser();
+      }
       return userManager.signoutRedirect({
         client_id: settings.client_id,
         post_logout_redirect_uri: settings.post_logout_redirect_uri
