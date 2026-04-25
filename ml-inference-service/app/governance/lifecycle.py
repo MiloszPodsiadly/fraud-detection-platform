@@ -211,7 +211,7 @@ class ModelLifecycleService:
         return {
             "current_model_version": model_lifecycle.get("model_version"),
             "model_loaded_at": loaded_at,
-            "model_changed_recently": _changed_recently(loaded_at),
+            "model_loaded_recently": _loaded_recently(loaded_at),
             "recent_lifecycle_event_count": min(len(self._events), MAX_LIFECYCLE_HISTORY_LIMIT),
         }
 
@@ -266,7 +266,7 @@ def _artifact_checksum(path: Path) -> str | None:
         return None
 
 
-def _changed_recently(loaded_at: str) -> bool:
+def _loaded_recently(loaded_at: str) -> bool:
     try:
         parsed = datetime.fromisoformat(loaded_at)
     except ValueError:

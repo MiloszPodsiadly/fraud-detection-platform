@@ -535,7 +535,7 @@ class MlGovernanceActionsTest(unittest.TestCase):
             {
                 "current_model_version",
                 "model_loaded_at",
-                "model_changed_recently",
+                "model_loaded_recently",
                 "recent_lifecycle_event_count",
             },
         )
@@ -595,12 +595,13 @@ class MlGovernanceActionsTest(unittest.TestCase):
             model_lifecycle={
                 "current_model_version": "actions-test-v1",
                 "model_loaded_at": "2026-04-25T00:00:00+00:00",
-                "model_changed_recently": True,
+                "model_loaded_recently": True,
                 "recent_lifecycle_event_count": 3,
             },
         )
 
-        self.assertTrue(actions["model_lifecycle"]["model_changed_recently"])
+        self.assertTrue(actions["model_lifecycle"]["model_loaded_recently"])
+        self.assertIsInstance(actions["model_lifecycle"]["model_loaded_recently"], bool)
         wording = json.dumps(actions).lower()
         self.assertNotIn("caused", wording)
         self.assertNotIn("because of model", wording)
@@ -885,7 +886,7 @@ class MlGovernanceEndpointTest(unittest.TestCase):
             {
                 "current_model_version",
                 "model_loaded_at",
-                "model_changed_recently",
+                "model_loaded_recently",
                 "recent_lifecycle_event_count",
             },
         )

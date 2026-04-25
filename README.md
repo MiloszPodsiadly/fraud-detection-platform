@@ -819,6 +819,7 @@ Governance snapshot and lifecycle persistence use the existing local MongoDB ser
 MongoDB outage pauses persisted governance history but does not fail scoring.
 Drift actions are advisory operator signals only; they do not block transactions, change scores, switch models, retrain models, or trigger external alerting workflows.
 Model lifecycle visibility is read-only; it exposes current model metadata and bounded lifecycle events for operator context, but it does not switch models, retrain, rollback, validate model quality, or change Java fallback behavior.
+`model_loaded_recently` means the model runtime was initialized recently based on process load time. It does not imply that a new model version was deployed, that a model change occurred, or that drift is caused by model updates. Lifecycle signals are observational and must not be interpreted as causal drivers of drift.
 
 Training smoke test:
 

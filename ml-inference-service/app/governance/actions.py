@@ -215,7 +215,7 @@ def _model_lifecycle_context(model_lifecycle: dict[str, Any] | None) -> dict[str
     return {
         "current_model_version": context.get("current_model_version"),
         "model_loaded_at": context.get("model_loaded_at"),
-        "model_changed_recently": bool(context.get("model_changed_recently", False)),
+        "model_loaded_recently": bool(context.get("model_loaded_recently", False)),
         "recent_lifecycle_event_count": int(context.get("recent_lifecycle_event_count") or 0),
     }
 

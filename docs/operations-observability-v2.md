@@ -237,8 +237,9 @@ Drift actions:
 - The response uses a stable bounded contract: `severity`, `confidence`, `drift_status`, `trend`, `recommended_actions`, `escalation`, `automation_policy`, `evaluated_at`, `explanation`, and `model_lifecycle`.
 - Trend is bounded to `STABLE`, `INCREASING`, and `DECREASING` and is computed from the latest bounded snapshot window.
 - Explanation is deterministic, short, and aggregate-only; it does not include raw feature values, identifiers, payload fragments, or exception text.
-- `model_lifecycle` context shows current model version, load time, recent lifecycle activity, and bounded recent event count.
-- Drift/lifecycle correlation is context only and must not claim model lifecycle activity caused drift.
+- `model_lifecycle` context shows current model version, load time, whether the runtime loaded recently, and bounded recent event count.
+- `model_loaded_recently` means the model runtime was initialized recently based on process load time. It does not imply that a new model version was deployed, that a model change occurred, or that drift is caused by model updates.
+- Lifecycle signals are observational and must not be interpreted as causal drivers of drift. Drift/lifecycle correlation is context only and must not claim lifecycle activity caused drift.
 - The endpoint never blocks transactions, changes scores, switches models, retrains models, or calls external alerting systems. Actions are for operator decision-making only.
 
 Detailed contract and playbook: [ML Governance And Drift v1](ml-governance-drift-v1.md).

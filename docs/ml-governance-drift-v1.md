@@ -298,7 +298,7 @@ FDP-8 starts operationalizing drift without making automated business decisions.
   "model_lifecycle": {
     "current_model_version": "2026-04-21.trained.v1",
     "model_loaded_at": "2026-04-25T00:00:00+00:00",
-    "model_changed_recently": true,
+    "model_loaded_recently": true,
     "recent_lifecycle_event_count": 3
   }
 }
@@ -326,7 +326,9 @@ Explanation is deterministic, short, and aggregate-only. It may mention aggregat
 
 These are operational recommendations only. They do not block transactions, change risk scores, switch models, retrain models, create analyst alerts, or call external alerting platforms. Actions exist for operator decision-making outside the scoring path.
 
-Drift/lifecycle correlation is context only. The system may show that drift was observed after recent model lifecycle activity, but it must not claim that a model lifecycle event caused drift.
+`model_loaded_recently` means the model runtime was initialized recently, based on process load time. It does not imply that a new model version was deployed, that a model change occurred, or that drift is caused by model updates.
+
+Lifecycle signals are observational and must not be interpreted as causal drivers of drift. Drift/lifecycle correlation is context only. The system may show that drift was observed after recent runtime lifecycle activity, but it must not claim that a lifecycle event caused drift.
 
 ## Endpoint Contracts
 
