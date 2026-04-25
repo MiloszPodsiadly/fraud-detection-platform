@@ -68,6 +68,11 @@ services:
       dockerfile: deployment/Dockerfile.ml-inference
     container_name: ml-inference-service
     restart: unless-stopped
+    environment:
+      MONGODB_URI: mongodb://mongodb:27017/fraud_governance
+      GOVERNANCE_SNAPSHOT_COLLECTION: ml_governance_snapshots
+      GOVERNANCE_SNAPSHOT_RETENTION_LIMIT: "500"
+      GOVERNANCE_SNAPSHOT_INTERVAL_REQUESTS: "50"
     ports:
       - "127.0.0.1:8090:8090"
     healthcheck:

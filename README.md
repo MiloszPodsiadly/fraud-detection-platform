@@ -782,6 +782,11 @@ Runtime API:
 POST /v1/fraud/score
 GET /health
 GET /metrics
+GET /governance/model
+GET /governance/profile/reference
+GET /governance/profile/inference
+GET /governance/drift
+GET /governance/history
 ```
 
 The Java scoring service sends `MlModelInput`, where `features` is the Java-enriched feature snapshot. The Python service responds with `MlModelOutput`: fraud score, risk level, model metadata, reason codes, score details, and explanation metadata.
@@ -795,6 +800,18 @@ Current ML capabilities:
 - production feature training mode for inference parity
 - SHADOW and COMPARE monitoring
 - analyst feedback dataset support
+- ML governance and drift v1 with model lineage, synthetic/local reference profile quality, process-local inference profile lifecycle, drift confidence, bounded MongoDB snapshot history, and low-cardinality governance metrics
+
+Governance snapshot persistence uses the existing local MongoDB service and is optional for scoring:
+
+| Env var | Default |
+| --- | --- |
+| `MONGODB_URI` | `mongodb://mongodb:27017/fraud_governance` |
+| `GOVERNANCE_SNAPSHOT_COLLECTION` | `ml_governance_snapshots` |
+| `GOVERNANCE_SNAPSHOT_RETENTION_LIMIT` | `500` |
+| `GOVERNANCE_SNAPSHOT_INTERVAL_REQUESTS` | `50` |
+
+MongoDB outage pauses persisted governance history but does not fail scoring.
 
 Training smoke test:
 
@@ -875,8 +892,9 @@ Security and architecture:
 - [API Error Contract](docs/api-error-contract.md): canonical local Java REST error envelope for timestamp/status/error/message/details and non-leakage rules.
 - [Operations And Observability v1](docs/operations-observability-v1.md): baseline observability foundation before the local monitoring stack rollout.
 - [Operations And Observability v2](docs/operations-observability-v2.md): current local Prometheus/Grafana runtime guide, ML metrics contract, alert thresholds, and troubleshooting flow.
+- [ML Governance And Drift v1](docs/ml-governance-drift-v1.md): bounded runtime governance layer for active model metadata, aggregate profiles, drift status, privacy rules, and incident playbook.
 
-TODO: If future work adds docs for ML governance, operations, data generation, or deployment, keep them as a small set of consolidated feature documents instead of many prompt-sized files.
+TODO: If future work adds docs for data generation or deployment, keep them as a small set of consolidated feature documents instead of many prompt-sized files.
 
 ## Project Status
 
@@ -903,6 +921,7 @@ Implemented:
 - principal-based actor identity
 - audit logging v1
 - local Keycloak OIDC login, callback, bearer propagation, and logout flow
+- ML governance and drift v1 for `ml-inference-service`
 
 Known production gaps:
 
@@ -910,6 +929,7 @@ Known production gaps:
 - Durable audit storage is not implemented yet.
 - DLT inspection/replay tooling is not implemented yet.
 - The frontend defaults to demo auth in quickstart mode and supports local OIDC through the Keycloak override, but it is not a production-ready SSO setup.
+- ML governance uses a synthetic/local reference profile and aggregate MongoDB snapshots; the synthetic reference is not suitable for production drift decisions and FDP-7 does not implement automatic retraining, rollback, approval UI, or production alert routing.
 
 ## Maintainer
 

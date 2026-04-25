@@ -1,0 +1,49 @@
+{
+  "feature_schema_version": "2026-04-22.v1",
+  "generated_at": "2026-04-25T00:00:00+00:00",
+  "generated_by": "ml-inference-service synthetic fraud behavior pipeline v1",
+  "model_name": "python-logistic-fraud-model",
+  "model_version": "2026-04-21.trained.v1",
+  "numeric_feature_stats": {
+    "countryMismatch": {"count": 1000, "max": 1.0, "mean": 0.024, "min": 0.0, "p50": 0.0, "p90": 0.0, "p95": 0.0, "std": 0.153049},
+    "deviceNovelty": {"count": 1000, "max": 1.0, "mean": 0.089, "min": 0.0, "p50": 0.0, "p90": 0.0, "p95": 1.0, "std": 0.284744},
+    "highRiskFlagCount": {"count": 1000, "max": 0.5, "mean": 0.009667, "min": 0.0, "p50": 0.0, "p90": 0.0, "p95": 0.0, "std": 0.046737},
+    "merchantFrequency7d": {"count": 1000, "max": 0.166667, "mean": 0.00475, "min": 0.0, "p50": 0.0, "p90": 0.0, "p95": 0.083333, "std": 0.02037},
+    "proxyOrVpnDetected": {"count": 1000, "max": 1.0, "mean": 0.02, "min": 0.0, "p50": 0.0, "p90": 0.0, "p95": 0.0, "std": 0.14},
+    "rapidTransferBurst": {"count": 1000, "max": 1.0, "mean": 0.007, "min": 0.0, "p50": 0.0, "p90": 0.0, "p95": 0.0, "std": 0.083373},
+    "recentAmountSum": {"count": 1000, "max": 0.209071, "mean": 0.026792, "min": 0.0, "p50": 0.016467, "p90": 0.068552, "p95": 0.092231, "std": 0.031079},
+    "recentTransactionCount": {"count": 1000, "max": 1.0, "mean": 0.2873, "min": 0.0, "p50": 0.3, "p90": 0.6, "p95": 0.7, "std": 0.226249},
+    "transactionVelocityPerMinute": {"count": 1000, "max": 0.0, "mean": 0.0, "min": 0.0, "p50": 0.0, "p90": 0.0, "p95": 0.0, "std": 0.0}
+  },
+  "profileType": "synthetic_local_reference",
+  "profileVersion": "2026-04-25.synthetic.v1",
+  "reference_quality": "SYNTHETIC",
+  "risk_level_distribution": {
+    "CRITICAL": 0.0,
+    "HIGH": 0.0,
+    "LOW": 1.0,
+    "MEDIUM": 0.0
+  },
+  "score_distribution": {
+    "count": 1000,
+    "high_risk_rate": 0.0,
+    "max": 0.348874,
+    "mean": 0.004083,
+    "min": 0.00114,
+    "p50": 0.001679,
+    "p90": 0.005441,
+    "p95": 0.00764,
+    "std": 0.015943
+  },
+  "sample_size": 1000,
+  "source": "synthetic",
+  "data_window": "1000 deterministic local synthetic fraud-behavior examples generated with seed 7307; not production traffic",
+  "source_metadata": {
+    "examples": 1000,
+    "generator": "generate_fraud_behavior",
+    "limitations": ["local synthetic baseline, not production traffic"],
+    "seed": 7307,
+    "type": "synthetic_training_pipeline"
+  },
+  "training_mode": "production"
+}
