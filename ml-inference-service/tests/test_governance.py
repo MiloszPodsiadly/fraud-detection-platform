@@ -8,6 +8,14 @@ from pathlib import Path
 from app import server
 from app.governance.actions import recommend_drift_actions
 from app.governance.drift import CONFIDENCE_ORDER, MIN_OBSERVATIONS, evaluate_drift
+from app.governance.lifecycle import (
+    LIFECYCLE_MODE,
+    MAX_LIFECYCLE_HISTORY_LIMIT,
+    ModelLifecycleConfig,
+    ModelLifecycleService,
+    MongoLifecycleEventRepository,
+    UnavailableLifecycleEventRepository,
+)
 from app.governance.persistence import (
     GovernancePersistenceConfig,
     GovernanceSnapshotRepository,
@@ -32,6 +40,14 @@ SENSITIVE_FIELDS = (
     "full payload",
 )
 
+RAW_ARTIFACT_FIELDS = (
+    '"weights"',
+    '"bias"',
+    '"thresholds"',
+    '"modelData"',
+    "model_artifact.json:",
+)
+
 
 class FakeSnapshotRepository(GovernanceSnapshotRepository):
     def __init__(self, fail: bool = False, documents: list[dict] | None = None):
@@ -47,6 +63,26 @@ class FakeSnapshotRepository(GovernanceSnapshotRepository):
     def history(self, limit: int) -> list[dict]:
         if self.fail:
             raise RuntimeError("fake history failure")
+        return self.documents[:limit]
+
+    def available(self) -> bool:
+        return not self.fail
+
+
+class FakeLifecycleRepository:
+    def __init__(self, fail: bool = False, documents: list[dict] | None = None):
+        self.fail = fail
+        self.documents = documents or []
+        self.persisted = []
+
+    def persist(self, document: dict) -> None:
+        if self.fail:
+            raise RuntimeError("fake lifecycle persistence failure")
+        self.persisted.append(document)
+
+    def history(self, limit: int) -> list[dict]:
+        if self.fail:
+            raise RuntimeError("fake lifecycle history failure")
         return self.documents[:limit]
 
     def available(self) -> bool:
@@ -91,7 +127,14 @@ class FakeCollection:
     def find(self, query: dict, projection: dict | None = None):
         documents = [document for document in self.documents if self._matches(document, query)]
         if projection == {"_id": 1}:
-            documents = [{"_id": document["_id"], "createdAt": document["createdAt"]} for document in documents]
+            documents = [
+                {
+                    "_id": document["_id"],
+                    "createdAt": document.get("createdAt"),
+                    "occurredAt": document.get("occurredAt"),
+                }
+                for document in documents
+            ]
         elif projection == {"_id": 0}:
             documents = [{key: value for key, value in document.items() if key != "_id"} for document in documents]
         return FakeCursor(documents)
@@ -320,6 +363,116 @@ class MlGovernancePersistenceTest(unittest.TestCase):
         self.assertIn("fraudScore", json.loads(payload.decode("utf-8")))
 
 
+class MlModelLifecycleTest(unittest.TestCase):
+    def config(self, retention: int = 2):
+        return ModelLifecycleConfig(
+            mongodb_uri="mongodb://mongodb:27017/fraud_governance",
+            collection="ml_model_lifecycle_events",
+            retention_limit=retention,
+        )
+
+    def lifecycle(self):
+        return {
+            "model_name": "python-logistic-fraud-model",
+            "model_version": "lifecycle-test-v1",
+            "model_family": "LOGISTIC_REGRESSION",
+            "loaded_at": "2026-04-25T00:00:00+00:00",
+            "artifact_path_or_id": "model_artifact.json",
+            "artifact_source": "synthetic-fraud-scenarios",
+            "artifact_checksum": "abc123",
+            "feature_set_version": None,
+            "training_mode": "production",
+            "reference_profile_id": "2026-04-25.synthetic.v1",
+            "runtime_environment": {
+                "service": "ml-inference-service",
+                "runtime": "python",
+            },
+            "lifecycle_mode": LIFECYCLE_MODE,
+        }
+
+    def event(self, index: int):
+        return {
+            "eventId": f"event-{index}",
+            "eventType": "MODEL_METADATA_DETECTED",
+            "occurredAt": f"2026-04-25T00:{index:02d}:00+00:00",
+            "modelName": "python-logistic-fraud-model",
+            "modelVersion": "lifecycle-test-v1",
+            "previousModelVersion": None,
+            "source": "ml-inference-service",
+            "reason": "test",
+            "metadataSummary": {"lifecycle_mode": LIFECYCLE_MODE},
+        }
+
+    def test_lifecycle_history_response_is_bounded(self):
+        documents = [self.event(index) for index in range(150)]
+        service = ModelLifecycleService(FakeLifecycleRepository(documents=documents), self.config())
+
+        response = service.lifecycle_response(999, self.lifecycle())
+
+        self.assertEqual(response["status"], "AVAILABLE")
+        self.assertEqual(response["count"], MAX_LIFECYCLE_HISTORY_LIMIT)
+        self.assertEqual(len(response["events"]), MAX_LIFECYCLE_HISTORY_LIMIT)
+
+    def test_mongo_unavailable_falls_back_to_bounded_memory_history(self):
+        service = ModelLifecycleService(UnavailableLifecycleEventRepository(), self.config())
+        persisted = service.record_event(
+            "MODEL_LOADED",
+            self.lifecycle(),
+            reason="runtime_startup",
+            metadata_summary={"lifecycle_mode": LIFECYCLE_MODE},
+        )
+
+        response = service.lifecycle_response(10, self.lifecycle())
+
+        self.assertFalse(persisted)
+        self.assertEqual(response["status"], "PARTIAL")
+        self.assertEqual(response["count"], 1)
+        self.assertEqual(response["events"][0]["eventType"], "MODEL_LOADED")
+
+    def test_lifecycle_mongo_retention_is_enforced_per_model_version(self):
+        collection = FakeCollection()
+        repository = MongoLifecycleEventRepository(
+            mongodb_uri="mongodb://mongodb:27017/fraud_governance",
+            collection_name="ml_model_lifecycle_events",
+            retention_limit=2,
+            client=FakeMongoClient(collection),
+        )
+        service = ModelLifecycleService(repository, self.config(retention=2))
+
+        for index in range(3):
+            service.record_event(
+                "MODEL_METADATA_DETECTED",
+                self.lifecycle(),
+                reason=f"metadata-{index}",
+                metadata_summary={"lifecycle_mode": LIFECYCLE_MODE},
+            )
+
+        self.assertEqual(collection.count_documents({"modelName": "python-logistic-fraud-model", "modelVersion": "lifecycle-test-v1"}), 2)
+        self.assertIn(((("occurredAt", -1),), True), collection.indexes)
+
+    def test_lifecycle_document_excludes_raw_artifact_and_secrets(self):
+        service = ModelLifecycleService(FakeLifecycleRepository(), self.config())
+        event = service.build_event(
+            "MODEL_METADATA_DETECTED",
+            self.lifecycle(),
+            source="ml-inference-service",
+            reason="metadata_available",
+            metadata_summary={
+                "lifecycle_mode": LIFECYCLE_MODE,
+                "artifact_source": "synthetic-fraud-scenarios",
+                "artifact_path": "C:/secret/model_artifact.json",
+                "checksum": "not-allowed",
+            },
+        )
+
+        serialized = json.dumps(event, default=str)
+        self.assertNotIn("artifact_path", serialized)
+        self.assertNotIn("C:/secret", serialized)
+        self.assertNotIn("checksum", serialized)
+        for field in SENSITIVE_FIELDS + RAW_ARTIFACT_FIELDS:
+            self.assertNotIn(field, serialized)
+
+
 class MlGovernanceActionsTest(unittest.TestCase):
     def model(self):
         return {
@@ -362,6 +515,7 @@ class MlGovernanceActionsTest(unittest.TestCase):
                 "automation_policy",
                 "evaluated_at",
                 "explanation",
+                "model_lifecycle",
             },
         )
         self.assertIn(actions["trend"], {"STABLE", "INCREASING", "DECREASING"})
@@ -374,6 +528,15 @@ class MlGovernanceActionsTest(unittest.TestCase):
                 "blocks_requests": False,
                 "switches_model": False,
                 "triggers_retraining": False,
+            },
+        )
+        self.assertEqual(
+            set(actions["model_lifecycle"]),
+            {
+                "current_model_version",
+                "model_loaded_at",
+                "model_changed_recently",
+                "recent_lifecycle_event_count",
             },
         )
 
@@ -424,6 +587,24 @@ class MlGovernanceActionsTest(unittest.TestCase):
         self.assertEqual(actions["explanation"], "feature mean increased by 20% compared to reference profile")
         for field in SENSITIVE_FIELDS:
             self.assertNotIn(field, json.dumps(actions))
+
+    def test_drift_action_lifecycle_context_avoids_causal_wording(self):
+        actions = recommend_drift_actions(
+            self.model(),
+            self.drift("DRIFT", "HIGH"),
+            model_lifecycle={
+                "current_model_version": "actions-test-v1",
+                "model_loaded_at": "2026-04-25T00:00:00+00:00",
+                "model_changed_recently": True,
+                "recent_lifecycle_event_count": 3,
+            },
+        )
+
+        self.assertTrue(actions["model_lifecycle"]["model_changed_recently"])
+        wording = json.dumps(actions).lower()
+        self.assertNotIn("caused", wording)
+        self.assertNotIn("because of model", wording)
+        self.assertNotIn("due to model", wording)
 
 
 class MlGovernanceEndpointTest(unittest.TestCase):
@@ -479,6 +660,37 @@ class MlGovernanceEndpointTest(unittest.TestCase):
         )
         self.assertIn("feature_set", payload["model"])
 
+    def test_current_model_lifecycle_endpoint_returns_stable_schema(self):
+        payload = self.get_json("/governance/model/current")
+        lifecycle = payload["model_lifecycle"]
+
+        self.assertEqual(
+            set(lifecycle),
+            {
+                "model_name",
+                "model_version",
+                "model_family",
+                "loaded_at",
+                "artifact_path_or_id",
+                "artifact_source",
+                "artifact_checksum",
+                "feature_set_version",
+                "training_mode",
+                "reference_profile_id",
+                "runtime_environment",
+                "lifecycle_mode",
+            },
+        )
+        self.assertEqual(lifecycle["lifecycle_mode"], "READ_ONLY")
+        self.assertEqual(lifecycle["model_name"], server.MODEL_NAME)
+        self.assertEqual(lifecycle["model_version"], server.MODEL_VERSION)
+        self.assertNotIn("/", lifecycle["artifact_path_or_id"])
+        self.assertNotIn("\\", lifecycle["artifact_path_or_id"])
+        self.assertNotIn(":", lifecycle["artifact_path_or_id"])
+        serialized = json.dumps(payload)
+        for field in SENSITIVE_FIELDS + RAW_ARTIFACT_FIELDS:
+            self.assertNotIn(field, serialized)
+
     def test_reference_profile_endpoint_marks_synthetic_quality(self):
         payload = self.get_json("/governance/profile/reference")
         reference = payload["reference_profile"]
@@ -513,6 +725,8 @@ class MlGovernanceEndpointTest(unittest.TestCase):
             "/governance/drift",
             "/governance/drift/actions",
             "/governance/history",
+            "/governance/model/current",
+            "/governance/model/lifecycle",
         ):
             payload = self.get_json(path)
             serialized = json.dumps(payload)
@@ -564,6 +778,65 @@ class MlGovernanceEndpointTest(unittest.TestCase):
         self.assertEqual(payload["count"], 1)
         self.assertLessEqual(len(payload["snapshots"]), 1)
 
+    def test_lifecycle_endpoint_enforces_max_limit(self):
+        documents = [
+            {
+                "eventId": f"event-{index}",
+                "eventType": "MODEL_METADATA_DETECTED",
+                "occurredAt": f"2026-04-25T00:{index:02d}:00+00:00",
+                "modelName": server.MODEL_NAME,
+                "modelVersion": server.MODEL_VERSION,
+                "previousModelVersion": None,
+                "source": "ml-inference-service",
+                "reason": "test",
+                "metadataSummary": {"lifecycle_mode": "READ_ONLY"},
+            }
+            for index in range(150)
+        ]
+        original_service = server.LIFECYCLE_SERVICE
+        try:
+            server.LIFECYCLE_SERVICE = ModelLifecycleService(
+                FakeLifecycleRepository(documents=documents),
+                ModelLifecycleConfig(
+                    mongodb_uri="mongodb://mongodb:27017/fraud_governance",
+                    collection="ml_model_lifecycle_events",
+                    retention_limit=200,
+                ),
+            )
+            payload = self.get_json("/governance/model/lifecycle?limit=999")
+        finally:
+            server.LIFECYCLE_SERVICE = original_service
+
+        self.assertEqual(payload["status"], "AVAILABLE")
+        self.assertEqual(payload["count"], MAX_LIFECYCLE_HISTORY_LIMIT)
+        self.assertEqual(len(payload["events"]), MAX_LIFECYCLE_HISTORY_LIMIT)
+
+    def test_lifecycle_endpoint_returns_partial_when_mongo_unavailable(self):
+        original_service = server.LIFECYCLE_SERVICE
+        try:
+            service = ModelLifecycleService(
+                UnavailableLifecycleEventRepository(),
+                ModelLifecycleConfig(
+                    mongodb_uri="mongodb://mongodb:27017/fraud_governance",
+                    collection="ml_model_lifecycle_events",
+                    retention_limit=200,
+                ),
+            )
+            service.record_event(
+                "MODEL_LOADED",
+                server.MODEL_LIFECYCLE,
+                reason="runtime_startup",
+                metadata_summary={"lifecycle_mode": "READ_ONLY"},
+            )
+            server.LIFECYCLE_SERVICE = service
+            payload = self.get_json("/governance/model/lifecycle")
+        finally:
+            server.LIFECYCLE_SERVICE = original_service
+
+        self.assertEqual(payload["status"], "PARTIAL")
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["events"][0]["eventType"], "MODEL_LOADED")
+
     def test_drift_actions_endpoint_returns_advisory_guidance(self):
         documents = [
             {"driftStatus": "DRIFT", "driftConfidence": "LOW", "createdAt": "2026-04-25T00:02:00+00:00"},
@@ -596,6 +869,7 @@ class MlGovernanceEndpointTest(unittest.TestCase):
                 "automation_policy",
                 "evaluated_at",
                 "explanation",
+                "model_lifecycle",
             },
         )
         self.assertIn(payload["trend"], {"STABLE", "INCREASING", "DECREASING"})
@@ -606,6 +880,19 @@ class MlGovernanceEndpointTest(unittest.TestCase):
         self.assertFalse(payload["automation_policy"]["switches_model"])
         self.assertFalse(payload["automation_policy"]["triggers_retraining"])
         self.assertLessEqual(len(payload["explanation"]), 120)
+        self.assertEqual(
+            set(payload["model_lifecycle"]),
+            {
+                "current_model_version",
+                "model_loaded_at",
+                "model_changed_recently",
+                "recent_lifecycle_event_count",
+            },
+        )
+        wording = json.dumps(payload).lower()
+        self.assertNotIn("caused", wording)
+        self.assertNotIn("because of model", wording)
+        self.assertNotIn("due to model", wording)
 
     def test_drift_unknown_until_minimum_sample_size(self):
         server.INFERENCE_PROFILE.reset()
@@ -641,6 +928,42 @@ class MlGovernanceEndpointTest(unittest.TestCase):
             },
         )
 
+    def test_lifecycle_persistence_failure_does_not_change_scoring_contract(self):
+        original_service = server.LIFECYCLE_SERVICE
+        try:
+            server.LIFECYCLE_SERVICE = ModelLifecycleService(
+                UnavailableLifecycleEventRepository(),
+                ModelLifecycleConfig(
+                    mongodb_uri="mongodb://mongodb:27017/fraud_governance",
+                    collection="ml_model_lifecycle_events",
+                    retention_limit=200,
+                ),
+            )
+            response = self.score(
+                b'{"features":{"recentTransactionCount":8,"recentAmountSum":{"amount":7200.0,"currency":"USD"},'
+                b'"transactionVelocityPerMinute":0.7,"merchantFrequency7d":9,"deviceNovelty":true,'
+                b'"countryMismatch":true,"proxyOrVpnDetected":true,'
+                b'"featureFlags":["DEVICE_NOVELTY","COUNTRY_MISMATCH","PROXY_OR_VPN","HIGH_VELOCITY"]}}'
+            )
+        finally:
+            server.LIFECYCLE_SERVICE = original_service
+
+        self.assertEqual(
+            set(response),
+            {
+                "available",
+                "fraudScore",
+                "riskLevel",
+                "modelName",
+                "modelVersion",
+                "inferenceTimestamp",
+                "reasonCodes",
+                "scoreDetails",
+                "explanationMetadata",
+                "fallbackReason",
+            },
+        )
+
     def test_governance_metrics_remain_low_cardinality(self):
         self.get_json("/governance/drift")
         status, headers, payload = self.request("GET", "/metrics")
@@ -653,10 +976,18 @@ class MlGovernanceEndpointTest(unittest.TestCase):
         self.assertIn("fraud_ml_governance_drift_confidence", metrics)
         self.assertIn("fraud_ml_governance_reference_profile_loaded", metrics)
         self.assertIn("fraud_ml_governance_profile_observations_total", metrics)
+        self.assertIn("fraud_ml_model_lifecycle_info", metrics)
+        self.assertIn("fraud_ml_model_lifecycle_events_total", metrics)
+        self.assertIn("fraud_ml_model_lifecycle_history_available", metrics)
         self.assertIn('fraud_ml_governance_drift_action_recommendation{model_name=', metrics)
         self.assertIn('severity=', metrics)
         self.assertNotIn("action=", metrics)
         self.assertNotIn("escalation=", metrics)
+        self.assertNotIn("artifact_path=", metrics)
+        self.assertNotIn("checksum=", metrics)
+        self.assertNotIn("event_id=", metrics)
+        self.assertNotIn("timestamp=", metrics)
+        self.assertNotIn("reason=", metrics)
         self.assertNotIn("sample_size=", metrics)
         self.assertNotIn("feature_name=", metrics)
         for field in SENSITIVE_FIELDS:
