@@ -786,6 +786,7 @@ GET /governance/model
 GET /governance/profile/reference
 GET /governance/profile/inference
 GET /governance/drift
+GET /governance/history
 ```
 
 The Java scoring service sends `MlModelInput`, where `features` is the Java-enriched feature snapshot. The Python service responds with `MlModelOutput`: fraud score, risk level, model metadata, reason codes, score details, and explanation metadata.
@@ -799,7 +800,18 @@ Current ML capabilities:
 - production feature training mode for inference parity
 - SHADOW and COMPARE monitoring
 - analyst feedback dataset support
-- ML governance and drift v1 with model lineage, synthetic/local reference profile quality, process-local inference profile lifecycle, drift confidence, and low-cardinality governance metrics
+- ML governance and drift v1 with model lineage, synthetic/local reference profile quality, process-local inference profile lifecycle, drift confidence, bounded MongoDB snapshot history, and low-cardinality governance metrics
+
+Governance snapshot persistence uses the existing local MongoDB service and is optional for scoring:
+
+| Env var | Default |
+| --- | --- |
+| `MONGODB_URI` | `mongodb://mongodb:27017/fraud_governance` |
+| `GOVERNANCE_SNAPSHOT_COLLECTION` | `ml_governance_snapshots` |
+| `GOVERNANCE_SNAPSHOT_RETENTION_LIMIT` | `500` |
+| `GOVERNANCE_SNAPSHOT_INTERVAL_REQUESTS` | `50` |
+
+MongoDB outage pauses persisted governance history but does not fail scoring.
 
 Training smoke test:
 
@@ -917,7 +929,7 @@ Known production gaps:
 - Durable audit storage is not implemented yet.
 - DLT inspection/replay tooling is not implemented yet.
 - The frontend defaults to demo auth in quickstart mode and supports local OIDC through the Keycloak override, but it is not a production-ready SSO setup.
-- ML governance uses a synthetic/local reference profile and in-memory inference profile that resets on restart; the synthetic reference is not suitable for production drift decisions and FDP-7 does not implement automatic retraining, rollback, approval UI, or production alert routing.
+- ML governance uses a synthetic/local reference profile and aggregate MongoDB snapshots; the synthetic reference is not suitable for production drift decisions and FDP-7 does not implement automatic retraining, rollback, approval UI, or production alert routing.
 
 ## Maintainer
 

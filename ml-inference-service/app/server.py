@@ -5,7 +5,7 @@ import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
@@ -16,6 +16,13 @@ from app.governance.profile import (
     governance_response,
     load_reference_profile,
     reference_feature_names,
+)
+from app.governance.persistence import (
+    GovernancePersistenceConfig,
+    GovernanceSnapshotService,
+    MAX_HISTORY_LIMIT,
+    create_snapshot_repository,
+    current_snapshot_document,
 )
 from app.model import DEFAULT_ARTIFACT_PATH, MODEL_NAME, MODEL_VERSION, FraudModel
 
@@ -29,6 +36,11 @@ INFERENCE_PROFILE = InferenceProfile(
     MODEL_NAME,
     MODEL_VERSION,
     reference_feature_names(REFERENCE_PROFILE) or MODEL_GOVERNANCE["feature_set"],
+)
+PERSISTENCE_CONFIG = GovernancePersistenceConfig.from_env()
+SNAPSHOT_SERVICE = GovernanceSnapshotService(
+    create_snapshot_repository(PERSISTENCE_CONFIG),
+    PERSISTENCE_CONFIG,
 )
 REQUEST_COUNTER = Counter(
     "fraud_ml_inference_requests_total",
@@ -86,6 +98,21 @@ GOVERNANCE_DRIFT_CONFIDENCE = Gauge(
     "Current ML governance drift confidence. Exactly one confidence label is set to 1 after a drift check.",
     ("model_name", "model_version", "confidence"),
 )
+GOVERNANCE_SNAPSHOTS_PERSISTED = Counter(
+    "fraud_ml_governance_snapshots_persisted_total",
+    "Aggregate governance snapshots persisted successfully.",
+    ("model_name", "model_version", "status"),
+)
+GOVERNANCE_SNAPSHOT_PERSISTENCE_FAILURES = Counter(
+    "fraud_ml_governance_snapshot_persistence_failures_total",
+    "Aggregate governance snapshot persistence failures.",
+    ("model_name", "model_version", "status"),
+)
+GOVERNANCE_SNAPSHOT_HISTORY_AVAILABLE = Gauge(
+    "fraud_ml_governance_snapshot_history_available",
+    "Whether persisted governance snapshot history is currently available.",
+    ("model_name", "model_version", "status"),
+)
 
 MODEL_LOAD_STATUS.labels("success", MODEL_NAME, MODEL_VERSION).set(1)
 MODEL_LOAD_STATUS.labels("failure", MODEL_NAME, MODEL_VERSION).set(0)
@@ -101,13 +128,16 @@ for _confidence in ("LOW", "MEDIUM", "HIGH"):
 for _severity in ("WATCH", "DRIFT"):
     GOVERNANCE_FEATURE_DRIFT_DETECTED.labels(MODEL_NAME, MODEL_VERSION, _severity).set(0)
     GOVERNANCE_SCORE_DRIFT_DETECTED.labels(MODEL_NAME, MODEL_VERSION, _severity).set(0)
+GOVERNANCE_SNAPSHOT_HISTORY_AVAILABLE.labels(MODEL_NAME, MODEL_VERSION, "available").set(0)
+GOVERNANCE_SNAPSHOT_HISTORY_AVAILABLE.labels(MODEL_NAME, MODEL_VERSION, "unavailable").set(1)
 
 
 class FraudInferenceHandler(BaseHTTPRequestHandler):
     server_version = "FraudMLInference/1.0"
 
     def do_GET(self) -> None:
-        path = urlparse(self.path).path
+        parsed_url = urlparse(self.path)
+        path = parsed_url.path
         if path == "/health":
             started_at = time.perf_counter()
             self._send_json(200, {"status": "UP", "modelName": MODEL_NAME, "modelVersion": MODEL_VERSION})
@@ -159,6 +189,21 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             self._send_json(200, governance_response(MODEL_GOVERNANCE, REFERENCE_PROFILE, inference, drift))
             self._record_request(path, "GET", 200, "success", started_at)
             return
+        if path == "/governance/history":
+            started_at = time.perf_counter()
+            limit = self._history_limit(parsed_url.query)
+            inference = INFERENCE_PROFILE.snapshot()
+            fallback_snapshot = current_snapshot_document(
+                SNAPSHOT_SERVICE,
+                MODEL_GOVERNANCE,
+                REFERENCE_PROFILE,
+                inference,
+            )
+            history = SNAPSHOT_SERVICE.history_response(limit, fallback_snapshot)
+            self._record_snapshot_history_available(history["status"] == "AVAILABLE")
+            self._send_json(200, history)
+            self._record_request(path, "GET", 200, "success", started_at)
+            return
         self._send_json(404, {"error": "Not found"})
         self._record_request(path, "GET", 404, "not_found")
         self._log_event("not_found", method="GET", path=path, statusCode=404)
@@ -205,6 +250,7 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
 
         self._send_json(200, response)
         self._update_inference_profile(response)
+        self._maybe_persist_governance_snapshot()
         self._record_request(path, "POST", 200, "success", started_at)
         self._log_score(payload, features, response, started_at)
 
@@ -332,6 +378,16 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
     def _record_error(self, endpoint: str, method: str, outcome: str) -> None:
         ERROR_COUNTER.labels(self._normalized_endpoint(endpoint), method, outcome).inc()
 
+    def _history_limit(self, query: str) -> int:
+        values = parse_qs(query).get("limit", [])
+        if not values:
+            return MAX_HISTORY_LIMIT
+        try:
+            requested = int(values[0])
+        except (TypeError, ValueError):
+            return MAX_HISTORY_LIMIT
+        return max(min(requested, MAX_HISTORY_LIMIT), 1)
+
     def _update_inference_profile(self, response: dict[str, Any]) -> None:
         try:
             score_details = response.get("scoreDetails")
@@ -346,6 +402,24 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             GOVERNANCE_PROFILE_OBSERVATIONS.labels(MODEL_NAME, MODEL_VERSION).inc()
         except Exception as exc:
             self._log_event("governance_profile_update_failed", errorType=exc.__class__.__name__)
+
+    def _maybe_persist_governance_snapshot(self) -> None:
+        if not SNAPSHOT_SERVICE.should_persist_after_success():
+            return
+        try:
+            inference = INFERENCE_PROFILE.snapshot()
+            drift = evaluate_drift(REFERENCE_PROFILE, inference)
+            SNAPSHOT_SERVICE.persist_snapshot(MODEL_GOVERNANCE, REFERENCE_PROFILE, inference, drift)
+            GOVERNANCE_SNAPSHOTS_PERSISTED.labels(MODEL_NAME, MODEL_VERSION, "success").inc()
+            self._record_snapshot_history_available(True)
+        except Exception as exc:
+            GOVERNANCE_SNAPSHOT_PERSISTENCE_FAILURES.labels(MODEL_NAME, MODEL_VERSION, "failure").inc()
+            self._record_snapshot_history_available(False)
+            self._log_event(
+                "governance_snapshot_persistence_failed",
+                level="warning",
+                errorType=exc.__class__.__name__,
+            )
 
     def _record_governance_drift(self, drift: dict[str, Any]) -> None:
         status = str(drift.get("status", "UNKNOWN"))
@@ -374,6 +448,12 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             GOVERNANCE_FEATURE_DRIFT_DETECTED.labels(MODEL_NAME, MODEL_VERSION, severity).set(feature_drift[severity])
             GOVERNANCE_SCORE_DRIFT_DETECTED.labels(MODEL_NAME, MODEL_VERSION, severity).set(score_drift[severity])
 
+    def _record_snapshot_history_available(self, available: bool) -> None:
+        GOVERNANCE_SNAPSHOT_HISTORY_AVAILABLE.labels(MODEL_NAME, MODEL_VERSION, "available").set(1 if available else 0)
+        GOVERNANCE_SNAPSHOT_HISTORY_AVAILABLE.labels(MODEL_NAME, MODEL_VERSION, "unavailable").set(
+            0 if available else 1
+        )
+
     def _normalized_endpoint(self, path: str) -> str:
         known_paths = {
             "/health",
@@ -383,6 +463,7 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             "/governance/profile/reference",
             "/governance/profile/inference",
             "/governance/drift",
+            "/governance/history",
         }
         return path if path in known_paths else "/unknown"
 

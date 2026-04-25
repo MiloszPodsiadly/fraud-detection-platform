@@ -116,6 +116,18 @@ Prometheus metric contract:
   - Type: gauge
   - Meaning: reference profile load status
   - Labels: `model_name`, `model_version`, `status`
+- `fraud_ml_governance_snapshots_persisted_total`
+  - Type: counter
+  - Meaning: aggregate governance snapshots persisted successfully
+  - Labels: `model_name`, `model_version`, `status`
+- `fraud_ml_governance_snapshot_persistence_failures_total`
+  - Type: counter
+  - Meaning: aggregate governance snapshot persistence failures
+  - Labels: `model_name`, `model_version`, `status`
+- `fraud_ml_governance_snapshot_history_available`
+  - Type: gauge
+  - Meaning: persisted governance history availability
+  - Labels: `model_name`, `model_version`, `status`
 
 ## Low-Cardinality Policy
 
@@ -155,6 +167,7 @@ Use `/governance/drift` for feature-level drift details instead of feature label
 - `GET /governance/profile/reference`
 - `GET /governance/profile/inference`
 - `GET /governance/drift`
+- `GET /governance/history`
 
 These endpoints expose aggregate operational metadata only. They do not change `POST /v1/fraud/score`, Java fallback behavior, alert thresholds, or fraud decision semantics.
 
@@ -172,6 +185,14 @@ Current confidence semantics:
 - `HIGH`: production-quality reference profile, enough observations, and stable variance.
 
 `MIN_OBSERVATIONS` is currently `100`. Drift remains `UNKNOWN` with reason `insufficient_data` below that threshold.
+
+MongoDB-backed snapshot history:
+
+- Snapshots are persisted to `ml_governance_snapshots` when MongoDB is available.
+- Persistence is aggregate-only and excludes raw requests and identifiers.
+- Snapshot writes are attempted every 50 successful scoring requests by default.
+- Retention keeps the latest 500 snapshots per model/version by default.
+- MongoDB outage sets history to `UNAVAILABLE` and does not break scoring.
 
 Detailed contract and playbook: [ML Governance And Drift v1](ml-governance-drift-v1.md).
 
@@ -243,6 +264,7 @@ Expected end-to-end checks after startup:
 4. Sending malformed requests increments the ML error/rejected signal.
 5. Java fallback ratio becomes visible when scoring continues while ML becomes unavailable.
 6. Calling `GET /governance/drift` returns `UNKNOWN`, `OK`, `WATCH`, or `DRIFT`.
+7. Calling `GET /governance/history?limit=10` returns bounded persisted history or `UNAVAILABLE` with a current fallback snapshot.
 
 Useful runtime checks:
 
@@ -252,6 +274,7 @@ curl http://localhost:9090/api/v1/rules
 curl http://localhost:8090/metrics
 curl http://localhost:8090/governance/model
 curl http://localhost:8090/governance/drift
+curl "http://localhost:8090/governance/history?limit=10"
 ```
 
 If `ml-inference-service` is `DOWN` in Prometheus and `/metrics` returns `404`, the running Docker image is older than the current repo code. Rebuild the ML image:
@@ -422,5 +445,6 @@ No Java runtime behavior change is required. Java should continue using existing
 - Metrics do not describe model quality or calibration drift; detailed feature drift stays in governance JSON rather than Prometheus labels.
 - Governance v1 describes aggregate input/output drift only, not model quality or automatic remediation.
 - The shipped reference profile is synthetic and not suitable for production drift decisions.
+- Governance history depends on MongoDB availability for persistence, but scoring and current in-memory governance endpoints continue without MongoDB.
 - Logs remain necessary for request-level investigation.
 - First build on a new machine still requires Docker access to upstream registries for base images.
