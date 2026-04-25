@@ -104,6 +104,10 @@ Prometheus metric contract:
   - Type: gauge
   - Meaning: current drift confidence after sample-size, variance, and reference-quality checks
   - Labels: `model_name`, `model_version`, `confidence`
+- `fraud_ml_governance_drift_action_recommendation`
+  - Type: gauge
+  - Meaning: current advisory drift action recommendation
+  - Labels: `model_name`, `model_version`, `severity`
 - `fraud_ml_governance_score_drift_detected`
   - Type: gauge
   - Meaning: aggregate score drift signal by severity
@@ -167,6 +171,7 @@ Use `/governance/drift` for feature-level drift details instead of feature label
 - `GET /governance/profile/reference`
 - `GET /governance/profile/inference`
 - `GET /governance/drift`
+- `GET /governance/drift/actions`
 - `GET /governance/history`
 
 These endpoints expose aggregate operational metadata only. They do not change `POST /v1/fraud/score`, Java fallback behavior, alert thresholds, or fraud decision semantics.
@@ -193,6 +198,15 @@ MongoDB-backed snapshot history:
 - Snapshot writes are attempted every 50 successful scoring requests by default.
 - Retention keeps the latest 500 snapshots per model/version by default.
 - MongoDB outage sets history to `UNAVAILABLE` and does not break scoring.
+
+Drift actions:
+
+- `GET /governance/drift/actions` converts drift into advisory operator guidance.
+- Recommendations are bounded enums such as `COLLECT_MORE_DATA`, `INVESTIGATE_DATA_SHIFT`, and `ESCALATE_MODEL_REVIEW`.
+- The response uses a stable bounded contract: `severity`, `confidence`, `drift_status`, `trend`, `recommended_actions`, `escalation`, `automation_policy`, `evaluated_at`, and `explanation`.
+- Trend is bounded to `STABLE`, `INCREASING`, and `DECREASING` and is computed from the latest bounded snapshot window.
+- Explanation is deterministic, short, and aggregate-only; it does not include raw feature values, identifiers, payload fragments, or exception text.
+- The endpoint never blocks transactions, changes scores, switches models, retrains models, or calls external alerting systems. Actions are for operator decision-making only.
 
 Detailed contract and playbook: [ML Governance And Drift v1](ml-governance-drift-v1.md).
 
@@ -264,7 +278,8 @@ Expected end-to-end checks after startup:
 4. Sending malformed requests increments the ML error/rejected signal.
 5. Java fallback ratio becomes visible when scoring continues while ML becomes unavailable.
 6. Calling `GET /governance/drift` returns `UNKNOWN`, `OK`, `WATCH`, or `DRIFT`.
-7. Calling `GET /governance/history?limit=10` returns bounded persisted history or `UNAVAILABLE` with a current fallback snapshot.
+7. Calling `GET /governance/drift/actions` returns advisory operator guidance with `automation_policy.advisory_only=true`.
+8. Calling `GET /governance/history?limit=10` returns bounded persisted history or `UNAVAILABLE` with a current fallback snapshot.
 
 Useful runtime checks:
 
@@ -274,6 +289,7 @@ curl http://localhost:9090/api/v1/rules
 curl http://localhost:8090/metrics
 curl http://localhost:8090/governance/model
 curl http://localhost:8090/governance/drift
+curl http://localhost:8090/governance/drift/actions
 curl "http://localhost:8090/governance/history?limit=10"
 ```
 
@@ -446,5 +462,6 @@ No Java runtime behavior change is required. Java should continue using existing
 - Governance v1 describes aggregate input/output drift only, not model quality or automatic remediation.
 - The shipped reference profile is synthetic and not suitable for production drift decisions.
 - Governance history depends on MongoDB availability for persistence, but scoring and current in-memory governance endpoints continue without MongoDB.
+- Drift action recommendations are advisory operator signals only.
 - Logs remain necessary for request-level investigation.
 - First build on a new machine still requires Docker access to upstream registries for base images.

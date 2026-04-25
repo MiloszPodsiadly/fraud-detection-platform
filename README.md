@@ -786,6 +786,7 @@ GET /governance/model
 GET /governance/profile/reference
 GET /governance/profile/inference
 GET /governance/drift
+GET /governance/drift/actions
 GET /governance/history
 ```
 
@@ -800,7 +801,7 @@ Current ML capabilities:
 - production feature training mode for inference parity
 - SHADOW and COMPARE monitoring
 - analyst feedback dataset support
-- ML governance and drift v1 with model lineage, synthetic/local reference profile quality, process-local inference profile lifecycle, drift confidence, bounded MongoDB snapshot history, and low-cardinality governance metrics
+- ML governance and drift v1 with model lineage, synthetic/local reference profile quality, process-local inference profile lifecycle, drift confidence, advisory drift actions, bounded MongoDB snapshot history, and low-cardinality governance metrics
 
 Governance snapshot persistence uses the existing local MongoDB service and is optional for scoring:
 
@@ -812,6 +813,7 @@ Governance snapshot persistence uses the existing local MongoDB service and is o
 | `GOVERNANCE_SNAPSHOT_INTERVAL_REQUESTS` | `50` |
 
 MongoDB outage pauses persisted governance history but does not fail scoring.
+Drift actions are advisory operator signals only; they do not block transactions, change scores, switch models, retrain models, or trigger external alerting workflows.
 
 Training smoke test:
 

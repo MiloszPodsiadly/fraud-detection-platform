@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlparse
 
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
+from app.governance.actions import ACTION_SEVERITIES, MAX_HISTORY_FOR_ACTIONS, recommend_drift_actions
 from app.governance.drift import evaluate_drift
 from app.governance.profile import (
     InferenceProfile,
@@ -113,6 +114,11 @@ GOVERNANCE_SNAPSHOT_HISTORY_AVAILABLE = Gauge(
     "Whether persisted governance snapshot history is currently available.",
     ("model_name", "model_version", "status"),
 )
+GOVERNANCE_DRIFT_ACTION_RECOMMENDATION = Gauge(
+    "fraud_ml_governance_drift_action_recommendation",
+    "Current advisory drift action recommendation.",
+    ("model_name", "model_version", "severity"),
+)
 
 MODEL_LOAD_STATUS.labels("success", MODEL_NAME, MODEL_VERSION).set(1)
 MODEL_LOAD_STATUS.labels("failure", MODEL_NAME, MODEL_VERSION).set(0)
@@ -130,6 +136,8 @@ for _severity in ("WATCH", "DRIFT"):
     GOVERNANCE_SCORE_DRIFT_DETECTED.labels(MODEL_NAME, MODEL_VERSION, _severity).set(0)
 GOVERNANCE_SNAPSHOT_HISTORY_AVAILABLE.labels(MODEL_NAME, MODEL_VERSION, "available").set(0)
 GOVERNANCE_SNAPSHOT_HISTORY_AVAILABLE.labels(MODEL_NAME, MODEL_VERSION, "unavailable").set(1)
+for _severity in ACTION_SEVERITIES:
+    GOVERNANCE_DRIFT_ACTION_RECOMMENDATION.labels(MODEL_NAME, MODEL_VERSION, _severity).set(0)
 
 
 class FraudInferenceHandler(BaseHTTPRequestHandler):
@@ -187,6 +195,17 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             drift = evaluate_drift(REFERENCE_PROFILE, inference)
             self._record_governance_drift(drift)
             self._send_json(200, governance_response(MODEL_GOVERNANCE, REFERENCE_PROFILE, inference, drift))
+            self._record_request(path, "GET", 200, "success", started_at)
+            return
+        if path == "/governance/drift/actions":
+            started_at = time.perf_counter()
+            inference = INFERENCE_PROFILE.snapshot()
+            drift = evaluate_drift(REFERENCE_PROFILE, inference)
+            history = self._snapshot_history_for_actions()
+            actions = recommend_drift_actions(MODEL_GOVERNANCE, drift, history)
+            self._record_governance_drift(drift)
+            self._record_drift_action(actions)
+            self._send_json(200, actions)
             self._record_request(path, "GET", 200, "success", started_at)
             return
         if path == "/governance/history":
@@ -454,6 +473,23 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             0 if available else 1
         )
 
+    def _snapshot_history_for_actions(self) -> list[dict[str, Any]]:
+        try:
+            history = SNAPSHOT_SERVICE.repository.history(MAX_HISTORY_FOR_ACTIONS)
+            self._record_snapshot_history_available(True)
+            return history
+        except Exception:
+            self._record_snapshot_history_available(False)
+            return []
+
+    def _record_drift_action(self, actions: dict[str, Any]) -> None:
+        severity = str(actions.get("severity", "INFO"))
+        if severity not in ACTION_SEVERITIES:
+            severity = "INFO"
+        for candidate_severity in ACTION_SEVERITIES:
+            GOVERNANCE_DRIFT_ACTION_RECOMMENDATION.labels(MODEL_NAME, MODEL_VERSION, candidate_severity).set(0)
+        GOVERNANCE_DRIFT_ACTION_RECOMMENDATION.labels(MODEL_NAME, MODEL_VERSION, severity).set(1)
+
     def _normalized_endpoint(self, path: str) -> str:
         known_paths = {
             "/health",
@@ -463,6 +499,7 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             "/governance/profile/reference",
             "/governance/profile/inference",
             "/governance/drift",
+            "/governance/drift/actions",
             "/governance/history",
         }
         return path if path in known_paths else "/unknown"

@@ -20,6 +20,7 @@ Operators need to answer:
 - `GET /governance/profile/reference` exposes the loaded aggregate reference profile.
 - `GET /governance/profile/inference` exposes process-local aggregate inference stats.
 - `GET /governance/drift` compares inference stats against the reference profile and returns status, confidence, sample size, lifecycle status, and bounded signal details.
+- `GET /governance/drift/actions` interprets drift into advisory operator actions and escalation guidance.
 - `GET /governance/history` exposes bounded persisted governance snapshot history when MongoDB is available.
 - `/metrics` exposes low-cardinality governance gauges and counters.
 
@@ -190,6 +191,59 @@ Signals:
 
 Methods are intentionally simple: absolute difference, relative difference, z-score style difference when reference std exists, and threshold flags. Drift detection never blocks scoring and is not fraud detection.
 
+## Drift Actions
+
+FDP-8 starts operationalizing drift without making automated business decisions.
+
+`GET /governance/drift/actions` returns advisory operator guidance:
+
+```json
+{
+  "severity": "MEDIUM",
+  "confidence": "LOW",
+  "drift_status": "DRIFT",
+  "trend": "INCREASING",
+  "recommended_actions": [
+    "INVESTIGATE_BASELINE_AND_DATA",
+    "CONFIRM_REFERENCE_PROFILE_QUALITY",
+    "COMPARE_TRAFFIC_TO_REFERENCE_WINDOW",
+    "KEEP_SCORING_UNCHANGED"
+  ],
+  "escalation": "OPERATOR_REVIEW",
+  "automation_policy": {
+    "advisory_only": true,
+    "affects_scoring": false,
+    "blocks_requests": false,
+    "switches_model": false,
+    "triggers_retraining": false
+  },
+  "evaluated_at": "2026-04-25T00:00:00+00:00",
+  "explanation": "score p95 increased by 18% compared to reference profile"
+}
+```
+
+Recommended action codes include:
+
+- `COLLECT_MORE_DATA`: sample size is too low or profile was reset recently.
+- `CHECK_REFERENCE_PROFILE`: reference profile is missing or invalid.
+- `CONTINUE_MONITORING`: drift is currently OK.
+- `INVESTIGATE_DATA_SHIFT`: WATCH-level signal needs operator review.
+- `INVESTIGATE_BASELINE_AND_DATA`: DRIFT exists but confidence is low, commonly due to synthetic or limited reference quality.
+- `ESCALATE_MODEL_REVIEW`: higher-confidence DRIFT requires model/data owner review.
+- `KEEP_SCORING_UNCHANGED`: explicit guardrail that drift actions are advisory only.
+
+Escalation values:
+
+- `NONE`
+- `OPERATOR_REVIEW`
+- `MODEL_OWNER_REVIEW`
+
+Trend values are bounded to `STABLE`, `INCREASING`, and `DECREASING`. Trend is computed from the latest bounded snapshot window used by the endpoint, not from an unbounded history scan.
+
+Explanation is deterministic, short, and aggregate-only. It may mention aggregate feature, score, missing-rate, or high-risk-rate movement and the relative or absolute amount changed. It must not include raw feature values, identifiers, request payload fragments, transaction IDs, customer IDs, account IDs, card IDs, user IDs, or correlation IDs.
+
+These are operational recommendations only. They do not block transactions, change risk scores, switch models, retrain models, create analyst alerts, or call external alerting platforms. Actions exist for operator decision-making outside the scoring path.
+
 ## Endpoint Contracts
 
 ```text
@@ -197,6 +251,7 @@ GET /governance/model
 GET /governance/profile/reference
 GET /governance/profile/inference
 GET /governance/drift
+GET /governance/drift/actions
 GET /governance/history
 ```
 
@@ -230,6 +285,7 @@ Governance metrics:
 
 - `fraud_ml_governance_drift_status{model_name,model_version,status}`
 - `fraud_ml_governance_drift_confidence{model_name,model_version,confidence}`
+- `fraud_ml_governance_drift_action_recommendation{model_name,model_version,severity}`
 - `fraud_ml_governance_feature_drift_detected{model_name,model_version,severity}`
 - `fraud_ml_governance_score_drift_detected{model_name,model_version,severity}`
 - `fraud_ml_governance_profile_observations_total{model_name,model_version}`
@@ -254,6 +310,8 @@ Forbidden metric labels:
 - collection name
 - exception message
 - reason text
+ 
+Action metric labels are bounded enums only. They must never include action text, escalation text, explanation text, feature names, raw drift reasons, snapshot IDs, user identifiers, or exception messages.
 
 ## Privacy Policy
 
@@ -278,17 +336,19 @@ For history `UNAVAILABLE`:
 For `WATCH`:
 
 1. Inspect `/governance/drift` signal details.
-2. Compare feature drift and score drift separately.
-3. Check recent deploys, feature contract changes, traffic mix changes, and simulator/replay source changes.
-4. Continue monitoring; do not change scoring thresholds solely because of `WATCH`.
+2. Inspect `/governance/drift/actions` for recommended operator steps.
+3. Compare feature drift and score drift separately.
+4. Check recent deploys, feature contract changes, traffic mix changes, and simulator/replay source changes.
+5. Continue monitoring; do not change scoring thresholds solely because of `WATCH`.
 
 For `DRIFT`:
 
 1. Confirm the signal is not caused by low traffic or a local synthetic workload mismatch.
-2. Verify model version and feature contract version.
-3. Inspect Java fallback and ML runtime health metrics to separate data drift from service failure.
-4. Escalate for model review or retraining analysis outside this runtime path.
-5. Do not rely on drift detection as a fraud decision or automatic rollback trigger.
+2. Inspect `/governance/drift/actions` to distinguish baseline/data investigation from model-owner escalation.
+3. Verify model version and feature contract version.
+4. Inspect Java fallback and ML runtime health metrics to separate data drift from service failure.
+5. Escalate for model review or retraining analysis outside this runtime path.
+6. Do not rely on drift detection as a fraud decision or automatic rollback trigger.
 
 ## Limitations
 
@@ -299,6 +359,7 @@ For `DRIFT`:
 - Synthetic reference confidence is intentionally capped at `LOW`.
 - Quantiles for inference are histogram approximations.
 - No automatic retraining, rollback, approval workflow, feature store, or alert routing is implemented.
+- Drift actions are advisory and do not create tickets, notify PagerDuty, mutate scoring, or trigger workflows.
 - No model quality monitoring is claimed; FDP-7 monitors input and output distribution shift only.
 - Drift thresholds are starting guardrails and need calibration against real baselines.
 
