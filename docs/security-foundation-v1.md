@@ -93,12 +93,17 @@ Backend implementation lives under `alert-service`:
 Frontend implementation:
 
 - `analyst-console-ui/src/auth/session.js`
+- `analyst-console-ui/src/auth/generatedAuthorities.js`
 - `analyst-console-ui/src/auth/demoSession.js`
 - `analyst-console-ui/src/auth/authProvider.js`
 - `analyst-console-ui/src/auth/oidcSessionSource.js`
 - `analyst-console-ui/src/auth/securityErrors.js`
 - `analyst-console-ui/src/components/SessionBadge.jsx`
 - `analyst-console-ui/src/components/SecurityStatePanels.jsx`
+
+## PR Checklist
+
+- If `AnalystAuthority` changes, `generatedAuthorities.js` must be updated.
 
 ## RBAC Model
 

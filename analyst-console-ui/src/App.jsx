@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { listAlerts, listFraudCases, listScoredTransactions, setApiSession } from "./api/alertsApi.js";
 import { getConfiguredAuthProvider } from "./auth/authProvider.js";
 import { isOidcCallbackPath } from "./auth/oidcClient.js";
@@ -52,6 +52,7 @@ export default function App() {
   const [callbackError, setCallbackError] = useState(null);
   const handlingOidcCallback = authProvider.kind === "oidc" && isOidcCallbackPath();
   const [sessionBootstrapPending, setSessionBootstrapPending] = useState(authProvider.kind === "oidc");
+  const skipNextOidcBootstrapRef = useRef(false);
 
   useEffect(() => {
     setApiSession(session, authProvider);
@@ -61,6 +62,11 @@ export default function App() {
 
   useEffect(() => {
     if (authProvider.kind !== "oidc" || handlingOidcCallback || typeof authProvider.refreshSession !== "function") {
+      setSessionBootstrapPending(false);
+      return;
+    }
+    if (skipNextOidcBootstrapRef.current) {
+      skipNextOidcBootstrapRef.current = false;
       setSessionBootstrapPending(false);
       return;
     }
@@ -130,6 +136,7 @@ export default function App() {
           return;
         }
         setSession(normalizeSession(nextSession));
+        skipNextOidcBootstrapRef.current = true;
         window.history.replaceState({}, "", "/");
         setSessionState(getSessionStateForProvider(nextSession, authProvider));
       })

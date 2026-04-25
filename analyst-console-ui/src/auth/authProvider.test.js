@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createDemoAuthProvider, createOidcAuthProvider } from "./authProvider.js";
 import { authHeadersForSession } from "./authHeaders.js";
-import { createInMemoryOidcSessionSource, normalizeOidcSessionSnapshot } from "./oidcSessionSource.js";
+import { createOidcSessionSource, normalizeOidcSessionSnapshot } from "./oidcSessionSource.js";
 import { SESSION_STATES } from "./sessionState.js";
 
 describe("authProvider", () => {
@@ -25,14 +25,6 @@ describe("authProvider", () => {
   });
 
   it("prepares oidc provider around a token/session source boundary", async () => {
-    const sessionSource = createInMemoryOidcSessionSource(normalizeOidcSessionSnapshot({
-      accessToken: "oidc-token",
-      profile: {
-        sub: "oidc-user-1",
-        roles: ["ANALYST"],
-        authorities: ["alert:read"]
-      }
-    }));
     const oidcClient = {
       getUser: async () => ({
         access_token: "oidc-token",
@@ -54,6 +46,15 @@ describe("authProvider", () => {
       beginLogout: async () => "logout-started",
       hasConfiguration: () => true
     };
+    const sessionSource = createOidcSessionSource(oidcClient, normalizeOidcSessionSnapshot({
+      accessToken: "oidc-token",
+      profile: {
+        sub: "oidc-user-1",
+        roles: ["ANALYST"],
+        authorities: ["alert:read"]
+      }
+    }));
+    const clearSpy = vi.spyOn(sessionSource, "clear");
     const provider = createOidcAuthProvider(sessionSource, oidcClient);
 
     expect(provider.kind).toBe("oidc");
@@ -74,11 +75,13 @@ describe("authProvider", () => {
       roles: ["ANALYST"]
     });
     await expect(provider.beginLogin()).resolves.toBe("redirected");
+    expect(clearSpy).toHaveBeenCalledTimes(1);
     await expect(provider.completeLoginCallback()).resolves.toMatchObject({
       userId: "oidc-user-1",
       roles: ["ANALYST"]
     });
     await expect(provider.beginLogout()).resolves.toBe("logout-started");
+    expect(clearSpy).toHaveBeenCalledTimes(2);
     expect(provider.hasLoginConfiguration()).toBe(true);
   });
 });
