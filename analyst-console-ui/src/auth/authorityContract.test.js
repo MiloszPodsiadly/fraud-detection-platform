@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { AUTHORITIES } from "./session.js";
+import { AUTHORITIES, AUTHORITY_VALUES } from "./generatedAuthorities.js";
 
 function backendAuthorities() {
   const currentFile = fileURLToPath(import.meta.url);
@@ -16,6 +16,10 @@ function backendAuthorities() {
 
 describe("authority contract", () => {
   it("matches backend analyst authority names", () => {
+    expect(AUTHORITY_VALUES.slice().sort()).toEqual(backendAuthorities());
+  });
+
+  it("exposes generated frontend constants keyed by backend authority names", () => {
     expect(Object.values(AUTHORITIES).sort()).toEqual(backendAuthorities());
   });
 });

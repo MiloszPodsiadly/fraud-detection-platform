@@ -4,10 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
-    "build": "vite build",
+    "generate:authorities": "node ../scripts/generate-frontend-authorities.mjs",
+    "check:authorities": "node ../scripts/generate-frontend-authorities.mjs --check",
+    "dev": "npm run generate:authorities && vite --host 127.0.0.1",
+    "build": "npm run generate:authorities && vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "vitest run"
+    "test": "npm run generate:authorities && vitest run"
   },
   "dependencies": {
     "oidc-client-ts": "^3.3.0",

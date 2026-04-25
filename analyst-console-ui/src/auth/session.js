@@ -1,11 +1,6 @@
-export const AUTHORITIES = {
-  ALERT_READ: "alert:read",
-  ASSISTANT_SUMMARY_READ: "assistant-summary:read",
-  ALERT_DECISION_SUBMIT: "alert:decision:submit",
-  FRAUD_CASE_READ: "fraud-case:read",
-  FRAUD_CASE_UPDATE: "fraud-case:update",
-  TRANSACTION_MONITOR_READ: "transaction-monitor:read"
-};
+import { AUTHORITIES } from "./generatedAuthorities.js";
+
+export { AUTHORITIES } from "./generatedAuthorities.js";
 
 export const ROLE_AUTHORITIES = {
   READ_ONLY_ANALYST: [
