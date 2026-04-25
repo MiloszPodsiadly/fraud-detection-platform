@@ -13,6 +13,7 @@ def recommend_drift_actions(
         model: dict[str, Any],
         drift: dict[str, Any],
         history_snapshots: list[dict[str, Any]] | None = None,
+        model_lifecycle: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Translate drift into bounded advisory operator guidance."""
     history = list(history_snapshots or [])[:MAX_HISTORY_FOR_ACTIONS]
@@ -31,6 +32,7 @@ def recommend_drift_actions(
         "automation_policy": automation_policy,
         "evaluated_at": drift.get("evaluated_at"),
         "explanation": _explanation(drift, recommendation["explanation"]),
+        "model_lifecycle": _model_lifecycle_context(model_lifecycle),
     }
 
 
@@ -205,6 +207,16 @@ def _automation_policy() -> dict[str, bool]:
         "blocks_requests": False,
         "switches_model": False,
         "triggers_retraining": False,
+    }
+
+
+def _model_lifecycle_context(model_lifecycle: dict[str, Any] | None) -> dict[str, Any]:
+    context = model_lifecycle if isinstance(model_lifecycle, dict) else {}
+    return {
+        "current_model_version": context.get("current_model_version"),
+        "model_loaded_at": context.get("model_loaded_at"),
+        "model_changed_recently": bool(context.get("model_changed_recently", False)),
+        "recent_lifecycle_event_count": int(context.get("recent_lifecycle_event_count") or 0),
     }
 
 
