@@ -6,6 +6,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 from app import server
+from app.governance.actions import recommend_drift_actions
 from app.governance.drift import CONFIDENCE_ORDER, MIN_OBSERVATIONS, evaluate_drift
 from app.governance.persistence import (
     GovernancePersistenceConfig,
@@ -319,6 +320,112 @@ class MlGovernancePersistenceTest(unittest.TestCase):
         self.assertIn("fraudScore", json.loads(payload.decode("utf-8")))
 
 
+class MlGovernanceActionsTest(unittest.TestCase):
+    def model(self):
+        return {
+            "model_name": "python-logistic-fraud-model",
+            "model_version": "actions-test-v1",
+        }
+
+    def drift(self, status: str, confidence: str, reason: str | None = None):
+        return {
+            "status": status,
+            "confidence": confidence,
+            "reason": reason,
+            "evaluated_at": "2026-04-25T00:00:00+00:00",
+            "sample_size": 100,
+            "signals": [
+                {
+                    "drift_type": "feature_mean_shift",
+                    "name": "recentTransactionCount",
+                    "severity": status if status in {"WATCH", "DRIFT"} else "OK",
+                    "statistic": "mean",
+                    "reference": 1.0,
+                    "inference": 1.2,
+                    "absolute_difference": 0.2,
+                    "relative_difference": 0.2,
+                    "z_score": 2.5,
+                }
+            ],
+        }
+
+    def assert_action_contract(self, actions: dict):
+        self.assertEqual(
+            set(actions),
+            {
+                "severity",
+                "confidence",
+                "drift_status",
+                "trend",
+                "recommended_actions",
+                "escalation",
+                "automation_policy",
+                "evaluated_at",
+                "explanation",
+            },
+        )
+        self.assertIn(actions["trend"], {"STABLE", "INCREASING", "DECREASING"})
+        self.assertLessEqual(len(actions["recommended_actions"]), 5)
+        self.assertEqual(
+            actions["automation_policy"],
+            {
+                "advisory_only": True,
+                "affects_scoring": False,
+                "blocks_requests": False,
+                "switches_model": False,
+                "triggers_retraining": False,
+            },
+        )
+
+    def test_unknown_insufficient_data_recommends_collection_only(self):
+        actions = recommend_drift_actions(
+            self.model(),
+            self.drift("UNKNOWN", "LOW", reason="insufficient_data"),
+        )
+
+        self.assert_action_contract(actions)
+        self.assertIn("COLLECT_MORE_DATA", actions["recommended_actions"])
+        self.assertEqual(actions["escalation"], "NONE")
+        self.assertEqual(actions["drift_status"], "UNKNOWN")
+
+    def test_watch_medium_confidence_recommends_operator_review(self):
+        actions = recommend_drift_actions(self.model(), self.drift("WATCH", "MEDIUM"))
+
+        self.assert_action_contract(actions)
+        self.assertIn("INVESTIGATE_DATA_SHIFT", actions["recommended_actions"])
+        self.assertEqual(actions["escalation"], "OPERATOR_REVIEW")
+        self.assertEqual(actions["severity"], "MEDIUM")
+
+    def test_low_confidence_drift_validates_baseline_before_model_review(self):
+        actions = recommend_drift_actions(
+            self.model(),
+            self.drift("DRIFT", "LOW", reason="non_production_reference_profile"),
+        )
+
+        self.assert_action_contract(actions)
+        self.assertIn("INVESTIGATE_BASELINE_AND_DATA", actions["recommended_actions"])
+        self.assertEqual(actions["escalation"], "OPERATOR_REVIEW")
+        self.assertEqual(actions["severity"], "MEDIUM")
+
+    def test_high_confidence_worsening_drift_escalates_model_review(self):
+        history = [
+            {"driftStatus": "DRIFT", "driftConfidence": "HIGH"},
+            {"driftStatus": "WATCH", "driftConfidence": "MEDIUM"},
+            {"driftStatus": "OK", "driftConfidence": "MEDIUM"},
+        ]
+
+        actions = recommend_drift_actions(self.model(), self.drift("DRIFT", "HIGH"), history)
+
+        self.assert_action_contract(actions)
+        self.assertEqual(actions["trend"], "INCREASING")
+        self.assertEqual(actions["severity"], "CRITICAL")
+        self.assertIn("ESCALATE_MODEL_REVIEW", actions["recommended_actions"])
+        self.assertEqual(actions["escalation"], "MODEL_OWNER_REVIEW")
+        self.assertEqual(actions["explanation"], "feature mean increased by 20% compared to reference profile")
+        for field in SENSITIVE_FIELDS:
+            self.assertNotIn(field, json.dumps(actions))
+
+
 class MlGovernanceEndpointTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -404,6 +511,7 @@ class MlGovernanceEndpointTest(unittest.TestCase):
             "/governance/profile/reference",
             "/governance/profile/inference",
             "/governance/drift",
+            "/governance/drift/actions",
             "/governance/history",
         ):
             payload = self.get_json(path)
@@ -456,6 +564,49 @@ class MlGovernanceEndpointTest(unittest.TestCase):
         self.assertEqual(payload["count"], 1)
         self.assertLessEqual(len(payload["snapshots"]), 1)
 
+    def test_drift_actions_endpoint_returns_advisory_guidance(self):
+        documents = [
+            {"driftStatus": "DRIFT", "driftConfidence": "LOW", "createdAt": "2026-04-25T00:02:00+00:00"},
+            {"driftStatus": "WATCH", "driftConfidence": "LOW", "createdAt": "2026-04-25T00:01:00+00:00"},
+        ]
+        original_service = server.SNAPSHOT_SERVICE
+        try:
+            server.SNAPSHOT_SERVICE = GovernanceSnapshotService(
+                FakeSnapshotRepository(documents=documents),
+                GovernancePersistenceConfig(
+                    mongodb_uri="mongodb://mongodb:27017/fraud_governance",
+                    collection="ml_governance_snapshots",
+                    retention_limit=500,
+                    snapshot_interval_requests=50,
+                ),
+            )
+            payload = self.get_json("/governance/drift/actions")
+        finally:
+            server.SNAPSHOT_SERVICE = original_service
+
+        self.assertEqual(
+            set(payload),
+            {
+                "severity",
+                "confidence",
+                "drift_status",
+                "trend",
+                "recommended_actions",
+                "escalation",
+                "automation_policy",
+                "evaluated_at",
+                "explanation",
+            },
+        )
+        self.assertIn(payload["trend"], {"STABLE", "INCREASING", "DECREASING"})
+        self.assertLessEqual(len(payload["recommended_actions"]), 5)
+        self.assertTrue(payload["automation_policy"]["advisory_only"])
+        self.assertFalse(payload["automation_policy"]["affects_scoring"])
+        self.assertFalse(payload["automation_policy"]["blocks_requests"])
+        self.assertFalse(payload["automation_policy"]["switches_model"])
+        self.assertFalse(payload["automation_policy"]["triggers_retraining"])
+        self.assertLessEqual(len(payload["explanation"]), 120)
+
     def test_drift_unknown_until_minimum_sample_size(self):
         server.INFERENCE_PROFILE.reset()
 
@@ -498,9 +649,14 @@ class MlGovernanceEndpointTest(unittest.TestCase):
         metrics = payload.decode("utf-8")
 
         self.assertIn("fraud_ml_governance_drift_status", metrics)
+        self.assertIn("fraud_ml_governance_drift_action_recommendation", metrics)
         self.assertIn("fraud_ml_governance_drift_confidence", metrics)
         self.assertIn("fraud_ml_governance_reference_profile_loaded", metrics)
         self.assertIn("fraud_ml_governance_profile_observations_total", metrics)
+        self.assertIn('fraud_ml_governance_drift_action_recommendation{model_name=', metrics)
+        self.assertIn('severity=', metrics)
+        self.assertNotIn("action=", metrics)
+        self.assertNotIn("escalation=", metrics)
         self.assertNotIn("sample_size=", metrics)
         self.assertNotIn("feature_name=", metrics)
         for field in SENSITIVE_FIELDS:
