@@ -1,5 +1,7 @@
 # Operations And Observability v1
 
+DO NOT USE FOR CURRENT RUNTIME DECISIONS. This document is the historical baseline only.
+
 Reviewer-friendly operations spec for the baseline observability foundation in `fraud-detection-platform`.
 
 This document is still accurate for the original Java-service metrics and triage model, but it is no longer the latest runtime view after FDP-5. For the current local monitoring stack with Prometheus, Grafana, alert rules, and direct `ml-inference-service` metrics, use [operations-observability-v2.md](operations-observability-v2.md).

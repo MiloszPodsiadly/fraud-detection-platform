@@ -232,6 +232,11 @@ http://localhost:4173
 
 The Docker stack starts synthetic replay automatically. Wait about 20-30 seconds after startup and refresh the UI if the first page still shows zero records.
 
+First-run rule of thumb:
+
+- if this is a fresh clone, run `up --build`
+- if containers already worked on this machine and you only changed code or want a restart, prefer targeted rebuilds or `up -d --no-build`
+
 ### Auth Modes
 
 Two local analyst-auth modes are supported today.
@@ -447,6 +452,44 @@ docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oid
 docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml up --build -d
 ```
 
+### Common Local Issues
+
+Stale Docker images:
+
+- symptom: runtime behavior does not match current repo code
+- fix:
+
+```bash
+docker compose -f deployment/docker-compose.yml build ml-inference-service
+docker compose -f deployment/docker-compose.yml up -d ml-inference-service prometheus grafana
+```
+
+OIDC login loop or stale callback behavior:
+
+- symptom: login redirects back incorrectly or UI keeps old auth settings
+- fix:
+
+```bash
+docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml build analyst-console-ui
+docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml up -d analyst-console-ui
+```
+
+Missing Kafka topics or broken startup ordering:
+
+- symptom: Kafka-backed services stay unhealthy or logs show missing topic errors
+- fix:
+
+```bash
+docker compose -f deployment/docker-compose.yml up -d kafka kafka-topics-init
+```
+
+Full local reset:
+
+```bash
+docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml down -v
+docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml up --build -d
+```
+
 ## Frontend Analyst Console
 
 URL:
@@ -651,6 +694,8 @@ Structured logs include:
 
 ## Operations And Observability
 
+v2 is the current runtime reference; v1 is the historical baseline.
+
 The observability docs are split into:
 
 - `v1`: baseline metrics and triage foundation for the Java services
@@ -827,6 +872,7 @@ scripts/                         Synthetic dataset and replay scripts
 Security and architecture:
 
 - [Security Foundation v1](docs/security-foundation-v1.md): consolidated technical reference for RBAC, local demo auth, actor identity, audit logging, frontend security UX, JWT/OIDC migration, review notes, known limitations, and next steps.
+- [API Error Contract](docs/api-error-contract.md): canonical local Java REST error envelope for timestamp/status/error/message/details and non-leakage rules.
 - [Operations And Observability v1](docs/operations-observability-v1.md): baseline observability foundation before the local monitoring stack rollout.
 - [Operations And Observability v2](docs/operations-observability-v2.md): current local Prometheus/Grafana runtime guide, ML metrics contract, alert thresholds, and troubleshooting flow.
 

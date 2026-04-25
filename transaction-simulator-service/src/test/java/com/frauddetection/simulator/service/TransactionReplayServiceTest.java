@@ -9,11 +9,10 @@ import com.frauddetection.simulator.config.ReplayProperties;
 import com.frauddetection.simulator.messaging.TransactionRawEventPublisher;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.task.SyncTaskExecutor;
+import org.springframework.core.task.TaskExecutor;
 
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -74,10 +73,11 @@ class TransactionReplayServiceTest {
 
     @Test
     void shouldRejectSecondReplayWhenAlreadyRunning() {
+        ManualTaskExecutor executor = new ManualTaskExecutor();
         TransactionReplayService service = new TransactionReplayService(
-                List.of(new BlockingReplayDataSource()),
+                List.of(new StubReplayDataSource(ReplaySourceType.JSONL, 1)),
                 event -> { },
-                runnable -> new Thread(runnable).start(),
+                executor,
                 new ReplayProperties(0L, "jsonl")
         );
 
@@ -85,6 +85,9 @@ class TransactionReplayServiceTest {
 
         assertThatThrownBy(() -> service.startReplay(new ReplayStartRequest(ReplaySourceType.JSONL, 1, 0L)))
                 .hasMessage("Replay is already running.");
+
+        executor.runPending();
+        assertThat(service.getReplayStatus().state()).isEqualTo("COMPLETED");
     }
 
     private record StubReplayDataSource(ReplaySourceType sourceType, int eventCount) implements ReplayDataSource {
@@ -122,55 +125,24 @@ class TransactionReplayServiceTest {
         }
     }
 
-    private static final class BlockingReplayDataSource implements ReplayDataSource {
-        private final CountDownLatch streamStarted = new CountDownLatch(1);
-        private final CountDownLatch releaseStream = new CountDownLatch(1);
+    private static final class ManualTaskExecutor implements TaskExecutor {
+        private Runnable pendingTask;
 
         @Override
-        public ReplaySourceType sourceType() {
-            return ReplaySourceType.JSONL;
-        }
-
-        @Override
-        public Stream<TransactionRawEvent> stream(int maxEvents) {
-            return Stream.generate(() -> {
-                streamStarted.countDown();
-                awaitReleaseWindow();
-                return new TransactionRawEvent(
-                        "event",
-                        "txn",
-                        "corr",
-                        "cust",
-                        "acct",
-                        "card",
-                        java.time.Instant.now(),
-                        java.time.Instant.now(),
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        "PURCHASE",
-                        "3DS",
-                        "SIMULATOR",
-                        "trace",
-                        Map.of()
-                );
-            }).limit(maxEvents);
-        }
-
-        private void awaitReleaseWindow() {
-            try {
-                if (!streamStarted.await(250, TimeUnit.MILLISECONDS)) {
-                    throw new AssertionError("Replay test did not start streaming in time.");
-                }
-                releaseStream.await(250, TimeUnit.MILLISECONDS);
-            } catch (InterruptedException exception) {
-                Thread.currentThread().interrupt();
-                throw new AssertionError("Interrupted while coordinating replay test blocking.", exception);
-            } finally {
-                releaseStream.countDown();
+        public void execute(Runnable task) {
+            if (pendingTask != null) {
+                throw new AssertionError("Only one pending task is expected in this test.");
             }
+            pendingTask = task;
+        }
+
+        private void runPending() {
+            if (pendingTask == null) {
+                throw new AssertionError("Expected a pending replay task.");
+            }
+            Runnable task = pendingTask;
+            pendingTask = null;
+            task.run();
         }
     }
 }
