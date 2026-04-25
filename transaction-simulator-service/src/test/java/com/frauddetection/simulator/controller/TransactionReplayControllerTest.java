@@ -67,7 +67,18 @@ class TransactionReplayControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new ReplayStartRequest(ReplaySourceType.SYNTHETIC, 0, -1L))))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("Request validation failed."));
+                .andExpect(jsonPath("$.message").value("Request validation failed."))
+                .andExpect(jsonPath("$.details[0]").exists());
+    }
+
+    @Test
+    void shouldRejectMalformedJsonWithoutLeakingInternalDetails() throws Exception {
+        mockMvc.perform(post("/api/v1/replay/start")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{not-json"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Malformed JSON request."))
+                .andExpect(jsonPath("$.details").isEmpty());
     }
 
     @Test

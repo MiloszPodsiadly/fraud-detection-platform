@@ -84,7 +84,7 @@ class TransactionIngestControllerTest {
                         .content(objectMapper.writeValueAsString(invalidRequest)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Request validation failed."))
-                .andExpect(jsonPath("$.validationErrors[0]").exists());
+                .andExpect(jsonPath("$.details[0]").exists());
     }
 
     @Test
@@ -94,6 +94,6 @@ class TransactionIngestControllerTest {
                         .content("{not-json"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Malformed JSON request."))
-                .andExpect(jsonPath("$.validationErrors").isEmpty());
+                .andExpect(jsonPath("$.details").isEmpty());
     }
 }

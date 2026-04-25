@@ -2,6 +2,8 @@
 
 Reviewer-friendly operations spec for `fraud-detection-platform` after FDP-5.
 
+This document supersedes `operations-observability-v1.md` for current local runtime decisions.
+
 This document extends the current observability foundation with direct ML runtime metrics so that `ml-inference-service` can be monitored as an independent operational component.
 
 ## Scope

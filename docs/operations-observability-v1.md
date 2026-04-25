@@ -1,6 +1,10 @@
 # Operations And Observability v1
 
-Reviewer-friendly operations spec for the current observability foundation in `fraud-detection-platform`.
+DO NOT USE FOR CURRENT RUNTIME DECISIONS. This document is the historical baseline only.
+
+Reviewer-friendly operations spec for the baseline observability foundation in `fraud-detection-platform`.
+
+This document is still accurate for the original Java-service metrics and triage model, but it is no longer the latest runtime view after FDP-5. For the current local monitoring stack with Prometheus, Grafana, alert rules, and direct `ml-inference-service` metrics, use [operations-observability-v2.md](operations-observability-v2.md).
 
 This document describes:
 
@@ -9,11 +13,11 @@ This document describes:
 - which alerts should be added later
 - how to triage incidents with the current metrics and logs
 
-It intentionally does not include Grafana JSON exports or vendor-specific alert definitions. The goal is to make the implemented metrics operationally legible before a full monitoring stack rollout.
+It intentionally does not include Grafana JSON exports or vendor-specific alert definitions because it describes the pre-rollout baseline, not the current shipped monitoring stack.
 
 ## Scope
 
-Current foundation covers:
+Baseline foundation covers:
 
 - Micrometer metrics in `alert-service`
 - Micrometer metrics in `fraud-scoring-service`
@@ -21,7 +25,7 @@ Current foundation covers:
 - correlation and trace context propagation through HTTP and Kafka boundaries
 - security telemetry for analyst-facing APIs
 
-Current foundation does not yet cover:
+Baseline foundation did not yet cover:
 
 - direct `/metrics` instrumentation inside `ml-inference-service`
 - distributed tracing spans and trace export

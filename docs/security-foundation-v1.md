@@ -406,6 +406,7 @@ Reviewers should check:
 - No read-access audit yet.
 - The frontend still defaults to demo auth unless OIDC env vars are set explicitly.
 - The frontend OIDC path is a local OIDC integration and foundation for production auth, not a production-ready SSO setup.
+- No silent refresh or session management hardening is shipped for deployment environments yet.
 - Backend and frontend currently duplicate authority names.
 - `analystId` is still accepted in write DTOs for compatibility.
 - `anyRequest().permitAll()` intentionally leaves non-API local routes public; protected business APIs are under `/api/v1/**`.

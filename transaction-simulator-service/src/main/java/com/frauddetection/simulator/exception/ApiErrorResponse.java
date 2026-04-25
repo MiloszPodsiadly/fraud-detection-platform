@@ -8,6 +8,6 @@ public record ApiErrorResponse(
         int status,
         String error,
         String message,
-        List<String> validationErrors
+        List<String> details
 ) {
 }
