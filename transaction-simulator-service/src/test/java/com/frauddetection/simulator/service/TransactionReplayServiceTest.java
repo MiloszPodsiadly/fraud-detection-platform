@@ -12,6 +12,8 @@ import org.springframework.core.task.SyncTaskExecutor;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -121,6 +123,9 @@ class TransactionReplayServiceTest {
     }
 
     private static final class BlockingReplayDataSource implements ReplayDataSource {
+        private final CountDownLatch streamStarted = new CountDownLatch(1);
+        private final CountDownLatch releaseStream = new CountDownLatch(1);
+
         @Override
         public ReplaySourceType sourceType() {
             return ReplaySourceType.JSONL;
@@ -129,11 +134,8 @@ class TransactionReplayServiceTest {
         @Override
         public Stream<TransactionRawEvent> stream(int maxEvents) {
             return Stream.generate(() -> {
-                try {
-                    Thread.sleep(500);
-                } catch (InterruptedException exception) {
-                    Thread.currentThread().interrupt();
-                }
+                streamStarted.countDown();
+                awaitReleaseWindow();
                 return new TransactionRawEvent(
                         "event",
                         "txn",
@@ -155,6 +157,20 @@ class TransactionReplayServiceTest {
                         Map.of()
                 );
             }).limit(maxEvents);
+        }
+
+        private void awaitReleaseWindow() {
+            try {
+                if (!streamStarted.await(250, TimeUnit.MILLISECONDS)) {
+                    throw new AssertionError("Replay test did not start streaming in time.");
+                }
+                releaseStream.await(250, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("Interrupted while coordinating replay test blocking.", exception);
+            } finally {
+                releaseStream.countDown();
+            }
         }
     }
 }
