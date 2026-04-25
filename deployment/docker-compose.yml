@@ -2,6 +2,7 @@ services:
   kafka:
     image: apache/kafka:3.8.0
     container_name: fraud-kafka
+    restart: unless-stopped
     ports:
       - "127.0.0.1:9092:9092"
     environment:
@@ -40,6 +41,7 @@ services:
   mongodb:
     image: mongo:7.0
     container_name: fraud-mongodb
+    restart: unless-stopped
     ports:
       - "127.0.0.1:27017:27017"
     healthcheck:
@@ -51,6 +53,7 @@ services:
   redis:
     image: redis:7.2-alpine
     container_name: fraud-redis
+    restart: unless-stopped
     ports:
       - "127.0.0.1:6379:6379"
     healthcheck:
@@ -64,6 +67,7 @@ services:
       context: ..
       dockerfile: deployment/Dockerfile.ml-inference
     container_name: ml-inference-service
+    restart: unless-stopped
     ports:
       - "127.0.0.1:8090:8090"
     healthcheck:
@@ -75,6 +79,7 @@ services:
   prometheus:
     image: prom/prometheus:v3.3.0
     container_name: fraud-prometheus
+    restart: unless-stopped
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.retention.time=2d
@@ -88,6 +93,7 @@ services:
   grafana:
     image: grafana/grafana:11.6.1
     container_name: fraud-grafana
+    restart: unless-stopped
     depends_on:
       prometheus:
         condition: service_started
@@ -104,6 +110,7 @@ services:
   ollama:
     image: ollama/ollama:latest
     container_name: fraud-ollama
+    restart: unless-stopped
     ports:
       - "127.0.0.1:11434:11434"
     volumes:
@@ -137,6 +144,7 @@ services:
       args:
         MODULE_NAME: transaction-ingest-service
     container_name: transaction-ingest-service
+    restart: unless-stopped
     depends_on:
       kafka:
         condition: service_healthy
@@ -160,6 +168,7 @@ services:
       args:
         MODULE_NAME: transaction-simulator-service
     container_name: transaction-simulator-service
+    restart: unless-stopped
     depends_on:
       kafka:
         condition: service_healthy
@@ -190,6 +199,7 @@ services:
       args:
         MODULE_NAME: feature-enricher-service
     container_name: feature-enricher-service
+    restart: unless-stopped
     depends_on:
       kafka:
         condition: service_healthy
@@ -215,6 +225,7 @@ services:
       args:
         MODULE_NAME: fraud-scoring-service
     container_name: fraud-scoring-service
+    restart: unless-stopped
     depends_on:
       kafka:
         condition: service_healthy
@@ -242,6 +253,7 @@ services:
       args:
         MODULE_NAME: alert-service
     container_name: alert-service
+    restart: unless-stopped
     depends_on:
       kafka:
         condition: service_healthy
@@ -271,6 +283,7 @@ services:
       context: ..
       dockerfile: deployment/Dockerfile.frontend
     container_name: analyst-console-ui
+    restart: unless-stopped
     depends_on:
       alert-service:
         condition: service_started
