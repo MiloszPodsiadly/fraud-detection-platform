@@ -651,7 +651,12 @@ Structured logs include:
 
 ## Operations And Observability
 
-Current v1 operations foundation includes:
+The observability docs are split into:
+
+- `v1`: baseline metrics and triage foundation for the Java services
+- `v2`: current local monitoring stack with Prometheus, Grafana, shipped alert rules, and direct ML runtime metrics
+
+Current runtime foundation includes:
 
 - Micrometer metrics in `alert-service`
 - Micrometer metrics in `fraud-scoring-service`
@@ -665,9 +670,10 @@ Current metrics exposure:
 - `fraud-scoring-service`: `/actuator/metrics`, `/actuator/prometheus`
 - `ml-inference-service`: `/metrics`
 
-Reviewer-facing operations spec:
+Reviewer-facing operations specs:
 
 - [Operations And Observability v1](docs/operations-observability-v1.md)
+- [Operations And Observability v2](docs/operations-observability-v2.md)
 
 ## Idempotency And Performance
 
@@ -821,7 +827,8 @@ scripts/                         Synthetic dataset and replay scripts
 Security and architecture:
 
 - [Security Foundation v1](docs/security-foundation-v1.md): consolidated technical reference for RBAC, local demo auth, actor identity, audit logging, frontend security UX, JWT/OIDC migration, review notes, known limitations, and next steps.
-- [Operations And Observability v1](docs/operations-observability-v1.md): dashboard and alert spec for analyst workflow, platform operations, security monitoring, ML/runtime monitoring, and triage guidance.
+- [Operations And Observability v1](docs/operations-observability-v1.md): baseline observability foundation before the local monitoring stack rollout.
+- [Operations And Observability v2](docs/operations-observability-v2.md): current local Prometheus/Grafana runtime guide, ML metrics contract, alert thresholds, and troubleshooting flow.
 
 TODO: If future work adds docs for ML governance, operations, data generation, or deployment, keep them as a small set of consolidated feature documents instead of many prompt-sized files.
 
