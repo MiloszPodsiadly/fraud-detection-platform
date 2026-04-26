@@ -45,4 +45,23 @@ class ReadAccessAuditClassifierTest {
         assertThat(target.endpointCategory()).isEqualTo(ReadAccessEndpointCategory.GOVERNANCE_ADVISORY_AUDIT_HISTORY);
         assertThat(target.resourceId()).isEqualTo("advisory-1");
     }
+
+    @Test
+    void shouldClassifyGovernanceAdvisoryListReadWithoutRawFilters() {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/governance/advisories");
+        request.setQueryString("severity=HIGH&model_version=2026-04-21.trained.v1&limit=25");
+        request.setParameter("severity", "HIGH");
+        request.setParameter("model_version", "2026-04-21.trained.v1");
+        request.setParameter("limit", "25");
+        request.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/governance/advisories");
+
+        ReadAccessAuditTarget target = classifier.classify(request).orElseThrow();
+
+        assertThat(target.endpointCategory()).isEqualTo(ReadAccessEndpointCategory.GOVERNANCE_ADVISORY_LIST);
+        assertThat(target.resourceType()).isEqualTo(ReadAccessResourceType.GOVERNANCE_ADVISORY_LIST);
+        assertThat(target.resourceId()).isNull();
+        assertThat(target.queryHash()).hasSize(32);
+        assertThat(target.toString())
+                .doesNotContain("severity", "HIGH", "model_version", "2026-04-21.trained.v1");
+    }
 }

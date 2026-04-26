@@ -31,6 +31,9 @@ public class ReadAccessAuditClassifier {
         if ("/api/v1/transactions/scored".equals(pattern)) {
             return Optional.of(target(ReadAccessEndpointCategory.SCORED_TRANSACTION_LIST, ReadAccessResourceType.SCORED_TRANSACTION, null, request));
         }
+        if ("/governance/advisories".equals(pattern)) {
+            return Optional.of(target(ReadAccessEndpointCategory.GOVERNANCE_ADVISORY_LIST, ReadAccessResourceType.GOVERNANCE_ADVISORY_LIST, null, request));
+        }
         if ("/governance/advisories/{eventId}".equals(pattern)) {
             return Optional.of(target(ReadAccessEndpointCategory.GOVERNANCE_ADVISORY_DETAIL, ReadAccessResourceType.GOVERNANCE_ADVISORY, variables.get("eventId"), request));
         }

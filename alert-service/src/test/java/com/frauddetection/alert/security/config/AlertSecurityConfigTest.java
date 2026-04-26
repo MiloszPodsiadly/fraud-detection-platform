@@ -324,7 +324,7 @@ class AlertSecurityConfigTest {
     @Test
     void shouldProtectPlatformAuditReadWithDedicatedAuthority() throws Exception {
         when(auditEventReadService.readEvents(any(), any(), any(), any(), any(), any(), any()))
-                .thenReturn(new AuditEventReadResponse("AVAILABLE", 0, 50, List.of()));
+                .thenReturn(new AuditEventReadResponse("AVAILABLE", null, null, 0, 50, List.of()));
 
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("FRAUD_OPS_ADMIN")))
                 .andExpect(status().isOk())

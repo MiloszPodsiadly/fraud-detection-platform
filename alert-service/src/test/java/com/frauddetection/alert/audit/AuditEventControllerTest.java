@@ -52,6 +52,8 @@ class AuditEventControllerTest {
                 eq(50)
         )).thenReturn(new AuditEventReadResponse(
                 "AVAILABLE",
+                null,
+                null,
                 1,
                 50,
                 List.of(new AuditEventResponse(
@@ -79,6 +81,8 @@ class AuditEventControllerTest {
                         .param("limit", "50"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("AVAILABLE"))
+                .andExpect(jsonPath("$.reason_code").doesNotExist())
+                .andExpect(jsonPath("$.message").doesNotExist())
                 .andExpect(jsonPath("$.count").value(1))
                 .andExpect(jsonPath("$.limit").value(50))
                 .andExpect(jsonPath("$.events[0].audit_event_id").value("audit-1"))
@@ -106,5 +110,22 @@ class AuditEventControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Invalid audit event query."))
                 .andExpect(jsonPath("$.details[0]").value("event_type: unsupported value"));
+    }
+
+    @Test
+    void shouldReturnStableUnavailableAuditReadContract() throws Exception {
+        when(auditEventReadService.readEvents(isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), eq(50)))
+                .thenReturn(AuditEventReadResponse.unavailable(50));
+
+        mockMvc.perform(get("/api/v1/audit/events").param("limit", "50"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("UNAVAILABLE"))
+                .andExpect(jsonPath("$.reason_code").value("AUDIT_STORE_UNAVAILABLE"))
+                .andExpect(jsonPath("$.message").value("Audit event store is currently unavailable."))
+                .andExpect(jsonPath("$.count").value(0))
+                .andExpect(jsonPath("$.limit").value(50))
+                .andExpect(jsonPath("$.events").isEmpty())
+                .andExpect(jsonPath("$.details").doesNotExist())
+                .andExpect(jsonPath("$.exception").doesNotExist());
     }
 }

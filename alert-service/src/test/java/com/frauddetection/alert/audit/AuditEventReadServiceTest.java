@@ -68,6 +68,8 @@ class AuditEventReadServiceTest {
         assertThat(queryCaptor.getValue().getLimit()).isEqualTo(50);
 
         assertThat(response.status()).isEqualTo("AVAILABLE");
+        assertThat(response.reasonCode()).isNull();
+        assertThat(response.message()).isNull();
         assertThat(response.count()).isEqualTo(1);
         assertThat(response.limit()).isEqualTo(50);
         AuditEventResponse event = response.events().getFirst();
@@ -123,13 +125,30 @@ class AuditEventReadServiceTest {
         AuditEventReadResponse response = service.readEvents(null, null, null, null, null, null, 25);
 
         assertThat(response.status()).isEqualTo("UNAVAILABLE");
+        assertThat(response.reasonCode()).isEqualTo("AUDIT_STORE_UNAVAILABLE");
+        assertThat(response.message()).isEqualTo("Audit event store is currently unavailable.");
         assertThat(response.count()).isZero();
         assertThat(response.limit()).isEqualTo(25);
         assertThat(response.events()).isEmpty();
+        assertThat(response.toString()).doesNotContain("mongo down", "DataAccessResourceFailureException");
         assertThat(meterRegistry.get("fraud_platform_audit_read_requests_total")
                 .tag("status", "UNAVAILABLE")
                 .counter()
                 .count()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void shouldDistinguishAvailableEmptyResultFromUnavailableStore() {
+        when(mongoTemplate.find(org.mockito.ArgumentMatchers.any(Query.class), eq(AuditEventDocument.class)))
+                .thenReturn(List.of());
+
+        AuditEventReadResponse response = service.readEvents(null, null, null, null, null, null, 25);
+
+        assertThat(response.status()).isEqualTo("AVAILABLE");
+        assertThat(response.reasonCode()).isNull();
+        assertThat(response.message()).isNull();
+        assertThat(response.count()).isZero();
+        assertThat(response.events()).isEmpty();
     }
 
     @Test
