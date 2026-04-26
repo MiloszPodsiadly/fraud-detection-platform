@@ -520,6 +520,27 @@ Lifecycle limitations:
 - no background jobs, timers, or cron
 - no retraining, rollback, alerting, scoring, or decision side effects
 
+## Audit Analytics
+
+FDP-15 adds bounded audit analytics through `alert-service`:
+
+```text
+GET /governance/advisories/analytics?window_days=7
+```
+
+Analytics are derived from advisory history and human-review audit events. They are read-only and are for visibility into operator behavior and advisory handling only.
+
+Returned analytics include:
+
+- total advisories, reviewed advisories, and open advisories
+- audit decision distribution
+- audit-derived lifecycle distribution
+- time-to-first-review p50 and p95 in minutes
+
+Analytics are not an SLA, do not trigger actions, do not persist aggregates, do not change lifecycle state, and do not influence scoring, model behavior, retraining, rollback, alerts, or fraud decisions.
+
+Analytics operates on bounded time windows. `window_days` defaults to `7` and is capped at `30`, and the advisory input remains bounded to the recent advisory window.
+
 ## Endpoint Contracts
 
 ```text
@@ -581,6 +602,8 @@ Governance metrics:
 - `fraud_ml_model_lifecycle_events_total{event_type,model_name,model_version,status}`
 - `fraud_ml_model_lifecycle_history_available{model_name,model_version,status}`
 - `fraud_ml_governance_advisory_lifecycle_total{lifecycle_status,model_name,model_version}`
+- `fraud_ml_governance_analytics_requests_total`
+- `fraud_ml_governance_analytics_window_days`
 - `fraud_ml_governance_advisory_events_emitted_total{severity,model_name,model_version,status}`
 - `fraud_ml_governance_advisory_events_persisted_total{severity,model_name,model_version,status}`
 - `fraud_ml_governance_advisory_persistence_failures_total{severity,model_name,model_version,status}`
@@ -607,6 +630,8 @@ Action metric labels are bounded enums only. They must never include action text
 Lifecycle metric labels are bounded to model metadata, lifecycle mode, fixed lifecycle event types, advisory lifecycle status, and status. They must never include artifact paths, checksums, event IDs, actor IDs, timestamps, reason text, exception text, hostnames, or filesystem paths.
 
 Lifecycle metrics represent distribution of advisory states, not operational decisions.
+
+Analytics metrics have no user, actor, event, advisory, or payload labels.
 
 Advisory metric labels are bounded to severity, model name, model version, and status. They must never include event IDs, timestamps, explanations, recommended action text, payload data, feature names, exception text, or identifiers.
 

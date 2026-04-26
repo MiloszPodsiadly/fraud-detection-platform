@@ -155,6 +155,14 @@ Prometheus metric contract:
   - Type: counter
   - Meaning: read-time advisory lifecycle projection observations. Lifecycle metrics represent distribution of advisory states, not operational decisions.
   - Labels: `lifecycle_status`, `model_name`, `model_version`
+- `fraud_ml_governance_analytics_requests_total`
+  - Type: counter
+  - Meaning: bounded audit analytics requests served by `alert-service`
+  - Labels: none
+- `fraud_ml_governance_analytics_window_days`
+  - Type: gauge
+  - Meaning: latest requested bounded audit analytics window in days
+  - Labels: none
 - `fraud_ml_governance_advisory_events_emitted_total`
   - Type: counter
   - Meaning: governance advisory events emitted
@@ -280,6 +288,7 @@ Governance advisory events:
 - The advisory API supports bounded exact filters only: `severity`, `model_version`, `lifecycle_status`, and `limit`; it does not support free-text search or regex.
 - Filtering by `lifecycle_status` applies to the bounded advisory result set. It does not guarantee global completeness.
 - Advisory lifecycle status is derived from the latest human-review audit event. It is not persisted as source of truth, not a workflow engine, and not an automation trigger.
+- Advisory audit analytics are read-only, bounded by `window_days`, and provide visibility only. They do not define SLA, trigger alerts, or drive automation.
 
 Analyst console operator queue:
 

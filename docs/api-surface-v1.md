@@ -62,6 +62,7 @@ Alert service:
 | `PATCH` | `/api/v1/fraud-cases/{caseId}` | Updates fraud case status/assignment fields. |
 | `GET` | `/api/v1/transactions/scored` | Lists scored transaction projections. |
 | `GET` | `/governance/advisories` | Lists governance advisory events enriched with read-time lifecycle status. |
+| `GET` | `/governance/advisories/analytics` | Returns bounded read-only audit analytics derived from advisory and audit history. |
 | `GET` | `/governance/advisories/{event_id}` | Returns one governance advisory event enriched with read-time lifecycle status. |
 | `GET` | `/governance/advisories/{event_id}/audit` | Returns bounded newest-first human-review audit history for one governance advisory event. |
 | `POST` | `/governance/advisories/{event_id}/audit` | Appends one authenticated human-review audit entry for a governance advisory event. |
@@ -78,6 +79,13 @@ Advisory lifecycle status is a read-time projection:
 Only the latest audit event matters. Lifecycle status is not persisted independently, is not workflow state, has no SLA, and triggers no automation.
 
 Filtering by `lifecycle_status` applies to the bounded advisory result set. It does not guarantee global completeness.
+
+Audit analytics are read-only and derived:
+
+- `GET /governance/advisories/analytics?window_days=7`
+- `window_days` defaults to `7` and is capped at `30`.
+- Analytics operate on bounded time windows and do not guarantee global completeness.
+- Analytics do not persist aggregates, enforce SLA, trigger actions, or change scoring/model behavior.
 
 Advisory list filters:
 

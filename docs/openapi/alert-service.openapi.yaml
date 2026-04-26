@@ -56,6 +56,36 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
+  /governance/advisories/analytics:
+    get:
+      summary: Get bounded governance advisory audit analytics
+      description: Returns read-only analytics derived from bounded advisory history and human-review audit events. Analytics are for visibility only; they are not SLA enforcement, do not trigger actions, and are not persisted as source of truth.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: window_days
+          in: query
+          required: false
+          description: Bounded analytics window in days.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 30
+            default: 7
+      responses:
+        "200":
+          description: Analytics returned for the bounded window.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceAdvisoryAnalyticsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /governance/advisories/{event_id}:
     get:
       summary: Get one governance advisory with derived lifecycle status
@@ -182,6 +212,75 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/GovernanceAdvisoryEvent"
+    GovernanceAdvisoryAnalyticsResponse:
+      type: object
+      required:
+        - status
+        - window
+        - totals
+        - decision_distribution
+        - lifecycle_distribution
+        - review_timeliness
+      properties:
+        status:
+          type: string
+          enum: [AVAILABLE, PARTIAL, UNAVAILABLE]
+        window:
+          type: object
+          required: [from, to, days]
+          properties:
+            from:
+              type: string
+              format: date-time
+            to:
+              type: string
+              format: date-time
+            days:
+              type: integer
+        totals:
+          type: object
+          required: [advisories, reviewed, open]
+          properties:
+            advisories:
+              type: integer
+            reviewed:
+              type: integer
+            open:
+              type: integer
+        decision_distribution:
+          type: object
+          additionalProperties:
+            type: integer
+          properties:
+            ACKNOWLEDGED:
+              type: integer
+            NEEDS_FOLLOW_UP:
+              type: integer
+            DISMISSED_AS_NOISE:
+              type: integer
+        lifecycle_distribution:
+          type: object
+          additionalProperties:
+            type: integer
+          properties:
+            OPEN:
+              type: integer
+            ACKNOWLEDGED:
+              type: integer
+            NEEDS_FOLLOW_UP:
+              type: integer
+            DISMISSED_AS_NOISE:
+              type: integer
+        review_timeliness:
+          type: object
+          required:
+            - time_to_first_review_p50_minutes
+            - time_to_first_review_p95_minutes
+          properties:
+            time_to_first_review_p50_minutes:
+              type: number
+            time_to_first_review_p95_minutes:
+              type: number
     GovernanceAdvisoryEvent:
       type: object
       required:
