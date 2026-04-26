@@ -789,6 +789,7 @@ GET /governance/profile/reference
 GET /governance/profile/inference
 GET /governance/drift
 GET /governance/drift/actions
+GET /governance/advisories
 GET /governance/history
 ```
 
@@ -803,7 +804,7 @@ Current ML capabilities:
 - production feature training mode for inference parity
 - SHADOW and COMPARE monitoring
 - analyst feedback dataset support
-- ML governance and drift v1 with model lineage, read-only model lifecycle visibility, synthetic/local reference profile quality, process-local inference profile lifecycle, drift confidence, advisory drift actions, bounded MongoDB snapshot and lifecycle history, and low-cardinality governance metrics
+- ML governance and drift v1 with model lineage, read-only model lifecycle visibility, synthetic/local reference profile quality, process-local inference profile lifecycle, drift confidence, advisory drift actions, governance advisory events, bounded MongoDB snapshot/lifecycle/advisory history, and low-cardinality governance metrics
 
 Governance snapshot and lifecycle persistence use the existing local MongoDB service and are optional for scoring:
 
@@ -815,10 +816,13 @@ Governance snapshot and lifecycle persistence use the existing local MongoDB ser
 | `GOVERNANCE_SNAPSHOT_INTERVAL_REQUESTS` | `50` |
 | `MODEL_LIFECYCLE_COLLECTION` | `ml_model_lifecycle_events` |
 | `MODEL_LIFECYCLE_RETENTION_LIMIT` | `200` |
+| `GOVERNANCE_ADVISORY_COLLECTION` | `ml_governance_advisory_events` |
+| `GOVERNANCE_ADVISORY_RETENTION_LIMIT` | `200` |
 
 MongoDB outage pauses persisted governance history but does not fail scoring.
 Model lifecycle visibility is read-only; it does not switch models, retrain, rollback, approve models, validate model quality, or expose raw artifacts. Drift actions include lifecycle context for operator triage only and do not claim model lifecycle activity caused drift.
-Drift actions are advisory operator signals only; they do not block transactions, change scores, switch models, retrain models, roll back models, or trigger external alerting workflows.
+Governance advisory events are operator signals only; they are not fraud alerts, model actions, retraining triggers, rollback triggers, automatic decisions, or frontend workflow items.
+Drift actions and advisory events do not block transactions, change scores, switch models, retrain models, roll back models, or trigger external alerting workflows.
 
 Training smoke test:
 

@@ -18,6 +18,7 @@ v2 covers:
 - operator guidance for ML runtime incidents
 - ML governance and drift v1 signals for aggregate input/output distribution oversight
 - read-only model lifecycle visibility for drift and runtime triage
+- read-only governance advisory events for meaningful drift operator signals
 
 v2 still does not cover:
 
@@ -25,6 +26,7 @@ v2 still does not cover:
 - distributed tracing export
 - full ML quality monitoring or automatic model lifecycle actions
 - model switching, retraining, rollback, or approval workflow
+- fraud alert creation or frontend surfacing for governance advisories
 - automatic alert routing configuration in repo
 
 ## Local Runtime Stack
@@ -146,6 +148,18 @@ Prometheus metric contract:
   - Type: gauge
   - Meaning: persisted lifecycle history availability
   - Labels: `model_name`, `model_version`, `status`
+- `fraud_ml_governance_advisory_events_emitted_total`
+  - Type: counter
+  - Meaning: governance advisory events emitted
+  - Labels: `severity`, `model_name`, `model_version`, `status`
+- `fraud_ml_governance_advisory_events_persisted_total`
+  - Type: counter
+  - Meaning: governance advisory events persisted successfully
+  - Labels: `severity`, `model_name`, `model_version`, `status`
+- `fraud_ml_governance_advisory_persistence_failures_total`
+  - Type: counter
+  - Meaning: governance advisory event persistence failures
+  - Labels: `severity`, `model_name`, `model_version`, `status`
 
 ## Low-Cardinality Policy
 
@@ -178,6 +192,9 @@ Forbidden labels and payload-derived fields:
 - timestamp
 - reason text
 - hostname if dynamic
+- event ID
+- explanation text
+- recommended action text
 - raw exception messages
 - request feature names and values
 - merchant, customer, device, or country identifiers
@@ -196,6 +213,7 @@ Use `/governance/drift` for feature-level drift details instead of feature label
 - `GET /governance/profile/inference`
 - `GET /governance/drift`
 - `GET /governance/drift/actions`
+- `GET /governance/advisories`
 - `GET /governance/history`
 
 These endpoints expose aggregate operational metadata only. They do not change `POST /v1/fraud/score`, Java fallback behavior, alert thresholds, or fraud decision semantics.
@@ -240,6 +258,15 @@ Drift actions:
 - Trend is bounded to `STABLE`, `INCREASING`, and `DECREASING` and is computed from the latest bounded snapshot window.
 - Explanation is deterministic, short, and aggregate-only; it may mention that drift was observed after recent model lifecycle activity, but it must not claim lifecycle activity caused drift. It does not include raw feature values, identifiers, payload fragments, or exception text.
 - The endpoint never blocks transactions, changes scores, switches models, retrains models, or calls external alerting systems. Actions are for operator decision-making only.
+
+Governance advisory events:
+
+- `GET /governance/advisories` returns bounded, newest-first advisory events.
+- Events are emitted only for meaningful drift actions: `HIGH` or `CRITICAL` severity, or non-`NONE` escalation, with confidence above `LOW`.
+- Events are persisted best-effort to `ml_governance_advisory_events` when MongoDB is available.
+- MongoDB outage returns `PARTIAL` when bounded in-memory events exist and does not break scoring or drift actions.
+- An advisory event is not a fraud alert, not a model action, not a retraining trigger, and not a rollback trigger.
+- Advisory lifecycle context is correlation context only; it must not be read as proof that lifecycle activity caused drift.
 
 Detailed contract and playbook: [ML Governance And Drift v1](ml-governance-drift-v1.md).
 
@@ -314,7 +341,8 @@ Expected end-to-end checks after startup:
 7. Calling `GET /governance/drift/actions` returns advisory operator guidance with `automation_policy.advisory_only=true`.
 8. Calling `GET /governance/model/current` returns the active model lifecycle metadata with `lifecycle_mode=READ_ONLY`.
 9. Calling `GET /governance/model/lifecycle` returns bounded persisted lifecycle history or `PARTIAL` with in-memory events.
-10. Calling `GET /governance/history?limit=10` returns bounded persisted history or `UNAVAILABLE` with a current fallback snapshot.
+10. Calling `GET /governance/advisories?limit=10` returns bounded advisory events or `PARTIAL`/`UNAVAILABLE`.
+11. Calling `GET /governance/history?limit=10` returns bounded persisted history or `UNAVAILABLE` with a current fallback snapshot.
 
 Useful runtime checks:
 
@@ -327,6 +355,7 @@ curl http://localhost:8090/governance/model/current
 curl http://localhost:8090/governance/model/lifecycle
 curl http://localhost:8090/governance/drift
 curl http://localhost:8090/governance/drift/actions
+curl "http://localhost:8090/governance/advisories?limit=10"
 curl "http://localhost:8090/governance/history?limit=10"
 ```
 
