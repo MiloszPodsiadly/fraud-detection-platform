@@ -50,6 +50,7 @@ SENSITIVE_FIELDS = (
     "raw feature row",
     "full payload",
 )
+SNAPSHOT_DIR = Path(__file__).parent / "snapshots"
 
 
 class FakeSnapshotRepository(GovernanceSnapshotRepository):
@@ -887,6 +888,72 @@ class MlGovernanceEndpointTest(unittest.TestCase):
         self.assertEqual(status, 200)
         return json.loads(body.decode("utf-8"))
 
+    def schema_snapshot(self, name: str):
+        return json.loads((SNAPSHOT_DIR / name).read_text(encoding="utf-8"))
+
+    def assert_json_contract(self, payload: dict, snapshot: dict):
+        self.assertEqual(set(payload), set(snapshot["required"]))
+        self.assert_field_types(payload, snapshot.get("types", {}))
+        for field, values in snapshot.get("enum", {}).items():
+            self.assertIn(payload[field], values)
+        for field, required in snapshot.get("nestedRequired", {}).items():
+            self.assertEqual(set(payload[field]), set(required))
+
+    def assert_advisory_contract(self, payload: dict, snapshot: dict):
+        self.assert_json_contract(payload, snapshot)
+        for event in payload["advisory_events"]:
+            self.assertEqual(set(event), set(snapshot["eventRequired"]))
+            self.assert_field_types(event, snapshot.get("eventTypes", {}))
+            for field, values in snapshot.get("eventEnum", {}).items():
+                self.assertIn(event[field], values)
+            for field, required in snapshot.get("eventNestedRequired", {}).items():
+                self.assertEqual(set(event[field]), set(required))
+
+    def assert_field_types(self, payload: dict, field_types: dict):
+        for field, expected in field_types.items():
+            if isinstance(expected, list):
+                self.assertTrue(
+                    any(self.matches_json_type(payload[field], candidate) for candidate in expected),
+                    f"{field} expected one of {expected}, got {type(payload[field]).__name__}",
+                )
+            else:
+                self.assertTrue(
+                    self.matches_json_type(payload[field], expected),
+                    f"{field} expected {expected}, got {type(payload[field]).__name__}",
+                )
+
+    def matches_json_type(self, value, expected_type: str):
+        if expected_type == "boolean":
+            return isinstance(value, bool)
+        if expected_type == "integer":
+            return isinstance(value, int) and not isinstance(value, bool)
+        if expected_type == "number":
+            return (isinstance(value, int) or isinstance(value, float)) and not isinstance(value, bool)
+        if expected_type == "string":
+            return isinstance(value, str)
+        if expected_type == "object":
+            return isinstance(value, dict)
+        if expected_type == "array":
+            return isinstance(value, list)
+        if expected_type == "null":
+            return value is None
+        raise AssertionError(f"Unknown JSON schema snapshot type: {expected_type}")
+
+    def assert_error_contract(self, status: int, payload: dict, message: str):
+        self.assertEqual(
+            set(payload),
+            {"timestamp", "status", "error", "message", "details"},
+        )
+        self.assertEqual(payload["status"], status)
+        self.assertEqual(payload["message"], message)
+        self.assertIsInstance(payload["timestamp"], str)
+        self.assertTrue(payload["timestamp"].endswith("Z"))
+        self.assertIsInstance(payload["error"], str)
+        self.assertIsInstance(payload["details"], list)
+        serialized = json.dumps(payload)
+        self.assertNotIn("Traceback", serialized)
+        self.assertNotIn("JSONDecodeError", serialized)
+
     def test_governance_model_endpoint_exposes_lineage(self):
         payload = self.get_json("/governance/model")
 
@@ -1082,6 +1149,7 @@ class MlGovernanceEndpointTest(unittest.TestCase):
                 "severity": "HIGH",
                 "drift_status": "DRIFT",
                 "confidence": "HIGH",
+                "advisory_confidence_context": "SUFFICIENT_DATA",
                 "model_name": server.MODEL_NAME,
                 "model_version": server.MODEL_VERSION,
                 "lifecycle_context": {
@@ -1113,6 +1181,10 @@ class MlGovernanceEndpointTest(unittest.TestCase):
         self.assertEqual(payload["status"], "AVAILABLE")
         self.assertEqual(payload["count"], MAX_ADVISORY_LIMIT)
         self.assertLessEqual(len(payload["advisory_events"]), MAX_ADVISORY_LIMIT)
+        self.assert_advisory_contract(
+            payload,
+            self.schema_snapshot("governance_advisories_response.schema.json"),
+        )
         serialized = json.dumps(payload)
         self.assertNotIn("raw feature", serialized.lower())
         for field in SENSITIVE_FIELDS:
@@ -1259,21 +1331,40 @@ class MlGovernanceEndpointTest(unittest.TestCase):
             b'"featureFlags":["DEVICE_NOVELTY","COUNTRY_MISMATCH","PROXY_OR_VPN","HIGH_VELOCITY"]}}'
         )
 
-        self.assertEqual(
-            set(response),
-            {
-                "available",
-                "fraudScore",
-                "riskLevel",
-                "modelName",
-                "modelVersion",
-                "inferenceTimestamp",
-                "reasonCodes",
-                "scoreDetails",
-                "explanationMetadata",
-                "fallbackReason",
-            },
+        self.assert_json_contract(
+            response,
+            self.schema_snapshot("fraud_score_response.schema.json"),
         )
+
+    def test_error_responses_use_platform_contract(self):
+        cases = [
+            ("GET", "/missing", None, {}, 404, "Not found."),
+            (
+                "POST",
+                "/v1/fraud/score",
+                b'{"features":',
+                {"Content-Type": "application/json"},
+                400,
+                "Malformed JSON request.",
+            ),
+            (
+                "POST",
+                "/v1/fraud/score",
+                b'{"features":[]}',
+                {"Content-Type": "application/json"},
+                422,
+                "Field 'features' must be an object.",
+            ),
+        ]
+
+        for method, path, body, headers, expected_status, expected_message in cases:
+            with self.subTest(path=path, status=expected_status):
+                status, response_headers, raw_payload = self.request(method, path, body=body, headers=headers)
+                payload = json.loads(raw_payload.decode("utf-8"))
+
+                self.assertEqual(status, expected_status)
+                self.assertEqual(response_headers["Content-Type"], "application/json")
+                self.assert_error_contract(expected_status, payload, expected_message)
 
     def test_governance_metrics_remain_low_cardinality(self):
         self.get_json("/governance/drift")

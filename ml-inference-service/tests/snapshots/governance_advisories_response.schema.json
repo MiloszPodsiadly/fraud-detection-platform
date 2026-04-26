@@ -1,0 +1,58 @@
+{
+  "required": [
+    "advisory_events",
+    "count",
+    "retention_limit",
+    "status"
+  ],
+  "types": {
+    "advisory_events": "array",
+    "count": "integer",
+    "retention_limit": "integer",
+    "status": "string"
+  },
+  "enum": {
+    "status": ["AVAILABLE", "PARTIAL", "UNAVAILABLE"]
+  },
+  "eventRequired": [
+    "advisory_confidence_context",
+    "confidence",
+    "created_at",
+    "drift_status",
+    "event_id",
+    "event_type",
+    "explanation",
+    "lifecycle_context",
+    "model_name",
+    "model_version",
+    "recommended_actions",
+    "severity"
+  ],
+  "eventTypes": {
+    "advisory_confidence_context": "string",
+    "confidence": "string",
+    "created_at": "string",
+    "drift_status": "string",
+    "event_id": "string",
+    "event_type": "string",
+    "explanation": ["string", "null"],
+    "lifecycle_context": "object",
+    "model_name": "string",
+    "model_version": "string",
+    "recommended_actions": "array",
+    "severity": "string"
+  },
+  "eventEnum": {
+    "advisory_confidence_context": ["LOW_SAMPLE", "PARTIAL_DATA", "STABLE_BASELINE", "SUFFICIENT_DATA"],
+    "event_type": ["GOVERNANCE_DRIFT_ADVISORY"],
+    "severity": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+  },
+  "eventNestedRequired": {
+    "lifecycle_context": [
+      "current_model_version",
+      "model_changed_recently",
+      "model_loaded_at",
+      "recent_lifecycle_event_count"
+    ]
+  }
+}

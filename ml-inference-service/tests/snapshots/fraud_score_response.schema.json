@@ -1,0 +1,46 @@
+{
+  "required": [
+    "available",
+    "explanationMetadata",
+    "fallbackReason",
+    "fraudScore",
+    "inferenceTimestamp",
+    "modelName",
+    "modelVersion",
+    "reasonCodes",
+    "riskLevel",
+    "scoreDetails"
+  ],
+  "types": {
+    "available": "boolean",
+    "explanationMetadata": "object",
+    "fallbackReason": ["string", "null"],
+    "fraudScore": "number",
+    "inferenceTimestamp": "string",
+    "modelName": "string",
+    "modelVersion": "string",
+    "reasonCodes": "array",
+    "riskLevel": "string",
+    "scoreDetails": "object"
+  },
+  "enum": {
+    "riskLevel": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+  },
+  "nestedRequired": {
+    "explanationMetadata": [
+      "engineType",
+      "explanationType",
+      "modelAvailable",
+      "modelName",
+      "modelVersion"
+    ],
+    "scoreDetails": [
+      "bias",
+      "featureCompatibility",
+      "featureContributions",
+      "logit",
+      "modelFamily",
+      "normalizedFeatures"
+    ]
+  }
+}
