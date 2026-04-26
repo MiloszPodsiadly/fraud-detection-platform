@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import base64
-import binascii
 import json
 import hashlib
 import hmac
@@ -15,6 +13,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+import jwt
+from jwt import (
+    ExpiredSignatureError,
+    InvalidAlgorithmError,
+    InvalidAudienceError,
+    InvalidIssuerError,
+    InvalidSignatureError,
+    InvalidTokenError,
+    MissingRequiredClaimError,
+)
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
 from app.governance.advisory import (
@@ -360,13 +368,12 @@ def _allowed_jwt_service_authorities() -> dict[str, frozenset[str]]:
 
 
 def _jwt_configured() -> bool:
-    return bool(_jwt_issuer() and _jwt_audience() and _jwt_secret() and _allowed_jwt_service_authorities())
-
-
-def _json_b64url_decode(value: str) -> Any:
-    padded = value + "=" * (-len(value) % 4)
-    decoded = base64.urlsafe_b64decode(padded.encode("ascii"))
-    return json.loads(decoded.decode("utf-8"))
+    return bool(
+        _jwt_issuer()
+        and _jwt_audience()
+        and len(_jwt_secret().encode("utf-8")) >= 32
+        and _allowed_jwt_service_authorities()
+    )
 
 
 def _jwt_authorities(value: Any) -> frozenset[str]:
@@ -377,41 +384,31 @@ def _jwt_authorities(value: Any) -> frozenset[str]:
     return frozenset()
 
 
-def _jwt_audience_matches(value: Any, expected: str) -> bool:
-    if isinstance(value, str):
-        return hmac.compare_digest(value, expected)
-    if isinstance(value, list):
-        return any(isinstance(candidate, str) and hmac.compare_digest(candidate, expected) for candidate in value)
-    return False
-
-
 def _validate_jwt_service_token(token: str, required_authority: str) -> tuple[InternalServicePrincipal | None, int, str]:
-    parts = token.split(".")
-    if len(parts) != 3:
-        return None, 403, "invalid_internal_token"
     try:
-        header = _json_b64url_decode(parts[0])
-        claims = _json_b64url_decode(parts[1])
-        signature = base64.urlsafe_b64decode((parts[2] + "=" * (-len(parts[2]) % 4)).encode("ascii"))
-    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError, ValueError):
-        return None, 403, "invalid_internal_token"
-    if not isinstance(header, dict) or not isinstance(claims, dict) or header.get("alg") != "HS256":
-        return None, 403, "invalid_internal_token"
-    signing_input = f"{parts[0]}.{parts[1]}".encode("ascii")
-    expected_signature = hmac.new(_jwt_secret().encode("utf-8"), signing_input, hashlib.sha256).digest()
-    if not hmac.compare_digest(signature, expected_signature):
+        claims = jwt.decode(
+            token,
+            _jwt_secret(),
+            algorithms=["HS256"],
+            issuer=_jwt_issuer(),
+            audience=_jwt_audience(),
+            options={
+                "require": ["iss", "aud", "exp", _jwt_service_claim(), _jwt_authorities_claim()],
+                "verify_iat": False,
+            },
+        )
+    except ExpiredSignatureError:
+        return None, 401, "expired_internal_token"
+    except InvalidIssuerError:
+        return None, 403, "invalid_internal_issuer"
+    except InvalidAudienceError:
+        return None, 403, "invalid_internal_audience"
+    except (InvalidAlgorithmError, InvalidSignatureError, MissingRequiredClaimError, InvalidTokenError):
         return None, 403, "invalid_internal_token"
     now = int(time.time())
-    exp = claims.get("exp")
-    if not isinstance(exp, (int, float)) or int(exp) <= now:
-        return None, 401, "expired_internal_token"
     iat = claims.get("iat")
     if iat is not None and (not isinstance(iat, (int, float)) or int(iat) > now + 60):
         return None, 403, "invalid_internal_token"
-    if not isinstance(claims.get("iss"), str) or not hmac.compare_digest(claims["iss"], _jwt_issuer()):
-        return None, 403, "invalid_internal_issuer"
-    if not _jwt_audience_matches(claims.get("aud"), _jwt_audience()):
-        return None, 403, "invalid_internal_audience"
     service_name = claims.get(_jwt_service_claim())
     if not isinstance(service_name, str) or not service_name.strip():
         return None, 403, "unknown_internal_service"
@@ -447,7 +444,7 @@ def _validate_internal_auth_startup(
         if not configured_credentials:
             raise RuntimeError("TOKEN_VALIDATOR internal auth mode requires an allowed service list in prod-like profiles.")
     if normalized_mode == "JWT_SERVICE_IDENTITY" and not _jwt_configured():
-        raise RuntimeError("JWT_SERVICE_IDENTITY internal auth mode requires issuer, audience, secret, and service authorities.")
+        raise RuntimeError("JWT_SERVICE_IDENTITY internal auth mode requires issuer, audience, HS256 secret of at least 32 bytes, and service authorities.")
     if normalized_mode == "MTLS_READY" and _prod_like_profile(profile):
         raise RuntimeError("MTLS_READY internal auth mode is a fail-closed placeholder until mTLS is configured.")
 
