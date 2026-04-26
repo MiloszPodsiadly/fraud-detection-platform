@@ -64,6 +64,7 @@ public class GovernanceAdvisoryAnalyticsService {
     public GovernanceAdvisoryAnalyticsResponse analytics(int windowDays) {
         // Analytics is observational only.
         // It MUST NOT be used to trigger system actions.
+        Instant startedAt = Instant.now(clock);
         metrics.recordGovernanceAnalyticsRequest(windowDays);
         Instant to = Instant.now(clock);
         Instant from = to.minus(Duration.ofDays(windowDays));
@@ -71,7 +72,11 @@ public class GovernanceAdvisoryAnalyticsService {
         AuditRead auditRead = readAuditEvents(from, to);
         AdvisoryRead advisoryRead = readAdvisories(from, to);
         if (!auditRead.available() && !advisoryRead.available()) {
-            return GovernanceAdvisoryAnalyticsResponse.empty("UNAVAILABLE", from, to, windowDays);
+            return recordOutcome(
+                    GovernanceAdvisoryAnalyticsResponse.empty("UNAVAILABLE", from, to, windowDays)
+                            .withReason(degradationReason(auditRead, advisoryRead)),
+                    startedAt
+            );
         }
 
         Map<String, GovernanceAdvisoryEvent> advisoriesById = advisoryRead.events().stream()
@@ -98,14 +103,16 @@ public class GovernanceAdvisoryAnalyticsService {
         List<Double> timeToFirstReviewMinutes = timeToFirstReviewMinutes(advisoriesById, auditByAdvisory);
 
         String status = auditRead.available() && advisoryRead.available() ? "AVAILABLE" : "PARTIAL";
-        return new GovernanceAdvisoryAnalyticsResponse(
+        GovernanceAdvisoryAnalyticsResponse response = new GovernanceAdvisoryAnalyticsResponse(
                 status,
+                "PARTIAL".equals(status) ? degradationReason(auditRead, advisoryRead) : null,
                 new GovernanceAdvisoryAnalyticsResponse.Window(from, to, windowDays),
                 new GovernanceAdvisoryAnalyticsResponse.Totals(advisoryIds.size(), reviewed, open),
                 decisionDistribution,
                 lifecycleDistribution,
                 reviewTimeliness(timeToFirstReviewMinutes)
         );
+        return recordOutcome(response, startedAt);
     }
 
     private AuditRead readAuditEvents(Instant from, Instant to) {
@@ -116,11 +123,11 @@ public class GovernanceAdvisoryAnalyticsService {
                     PageRequest.of(0, maxAuditEvents + 1)
             );
             if (events.size() > maxAuditEvents) {
-                return new AuditRead(false, List.of());
+                return new AuditRead(false, "AUDIT_LIMIT_EXCEEDED", List.of());
             }
-            return new AuditRead(true, events);
+            return new AuditRead(true, null, events);
         } catch (DataAccessException exception) {
-            return new AuditRead(false, List.of());
+            return new AuditRead(false, "AUDIT_UNAVAILABLE", List.of());
         }
     }
 
@@ -134,9 +141,9 @@ public class GovernanceAdvisoryAnalyticsService {
                     : response.advisoryEvents().stream()
                     .filter(event -> isWithinWindow(event.createdAt(), from, to))
                     .toList();
-            return new AdvisoryRead(true, events);
+            return new AdvisoryRead(true, null, events);
         } catch (RuntimeException exception) {
-            return new AdvisoryRead(false, List.of());
+            return new AdvisoryRead(false, "ADVISORY_UNAVAILABLE", List.of());
         }
     }
 
@@ -229,9 +236,24 @@ public class GovernanceAdvisoryAnalyticsService {
         return sorted.get(Math.min(index, sorted.size() - 1));
     }
 
-    private record AuditRead(boolean available, List<GovernanceAuditEventDocument> events) {
+    private GovernanceAdvisoryAnalyticsResponse recordOutcome(GovernanceAdvisoryAnalyticsResponse response, Instant startedAt) {
+        metrics.recordGovernanceAnalyticsOutcome(response.status(), Duration.between(startedAt, Instant.now(clock)));
+        return response;
     }
 
-    private record AdvisoryRead(boolean available, List<GovernanceAdvisoryEvent> events) {
+    private String degradationReason(AuditRead auditRead, AdvisoryRead advisoryRead) {
+        if (!auditRead.available()) {
+            return auditRead.reason();
+        }
+        if (!advisoryRead.available()) {
+            return advisoryRead.reason();
+        }
+        return null;
+    }
+
+    private record AuditRead(boolean available, String reason, List<GovernanceAuditEventDocument> events) {
+    }
+
+    private record AdvisoryRead(boolean available, String reason, List<GovernanceAdvisoryEvent> events) {
     }
 }

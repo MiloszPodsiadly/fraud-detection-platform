@@ -93,6 +93,10 @@ Audit analytics are read-only and derived:
 - Analytics operate on bounded time windows, cap audit scans with `GOVERNANCE_AUDIT_ANALYTICS_MAX_AUDIT_EVENTS`, and do not guarantee global completeness.
 - Analytics do not persist aggregates, enforce SLA, trigger actions, or change scoring/model behavior.
 
+### API Stability
+
+`GET /governance/advisories/analytics` is considered stable. Breaking changes to existing fields, enums, or meanings require a version bump. The optional `reason` field may appear only for `PARTIAL` or `UNAVAILABLE` responses and is limited to `AUDIT_LIMIT_EXCEEDED`, `AUDIT_UNAVAILABLE`, or `ADVISORY_UNAVAILABLE`.
+
 Advisory list filters:
 
 - `severity`

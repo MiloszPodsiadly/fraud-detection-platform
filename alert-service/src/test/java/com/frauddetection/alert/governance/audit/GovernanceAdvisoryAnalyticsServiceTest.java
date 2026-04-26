@@ -7,6 +7,7 @@ import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.domain.Pageable;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Arrays;
@@ -48,12 +49,14 @@ class GovernanceAdvisoryAnalyticsServiceTest {
         GovernanceAdvisoryAnalyticsResponse response = service.analytics(7);
 
         assertThat(response.status()).isEqualTo("AVAILABLE");
+        assertThat(response.reason()).isNull();
         assertThat(response.totals()).isEqualTo(new GovernanceAdvisoryAnalyticsResponse.Totals(0, 0, 0));
         assertThat(response.decisionDistribution()).containsEntry(GovernanceAuditDecision.ACKNOWLEDGED, 0);
         assertThat(response.lifecycleDistribution()).containsEntry(GovernanceAdvisoryLifecycleStatus.OPEN, 0);
         assertThat(response.reviewTimeliness().status()).isEqualTo("LOW_CONFIDENCE");
         assertThat(response.reviewTimeliness().timeToFirstReviewP50Minutes()).isZero();
         verify(metrics).recordGovernanceAnalyticsRequest(7);
+        verify(metrics).recordGovernanceAnalyticsOutcome(eq("AVAILABLE"), any(Duration.class));
         verify(auditRepository, never()).save(any(GovernanceAuditEventDocument.class));
     }
 
@@ -116,6 +119,7 @@ class GovernanceAdvisoryAnalyticsServiceTest {
         GovernanceAdvisoryAnalyticsResponse response = service.analytics(7);
 
         assertThat(response.status()).isEqualTo("PARTIAL");
+        assertThat(response.reason()).isEqualTo("AUDIT_UNAVAILABLE");
         assertThat(response.totals()).isEqualTo(new GovernanceAdvisoryAnalyticsResponse.Totals(1, 0, 1));
     }
 
@@ -130,6 +134,7 @@ class GovernanceAdvisoryAnalyticsServiceTest {
         GovernanceAdvisoryAnalyticsResponse response = service.analytics(7);
 
         assertThat(response.status()).isEqualTo("PARTIAL");
+        assertThat(response.reason()).isEqualTo("ADVISORY_UNAVAILABLE");
         assertThat(response.totals()).isEqualTo(new GovernanceAdvisoryAnalyticsResponse.Totals(0, 0, 0));
         assertThat(response.lifecycleDistribution()).containsEntry(GovernanceAdvisoryLifecycleStatus.NEEDS_FOLLOW_UP, 0);
     }
@@ -159,6 +164,7 @@ class GovernanceAdvisoryAnalyticsServiceTest {
         GovernanceAdvisoryAnalyticsResponse response = service.analytics(7);
 
         assertThat(response.status()).isEqualTo("UNAVAILABLE");
+        assertThat(response.reason()).isEqualTo("AUDIT_UNAVAILABLE");
         assertThat(response.totals()).isEqualTo(new GovernanceAdvisoryAnalyticsResponse.Totals(0, 0, 0));
     }
 
@@ -239,6 +245,7 @@ class GovernanceAdvisoryAnalyticsServiceTest {
         GovernanceAdvisoryAnalyticsResponse response = limitedService.analytics(7);
 
         assertThat(response.status()).isEqualTo("PARTIAL");
+        assertThat(response.reason()).isEqualTo("AUDIT_LIMIT_EXCEEDED");
         assertThat(response.totals()).isEqualTo(new GovernanceAdvisoryAnalyticsResponse.Totals(1, 0, 1));
     }
 
@@ -254,6 +261,7 @@ class GovernanceAdvisoryAnalyticsServiceTest {
 
         assertThat(jsonPropertyNames(GovernanceAdvisoryAnalyticsResponse.class)).containsExactlyInAnyOrder(
                 "status",
+                "reason",
                 "window",
                 "totals",
                 "decision_distribution",
@@ -281,6 +289,54 @@ class GovernanceAdvisoryAnalyticsServiceTest {
                 .noneMatch(typeName -> typeName.contains("retrain"))
                 .noneMatch(typeName -> typeName.contains("scoring"))
                 .noneMatch(typeName -> typeName.contains("frauddecision"));
+    }
+
+    @Test
+    void shouldUseBoundedAuditPageAndRemainReadOnly() {
+        GovernanceAdvisoryAnalyticsService limitedService = new GovernanceAdvisoryAnalyticsService(
+                auditRepository,
+                advisoryClient,
+                lifecycleService,
+                metrics,
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                25
+        );
+        when(auditRepository.findByCreatedAtBetweenOrderByCreatedAtAsc(eq(FROM), eq(NOW), any(Pageable.class))).thenReturn(List.of());
+        when(advisoryClient.listAdvisories(new GovernanceAdvisoryQuery(null, null, 100)))
+                .thenReturn(new GovernanceAdvisoryListResponse("AVAILABLE", 0, 200, List.of()));
+
+        limitedService.analytics(7);
+
+        verify(auditRepository).findByCreatedAtBetweenOrderByCreatedAtAsc(
+                eq(FROM),
+                eq(NOW),
+                org.mockito.ArgumentMatchers.argThat(pageable -> pageable.getPageSize() == 26)
+        );
+        verify(auditRepository, never()).save(any(GovernanceAuditEventDocument.class));
+    }
+
+    @Test
+    void shouldStayWithinPerformanceEnvelopeForBoundedDataset() {
+        List<GovernanceAuditEventDocument> audits = java.util.stream.IntStream.range(0, 100)
+                .mapToObj(index -> audit("advisory-" + index, GovernanceAuditDecision.ACKNOWLEDGED, "2026-04-26T00:10:00Z"))
+                .toList();
+        List<GovernanceAdvisoryEvent> advisories = java.util.stream.IntStream.range(0, 100)
+                .mapToObj(index -> advisory("advisory-" + index, "2026-04-26T00:00:00Z"))
+                .toList();
+        when(auditRepository.findByCreatedAtBetweenOrderByCreatedAtAsc(eq(FROM), eq(NOW), any(Pageable.class))).thenReturn(audits);
+        when(advisoryClient.listAdvisories(new GovernanceAdvisoryQuery(null, null, 100)))
+                .thenReturn(new GovernanceAdvisoryListResponse("AVAILABLE", 100, 200, advisories));
+        for (GovernanceAdvisoryEvent advisory : advisories) {
+            when(lifecycleService.lifecycleStatus(advisory.eventId())).thenReturn(GovernanceAdvisoryLifecycleStatus.ACKNOWLEDGED);
+        }
+
+        long started = System.nanoTime();
+        GovernanceAdvisoryAnalyticsResponse response = service.analytics(7);
+        long elapsedMillis = Duration.ofNanos(System.nanoTime() - started).toMillis();
+
+        assertThat(response.status()).isEqualTo("AVAILABLE");
+        assertThat(response.totals().advisories()).isEqualTo(100);
+        assertThat(elapsedMillis).isLessThan(200);
     }
 
     private GovernanceAuditEventDocument audit(String advisoryEventId, GovernanceAuditDecision decision, String createdAt) {

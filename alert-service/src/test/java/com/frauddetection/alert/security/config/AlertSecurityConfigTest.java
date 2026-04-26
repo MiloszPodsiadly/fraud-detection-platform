@@ -189,6 +189,7 @@ class AlertSecurityConfigTest {
         when(governanceAdvisoryProjectionService.analytics(7))
                 .thenReturn(new GovernanceAdvisoryAnalyticsResponse(
                         "AVAILABLE",
+                        null,
                         new GovernanceAdvisoryAnalyticsResponse.Window(
                                 Instant.parse("2026-04-19T00:00:00Z"),
                                 Instant.parse("2026-04-26T00:00:00Z"),
