@@ -20,6 +20,8 @@ FDP-17 does not change scoring behavior, ML model behavior, Kafka contracts, gov
 
 Unknown modes fail startup instead of downgrading.
 
+JWT validation is implemented with PyJWT in `ml-inference-service`. Java service JWT generation uses Nimbus JOSE + JWT. Custom JWT parsing/signing is intentionally avoided.
+
 ## JWT Contract
 
 Server-side ML configuration:
@@ -51,6 +53,8 @@ JWT claims:
 - `exp`
 - `service_name`
 - `authorities`
+
+The local HMAC secret must be at least 32 bytes for HS256 signing. Production deployments should provide environment-managed secret material or a future controlled JWKS path; FDP-17 does not add external IdP or JWKS discovery.
 
 Business clients do not construct JWTs directly. Java clients call `InternalServiceAuthHeaders`, which delegates JWT creation to the internal credential provider.
 
