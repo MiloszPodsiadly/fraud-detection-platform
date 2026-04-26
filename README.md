@@ -479,7 +479,7 @@ These credentials are local-only and must not be reused outside local test envir
 
 - no silent refresh
 - no token refresh flow
-- service-to-service auth uses the internal shared-secret service-auth foundation for configured ML/governance calls; local Docker may use explicit `DISABLED_LOCAL_ONLY`, the token-validator Docker override exercises `TOKEN_VALIDATOR`, and this is not full enterprise mTLS
+- service-to-service auth uses the internal service-auth foundation for configured ML/governance calls; local Docker may use explicit `DISABLED_LOCAL_ONLY`, the token-validator Docker override exercises compatibility `TOKEN_VALIDATOR`, and `deployment/docker-compose.service-identity-jwt.yml` exercises `JWT_SERVICE_IDENTITY`; this is not full enterprise mTLS
 - no production IdP config
 - tokens are managed by `oidc-client-ts` for local/dev use, not as hardened production storage
 
@@ -513,6 +513,17 @@ curl -s http://localhost:8090/metrics | grep fraud_internal_auth
 ```
 
 Expected results: the anonymous ML governance call returns `401`, the configured alert-service identity succeeds, and internal auth success/failure metrics are visible. Scoring through `fraud-scoring-service` uses the same shared token through its internal client boundary. This validates the internal shared-secret service-auth foundation; it is not full enterprise mTLS.
+
+To verify the JWT service identity path:
+
+```bash
+docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml -f deployment/docker-compose.service-identity-jwt.yml up --build -d
+curl -i http://localhost:8090/governance/advisories
+curl -i -H "Authorization: Bearer invalid-token" http://localhost:8090/governance/advisories
+curl -s http://localhost:8090/metrics | grep fraud_internal_auth
+```
+
+Expected results: anonymous direct ML calls return `401`, invalid bearer calls return `403`, configured Java clients attach signed JWT service identity through `InternalServiceAuthHeaders`, and internal auth metrics remain low-cardinality. See `docs/service-identity-fdp17.md` for the full contract. This is a JWT service-auth foundation, not enterprise mTLS or enterprise IAM.
 
 If you suspect stale local images or containers, rebuild cleanly:
 
@@ -603,7 +614,7 @@ Full details: [Security Foundation v1](docs/security-foundation-v1.md).
 
 Current non-production gaps:
 
-- Internal shared-secret service-auth foundation is implemented for configured ML/governance calls through token validation and an explicit local/dev bypass mode; it is not full enterprise mTLS.
+- Internal service-auth foundation is implemented for configured ML/governance calls through JWT service identity, compatibility token validation, and an explicit local/dev bypass mode; it is not full enterprise mTLS or enterprise IAM.
 - The frontend still uses demo auth by default in development.
 - The frontend OIDC path is a local OIDC integration and foundation for production auth, but it does not yet implement silent refresh or production deployment hardening.
 - Request DTOs still accept `analystId` for compatibility, although secured write paths use the principal as actor source of truth.
@@ -1018,7 +1029,7 @@ Implemented:
 
 Known production gaps:
 
-- Service-to-service authentication is an internal shared-secret service-auth foundation only, with a token-validator path and prod-like fail-closed guards; it is not bank-grade service identity.
+- Service-to-service authentication is an internal service-auth foundation with JWT service identity, a compatibility token-validator path, and prod-like fail-closed guards; it is not enterprise mTLS, enterprise IAM, or bank-grade certification.
 - mTLS is not implemented yet; current internal service authentication has an mTLS-ready boundary with `MTLS_READY` kept fail-closed rather than pretending mTLS exists.
 - Durable audit storage is not WORM/immutable archive storage, not a final compliance archive, and has no SIEM export integration.
 - DLT inspection/replay tooling is not implemented yet.

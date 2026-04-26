@@ -15,7 +15,7 @@ FDP-11 freezes the public HTTP API surface for local services without changing s
 
 Base URL in Docker: `http://ml-inference-service:8090`
 
-Internal ML scoring and governance endpoints require configured service identity in non-localdev runtime. Docker localdev may allow anonymous internal calls only when `INTERNAL_AUTH_MODE=DISABLED_LOCAL_ONLY` (`LOCALDEV` remains a compatibility alias); production/default mode is fail-closed and requires the internal service headers documented in the ML OpenAPI reference. This is an internal shared-secret service-auth foundation with optional token-hash allowlist mode and an mTLS-ready configuration boundary; it is not full enterprise mTLS.
+Internal ML scoring and governance endpoints require configured service identity in non-localdev runtime. Docker localdev may allow anonymous internal calls only when `INTERNAL_AUTH_MODE=DISABLED_LOCAL_ONLY` (`LOCALDEV` remains a compatibility alias). `TOKEN_VALIDATOR` remains a compatibility shared-token mode, and `JWT_SERVICE_IDENTITY` validates signed service JWTs with issuer, audience, expiration, service identity, allowlist, and authority checks. This is an internal service-auth foundation with an `MTLS_READY` fail-closed boundary; it is not full enterprise mTLS.
 
 | Method | Path | Contract |
 | --- | --- | --- |

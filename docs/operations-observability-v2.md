@@ -191,6 +191,7 @@ Prometheus metric contract:
   - Type: counter
   - Meaning: rejected internal service authentication attempts
   - Labels: `target_service`, `reason`
+  - Bounded reasons include missing credentials, expired JWT, invalid JWT, invalid issuer, invalid audience, unknown service, missing authority, invalid shared-token credentials, and mTLS-not-configured.
 - `fraud_read_access_audit_actor_missing_total`
   - Type: counter
   - Meaning: sensitive read-access audit was persisted with `actor_id=unknown` because the backend principal was unavailable
