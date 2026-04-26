@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from threading import Lock
 from typing import Any
 
@@ -14,8 +14,11 @@ ADVISORY_EVENT_TYPE = "GOVERNANCE_DRIFT_ADVISORY"
 DEFAULT_ADVISORY_COLLECTION = "ml_governance_advisory_events"
 DEFAULT_ADVISORY_RETENTION_LIMIT = 200
 MAX_ADVISORY_LIMIT = 100
+ADVISORY_DEDUP_WINDOW = timedelta(minutes=5)
 EMITTING_SEVERITIES = {"HIGH", "CRITICAL"}
 NON_EMITTING_SEVERITIES = {"NONE", "INFO", "LOW"}
+ADVISORY_SEVERITIES = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
+ADVISORY_CONFIDENCE_CONTEXTS = {"LOW_SAMPLE", "PARTIAL_DATA", "STABLE_BASELINE", "SUFFICIENT_DATA"}
 
 
 class AdvisoryEventRepository:
@@ -147,10 +150,15 @@ class AdvisoryEventService:
             actions: dict[str, Any],
             model: dict[str, Any],
             lifecycle_context: dict[str, Any],
+            drift_context: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any] | None, str]:
         if not should_emit_advisory(actions):
             return None, "skipped"
-        event = build_advisory_event(actions, model, lifecycle_context)
+        fingerprint = advisory_fingerprint(actions, model)
+        now = datetime.now(timezone.utc)
+        if self._recent_duplicate(fingerprint, now):
+            return None, "deduplicated"
+        event = build_advisory_event(actions, model, lifecycle_context, drift_context, created_at=now)
         self._append_memory(event)
         try:
             self.repository.persist(event)
@@ -158,14 +166,21 @@ class AdvisoryEventService:
         except Exception:
             return event, "memory"
 
-    def history_response(self, limit: int | None = None) -> dict[str, Any]:
+    def history_response(
+            self,
+            limit: int | None = None,
+            severity: str | None = None,
+            model_version: str | None = None,
+    ) -> dict[str, Any]:
         bounded_limit = self._bounded_limit(limit)
+        query_limit = max(min(self.config.retention_limit, MAX_ADVISORY_LIMIT), bounded_limit)
         try:
-            events = self.repository.history(bounded_limit)
+            events = self.repository.history(query_limit)
             status = "AVAILABLE"
         except Exception:
-            events = self.memory_history(bounded_limit)
+            events = self.memory_history(query_limit)
             status = "PARTIAL" if events else "UNAVAILABLE"
+        events = self._apply_filters(events, severity, model_version)[:bounded_limit]
         return {
             "status": status,
             "count": len(events),
@@ -183,6 +198,34 @@ class AdvisoryEventService:
             self._events.append(dict(event))
             if len(self._events) > self.config.retention_limit:
                 self._events = self._events[-self.config.retention_limit:]
+
+    def _recent_duplicate(self, fingerprint: tuple[str, str, str, str], now: datetime) -> bool:
+        return self._recent_memory_duplicate(fingerprint, now) or self._recent_repository_duplicate(fingerprint, now)
+
+    def _recent_memory_duplicate(self, fingerprint: tuple[str, str, str, str], now: datetime) -> bool:
+        with self._lock:
+            events = list(self._events)
+        return any(_matches_recent(event, fingerprint, now) for event in events)
+
+    def _recent_repository_duplicate(self, fingerprint: tuple[str, str, str, str], now: datetime) -> bool:
+        try:
+            events = self.repository.history(MAX_ADVISORY_LIMIT)
+        except Exception:
+            return False
+        return any(_matches_recent(event, fingerprint, now) for event in events)
+
+    def _apply_filters(
+            self,
+            events: list[dict[str, Any]],
+            severity: str | None,
+            model_version: str | None,
+    ) -> list[dict[str, Any]]:
+        filtered = list(events)
+        if severity in ADVISORY_SEVERITIES:
+            filtered = [event for event in filtered if event.get("severity") == severity]
+        if _valid_model_version_filter(model_version):
+            filtered = [event for event in filtered if event.get("model_version") == model_version]
+        return filtered
 
     def _bounded_limit(self, limit: int | None) -> int:
         requested = self.config.retention_limit if limit is None else limit
@@ -204,23 +247,52 @@ def build_advisory_event(
         actions: dict[str, Any],
         model: dict[str, Any],
         lifecycle_context: dict[str, Any],
+        drift_context: dict[str, Any] | None = None,
+        created_at: datetime | None = None,
 ) -> dict[str, Any]:
     severity = str(actions.get("severity", "INFO"))
-    if severity not in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}:
+    if severity not in ADVISORY_SEVERITIES:
         severity = "LOW"
+    now = created_at or datetime.now(timezone.utc)
     return {
         "event_id": str(uuid.uuid4()),
         "event_type": ADVISORY_EVENT_TYPE,
         "severity": severity,
         "drift_status": str(actions.get("drift_status", "UNKNOWN")),
         "confidence": str(actions.get("confidence", "LOW")),
+        "advisory_confidence_context": advisory_confidence_context(actions, drift_context or {}),
         "model_name": model.get("model_name"),
         "model_version": model.get("model_version"),
         "lifecycle_context": _bounded_lifecycle_context(lifecycle_context),
         "recommended_actions": _recommended_actions(actions.get("recommended_actions")),
         "explanation": _bounded_explanation(actions.get("explanation")),
-        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "created_at": now.isoformat(timespec="seconds"),
     }
+
+
+def advisory_fingerprint(actions: dict[str, Any], model: dict[str, Any]) -> tuple[str, str, str, str]:
+    return (
+        str(model.get("model_name")),
+        str(model.get("model_version")),
+        str(actions.get("severity", "INFO")),
+        str(actions.get("drift_status", "UNKNOWN")),
+    )
+
+
+def advisory_confidence_context(actions: dict[str, Any], drift_context: dict[str, Any]) -> str:
+    observations = _int_or_none(drift_context.get("observation_count", drift_context.get("sample_size")))
+    min_observations = _int_or_none(drift_context.get("min_observations"))
+    if observations is not None and min_observations is not None and observations < min_observations:
+        return "LOW_SAMPLE"
+    if (
+            drift_context.get("reason") == "reference_profile_unavailable"
+            or drift_context.get("inference_profile_status") in {"RESET_RECENTLY", "FRESH"}
+            or drift_context.get("signals") == []
+    ):
+        return "PARTIAL_DATA"
+    if str(actions.get("confidence")) == "HIGH":
+        return "SUFFICIENT_DATA"
+    return "STABLE_BASELINE"
 
 
 def create_advisory_repository(config: AdvisoryPersistenceConfig) -> AdvisoryEventRepository:
@@ -255,3 +327,39 @@ def _bounded_explanation(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
     return value[:240]
+
+
+def _matches_recent(event: dict[str, Any], fingerprint: tuple[str, str, str, str], now: datetime) -> bool:
+    event_fingerprint = (
+        str(event.get("model_name")),
+        str(event.get("model_version")),
+        str(event.get("severity")),
+        str(event.get("drift_status")),
+    )
+    if event_fingerprint != fingerprint:
+        return False
+    created_at = _parse_time(event.get("created_at"))
+    return now - created_at <= ADVISORY_DEDUP_WINDOW
+
+
+def _parse_time(value: Any) -> datetime:
+    if not isinstance(value, str):
+        return datetime.fromtimestamp(0, timezone.utc)
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return datetime.fromtimestamp(0, timezone.utc)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _valid_model_version_filter(value: str | None) -> bool:
+    if not isinstance(value, str) or not value or len(value) > 80:
+        return False
+    return all(character.isalnum() or character in {".", "_", "-"} for character in value)

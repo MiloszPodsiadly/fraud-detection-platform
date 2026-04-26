@@ -12,6 +12,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, ge
 from app.governance.advisory import (
     AdvisoryEventService,
     AdvisoryPersistenceConfig,
+    ADVISORY_SEVERITIES,
     MAX_ADVISORY_LIMIT,
     create_advisory_repository,
 )
@@ -329,7 +330,7 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             history = self._snapshot_history_for_actions()
             actions = recommend_drift_actions(MODEL_GOVERNANCE, drift, history)
             actions = with_model_lifecycle_context(actions, LIFECYCLE_SERVICE.lifecycle_context(MODEL_LIFECYCLE))
-            self._maybe_emit_advisory_event(actions)
+            self._maybe_emit_advisory_event(actions, drift)
             self._record_governance_drift(drift)
             self._record_drift_action(actions)
             self._send_json(200, actions)
@@ -338,7 +339,8 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
         if path == "/governance/advisories":
             started_at = time.perf_counter()
             limit = self._advisory_limit(parsed_url.query)
-            response = ADVISORY_SERVICE.history_response(limit)
+            filters = self._advisory_filters(parsed_url.query)
+            response = ADVISORY_SERVICE.history_response(limit, **filters)
             self._send_json(200, response)
             self._record_request(path, "GET", 200, "success", started_at)
             return
@@ -551,6 +553,21 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             return MAX_ADVISORY_LIMIT
         return max(min(requested, MAX_ADVISORY_LIMIT), 1)
 
+    def _advisory_filters(self, query: str) -> dict[str, str | None]:
+        values = parse_qs(query)
+        severity = values.get("severity", [None])[0]
+        if severity not in ADVISORY_SEVERITIES:
+            severity = None
+        model_version = values.get("model_version", [None])[0]
+        if not self._valid_advisory_model_version_filter(model_version):
+            model_version = None
+        return {"severity": severity, "model_version": model_version}
+
+    def _valid_advisory_model_version_filter(self, value: str | None) -> bool:
+        if not isinstance(value, str) or not value or len(value) > 80:
+            return False
+        return all(character.isalnum() or character in {".", "_", "-"} for character in value)
+
     def _update_inference_profile(self, response: dict[str, Any]) -> None:
         try:
             score_details = response.get("scoreDetails")
@@ -634,11 +651,11 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             GOVERNANCE_DRIFT_ACTION_RECOMMENDATION.labels(MODEL_NAME, MODEL_VERSION, candidate_severity).set(0)
         GOVERNANCE_DRIFT_ACTION_RECOMMENDATION.labels(MODEL_NAME, MODEL_VERSION, severity).set(1)
 
-    def _maybe_emit_advisory_event(self, actions: dict[str, Any]) -> None:
+    def _maybe_emit_advisory_event(self, actions: dict[str, Any], drift: dict[str, Any]) -> None:
         lifecycle_context = actions.get("model_lifecycle")
         if not isinstance(lifecycle_context, dict):
             lifecycle_context = {}
-        event, status = ADVISORY_SERVICE.emit_if_needed(actions, MODEL_GOVERNANCE, lifecycle_context)
+        event, status = ADVISORY_SERVICE.emit_if_needed(actions, MODEL_GOVERNANCE, lifecycle_context, drift)
         if event is None:
             return
         severity = str(event.get("severity", "LOW"))
