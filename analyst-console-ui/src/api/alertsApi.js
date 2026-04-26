@@ -3,7 +3,6 @@ import { authHeadersForSession } from "../auth/authHeaders.js";
 import { getConfiguredAuthProvider } from "../auth/authProvider.js";
 
 const API_BASE_URL = import.meta.env.VITE_ALERT_API_BASE_URL ?? "";
-const ML_API_BASE_URL = import.meta.env.VITE_ML_API_BASE_URL ?? "";
 let activeSession = null;
 let activeAuthProvider = getConfiguredAuthProvider();
 
@@ -79,7 +78,7 @@ export function listScoredTransactions({ page = 0, size = 25 } = {}) {
   return request(`/api/v1/transactions/scored?${params.toString()}`);
 }
 
-export function listGovernanceAdvisories({ severity = "ALL", modelVersion = "", limit = 25 } = {}) {
+export function listGovernanceAdvisories({ severity = "ALL", modelVersion = "", lifecycleStatus = "ALL", limit = 25 } = {}) {
   const params = new URLSearchParams({
     limit: String(limit)
   });
@@ -89,10 +88,10 @@ export function listGovernanceAdvisories({ severity = "ALL", modelVersion = "", 
   if (modelVersion && modelVersion.trim()) {
     params.set("model_version", modelVersion.trim());
   }
-  return request(`/governance/advisories?${params.toString()}`, {
-    baseUrl: ML_API_BASE_URL,
-    includeAuth: false
-  });
+  if (lifecycleStatus && lifecycleStatus !== "ALL") {
+    params.set("lifecycle_status", lifecycleStatus);
+  }
+  return request(`/governance/advisories?${params.toString()}`);
 }
 
 export function getGovernanceAdvisoryAudit(eventId) {

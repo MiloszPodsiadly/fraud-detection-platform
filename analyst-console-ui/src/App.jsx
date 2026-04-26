@@ -60,6 +60,7 @@ export default function App() {
   const [advisoryQueueRequest, setAdvisoryQueueRequest] = useState({
     severity: "ALL",
     modelVersion: "",
+    lifecycleStatus: "ALL",
     limit: 25
   });
   const [selectedAlertId, setSelectedAlertId] = useState(getInitialAlertId);
@@ -263,6 +264,13 @@ export default function App() {
     setGovernanceAuditHistories((current) => ({
       ...current,
       [eventId]: nextHistory
+    }));
+    const latestDecision = nextHistory.audit_events?.[0]?.decision || "OPEN";
+    setAdvisoryQueue((current) => ({
+      ...current,
+      advisory_events: current.advisory_events
+        .map((event) => (event.event_id === eventId ? { ...event, lifecycle_status: latestDecision } : event))
+        .filter((event) => advisoryQueueRequest.lifecycleStatus === "ALL" || event.lifecycle_status === advisoryQueueRequest.lifecycleStatus)
     }));
   }
 
