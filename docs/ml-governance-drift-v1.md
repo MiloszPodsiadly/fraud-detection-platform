@@ -418,7 +418,67 @@ The response is newest-first, bounded to a maximum of 100 events, and returns `s
 
 Advisory events contain aggregate governance context only. They exclude user IDs, transaction IDs, correlation IDs, raw feature values, request payloads, artifact contents, credentials, raw exception text, and unbounded arrays. Lifecycle context remains bounded and must not be interpreted as causality; drift may be observed after lifecycle activity, but this runtime does not claim lifecycle activity caused drift.
 
-FDP-12 adds a read-only analyst console operator queue for this endpoint. The queue displays advisory events and exact-match filters only. It does not acknowledge advisories, create audit records, integrate with `alert-service`, create fraud alerts, submit analyst decisions, change scoring, trigger retraining, or trigger rollback.
+FDP-12 adds an analyst console operator queue for this endpoint. FDP-13 adds a minimal human-review audit trail for advisory events through the authenticated `alert-service` boundary. The queue still does not create fraud alerts, submit fraud decisions, change scoring, trigger retraining, or trigger rollback.
+
+## Governance Advisory Audit Trail
+
+FDP-13 records append-only operator review entries for governance advisory events. This audit trail records human review only. It does not mutate the advisory event, does not create a fraud alert, does not make a business decision, does not change scoring, does not switch models, and does not trigger retraining or rollback.
+
+Write boundary:
+
+```text
+POST /governance/advisories/{event_id}/audit
+GET /governance/advisories/{event_id}/audit
+```
+
+These endpoints are owned by `alert-service`, not `ml-inference-service`, because audit writes require an authenticated operator actor. The ML service remains provider-neutral and unauthenticated in local runtime. The frontend sends only `decision` and optional `note`; `actor_id`, roles, and display name are derived from the backend-authenticated principal/session.
+
+Allowed decisions:
+
+- `ACKNOWLEDGED`
+- `NEEDS_FOLLOW_UP`
+- `DISMISSED_AS_NOISE`
+
+Audit event schema:
+
+```json
+{
+  "audit_id": "uuid",
+  "advisory_event_id": "uuid",
+  "decision": "ACKNOWLEDGED",
+  "note": "Reviewed by operator",
+  "actor_id": "analyst-1",
+  "actor_display_name": "analyst-1",
+  "actor_roles": ["ANALYST"],
+  "created_at": "2026-04-26T10:00:00Z",
+  "model_name": "python-logistic-fraud-model",
+  "model_version": "2026-04-21.trained.v1",
+  "advisory_severity": "HIGH",
+  "advisory_confidence": "HIGH",
+  "advisory_confidence_context": "SUFFICIENT_DATA"
+}
+```
+
+Validation and privacy:
+
+- `note` is optional and capped at 500 characters.
+- frontend-provided actor fields are rejected.
+- raw advisory payloads, transaction identifiers, customer identifiers, model artifacts, secrets, and raw feature values are not persisted.
+- audit writes fail clearly if persistence or advisory lookup is unavailable; they are not silently dropped.
+- audit history returns newest-first bounded results and may return `status=UNAVAILABLE` when storage is unavailable.
+
+Persistence:
+
+```text
+collection: ml_governance_audit_events
+default retention: 500 events per advisory_event_id
+```
+
+Indexes:
+
+- `advisory_event_id`, `created_at` descending
+- `actor_id`, `created_at` descending
+- `model_name`, `model_version`, `created_at` descending
 
 ## Endpoint Contracts
 
@@ -432,6 +492,8 @@ GET /governance/drift
 GET /governance/drift/actions
 GET /governance/advisories
 GET /governance/history
+POST /governance/advisories/{event_id}/audit
+GET /governance/advisories/{event_id}/audit
 ```
 
 These endpoints are additive. Existing endpoints remain compatible:
@@ -444,7 +506,7 @@ GET /metrics
 
 The current ML API surface and backward-compatibility rules are tracked in `docs/api-surface-v1.md`; the OpenAPI reference is `docs/openapi/ml-inference-service.openapi.yaml`. Governance and scoring success responses keep their existing top-level fields. Error responses use the platform `timestamp/status/error/message/details` envelope.
 
-No auth is added in FDP-7 because `ml-inference-service` does not currently own an auth boundary. In production, expose these endpoints only through the same network controls used for operational metrics.
+No auth is added to the ML governance read endpoints because `ml-inference-service` does not currently own an auth boundary. Governance audit writes are different: they are handled by `alert-service` so the authenticated analyst principal remains the source of actor attribution. In production, expose ML read endpoints only through the same network controls used for operational metrics.
 
 History response:
 
@@ -557,6 +619,14 @@ For advisory events:
 4. Check `advisory_confidence_context`; low-sample and partial-data advisories can be misleading.
 5. Do not infer that lifecycle activity caused drift.
 6. Confirm scoring behavior remains unchanged.
+7. If human review is needed, record an audit entry from the analyst console; the entry is review history only.
+
+For advisory audit persistence `UNAVAILABLE`:
+
+1. Confirm MongoDB availability for `alert-service`.
+2. Check whether `GET /governance/advisories/{event_id}/audit` returns `status=UNAVAILABLE`.
+3. Retry the audit write only after persistence is available; write intent is never silently dropped.
+4. Confirm scoring and ML drift endpoints remain unchanged.
 
 ## Limitations
 
@@ -571,7 +641,7 @@ For advisory events:
 - Drift actions are advisory and do not create tickets, notify PagerDuty, mutate scoring, or trigger workflows.
 - No model quality monitoring is claimed; FDP-7 monitors input and output distribution shift only.
 - FDP-9 adds lifecycle visibility only; it does not implement lifecycle control or model quality validation.
-- FDP-12 frontend surfacing is read-only review context only; it does not implement fraud alerts, model automation, acknowledgement, audit trail, alert-service integration, retraining triggers, or rollback triggers.
+- FDP-13 audit trail records human review only; it does not implement advisory status transitions, update/delete operations, fraud alerts, model automation, retraining triggers, or rollback triggers.
 - Drift thresholds are starting guardrails and need calibration against real baselines.
 
 ## Out Of Scope

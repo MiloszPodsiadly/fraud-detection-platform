@@ -10,6 +10,7 @@ public final class AnalystAuthority {
     public static final String FRAUD_CASE_READ = "fraud-case:read";
     public static final String FRAUD_CASE_UPDATE = "fraud-case:update";
     public static final String TRANSACTION_MONITOR_READ = "transaction-monitor:read";
+    public static final String GOVERNANCE_ADVISORY_AUDIT_WRITE = "governance-advisory:audit:write";
 
     public static final Set<String> ALL = Set.of(
             ALERT_READ,
@@ -17,7 +18,8 @@ public final class AnalystAuthority {
             ALERT_DECISION_SUBMIT,
             FRAUD_CASE_READ,
             FRAUD_CASE_UPDATE,
-            TRANSACTION_MONITOR_READ
+            TRANSACTION_MONITOR_READ,
+            GOVERNANCE_ADVISORY_AUDIT_WRITE
     );
 
     private AnalystAuthority() {

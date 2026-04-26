@@ -95,6 +95,17 @@ export function listGovernanceAdvisories({ severity = "ALL", modelVersion = "", 
   });
 }
 
+export function getGovernanceAdvisoryAudit(eventId) {
+  return request(`/governance/advisories/${encodeURIComponent(eventId)}/audit`);
+}
+
+export function recordGovernanceAdvisoryAudit(eventId, audit) {
+  return request(`/governance/advisories/${encodeURIComponent(eventId)}/audit`, {
+    method: "POST",
+    body: JSON.stringify(audit)
+  });
+}
+
 export function getAlert(alertId) {
   return request(`/api/v1/alerts/${encodeURIComponent(alertId)}`);
 }

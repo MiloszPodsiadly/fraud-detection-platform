@@ -32,6 +32,7 @@ public class AlertSecurityConfig {
      *
      * Protected:
      * - analyst workflow endpoints under /api/v1/**
+     * - governance advisory audit endpoints, which record authenticated operator review only
      *
      * Fallback:
      * - unknown /api/v1/** routes are denied explicitly
@@ -75,6 +76,8 @@ public class AlertSecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/fraud-cases/{caseId}").hasAuthority(AnalystAuthority.FRAUD_CASE_READ)
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/fraud-cases/{caseId}").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
                         .requestMatchers(HttpMethod.GET, "/api/v1/transactions/scored").hasAuthority(AnalystAuthority.TRANSACTION_MONITOR_READ)
+                        .requestMatchers(HttpMethod.GET, "/governance/advisories/{eventId}/audit").hasAuthority(AnalystAuthority.TRANSACTION_MONITOR_READ)
+                        .requestMatchers(HttpMethod.POST, "/governance/advisories/{eventId}/audit").hasAuthority(AnalystAuthority.GOVERNANCE_ADVISORY_AUDIT_WRITE)
 
                         // Guardrail for future analyst endpoints added under /api/v1/** without explicit rules.
                         .requestMatchers("/api/v1/**").denyAll()

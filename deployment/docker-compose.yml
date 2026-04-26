@@ -276,6 +276,7 @@ services:
       APP_SECURITY_DEMO_AUTH_ENABLED: "true"
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       MONGODB_URI: mongodb://mongodb:27017/fraud_alerts
+      ML_GOVERNANCE_BASE_URL: http://ml-inference-service:8090
       ASSISTANT_MODE: OLLAMA
       OLLAMA_BASE_URL: http://ollama:11434
       OLLAMA_MODEL: llama3.2:3b

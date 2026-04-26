@@ -1,5 +1,12 @@
 package com.frauddetection.alert.exception;
 
+import com.frauddetection.alert.governance.audit.GovernanceAdvisoryLookupUnavailableException;
+import com.frauddetection.alert.governance.audit.GovernanceAdvisoryNotFoundException;
+import com.frauddetection.alert.governance.audit.GovernanceAuditActorUnavailableException;
+import com.frauddetection.alert.governance.audit.GovernanceAuditDecision;
+import com.frauddetection.alert.governance.audit.GovernanceAuditPersistenceUnavailableException;
+import com.frauddetection.alert.governance.audit.InvalidGovernanceAuditRequestException;
+import com.frauddetection.alert.governance.audit.InvalidGovernanceAuditDecisionException;
 import jakarta.validation.ConstraintViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -19,6 +26,62 @@ public class AlertServiceExceptionHandler {
     public ResponseEntity<ApiErrorResponse> handleNotFound(AlertNotFoundException exception) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(
                 new ApiErrorResponse(Instant.now(), 404, "Not Found", exception.getMessage(), List.of())
+        );
+    }
+
+    @ExceptionHandler(GovernanceAdvisoryNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleGovernanceAdvisoryNotFound(GovernanceAdvisoryNotFoundException exception) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(
+                new ApiErrorResponse(Instant.now(), 404, "Not Found", exception.getMessage(), List.of())
+        );
+    }
+
+    @ExceptionHandler(InvalidGovernanceAuditDecisionException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidGovernanceAuditDecision(InvalidGovernanceAuditDecisionException exception) {
+        return ResponseEntity.badRequest().body(
+                new ApiErrorResponse(
+                        Instant.now(),
+                        400,
+                        "Bad Request",
+                        "Invalid governance audit decision.",
+                        List.of("allowed: " + String.join(",", GovernanceAuditDecision.allowedValues()))
+                )
+        );
+    }
+
+    @ExceptionHandler(InvalidGovernanceAuditRequestException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidGovernanceAuditRequest(InvalidGovernanceAuditRequestException exception) {
+        return ResponseEntity.badRequest().body(
+                new ApiErrorResponse(
+                        Instant.now(),
+                        400,
+                        "Bad Request",
+                        "Invalid governance audit request.",
+                        exception.details()
+                )
+        );
+    }
+
+    @ExceptionHandler({
+            GovernanceAuditPersistenceUnavailableException.class,
+            GovernanceAdvisoryLookupUnavailableException.class
+    })
+    public ResponseEntity<ApiErrorResponse> handleGovernanceAuditUnavailable(RuntimeException exception) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(
+                new ApiErrorResponse(
+                        Instant.now(),
+                        503,
+                        "Service Unavailable",
+                        "Governance audit persistence or advisory lookup is unavailable.",
+                        List.of()
+                )
+        );
+    }
+
+    @ExceptionHandler(GovernanceAuditActorUnavailableException.class)
+    public ResponseEntity<ApiErrorResponse> handleGovernanceAuditActorUnavailable(GovernanceAuditActorUnavailableException exception) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(
+                new ApiErrorResponse(Instant.now(), 401, "Unauthorized", "Authentication is required.", List.of("reason:missing_credentials"))
         );
     }
 

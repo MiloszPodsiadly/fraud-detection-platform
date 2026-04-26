@@ -21,10 +21,13 @@ export function AlertsListPage({
   isGovernanceLoading,
   error,
   governanceError,
+  governanceAuditHistories,
+  session,
   sessionState,
   onRetry,
   onGovernanceRetry,
   onAdvisoryQueueRequestChange,
+  onRecordGovernanceAudit,
   onTransactionPageChange,
   onTransactionPageSizeChange,
   onAlertPageChange,
@@ -118,8 +121,11 @@ export function AlertsListPage({
         filters={advisoryQueueRequest}
         isLoading={isGovernanceLoading}
         error={governanceError}
+        auditHistories={governanceAuditHistories}
+        session={session}
         onFiltersChange={onAdvisoryQueueRequestChange}
         onRetry={onGovernanceRetry}
+        onRecordAudit={onRecordGovernanceAudit}
       />
 
       <section className="panel">

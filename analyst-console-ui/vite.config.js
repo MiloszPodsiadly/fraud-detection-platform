@@ -10,6 +10,10 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      "/governance/advisories/": {
+        target: "http://localhost:8085",
+        changeOrigin: true
+      },
       "/api": {
         target: "http://localhost:8085",
         changeOrigin: true

@@ -11,6 +11,7 @@ Security Foundation v1 is implemented for the analyst workflow owned by `alert-s
 Backend:
 
 - Spring Security protects analyst APIs under `/api/v1/**`.
+- Spring Security also protects governance advisory audit endpoints owned by `alert-service`.
 - Health and info actuator endpoints remain public for local orchestration.
 - Local/demo auth is disabled by default and can only be enabled in `local`, `dev`, `docker-local`, or `test` profiles.
 - JWT Resource Server can be enabled explicitly through `app.security.jwt.enabled`.
@@ -18,6 +19,7 @@ Backend:
 - Authorization checks authorities, not role names.
 - Write actions use authenticated principal identity as the actor source of truth.
 - Audit logging v1 records analyst write actions through structured logs.
+- Governance advisory audit writes are append-only, authenticated human-review records.
 - Demo auth is ignored when JWT auth is active.
 
 Frontend:
@@ -42,6 +44,7 @@ In scope:
 - 401/403 JSON error contract
 - principal-based actor identity for write paths
 - audit logging for write actions
+- governance advisory human-review audit writes
 - frontend session awareness and action gating
 - migration notes for JWT/OIDC
 
@@ -89,6 +92,8 @@ Backend implementation lives under `alert-service`:
 - `com.frauddetection.alert.security.config.DemoAuthSecurityConfig`
 - `com.frauddetection.alert.security.config.JwtResourceServerSecurityConfig`
 - `com.frauddetection.alert.audit.AuditService`
+- `com.frauddetection.alert.governance.audit.GovernanceAuditController`
+- `com.frauddetection.alert.governance.audit.GovernanceAuditService`
 
 Frontend implementation:
 
@@ -119,13 +124,14 @@ Roles describe analyst personas. Authorities are the backend authorization contr
 | `fraud-case:read` | List fraud cases and get case details. |
 | `fraud-case:update` | Update fraud case decision/status fields. |
 | `transaction-monitor:read` | Read scored transaction monitoring data. |
+| `governance-advisory:audit:write` | Record human review for governance advisory events. |
 
 ### Roles
 
 | Role | Intent | Authorities |
 | --- | --- | --- |
 | `READ_ONLY_ANALYST` | Analyst queue visibility without write actions. | `alert:read`, `assistant-summary:read`, `fraud-case:read`, `transaction-monitor:read` |
-| `ANALYST` | Standard analyst who can review alerts and submit alert decisions. | `READ_ONLY_ANALYST` authorities plus `alert:decision:submit` |
+| `ANALYST` | Standard analyst who can review alerts and submit alert decisions. | `READ_ONLY_ANALYST` authorities plus `alert:decision:submit`, `governance-advisory:audit:write` |
 | `REVIEWER` | Senior analyst/reviewer who can also update fraud cases. | `ANALYST` authorities plus `fraud-case:update` |
 | `FRAUD_OPS_ADMIN` | Fraud operations lead/admin with full v1 access. | all v1 authorities |
 
@@ -141,6 +147,8 @@ Roles describe analyst personas. Authorities are the backend authorization contr
 | `GET /api/v1/fraud-cases/{caseId}` | `fraud-case:read` | Case details read. |
 | `PATCH /api/v1/fraud-cases/{caseId}` | `fraud-case:update` | Write action; audit in v1. |
 | `GET /api/v1/transactions/scored` | `transaction-monitor:read` | Separate from alert read because monitor data may grow beyond alert queue use cases. |
+| `GET /governance/advisories/{event_id}/audit` | `transaction-monitor:read` | Reads human-review history for governance advisory context. |
+| `POST /governance/advisories/{event_id}/audit` | `governance-advisory:audit:write` | Write action; records human review only. |
 
 ## Local Demo Auth
 
@@ -200,6 +208,7 @@ Audited actions:
 
 - `SUBMIT_ANALYST_DECISION` for `ALERT`
 - `UPDATE_FRAUD_CASE` for `FRAUD_CASE`
+- governance advisory human-review entries for advisory audit history
 
 Event model:
 
@@ -238,6 +247,8 @@ Future sinks can be added behind `AuditEventPublisher`:
 - retention and masking policies
 - read-access auditing if required
 
+Governance advisory audit entries are stored separately in `ml_governance_audit_events` through the existing MongoDB infrastructure. They are append-only human-review records, not fraud decisions. The frontend may submit only `decision` and optional bounded `note`; `actor_id`, actor roles, display name, and advisory model metadata are derived server-side. Audit writes fail clearly if persistence or advisory lookup is unavailable and are never silently dropped.
+
 ## Frontend Security UX
 
 The analyst console keeps one stable session contract and one auth provider boundary.
@@ -263,7 +274,7 @@ VITE_DEMO_ROLES=ANALYST
 Session behavior:
 
 - selecting `Unauthenticated` removes demo auth headers and should produce HTTP 401 states from protected API calls
-- selecting `READ_ONLY_ANALYST` keeps reads enabled but disables write actions requiring `alert:decision:submit` or `fraud-case:update`
+- selecting `READ_ONLY_ANALYST` keeps reads enabled but disables write actions requiring `alert:decision:submit`, `fraud-case:update`, or `governance-advisory:audit:write`
 - unavailable write actions show an inline permission notice with the required authority
 - session lifecycle distinguishes:
   - `loading`

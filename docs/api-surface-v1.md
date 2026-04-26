@@ -31,6 +31,7 @@ Base URL in Docker: `http://ml-inference-service:8090`
 | `GET` | `/governance/history` | Bounded governance snapshot history. |
 
 The ML OpenAPI reference is `docs/openapi/ml-inference-service.openapi.yaml`.
+The alert-service governance audit OpenAPI reference is `docs/openapi/alert-service.openapi.yaml`.
 
 ## Java Services
 
@@ -60,6 +61,39 @@ Alert service:
 | `GET` | `/api/v1/fraud-cases/{caseId}` | Returns one fraud case. |
 | `PATCH` | `/api/v1/fraud-cases/{caseId}` | Updates fraud case status/assignment fields. |
 | `GET` | `/api/v1/transactions/scored` | Lists scored transaction projections. |
+| `GET` | `/governance/advisories/{event_id}/audit` | Returns bounded newest-first human-review audit history for one governance advisory event. |
+| `POST` | `/governance/advisories/{event_id}/audit` | Appends one authenticated human-review audit entry for a governance advisory event. |
+
+Governance advisory audit endpoints are owned by `alert-service`, not `ml-inference-service`, because writes require authenticated operator actor attribution. They do not mutate advisory events, scoring, model behavior, retraining, rollback, or fraud decisioning.
+
+POST request:
+
+```json
+{
+  "decision": "ACKNOWLEDGED",
+  "note": "Reviewed by operator"
+}
+```
+
+Allowed `decision` values:
+
+- `ACKNOWLEDGED`
+- `NEEDS_FOLLOW_UP`
+- `DISMISSED_AS_NOISE`
+
+Frontend-provided `actor_id`, actor roles, or model metadata fields are rejected or ignored by contract; actor attribution is backend-derived. `note` is optional and capped at 500 characters.
+
+GET response:
+
+```json
+{
+  "advisory_event_id": "event-1",
+  "status": "AVAILABLE",
+  "audit_events": []
+}
+```
+
+`GET` may return `status=UNAVAILABLE` with an empty `audit_events` array when audit storage is unavailable. `POST` fails clearly with the platform error envelope when persistence or advisory lookup is unavailable; explicit operator write intent is not silently dropped.
 
 ## Error Contract
 

@@ -10,6 +10,10 @@ import com.frauddetection.alert.controller.FraudCaseController;
 import com.frauddetection.alert.controller.ScoredTransactionController;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
+import com.frauddetection.alert.governance.audit.GovernanceAuditController;
+import com.frauddetection.alert.governance.audit.GovernanceAuditDecision;
+import com.frauddetection.alert.governance.audit.GovernanceAuditEventResponse;
+import com.frauddetection.alert.governance.audit.GovernanceAuditService;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.mapper.ScoredTransactionResponseMapper;
@@ -56,7 +60,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @WebMvcTest({
         AlertController.class,
         FraudCaseController.class,
-        ScoredTransactionController.class
+        ScoredTransactionController.class,
+        GovernanceAuditController.class
 })
 @Import({
         AlertSecurityConfig.class,
@@ -96,6 +101,9 @@ class AlertSecurityConfigTest {
     @MockBean
     private AlertServiceMetrics alertServiceMetrics;
 
+    @MockBean
+    private GovernanceAuditService governanceAuditService;
+
     @Test
     void shouldReturn401WhenAuthenticationIsMissingForAnalystEndpoints() throws Exception {
         mockMvc.perform(get("/api/v1/alerts"))
@@ -122,6 +130,12 @@ class AlertSecurityConfigTest {
                         .content(objectMapper.writeValueAsString(updateFraudCaseRequest())))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/transactions/scored"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/governance/advisories/advisory-1/audit"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/governance/advisories/advisory-1/audit")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"decision\":\"ACKNOWLEDGED\"}"))
                 .andExpect(status().isUnauthorized());
     }
 
@@ -152,6 +166,26 @@ class AlertSecurityConfigTest {
         mockMvc.perform(get("/api/v1/transactions/scored").with(demoUser("READ_ONLY_ANALYST")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isArray());
+    }
+
+    @Test
+    void shouldAllowReadOnlyAnalystToReadGovernanceAuditHistoryOnly() throws Exception {
+        when(governanceAuditService.history("advisory-1"))
+                .thenReturn(new com.frauddetection.alert.governance.audit.GovernanceAuditHistoryResponse(
+                        "advisory-1",
+                        "AVAILABLE",
+                        List.of()
+                ));
+
+        mockMvc.perform(get("/governance/advisories/advisory-1/audit").with(demoUser("READ_ONLY_ANALYST")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.advisory_event_id").value("advisory-1"));
+
+        mockMvc.perform(post("/governance/advisories/advisory-1/audit")
+                        .with(demoUser("READ_ONLY_ANALYST"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"decision\":\"ACKNOWLEDGED\"}"))
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -194,6 +228,33 @@ class AlertSecurityConfigTest {
                         .content(objectMapper.writeValueAsString(submitDecisionRequest())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultingStatus").value("RESOLVED"));
+    }
+
+    @Test
+    void shouldAllowAnalystToRecordGovernanceAudit() throws Exception {
+        when(governanceAuditService.appendAudit(eq("advisory-1"), any()))
+                .thenReturn(new GovernanceAuditEventResponse(
+                        "audit-1",
+                        "advisory-1",
+                        GovernanceAuditDecision.ACKNOWLEDGED,
+                        null,
+                        "analyst-1",
+                        "analyst-1",
+                        List.of("ANALYST"),
+                        Instant.parse("2026-04-26T00:00:00Z"),
+                        "python-logistic-fraud-model",
+                        "2026-04-21.trained.v1",
+                        "HIGH",
+                        "HIGH",
+                        "SUFFICIENT_DATA"
+                ));
+
+        mockMvc.perform(post("/governance/advisories/advisory-1/audit")
+                        .with(demoUser("ANALYST"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"decision\":\"ACKNOWLEDGED\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.actor_id").value("analyst-1"));
     }
 
     @Test

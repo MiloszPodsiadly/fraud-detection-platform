@@ -18,7 +18,7 @@ describe("SessionBadge", () => {
     );
 
     expect(screen.getAllByText("reviewer-1")).toHaveLength(2);
-    expect(screen.getByText("REVIEWER access active via local demo session. 6 authorities available.")).toBeInTheDocument();
+    expect(screen.getByText("REVIEWER access active via local demo session. 7 authorities available.")).toBeInTheDocument();
     expect(screen.getByText("local/dev only")).toBeInTheDocument();
     expect(screen.getByText("Demo auth mode")).toBeInTheDocument();
     expect(screen.getByLabelText("Role")).toHaveValue("REVIEWER");
