@@ -10,6 +10,9 @@ import com.frauddetection.alert.controller.FraudCaseController;
 import com.frauddetection.alert.controller.ScoredTransactionController;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
+import com.frauddetection.alert.governance.audit.GovernanceAdvisoryController;
+import com.frauddetection.alert.governance.audit.GovernanceAdvisoryListResponse;
+import com.frauddetection.alert.governance.audit.GovernanceAdvisoryProjectionService;
 import com.frauddetection.alert.governance.audit.GovernanceAuditController;
 import com.frauddetection.alert.governance.audit.GovernanceAuditDecision;
 import com.frauddetection.alert.governance.audit.GovernanceAuditEventResponse;
@@ -61,6 +64,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         AlertController.class,
         FraudCaseController.class,
         ScoredTransactionController.class,
+        GovernanceAdvisoryController.class,
         GovernanceAuditController.class
 })
 @Import({
@@ -104,6 +108,9 @@ class AlertSecurityConfigTest {
     @MockBean
     private GovernanceAuditService governanceAuditService;
 
+    @MockBean
+    private GovernanceAdvisoryProjectionService governanceAdvisoryProjectionService;
+
     @Test
     void shouldReturn401WhenAuthenticationIsMissingForAnalystEndpoints() throws Exception {
         mockMvc.perform(get("/api/v1/alerts"))
@@ -130,6 +137,10 @@ class AlertSecurityConfigTest {
                         .content(objectMapper.writeValueAsString(updateFraudCaseRequest())))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/transactions/scored"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/governance/advisories"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/governance/advisories/advisory-1"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/governance/advisories/advisory-1/audit"))
                 .andExpect(status().isUnauthorized());
@@ -170,6 +181,8 @@ class AlertSecurityConfigTest {
 
     @Test
     void shouldAllowReadOnlyAnalystToReadGovernanceAuditHistoryOnly() throws Exception {
+        when(governanceAdvisoryProjectionService.listAdvisories(any(), any()))
+                .thenReturn(new GovernanceAdvisoryListResponse("AVAILABLE", 0, 200, List.of()));
         when(governanceAuditService.history("advisory-1"))
                 .thenReturn(new com.frauddetection.alert.governance.audit.GovernanceAuditHistoryResponse(
                         "advisory-1",
@@ -177,6 +190,9 @@ class AlertSecurityConfigTest {
                         List.of()
                 ));
 
+        mockMvc.perform(get("/governance/advisories").with(demoUser("READ_ONLY_ANALYST")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("AVAILABLE"));
         mockMvc.perform(get("/governance/advisories/advisory-1/audit").with(demoUser("READ_ONLY_ANALYST")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.advisory_event_id").value("advisory-1"));
