@@ -7,7 +7,7 @@ from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-os.environ.setdefault("INTERNAL_AUTH_MODE", "LOCALDEV")
+os.environ.setdefault("INTERNAL_AUTH_MODE", "DISABLED_LOCAL_ONLY")
 
 from app import server
 from app.governance.advisory import (

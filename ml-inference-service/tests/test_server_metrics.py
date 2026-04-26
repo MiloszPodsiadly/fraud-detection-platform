@@ -1,10 +1,12 @@
 import threading
 import unittest
 import os
+from contextlib import redirect_stdout
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
+from io import StringIO
 
-os.environ.setdefault("INTERNAL_AUTH_MODE", "LOCALDEV")
+os.environ.setdefault("INTERNAL_AUTH_MODE", "DISABLED_LOCAL_ONLY")
 
 from app import server
 
@@ -115,25 +117,51 @@ class MlMetricsEndpointTest(unittest.TestCase):
             parse_metric_value(before, "fraud_ml_inference_errors_total", error_labels),
         )
 
-    def test_required_internal_auth_rejects_anonymous_governance_request(self):
+    def test_disabled_local_only_mode_allows_local_anonymous_internal_call(self):
         previous_mode = os.environ.get("INTERNAL_AUTH_MODE")
         try:
-            os.environ["INTERNAL_AUTH_MODE"] = "REQUIRED"
+            os.environ["INTERNAL_AUTH_MODE"] = "DISABLED_LOCAL_ONLY"
             status, _, payload = self.request("GET", "/governance/model")
 
-            self.assertEqual(status, 401)
-            self.assertIn(b"Internal service authentication is required.", payload)
+            self.assertEqual(status, 200)
+            self.assertIn(b"model", payload)
         finally:
             if previous_mode is None:
                 os.environ.pop("INTERNAL_AUTH_MODE", None)
             else:
                 os.environ["INTERNAL_AUTH_MODE"] = previous_mode
 
-    def test_required_internal_auth_rejects_invalid_identity(self):
+    def test_token_validator_rejects_anonymous_governance_request(self):
+        previous_mode = os.environ.get("INTERNAL_AUTH_MODE")
+        before = self.metrics_text()
+        try:
+            os.environ["INTERNAL_AUTH_MODE"] = "TOKEN_VALIDATOR"
+            status, _, payload = self.request("GET", "/governance/model")
+
+            self.assertEqual(status, 401)
+            self.assertIn(b"Internal service authentication is required.", payload)
+            after = self.metrics_text()
+            self.assertGreater(
+                parse_metric_value(after, "fraud_internal_auth_failure_total", {
+                    "target_service": "ml-inference-service",
+                    "reason": "missing_internal_credentials",
+                }),
+                parse_metric_value(before, "fraud_internal_auth_failure_total", {
+                    "target_service": "ml-inference-service",
+                    "reason": "missing_internal_credentials",
+                }),
+            )
+        finally:
+            if previous_mode is None:
+                os.environ.pop("INTERNAL_AUTH_MODE", None)
+            else:
+                os.environ["INTERNAL_AUTH_MODE"] = previous_mode
+
+    def test_token_validator_rejects_unknown_service(self):
         previous_mode = os.environ.get("INTERNAL_AUTH_MODE")
         previous_credentials = server.INTERNAL_SERVICE_CREDENTIALS
         try:
-            os.environ["INTERNAL_AUTH_MODE"] = "REQUIRED"
+            os.environ["INTERNAL_AUTH_MODE"] = "TOKEN_VALIDATOR"
             server.INTERNAL_SERVICE_CREDENTIALS = {
                 "known-service": server.InternalServiceCredential("secret", frozenset({"governance-read"}))
             }
@@ -156,11 +184,43 @@ class MlMetricsEndpointTest(unittest.TestCase):
             else:
                 os.environ["INTERNAL_AUTH_MODE"] = previous_mode
 
-    def test_required_internal_auth_allows_known_service(self):
+    def test_token_validator_rejects_invalid_token_without_logging_token(self):
         previous_mode = os.environ.get("INTERNAL_AUTH_MODE")
         previous_credentials = server.INTERNAL_SERVICE_CREDENTIALS
         try:
-            os.environ["INTERNAL_AUTH_MODE"] = "REQUIRED"
+            os.environ["INTERNAL_AUTH_MODE"] = "TOKEN_VALIDATOR"
+            server.INTERNAL_SERVICE_CREDENTIALS = {
+                "known-service": server.InternalServiceCredential("secret", frozenset({"governance-read"}))
+            }
+
+            output = StringIO()
+            with redirect_stdout(output):
+                status, _, payload = self.request(
+                    "GET",
+                    "/governance/model",
+                    headers={
+                        "X-Internal-Service-Name": "known-service",
+                        "X-Internal-Service-Token": "wrong-secret-token",
+                    },
+                )
+
+            self.assertEqual(status, 403)
+            self.assertIn(b"Internal service is not authorized", payload)
+            self.assertNotIn("wrong-secret-token", output.getvalue())
+            self.assertIn("internal_auth_rejected", output.getvalue())
+        finally:
+            server.INTERNAL_SERVICE_CREDENTIALS = previous_credentials
+            if previous_mode is None:
+                os.environ.pop("INTERNAL_AUTH_MODE", None)
+            else:
+                os.environ["INTERNAL_AUTH_MODE"] = previous_mode
+
+    def test_token_validator_allows_known_service_and_records_success_metric(self):
+        previous_mode = os.environ.get("INTERNAL_AUTH_MODE")
+        previous_credentials = server.INTERNAL_SERVICE_CREDENTIALS
+        before = self.metrics_text()
+        try:
+            os.environ["INTERNAL_AUTH_MODE"] = "TOKEN_VALIDATOR"
             server.INTERNAL_SERVICE_CREDENTIALS = {
                 "known-service": server.InternalServiceCredential("secret", frozenset({"governance-read"}))
             }
@@ -176,6 +236,63 @@ class MlMetricsEndpointTest(unittest.TestCase):
 
             self.assertEqual(status, 200)
             self.assertIn(b"model", payload)
+            after = self.metrics_text()
+            self.assertGreater(
+                parse_metric_value(after, "fraud_internal_auth_success_total", {
+                    "source_service": "known-service",
+                    "target_service": "ml-inference-service",
+                }),
+                parse_metric_value(before, "fraud_internal_auth_success_total", {
+                    "source_service": "known-service",
+                    "target_service": "ml-inference-service",
+                }),
+            )
+        finally:
+            server.INTERNAL_SERVICE_CREDENTIALS = previous_credentials
+            if previous_mode is None:
+                os.environ.pop("INTERNAL_AUTH_MODE", None)
+            else:
+                os.environ["INTERNAL_AUTH_MODE"] = previous_mode
+
+    def test_internal_auth_startup_rejects_disabled_local_only_in_prod_profile(self):
+        with self.assertRaises(RuntimeError):
+            server._validate_internal_auth_startup(
+                mode="DISABLED_LOCAL_ONLY",
+                profile="production",
+                credentials={},
+            )
+
+    def test_internal_auth_startup_requires_allowlist_in_prod_token_validator(self):
+        with self.assertRaises(RuntimeError):
+            server._validate_internal_auth_startup(
+                mode="TOKEN_VALIDATOR",
+                profile="prod",
+                credentials={},
+            )
+
+    def test_scoring_behavior_is_unchanged_when_internal_auth_is_valid(self):
+        previous_mode = os.environ.get("INTERNAL_AUTH_MODE")
+        previous_credentials = server.INTERNAL_SERVICE_CREDENTIALS
+        try:
+            os.environ["INTERNAL_AUTH_MODE"] = "TOKEN_VALIDATOR"
+            server.INTERNAL_SERVICE_CREDENTIALS = {
+                "fraud-scoring-service": server.InternalServiceCredential("secret", frozenset({"ml-score"}))
+            }
+
+            status, _, payload = self.request(
+                "POST",
+                "/v1/fraud/score",
+                body=b'{"features":{"amount":42,"recentTransactionCount":1}}',
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Internal-Service-Name": "fraud-scoring-service",
+                    "X-Internal-Service-Token": "secret",
+                },
+            )
+
+            self.assertEqual(status, 200)
+            self.assertIn(b"fraudScore", payload)
+            self.assertIn(b"riskLevel", payload)
         finally:
             server.INTERNAL_SERVICE_CREDENTIALS = previous_credentials
             if previous_mode is None:

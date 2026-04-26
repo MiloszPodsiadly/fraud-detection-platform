@@ -98,10 +98,15 @@ ERROR_COUNTER = Counter(
     "Rejected or failed ML inference requests.",
     ("endpoint", "method", "outcome"),
 )
+INTERNAL_AUTH_SUCCESSES = Counter(
+    "fraud_internal_auth_success_total",
+    "Accepted internal service authentication attempts.",
+    ("source_service", "target_service"),
+)
 INTERNAL_AUTH_FAILURES = Counter(
-    "fraud_ml_internal_auth_failures_total",
-    "Rejected internal service authentication attempts by endpoint and reason.",
-    ("endpoint", "reason"),
+    "fraud_internal_auth_failure_total",
+    "Rejected internal service authentication attempts.",
+    ("target_service", "reason"),
 )
 MODEL_LOAD_STATUS = Gauge(
     "fraud_ml_model_load_status",
@@ -222,6 +227,7 @@ class InternalServicePrincipal:
     service_name: str
     authorities: frozenset[str]
     authenticated_at: datetime
+    auth_mode: str
 
 
 @dataclass(frozen=True)
@@ -230,9 +236,43 @@ class InternalServiceCredential:
     authorities: frozenset[str]
 
 
+INTERNAL_AUTH_TARGET_SERVICE = "ml-inference-service"
+LOCAL_INTERNAL_AUTH_MODES = {"LOCALDEV", "DISABLED_LOCAL_ONLY"}
+TOKEN_INTERNAL_AUTH_MODES = {"REQUIRED", "TOKEN_VALIDATOR"}
+PROD_LIKE_PROFILES = {"prod", "production", "staging"}
+INTERNAL_AUTH_FAILURE_REASONS = {
+    "missing_internal_credentials",
+    "invalid_internal_credentials",
+    "missing_internal_authority",
+    "mtls_not_configured",
+}
+
+
 def _internal_auth_mode() -> str:
     mode = os.getenv("INTERNAL_AUTH_MODE", "REQUIRED").strip().upper()
-    return "LOCALDEV" if mode == "LOCALDEV" else "REQUIRED"
+    if mode in LOCAL_INTERNAL_AUTH_MODES:
+        return "DISABLED_LOCAL_ONLY"
+    if mode in TOKEN_INTERNAL_AUTH_MODES:
+        return "TOKEN_VALIDATOR"
+    if mode == "MTLS_READY":
+        return "MTLS_READY"
+    return "TOKEN_VALIDATOR"
+
+
+def _runtime_profile() -> str:
+    return (
+        os.getenv("INTERNAL_AUTH_PROFILE")
+        or os.getenv("APP_PROFILE")
+        or os.getenv("ENVIRONMENT")
+        or os.getenv("SPRING_PROFILES_ACTIVE")
+        or "localdev"
+    ).strip().lower()
+
+
+def _prod_like_profile(profile: str | None = None) -> bool:
+    value = (profile or _runtime_profile()).strip().lower()
+    profiles = {part.strip() for part in value.replace(";", ",").split(",") if part.strip()}
+    return bool(profiles & PROD_LIKE_PROFILES)
 
 
 def _allowed_internal_services() -> dict[str, InternalServiceCredential]:
@@ -251,6 +291,26 @@ def _allowed_internal_services() -> dict[str, InternalServiceCredential]:
 
 
 INTERNAL_SERVICE_CREDENTIALS = _allowed_internal_services()
+
+
+def _validate_internal_auth_startup(
+        mode: str | None = None,
+        profile: str | None = None,
+        credentials: dict[str, InternalServiceCredential] | None = None,
+) -> None:
+    normalized_mode = _internal_auth_mode() if mode is None else (
+        "DISABLED_LOCAL_ONLY" if mode.strip().upper() in LOCAL_INTERNAL_AUTH_MODES
+        else "MTLS_READY" if mode.strip().upper() == "MTLS_READY"
+        else "TOKEN_VALIDATOR"
+    )
+    configured_credentials = INTERNAL_SERVICE_CREDENTIALS if credentials is None else credentials
+    if normalized_mode == "DISABLED_LOCAL_ONLY" and _prod_like_profile(profile):
+        raise RuntimeError("DISABLED_LOCAL_ONLY internal auth mode is forbidden in prod-like profiles.")
+    if normalized_mode == "TOKEN_VALIDATOR" and _prod_like_profile(profile) and not configured_credentials:
+        raise RuntimeError("TOKEN_VALIDATOR internal auth mode requires an allowed service list in prod-like profiles.")
+
+
+_validate_internal_auth_startup()
 
 
 def _initialize_lifecycle_tracking() -> None:
@@ -584,11 +644,12 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
     def _require_internal_auth(self, endpoint: str, required_authority: str) -> bool:
         principal, status_code, reason = self._internal_service_principal(required_authority)
         if principal is not None:
+            self._record_internal_auth_success(principal)
             self._log_event(
                 "internal_auth_allowed",
                 serviceName=principal.service_name,
-                endpoint=self._normalized_endpoint(endpoint),
                 authority=required_authority,
+                authMode=principal.auth_mode,
             )
             return True
         self._record_internal_auth_failure(endpoint, reason)
@@ -602,12 +663,15 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
         mode = _internal_auth_mode()
         service_name = self.headers.get("X-Internal-Service-Name", "").strip()
         token = self.headers.get("X-Internal-Service-Token", "").strip()
-        if mode == "LOCALDEV" and not service_name and not token:
+        if mode == "DISABLED_LOCAL_ONLY" and not service_name and not token:
             return InternalServicePrincipal(
                 service_name="localdev-anonymous",
                 authorities=frozenset({required_authority}),
                 authenticated_at=datetime.now(timezone.utc),
+                auth_mode=mode,
             ), 200, "allowed_localdev"
+        if mode == "MTLS_READY":
+            return None, 401, "mtls_not_configured"
         if not service_name or not token:
             return None, 401, "missing_internal_credentials"
         credential = INTERNAL_SERVICE_CREDENTIALS.get(service_name)
@@ -619,19 +683,19 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             service_name=service_name,
             authorities=credential.authorities,
             authenticated_at=datetime.now(timezone.utc),
+            auth_mode=mode,
         ), 200, "allowed"
 
+    def _record_internal_auth_success(self, principal: InternalServicePrincipal) -> None:
+        source_service = principal.service_name if principal.service_name in INTERNAL_SERVICE_CREDENTIALS else "localdev"
+        INTERNAL_AUTH_SUCCESSES.labels(source_service, INTERNAL_AUTH_TARGET_SERVICE).inc()
+
     def _record_internal_auth_failure(self, endpoint: str, reason: str) -> None:
-        normalized_endpoint = self._normalized_endpoint(endpoint)
-        normalized_reason = reason if reason in {
-            "missing_internal_credentials",
-            "invalid_internal_credentials",
-            "missing_internal_authority",
-        } else "invalid_internal_credentials"
-        INTERNAL_AUTH_FAILURES.labels(normalized_endpoint, normalized_reason).inc()
+        normalized_reason = reason if reason in INTERNAL_AUTH_FAILURE_REASONS else "invalid_internal_credentials"
+        INTERNAL_AUTH_FAILURES.labels(INTERNAL_AUTH_TARGET_SERVICE, normalized_reason).inc()
         self._log_event(
             "internal_auth_rejected",
-            endpoint=normalized_endpoint,
+            targetService=INTERNAL_AUTH_TARGET_SERVICE,
             reason=normalized_reason,
         )
 

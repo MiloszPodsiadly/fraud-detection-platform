@@ -11,7 +11,7 @@ public class MlModelClientConfig {
     @Bean
     public RestClient mlModelRestClient(
             MlModelClientProperties properties,
-            InternalServiceClientProperties internalAuth,
+            InternalServiceAuthHeaders internalAuthHeaders,
             RestClient.Builder builder
     ) {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
@@ -22,10 +22,7 @@ public class MlModelClientConfig {
                 .baseUrl(properties.baseUrl())
                 .requestFactory(requestFactory)
                 .requestInterceptor((request, body, execution) -> {
-                    if (internalAuth.enabled()) {
-                        request.getHeaders().set("X-Internal-Service-Name", internalAuth.normalizedServiceName());
-                        request.getHeaders().set("X-Internal-Service-Token", internalAuth.normalizedToken());
-                    }
+                    internalAuthHeaders.apply(request.getHeaders());
                     return execution.execute(request, body);
                 })
                 .build();

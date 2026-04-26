@@ -73,7 +73,7 @@ services:
       GOVERNANCE_SNAPSHOT_COLLECTION: ml_governance_snapshots
       GOVERNANCE_SNAPSHOT_RETENTION_LIMIT: "500"
       GOVERNANCE_SNAPSHOT_INTERVAL_REQUESTS: "50"
-      INTERNAL_AUTH_MODE: LOCALDEV
+      INTERNAL_AUTH_MODE: DISABLED_LOCAL_ONLY
       INTERNAL_AUTH_ALLOWED_SERVICES: fraud-scoring-service:local-dev-internal-token:ml-score,alert-service:local-dev-internal-token:governance-read
     ports:
       - "127.0.0.1:8090:8090"
@@ -280,7 +280,7 @@ services:
       SPRING_PROFILES_ACTIVE: docker,docker-local
       APP_SECURITY_DEMO_AUTH_ENABLED: "true"
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      MONGODB_URI: mongodb://mongodb:27017/fraud_alerts
+      MONGODB_URI: mongodb://mongodb:27017/fraud_alerts?serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000
       ML_GOVERNANCE_BASE_URL: http://ml-inference-service:8090
       INTERNAL_AUTH_CLIENT_ENABLED: "true"
       INTERNAL_AUTH_SERVICE_NAME: alert-service
