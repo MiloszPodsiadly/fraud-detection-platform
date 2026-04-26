@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import hmac
 import os
+import re
 import time
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -275,9 +278,14 @@ def _prod_like_profile(profile: str | None = None) -> bool:
     return bool(profiles & PROD_LIKE_PROFILES)
 
 
+def _token_hash_mode() -> bool:
+    return os.getenv("INTERNAL_AUTH_TOKEN_HASH_MODE", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _allowed_internal_services() -> dict[str, InternalServiceCredential]:
     raw = os.getenv("INTERNAL_AUTH_ALLOWED_SERVICES", "")
     services: dict[str, InternalServiceCredential] = {}
+    hash_mode = _token_hash_mode()
     for entry in raw.split(","):
         parts = entry.strip().split(":", 2)
         if len(parts) != 3:
@@ -286,6 +294,10 @@ def _allowed_internal_services() -> dict[str, InternalServiceCredential]:
         if not service_name or not token:
             continue
         authority_set = frozenset(authority.strip() for authority in authorities.split("|") if authority.strip())
+        if not authority_set:
+            continue
+        if hash_mode and not re.fullmatch(r"[A-Fa-f0-9]{64}", token):
+            continue
         services[service_name] = InternalServiceCredential(token=token, authorities=authority_set)
     return services
 
@@ -306,6 +318,8 @@ def _validate_internal_auth_startup(
     configured_credentials = INTERNAL_SERVICE_CREDENTIALS if credentials is None else credentials
     if normalized_mode == "DISABLED_LOCAL_ONLY" and _prod_like_profile(profile):
         raise RuntimeError("DISABLED_LOCAL_ONLY internal auth mode is forbidden in prod-like profiles.")
+    if normalized_mode == "TOKEN_VALIDATOR" and _prod_like_profile(profile) and not _token_hash_mode():
+        raise RuntimeError("TOKEN_VALIDATOR internal auth mode requires token hash mode in prod-like profiles.")
     if normalized_mode == "TOKEN_VALIDATOR" and _prod_like_profile(profile) and not configured_credentials:
         raise RuntimeError("TOKEN_VALIDATOR internal auth mode requires an allowed service list in prod-like profiles.")
 
@@ -675,7 +689,7 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
         if not service_name or not token:
             return None, 401, "missing_internal_credentials"
         credential = INTERNAL_SERVICE_CREDENTIALS.get(service_name)
-        if credential is None or credential.token != token:
+        if credential is None or not self._internal_token_matches(token, credential.token):
             return None, 403, "invalid_internal_credentials"
         if required_authority not in credential.authorities:
             return None, 403, "missing_internal_authority"
@@ -685,6 +699,12 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             authenticated_at=datetime.now(timezone.utc),
             auth_mode=mode,
         ), 200, "allowed"
+
+    def _internal_token_matches(self, presented_token: str, configured_token: str) -> bool:
+        if _token_hash_mode():
+            presented_hash = hashlib.sha256(presented_token.encode("utf-8")).hexdigest()
+            return hmac.compare_digest(presented_hash, configured_token.lower())
+        return hmac.compare_digest(configured_token, presented_token)
 
     def _record_internal_auth_success(self, principal: InternalServicePrincipal) -> None:
         source_service = principal.service_name if principal.service_name in INTERNAL_SERVICE_CREDENTIALS else "localdev"

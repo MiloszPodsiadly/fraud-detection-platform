@@ -1,0 +1,6 @@
+services:
+  ml-inference-service:
+    environment:
+      INTERNAL_AUTH_MODE: TOKEN_VALIDATOR
+      INTERNAL_AUTH_TOKEN_HASH_MODE: "true"
+      INTERNAL_AUTH_ALLOWED_SERVICES: fraud-scoring-service:486c7e8132888f1bbc9cb9165533394615e283500a51bfdfee509e8fe42b869a:ml-score,alert-service:486c7e8132888f1bbc9cb9165533394615e283500a51bfdfee509e8fe42b869a:governance-read

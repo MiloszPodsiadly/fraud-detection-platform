@@ -1,6 +1,7 @@
 import threading
 import unittest
 import os
+import hashlib
 from contextlib import redirect_stdout
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
@@ -263,12 +264,126 @@ class MlMetricsEndpointTest(unittest.TestCase):
             )
 
     def test_internal_auth_startup_requires_allowlist_in_prod_token_validator(self):
-        with self.assertRaises(RuntimeError):
-            server._validate_internal_auth_startup(
-                mode="TOKEN_VALIDATOR",
-                profile="prod",
-                credentials={},
+        previous_hash_mode = os.environ.get("INTERNAL_AUTH_TOKEN_HASH_MODE")
+        try:
+            os.environ["INTERNAL_AUTH_TOKEN_HASH_MODE"] = "true"
+            with self.assertRaises(RuntimeError):
+                server._validate_internal_auth_startup(
+                    mode="TOKEN_VALIDATOR",
+                    profile="prod",
+                    credentials={},
+                )
+        finally:
+            if previous_hash_mode is None:
+                os.environ.pop("INTERNAL_AUTH_TOKEN_HASH_MODE", None)
+            else:
+                os.environ["INTERNAL_AUTH_TOKEN_HASH_MODE"] = previous_hash_mode
+
+    def test_prod_token_validator_requires_hash_mode(self):
+        previous_hash_mode = os.environ.get("INTERNAL_AUTH_TOKEN_HASH_MODE")
+        try:
+            os.environ["INTERNAL_AUTH_TOKEN_HASH_MODE"] = "false"
+            with self.assertRaises(RuntimeError) as raised:
+                server._validate_internal_auth_startup(
+                    mode="TOKEN_VALIDATOR",
+                    profile="production",
+                    credentials={
+                        "known-service": server.InternalServiceCredential("secret", frozenset({"governance-read"}))
+                    },
+                )
+
+            self.assertNotIn("secret", str(raised.exception))
+        finally:
+            if previous_hash_mode is None:
+                os.environ.pop("INTERNAL_AUTH_TOKEN_HASH_MODE", None)
+            else:
+                os.environ["INTERNAL_AUTH_TOKEN_HASH_MODE"] = previous_hash_mode
+
+    def test_token_hash_mode_accepts_hash_and_never_logs_hash_or_token(self):
+        previous_mode = os.environ.get("INTERNAL_AUTH_MODE")
+        previous_hash_mode = os.environ.get("INTERNAL_AUTH_TOKEN_HASH_MODE")
+        previous_credentials = server.INTERNAL_SERVICE_CREDENTIALS
+        token = "super-secret-token"
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        try:
+            os.environ["INTERNAL_AUTH_MODE"] = "TOKEN_VALIDATOR"
+            os.environ["INTERNAL_AUTH_TOKEN_HASH_MODE"] = "true"
+            server.INTERNAL_SERVICE_CREDENTIALS = {
+                "known-service": server.InternalServiceCredential(token_hash, frozenset({"governance-read"}))
+            }
+
+            output = StringIO()
+            with redirect_stdout(output):
+                status, _, payload = self.request(
+                    "GET",
+                    "/governance/model",
+                    headers={
+                        "X-Internal-Service-Name": "known-service",
+                        "X-Internal-Service-Token": token,
+                    },
+                )
+
+            self.assertEqual(status, 200)
+            self.assertIn(b"model", payload)
+            self.assertNotIn(token, output.getvalue())
+            self.assertNotIn(token_hash, output.getvalue())
+        finally:
+            server.INTERNAL_SERVICE_CREDENTIALS = previous_credentials
+            if previous_mode is None:
+                os.environ.pop("INTERNAL_AUTH_MODE", None)
+            else:
+                os.environ["INTERNAL_AUTH_MODE"] = previous_mode
+            if previous_hash_mode is None:
+                os.environ.pop("INTERNAL_AUTH_TOKEN_HASH_MODE", None)
+            else:
+                os.environ["INTERNAL_AUTH_TOKEN_HASH_MODE"] = previous_hash_mode
+
+    def test_malformed_allowed_service_config_does_not_create_permissive_auth(self):
+        previous_hash_mode = os.environ.get("INTERNAL_AUTH_TOKEN_HASH_MODE")
+        previous_allowed = os.environ.get("INTERNAL_AUTH_ALLOWED_SERVICES")
+        try:
+            os.environ["INTERNAL_AUTH_TOKEN_HASH_MODE"] = "true"
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICES"] = "bad-entry,svc:not-a-sha256:governance-read,svc2::ml-score,svc3:486c7e8132888f1bbc9cb9165533394615e283500a51bfdfee509e8fe42b869a:"
+
+            self.assertEqual(server._allowed_internal_services(), {})
+        finally:
+            if previous_hash_mode is None:
+                os.environ.pop("INTERNAL_AUTH_TOKEN_HASH_MODE", None)
+            else:
+                os.environ["INTERNAL_AUTH_TOKEN_HASH_MODE"] = previous_hash_mode
+            if previous_allowed is None:
+                os.environ.pop("INTERNAL_AUTH_ALLOWED_SERVICES", None)
+            else:
+                os.environ["INTERNAL_AUTH_ALLOWED_SERVICES"] = previous_allowed
+
+    def test_token_validator_rejects_service_without_required_authority(self):
+        previous_mode = os.environ.get("INTERNAL_AUTH_MODE")
+        previous_credentials = server.INTERNAL_SERVICE_CREDENTIALS
+        try:
+            os.environ["INTERNAL_AUTH_MODE"] = "TOKEN_VALIDATOR"
+            server.INTERNAL_SERVICE_CREDENTIALS = {
+                "known-service": server.InternalServiceCredential("secret", frozenset({"governance-read"}))
+            }
+
+            status, _, payload = self.request(
+                "POST",
+                "/v1/fraud/score",
+                body=b'{"features":{"amount":42}}',
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Internal-Service-Name": "known-service",
+                    "X-Internal-Service-Token": "secret",
+                },
             )
+
+            self.assertEqual(status, 403)
+            self.assertIn(b"Internal service is not authorized for this endpoint.", payload)
+        finally:
+            server.INTERNAL_SERVICE_CREDENTIALS = previous_credentials
+            if previous_mode is None:
+                os.environ.pop("INTERNAL_AUTH_MODE", None)
+            else:
+                os.environ["INTERNAL_AUTH_MODE"] = previous_mode
 
     def test_scoring_behavior_is_unchanged_when_internal_auth_is_valid(self):
         previous_mode = os.environ.get("INTERNAL_AUTH_MODE")
