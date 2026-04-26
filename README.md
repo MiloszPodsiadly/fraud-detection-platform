@@ -514,6 +514,14 @@ curl -s http://localhost:8090/metrics | grep fraud_internal_auth
 
 Expected results: the anonymous ML governance call returns `401`, the configured alert-service identity succeeds, and internal auth success/failure metrics are visible. Scoring through `fraud-scoring-service` uses the same shared token through its internal client boundary. This validates the internal shared-secret service-auth foundation; it is not full enterprise mTLS.
 
+## RS256 Service Identity
+
+RS256 provides service identity via signed tokens.
+
+It does NOT provide transport-level security.
+
+Transport security (TLS/mTLS) is still required and is outside the scope of FDP-17.
+
 To verify the RS256 JWT service identity path:
 
 ```bash
@@ -525,7 +533,38 @@ curl -s http://localhost:8090/metrics | grep fraud_internal_auth
 
 Expected results: anonymous direct ML calls return `401`, invalid bearer calls return `403`, configured Java clients attach RS256 signed JWT service identity through `InternalServiceAuthHeaders`, `ml-inference-service` validates public JWKS material only, `kid` is required, service-to-key binding is enforced, strict `iat`/`exp` freshness checks bound replay risk, and internal auth metrics remain low-cardinality. See `docs/service-identity-fdp17.md` for the full contract. This is a JWT service-auth foundation, not enterprise mTLS or enterprise IAM.
 
-Replay note: JWT service tokens can be replayed within their validity window. FDP-17 mitigates this with short TTLs, strict token age and TTL validation, clock skew bounds, and an optional in-memory soft replay cache. This is not a zero-replay guarantee; full replay protection requires `jti` with a distributed store or mTLS with channel binding.
+## Replay Risk
+
+JWT service identity tokens can be replayed within their validity window if intercepted.
+
+FDP-17 reduces this risk by:
+
+- enforcing short-lived tokens
+- strict `iat` and `exp` validation
+- maximum token age enforcement
+- bounded clock skew tolerance
+- optional in-memory replay detection
+
+This does NOT provide:
+
+- zero replay guarantee
+- nonce-based replay prevention
+- mTLS channel binding
+
+Full replay protection requires:
+
+- `jti` with a distributed store, OR
+- mTLS with channel binding
+
+## Local Keys
+
+`deployment/service-identity/` contains local RS256 keys for Docker verification.
+
+They are committed intentionally for local development and verification only.
+
+They must NEVER be used in any production or shared environment.
+
+Production deployments must use externally managed private keys and JWKS material.
 
 If you suspect stale local images or containers, rebuild cleanly:
 
