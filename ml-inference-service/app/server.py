@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from http import HTTPStatus
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -359,7 +360,7 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             self._send_json(200, history)
             self._record_request(path, "GET", 200, "success", started_at)
             return
-        self._send_json(404, {"error": "Not found"})
+        self._send_error(404, "Not Found", "Not found.")
         self._record_request(path, "GET", 404, "not_found")
         self._log_event("not_found", method="GET", path=path, statusCode=404)
 
@@ -367,14 +368,14 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
         started_at = time.perf_counter()
         path = urlparse(self.path).path
         if path != "/v1/fraud/score":
-            self._send_json(404, {"error": "Not found"})
+            self._send_error(404, "Not Found", "Not found.")
             self._record_request(path, "POST", 404, "not_found", started_at)
             self._log_event("not_found", method="POST", path=path, statusCode=404)
             return
 
         payload = self._read_json()
         if payload is None:
-            self._send_json(400, {"error": "Malformed JSON request."})
+            self._send_error(400, "Bad Request", "Malformed JSON request.")
             self._record_error(path, "POST", "rejected")
             self._record_request(path, "POST", 400, "rejected", started_at)
             self._log_event("score_rejected", statusCode=400, reason="malformed_json")
@@ -382,7 +383,12 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
 
         features = payload.get("features")
         if not isinstance(features, dict):
-            self._send_json(422, {"error": "Field 'features' must be an object."})
+            self._send_error(
+                422,
+                "Unprocessable Entity",
+                "Field 'features' must be an object.",
+                ["features: must be an object"],
+            )
             self._record_error(path, "POST", "rejected")
             self._record_request(path, "POST", 422, "rejected", started_at)
             self._log_event(
@@ -397,7 +403,7 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
         try:
             response = MODEL.score(features)
         except Exception:
-            self._send_json(500, {"error": "Model inference failed."})
+            self._send_error(500, "Internal Server Error", "Model inference failed.")
             self._record_error(path, "POST", "inference_error")
             self._record_request(path, "POST", 500, "inference_error", started_at)
             self._log_event("score_failed", statusCode=500)
@@ -481,6 +487,25 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _send_error(
+            self,
+            status_code: int,
+            error: str | None = None,
+            message: str | None = None,
+            details: list[str] | None = None,
+    ) -> None:
+        status = HTTPStatus(status_code)
+        self._send_json(
+            status_code,
+            {
+                "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                "status": status_code,
+                "error": error or status.phrase,
+                "message": message or status.phrase,
+                "details": list(details or []),
+            },
+        )
 
     def _send_metrics(self) -> None:
         started_at = time.perf_counter()
