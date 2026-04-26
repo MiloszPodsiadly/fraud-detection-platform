@@ -84,7 +84,13 @@ Audit analytics are read-only and derived:
 
 - `GET /governance/advisories/analytics?window_days=7`
 - `window_days` defaults to `7` and is capped at `30`.
-- Analytics operate on bounded time windows and do not guarantee global completeness.
+- `totals.advisories` is the number of distinct `advisory_event_id` values in the bounded advisory projection window.
+- `totals.reviewed` means those advisories with at least one matching audit event; `totals.open` means zero matching audit events.
+- `decision_distribution` uses the latest audit decision for reviewed advisories in that same projection window.
+- `lifecycle_distribution` uses read-time lifecycle enrichment of that same projection and sums to `totals.advisories`.
+- `review_timeliness` samples only valid non-negative first-review durations and reports `LOW_CONFIDENCE` when fewer than five samples exist.
+- Status is `AVAILABLE` when advisory and audit sources are both readable, `PARTIAL` when one source is degraded or the audit scan limit is exceeded, and `UNAVAILABLE` when both sources are unavailable.
+- Analytics operate on bounded time windows, cap audit scans with `GOVERNANCE_AUDIT_ANALYTICS_MAX_AUDIT_EVENTS`, and do not guarantee global completeness.
 - Analytics do not persist aggregates, enforce SLA, trigger actions, or change scoring/model behavior.
 
 Advisory list filters:
