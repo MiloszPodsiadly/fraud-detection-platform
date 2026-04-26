@@ -19,6 +19,7 @@ v2 covers:
 - ML governance and drift v1 signals for aggregate input/output distribution oversight
 - read-only model lifecycle visibility for drift and runtime triage
 - read-only governance advisory events for meaningful drift operator signals
+- authenticated governance advisory audit history for human operator review
 
 v2 still does not cover:
 
@@ -26,7 +27,7 @@ v2 still does not cover:
 - distributed tracing export
 - full ML quality monitoring or automatic model lifecycle actions
 - model switching, retraining, rollback, or approval workflow
-- fraud alert creation or frontend surfacing for governance advisories
+- fraud alert creation from governance advisories
 - automatic alert routing configuration in repo
 
 ## Local Runtime Stack
@@ -276,9 +277,12 @@ Governance advisory events:
 
 Analyst console operator queue:
 
-- FDP-12 exposes advisory events in a read-only UI panel.
+- FDP-12 exposes advisory events in an operator review UI panel.
+- FDP-13 adds an authenticated human-review audit form and audit history per advisory event.
 - The UI fetches only `GET /governance/advisories` through the local frontend proxy.
-- The UI does not poll, acknowledge, mutate advisories, write audit history, or integrate with `alert-service`.
+- Audit history uses `GET /governance/advisories/{event_id}/audit` and `POST /governance/advisories/{event_id}/audit` through `alert-service`.
+- The UI submits only `decision` and optional bounded `note`; the backend derives actor attribution from the authenticated principal/session.
+- Audit entries are append-only human review records; they do not mutate advisory events.
 - The UI does not trigger scoring changes, retraining, rollback, fraud decisions, or external incident workflows.
 - Empty, partial, unavailable, and error states are visible to the operator instead of hidden by silent retries.
 
@@ -356,7 +360,8 @@ Expected end-to-end checks after startup:
 8. Calling `GET /governance/model/current` returns the active model lifecycle metadata with `lifecycle_mode=READ_ONLY`.
 9. Calling `GET /governance/model/lifecycle` returns bounded persisted lifecycle history or `PARTIAL` with in-memory events.
 10. Calling `GET /governance/advisories?limit=10` returns bounded advisory events or `PARTIAL`/`UNAVAILABLE`.
-11. Calling `GET /governance/history?limit=10` returns bounded persisted history or `UNAVAILABLE` with a current fallback snapshot.
+11. Calling `GET /governance/advisories/{event_id}/audit` through `alert-service` returns bounded audit history or `status=UNAVAILABLE`.
+12. Calling `GET /governance/history?limit=10` returns bounded persisted history or `UNAVAILABLE` with a current fallback snapshot.
 
 Useful runtime checks:
 
@@ -371,6 +376,8 @@ curl http://localhost:8090/governance/drift
 curl http://localhost:8090/governance/drift/actions
 curl "http://localhost:8090/governance/advisories?limit=10"
 curl "http://localhost:8090/governance/history?limit=10"
+curl -H "X-Demo-User-Id: analyst-1" -H "X-Demo-Roles: ANALYST" \
+  "http://localhost:8085/governance/advisories/{event_id}/audit"
 ```
 
 If `ml-inference-service` is `DOWN` in Prometheus and `/metrics` returns `404`, the running Docker image is older than the current repo code. Rebuild the ML image:
@@ -522,6 +529,14 @@ Use this order during ML runtime incidents:
 4. Inspect ML runtime logs for `score_failed`, startup, and health behavior.
 5. Use `correlationId` in logs only after metrics identify the failing path.
 
+For governance audit write failures:
+
+1. Confirm the request is going to `alert-service`, not `ml-inference-service`.
+2. Verify the operator session has `governance-advisory:audit:write`.
+3. Check MongoDB availability for `alert-service`.
+4. Confirm the advisory still appears in the bounded ML advisory history used for snapshot lookup.
+5. Do not treat audit write failure as scoring or drift failure.
+
 ## Java Integration Note
 
 `fraud-scoring-service` already exposes enough fallback and ML-client telemetry for FDP-5:
@@ -542,6 +557,7 @@ No Java runtime behavior change is required. Java should continue using existing
 - Governance v1 describes aggregate input/output drift only, not model quality or automatic remediation.
 - The shipped reference profile is synthetic and not suitable for production drift decisions.
 - Governance history depends on MongoDB availability for persistence, but scoring and current in-memory governance endpoints continue without MongoDB.
+- Governance audit writes depend on `alert-service` MongoDB persistence and fail clearly when unavailable; write intent is not silently dropped.
 - Drift action recommendations are advisory operator signals only.
 - Logs remain necessary for request-level investigation.
 - First build on a new machine still requires Docker access to upstream registries for base images.

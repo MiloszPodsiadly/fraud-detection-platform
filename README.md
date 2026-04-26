@@ -40,7 +40,7 @@ This project models a production-style fraud detection workflow:
 - alert creation for high-risk transactions
 - fraud case management for grouped suspicious behavior
 - analyst-facing review UI
-- RBAC, security error handling, and audit logging for analyst actions
+- RBAC, security error handling, and audit logging for analyst actions and governance advisory review
 
 The goal is not to be a minimal demo. The repository shows service boundaries, event contracts, operational tradeoffs, security foundation work, and migration points toward production authentication.
 
@@ -89,7 +89,7 @@ Kafka contracts live in `common-events`. REST DTOs and persistence documents sta
 - Alerting: `HIGH` and `CRITICAL` scored transactions create analyst alerts.
 - Case management: rapid-transfer grouped fraud cases are created for `RAPID_TRANSFER_BURST_20K_PLN`.
 - Analyst console: scored transaction monitor, alert queue, alert details, assistant summary, decision form, and fraud case update flow.
-- Audit logging: analyst write actions emit structured audit events.
+- Audit logging: analyst write actions emit structured audit events; governance advisory human-review entries are persisted append-only.
 
 ## Security Foundation v1
 
@@ -105,6 +105,7 @@ Implemented:
 - Stable JSON HTTP 401/403 responses.
 - Principal-based actor identity for analyst write paths.
 - Audit logging v1 for alert decisions and fraud case updates.
+- Append-only governance advisory audit trail for authenticated human review.
 - Frontend session awareness, explicit session lifecycle states, role-aware action disabling, and dedicated auth/security states.
 - JWT/OIDC migration extension points.
 
@@ -144,6 +145,7 @@ Example authorities:
 - `fraud-case:read`
 - `fraud-case:update`
 - `transaction-monitor:read`
+- `governance-advisory:audit:write`
 
 Representative endpoint matrix:
 
@@ -157,6 +159,8 @@ Representative endpoint matrix:
 | `GET /api/v1/fraud-cases/{caseId}` | `fraud-case:read` |
 | `PATCH /api/v1/fraud-cases/{caseId}` | `fraud-case:update` |
 | `GET /api/v1/transactions/scored` | `transaction-monitor:read` |
+| `GET /governance/advisories/{event_id}/audit` | `transaction-monitor:read` |
+| `POST /governance/advisories/{event_id}/audit` | `governance-advisory:audit:write` |
 
 Full matrix: [Security Foundation v1](docs/security-foundation-v1.md).
 
@@ -168,6 +172,7 @@ Audited actions:
 
 - `SUBMIT_ANALYST_DECISION` on `ALERT`
 - `UPDATE_FRAUD_CASE` on `FRAUD_CASE`
+- governance advisory human-review entries in `ml_governance_audit_events`
 
 Audit events include:
 
@@ -189,6 +194,8 @@ Audit payloads intentionally exclude sensitive business details:
 - full request payloads
 
 Current sink: structured SLF4J logs through `StructuredAuditEventPublisher`. Durable audit storage is a production follow-up.
+
+Governance advisory audit entries are separate from fraud workflow audit logs. They are persisted append-only as human review history, derive actor identity from the backend-authenticated principal, and do not affect scoring, model behavior, retraining, rollback, or fraud decisioning.
 
 Full details: [Security Foundation v1](docs/security-foundation-v1.md).
 
@@ -598,6 +605,8 @@ Main local endpoints:
 - `POST http://localhost:8082/api/v1/replay/stop`: stop replay.
 - `GET http://localhost:8082/api/v1/replay/status`: replay status.
 - `GET http://localhost:8085/api/v1/transactions/scored?page=0&size=25`: paged scored transaction monitor data.
+- `GET http://localhost:8085/governance/advisories/{event_id}/audit`: governance advisory audit history.
+- `POST http://localhost:8085/governance/advisories/{event_id}/audit`: append governance advisory human-review audit entry.
 - `GET http://localhost:8085/api/v1/alerts`: alert queue.
 - `GET http://localhost:8085/api/v1/alerts/{alertId}`: alert details.
 - `GET http://localhost:8085/api/v1/alerts/{alertId}/assistant-summary`: assistant case summary.
@@ -796,7 +805,7 @@ GET /governance/history
 The Java scoring service sends `MlModelInput`, where `features` is the Java-enriched feature snapshot. The Python service responds with `MlModelOutput`: fraud score, risk level, model metadata, reason codes, score details, and explanation metadata.
 The ML HTTP contract is documented in `docs/openapi/ml-inference-service.openapi.yaml`; its public endpoint inventory and backward-compatibility rules are summarized in `docs/api-surface-v1.md`. ML error responses use the same platform `timestamp/status/error/message/details` envelope as the Java APIs.
 
-Current ML capabilities:
+Current ML and governance capabilities:
 
 - logistic baseline model
 - optional XGBoost adapter when the Python package is installed
@@ -805,7 +814,7 @@ Current ML capabilities:
 - production feature training mode for inference parity
 - SHADOW and COMPARE monitoring
 - analyst feedback dataset support
-- ML governance and drift v1 with model lineage, read-only model lifecycle visibility, synthetic/local reference profile quality, process-local inference profile lifecycle, drift confidence, advisory drift actions, governance advisory events, bounded MongoDB snapshot/lifecycle/advisory history, and low-cardinality governance metrics
+- ML governance and drift v1 with model lineage, read-only model lifecycle visibility, synthetic/local reference profile quality, process-local inference profile lifecycle, drift confidence, advisory drift actions, governance advisory events, authenticated advisory audit history, bounded MongoDB snapshot/lifecycle/advisory history, and low-cardinality governance metrics
 
 Governance snapshot and lifecycle persistence use the existing local MongoDB service and are optional for scoring:
 
@@ -819,13 +828,14 @@ Governance snapshot and lifecycle persistence use the existing local MongoDB ser
 | `MODEL_LIFECYCLE_RETENTION_LIMIT` | `200` |
 | `GOVERNANCE_ADVISORY_COLLECTION` | `ml_governance_advisory_events` |
 | `GOVERNANCE_ADVISORY_RETENTION_LIMIT` | `200` |
+| `GOVERNANCE_AUDIT_RETENTION_PER_ADVISORY_EVENT` | `500` |
 
 MongoDB outage pauses persisted governance history but does not fail scoring.
 Model lifecycle visibility is read-only; it does not switch models, retrain, rollback, approve models, validate model quality, or expose raw artifacts. Drift actions include lifecycle context for operator triage only and do not claim model lifecycle activity caused drift.
 Governance advisory events are operator signals only; they are not fraud alerts, model actions, retraining triggers, rollback triggers, automatic decisions, or frontend workflow items. Advisory events are heuristic and may be inaccurate under low data conditions; the system does not guarantee correctness of drift or advisory signals. Advisory events include bounded confidence context and are deduplicated to avoid repeated signals from repeated polling.
 Drift actions and advisory events do not block transactions, change scores, switch models, retrain models, roll back models, or trigger external alerting workflows.
 
-FDP-12 surfaces governance advisory events in the analyst console as a read-only operator review queue. The UI consumes only `GET /governance/advisories` with exact-match `severity`, `model_version`, and bounded `limit` filters. It does not add acknowledgement, audit trail, alert-service integration, fraud decisioning, retraining, rollback, polling, or write APIs. The queue is review context only and has no scoring impact.
+FDP-12 surfaces governance advisory events in the analyst console as an operator review queue. FDP-13 adds authenticated human-review audit recording for each advisory event. The UI consumes `GET /governance/advisories` for advisory context and uses `alert-service` for append-only audit history and writes. Audit entries record only `decision`, optional bounded `note`, backend-derived actor, and bounded advisory metadata; they do not change scoring, model behavior, retraining, rollback, advisory status, or fraud decisioning.
 
 Training smoke test:
 
@@ -905,6 +915,7 @@ Security and architecture:
 - [Security Foundation v1](docs/security-foundation-v1.md): consolidated technical reference for RBAC, local demo auth, actor identity, audit logging, frontend security UX, JWT/OIDC migration, review notes, known limitations, and next steps.
 - [API Surface v1](docs/api-surface-v1.md): public local HTTP endpoint inventory and backward-compatibility rules.
 - [ML Inference OpenAPI](docs/openapi/ml-inference-service.openapi.yaml): current OpenAPI reference for the Python ML runtime.
+- [Alert Service OpenAPI](docs/openapi/alert-service.openapi.yaml): current OpenAPI reference for governance advisory audit endpoints.
 - [API Error Contract](docs/api-error-contract.md): canonical local REST error envelope for timestamp/status/error/message/details and non-leakage rules.
 - [Operations And Observability v1](docs/operations-observability-v1.md): baseline observability foundation before the local monitoring stack rollout.
 - [Operations And Observability v2](docs/operations-observability-v2.md): current local Prometheus/Grafana runtime guide, ML metrics contract, alert thresholds, and troubleshooting flow.
@@ -939,6 +950,7 @@ Implemented:
 - audit logging v1
 - local Keycloak OIDC login, callback, bearer propagation, and logout flow
 - ML governance and drift v1 for `ml-inference-service`
+- governance advisory human-review audit trail in `alert-service`
 
 Known production gaps:
 
