@@ -440,6 +440,8 @@ GET /health
 GET /metrics
 ```
 
+The current ML API surface and backward-compatibility rules are tracked in `docs/api-surface-v1.md`; the OpenAPI reference is `docs/openapi/ml-inference-service.openapi.yaml`. Governance and scoring success responses keep their existing top-level fields. Error responses use the platform `timestamp/status/error/message/details` envelope.
+
 No auth is added in FDP-7 because `ml-inference-service` does not currently own an auth boundary. In production, expose these endpoints only through the same network controls used for operational metrics.
 
 History response:

@@ -794,6 +794,7 @@ GET /governance/history
 ```
 
 The Java scoring service sends `MlModelInput`, where `features` is the Java-enriched feature snapshot. The Python service responds with `MlModelOutput`: fraud score, risk level, model metadata, reason codes, score details, and explanation metadata.
+The ML HTTP contract is documented in `docs/openapi/ml-inference-service.openapi.yaml`; its public endpoint inventory and backward-compatibility rules are summarized in `docs/api-surface-v1.md`. ML error responses use the same platform `timestamp/status/error/message/details` envelope as the Java APIs.
 
 Current ML capabilities:
 
@@ -900,7 +901,9 @@ scripts/                         Synthetic dataset and replay scripts
 Security and architecture:
 
 - [Security Foundation v1](docs/security-foundation-v1.md): consolidated technical reference for RBAC, local demo auth, actor identity, audit logging, frontend security UX, JWT/OIDC migration, review notes, known limitations, and next steps.
-- [API Error Contract](docs/api-error-contract.md): canonical local Java REST error envelope for timestamp/status/error/message/details and non-leakage rules.
+- [API Surface v1](docs/api-surface-v1.md): public local HTTP endpoint inventory and backward-compatibility rules.
+- [ML Inference OpenAPI](docs/openapi/ml-inference-service.openapi.yaml): current OpenAPI reference for the Python ML runtime.
+- [API Error Contract](docs/api-error-contract.md): canonical local REST error envelope for timestamp/status/error/message/details and non-leakage rules.
 - [Operations And Observability v1](docs/operations-observability-v1.md): baseline observability foundation before the local monitoring stack rollout.
 - [Operations And Observability v2](docs/operations-observability-v2.md): current local Prometheus/Grafana runtime guide, ML metrics contract, alert thresholds, and troubleshooting flow.
 - [ML Governance And Drift v1](docs/ml-governance-drift-v1.md): bounded runtime governance layer for active model metadata, aggregate profiles, drift status, privacy rules, and incident playbook.

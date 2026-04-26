@@ -1,0 +1,452 @@
+openapi: 3.0.3
+info:
+  title: Fraud Detection ML Inference Service
+  version: "1.0"
+  description: Current FDP-11 contract for the Python ML inference runtime.
+servers:
+  - url: http://localhost:8090
+paths:
+  /health:
+    get:
+      summary: Runtime health
+      responses:
+        "200":
+          description: Active runtime status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      responses:
+        "200":
+          description: Prometheus text exposition.
+          content:
+            text/plain:
+              schema:
+                type: string
+  /v1/fraud/score:
+    post:
+      summary: Score fraud risk for a feature snapshot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [features]
+              additionalProperties: true
+              properties:
+                transactionId:
+                  type: string
+                correlationId:
+                  type: string
+                features:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "200":
+          description: Fraud score response. Existing top-level fields are intentionally unwrapped for backward compatibility.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FraudScoreResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "422":
+          description: Feature payload shape is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /governance/model:
+    get:
+      summary: Active model governance summary
+      responses:
+        "200":
+          description: Model, reference profile, inference profile, and drift summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceModelResponse"
+  /governance/model/current:
+    get:
+      summary: Current active model lifecycle metadata
+      responses:
+        "200":
+          description: Read-only current model lifecycle metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelLifecycleMetadata"
+  /governance/model/lifecycle:
+    get:
+      summary: Model lifecycle event history
+      responses:
+        "200":
+          description: Bounded lifecycle event history.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HistoryResponse"
+  /governance/profile/reference:
+    get:
+      summary: Reference profile details
+      responses:
+        "200":
+          description: Governance response with reference profile details.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceModelResponse"
+  /governance/profile/inference:
+    get:
+      summary: Inference profile details
+      responses:
+        "200":
+          description: Governance response with aggregate inference profile details.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceModelResponse"
+  /governance/drift:
+    get:
+      summary: Drift status
+      responses:
+        "200":
+          description: Aggregate drift evaluation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceModelResponse"
+  /governance/drift/actions:
+    get:
+      summary: Advisory drift actions
+      responses:
+        "200":
+          description: Advisory-only operator guidance. It does not change scoring, block requests, retrain, or switch models.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriftActionsResponse"
+  /governance/advisories:
+    get:
+      summary: Governance advisory history
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: severity
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [LOW, MEDIUM, HIGH, CRITICAL]
+        - name: model_version
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Bounded advisory event history.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdvisoryHistoryResponse"
+  /governance/history:
+    get:
+      summary: Governance snapshot history
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        "200":
+          description: Bounded governance snapshot history.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HistoryResponse"
+components:
+  responses:
+    BadRequest:
+      description: Invalid JSON or malformed request body.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    InternalServerError:
+      description: Generic internal failure without implementation details.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  schemas:
+    HealthResponse:
+      type: object
+      required: [modelName, modelVersion, status]
+      properties:
+        status:
+          type: string
+          enum: [UP]
+        modelName:
+          type: string
+        modelVersion:
+          type: string
+    ErrorResponse:
+      type: object
+      required: [timestamp, status, error, message, details]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+        error:
+          type: string
+        message:
+          type: string
+        details:
+          type: array
+          items:
+            type: string
+    FraudScoreResponse:
+      type: object
+      required:
+        - available
+        - explanationMetadata
+        - fallbackReason
+        - fraudScore
+        - inferenceTimestamp
+        - modelName
+        - modelVersion
+        - reasonCodes
+        - riskLevel
+        - scoreDetails
+      properties:
+        available:
+          type: boolean
+        fraudScore:
+          type: number
+        riskLevel:
+          type: string
+          enum: [LOW, MEDIUM, HIGH, CRITICAL]
+        modelName:
+          type: string
+        modelVersion:
+          type: string
+        inferenceTimestamp:
+          type: string
+          format: date-time
+        reasonCodes:
+          type: array
+          items:
+            type: string
+        scoreDetails:
+          type: object
+          additionalProperties: true
+          required: [bias, featureCompatibility, featureContributions, logit, modelFamily, normalizedFeatures]
+        explanationMetadata:
+          type: object
+          additionalProperties: true
+          required: [engineType, explanationType, modelAvailable, modelName, modelVersion]
+        fallbackReason:
+          nullable: true
+          type: string
+    GovernanceModelResponse:
+      type: object
+      required: [drift, inference_profile, model, reference_profile]
+      properties:
+        model:
+          type: object
+          additionalProperties: true
+        reference_profile:
+          type: object
+          additionalProperties: true
+        inference_profile:
+          type: object
+          additionalProperties: true
+        drift:
+          type: object
+          additionalProperties: true
+    ModelLifecycleMetadata:
+      type: object
+      required:
+        - artifact_checksum
+        - artifact_path_or_id
+        - artifact_source
+        - feature_set_version
+        - lifecycle_mode
+        - loaded_at
+        - model_family
+        - model_name
+        - model_version
+        - reference_profile_id
+        - runtime_environment
+        - training_mode
+      additionalProperties: false
+      properties:
+        artifact_checksum:
+          type: string
+          nullable: true
+        artifact_path_or_id:
+          type: string
+        artifact_source:
+          type: string
+        feature_set_version:
+          type: string
+          nullable: true
+        lifecycle_mode:
+          type: string
+          enum: [READ_ONLY]
+        loaded_at:
+          type: string
+          format: date-time
+        model_family:
+          type: string
+        model_name:
+          type: string
+        model_version:
+          type: string
+        reference_profile_id:
+          type: string
+          nullable: true
+        runtime_environment:
+          type: string
+        training_mode:
+          type: string
+          nullable: true
+    DriftActionsResponse:
+      type: object
+      required:
+        - automation_policy
+        - confidence
+        - drift_status
+        - evaluated_at
+        - escalation
+        - explanation
+        - model_lifecycle
+        - recommended_actions
+        - severity
+        - trend
+      properties:
+        severity:
+          type: string
+        confidence:
+          type: string
+        drift_status:
+          type: string
+        trend:
+          type: string
+        recommended_actions:
+          type: array
+          items:
+            type: string
+        escalation:
+          type: string
+        automation_policy:
+          type: object
+          additionalProperties: true
+        evaluated_at:
+          type: string
+          format: date-time
+        explanation:
+          type: string
+        model_lifecycle:
+          type: object
+          additionalProperties: true
+    AdvisoryHistoryResponse:
+      type: object
+      required: [advisory_events, count, retention_limit, status]
+      properties:
+        status:
+          type: string
+          enum: [AVAILABLE, PARTIAL, UNAVAILABLE]
+        count:
+          type: integer
+        retention_limit:
+          type: integer
+        advisory_events:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdvisoryEvent"
+    AdvisoryEvent:
+      type: object
+      required:
+        - advisory_confidence_context
+        - confidence
+        - created_at
+        - drift_status
+        - event_id
+        - event_type
+        - explanation
+        - lifecycle_context
+        - model_name
+        - model_version
+        - recommended_actions
+        - severity
+      properties:
+        event_id:
+          type: string
+        event_type:
+          type: string
+          enum: [GOVERNANCE_DRIFT_ADVISORY]
+        severity:
+          type: string
+          enum: [LOW, MEDIUM, HIGH, CRITICAL]
+        drift_status:
+          type: string
+        confidence:
+          type: string
+        advisory_confidence_context:
+          type: string
+          enum: [LOW_SAMPLE, PARTIAL_DATA, STABLE_BASELINE, SUFFICIENT_DATA]
+        model_name:
+          type: string
+        model_version:
+          type: string
+        lifecycle_context:
+          type: object
+          required: [current_model_version, model_changed_recently, model_loaded_at, recent_lifecycle_event_count]
+          additionalProperties: false
+          properties:
+            current_model_version:
+              type: string
+            model_loaded_at:
+              type: string
+              nullable: true
+            model_changed_recently:
+              type: boolean
+            recent_lifecycle_event_count:
+              type: integer
+        recommended_actions:
+          type: array
+          items:
+            type: string
+        explanation:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+    HistoryResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        status:
+          type: string
+          enum: [AVAILABLE, PARTIAL, UNAVAILABLE]
+        count:
+          type: integer
