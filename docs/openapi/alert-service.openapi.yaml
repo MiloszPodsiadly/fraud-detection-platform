@@ -1,11 +1,82 @@
 openapi: 3.0.3
 info:
   title: Alert Service API
-  version: FDP-14
-  description: Authenticated alert-service contracts for analyst workflows, governance advisory lifecycle projection, and human-review audit.
+  version: FDP-16.2
+  description: Authenticated alert-service contracts for analyst workflows, durable platform audit reads, governance advisory lifecycle projection, and human-review audit.
 servers:
   - url: http://localhost:8085
 paths:
+  /api/v1/audit/events:
+    get:
+      summary: List durable platform audit events
+      description: Returns bounded newest-first durable platform audit events. Requires audit:read. Filters are exact-match only; no regex, full-text search, export, aggregation, delete, or update operations are supported. If persistence cannot be read, returns status UNAVAILABLE with an empty events array.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: event_type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [SUBMIT_ANALYST_DECISION, UPDATE_FRAUD_CASE]
+        - name: actor_id
+          in: query
+          required: false
+          description: Exact backend-derived actor id match.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 120
+        - name: resource_type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [ALERT, FRAUD_CASE]
+        - name: resource_id
+          in: query
+          required: false
+          description: Exact resource id match.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+        - name: from
+          in: query
+          required: false
+          description: Inclusive ISO-8601 lower timestamp bound. If provided without to, the upper bound is request time.
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          description: Inclusive ISO-8601 upper timestamp bound.
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        "200":
+          description: Durable audit events returned or audit storage reported unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditEventReadResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /governance/advisories:
     get:
       summary: List governance advisories with derived lifecycle status
@@ -186,6 +257,91 @@ components:
         maxLength: 120
         pattern: "^[A-Za-z0-9._:-]+$"
   schemas:
+    AuditEventReadResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - count
+        - limit
+        - events
+      properties:
+        status:
+          type: string
+          enum: [AVAILABLE, UNAVAILABLE]
+        count:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEvent"
+    AuditEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - audit_event_id
+        - event_type
+        - actor_id
+        - actor_display_name
+        - actor_roles
+        - resource_type
+        - resource_id
+        - action
+        - outcome
+        - occurred_at
+        - metadata_summary
+      properties:
+        audit_event_id:
+          type: string
+        event_type:
+          type: string
+          enum: [SUBMIT_ANALYST_DECISION, UPDATE_FRAUD_CASE]
+        actor_id:
+          type: string
+          description: Backend-derived authenticated actor identity.
+        actor_display_name:
+          type: string
+        actor_roles:
+          type: array
+          items:
+            type: string
+        resource_type:
+          type: string
+          enum: [ALERT, FRAUD_CASE]
+        resource_id:
+          type: string
+        action:
+          type: string
+          enum: [SUBMIT_ANALYST_DECISION, UPDATE_FRAUD_CASE]
+        outcome:
+          type: string
+          enum: [SUCCESS, REJECTED, FAILED]
+        occurred_at:
+          type: string
+          format: date-time
+        metadata_summary:
+          $ref: "#/components/schemas/AuditEventMetadataSummary"
+    AuditEventMetadataSummary:
+      type: object
+      additionalProperties: false
+      description: Bounded safe metadata summary. Does not include raw payloads, feature vectors, tokens, secrets, stack traces, or customer/account/card data.
+      required:
+        - correlation_id
+        - failure_reason
+      properties:
+        correlation_id:
+          type: string
+          nullable: true
+          maxLength: 120
+        failure_reason:
+          type: string
+          nullable: true
+          maxLength: 120
     GovernanceAdvisoryLifecycleStatus:
       type: string
       description: Read-time projection from latest audit decision. OPEN means no audit event exists.
