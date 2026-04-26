@@ -32,8 +32,27 @@ class InternalServiceClientProdGuard implements InitializingBean {
         if (properties.normalizedServiceName().isBlank()) {
             throw new IllegalStateException("Internal service auth client service name is required in prod-like profiles.");
         }
-        if (properties.normalizedToken().isBlank()) {
-            throw new IllegalStateException("Internal service auth client token is required in prod-like profiles.");
+        if ("DISABLED_LOCAL_ONLY".equals(properties.normalizedMode())) {
+            throw new IllegalStateException("DISABLED_LOCAL_ONLY internal auth client mode is forbidden in prod-like profiles.");
+        }
+        if ("TOKEN_VALIDATOR".equals(properties.normalizedMode())) {
+            if (!properties.allowTokenValidatorInProd()) {
+                throw new IllegalStateException("TOKEN_VALIDATOR internal auth client mode requires explicit prod compatibility opt-in.");
+            }
+            if (properties.normalizedToken().isBlank()) {
+                throw new IllegalStateException("Internal service auth client token is required in prod-like profiles.");
+            }
+        }
+        if ("JWT_SERVICE_IDENTITY".equals(properties.normalizedMode())) {
+            if (!properties.jwt().complete()) {
+                throw new IllegalStateException("JWT_SERVICE_IDENTITY internal auth client mode requires complete JWT issuer, audience, algorithm, key material, ttl, and authorities in prod-like profiles.");
+            }
+            if (!properties.jwt().productionTarget()) {
+                throw new IllegalStateException("HS256 internal auth client JWT mode is local compatibility only and is forbidden in prod-like profiles.");
+            }
+        }
+        if ("MTLS_READY".equals(properties.normalizedMode())) {
+            throw new IllegalStateException("MTLS_READY internal auth client mode is a fail-closed placeholder until mTLS is configured.");
         }
     }
 

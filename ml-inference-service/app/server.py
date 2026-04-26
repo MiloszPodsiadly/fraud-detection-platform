@@ -5,7 +5,9 @@ import hashlib
 import hmac
 import os
 import re
+import threading
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from http import HTTPStatus
 from datetime import datetime, timezone
@@ -13,6 +15,18 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+import jwt
+from jwt import (
+    ExpiredSignatureError,
+    InvalidAlgorithmError,
+    InvalidAudienceError,
+    InvalidIssuerError,
+    InvalidKeyError,
+    InvalidSignatureError,
+    InvalidTokenError,
+    MissingRequiredClaimError,
+)
+from jwt.algorithms import RSAAlgorithm
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
 from app.governance.advisory import (
@@ -110,6 +124,17 @@ INTERNAL_AUTH_FAILURES = Counter(
     "fraud_internal_auth_failure_total",
     "Rejected internal service authentication attempts.",
     ("target_service", "reason"),
+)
+INTERNAL_AUTH_REPLAY_REJECTIONS = Counter(
+    "fraud_internal_auth_replay_rejected_total",
+    "Rejected internal service JWT replay or freshness attempts.",
+    ("reason",),
+)
+INTERNAL_AUTH_TOKEN_AGE = Histogram(
+    "fraud_internal_auth_token_age_seconds",
+    "Age of internal service JWTs rejected by replay or freshness checks.",
+    ("reason",),
+    buckets=(0, 1, 5, 15, 30, 60, 120, 300, 600, 900),
 )
 MODEL_LOAD_STATUS = Gauge(
     "fraud_ml_model_load_status",
@@ -242,24 +267,75 @@ class InternalServiceCredential:
 INTERNAL_AUTH_TARGET_SERVICE = "ml-inference-service"
 LOCAL_INTERNAL_AUTH_MODES = {"LOCALDEV", "DISABLED_LOCAL_ONLY"}
 TOKEN_INTERNAL_AUTH_MODES = {"REQUIRED", "TOKEN_VALIDATOR"}
+JWT_INTERNAL_AUTH_MODES = {"JWT_SERVICE_IDENTITY"}
+SUPPORTED_INTERNAL_AUTH_MODES = LOCAL_INTERNAL_AUTH_MODES | TOKEN_INTERNAL_AUTH_MODES | JWT_INTERNAL_AUTH_MODES | {"MTLS_READY"}
 PROD_LIKE_PROFILES = {"prod", "production", "staging"}
 INTERNAL_AUTH_FAILURE_REASONS = {
     "missing_internal_credentials",
     "invalid_internal_credentials",
+    "expired_internal_token",
+    "invalid_internal_token",
+    "invalid_internal_issuer",
+    "invalid_internal_audience",
+    "unknown_internal_service",
     "missing_internal_authority",
     "mtls_not_configured",
 }
+REPLAY_REASON_EXPIRED = "EXPIRED"
+REPLAY_REASON_TOO_OLD = "TOO_OLD"
+REPLAY_REASON_FUTURE_IAT = "FUTURE_IAT"
+REPLAY_REASON_REPLAY_DETECTED = "REPLAY_DETECTED"
+DEFAULT_JWT_MAX_TOKEN_AGE_SECONDS = 300
+DEFAULT_JWT_MAX_ALLOWED_TTL_SECONDS = 300
+DEFAULT_JWT_CLOCK_SKEW_SECONDS = 30
+DEFAULT_REPLAY_CACHE_MAX_ENTRIES = 10_000
+
+
+class SoftReplayCache:
+    def __init__(self) -> None:
+        self._entries: OrderedDict[str, float] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def seen(self, token_hash: str, expires_at: float, now: float, max_entries: int) -> bool:
+        with self._lock:
+            self._evict(now, max_entries)
+            cached_expires_at = self._entries.get(token_hash)
+            if cached_expires_at is not None and cached_expires_at > now:
+                self._entries.move_to_end(token_hash)
+                return True
+            self._entries[token_hash] = expires_at
+            self._entries.move_to_end(token_hash)
+            self._evict(now, max_entries)
+            return False
+
+    def clear(self) -> None:
+        with self._lock:
+            self._entries.clear()
+
+    def _evict(self, now: float, max_entries: int) -> None:
+        expired = [key for key, expires_at in self._entries.items() if expires_at <= now]
+        for key in expired:
+            self._entries.pop(key, None)
+        while len(self._entries) > max(max_entries, 1):
+            self._entries.popitem(last=False)
+
+
+SOFT_REPLAY_CACHE = SoftReplayCache()
+
+
+def _normalize_internal_auth_mode(mode: str) -> str:
+    candidate = mode.strip().upper()
+    if candidate not in SUPPORTED_INTERNAL_AUTH_MODES:
+        raise RuntimeError("Unsupported internal auth mode.")
+    if candidate in LOCAL_INTERNAL_AUTH_MODES:
+        return "DISABLED_LOCAL_ONLY"
+    if candidate in TOKEN_INTERNAL_AUTH_MODES:
+        return "TOKEN_VALIDATOR"
+    return candidate
 
 
 def _internal_auth_mode() -> str:
-    mode = os.getenv("INTERNAL_AUTH_MODE", "REQUIRED").strip().upper()
-    if mode in LOCAL_INTERNAL_AUTH_MODES:
-        return "DISABLED_LOCAL_ONLY"
-    if mode in TOKEN_INTERNAL_AUTH_MODES:
-        return "TOKEN_VALIDATOR"
-    if mode == "MTLS_READY":
-        return "MTLS_READY"
-    return "TOKEN_VALIDATOR"
+    return _normalize_internal_auth_mode(os.getenv("INTERNAL_AUTH_MODE", "REQUIRED"))
 
 
 def _runtime_profile() -> str:
@@ -280,6 +356,10 @@ def _prod_like_profile(profile: str | None = None) -> bool:
 
 def _token_hash_mode() -> bool:
     return os.getenv("INTERNAL_AUTH_TOKEN_HASH_MODE", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _allow_token_validator_in_prod() -> bool:
+    return os.getenv("INTERNAL_AUTH_ALLOW_TOKEN_VALIDATOR_IN_PROD", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _allowed_internal_services() -> dict[str, InternalServiceCredential]:
@@ -305,23 +385,319 @@ def _allowed_internal_services() -> dict[str, InternalServiceCredential]:
 INTERNAL_SERVICE_CREDENTIALS = _allowed_internal_services()
 
 
+def _jwt_issuer() -> str:
+    return os.getenv("INTERNAL_AUTH_JWT_ISSUER", "").strip()
+
+
+def _jwt_audience() -> str:
+    return os.getenv("INTERNAL_AUTH_JWT_AUDIENCE", "").strip()
+
+
+def _jwt_secret() -> str:
+    return os.getenv("INTERNAL_AUTH_JWT_SECRET", "").strip()
+
+
+def _jwt_algorithm() -> str:
+    return os.getenv("INTERNAL_AUTH_JWT_ALGORITHM", "HS256").strip().upper()
+
+
+def _jwt_jwks_json() -> str:
+    return os.getenv("INTERNAL_AUTH_JWKS_JSON", "").strip()
+
+
+def _jwt_jwks_path() -> str:
+    return os.getenv("INTERNAL_AUTH_JWKS_PATH", "").strip()
+
+
+def _jwt_service_claim() -> str:
+    return os.getenv("INTERNAL_AUTH_JWT_SERVICE_CLAIM", "service_name").strip() or "service_name"
+
+
+def _jwt_authorities_claim() -> str:
+    return os.getenv("INTERNAL_AUTH_JWT_AUTHORITIES_CLAIM", "authorities").strip() or "authorities"
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)).strip())
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def _jwt_max_token_age_seconds() -> int:
+    return _env_int("INTERNAL_AUTH_JWT_MAX_TOKEN_AGE_SECONDS", DEFAULT_JWT_MAX_TOKEN_AGE_SECONDS)
+
+
+def _jwt_max_allowed_ttl_seconds() -> int:
+    return _env_int("INTERNAL_AUTH_JWT_MAX_ALLOWED_TTL_SECONDS", DEFAULT_JWT_MAX_ALLOWED_TTL_SECONDS)
+
+
+def _jwt_clock_skew_seconds() -> int:
+    return _env_int("INTERNAL_AUTH_JWT_CLOCK_SKEW_SECONDS", DEFAULT_JWT_CLOCK_SKEW_SECONDS)
+
+
+def _replay_cache_enabled() -> bool:
+    return os.getenv("INTERNAL_AUTH_REPLAY_CACHE_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _replay_cache_reject_mode() -> bool:
+    return os.getenv("INTERNAL_AUTH_REPLAY_CACHE_MODE", "log").strip().lower() == "reject"
+
+
+def _replay_cache_max_entries() -> int:
+    return _env_int("INTERNAL_AUTH_REPLAY_CACHE_MAX_ENTRIES", DEFAULT_REPLAY_CACHE_MAX_ENTRIES)
+
+
+def _allowed_jwt_service_authorities() -> dict[str, frozenset[str]]:
+    raw = os.getenv("INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES", "")
+    services: dict[str, frozenset[str]] = {}
+    for entry in raw.split(","):
+        parts = entry.strip().split(":", 1)
+        if len(parts) != 2:
+            continue
+        service_name, authorities = (part.strip() for part in parts)
+        if not service_name:
+            continue
+        authority_set = frozenset(authority.strip() for authority in authorities.split("|") if authority.strip())
+        if not authority_set:
+            continue
+        services[service_name] = authority_set
+    return services
+
+
+def _allowed_jwt_service_keys() -> dict[str, frozenset[str]]:
+    raw = os.getenv("INTERNAL_AUTH_ALLOWED_SERVICE_KEYS", "")
+    services: dict[str, frozenset[str]] = {}
+    for entry in raw.split(","):
+        parts = entry.strip().split(":", 1)
+        if len(parts) != 2:
+            continue
+        service_name, key_ids = (part.strip() for part in parts)
+        if not service_name:
+            continue
+        key_id_set = frozenset(key_id.strip() for key_id in key_ids.split("|") if key_id.strip())
+        if not key_id_set:
+            continue
+        services[service_name] = key_id_set
+    return services
+
+
+def _jwt_jwks_configured() -> bool:
+    return bool(_jwt_jwks_json() or _jwt_jwks_path())
+
+
+def _jwt_configured() -> bool:
+    algorithm = _jwt_algorithm()
+    if algorithm == "RS256":
+        return bool(
+            _jwt_issuer()
+            and _jwt_audience()
+            and _jwt_jwks_configured()
+            and _allowed_jwt_service_authorities()
+            and _allowed_jwt_service_keys()
+        )
+    if algorithm == "HS256":
+        return bool(
+            _jwt_issuer()
+            and _jwt_audience()
+            and len(_jwt_secret().encode("utf-8")) >= 32
+            and _allowed_jwt_service_authorities()
+        )
+    return False
+
+
+def _load_jwks() -> dict[str, Any]:
+    raw = _jwt_jwks_json()
+    if not raw:
+        path = _jwt_jwks_path()
+        if not path:
+            return {}
+        try:
+            with open(path, encoding="utf-8") as handle:
+                raw = handle.read()
+        except OSError:
+            return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _jwk_for_kid(kid: str) -> dict[str, Any] | None:
+    keys = _load_jwks().get("keys")
+    if not isinstance(keys, list):
+        return None
+    for jwk in keys:
+        if not isinstance(jwk, dict) or jwk.get("kid") != kid:
+            continue
+        if jwk.get("kty") != "RSA" or jwk.get("alg") not in (None, "RS256"):
+            return None
+        if "d" in jwk or "p" in jwk or "q" in jwk:
+            return None
+        if not isinstance(jwk.get("n"), str) or not isinstance(jwk.get("e"), str):
+            return None
+        return jwk
+    return None
+
+
+def _rs256_public_key_for_kid(kid: str) -> Any | None:
+    jwk = _jwk_for_kid(kid)
+    if jwk is None:
+        return None
+    try:
+        return RSAAlgorithm.from_jwk(json.dumps(jwk))
+    except (InvalidKeyError, ValueError, TypeError, KeyError):
+        return None
+
+
+def _jwt_authorities(value: Any) -> frozenset[str]:
+    if isinstance(value, list):
+        return frozenset(item.strip() for item in value if isinstance(item, str) and item.strip())
+    if isinstance(value, str):
+        return frozenset(part.strip() for part in re.split(r"[\s,]+", value) if part.strip())
+    return frozenset()
+
+
+def _numeric_timestamp(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return int(value)
+
+
+def _record_replay_metric(reason: str, token_age_seconds: float) -> None:
+    INTERNAL_AUTH_REPLAY_REJECTIONS.labels(reason).inc()
+    INTERNAL_AUTH_TOKEN_AGE.labels(reason).observe(max(token_age_seconds, 0.0))
+
+
+def _log_internal_auth_replay_detected() -> None:
+    print(json.dumps({
+        "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+        "service": "ml-inference-service",
+        "event": "internal_auth_replay_detected",
+        "reason": REPLAY_REASON_REPLAY_DETECTED,
+    }, separators=(",", ":"), sort_keys=True), flush=True)
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _validate_jwt_service_token(token: str, required_authority: str) -> tuple[InternalServicePrincipal | None, int, str]:
+    algorithm = _jwt_algorithm()
+    if algorithm not in {"RS256", "HS256"}:
+        return None, 403, "invalid_internal_token"
+    try:
+        header = jwt.get_unverified_header(token)
+    except InvalidTokenError:
+        return None, 403, "invalid_internal_token"
+    if not isinstance(header, dict) or header.get("alg") != algorithm:
+        return None, 403, "invalid_internal_token"
+    key: Any
+    kid = header.get("kid")
+    if algorithm == "RS256":
+        if not isinstance(kid, str) or not kid.strip():
+            return None, 403, "invalid_internal_token"
+        kid = kid.strip()
+        key = _rs256_public_key_for_kid(kid)
+        if key is None:
+            return None, 403, "invalid_internal_token"
+    else:
+        key = _jwt_secret()
+    try:
+        claims = jwt.decode(
+            token,
+            key,
+            algorithms=[algorithm],
+            issuer=_jwt_issuer(),
+            audience=_jwt_audience(),
+            options={
+                "require": ["iss", "aud", "iat", "exp", _jwt_service_claim(), _jwt_authorities_claim()],
+                "verify_exp": False,
+                "verify_iat": False,
+            },
+        )
+    except InvalidIssuerError:
+        return None, 403, "invalid_internal_issuer"
+    except InvalidAudienceError:
+        return None, 403, "invalid_internal_audience"
+    except (ExpiredSignatureError, InvalidAlgorithmError, InvalidSignatureError, MissingRequiredClaimError, InvalidTokenError):
+        return None, 403, "invalid_internal_token"
+    now = int(time.time())
+    skew_seconds = _jwt_clock_skew_seconds()
+    max_token_age_seconds = _jwt_max_token_age_seconds()
+    max_allowed_ttl_seconds = _jwt_max_allowed_ttl_seconds()
+    iat = _numeric_timestamp(claims.get("iat"))
+    exp = _numeric_timestamp(claims.get("exp"))
+    if iat is None or exp is None:
+        return None, 403, "invalid_internal_token"
+    token_age_seconds = now - iat
+    if iat > now + skew_seconds:
+        _record_replay_metric(REPLAY_REASON_FUTURE_IAT, token_age_seconds)
+        return None, 403, "invalid_internal_token"
+    if exp <= iat:
+        return None, 403, "invalid_internal_token"
+    if exp - iat > max_allowed_ttl_seconds:
+        _record_replay_metric(REPLAY_REASON_TOO_OLD, token_age_seconds)
+        return None, 403, "invalid_internal_token"
+    if token_age_seconds > max_token_age_seconds:
+        _record_replay_metric(REPLAY_REASON_TOO_OLD, token_age_seconds)
+        return None, 403, "invalid_internal_token"
+    if now > exp + skew_seconds:
+        _record_replay_metric(REPLAY_REASON_EXPIRED, token_age_seconds)
+        return None, 401, "expired_internal_token"
+    service_name = claims.get(_jwt_service_claim())
+    if not isinstance(service_name, str) or not service_name.strip():
+        return None, 403, "unknown_internal_service"
+    service_name = service_name.strip()
+    allowed_authorities = _allowed_jwt_service_authorities().get(service_name)
+    if allowed_authorities is None:
+        return None, 403, "unknown_internal_service"
+    if algorithm == "RS256":
+        allowed_key_ids = _allowed_jwt_service_keys().get(service_name)
+        if allowed_key_ids is None or kid not in allowed_key_ids:
+            return None, 403, "invalid_internal_token"
+    token_authorities = _jwt_authorities(claims.get(_jwt_authorities_claim()))
+    if required_authority not in allowed_authorities or required_authority not in token_authorities:
+        return None, 403, "missing_internal_authority"
+    if _replay_cache_enabled():
+        replay_expires_at = min(exp + skew_seconds, now + max(exp - iat, 1))
+        if SOFT_REPLAY_CACHE.seen(_token_hash(token), replay_expires_at, now, _replay_cache_max_entries()):
+            _record_replay_metric(REPLAY_REASON_REPLAY_DETECTED, token_age_seconds)
+            _log_internal_auth_replay_detected()
+            if _replay_cache_reject_mode():
+                return None, 403, "invalid_internal_token"
+    return InternalServicePrincipal(
+        service_name=service_name,
+        authorities=token_authorities & allowed_authorities,
+        authenticated_at=datetime.now(timezone.utc),
+        auth_mode="JWT_SERVICE_IDENTITY",
+    ), 200, "allowed"
+
+
 def _validate_internal_auth_startup(
         mode: str | None = None,
         profile: str | None = None,
         credentials: dict[str, InternalServiceCredential] | None = None,
 ) -> None:
-    normalized_mode = _internal_auth_mode() if mode is None else (
-        "DISABLED_LOCAL_ONLY" if mode.strip().upper() in LOCAL_INTERNAL_AUTH_MODES
-        else "MTLS_READY" if mode.strip().upper() == "MTLS_READY"
-        else "TOKEN_VALIDATOR"
-    )
+    normalized_mode = _internal_auth_mode() if mode is None else _normalize_internal_auth_mode(mode)
     configured_credentials = INTERNAL_SERVICE_CREDENTIALS if credentials is None else credentials
     if normalized_mode == "DISABLED_LOCAL_ONLY" and _prod_like_profile(profile):
         raise RuntimeError("DISABLED_LOCAL_ONLY internal auth mode is forbidden in prod-like profiles.")
-    if normalized_mode == "TOKEN_VALIDATOR" and _prod_like_profile(profile) and not _token_hash_mode():
-        raise RuntimeError("TOKEN_VALIDATOR internal auth mode requires token hash mode in prod-like profiles.")
-    if normalized_mode == "TOKEN_VALIDATOR" and _prod_like_profile(profile) and not configured_credentials:
-        raise RuntimeError("TOKEN_VALIDATOR internal auth mode requires an allowed service list in prod-like profiles.")
+    if normalized_mode == "TOKEN_VALIDATOR" and _prod_like_profile(profile):
+        if not _allow_token_validator_in_prod():
+            raise RuntimeError("TOKEN_VALIDATOR internal auth mode requires explicit prod compatibility opt-in.")
+        if not _token_hash_mode():
+            raise RuntimeError("TOKEN_VALIDATOR internal auth mode requires token hash mode in prod-like profiles.")
+        if not configured_credentials:
+            raise RuntimeError("TOKEN_VALIDATOR internal auth mode requires an allowed service list in prod-like profiles.")
+    if normalized_mode == "JWT_SERVICE_IDENTITY" and not _jwt_configured():
+        raise RuntimeError("JWT_SERVICE_IDENTITY internal auth mode requires complete JWT issuer, audience, algorithm, key material, service authorities, and service key bindings.")
+    if normalized_mode == "JWT_SERVICE_IDENTITY" and _jwt_algorithm() == "HS256" and _prod_like_profile(profile):
+        raise RuntimeError("HS256 JWT service identity is local compatibility only and is forbidden in prod-like profiles.")
+    if normalized_mode == "MTLS_READY" and _prod_like_profile(profile):
+        raise RuntimeError("MTLS_READY internal auth mode is a fail-closed placeholder until mTLS is configured.")
 
 
 _validate_internal_auth_startup()
@@ -686,6 +1062,13 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             ), 200, "allowed_localdev"
         if mode == "MTLS_READY":
             return None, 401, "mtls_not_configured"
+        if mode == "JWT_SERVICE_IDENTITY":
+            authorization = self.headers.get("Authorization", "").strip()
+            if not authorization:
+                return None, 401, "missing_internal_credentials"
+            if not authorization.startswith("Bearer ") or not authorization[7:].strip():
+                return None, 403, "invalid_internal_token"
+            return _validate_jwt_service_token(authorization[7:].strip(), required_authority)
         if not service_name or not token:
             return None, 401, "missing_internal_credentials"
         credential = INTERNAL_SERVICE_CREDENTIALS.get(service_name)
@@ -707,11 +1090,15 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
         return hmac.compare_digest(configured_token, presented_token)
 
     def _record_internal_auth_success(self, principal: InternalServicePrincipal) -> None:
-        source_service = principal.service_name if principal.service_name in INTERNAL_SERVICE_CREDENTIALS else "localdev"
+        if principal.auth_mode == "JWT_SERVICE_IDENTITY":
+            allowed_services = _allowed_jwt_service_authorities()
+            source_service = principal.service_name if principal.service_name in allowed_services else "unknown"
+        else:
+            source_service = principal.service_name if principal.service_name in INTERNAL_SERVICE_CREDENTIALS else "localdev"
         INTERNAL_AUTH_SUCCESSES.labels(source_service, INTERNAL_AUTH_TARGET_SERVICE).inc()
 
     def _record_internal_auth_failure(self, endpoint: str, reason: str) -> None:
-        normalized_reason = reason if reason in INTERNAL_AUTH_FAILURE_REASONS else "invalid_internal_credentials"
+        normalized_reason = reason if reason in INTERNAL_AUTH_FAILURE_REASONS else "invalid_internal_token"
         INTERNAL_AUTH_FAILURES.labels(INTERNAL_AUTH_TARGET_SERVICE, normalized_reason).inc()
         self._log_event(
             "internal_auth_rejected",

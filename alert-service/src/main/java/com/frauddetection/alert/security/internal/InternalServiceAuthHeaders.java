@@ -10,16 +10,24 @@ public class InternalServiceAuthHeaders {
     private static final String SERVICE_TOKEN_HEADER = "X-Internal-Service-Token";
 
     private final InternalServiceClientProperties properties;
+    private final InternalServiceCredentialProvider credentialProvider;
 
     public InternalServiceAuthHeaders(InternalServiceClientProperties properties) {
         this.properties = properties;
+        this.credentialProvider = new InternalServiceCredentialProvider(properties);
     }
 
     public void apply(HttpHeaders headers) {
         if (!properties.enabled()) {
             return;
         }
-        headers.set(SERVICE_NAME_HEADER, properties.normalizedServiceName());
-        headers.set(SERVICE_TOKEN_HEADER, properties.normalizedToken());
+        if ("TOKEN_VALIDATOR".equals(properties.normalizedMode())) {
+            headers.set(SERVICE_NAME_HEADER, properties.normalizedServiceName());
+            headers.set(SERVICE_TOKEN_HEADER, properties.normalizedToken());
+            return;
+        }
+        if ("JWT_SERVICE_IDENTITY".equals(properties.normalizedMode())) {
+            headers.setBearerAuth(credentialProvider.bearerToken());
+        }
     }
 }

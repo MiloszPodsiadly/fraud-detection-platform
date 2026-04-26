@@ -3,29 +3,153 @@ package com.frauddetection.alert.security.internal;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
+import java.time.Duration;
+import java.util.Arrays;
+import java.util.List;
+
 @Validated
 @ConfigurationProperties(prefix = "app.internal-auth.client")
 public record InternalServiceClientProperties(
         boolean enabled,
+        String mode,
         String serviceName,
-        String token
+        String token,
+        boolean allowTokenValidatorInProd,
+        Jwt jwt
 ) {
+    private static final List<String> MODES = List.of(
+            "DISABLED_LOCAL_ONLY",
+            "TOKEN_VALIDATOR",
+            "JWT_SERVICE_IDENTITY",
+            "MTLS_READY"
+    );
+
     public InternalServiceClientProperties {
-        if (enabled) {
-            if (serviceName == null || serviceName.isBlank()) {
-                throw new IllegalArgumentException("app.internal-auth.client.service-name is required when internal auth is enabled");
-            }
-            if (token == null || token.isBlank()) {
-                throw new IllegalArgumentException("app.internal-auth.client.token is required when internal auth is enabled");
-            }
+        mode = normalizeMode(mode, enabled);
+        serviceName = serviceName == null ? "" : serviceName.trim();
+        token = token == null ? "" : token.trim();
+        jwt = jwt == null ? Jwt.empty() : jwt.normalized();
+        if (enabled && serviceName.isBlank()) {
+            throw new IllegalArgumentException("app.internal-auth.client.service-name is required when internal auth is enabled");
+        }
+        if (enabled && "TOKEN_VALIDATOR".equals(mode) && token.isBlank()) {
+            throw new IllegalArgumentException("app.internal-auth.client.token is required when TOKEN_VALIDATOR is enabled");
+        }
+        if (enabled && "JWT_SERVICE_IDENTITY".equals(mode) && !jwt.complete()) {
+            throw new IllegalArgumentException("app.internal-auth.client.jwt issuer, audience, algorithm, key material, ttl, and authorities are required when JWT_SERVICE_IDENTITY is enabled");
         }
     }
 
+    public String normalizedMode() {
+        return mode;
+    }
+
     public String normalizedServiceName() {
-        return serviceName == null ? "" : serviceName.trim();
+        return serviceName;
     }
 
     public String normalizedToken() {
-        return token == null ? "" : token.trim();
+        return token;
+    }
+
+    public List<String> jwtAuthorities() {
+        return jwt.authorityList();
+    }
+
+    private static String normalizeMode(String mode, boolean enabled) {
+        String candidate = mode == null || mode.isBlank()
+                ? (enabled ? "TOKEN_VALIDATOR" : "DISABLED_LOCAL_ONLY")
+                : mode.trim().toUpperCase();
+        if ("REQUIRED".equals(candidate)) {
+            candidate = "TOKEN_VALIDATOR";
+        }
+        if ("LOCALDEV".equals(candidate)) {
+            candidate = "DISABLED_LOCAL_ONLY";
+        }
+        if (!MODES.contains(candidate)) {
+            throw new IllegalArgumentException("Unsupported internal auth client mode.");
+        }
+        return candidate;
+    }
+
+    public record Jwt(
+            String algorithm,
+            String issuer,
+            String audience,
+            String secret,
+            String keyId,
+            String privateKeyPem,
+            String privateKeyPath,
+            Duration ttl,
+            String authorities
+    ) {
+        static Jwt empty() {
+            return new Jwt("HS256", "", "", "", "", "", "", Duration.ofMinutes(5), "");
+        }
+
+        Jwt normalized() {
+            return new Jwt(
+                    normalizeAlgorithm(algorithm),
+                    issuer == null ? "" : issuer.trim(),
+                    audience == null ? "" : audience.trim(),
+                    secret == null ? "" : secret.trim(),
+                    keyId == null ? "" : keyId.trim(),
+                    privateKeyPem == null ? "" : privateKeyPem.trim(),
+                    privateKeyPath == null ? "" : privateKeyPath.trim(),
+                    ttl == null ? Duration.ofMinutes(5) : ttl,
+                    authorities == null ? "" : authorities.trim()
+            );
+        }
+
+        public boolean complete() {
+            if (issuer.isBlank()
+                    || audience.isBlank()
+                    || ttl == null
+                    || ttl.isNegative()
+                    || ttl.isZero()
+                    || authorityList().isEmpty()) {
+                return false;
+            }
+            if ("RS256".equals(algorithm)) {
+                return !keyId.isBlank() && (!privateKeyPem.isBlank() || !privateKeyPath.isBlank());
+            }
+            if ("HS256".equals(algorithm)) {
+                return !secret.isBlank()
+                    && secret.getBytes(java.nio.charset.StandardCharsets.UTF_8).length >= 32;
+            }
+            return false;
+        }
+
+        boolean productionTarget() {
+            return "RS256".equals(algorithm);
+        }
+
+        private static String normalizeAlgorithm(String value) {
+            String candidate = value == null || value.isBlank() ? "HS256" : value.trim().toUpperCase();
+            return switch (candidate) {
+                case "RS256", "HS256" -> candidate;
+                default -> candidate;
+            };
+        }
+
+        boolean baseClaimsComplete() {
+            return !issuer.isBlank()
+                    && !audience.isBlank()
+                    && ttl != null
+                    && !ttl.isNegative()
+                    && !ttl.isZero()
+                    && !authorityList().isEmpty();
+        }
+
+        List<String> authorityList() {
+            if (authorities == null || authorities.isBlank()) {
+                return List.of();
+            }
+            return Arrays.stream(authorities.split("[,\\s]+"))
+                    .map(String::trim)
+                    .filter(value -> !value.isBlank())
+                    .distinct()
+                    .toList();
+        }
     }
 }

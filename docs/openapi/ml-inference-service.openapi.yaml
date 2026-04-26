@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: Fraud Detection ML Inference Service
   version: "1.0"
-  description: Current contract for the Python ML inference runtime. Scoring and governance APIs require configured internal service identity in default/production mode. Docker localdev may allow anonymous internal calls only when INTERNAL_AUTH_MODE=DISABLED_LOCAL_ONLY. This is an internal shared-secret service-auth foundation with optional token-hash allowlist mode and an MTLS_READY fail-closed boundary; it is not full enterprise mTLS.
+  description: Current contract for the Python ML inference runtime. Scoring and governance APIs require configured internal service identity in default/production mode. Docker localdev may allow anonymous internal calls only when INTERNAL_AUTH_MODE=DISABLED_LOCAL_ONLY. TOKEN_VALIDATOR remains a compatibility shared-token mode; JWT_SERVICE_IDENTITY validates RS256 signed service JWTs with public JWKS material, required kid, issuer, audience, expiration, future iat, service identity, service allowlist, service-to-key binding, and authority checks. HS256 is local compatibility only and is forbidden in prod-like profiles. This is an internal service-auth foundation with an MTLS_READY fail-closed boundary; it is not full enterprise mTLS.
 servers:
   - url: http://localhost:8090
 paths:
@@ -31,6 +31,7 @@ paths:
       summary: Score fraud risk for a feature snapshot
       description: Requires internal service identity with ml-score authority outside explicit DISABLED_LOCAL_ONLY local/dev mode.
       security:
+        - internalServiceJwt: []
         - internalServiceName: []
           internalServiceToken: []
       requestBody:
@@ -75,6 +76,7 @@ paths:
       summary: Active model governance summary
       description: Requires internal service identity with governance-read authority outside explicit DISABLED_LOCAL_ONLY local/dev mode.
       security:
+        - internalServiceJwt: []
         - internalServiceName: []
           internalServiceToken: []
       responses:
@@ -93,6 +95,7 @@ paths:
       summary: Current active model lifecycle metadata
       description: Requires internal service identity with governance-read authority outside explicit DISABLED_LOCAL_ONLY local/dev mode.
       security:
+        - internalServiceJwt: []
         - internalServiceName: []
           internalServiceToken: []
       responses:
@@ -111,6 +114,7 @@ paths:
       summary: Model lifecycle event history
       description: Requires internal service identity with governance-read authority outside explicit DISABLED_LOCAL_ONLY local/dev mode.
       security:
+        - internalServiceJwt: []
         - internalServiceName: []
           internalServiceToken: []
       responses:
@@ -129,6 +133,7 @@ paths:
       summary: Reference profile details
       description: Requires internal service identity with governance-read authority outside explicit DISABLED_LOCAL_ONLY local/dev mode.
       security:
+        - internalServiceJwt: []
         - internalServiceName: []
           internalServiceToken: []
       responses:
@@ -147,6 +152,7 @@ paths:
       summary: Inference profile details
       description: Requires internal service identity with governance-read authority outside explicit DISABLED_LOCAL_ONLY local/dev mode.
       security:
+        - internalServiceJwt: []
         - internalServiceName: []
           internalServiceToken: []
       responses:
@@ -165,6 +171,7 @@ paths:
       summary: Drift status
       description: Requires internal service identity with governance-read authority outside explicit DISABLED_LOCAL_ONLY local/dev mode.
       security:
+        - internalServiceJwt: []
         - internalServiceName: []
           internalServiceToken: []
       responses:
@@ -183,6 +190,7 @@ paths:
       summary: Advisory drift actions
       description: Requires internal service identity with governance-read authority outside explicit DISABLED_LOCAL_ONLY local/dev mode.
       security:
+        - internalServiceJwt: []
         - internalServiceName: []
           internalServiceToken: []
       responses:
@@ -201,6 +209,7 @@ paths:
       summary: Governance advisory history
       description: Requires internal service identity with governance-read authority outside explicit DISABLED_LOCAL_ONLY local/dev mode.
       security:
+        - internalServiceJwt: []
         - internalServiceName: []
           internalServiceToken: []
       parameters:
@@ -238,6 +247,7 @@ paths:
       summary: Governance snapshot history
       description: Requires internal service identity with governance-read authority outside explicit DISABLED_LOCAL_ONLY local/dev mode.
       security:
+        - internalServiceJwt: []
         - internalServiceName: []
           internalServiceToken: []
       parameters:
@@ -261,6 +271,11 @@ paths:
           $ref: "#/components/responses/Forbidden"
 components:
   securitySchemes:
+    internalServiceJwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Signed internal service JWT for JWT_SERVICE_IDENTITY mode. Token contents must not be logged or exposed to frontend clients.
     internalServiceName:
       type: apiKey
       in: header

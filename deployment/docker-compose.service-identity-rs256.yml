@@ -1,0 +1,46 @@
+services:
+  ml-inference-service:
+    environment:
+      INTERNAL_AUTH_MODE: JWT_SERVICE_IDENTITY
+      INTERNAL_AUTH_JWT_ALGORITHM: RS256
+      INTERNAL_AUTH_JWT_ISSUER: fraud-platform-local
+      INTERNAL_AUTH_JWT_AUDIENCE: ml-inference-service
+      INTERNAL_AUTH_JWKS_PATH: /run/service-identity/jwks.json
+      INTERNAL_AUTH_JWT_SERVICE_CLAIM: service_name
+      INTERNAL_AUTH_JWT_AUTHORITIES_CLAIM: authorities
+      INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES: fraud-scoring-service:ml-score,alert-service:governance-read
+      INTERNAL_AUTH_ALLOWED_SERVICE_KEYS: fraud-scoring-service:scoring-key-1,alert-service:alert-key-1
+    volumes:
+      - ./service-identity/jwks.json:/run/service-identity/jwks.json:ro
+
+  fraud-scoring-service:
+    environment:
+      INTERNAL_AUTH_CLIENT_ENABLED: "true"
+      INTERNAL_AUTH_CLIENT_MODE: JWT_SERVICE_IDENTITY
+      INTERNAL_AUTH_SERVICE_NAME: fraud-scoring-service
+      INTERNAL_AUTH_TOKEN: ""
+      INTERNAL_AUTH_JWT_ALGORITHM: RS256
+      INTERNAL_AUTH_JWT_KEY_ID: scoring-key-1
+      INTERNAL_AUTH_JWT_PRIVATE_KEY_PATH: /run/service-identity/fraud-scoring-service-private.pem
+      INTERNAL_AUTH_JWT_ISSUER: fraud-platform-local
+      INTERNAL_AUTH_JWT_AUDIENCE: ml-inference-service
+      INTERNAL_AUTH_JWT_TTL: 5m
+      INTERNAL_AUTH_JWT_AUTHORITIES: ml-score
+    volumes:
+      - ./service-identity/fraud-scoring-service-private.pem:/run/service-identity/fraud-scoring-service-private.pem:ro
+
+  alert-service:
+    environment:
+      INTERNAL_AUTH_CLIENT_ENABLED: "true"
+      INTERNAL_AUTH_CLIENT_MODE: JWT_SERVICE_IDENTITY
+      INTERNAL_AUTH_SERVICE_NAME: alert-service
+      INTERNAL_AUTH_TOKEN: ""
+      INTERNAL_AUTH_JWT_ALGORITHM: RS256
+      INTERNAL_AUTH_JWT_KEY_ID: alert-key-1
+      INTERNAL_AUTH_JWT_PRIVATE_KEY_PATH: /run/service-identity/alert-service-private.pem
+      INTERNAL_AUTH_JWT_ISSUER: fraud-platform-local
+      INTERNAL_AUTH_JWT_AUDIENCE: ml-inference-service
+      INTERNAL_AUTH_JWT_TTL: 5m
+      INTERNAL_AUTH_JWT_AUTHORITIES: governance-read
+    volumes:
+      - ./service-identity/alert-service-private.pem:/run/service-identity/alert-service-private.pem:ro

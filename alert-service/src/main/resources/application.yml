@@ -55,8 +55,20 @@ app:
   internal-auth:
     client:
       enabled: ${INTERNAL_AUTH_CLIENT_ENABLED:false}
+      mode: ${INTERNAL_AUTH_CLIENT_MODE:TOKEN_VALIDATOR}
       service-name: ${INTERNAL_AUTH_SERVICE_NAME:alert-service}
       token: ${INTERNAL_AUTH_TOKEN:}
+      allow-token-validator-in-prod: ${INTERNAL_AUTH_ALLOW_TOKEN_VALIDATOR_IN_PROD:false}
+      jwt:
+        algorithm: ${INTERNAL_AUTH_JWT_ALGORITHM:HS256}
+        issuer: ${INTERNAL_AUTH_JWT_ISSUER:}
+        audience: ${INTERNAL_AUTH_JWT_AUDIENCE:}
+        secret: ${INTERNAL_AUTH_JWT_SECRET:}
+        key-id: ${INTERNAL_AUTH_JWT_KEY_ID:}
+        private-key-pem: ${INTERNAL_AUTH_JWT_PRIVATE_KEY_PEM:}
+        private-key-path: ${INTERNAL_AUTH_JWT_PRIVATE_KEY_PATH:}
+        ttl: ${INTERNAL_AUTH_JWT_TTL:5m}
+        authorities: ${INTERNAL_AUTH_JWT_AUTHORITIES:}
   kafka:
     topics:
       transaction-scored: transactions.scored

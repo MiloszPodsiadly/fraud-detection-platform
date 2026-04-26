@@ -2,14 +2,23 @@ import threading
 import unittest
 import os
 import hashlib
+import time
 from contextlib import redirect_stdout
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 from io import StringIO
 
+import jwt
+
 os.environ.setdefault("INTERNAL_AUTH_MODE", "DISABLED_LOCAL_ONLY")
 
 from app import server
+
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+SERVICE_IDENTITY_DIR = os.path.join(REPO_ROOT, "deployment", "service-identity")
+SCORING_PRIVATE_KEY = os.path.join(SERVICE_IDENTITY_DIR, "fraud-scoring-service-private.pem")
+ALERT_PRIVATE_KEY = os.path.join(SERVICE_IDENTITY_DIR, "alert-service-private.pem")
+JWKS_PATH = os.path.join(SERVICE_IDENTITY_DIR, "jwks.json")
 
 
 def parse_metric_value(metrics_text: str, metric_name: str, labels: dict[str, str]) -> float:
@@ -24,6 +33,66 @@ def parse_metric_value(metrics_text: str, metric_name: str, labels: dict[str, st
         if parsed == labels:
             return float(value)
     return 0.0
+
+
+def jwt_service_token(
+        service_name: str = "fraud-scoring-service",
+        authorities: list[str] | None = None,
+        issuer: str = "fraud-platform-local",
+        audience: str = "ml-inference-service",
+        secret: str = "local-dev-jwt-service-secret-32bytes",
+        expires_in_seconds: int = 300,
+        include_authorities: bool = True,
+        include_iat: bool = True,
+        include_exp: bool = True,
+        issued_at_offset_seconds: int = 0,
+        algorithm: str = "HS256",
+) -> str:
+    now = int(time.time())
+    payload = {
+        "iss": issuer,
+        "aud": audience,
+        "service_name": service_name,
+    }
+    if include_iat:
+        payload["iat"] = now + issued_at_offset_seconds
+    if include_exp:
+        payload["exp"] = now + expires_in_seconds
+    if include_authorities:
+        payload["authorities"] = authorities or ["ml-score"]
+    key = "" if algorithm == "none" else secret
+    return jwt.encode(payload, key=key, algorithm=algorithm)
+
+
+def rs256_service_token(
+        private_key_path: str = SCORING_PRIVATE_KEY,
+        key_id: str = "scoring-key-1",
+        service_name: str = "fraud-scoring-service",
+        authorities: list[str] | None = None,
+        issuer: str = "fraud-platform-local",
+        audience: str = "ml-inference-service",
+        expires_in_seconds: int = 300,
+        include_authorities: bool = True,
+        include_iat: bool = True,
+        include_exp: bool = True,
+        issued_at_offset_seconds: int = 0,
+        algorithm: str = "RS256",
+) -> str:
+    now = int(time.time())
+    payload = {
+        "iss": issuer,
+        "aud": audience,
+        "service_name": service_name,
+    }
+    if include_iat:
+        payload["iat"] = now + issued_at_offset_seconds
+    if include_exp:
+        payload["exp"] = now + expires_in_seconds
+    if include_authorities:
+        payload["authorities"] = authorities or ["ml-score"]
+    with open(private_key_path, encoding="utf-8") as handle:
+        key = handle.read()
+    return jwt.encode(payload, key=key, algorithm=algorithm, headers={"kid": key_id})
 
 
 class MlMetricsEndpointTest(unittest.TestCase):
@@ -265,8 +334,10 @@ class MlMetricsEndpointTest(unittest.TestCase):
 
     def test_internal_auth_startup_requires_allowlist_in_prod_token_validator(self):
         previous_hash_mode = os.environ.get("INTERNAL_AUTH_TOKEN_HASH_MODE")
+        previous_allow = os.environ.get("INTERNAL_AUTH_ALLOW_TOKEN_VALIDATOR_IN_PROD")
         try:
             os.environ["INTERNAL_AUTH_TOKEN_HASH_MODE"] = "true"
+            os.environ["INTERNAL_AUTH_ALLOW_TOKEN_VALIDATOR_IN_PROD"] = "true"
             with self.assertRaises(RuntimeError):
                 server._validate_internal_auth_startup(
                     mode="TOKEN_VALIDATOR",
@@ -278,11 +349,17 @@ class MlMetricsEndpointTest(unittest.TestCase):
                 os.environ.pop("INTERNAL_AUTH_TOKEN_HASH_MODE", None)
             else:
                 os.environ["INTERNAL_AUTH_TOKEN_HASH_MODE"] = previous_hash_mode
+            if previous_allow is None:
+                os.environ.pop("INTERNAL_AUTH_ALLOW_TOKEN_VALIDATOR_IN_PROD", None)
+            else:
+                os.environ["INTERNAL_AUTH_ALLOW_TOKEN_VALIDATOR_IN_PROD"] = previous_allow
 
     def test_prod_token_validator_requires_hash_mode(self):
         previous_hash_mode = os.environ.get("INTERNAL_AUTH_TOKEN_HASH_MODE")
+        previous_allow = os.environ.get("INTERNAL_AUTH_ALLOW_TOKEN_VALIDATOR_IN_PROD")
         try:
             os.environ["INTERNAL_AUTH_TOKEN_HASH_MODE"] = "false"
+            os.environ["INTERNAL_AUTH_ALLOW_TOKEN_VALIDATOR_IN_PROD"] = "true"
             with self.assertRaises(RuntimeError) as raised:
                 server._validate_internal_auth_startup(
                     mode="TOKEN_VALIDATOR",
@@ -298,6 +375,37 @@ class MlMetricsEndpointTest(unittest.TestCase):
                 os.environ.pop("INTERNAL_AUTH_TOKEN_HASH_MODE", None)
             else:
                 os.environ["INTERNAL_AUTH_TOKEN_HASH_MODE"] = previous_hash_mode
+            if previous_allow is None:
+                os.environ.pop("INTERNAL_AUTH_ALLOW_TOKEN_VALIDATOR_IN_PROD", None)
+            else:
+                os.environ["INTERNAL_AUTH_ALLOW_TOKEN_VALIDATOR_IN_PROD"] = previous_allow
+
+    def test_prod_token_validator_requires_explicit_compatibility_opt_in(self):
+        previous_hash_mode = os.environ.get("INTERNAL_AUTH_TOKEN_HASH_MODE")
+        previous_allow = os.environ.get("INTERNAL_AUTH_ALLOW_TOKEN_VALIDATOR_IN_PROD")
+        try:
+            os.environ["INTERNAL_AUTH_TOKEN_HASH_MODE"] = "true"
+            os.environ["INTERNAL_AUTH_ALLOW_TOKEN_VALIDATOR_IN_PROD"] = "false"
+            with self.assertRaises(RuntimeError) as raised:
+                server._validate_internal_auth_startup(
+                    mode="TOKEN_VALIDATOR",
+                    profile="prod",
+                    credentials={
+                        "known-service": server.InternalServiceCredential("secret", frozenset({"governance-read"}))
+                    },
+                )
+
+            self.assertIn("explicit prod compatibility opt-in", str(raised.exception))
+            self.assertNotIn("secret", str(raised.exception))
+        finally:
+            if previous_hash_mode is None:
+                os.environ.pop("INTERNAL_AUTH_TOKEN_HASH_MODE", None)
+            else:
+                os.environ["INTERNAL_AUTH_TOKEN_HASH_MODE"] = previous_hash_mode
+            if previous_allow is None:
+                os.environ.pop("INTERNAL_AUTH_ALLOW_TOKEN_VALIDATOR_IN_PROD", None)
+            else:
+                os.environ["INTERNAL_AUTH_ALLOW_TOKEN_VALIDATOR_IN_PROD"] = previous_allow
 
     def test_token_hash_mode_accepts_hash_and_never_logs_hash_or_token(self):
         previous_mode = os.environ.get("INTERNAL_AUTH_MODE")
@@ -414,6 +522,606 @@ class MlMetricsEndpointTest(unittest.TestCase):
                 os.environ.pop("INTERNAL_AUTH_MODE", None)
             else:
                 os.environ["INTERNAL_AUTH_MODE"] = previous_mode
+
+    def test_jwt_service_identity_allows_known_service_and_preserves_scoring_response(self):
+        saved = {key: os.environ.get(key) for key in (
+            "INTERNAL_AUTH_MODE",
+            "INTERNAL_AUTH_JWT_ISSUER",
+            "INTERNAL_AUTH_JWT_AUDIENCE",
+            "INTERNAL_AUTH_JWT_SECRET",
+            "INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES",
+        )}
+        before = self.metrics_text()
+        try:
+            os.environ["INTERNAL_AUTH_MODE"] = "JWT_SERVICE_IDENTITY"
+            os.environ["INTERNAL_AUTH_JWT_ISSUER"] = "fraud-platform-local"
+            os.environ["INTERNAL_AUTH_JWT_AUDIENCE"] = "ml-inference-service"
+            os.environ["INTERNAL_AUTH_JWT_SECRET"] = "local-dev-jwt-service-secret-32bytes"
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES"] = "fraud-scoring-service:ml-score"
+
+            status, _, payload = self.request(
+                "POST",
+                "/v1/fraud/score",
+                body=b'{"features":{"amount":42,"recentTransactionCount":1}}',
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {jwt_service_token()}",
+                },
+            )
+
+            self.assertEqual(status, 200)
+            self.assertIn(b"fraudScore", payload)
+            self.assertIn(b"riskLevel", payload)
+            after = self.metrics_text()
+            self.assertGreater(
+                parse_metric_value(after, "fraud_internal_auth_success_total", {
+                    "source_service": "fraud-scoring-service",
+                    "target_service": "ml-inference-service",
+                }),
+                parse_metric_value(before, "fraud_internal_auth_success_total", {
+                    "source_service": "fraud-scoring-service",
+                    "target_service": "ml-inference-service",
+                }),
+            )
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    def test_jwt_service_identity_rejects_missing_expired_invalid_and_wrong_audience_tokens(self):
+        saved = {key: os.environ.get(key) for key in (
+            "INTERNAL_AUTH_MODE",
+            "INTERNAL_AUTH_JWT_ISSUER",
+            "INTERNAL_AUTH_JWT_AUDIENCE",
+            "INTERNAL_AUTH_JWT_SECRET",
+            "INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES",
+        )}
+        try:
+            os.environ["INTERNAL_AUTH_MODE"] = "JWT_SERVICE_IDENTITY"
+            os.environ["INTERNAL_AUTH_JWT_ISSUER"] = "fraud-platform-local"
+            os.environ["INTERNAL_AUTH_JWT_AUDIENCE"] = "ml-inference-service"
+            os.environ["INTERNAL_AUTH_JWT_SECRET"] = "local-dev-jwt-service-secret-32bytes"
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES"] = "fraud-scoring-service:ml-score"
+
+            missing_status, _, _ = self.request("POST", "/v1/fraud/score", body=b'{"features":{"amount":42}}')
+            expired_status, _, _ = self.request(
+                "POST",
+                "/v1/fraud/score",
+                body=b'{"features":{"amount":42}}',
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {jwt_service_token(issued_at_offset_seconds=-100, expires_in_seconds=-40)}",
+                },
+            )
+            wrong_audience_status, _, _ = self.request(
+                "POST",
+                "/v1/fraud/score",
+                body=b'{"features":{"amount":42}}',
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {jwt_service_token(audience='wrong-service')}",
+                },
+            )
+            invalid_signature_status, _, _ = self.request(
+                "POST",
+                "/v1/fraud/score",
+                body=b'{"features":{"amount":42}}',
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {jwt_service_token(secret='wrong-secret')}",
+                },
+            )
+
+            self.assertEqual(missing_status, 401)
+            self.assertEqual(expired_status, 401)
+            self.assertEqual(wrong_audience_status, 403)
+            self.assertEqual(invalid_signature_status, 403)
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    def test_jwt_service_identity_rejects_wrong_issuer_malformed_none_alg_future_iat_and_missing_authorities(self):
+        saved = {key: os.environ.get(key) for key in (
+            "INTERNAL_AUTH_MODE",
+            "INTERNAL_AUTH_JWT_ISSUER",
+            "INTERNAL_AUTH_JWT_AUDIENCE",
+            "INTERNAL_AUTH_JWT_SECRET",
+            "INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES",
+        )}
+        try:
+            os.environ["INTERNAL_AUTH_MODE"] = "JWT_SERVICE_IDENTITY"
+            os.environ["INTERNAL_AUTH_JWT_ISSUER"] = "fraud-platform-local"
+            os.environ["INTERNAL_AUTH_JWT_AUDIENCE"] = "ml-inference-service"
+            os.environ["INTERNAL_AUTH_JWT_SECRET"] = "local-dev-jwt-service-secret-32bytes"
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES"] = "fraud-scoring-service:ml-score"
+
+            cases = {
+                "wrong_issuer": jwt_service_token(issuer="attacker"),
+                "malformed": "not-a-jwt",
+                "none_alg": jwt_service_token(algorithm="none"),
+                "future_iat": jwt_service_token(issued_at_offset_seconds=600),
+                "missing_authorities": jwt_service_token(include_authorities=False),
+            }
+
+            for token in cases.values():
+                status, _, _ = self.request(
+                    "POST",
+                    "/v1/fraud/score",
+                    body=b'{"features":{"amount":42}}',
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {token}",
+                    },
+                )
+                self.assertEqual(status, 403)
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    def test_jwt_service_identity_rejects_authority_escalation_and_mixed_authority_injection(self):
+        saved = {key: os.environ.get(key) for key in (
+            "INTERNAL_AUTH_MODE",
+            "INTERNAL_AUTH_JWT_ISSUER",
+            "INTERNAL_AUTH_JWT_AUDIENCE",
+            "INTERNAL_AUTH_JWT_SECRET",
+            "INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES",
+        )}
+        score_body = b'{"features":{"amount":42,"recentTransactionCount":1}}'
+        try:
+            os.environ["INTERNAL_AUTH_MODE"] = "JWT_SERVICE_IDENTITY"
+            os.environ["INTERNAL_AUTH_JWT_ISSUER"] = "fraud-platform-local"
+            os.environ["INTERNAL_AUTH_JWT_AUDIENCE"] = "ml-inference-service"
+            os.environ["INTERNAL_AUTH_JWT_SECRET"] = "local-dev-jwt-service-secret-32bytes"
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES"] = "fraud-scoring-service:ml-score,alert-service:governance-read"
+
+            escalation_token = jwt_service_token(authorities=["governance-read"])
+            score_escalation_status, _, _ = self.request(
+                "POST",
+                "/v1/fraud/score",
+                body=score_body,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {escalation_token}",
+                },
+            )
+            governance_escalation_status, _, _ = self.request(
+                "GET",
+                "/governance/model",
+                headers={"Authorization": f"Bearer {escalation_token}"},
+            )
+
+            mixed_token = jwt_service_token(authorities=["ml-score", "governance-read"])
+            score_mixed_status, _, _ = self.request(
+                "POST",
+                "/v1/fraud/score",
+                body=score_body,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {mixed_token}",
+                },
+            )
+            governance_mixed_status, _, _ = self.request(
+                "GET",
+                "/governance/model",
+                headers={"Authorization": f"Bearer {mixed_token}"},
+            )
+
+            self.assertEqual(score_escalation_status, 403)
+            self.assertEqual(governance_escalation_status, 403)
+            self.assertEqual(score_mixed_status, 200)
+            self.assertEqual(governance_mixed_status, 403)
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    def test_jwt_service_identity_rejects_unknown_service_and_missing_authority_without_logging_token(self):
+        saved = {key: os.environ.get(key) for key in (
+            "INTERNAL_AUTH_MODE",
+            "INTERNAL_AUTH_JWT_ISSUER",
+            "INTERNAL_AUTH_JWT_AUDIENCE",
+            "INTERNAL_AUTH_JWT_SECRET",
+            "INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES",
+        )}
+        token = jwt_service_token(service_name="unknown-service", authorities=["ml-score"])
+        try:
+            os.environ["INTERNAL_AUTH_MODE"] = "JWT_SERVICE_IDENTITY"
+            os.environ["INTERNAL_AUTH_JWT_ISSUER"] = "fraud-platform-local"
+            os.environ["INTERNAL_AUTH_JWT_AUDIENCE"] = "ml-inference-service"
+            os.environ["INTERNAL_AUTH_JWT_SECRET"] = "local-dev-jwt-service-secret-32bytes"
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES"] = "fraud-scoring-service:ml-score"
+
+            output = StringIO()
+            with redirect_stdout(output):
+                unknown_status, _, _ = self.request(
+                    "POST",
+                    "/v1/fraud/score",
+                    body=b'{"features":{"amount":42}}',
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {token}",
+                    },
+                )
+                missing_authority_status, _, _ = self.request(
+                    "GET",
+                    "/governance/model",
+                    headers={
+                        "Authorization": f"Bearer {jwt_service_token(authorities=['ml-score'])}",
+                    },
+                )
+
+            self.assertEqual(unknown_status, 403)
+            self.assertEqual(missing_authority_status, 403)
+            self.assertIn("internal_auth_rejected", output.getvalue())
+            self.assertNotIn(token, output.getvalue())
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    def test_rs256_service_identity_enforces_kid_service_binding_and_authority_boundaries(self):
+        saved = {key: os.environ.get(key) for key in (
+            "INTERNAL_AUTH_MODE",
+            "INTERNAL_AUTH_JWT_ALGORITHM",
+            "INTERNAL_AUTH_JWT_ISSUER",
+            "INTERNAL_AUTH_JWT_AUDIENCE",
+            "INTERNAL_AUTH_JWKS_PATH",
+            "INTERNAL_AUTH_JWKS_JSON",
+            "INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES",
+            "INTERNAL_AUTH_ALLOWED_SERVICE_KEYS",
+        )}
+        score_body = b'{"features":{"amount":42,"recentTransactionCount":1}}'
+        valid_scoring_token = rs256_service_token()
+        valid_alert_token = rs256_service_token(
+            private_key_path=ALERT_PRIVATE_KEY,
+            key_id="alert-key-1",
+            service_name="alert-service",
+            authorities=["governance-read"],
+        )
+        alert_score_token = rs256_service_token(
+            private_key_path=ALERT_PRIVATE_KEY,
+            key_id="alert-key-1",
+            service_name="alert-service",
+            authorities=["ml-score"],
+        )
+        alert_key_scoring_service_token = rs256_service_token(
+            private_key_path=ALERT_PRIVATE_KEY,
+            key_id="alert-key-1",
+            service_name="fraud-scoring-service",
+            authorities=["ml-score"],
+        )
+        wrong_key_service_token = rs256_service_token(
+            private_key_path=SCORING_PRIVATE_KEY,
+            key_id="scoring-key-1",
+            service_name="alert-service",
+            authorities=["governance-read"],
+        )
+        mixed_authority_token = rs256_service_token(authorities=["ml-score", "governance-read"])
+        try:
+            os.environ["INTERNAL_AUTH_MODE"] = "JWT_SERVICE_IDENTITY"
+            os.environ["INTERNAL_AUTH_JWT_ALGORITHM"] = "RS256"
+            os.environ["INTERNAL_AUTH_JWT_ISSUER"] = "fraud-platform-local"
+            os.environ["INTERNAL_AUTH_JWT_AUDIENCE"] = "ml-inference-service"
+            os.environ["INTERNAL_AUTH_JWKS_PATH"] = JWKS_PATH
+            os.environ.pop("INTERNAL_AUTH_JWKS_JSON", None)
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES"] = "fraud-scoring-service:ml-score,alert-service:governance-read"
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICE_KEYS"] = "fraud-scoring-service:scoring-key-1,alert-service:alert-key-1"
+
+            valid_status, _, _ = self.request(
+                "POST",
+                "/v1/fraud/score",
+                body=score_body,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {valid_scoring_token}",
+                },
+            )
+            valid_alert_status, _, _ = self.request(
+                "GET",
+                "/governance/model",
+                headers={"Authorization": f"Bearer {valid_alert_token}"},
+            )
+            scoring_governance_status, _, _ = self.request(
+                "GET",
+                "/governance/model",
+                headers={"Authorization": f"Bearer {mixed_authority_token}"},
+            )
+            alert_score_status, _, _ = self.request(
+                "POST",
+                "/v1/fraud/score",
+                body=score_body,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {alert_score_token}",
+                },
+            )
+            alert_key_scoring_status, _, _ = self.request(
+                "POST",
+                "/v1/fraud/score",
+                body=score_body,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {alert_key_scoring_service_token}",
+                },
+            )
+            wrong_key_status, _, _ = self.request(
+                "GET",
+                "/governance/model",
+                headers={"Authorization": f"Bearer {wrong_key_service_token}"},
+            )
+
+            self.assertEqual(valid_status, 200)
+            self.assertEqual(valid_alert_status, 200)
+            self.assertEqual(scoring_governance_status, 403)
+            self.assertEqual(alert_score_status, 403)
+            self.assertEqual(alert_key_scoring_status, 403)
+            self.assertEqual(wrong_key_status, 403)
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    def test_rs256_service_identity_rejects_unknown_kid_hs256_wrong_issuer_wrong_audience_expired_future_iat_and_no_logging(self):
+        saved = {key: os.environ.get(key) for key in (
+            "INTERNAL_AUTH_MODE",
+            "INTERNAL_AUTH_JWT_ALGORITHM",
+            "INTERNAL_AUTH_JWT_ISSUER",
+            "INTERNAL_AUTH_JWT_AUDIENCE",
+            "INTERNAL_AUTH_JWKS_PATH",
+            "INTERNAL_AUTH_JWKS_JSON",
+            "INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES",
+            "INTERNAL_AUTH_ALLOWED_SERVICE_KEYS",
+        )}
+        tokens = {
+            "unknown_kid": rs256_service_token(key_id="unknown-key"),
+            "known_kid_unknown_service": rs256_service_token(service_name="unknown-service"),
+            "wrong_issuer": rs256_service_token(issuer="attacker"),
+            "wrong_audience": rs256_service_token(audience="wrong-service"),
+            "expired": rs256_service_token(expires_in_seconds=-1),
+            "future_iat": rs256_service_token(issued_at_offset_seconds=600),
+            "missing_authorities": rs256_service_token(include_authorities=False),
+            "hs256": jwt_service_token(),
+            "none": jwt_service_token(algorithm="none"),
+        }
+        try:
+            os.environ["INTERNAL_AUTH_MODE"] = "JWT_SERVICE_IDENTITY"
+            os.environ["INTERNAL_AUTH_JWT_ALGORITHM"] = "RS256"
+            os.environ["INTERNAL_AUTH_JWT_ISSUER"] = "fraud-platform-local"
+            os.environ["INTERNAL_AUTH_JWT_AUDIENCE"] = "ml-inference-service"
+            os.environ["INTERNAL_AUTH_JWKS_PATH"] = JWKS_PATH
+            os.environ.pop("INTERNAL_AUTH_JWKS_JSON", None)
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES"] = "fraud-scoring-service:ml-score"
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICE_KEYS"] = "fraud-scoring-service:scoring-key-1"
+
+            output = StringIO()
+            with redirect_stdout(output):
+                for token in tokens.values():
+                    status, _, _ = self.request(
+                        "POST",
+                        "/v1/fraud/score",
+                        body=b'{"features":{"amount":42}}',
+                        headers={
+                            "Content-Type": "application/json",
+                            "Authorization": f"Bearer {token}",
+                        },
+                    )
+                    self.assertIn(status, {401, 403})
+
+            self.assertNotIn(tokens["unknown_kid"], output.getvalue())
+            self.assertNotIn("BEGIN PRIVATE KEY", output.getvalue())
+            self.assertNotIn("scoring-key-1", output.getvalue())
+            with open(JWKS_PATH, encoding="utf-8") as handle:
+                self.assertNotIn(handle.read(), output.getvalue())
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    def test_rs256_service_identity_enforces_strict_token_freshness(self):
+        saved = {key: os.environ.get(key) for key in (
+            "INTERNAL_AUTH_MODE",
+            "INTERNAL_AUTH_JWT_ALGORITHM",
+            "INTERNAL_AUTH_JWT_ISSUER",
+            "INTERNAL_AUTH_JWT_AUDIENCE",
+            "INTERNAL_AUTH_JWKS_PATH",
+            "INTERNAL_AUTH_JWKS_JSON",
+            "INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES",
+            "INTERNAL_AUTH_ALLOWED_SERVICE_KEYS",
+            "INTERNAL_AUTH_JWT_MAX_TOKEN_AGE_SECONDS",
+            "INTERNAL_AUTH_JWT_MAX_ALLOWED_TTL_SECONDS",
+            "INTERNAL_AUTH_JWT_CLOCK_SKEW_SECONDS",
+        )}
+        tokens = {
+            "valid": rs256_service_token(),
+            "expired": rs256_service_token(issued_at_offset_seconds=-100, expires_in_seconds=-40),
+            "too_old": rs256_service_token(issued_at_offset_seconds=-301, expires_in_seconds=1),
+            "future_iat": rs256_service_token(issued_at_offset_seconds=31),
+            "missing_iat": rs256_service_token(include_iat=False),
+            "exp_before_iat": rs256_service_token(expires_in_seconds=0),
+        }
+        try:
+            os.environ["INTERNAL_AUTH_MODE"] = "JWT_SERVICE_IDENTITY"
+            os.environ["INTERNAL_AUTH_JWT_ALGORITHM"] = "RS256"
+            os.environ["INTERNAL_AUTH_JWT_ISSUER"] = "fraud-platform-local"
+            os.environ["INTERNAL_AUTH_JWT_AUDIENCE"] = "ml-inference-service"
+            os.environ["INTERNAL_AUTH_JWKS_PATH"] = JWKS_PATH
+            os.environ.pop("INTERNAL_AUTH_JWKS_JSON", None)
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES"] = "fraud-scoring-service:ml-score"
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICE_KEYS"] = "fraud-scoring-service:scoring-key-1"
+            os.environ["INTERNAL_AUTH_JWT_MAX_TOKEN_AGE_SECONDS"] = "300"
+            os.environ["INTERNAL_AUTH_JWT_MAX_ALLOWED_TTL_SECONDS"] = "300"
+            os.environ["INTERNAL_AUTH_JWT_CLOCK_SKEW_SECONDS"] = "30"
+
+            valid_status, _, _ = self.request(
+                "POST",
+                "/v1/fraud/score",
+                body=b'{"features":{"amount":42}}',
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {tokens['valid']}",
+                },
+            )
+            self.assertEqual(valid_status, 200)
+
+            output = StringIO()
+            with redirect_stdout(output):
+                for name in ("expired", "too_old", "future_iat", "missing_iat", "exp_before_iat"):
+                    status, _, _ = self.request(
+                        "POST",
+                        "/v1/fraud/score",
+                        body=b'{"features":{"amount":42}}',
+                        headers={
+                            "Content-Type": "application/json",
+                            "Authorization": f"Bearer {tokens[name]}",
+                        },
+                    )
+                    self.assertIn(status, {401, 403})
+
+            for token in tokens.values():
+                self.assertNotIn(token, output.getvalue())
+
+            metrics_status, _, metrics_payload = self.request("GET", "/metrics")
+            metrics = metrics_payload.decode("utf-8")
+            self.assertEqual(metrics_status, 200)
+            self.assertIn('fraud_internal_auth_replay_rejected_total{reason="EXPIRED"}', metrics)
+            self.assertIn('fraud_internal_auth_replay_rejected_total{reason="TOO_OLD"}', metrics)
+            self.assertIn('fraud_internal_auth_replay_rejected_total{reason="FUTURE_IAT"}', metrics)
+            self.assertIn('fraud_internal_auth_token_age_seconds_bucket{le="300.0",reason="TOO_OLD"}', metrics)
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    def test_rs256_service_identity_soft_replay_cache_rejects_reused_token_when_enabled(self):
+        saved = {key: os.environ.get(key) for key in (
+            "INTERNAL_AUTH_MODE",
+            "INTERNAL_AUTH_JWT_ALGORITHM",
+            "INTERNAL_AUTH_JWT_ISSUER",
+            "INTERNAL_AUTH_JWT_AUDIENCE",
+            "INTERNAL_AUTH_JWKS_PATH",
+            "INTERNAL_AUTH_JWKS_JSON",
+            "INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES",
+            "INTERNAL_AUTH_ALLOWED_SERVICE_KEYS",
+            "INTERNAL_AUTH_REPLAY_CACHE_ENABLED",
+            "INTERNAL_AUTH_REPLAY_CACHE_MODE",
+            "INTERNAL_AUTH_REPLAY_CACHE_MAX_ENTRIES",
+        )}
+        token = rs256_service_token()
+        try:
+            server.SOFT_REPLAY_CACHE.clear()
+            os.environ["INTERNAL_AUTH_MODE"] = "JWT_SERVICE_IDENTITY"
+            os.environ["INTERNAL_AUTH_JWT_ALGORITHM"] = "RS256"
+            os.environ["INTERNAL_AUTH_JWT_ISSUER"] = "fraud-platform-local"
+            os.environ["INTERNAL_AUTH_JWT_AUDIENCE"] = "ml-inference-service"
+            os.environ["INTERNAL_AUTH_JWKS_PATH"] = JWKS_PATH
+            os.environ.pop("INTERNAL_AUTH_JWKS_JSON", None)
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES"] = "fraud-scoring-service:ml-score"
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICE_KEYS"] = "fraud-scoring-service:scoring-key-1"
+            os.environ["INTERNAL_AUTH_REPLAY_CACHE_ENABLED"] = "true"
+            os.environ["INTERNAL_AUTH_REPLAY_CACHE_MODE"] = "reject"
+            os.environ["INTERNAL_AUTH_REPLAY_CACHE_MAX_ENTRIES"] = "100"
+
+            first_status, _, _ = self.request(
+                "POST",
+                "/v1/fraud/score",
+                body=b'{"features":{"amount":42}}',
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {token}",
+                },
+            )
+            output = StringIO()
+            with redirect_stdout(output):
+                second_status, _, _ = self.request(
+                    "POST",
+                    "/v1/fraud/score",
+                    body=b'{"features":{"amount":42}}',
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {token}",
+                    },
+                )
+
+            self.assertEqual(first_status, 200)
+            self.assertEqual(second_status, 403)
+            self.assertIn("internal_auth_replay_detected", output.getvalue())
+            self.assertNotIn(token, output.getvalue())
+            metrics_status, _, metrics_payload = self.request("GET", "/metrics")
+            self.assertEqual(metrics_status, 200)
+            self.assertIn(
+                'fraud_internal_auth_replay_rejected_total{reason="REPLAY_DETECTED"}',
+                metrics_payload.decode("utf-8"),
+            )
+        finally:
+            server.SOFT_REPLAY_CACHE.clear()
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    def test_jwt_service_identity_startup_requires_complete_config_and_rejects_unknown_mode(self):
+        saved = {key: os.environ.get(key) for key in (
+            "INTERNAL_AUTH_JWT_ISSUER",
+            "INTERNAL_AUTH_JWT_AUDIENCE",
+            "INTERNAL_AUTH_JWT_SECRET",
+            "INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES",
+        )}
+        try:
+            for key in saved:
+                os.environ.pop(key, None)
+            with self.assertRaises(RuntimeError):
+                server._validate_internal_auth_startup(mode="JWT_SERVICE_IDENTITY", profile="prod")
+            with self.assertRaises(RuntimeError):
+                server._validate_internal_auth_startup(mode="unknown-mode", profile="localdev")
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    def test_jwt_service_identity_startup_rejects_hs256_in_prod_like_profiles(self):
+        saved = {key: os.environ.get(key) for key in (
+            "INTERNAL_AUTH_JWT_ALGORITHM",
+            "INTERNAL_AUTH_JWT_ISSUER",
+            "INTERNAL_AUTH_JWT_AUDIENCE",
+            "INTERNAL_AUTH_JWT_SECRET",
+            "INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES",
+        )}
+        try:
+            os.environ["INTERNAL_AUTH_JWT_ALGORITHM"] = "HS256"
+            os.environ["INTERNAL_AUTH_JWT_ISSUER"] = "fraud-platform-local"
+            os.environ["INTERNAL_AUTH_JWT_AUDIENCE"] = "ml-inference-service"
+            os.environ["INTERNAL_AUTH_JWT_SECRET"] = "local-dev-jwt-service-secret-32bytes"
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES"] = "fraud-scoring-service:ml-score"
+
+            with self.assertRaises(RuntimeError):
+                server._validate_internal_auth_startup(mode="JWT_SERVICE_IDENTITY", profile="prod")
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
 
     def test_model_version_info_and_load_status_exist(self):
         metrics = self.metrics_text()
