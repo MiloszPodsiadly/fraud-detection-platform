@@ -16,10 +16,12 @@ class GovernanceAdvisoryProjectionServiceTest {
 
     private final GovernanceAdvisoryClient advisoryClient = mock(GovernanceAdvisoryClient.class);
     private final GovernanceAdvisoryLifecycleService lifecycleService = mock(GovernanceAdvisoryLifecycleService.class);
+    private final GovernanceAdvisoryAnalyticsService analyticsService = mock(GovernanceAdvisoryAnalyticsService.class);
     private final AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
     private final GovernanceAdvisoryProjectionService service = new GovernanceAdvisoryProjectionService(
             advisoryClient,
             lifecycleService,
+            analyticsService,
             metrics
     );
 

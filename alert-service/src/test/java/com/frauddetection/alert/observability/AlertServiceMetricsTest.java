@@ -29,4 +29,16 @@ class AlertServiceMetricsTest {
                 .extracting(Tag::getKey)
                 .doesNotContain("event_id", "actor_id", "audit_id", "endpoint", "reason", "exception");
     }
+
+    @Test
+    void shouldUseNoDynamicLabelsForAnalyticsMetrics() {
+        metrics.recordGovernanceAnalyticsRequest(7);
+
+        Meter requestMeter = meterRegistry.get("fraud_ml_governance_analytics_requests_total").meter();
+        Meter windowMeter = meterRegistry.get("fraud_ml_governance_analytics_window_days").meter();
+
+        assertThat(requestMeter.getId().getTags()).isEmpty();
+        assertThat(windowMeter.getId().getTags()).isEmpty();
+        assertThat(meterRegistry.get("fraud_ml_governance_analytics_window_days").gauge().value()).isEqualTo(7.0);
+    }
 }

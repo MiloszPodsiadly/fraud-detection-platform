@@ -67,6 +67,27 @@ class GovernanceAdvisoryControllerTest {
     }
 
     @Test
+    void shouldReturnAnalyticsForBoundedWindow() throws Exception {
+        when(projectionService.analytics(7)).thenReturn(analyticsResponse());
+
+        mockMvc.perform(get("/governance/advisories/analytics")
+                        .queryParam("window_days", "7"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("AVAILABLE"))
+                .andExpect(jsonPath("$.window.days").value(7))
+                .andExpect(jsonPath("$.totals.advisories").value(2))
+                .andExpect(jsonPath("$.decision_distribution.ACKNOWLEDGED").value(1));
+    }
+
+    @Test
+    void shouldRejectInvalidAnalyticsWindow() throws Exception {
+        mockMvc.perform(get("/governance/advisories/analytics")
+                        .queryParam("window_days", "31"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Validation failed."));
+    }
+
+    @Test
     void shouldRejectInvalidLifecycleFilter() throws Exception {
         mockMvc.perform(get("/governance/advisories")
                         .queryParam("lifecycle_status", "IN_PROGRESS"))
@@ -99,6 +120,28 @@ class GovernanceAdvisoryControllerTest {
                 "score p95 increased compared to reference profile",
                 "2026-04-26T00:02:00+00:00",
                 GovernanceAdvisoryLifecycleStatus.ACKNOWLEDGED
+        );
+    }
+
+    private GovernanceAdvisoryAnalyticsResponse analyticsResponse() {
+        java.util.Map<GovernanceAuditDecision, Integer> decisionDistribution =
+                GovernanceAdvisoryAnalyticsResponse.emptyDecisionDistribution();
+        decisionDistribution.put(GovernanceAuditDecision.ACKNOWLEDGED, 1);
+        java.util.Map<GovernanceAdvisoryLifecycleStatus, Integer> lifecycleDistribution =
+                GovernanceAdvisoryAnalyticsResponse.emptyLifecycleDistribution();
+        lifecycleDistribution.put(GovernanceAdvisoryLifecycleStatus.ACKNOWLEDGED, 1);
+        lifecycleDistribution.put(GovernanceAdvisoryLifecycleStatus.OPEN, 1);
+        return new GovernanceAdvisoryAnalyticsResponse(
+                "AVAILABLE",
+                new GovernanceAdvisoryAnalyticsResponse.Window(
+                        java.time.Instant.parse("2026-04-19T00:00:00Z"),
+                        java.time.Instant.parse("2026-04-26T00:00:00Z"),
+                        7
+                ),
+                new GovernanceAdvisoryAnalyticsResponse.Totals(2, 1, 1),
+                decisionDistribution,
+                lifecycleDistribution,
+                new GovernanceAdvisoryAnalyticsResponse.ReviewTimeliness(10.0, 10.0)
         );
     }
 }
