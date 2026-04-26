@@ -141,7 +141,7 @@ class GovernanceAdvisoryControllerTest {
                 new GovernanceAdvisoryAnalyticsResponse.Totals(2, 1, 1),
                 decisionDistribution,
                 lifecycleDistribution,
-                new GovernanceAdvisoryAnalyticsResponse.ReviewTimeliness(10.0, 10.0)
+                new GovernanceAdvisoryAnalyticsResponse.ReviewTimeliness("AVAILABLE", 10.0, 10.0)
         );
     }
 }

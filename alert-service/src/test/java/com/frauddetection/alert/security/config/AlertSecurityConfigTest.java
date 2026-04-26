@@ -197,7 +197,7 @@ class AlertSecurityConfigTest {
                         new GovernanceAdvisoryAnalyticsResponse.Totals(0, 0, 0),
                         GovernanceAdvisoryAnalyticsResponse.emptyDecisionDistribution(),
                         GovernanceAdvisoryAnalyticsResponse.emptyLifecycleDistribution(),
-                        new GovernanceAdvisoryAnalyticsResponse.ReviewTimeliness(0.0, 0.0)
+                        new GovernanceAdvisoryAnalyticsResponse.ReviewTimeliness("LOW_CONFIDENCE", 0.0, 0.0)
                 ));
         when(governanceAuditService.history("advisory-1"))
                 .thenReturn(new com.frauddetection.alert.governance.audit.GovernanceAuditHistoryResponse(
