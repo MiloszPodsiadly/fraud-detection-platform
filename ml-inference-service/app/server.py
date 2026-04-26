@@ -9,6 +9,12 @@ from urllib.parse import parse_qs, urlparse
 
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
+from app.governance.advisory import (
+    AdvisoryEventService,
+    AdvisoryPersistenceConfig,
+    MAX_ADVISORY_LIMIT,
+    create_advisory_repository,
+)
 from app.governance.actions import (
     ACTION_SEVERITIES,
     MAX_HISTORY_FOR_ACTIONS,
@@ -66,6 +72,11 @@ LIFECYCLE_CONFIG = LifecyclePersistenceConfig.from_env()
 LIFECYCLE_SERVICE = ModelLifecycleService(
     create_lifecycle_repository(LIFECYCLE_CONFIG),
     LIFECYCLE_CONFIG,
+)
+ADVISORY_CONFIG = AdvisoryPersistenceConfig.from_env()
+ADVISORY_SERVICE = AdvisoryEventService(
+    create_advisory_repository(ADVISORY_CONFIG),
+    ADVISORY_CONFIG,
 )
 REQUEST_COUNTER = Counter(
     "fraud_ml_inference_requests_total",
@@ -157,6 +168,21 @@ MODEL_LIFECYCLE_HISTORY_AVAILABLE = Gauge(
     "fraud_ml_model_lifecycle_history_available",
     "Whether model lifecycle event history is available from persistent storage.",
     ("model_name", "model_version", "status"),
+)
+GOVERNANCE_ADVISORY_EVENTS_EMITTED = Counter(
+    "fraud_ml_governance_advisory_events_emitted_total",
+    "Governance advisory events emitted by severity and storage status.",
+    ("severity", "model_name", "model_version", "status"),
+)
+GOVERNANCE_ADVISORY_EVENTS_PERSISTED = Counter(
+    "fraud_ml_governance_advisory_events_persisted_total",
+    "Governance advisory events persisted successfully.",
+    ("severity", "model_name", "model_version", "status"),
+)
+GOVERNANCE_ADVISORY_PERSISTENCE_FAILURES = Counter(
+    "fraud_ml_governance_advisory_persistence_failures_total",
+    "Governance advisory event persistence failures.",
+    ("severity", "model_name", "model_version", "status"),
 )
 
 MODEL_LOAD_STATUS.labels("success", MODEL_NAME, MODEL_VERSION).set(1)
@@ -303,9 +329,17 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             history = self._snapshot_history_for_actions()
             actions = recommend_drift_actions(MODEL_GOVERNANCE, drift, history)
             actions = with_model_lifecycle_context(actions, LIFECYCLE_SERVICE.lifecycle_context(MODEL_LIFECYCLE))
+            self._maybe_emit_advisory_event(actions)
             self._record_governance_drift(drift)
             self._record_drift_action(actions)
             self._send_json(200, actions)
+            self._record_request(path, "GET", 200, "success", started_at)
+            return
+        if path == "/governance/advisories":
+            started_at = time.perf_counter()
+            limit = self._advisory_limit(parsed_url.query)
+            response = ADVISORY_SERVICE.history_response(limit)
+            self._send_json(200, response)
             self._record_request(path, "GET", 200, "success", started_at)
             return
         if path == "/governance/history":
@@ -507,6 +541,16 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             return MAX_HISTORY_LIMIT
         return max(min(requested, MAX_HISTORY_LIMIT), 1)
 
+    def _advisory_limit(self, query: str) -> int:
+        values = parse_qs(query).get("limit", [])
+        if not values:
+            return MAX_ADVISORY_LIMIT
+        try:
+            requested = int(values[0])
+        except (TypeError, ValueError):
+            return MAX_ADVISORY_LIMIT
+        return max(min(requested, MAX_ADVISORY_LIMIT), 1)
+
     def _update_inference_profile(self, response: dict[str, Any]) -> None:
         try:
             score_details = response.get("scoreDetails")
@@ -590,6 +634,22 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             GOVERNANCE_DRIFT_ACTION_RECOMMENDATION.labels(MODEL_NAME, MODEL_VERSION, candidate_severity).set(0)
         GOVERNANCE_DRIFT_ACTION_RECOMMENDATION.labels(MODEL_NAME, MODEL_VERSION, severity).set(1)
 
+    def _maybe_emit_advisory_event(self, actions: dict[str, Any]) -> None:
+        lifecycle_context = actions.get("model_lifecycle")
+        if not isinstance(lifecycle_context, dict):
+            lifecycle_context = {}
+        event, status = ADVISORY_SERVICE.emit_if_needed(actions, MODEL_GOVERNANCE, lifecycle_context)
+        if event is None:
+            return
+        severity = str(event.get("severity", "LOW"))
+        model_name = str(event.get("model_name", MODEL_NAME))
+        model_version = str(event.get("model_version", MODEL_VERSION))
+        GOVERNANCE_ADVISORY_EVENTS_EMITTED.labels(severity, model_name, model_version, status).inc()
+        if status == "persisted":
+            GOVERNANCE_ADVISORY_EVENTS_PERSISTED.labels(severity, model_name, model_version, "success").inc()
+        else:
+            GOVERNANCE_ADVISORY_PERSISTENCE_FAILURES.labels(severity, model_name, model_version, "failure").inc()
+
     def _normalized_endpoint(self, path: str) -> str:
         known_paths = {
             "/health",
@@ -602,6 +662,7 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             "/governance/profile/inference",
             "/governance/drift",
             "/governance/drift/actions",
+            "/governance/advisories",
             "/governance/history",
         }
         return path if path in known_paths else "/unknown"
