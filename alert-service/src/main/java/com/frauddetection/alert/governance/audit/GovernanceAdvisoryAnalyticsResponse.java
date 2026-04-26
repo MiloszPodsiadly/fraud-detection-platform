@@ -1,6 +1,7 @@
 package com.frauddetection.alert.governance.audit;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.time.Instant;
 import java.util.EnumMap;
@@ -9,6 +10,10 @@ import java.util.Map;
 public record GovernanceAdvisoryAnalyticsResponse(
         @JsonProperty("status")
         String status,
+
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        @JsonProperty("reason")
+        String reason,
 
         @JsonProperty("window")
         Window window,
@@ -28,11 +33,24 @@ public record GovernanceAdvisoryAnalyticsResponse(
     public static GovernanceAdvisoryAnalyticsResponse empty(String status, Instant from, Instant to, int days) {
         return new GovernanceAdvisoryAnalyticsResponse(
                 status,
+                null,
                 new Window(from, to, days),
                 new Totals(0, 0, 0),
                 emptyDecisionDistribution(),
                 emptyLifecycleDistribution(),
                 new ReviewTimeliness("LOW_CONFIDENCE", 0.0, 0.0)
+        );
+    }
+
+    public GovernanceAdvisoryAnalyticsResponse withReason(String reason) {
+        return new GovernanceAdvisoryAnalyticsResponse(
+                status,
+                reason,
+                window,
+                totals,
+                decisionDistribution,
+                lifecycleDistribution,
+                reviewTimeliness
         );
     }
 

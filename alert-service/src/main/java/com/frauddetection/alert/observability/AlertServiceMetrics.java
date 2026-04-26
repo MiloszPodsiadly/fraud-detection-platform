@@ -6,12 +6,14 @@ import com.frauddetection.alert.security.error.SecurityFailureClassifier;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Component
@@ -82,6 +84,17 @@ public class AlertServiceMetrics {
         counter("fraud_ml_governance_analytics_requests_total").increment();
     }
 
+    public void recordGovernanceAnalyticsOutcome(String status, Duration latency) {
+        counter(
+                "fraud_ml_governance_analytics_status_total",
+                "status", normalizeAnalyticsStatus(status)
+        ).increment();
+        Timer.builder("fraud_ml_governance_analytics_latency_seconds")
+                .publishPercentiles(0.5, 0.95)
+                .register(meterRegistry)
+                .record(latency);
+    }
+
     private Counter counter(String name, String... tags) {
         return Counter.builder(name)
                 .tags(tags)
@@ -132,5 +145,12 @@ public class AlertServiceMetrics {
             return "unknown";
         }
         return value.trim().replaceAll("[^A-Za-z0-9._:-]+", "_");
+    }
+
+    private String normalizeAnalyticsStatus(String status) {
+        if ("AVAILABLE".equals(status) || "PARTIAL".equals(status) || "UNAVAILABLE".equals(status)) {
+            return status;
+        }
+        return "UNAVAILABLE";
     }
 }
