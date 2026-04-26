@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: Fraud Detection ML Inference Service
   version: "1.0"
-  description: Current FDP-11 contract for the Python ML inference runtime.
+  description: Current contract for the Python ML inference runtime. Scoring and governance APIs require configured internal service identity in default/production mode. Docker localdev may allow anonymous internal calls only when INTERNAL_AUTH_MODE=LOCALDEV. This is a header-token service-auth foundation, not mTLS.
 servers:
   - url: http://localhost:8090
 paths:
@@ -29,6 +29,10 @@ paths:
   /v1/fraud/score:
     post:
       summary: Score fraud risk for a feature snapshot
+      description: Requires internal service identity with ml-score authority outside explicit LOCALDEV mode.
+      security:
+        - internalServiceName: []
+          internalServiceToken: []
       requestBody:
         required: true
         content:
@@ -54,6 +58,10 @@ paths:
                 $ref: "#/components/schemas/FraudScoreResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           description: Feature payload shape is invalid.
           content:
@@ -65,6 +73,10 @@ paths:
   /governance/model:
     get:
       summary: Active model governance summary
+      description: Requires internal service identity with governance-read authority outside explicit LOCALDEV mode.
+      security:
+        - internalServiceName: []
+          internalServiceToken: []
       responses:
         "200":
           description: Model, reference profile, inference profile, and drift summary.
@@ -72,9 +84,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/GovernanceModelResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /governance/model/current:
     get:
       summary: Current active model lifecycle metadata
+      description: Requires internal service identity with governance-read authority outside explicit LOCALDEV mode.
+      security:
+        - internalServiceName: []
+          internalServiceToken: []
       responses:
         "200":
           description: Read-only current model lifecycle metadata.
@@ -82,9 +102,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ModelLifecycleMetadata"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /governance/model/lifecycle:
     get:
       summary: Model lifecycle event history
+      description: Requires internal service identity with governance-read authority outside explicit LOCALDEV mode.
+      security:
+        - internalServiceName: []
+          internalServiceToken: []
       responses:
         "200":
           description: Bounded lifecycle event history.
@@ -92,9 +120,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HistoryResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /governance/profile/reference:
     get:
       summary: Reference profile details
+      description: Requires internal service identity with governance-read authority outside explicit LOCALDEV mode.
+      security:
+        - internalServiceName: []
+          internalServiceToken: []
       responses:
         "200":
           description: Governance response with reference profile details.
@@ -102,9 +138,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/GovernanceModelResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /governance/profile/inference:
     get:
       summary: Inference profile details
+      description: Requires internal service identity with governance-read authority outside explicit LOCALDEV mode.
+      security:
+        - internalServiceName: []
+          internalServiceToken: []
       responses:
         "200":
           description: Governance response with aggregate inference profile details.
@@ -112,9 +156,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/GovernanceModelResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /governance/drift:
     get:
       summary: Drift status
+      description: Requires internal service identity with governance-read authority outside explicit LOCALDEV mode.
+      security:
+        - internalServiceName: []
+          internalServiceToken: []
       responses:
         "200":
           description: Aggregate drift evaluation.
@@ -122,9 +174,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/GovernanceModelResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /governance/drift/actions:
     get:
       summary: Advisory drift actions
+      description: Requires internal service identity with governance-read authority outside explicit LOCALDEV mode.
+      security:
+        - internalServiceName: []
+          internalServiceToken: []
       responses:
         "200":
           description: Advisory-only operator guidance. It does not change scoring, block requests, retrain, or switch models.
@@ -132,9 +192,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DriftActionsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /governance/advisories:
     get:
       summary: Governance advisory history
+      description: Requires internal service identity with governance-read authority outside explicit LOCALDEV mode.
+      security:
+        - internalServiceName: []
+          internalServiceToken: []
       parameters:
         - name: limit
           in: query
@@ -161,9 +229,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AdvisoryHistoryResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /governance/history:
     get:
       summary: Governance snapshot history
+      description: Requires internal service identity with governance-read authority outside explicit LOCALDEV mode.
+      security:
+        - internalServiceName: []
+          internalServiceToken: []
       parameters:
         - name: limit
           in: query
@@ -179,10 +255,37 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HistoryResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 components:
+  securitySchemes:
+    internalServiceName:
+      type: apiKey
+      in: header
+      name: X-Internal-Service-Name
+      description: Configured internal service name. Not accepted as user identity.
+    internalServiceToken:
+      type: apiKey
+      in: header
+      name: X-Internal-Service-Token
+      description: Configured internal service shared token. Tokens must not be logged or exposed to frontend clients.
   responses:
     BadRequest:
       description: Invalid JSON or malformed request body.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: Internal service authentication is required.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: Internal service identity is invalid or lacks the required authority.
       content:
         application/json:
           schema:

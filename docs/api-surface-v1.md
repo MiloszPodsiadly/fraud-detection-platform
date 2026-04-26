@@ -15,6 +15,8 @@ FDP-11 freezes the public HTTP API surface for local services without changing s
 
 Base URL in Docker: `http://ml-inference-service:8090`
 
+Internal ML scoring and governance endpoints require configured service identity in non-localdev runtime. Docker localdev may allow anonymous internal calls only when `INTERNAL_AUTH_MODE=LOCALDEV`; production/default mode is fail-closed and requires the internal service headers documented in the ML OpenAPI reference. This is a header-token service-auth foundation, not mTLS.
+
 | Method | Path | Contract |
 | --- | --- | --- |
 | `POST` | `/v1/fraud/score` | Scores a Java-enriched feature snapshot. Success shape is locked by `fraud_score_response.schema.json`. |
@@ -70,7 +72,7 @@ Alert service:
 
 Governance advisory audit and lifecycle projection endpoints are owned by `alert-service`, not `ml-inference-service`, because lifecycle status is derived from authenticated human-review audit history. They do not mutate advisory events, scoring, model behavior, retraining, rollback, or fraud decisioning.
 
-Platform audit read access:
+Platform Audit Read API:
 
 - `GET /api/v1/audit/events`
 - Requires backend-enforced `audit:read`; the local role model grants it only to `FRAUD_OPS_ADMIN`.
@@ -80,6 +82,14 @@ Platform audit read access:
 - Results are newest-first and bounded. The endpoint does not support regex, full-text search, unbounded export, pagination cursor, aggregation, delete, or update.
 - `metadata_summary` is bounded and excludes raw payloads, feature vectors, tokens, secrets, stack traces, and customer/account/card data.
 - If audit persistence cannot be read, the endpoint returns `status=UNAVAILABLE`, `count=0`, and an empty `events` array.
+- This endpoint reads durable platform audit events. It is not itself proof that every sensitive data read was audited.
+
+Sensitive read-access audit:
+
+- Implemented for `GET /api/v1/alerts/{alertId}`, `GET /api/v1/fraud-cases/{caseId}`, `GET /api/v1/transactions/scored`, `GET /governance/advisories/{event_id}`, `GET /governance/advisories/{event_id}/audit`, and `GET /governance/advisories/analytics`.
+- Records authenticated backend principal identity, roles, `action=READ`, resource type/id where applicable, endpoint category, hashed query shape, page/size, bounded result count, outcome, correlation id, source service, and schema version.
+- Does not store raw query parameters, filters, response payloads, transaction data, customer/account/card data, advisory content, full URLs, exception messages, tokens, secrets, or stack traces.
+- Audit persistence failure is best-effort for sensitive reads: the read response is not blocked, and alert-service emits a structured warning plus low-cardinality failure metric.
 
 Platform audit read response:
 

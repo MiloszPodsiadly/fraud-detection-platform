@@ -174,7 +174,8 @@ Full matrix: [Security Foundation v1](docs/security-foundation-v1.md).
 FDP-16 is split into explicit production-hardening steps:
 
 - FDP-16.1 Durable Audit Foundation: append-only platform audit writes to MongoDB plus secondary structured logs.
-- FDP-16.2 Read-Access Audit: authenticated, authority-protected, bounded reads of durable platform audit events.
+- FDP-16.2 Audit Read API: authenticated, authority-protected, bounded reads of durable platform audit events.
+- FDP-16.3 Sensitive Read-Access Audit: best-effort audit records for selected sensitive read endpoints.
 
 Audit Logging v1 records security-relevant analyst write operations in `alert-service`.
 
@@ -210,9 +211,11 @@ Current sinks:
 
 Durable audit writes happen before structured log publication. If audit persistence is unavailable, write paths fail explicitly with the platform error envelope instead of silently dropping audit intent.
 
-Platform audit reads are available through `GET /api/v1/audit/events` and require `audit:read`, which is granted only to `FRAUD_OPS_ADMIN` by the local role model. Filters are exact-match only (`event_type`, `actor_id`, `resource_type`, `resource_id`) plus an inclusive timestamp window (`from`, `to`) and a bounded `limit` defaulting to 50 and capped at 100. The endpoint returns newest-first results, does not support regex, full-text search, export, aggregation, delete, or update operations, and returns `status=UNAVAILABLE` with an empty result set when audit storage cannot be read.
+Platform audit event reads are available through `GET /api/v1/audit/events` and require `audit:read`, which is granted only to `FRAUD_OPS_ADMIN` by the local role model. This is an Audit Read API for durable audit events; it is not itself proof that every sensitive data read was audited. Filters are exact-match only (`event_type`, `actor_id`, `resource_type`, `resource_id`) plus an inclusive timestamp window (`from`, `to`) and a bounded `limit` defaulting to 50 and capped at 100. The endpoint returns newest-first results, does not support regex, full-text search, export, aggregation, delete, or update operations, and returns `status=UNAVAILABLE` with an empty result set when audit storage cannot be read.
 
-The durable audit store is not a WORM archive, SIEM integration, or full compliance reporting system. Metrics such as `fraud_platform_audit_events_persisted_total`, `fraud_platform_audit_persistence_failures_total`, and `fraud_platform_audit_read_requests_total` are operational health signals only.
+Sensitive read-access audit is implemented separately for selected reads: alert details, fraud case details, scored transaction monitor, governance advisory details, governance advisory audit history, and governance advisory analytics. These audit records are best-effort and do not block the read response if audit persistence fails. They store bounded metadata only: actor identity from the authenticated backend principal, endpoint category, resource type/id where applicable, page/size, hashed query shape, bounded result count, outcome, correlation id, source service, and schema version. They do not store raw query params, filters, response payloads, transaction data, customer/account/card data, advisory content, full URLs, exception messages, tokens, or stack traces.
+
+The durable audit store is not a WORM archive, SIEM integration, or full compliance reporting system. Metrics such as `fraud_platform_audit_events_persisted_total`, `fraud_platform_audit_persistence_failures_total`, `fraud_platform_audit_read_requests_total`, `fraud_platform_read_access_audit_events_persisted_total`, and `fraud_platform_read_access_audit_persistence_failures_total` are operational health signals only.
 
 Governance advisory audit entries are separate from fraud workflow audit logs. They are persisted append-only as human review history, derive actor identity from the backend-authenticated principal, and do not affect scoring, model behavior, retraining, rollback, or fraud decisioning. Advisory lifecycle status is a read-time projection from the latest audit entry, not a persisted workflow state or automation trigger.
 
@@ -476,7 +479,7 @@ These credentials are local-only and must not be reused outside local test envir
 
 - no silent refresh
 - no token refresh flow
-- no service-to-service auth
+- service-to-service auth uses the internal header foundation for configured ML/governance calls; it is not mTLS
 - no production IdP config
 - tokens are managed by `oidc-client-ts` for local/dev use, not as hardened production storage
 
@@ -589,7 +592,7 @@ Full details: [Security Foundation v1](docs/security-foundation-v1.md).
 
 Current non-production gaps:
 
-- No service-to-service authentication or mTLS is implemented.
+- Service-to-service authentication foundation is implemented for configured ML/governance calls, but mTLS is not implemented.
 - The frontend still uses demo auth by default in development.
 - The frontend OIDC path is a local OIDC integration and foundation for production auth, but it does not yet implement silent refresh or production deployment hardening.
 - Request DTOs still accept `analystId` for compatibility, although secured write paths use the principal as actor source of truth.
@@ -965,7 +968,7 @@ Security and architecture:
 - [Security Foundation v1](docs/security-foundation-v1.md): consolidated technical reference for RBAC, local demo auth, actor identity, audit logging, frontend security UX, JWT/OIDC migration, review notes, known limitations, and next steps.
 - [API Surface v1](docs/api-surface-v1.md): public local HTTP endpoint inventory and backward-compatibility rules.
 - [ML Inference OpenAPI](docs/openapi/ml-inference-service.openapi.yaml): current OpenAPI reference for the Python ML runtime.
-- [Alert Service OpenAPI](docs/openapi/alert-service.openapi.yaml): current OpenAPI reference for platform audit reads and governance advisory audit endpoints.
+- [Alert Service OpenAPI](docs/openapi/alert-service.openapi.yaml): current OpenAPI reference for platform Audit Read API and governance advisory audit endpoints.
 - [API Error Contract](docs/api-error-contract.md): canonical local REST error envelope for timestamp/status/error/message/details and non-leakage rules.
 - [Operations And Observability v1](docs/operations-observability-v1.md): baseline observability foundation before the local monitoring stack rollout.
 - [Operations And Observability v2](docs/operations-observability-v2.md): current local Prometheus/Grafana runtime guide, ML metrics contract, alert thresholds, and troubleshooting flow.
@@ -1005,7 +1008,7 @@ Implemented:
 Known production gaps:
 
 - Service-to-service authentication is not implemented yet.
-- mTLS is not implemented yet.
+- mTLS is not implemented yet; current internal service authentication is a header-token foundation.
 - Durable audit storage is not WORM/immutable archive storage and has no SIEM export integration.
 - DLT inspection/replay tooling is not implemented yet.
 - The frontend defaults to demo auth in quickstart mode and supports local OIDC through the Keycloak override, but it is not a production-ready SSO setup.
