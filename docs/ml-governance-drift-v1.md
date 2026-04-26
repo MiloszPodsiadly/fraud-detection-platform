@@ -418,6 +418,8 @@ The response is newest-first, bounded to a maximum of 100 events, and returns `s
 
 Advisory events contain aggregate governance context only. They exclude user IDs, transaction IDs, correlation IDs, raw feature values, request payloads, artifact contents, credentials, raw exception text, and unbounded arrays. Lifecycle context remains bounded and must not be interpreted as causality; drift may be observed after lifecycle activity, but this runtime does not claim lifecycle activity caused drift.
 
+FDP-12 adds a read-only analyst console operator queue for this endpoint. The queue displays advisory events and exact-match filters only. It does not acknowledge advisories, create audit records, integrate with `alert-service`, create fraud alerts, submit analyst decisions, change scoring, trigger retraining, or trigger rollback.
+
 ## Endpoint Contracts
 
 ```text
@@ -569,7 +571,7 @@ For advisory events:
 - Drift actions are advisory and do not create tickets, notify PagerDuty, mutate scoring, or trigger workflows.
 - No model quality monitoring is claimed; FDP-7 monitors input and output distribution shift only.
 - FDP-9 adds lifecycle visibility only; it does not implement lifecycle control or model quality validation.
-- FDP-10 adds advisory events only; it does not implement fraud alerts, model automation, retraining triggers, rollback triggers, or frontend surfacing.
+- FDP-12 frontend surfacing is read-only review context only; it does not implement fraud alerts, model automation, acknowledgement, audit trail, alert-service integration, retraining triggers, or rollback triggers.
 - Drift thresholds are starting guardrails and need calibration against real baselines.
 
 ## Out Of Scope
