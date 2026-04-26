@@ -84,6 +84,9 @@ class AuditEventReadServiceTest {
         assertThat(event.outcome()).isEqualTo("SUCCESS");
         assertThat(event.occurredAt()).isEqualTo(Instant.parse("2026-04-26T09:00:00Z"));
         assertThat(event.metadataSummary().correlationId()).isEqualTo("corr-1");
+        assertThat(event.metadataSummary().sourceService()).isEqualTo("alert-service");
+        assertThat(event.metadataSummary().schemaVersion()).isEqualTo("1.0");
+        assertThat(event.metadataSummary().failureCategory()).isEqualTo("NONE");
     }
 
     @Test

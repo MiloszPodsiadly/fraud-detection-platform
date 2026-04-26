@@ -60,6 +60,7 @@ class AuditServiceTest {
         assertThat(event.resourceId()).isEqualTo("alert-1");
         assertThat(event.correlationId()).isEqualTo("corr-1");
         assertThat(event.outcome()).isEqualTo(AuditOutcome.SUCCESS);
+        assertThat(event.failureCategory()).isEqualTo(AuditFailureCategory.NONE);
         assertThat(event.failureReason()).isNull();
         assertThat(event.timestamp()).isNotNull();
     }
@@ -108,6 +109,7 @@ class AuditServiceTest {
         assertThat(event.correlationId()).isNull();
         assertThat(event.failureReason()).isNull();
         assertThat(event.outcome()).isEqualTo(AuditOutcome.FAILED);
+        assertThat(event.failureCategory()).isEqualTo(AuditFailureCategory.UNKNOWN);
     }
 
     @Test
@@ -134,6 +136,7 @@ class AuditServiceTest {
         assertThat(event.correlationId()).isEqualTo("corr-1");
         assertThat(event.actor().userId()).isEqualTo("request-analyst");
         assertThat(event.outcome()).isEqualTo(AuditOutcome.REJECTED);
+        assertThat(event.failureCategory()).isEqualTo(AuditFailureCategory.AUTHORIZATION);
         assertThat(event.failureReason()).isEqualTo("INSUFFICIENT_AUTHORITY");
     }
 

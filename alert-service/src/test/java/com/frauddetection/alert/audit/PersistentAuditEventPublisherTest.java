@@ -53,8 +53,12 @@ class PersistentAuditEventPublisherTest {
         assertThat(document.resourceId()).isEqualTo("alert-1");
         assertThat(document.createdAt()).isEqualTo(Instant.parse("2026-04-23T10:00:00Z"));
         assertThat(document.correlationId()).isEqualTo("corr-1");
+        assertThat(document.requestId()).isNull();
+        assertThat(document.sourceService()).isEqualTo("alert-service");
         assertThat(document.outcome()).isEqualTo(AuditOutcome.SUCCESS);
+        assertThat(document.failureCategory()).isEqualTo(AuditFailureCategory.NONE);
         assertThat(document.failureReason()).isNull();
+        assertThat(document.schemaVersion()).isEqualTo("1.0");
         assertThat(java.util.Arrays.stream(document.getClass().getDeclaredFields()).map(java.lang.reflect.Field::getName))
                 .doesNotContain("requestBody", "responseBody", "transactionPayload", "featureVector", "customerId", "accountId", "cardNumber");
         assertThat(meterRegistry.get("fraud_platform_audit_events_persisted_total")

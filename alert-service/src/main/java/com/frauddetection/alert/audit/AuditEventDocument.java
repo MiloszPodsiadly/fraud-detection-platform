@@ -53,12 +53,28 @@ public record AuditEventDocument(
         @Field("correlation_id")
         String correlationId,
 
+        @Field("request_id")
+        String requestId,
+
+        @Field("source_service")
+        String sourceService,
+
         @Field("outcome")
         AuditOutcome outcome,
 
+        @Field("failure_category")
+        AuditFailureCategory failureCategory,
+
         @Field("failure_reason")
-        String failureReason
+        String failureReason,
+
+        @Field("schema_version")
+        String schemaVersion
 ) {
+    private static final String SCHEMA_VERSION = "1.0";
+    private static final String SOURCE_SERVICE = "alert-service";
+    private static final int MAX_REQUEST_ID_LENGTH = 120;
+
     static AuditEventDocument from(String auditId, AuditEvent event) {
         return new AuditEventDocument(
                 auditId,
@@ -72,12 +88,24 @@ public record AuditEventDocument(
                 event.resourceId(),
                 event.timestamp(),
                 event.correlationId(),
+                bounded(event.requestId(), MAX_REQUEST_ID_LENGTH),
+                SOURCE_SERVICE,
                 event.outcome(),
-                event.failureReason()
+                event.failureCategory(),
+                event.failureReason(),
+                SCHEMA_VERSION
         );
     }
 
     private static List<String> sorted(java.util.Set<String> values) {
         return values.stream().sorted().toList();
+    }
+
+    private static String bounded(String value, int maxLength) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String normalized = value.trim().replaceAll("[\\r\\n\\t]+", " ");
+        return normalized.length() <= maxLength ? normalized : normalized.substring(0, maxLength);
     }
 }
