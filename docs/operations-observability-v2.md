@@ -17,12 +17,14 @@ v2 covers:
 - correlation and trace context propagation through HTTP and Kafka boundaries
 - operator guidance for ML runtime incidents
 - ML governance and drift v1 signals for aggregate input/output distribution oversight
+- read-only model lifecycle visibility for drift and runtime triage
 
 v2 still does not cover:
 
 - a production monitoring stack rollout
 - distributed tracing export
 - full ML quality monitoring or automatic model lifecycle actions
+- model switching, retraining, rollback, or approval workflow
 - automatic alert routing configuration in repo
 
 ## Local Runtime Stack
@@ -132,6 +134,18 @@ Prometheus metric contract:
   - Type: gauge
   - Meaning: persisted governance history availability
   - Labels: `model_name`, `model_version`, `status`
+- `fraud_ml_model_lifecycle_info`
+  - Type: gauge
+  - Meaning: read-only lifecycle metadata for the active model
+  - Labels: `model_name`, `model_version`, `lifecycle_mode`
+- `fraud_ml_model_lifecycle_events_total`
+  - Type: counter
+  - Meaning: lifecycle events recorded by event type and persistence status
+  - Labels: `event_type`, `model_name`, `model_version`, `status`
+- `fraud_ml_model_lifecycle_history_available`
+  - Type: gauge
+  - Meaning: persisted lifecycle history availability
+  - Labels: `model_name`, `model_version`, `status`
 
 ## Low-Cardinality Policy
 
@@ -148,6 +162,8 @@ Allowed bounded labels:
 - `severity`
 - `status`
 - `confidence`
+- `event_type`
+- `lifecycle_mode`
 
 Forbidden labels and payload-derived fields:
 
@@ -156,6 +172,12 @@ Forbidden labels and payload-derived fields:
 - `userId`
 - `alertId`
 - `correlationId`
+- artifact path
+- checksum
+- event ID
+- timestamp
+- reason text
+- hostname if dynamic
 - raw exception messages
 - request feature names and values
 - merchant, customer, device, or country identifiers
@@ -168,6 +190,8 @@ Use `/governance/drift` for feature-level drift details instead of feature label
 `ml-inference-service` exposes additive governance endpoints:
 
 - `GET /governance/model`
+- `GET /governance/model/current`
+- `GET /governance/model/lifecycle`
 - `GET /governance/profile/reference`
 - `GET /governance/profile/inference`
 - `GET /governance/drift`
@@ -175,6 +199,8 @@ Use `/governance/drift` for feature-level drift details instead of feature label
 - `GET /governance/history`
 
 These endpoints expose aggregate operational metadata only. They do not change `POST /v1/fraud/score`, Java fallback behavior, alert thresholds, or fraud decision semantics.
+
+Model lifecycle visibility is read-only. It exposes current model metadata, artifact checksum metadata, lifecycle mode, reference profile linkage, and bounded lifecycle events. It does not expose raw artifacts, filesystem secrets, credentials, model approval state, retraining, rollback, or model quality validation.
 
 Current drift status semantics:
 
@@ -199,13 +225,20 @@ MongoDB-backed snapshot history:
 - Retention keeps the latest 500 snapshots per model/version by default.
 - MongoDB outage sets history to `UNAVAILABLE` and does not break scoring.
 
+MongoDB-backed lifecycle history:
+
+- Lifecycle events are persisted to `ml_model_lifecycle_events` when MongoDB is available.
+- The default lifecycle retention limit is 200 events per model/version.
+- MongoDB outage sets lifecycle history to `PARTIAL` when in-memory events are available.
+- Lifecycle persistence is best-effort and does not break scoring.
+
 Drift actions:
 
 - `GET /governance/drift/actions` converts drift into advisory operator guidance.
 - Recommendations are bounded enums such as `COLLECT_MORE_DATA`, `INVESTIGATE_DATA_SHIFT`, and `ESCALATE_MODEL_REVIEW`.
-- The response uses a stable bounded contract: `severity`, `confidence`, `drift_status`, `trend`, `recommended_actions`, `escalation`, `automation_policy`, `evaluated_at`, and `explanation`.
+- The response uses a stable bounded contract: `severity`, `confidence`, `drift_status`, `trend`, `recommended_actions`, `escalation`, `automation_policy`, `evaluated_at`, `explanation`, and `model_lifecycle`.
 - Trend is bounded to `STABLE`, `INCREASING`, and `DECREASING` and is computed from the latest bounded snapshot window.
-- Explanation is deterministic, short, and aggregate-only; it does not include raw feature values, identifiers, payload fragments, or exception text.
+- Explanation is deterministic, short, and aggregate-only; it may mention that drift was observed after recent model lifecycle activity, but it must not claim lifecycle activity caused drift. It does not include raw feature values, identifiers, payload fragments, or exception text.
 - The endpoint never blocks transactions, changes scores, switches models, retrains models, or calls external alerting systems. Actions are for operator decision-making only.
 
 Detailed contract and playbook: [ML Governance And Drift v1](ml-governance-drift-v1.md).
@@ -279,7 +312,9 @@ Expected end-to-end checks after startup:
 5. Java fallback ratio becomes visible when scoring continues while ML becomes unavailable.
 6. Calling `GET /governance/drift` returns `UNKNOWN`, `OK`, `WATCH`, or `DRIFT`.
 7. Calling `GET /governance/drift/actions` returns advisory operator guidance with `automation_policy.advisory_only=true`.
-8. Calling `GET /governance/history?limit=10` returns bounded persisted history or `UNAVAILABLE` with a current fallback snapshot.
+8. Calling `GET /governance/model/current` returns the active model lifecycle metadata with `lifecycle_mode=READ_ONLY`.
+9. Calling `GET /governance/model/lifecycle` returns bounded persisted lifecycle history or `PARTIAL` with in-memory events.
+10. Calling `GET /governance/history?limit=10` returns bounded persisted history or `UNAVAILABLE` with a current fallback snapshot.
 
 Useful runtime checks:
 
@@ -288,6 +323,8 @@ curl http://localhost:9090/api/v1/targets
 curl http://localhost:9090/api/v1/rules
 curl http://localhost:8090/metrics
 curl http://localhost:8090/governance/model
+curl http://localhost:8090/governance/model/current
+curl http://localhost:8090/governance/model/lifecycle
 curl http://localhost:8090/governance/drift
 curl http://localhost:8090/governance/drift/actions
 curl "http://localhost:8090/governance/history?limit=10"

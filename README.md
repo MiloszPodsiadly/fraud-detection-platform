@@ -783,6 +783,8 @@ POST /v1/fraud/score
 GET /health
 GET /metrics
 GET /governance/model
+GET /governance/model/current
+GET /governance/model/lifecycle
 GET /governance/profile/reference
 GET /governance/profile/inference
 GET /governance/drift
@@ -801,9 +803,9 @@ Current ML capabilities:
 - production feature training mode for inference parity
 - SHADOW and COMPARE monitoring
 - analyst feedback dataset support
-- ML governance and drift v1 with model lineage, synthetic/local reference profile quality, process-local inference profile lifecycle, drift confidence, advisory drift actions, bounded MongoDB snapshot history, and low-cardinality governance metrics
+- ML governance and drift v1 with model lineage, read-only model lifecycle visibility, synthetic/local reference profile quality, process-local inference profile lifecycle, drift confidence, advisory drift actions, bounded MongoDB snapshot and lifecycle history, and low-cardinality governance metrics
 
-Governance snapshot persistence uses the existing local MongoDB service and is optional for scoring:
+Governance snapshot and lifecycle persistence use the existing local MongoDB service and are optional for scoring:
 
 | Env var | Default |
 | --- | --- |
@@ -811,9 +813,12 @@ Governance snapshot persistence uses the existing local MongoDB service and is o
 | `GOVERNANCE_SNAPSHOT_COLLECTION` | `ml_governance_snapshots` |
 | `GOVERNANCE_SNAPSHOT_RETENTION_LIMIT` | `500` |
 | `GOVERNANCE_SNAPSHOT_INTERVAL_REQUESTS` | `50` |
+| `MODEL_LIFECYCLE_COLLECTION` | `ml_model_lifecycle_events` |
+| `MODEL_LIFECYCLE_RETENTION_LIMIT` | `200` |
 
 MongoDB outage pauses persisted governance history but does not fail scoring.
-Drift actions are advisory operator signals only; they do not block transactions, change scores, switch models, retrain models, or trigger external alerting workflows.
+Model lifecycle visibility is read-only; it does not switch models, retrain, rollback, approve models, validate model quality, or expose raw artifacts. Drift actions include lifecycle context for operator triage only and do not claim model lifecycle activity caused drift.
+Drift actions are advisory operator signals only; they do not block transactions, change scores, switch models, retrain models, roll back models, or trigger external alerting workflows.
 
 Training smoke test:
 
