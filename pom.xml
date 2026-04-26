@@ -32,6 +32,7 @@
         <maven.compiler.release>${java.version}</maven.compiler.release>
         <testcontainers.version>1.21.4</testcontainers.version>
         <assertj.version>3.26.3</assertj.version>
+        <nimbus-jose-jwt.version>9.37.3</nimbus-jose-jwt.version>
     </properties>
 
     <dependencyManagement>
@@ -42,6 +43,11 @@
                 <version>${testcontainers.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.nimbusds</groupId>
+                <artifactId>nimbus-jose-jwt</artifactId>
+                <version>${nimbus-jose-jwt.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

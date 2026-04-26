@@ -1,13 +1,16 @@
 package com.frauddetection.alert.security.internal;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
+import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.JOSEObjectType;
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.JWSHeader;
+import com.nimbusds.jose.crypto.MACSigner;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.SignedJWT;
+
 import java.nio.charset.StandardCharsets;
-import java.security.InvalidKeyException;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
-import java.util.Base64;
-import java.util.stream.Collectors;
+import java.util.Date;
 
 final class InternalServiceCredentialProvider {
 
@@ -22,44 +25,25 @@ final class InternalServiceCredentialProvider {
             return "";
         }
         Instant now = Instant.now();
-        long issuedAt = now.getEpochSecond();
-        long expiresAt = now.plus(properties.jwt().ttl()).getEpochSecond();
-        String header = base64Url("{\"alg\":\"HS256\",\"typ\":\"JWT\"}");
-        String payload = base64Url("""
-                {"iss":"%s","aud":"%s","iat":%d,"exp":%d,"service_name":"%s","authorities":[%s]}"""
-                .formatted(
-                        escape(properties.jwt().issuer()),
-                        escape(properties.jwt().audience()),
-                        issuedAt,
-                        expiresAt,
-                        escape(properties.normalizedServiceName()),
-                        properties.jwtAuthorities().stream()
-                                .map(authority -> "\"" + escape(authority) + "\"")
-                                .collect(Collectors.joining(","))
-                ));
-        String signingInput = header + "." + payload;
-        return signingInput + "." + sign(signingInput, properties.jwt().secret());
-    }
-
-    private static String sign(String signingInput, String secret) {
+        JWTClaimsSet claims = new JWTClaimsSet.Builder()
+                .issuer(properties.jwt().issuer())
+                .audience(properties.jwt().audience())
+                .issueTime(Date.from(now))
+                .expirationTime(Date.from(now.plus(properties.jwt().ttl())))
+                .claim("service_name", properties.normalizedServiceName())
+                .claim("authorities", properties.jwtAuthorities())
+                .build();
+        SignedJWT jwt = new SignedJWT(
+                new JWSHeader.Builder(JWSAlgorithm.HS256)
+                        .type(JOSEObjectType.JWT)
+                        .build(),
+                claims
+        );
         try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            return Base64.getUrlEncoder().withoutPadding()
-                    .encodeToString(mac.doFinal(signingInput.getBytes(StandardCharsets.US_ASCII)));
-        } catch (NoSuchAlgorithmException | InvalidKeyException exception) {
+            jwt.sign(new MACSigner(properties.jwt().secret().getBytes(StandardCharsets.UTF_8)));
+            return jwt.serialize();
+        } catch (JOSEException exception) {
             throw new IllegalStateException("Internal JWT signing is not available.");
         }
-    }
-
-    private static String base64Url(String value) {
-        return Base64.getUrlEncoder().withoutPadding()
-                .encodeToString(value.getBytes(StandardCharsets.UTF_8));
-    }
-
-    private static String escape(String value) {
-        return value
-                .replace("\\", "\\\\")
-                .replace("\"", "\\\"");
     }
 }

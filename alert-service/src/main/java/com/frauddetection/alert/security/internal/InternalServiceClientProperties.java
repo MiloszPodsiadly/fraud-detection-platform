@@ -3,6 +3,7 @@ package com.frauddetection.alert.security.internal;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
@@ -36,7 +37,7 @@ public record InternalServiceClientProperties(
             throw new IllegalArgumentException("app.internal-auth.client.token is required when TOKEN_VALIDATOR is enabled");
         }
         if (enabled && "JWT_SERVICE_IDENTITY".equals(mode) && !jwt.complete()) {
-            throw new IllegalArgumentException("app.internal-auth.client.jwt issuer, audience, secret, ttl, and authorities are required when JWT_SERVICE_IDENTITY is enabled");
+            throw new IllegalArgumentException("app.internal-auth.client.jwt issuer, audience, HS256 secret of at least 32 bytes, ttl, and authorities are required when JWT_SERVICE_IDENTITY is enabled");
         }
     }
 
@@ -97,6 +98,7 @@ public record InternalServiceClientProperties(
             return !issuer.isBlank()
                     && !audience.isBlank()
                     && !secret.isBlank()
+                    && secret.getBytes(StandardCharsets.UTF_8).length >= 32
                     && ttl != null
                     && !ttl.isNegative()
                     && !ttl.isZero()

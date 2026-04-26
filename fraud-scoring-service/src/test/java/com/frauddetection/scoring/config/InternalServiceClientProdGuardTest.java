@@ -1,12 +1,14 @@
 package com.frauddetection.scoring.config;
 
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jwt.SignedJWT;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.mock.env.MockEnvironment;
 
-import java.nio.charset.StandardCharsets;
+import java.text.ParseException;
 import java.time.Duration;
-import java.util.Base64;
+import java.util.Date;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -58,7 +60,7 @@ class InternalServiceClientProdGuardTest {
     }
 
     @Test
-    void shouldAttachJwtAuthorizationHeaderWithoutSharedSecretHeaders() {
+    void shouldAttachJwtAuthorizationHeaderWithoutSharedSecretHeaders() throws ParseException {
         HttpHeaders headers = new HttpHeaders();
 
         new InternalServiceAuthHeaders(jwtProperties()).apply(headers);
@@ -67,10 +69,17 @@ class InternalServiceClientProdGuardTest {
         assertThat(headers.containsKey("X-Internal-Service-Name")).isFalse();
         assertThat(headers.containsKey("X-Internal-Service-Token")).isFalse();
         String token = headers.getFirst("Authorization").substring("Bearer ".length());
-        String payload = new String(Base64.getUrlDecoder().decode(pad(token.split("\\.")[1])), StandardCharsets.UTF_8);
-        assertThat(payload).contains("\"service_name\":\"fraud-scoring-service\"");
-        assertThat(payload).contains("\"authorities\":[\"ml-score\"]");
-        assertThat(payload).doesNotContain("local-dev-jwt-secret");
+        SignedJWT jwt = SignedJWT.parse(token);
+        assertThat(jwt.getHeader().getAlgorithm()).isEqualTo(JWSAlgorithm.HS256);
+        assertThat(jwt.getJWTClaimsSet().getIssuer()).isEqualTo("fraud-platform-local");
+        assertThat(jwt.getJWTClaimsSet().getAudience()).containsExactly("ml-inference-service");
+        assertThat(jwt.getJWTClaimsSet().getStringClaim("service_name")).isEqualTo("fraud-scoring-service");
+        assertThat(jwt.getJWTClaimsSet().getStringListClaim("authorities")).containsExactly("ml-score");
+        assertThat(jwt.getJWTClaimsSet().getIssueTime()).isNotNull();
+        assertThat(jwt.getJWTClaimsSet().getExpirationTime()).isAfter(jwt.getJWTClaimsSet().getIssueTime());
+        assertThat(jwt.getJWTClaimsSet().getExpirationTime()).isBeforeOrEqualTo(
+                Date.from(jwt.getJWTClaimsSet().getIssueTime().toInstant().plus(Duration.ofMinutes(5).plusSeconds(1)))
+        );
     }
 
     @Test
@@ -99,7 +108,7 @@ class InternalServiceClientProdGuardTest {
                 new InternalServiceClientProperties.Jwt(
                         "fraud-platform-local",
                         "ml-inference-service",
-                        "local-dev-jwt-secret",
+                        "local-dev-jwt-service-secret-32bytes",
                         Duration.ofMinutes(5),
                         "ml-score"
                 )
@@ -117,7 +126,4 @@ class InternalServiceClientProdGuardTest {
         );
     }
 
-    private byte[] pad(String value) {
-        return (value + "=".repeat((4 - value.length() % 4) % 4)).getBytes(StandardCharsets.US_ASCII);
-    }
 }

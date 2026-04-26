@@ -4,7 +4,7 @@ services:
       INTERNAL_AUTH_MODE: JWT_SERVICE_IDENTITY
       INTERNAL_AUTH_JWT_ISSUER: fraud-platform-local
       INTERNAL_AUTH_JWT_AUDIENCE: ml-inference-service
-      INTERNAL_AUTH_JWT_SECRET: local-dev-jwt-service-secret
+      INTERNAL_AUTH_JWT_SECRET: local-dev-jwt-service-secret-32bytes
       INTERNAL_AUTH_JWT_SERVICE_CLAIM: service_name
       INTERNAL_AUTH_JWT_AUTHORITIES_CLAIM: authorities
       INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES: fraud-scoring-service:ml-score,alert-service:governance-read
@@ -17,7 +17,7 @@ services:
       INTERNAL_AUTH_TOKEN: ""
       INTERNAL_AUTH_JWT_ISSUER: fraud-platform-local
       INTERNAL_AUTH_JWT_AUDIENCE: ml-inference-service
-      INTERNAL_AUTH_JWT_SECRET: local-dev-jwt-service-secret
+      INTERNAL_AUTH_JWT_SECRET: local-dev-jwt-service-secret-32bytes
       INTERNAL_AUTH_JWT_TTL: 5m
       INTERNAL_AUTH_JWT_AUTHORITIES: ml-score
 
@@ -29,6 +29,6 @@ services:
       INTERNAL_AUTH_TOKEN: ""
       INTERNAL_AUTH_JWT_ISSUER: fraud-platform-local
       INTERNAL_AUTH_JWT_AUDIENCE: ml-inference-service
-      INTERNAL_AUTH_JWT_SECRET: local-dev-jwt-service-secret
+      INTERNAL_AUTH_JWT_SECRET: local-dev-jwt-service-secret-32bytes
       INTERNAL_AUTH_JWT_TTL: 5m
       INTERNAL_AUTH_JWT_AUTHORITIES: governance-read
