@@ -72,6 +72,5 @@ app:
     audit:
       ml-governance-base-url: ${ML_GOVERNANCE_BASE_URL:http://localhost:8090}
       history-limit: ${GOVERNANCE_AUDIT_HISTORY_LIMIT:50}
-      retention-per-advisory-event: ${GOVERNANCE_AUDIT_RETENTION_PER_ADVISORY_EVENT:500}
       analytics-max-audit-events: ${GOVERNANCE_AUDIT_ANALYTICS_MAX_AUDIT_EVENTS:10000}
       ml-lookup-timeout: ${GOVERNANCE_AUDIT_ML_LOOKUP_TIMEOUT:2s}
