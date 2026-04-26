@@ -15,7 +15,7 @@ FDP-11 freezes the public HTTP API surface for local services without changing s
 
 Base URL in Docker: `http://ml-inference-service:8090`
 
-Internal ML scoring and governance endpoints require configured service identity in non-localdev runtime. Docker localdev may allow anonymous internal calls only when `INTERNAL_AUTH_MODE=DISABLED_LOCAL_ONLY` (`LOCALDEV` remains a compatibility alias); production/default mode is fail-closed and requires the internal service headers documented in the ML OpenAPI reference. This is a token-validator service-auth foundation with an mTLS-ready configuration boundary, not implemented mTLS.
+Internal ML scoring and governance endpoints require configured service identity in non-localdev runtime. Docker localdev may allow anonymous internal calls only when `INTERNAL_AUTH_MODE=DISABLED_LOCAL_ONLY` (`LOCALDEV` remains a compatibility alias); production/default mode is fail-closed and requires the internal service headers documented in the ML OpenAPI reference. This is an internal shared-secret service-auth foundation with optional token-hash allowlist mode and an mTLS-ready configuration boundary; it is not full enterprise mTLS.
 
 | Method | Path | Contract |
 | --- | --- | --- |
@@ -76,20 +76,22 @@ Platform Audit Read API:
 
 - `GET /api/v1/audit/events`
 - Requires backend-enforced `audit:read`; the local role model grants it only to `FRAUD_OPS_ADMIN`.
+- Returns only durable platform write/governance audit events from `audit_events`. It does not return read-access audit records from `read_access_audit_events`.
 - Query filters are exact match only: `event_type`, `actor_id`, `resource_type`, `resource_id`.
 - Timestamp filters `from` and `to` are inclusive ISO-8601 instants. If only `from` is provided, the upper bound is request time; if only `to` is provided, the lower bound is open-ended.
 - `limit` defaults to `50`, maximum `100`; invalid limits or `from > to` return the platform 400 error envelope.
 - Results are newest-first and bounded. The endpoint does not support regex, full-text search, unbounded export, pagination cursor, aggregation, delete, or update.
-- `metadata_summary` is bounded and excludes raw payloads, feature vectors, tokens, secrets, stack traces, and customer/account/card data.
+- `metadata_summary` is bounded and may include safe correlation id, request id, source service, schema version, failure category, and failure reason. It excludes raw payloads, feature vectors, tokens, secrets, stack traces, and customer/account/card data.
 - If audit persistence cannot be read, the endpoint returns `status=UNAVAILABLE`, `reason_code=AUDIT_STORE_UNAVAILABLE`, a stable non-sensitive `message`, `count=0`, and an empty `events` array.
 - Clients MUST check `status` before interpreting `count` or `events`; `AVAILABLE` with `count=0` is a valid empty result and is distinct from `UNAVAILABLE`.
 - Runtime environments should set bounded MongoDB driver timeouts for `alert-service`; the Docker quickstart does this so store outages resolve to the `UNAVAILABLE` contract instead of relying on long driver defaults.
-- This endpoint reads durable platform audit events. It is not itself proof that every sensitive data read was audited.
+- This endpoint reads durable platform audit events. It is not itself proof that every sensitive data read was audited. Read-access audit is persisted separately and would need a separate bounded endpoint in a future scope.
 
 Sensitive read-access audit:
 
 - Implemented for `GET /api/v1/alerts/{alertId}`, `GET /api/v1/fraud-cases/{caseId}`, `GET /api/v1/transactions/scored`, `GET /governance/advisories`, `GET /governance/advisories/{event_id}`, `GET /governance/advisories/{event_id}/audit`, and `GET /governance/advisories/analytics`.
-- Records authenticated backend principal identity, roles, `action=READ`, resource type/id where applicable, endpoint category, hashed query shape, page/size, bounded result count, outcome, correlation id, source service, and schema version.
+- Records authenticated backend principal identity, roles, `action=READ`, resource type/id where applicable, endpoint category, canonical hashed query shape, page/size, bounded result count, outcome, correlation id, source service, schema version, and indexed timestamps.
+- If actor principal is missing, records `actor_id=unknown`, emits a low-cardinality anomaly metric, and logs a bounded warning without URL/query/payload/token content.
 - Does not store raw query parameters, filters, response payloads, transaction data, customer/account/card data, advisory content, full URLs, exception messages, tokens, secrets, or stack traces.
 - Audit persistence failure is best-effort for sensitive reads: the read response is not blocked, and alert-service emits a structured warning plus low-cardinality failure metric.
 
@@ -114,6 +116,10 @@ Platform audit read response:
       "occurred_at": "2026-04-26T09:00:00Z",
       "metadata_summary": {
         "correlation_id": "corr-1",
+        "request_id": null,
+        "source_service": "alert-service",
+        "schema_version": "1.0",
+        "failure_category": "NONE",
         "failure_reason": null
       }
     }

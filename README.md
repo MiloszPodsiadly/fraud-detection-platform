@@ -211,11 +211,11 @@ Current sinks:
 
 Durable audit writes happen before structured log publication. If audit persistence is unavailable, write paths fail explicitly with the platform error envelope instead of silently dropping audit intent.
 
-Platform audit event reads are available through `GET /api/v1/audit/events` and require `audit:read`, which is granted only to `FRAUD_OPS_ADMIN` by the local role model. This is an Audit Read API for durable audit events; it is not itself proof that every sensitive data read was audited. Filters are exact-match only (`event_type`, `actor_id`, `resource_type`, `resource_id`) plus an inclusive timestamp window (`from`, `to`) and a bounded `limit` defaulting to 50 and capped at 100. The endpoint returns newest-first results and does not support regex, full-text search, export, aggregation, delete, or update operations. Clients MUST check `status` before interpreting `count` or `events`: `AVAILABLE` with `count=0` means a valid empty result, while `UNAVAILABLE` means audit storage could not be read and includes stable `reason_code=AUDIT_STORE_UNAVAILABLE` plus a non-sensitive message.
+Platform audit event reads are available through `GET /api/v1/audit/events` and require `audit:read`, which is granted only to `FRAUD_OPS_ADMIN` by the local role model. This is an Audit Read API for durable platform write/governance audit events in `audit_events`; it does not return read-access audit events and is not itself proof that every sensitive data read was audited. Filters are exact-match only (`event_type`, `actor_id`, `resource_type`, `resource_id`) plus an inclusive timestamp window (`from`, `to`) and a bounded `limit` defaulting to 50 and capped at 100. The endpoint returns newest-first results and does not support regex, full-text search, export, aggregation, delete, or update operations. Clients MUST check `status` before interpreting `count` or `events`: `AVAILABLE` with `count=0` means a valid empty result, while `UNAVAILABLE` means audit storage could not be read and includes stable `reason_code=AUDIT_STORE_UNAVAILABLE` plus a non-sensitive message.
 
-Sensitive read-access audit is implemented separately for selected reads: alert details, fraud case details, scored transaction monitor, governance advisory list, governance advisory details, governance advisory audit history, and governance advisory analytics. These audit records are best-effort and do not block the read response if audit persistence fails. They store bounded metadata only: actor identity from the authenticated backend principal, endpoint category, resource type/id where applicable, page/size, hashed query shape, bounded result count, outcome, correlation id, source service, and schema version. They do not store raw query params, filters, response payloads, transaction data, customer/account/card data, advisory content, full URLs, exception messages, tokens, or stack traces.
+Sensitive read-access audit is implemented separately for selected reads in `read_access_audit_events`: alert details, fraud case details, scored transaction monitor, governance advisory list, governance advisory details, governance advisory audit history, and governance advisory analytics. There is no public read-access audit query endpoint in this scope. These audit records are best-effort and do not block the read response if audit persistence fails. They store bounded metadata only: actor identity from the authenticated backend principal or `unknown` with an anomaly metric if no principal is present, endpoint category, resource type/id where applicable, page/size, canonical hashed query shape, bounded result count, outcome, correlation id, source service, and schema version. They do not store raw query params, filters, response payloads, transaction data, customer/account/card data, advisory content, full URLs, exception messages, tokens, or stack traces.
 
-The durable audit store is not a WORM archive, SIEM integration, or full compliance reporting system. Metrics such as `fraud_platform_audit_events_persisted_total`, `fraud_platform_audit_persistence_failures_total`, `fraud_platform_audit_read_requests_total`, `fraud_platform_read_access_audit_events_persisted_total`, `fraud_platform_read_access_audit_persistence_failures_total`, `fraud_internal_auth_success_total`, and `fraud_internal_auth_failure_total` are operational health signals only.
+The durable audit store is not WORM archive storage, not SIEM integration, and not a final compliance archive. Metrics such as `fraud_platform_audit_events_persisted_total`, `fraud_platform_audit_persistence_failures_total`, `fraud_platform_audit_read_requests_total`, `fraud_platform_read_access_audit_events_persisted_total`, `fraud_platform_read_access_audit_persistence_failures_total`, `fraud_read_access_audit_actor_missing_total`, `fraud_internal_auth_success_total`, and `fraud_internal_auth_failure_total` are operational health signals only.
 
 Governance advisory audit entries are separate from fraud workflow audit logs. They are persisted append-only as human review history, derive actor identity from the backend-authenticated principal, and do not affect scoring, model behavior, retraining, rollback, or fraud decisioning. Advisory lifecycle status is a read-time projection from the latest audit entry, not a persisted workflow state or automation trigger.
 
@@ -479,7 +479,7 @@ These credentials are local-only and must not be reused outside local test envir
 
 - no silent refresh
 - no token refresh flow
-- service-to-service auth uses the `TOKEN_VALIDATOR` internal service foundation for configured ML/governance calls; local Docker may use explicit `DISABLED_LOCAL_ONLY`, and this is not mTLS
+- service-to-service auth uses the internal shared-secret service-auth foundation for configured ML/governance calls; local Docker may use explicit `DISABLED_LOCAL_ONLY`, the token-validator Docker override exercises `TOKEN_VALIDATOR`, and this is not full enterprise mTLS
 - no production IdP config
 - tokens are managed by `oidc-client-ts` for local/dev use, not as hardened production storage
 
@@ -502,6 +502,17 @@ If runtime behavior does not match the current repo state after code changes, re
 docker compose -f deployment/docker-compose.yml build ml-inference-service analyst-console-ui
 docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml up -d
 ```
+
+To verify the token-validator service-auth path instead of the local bypass:
+
+```bash
+docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml -f deployment/docker-compose.internal-auth.yml up --build -d
+curl -i http://localhost:8090/governance/model
+curl -i -H "X-Internal-Service-Name: alert-service" -H "X-Internal-Service-Token: local-dev-internal-token" http://localhost:8090/governance/model
+curl -s http://localhost:8090/metrics | grep fraud_internal_auth
+```
+
+Expected results: the anonymous ML governance call returns `401`, the configured alert-service identity succeeds, and internal auth success/failure metrics are visible. Scoring through `fraud-scoring-service` uses the same shared token through its internal client boundary. This validates the internal shared-secret service-auth foundation; it is not full enterprise mTLS.
 
 If you suspect stale local images or containers, rebuild cleanly:
 
@@ -592,7 +603,7 @@ Full details: [Security Foundation v1](docs/security-foundation-v1.md).
 
 Current non-production gaps:
 
-- Service-to-service authentication foundation is implemented for configured ML/governance calls through token validation and an explicit local/dev bypass mode; mTLS is not implemented.
+- Internal shared-secret service-auth foundation is implemented for configured ML/governance calls through token validation and an explicit local/dev bypass mode; it is not full enterprise mTLS.
 - The frontend still uses demo auth by default in development.
 - The frontend OIDC path is a local OIDC integration and foundation for production auth, but it does not yet implement silent refresh or production deployment hardening.
 - Request DTOs still accept `analystId` for compatibility, although secured write paths use the principal as actor source of truth.
@@ -1007,9 +1018,9 @@ Implemented:
 
 Known production gaps:
 
-- Service-to-service authentication is not implemented yet.
-- mTLS is not implemented yet; current internal service authentication is a token-validator foundation with `MTLS_READY` kept fail-closed rather than pretending mTLS exists.
-- Durable audit storage is not WORM/immutable archive storage and has no SIEM export integration.
+- Service-to-service authentication is an internal shared-secret service-auth foundation only, with a token-validator path and prod-like fail-closed guards; it is not bank-grade service identity.
+- mTLS is not implemented yet; current internal service authentication has an mTLS-ready boundary with `MTLS_READY` kept fail-closed rather than pretending mTLS exists.
+- Durable audit storage is not WORM/immutable archive storage, not a final compliance archive, and has no SIEM export integration.
 - DLT inspection/replay tooling is not implemented yet.
 - The frontend defaults to demo auth in quickstart mode and supports local OIDC through the Keycloak override, but it is not a production-ready SSO setup.
 - ML governance uses a synthetic/local reference profile and aggregate MongoDB snapshots; the synthetic reference is not suitable for production drift decisions and FDP-7 does not implement automatic retraining, rollback, approval UI, or production alert routing.

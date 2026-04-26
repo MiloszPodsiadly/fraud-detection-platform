@@ -2,14 +2,14 @@ openapi: 3.0.3
 info:
   title: Alert Service API
   version: FDP-16.3
-  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, selected sensitive read-access audit, governance advisory lifecycle projection, and human-review audit. Audit read contracts do not imply mTLS, WORM storage, SIEM integration, unbounded export, or full compliance archive.
+  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, selected sensitive read-access audit persistence, governance advisory lifecycle projection, and human-review audit. Audit read contracts do not imply full enterprise mTLS, WORM archive storage, SIEM integration, unbounded export, or final compliance archive.
 servers:
   - url: http://localhost:8085
 paths:
   /api/v1/audit/events:
     get:
       summary: List durable platform audit events
-      description: Returns bounded newest-first durable platform audit events. This is the Audit Read API for already-persisted durable audit events; it is not itself proof that every sensitive platform read was audited. Requires audit:read. Filters are exact-match only; no regex, full-text search, export, aggregation, delete, or update operations are supported. Clients MUST check status before interpreting count or events. AVAILABLE with count 0 is a valid empty result. UNAVAILABLE means audit storage could not be read and returns reason_code AUDIT_STORE_UNAVAILABLE, a stable non-sensitive message, count 0, and an empty events array.
+      description: Returns bounded newest-first durable platform write/governance audit events from audit_events. This endpoint does not return read-access audit events from read_access_audit_events and is not itself proof that every sensitive platform read was audited. Requires audit:read. Filters are exact-match only; no regex, full-text search, export, aggregation, delete, or update operations are supported. Clients MUST check status before interpreting count or events. AVAILABLE with count 0 is a valid empty result. UNAVAILABLE means audit storage could not be read and returns reason_code AUDIT_STORE_UNAVAILABLE, a stable non-sensitive message, count 0, and an empty events array.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -461,12 +461,32 @@ components:
       description: Bounded safe metadata summary. Does not include raw payloads, feature vectors, tokens, secrets, stack traces, or customer/account/card data.
       required:
         - correlation_id
+        - request_id
+        - source_service
+        - schema_version
+        - failure_category
         - failure_reason
       properties:
         correlation_id:
           type: string
           nullable: true
           maxLength: 120
+        request_id:
+          type: string
+          nullable: true
+          maxLength: 120
+        source_service:
+          type: string
+          nullable: true
+          enum: [alert-service]
+        schema_version:
+          type: string
+          nullable: true
+          enum: ["1.0"]
+        failure_category:
+          type: string
+          nullable: true
+          enum: [NONE, VALIDATION, AUTHORIZATION, DEPENDENCY, CONFLICT, UNKNOWN]
         failure_reason:
           type: string
           nullable: true

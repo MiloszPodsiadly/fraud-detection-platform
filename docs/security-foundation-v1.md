@@ -228,8 +228,12 @@ Event model:
 - resource id
 - timestamp
 - correlation id when available
+- nullable bounded request id when available
+- source service (`alert-service`)
 - outcome: `SUCCESS`, `REJECTED`, or `FAILED`
-- optional failure reason category
+- failure category: `NONE`, `VALIDATION`, `AUTHORIZATION`, `DEPENDENCY`, `CONFLICT`, or `UNKNOWN`
+- optional bounded failure reason
+- schema version (`1.0`)
 
 Sensitive data intentionally excluded:
 
@@ -249,19 +253,21 @@ Implementation:
 - `PersistentAuditEventPublisher` writes append-only audit records to MongoDB collection `audit_events`.
 - `StructuredAuditEventPublisher` writes structured key-value logs through SLF4J after durable persistence succeeds.
 - Audit persistence failures surface as HTTP 503 responses on audited write paths and are not silently dropped.
-- `GET /api/v1/audit/events` reads durable audit events newest-first with exact-match filters only. This is an Audit Read API, not a claim that every sensitive platform read was audited.
+- `GET /api/v1/audit/events` reads durable platform write/governance audit events from `audit_events` newest-first with exact-match filters only. This is an Audit Read API for that store, not a claim that every sensitive platform read was audited.
+- `GET /api/v1/audit/events` does not return read-access audit events; those are stored separately in `read_access_audit_events`. A future endpoint would be needed for bounded read-access audit investigation.
 - Audit read filters are `event_type`, `actor_id`, `resource_type`, `resource_id`, inclusive `from`/`to` timestamps, and bounded `limit` default `50`, max `100`.
 - Audit reads return `status=UNAVAILABLE`, `reason_code=AUDIT_STORE_UNAVAILABLE`, a stable non-sensitive `message`, `count=0`, and an empty event list if persistence cannot be read.
 - Clients MUST check `status` before interpreting `count` or `events`; `AVAILABLE` with `count=0` is a valid empty result and is not equivalent to `UNAVAILABLE`.
 - Deployments should configure bounded MongoDB driver timeouts for `alert-service` so datastore outage detection does not depend on long driver defaults; the Docker quickstart sets bounded server-selection, connect, and socket timeouts.
 - Audit reads do not provide regex, free-text search, unbounded export, aggregation, delete, or update operations.
-- `metadata_summary` is bounded and limited to safe correlation/failure context. Raw payloads, feature vectors, tokens, secrets, stack traces, and customer/account/card data are not stored or returned.
+- `metadata_summary` is bounded and limited to safe correlation/request/source/schema/failure context. Raw payloads, feature vectors, tokens, secrets, stack traces, and customer/account/card data are not stored or returned.
 
 Sensitive read-access audit:
 
 - Covers `GET /api/v1/alerts/{alertId}`, `GET /api/v1/fraud-cases/{caseId}`, `GET /api/v1/transactions/scored`, `GET /governance/advisories`, `GET /governance/advisories/{eventId}`, `GET /governance/advisories/{eventId}/audit`, and `GET /governance/advisories/analytics`.
 - Uses the authenticated backend principal for actor identity.
-- Stores endpoint category, resource type/id where applicable, page/size, hashed query shape, bounded result count, outcome, correlation id, source service, and schema version.
+- If the backend principal is unexpectedly missing, stores `actor_id=unknown`, emits `fraud_read_access_audit_actor_missing_total{endpoint_category}`, and logs a bounded warning without URL, query, payload, or token content.
+- Stores endpoint category, resource type/id where applicable, page/size, canonical hashed query shape, bounded result count, outcome, correlation id, source service, schema version, and indexed timestamps.
 - Does not store raw query params, filters, response payloads, transaction data, PII/customer/account/card data, advisory content, full URLs, exception messages, tokens, or stack traces.
 - Audit persistence failure does not block the sensitive read; it emits a structured warning and a low-cardinality failure metric.
 
@@ -272,27 +278,29 @@ Operational audit metrics:
 - `fraud_platform_audit_read_requests_total{status}`
 - `fraud_platform_read_access_audit_events_persisted_total{endpoint_category,outcome}`
 - `fraud_platform_read_access_audit_persistence_failures_total{endpoint_category}`
+- `fraud_read_access_audit_actor_missing_total{endpoint_category}`
 
 These metrics are health signals, not compliance reports, and intentionally exclude actor IDs, resource IDs, audit IDs, exception messages, and other high-cardinality values.
 
 ## Internal Service Authentication
 
-Configured internal ML scoring and governance calls use a service-auth header foundation:
+Configured internal ML scoring and governance calls use an internal shared-secret service-auth foundation:
 
 - `fraud-scoring-service` sends internal service identity when calling `ml-inference-service` scoring.
 - `alert-service` sends internal service identity when calling `ml-inference-service` governance endpoints.
 - `ml-inference-service` defaults to `TOKEN_VALIDATOR` fail-closed mode and rejects missing internal identity with 401.
 - Unknown identities, invalid tokens, or missing endpoint authority return 403.
 - `INTERNAL_AUTH_MODE=DISABLED_LOCAL_ONLY` is the explicit local/dev bypass mode; `LOCALDEV` remains a compatibility alias.
-- Startup fails if `DISABLED_LOCAL_ONLY` is used with a prod-like profile or if `TOKEN_VALIDATOR` is used in a prod-like profile without an allowlist.
-- `MTLS_READY` is a fail-closed configuration boundary only; mTLS is not implemented.
+- Startup fails if `DISABLED_LOCAL_ONLY` is used with a prod-like profile, if a Java internal-auth client is disabled in prod-like profiles, if service name/token is missing in prod-like profiles, or if `TOKEN_VALIDATOR` is used in a prod-like profile without token hash mode and a valid allowlist.
+- `INTERNAL_AUTH_TOKEN_HASH_MODE=true` lets `ml-inference-service` compare configured SHA-256 token hashes instead of storing plaintext shared secrets in its allowlist. Plain shared-secret comparison is limited to local/dev style runtime.
+- `MTLS_READY` is a fail-closed configuration boundary only; full enterprise mTLS is not implemented.
 - Tokens are not logged, not sent to the frontend, and not used as analyst identity.
 - Security events and metrics are low-cardinality and do not include tokens, actor IDs, resource IDs, paths, or exception messages.
 - Internal auth metrics are `fraud_internal_auth_success_total{source_service,target_service}` and `fraud_internal_auth_failure_total{target_service,reason}`.
 
-This is not mTLS and does not replace production deployment hardening.
+This is an internal shared-secret service-auth foundation, not full enterprise mTLS, not bank-grade service identity, and not a replacement for production deployment hardening.
 
-Future sinks can be added behind `AuditEventPublisher`:
+Future sinks can be added behind `AuditEventPublisher`; they are not implemented in FDP-16:
 
 - Kafka audit topic
 - SIEM forwarder
