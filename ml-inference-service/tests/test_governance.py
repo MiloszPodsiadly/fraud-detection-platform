@@ -1,6 +1,7 @@
 import json
 import threading
 import unittest
+from datetime import datetime, timedelta, timezone
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -12,6 +13,7 @@ from app.governance.advisory import (
     AdvisoryPersistenceConfig,
     MAX_ADVISORY_LIMIT,
     MongoAdvisoryEventRepository,
+    advisory_confidence_context,
     build_advisory_event,
     should_emit_advisory,
 )
@@ -570,6 +572,25 @@ class MlGovernanceAdvisoryTest(unittest.TestCase):
             "artifact_path_or_id": "not-allowed",
         }
 
+    def drift_context(
+            self,
+            sample_size: int = 500,
+            min_observations: int = 100,
+            confidence: str = "HIGH",
+            reason: str | None = None,
+            inference_profile_status: str = "STABLE",
+            signals: list[dict] | None = None,
+    ):
+        return {
+            "sample_size": sample_size,
+            "observation_count": sample_size,
+            "min_observations": min_observations,
+            "confidence": confidence,
+            "reason": reason,
+            "inference_profile_status": inference_profile_status,
+            "signals": signals if signals is not None else [{"severity": "DRIFT"}],
+        }
+
     def test_emits_only_for_meaningful_escalated_advisories(self):
         self.assertTrue(should_emit_advisory(self.actions(severity="HIGH", confidence="HIGH", escalation="NONE")))
         self.assertTrue(should_emit_advisory(self.actions(severity="MEDIUM", confidence="MEDIUM", escalation="OPERATOR_REVIEW")))
@@ -588,11 +609,13 @@ class MlGovernanceAdvisoryTest(unittest.TestCase):
             },
             self.model(),
             self.lifecycle_context(),
+            self.drift_context(),
         )
         serialized = json.dumps(event)
 
         self.assertEqual(event["event_type"], "GOVERNANCE_DRIFT_ADVISORY")
         self.assertEqual(event["severity"], "HIGH")
+        self.assertIn(event["advisory_confidence_context"], {"LOW_SAMPLE", "PARTIAL_DATA", "STABLE_BASELINE", "SUFFICIENT_DATA"})
         self.assertLessEqual(len(event["recommended_actions"]), 5)
         self.assertEqual(
             set(event["lifecycle_context"]),
@@ -612,7 +635,7 @@ class MlGovernanceAdvisoryTest(unittest.TestCase):
     def test_advisory_persistence_falls_back_to_memory(self):
         service = AdvisoryEventService(FakeAdvisoryRepository(fail=True), self.config())
 
-        event, status = service.emit_if_needed(self.actions(), self.model(), self.lifecycle_context())
+        event, status = service.emit_if_needed(self.actions(), self.model(), self.lifecycle_context(), self.drift_context())
         response = service.history_response()
 
         self.assertEqual(status, "memory")
@@ -624,8 +647,9 @@ class MlGovernanceAdvisoryTest(unittest.TestCase):
     def test_advisory_history_is_bounded(self):
         service = AdvisoryEventService(FakeAdvisoryRepository(), self.config(retention=2))
 
-        for _ in range(4):
-            service.emit_if_needed(self.actions(), self.model(), self.lifecycle_context())
+        for index in range(4):
+            actions = {**self.actions(), "drift_status": f"DRIFT-{index}"}
+            service.emit_if_needed(actions, self.model(), self.lifecycle_context(), self.drift_context())
         response = service.history_response(999)
 
         self.assertEqual(response["status"], "AVAILABLE")
@@ -642,13 +666,60 @@ class MlGovernanceAdvisoryTest(unittest.TestCase):
         )
         service = AdvisoryEventService(repository, self.config(retention=2))
 
-        for _ in range(3):
-            service.emit_if_needed(self.actions(), self.model(), self.lifecycle_context())
+        for index in range(3):
+            actions = {**self.actions(), "drift_status": f"DRIFT-{index}"}
+            service.emit_if_needed(actions, self.model(), self.lifecycle_context(), self.drift_context())
 
         self.assertEqual(collection.count_documents({"model_name": "python-logistic-fraud-model", "model_version": "advisory-test-v1"}), 2)
         self.assertIn(((("created_at", -1),), True), collection.indexes)
         self.assertIn(((("severity", 1),), True), collection.indexes)
         self.assertIn(((("model_name", 1), ("model_version", 1)), True), collection.indexes)
+
+    def test_deduplicates_identical_advisory_within_window(self):
+        service = AdvisoryEventService(FakeAdvisoryRepository(), self.config())
+
+        first, first_status = service.emit_if_needed(self.actions(), self.model(), self.lifecycle_context(), self.drift_context())
+        second, second_status = service.emit_if_needed(self.actions(), self.model(), self.lifecycle_context(), self.drift_context())
+        response = service.history_response()
+
+        self.assertIsNotNone(first)
+        self.assertEqual(first_status, "persisted")
+        self.assertIsNone(second)
+        self.assertEqual(second_status, "deduplicated")
+        self.assertEqual(response["count"], 1)
+
+    def test_dedup_allows_identical_advisory_after_window(self):
+        service = AdvisoryEventService(FakeAdvisoryRepository(fail=True), self.config())
+
+        first, _ = service.emit_if_needed(self.actions(), self.model(), self.lifecycle_context(), self.drift_context())
+        old_timestamp = (datetime.now(timezone.utc) - timedelta(minutes=6)).isoformat(timespec="seconds")
+        service._events[0]["created_at"] = old_timestamp
+        second, second_status = service.emit_if_needed(self.actions(), self.model(), self.lifecycle_context(), self.drift_context())
+
+        self.assertIsNotNone(first)
+        self.assertIsNotNone(second)
+        self.assertEqual(second_status, "memory")
+        self.assertEqual(service.history_response()["count"], 2)
+
+    def test_confidence_context_is_bounded_and_omits_numeric_values(self):
+        self.assertEqual(
+            advisory_confidence_context(self.actions(confidence="HIGH"), self.drift_context(sample_size=10)),
+            "LOW_SAMPLE",
+        )
+        self.assertEqual(
+            advisory_confidence_context(self.actions(confidence="MEDIUM"), self.drift_context(reason="reference_profile_unavailable")),
+            "PARTIAL_DATA",
+        )
+        self.assertEqual(
+            advisory_confidence_context(self.actions(confidence="HIGH"), self.drift_context()),
+            "SUFFICIENT_DATA",
+        )
+        event = build_advisory_event(self.actions(confidence="MEDIUM"), self.model(), self.lifecycle_context(), self.drift_context(confidence="MEDIUM"))
+
+        self.assertEqual(event["advisory_confidence_context"], "STABLE_BASELINE")
+        self.assertNotIn("sample_size", event)
+        self.assertNotIn("observation_count", event)
+        self.assertNotIn("min_observations", event)
 
 
 class MlGovernanceActionsTest(unittest.TestCase):
@@ -1046,6 +1117,84 @@ class MlGovernanceEndpointTest(unittest.TestCase):
         self.assertNotIn("raw feature", serialized.lower())
         for field in SENSITIVE_FIELDS:
             self.assertNotIn(field, serialized)
+
+    def test_advisories_endpoint_filters_by_severity_and_model_version(self):
+        documents = [
+            {
+                "event_id": "advisory-high-current",
+                "event_type": "GOVERNANCE_DRIFT_ADVISORY",
+                "severity": "HIGH",
+                "drift_status": "DRIFT",
+                "confidence": "HIGH",
+                "advisory_confidence_context": "SUFFICIENT_DATA",
+                "model_name": server.MODEL_NAME,
+                "model_version": server.MODEL_VERSION,
+                "lifecycle_context": {
+                    "current_model_version": server.MODEL_VERSION,
+                    "model_loaded_at": "2026-04-26T00:00:00+00:00",
+                    "model_changed_recently": False,
+                    "recent_lifecycle_event_count": 1,
+                },
+                "recommended_actions": ["ESCALATE_MODEL_REVIEW"],
+                "explanation": "score p95 increased by 18% compared to reference profile",
+                "created_at": "2026-04-26T00:02:00+00:00",
+            },
+            {
+                "event_id": "advisory-medium-current",
+                "event_type": "GOVERNANCE_DRIFT_ADVISORY",
+                "severity": "MEDIUM",
+                "drift_status": "WATCH",
+                "confidence": "MEDIUM",
+                "advisory_confidence_context": "STABLE_BASELINE",
+                "model_name": server.MODEL_NAME,
+                "model_version": server.MODEL_VERSION,
+                "lifecycle_context": {
+                    "current_model_version": server.MODEL_VERSION,
+                    "model_loaded_at": "2026-04-26T00:00:00+00:00",
+                    "model_changed_recently": False,
+                    "recent_lifecycle_event_count": 1,
+                },
+                "recommended_actions": ["INVESTIGATE_DATA_SHIFT"],
+                "explanation": "feature mean increased by 20% compared to reference profile",
+                "created_at": "2026-04-26T00:01:00+00:00",
+            },
+            {
+                "event_id": "advisory-high-other",
+                "event_type": "GOVERNANCE_DRIFT_ADVISORY",
+                "severity": "HIGH",
+                "drift_status": "DRIFT",
+                "confidence": "HIGH",
+                "advisory_confidence_context": "SUFFICIENT_DATA",
+                "model_name": server.MODEL_NAME,
+                "model_version": "other-v1",
+                "lifecycle_context": {
+                    "current_model_version": "other-v1",
+                    "model_loaded_at": "2026-04-26T00:00:00+00:00",
+                    "model_changed_recently": False,
+                    "recent_lifecycle_event_count": 1,
+                },
+                "recommended_actions": ["ESCALATE_MODEL_REVIEW"],
+                "explanation": "score p95 increased by 18% compared to reference profile",
+                "created_at": "2026-04-26T00:00:00+00:00",
+            },
+        ]
+        original_service = server.ADVISORY_SERVICE
+        try:
+            server.ADVISORY_SERVICE = AdvisoryEventService(
+                FakeAdvisoryRepository(documents=documents),
+                AdvisoryPersistenceConfig(
+                    mongodb_uri="mongodb://mongodb:27017/fraud_governance",
+                    collection="ml_governance_advisory_events",
+                    retention_limit=200,
+                ),
+            )
+            payload = self.get_json(f"/governance/advisories?severity=HIGH&model_version={server.MODEL_VERSION}&limit=1")
+        finally:
+            server.ADVISORY_SERVICE = original_service
+
+        self.assertEqual(payload["status"], "AVAILABLE")
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["advisory_events"][0]["event_id"], "advisory-high-current")
 
     def test_drift_actions_endpoint_returns_advisory_guidance(self):
         documents = [
