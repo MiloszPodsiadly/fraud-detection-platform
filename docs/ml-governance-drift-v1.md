@@ -23,6 +23,7 @@ Operators need to answer:
 - `GET /governance/profile/inference` exposes process-local aggregate inference stats.
 - `GET /governance/drift` compares inference stats against the reference profile and returns status, confidence, sample size, lifecycle status, and bounded signal details.
 - `GET /governance/drift/actions` interprets drift into advisory operator actions and escalation guidance.
+- `GET /governance/advisories` exposes bounded governance advisory events for operators.
 - `GET /governance/history` exposes bounded persisted governance snapshot history when MongoDB is available.
 - `/metrics` exposes low-cardinality governance gauges and counters.
 
@@ -336,6 +337,87 @@ Explanation is deterministic, short, and aggregate-only. It may mention aggregat
 
 These are operational recommendations only. They do not block transactions, change risk scores, switch models, retrain models, create analyst alerts, or call external alerting platforms. Actions exist for operator decision-making outside the scoring path.
 
+## Governance Advisory Events
+
+FDP-10 bridges meaningful drift action outcomes into read-only advisory events. An advisory event is an operator signal only. It is not a fraud alert, not a model action, not a retraining trigger, not a rollback trigger, and not an automated decision.
+
+Events are emitted only when drift actions are operationally meaningful:
+
+- severity is `HIGH` or `CRITICAL`
+- or escalation is not `NONE`
+- and confidence is not `LOW`
+
+Events are not emitted for `LOW`, `INFO`, or low-confidence actions. This keeps routine local/synthetic drift output from becoming operational noise.
+
+Advisory events are heuristic signals and may be inaccurate under low data conditions. The system does not guarantee correctness of drift or advisory signals. Operators must treat advisories as review context, not proof of model or data failure.
+
+Advisory events are deduplicated to avoid repeated signals. The fingerprint is `model_name`, `model_version`, `severity`, and `drift_status`; an identical advisory emitted within the 5-minute deduplication window is skipped. Deduplication is best-effort and works against both persisted MongoDB history and bounded in-memory fallback history.
+
+Event schema:
+
+```json
+{
+  "event_id": "uuid",
+  "event_type": "GOVERNANCE_DRIFT_ADVISORY",
+  "severity": "HIGH",
+  "drift_status": "DRIFT",
+  "confidence": "HIGH",
+  "advisory_confidence_context": "SUFFICIENT_DATA",
+  "model_name": "python-logistic-fraud-model",
+  "model_version": "2026-04-21.trained.v1",
+  "lifecycle_context": {
+    "current_model_version": "2026-04-21.trained.v1",
+    "model_loaded_at": "2026-04-26T08:00:00+00:00",
+    "model_changed_recently": false,
+    "recent_lifecycle_event_count": 4
+  },
+  "recommended_actions": [
+    "ESCALATE_MODEL_REVIEW",
+    "OPEN_MODEL_DATA_REVIEW",
+    "KEEP_SCORING_UNCHANGED"
+  ],
+  "explanation": "score p95 increased by 18% compared to reference profile",
+  "created_at": "2026-04-26T08:05:00+00:00"
+}
+```
+
+Advisory confidence context:
+
+- `LOW_SAMPLE`: inference sample volume is below the current drift guardrail.
+- `PARTIAL_DATA`: reference or inference profile context is incomplete, unavailable, or freshly reset.
+- `STABLE_BASELINE`: the signal has stable baseline context but does not meet the strongest reliability criteria.
+- `SUFFICIENT_DATA`: the signal has enough aggregate runtime context for higher-confidence operator review.
+
+The confidence context is a bounded enum. It does not expose sample counts, raw feature values, payload data, or statistical internals.
+
+Persistence:
+
+```text
+GOVERNANCE_ADVISORY_COLLECTION=ml_governance_advisory_events
+GOVERNANCE_ADVISORY_RETENTION_LIMIT=200
+```
+
+MongoDB persistence is optional and best-effort. If MongoDB is unavailable, advisory events fall back to bounded process memory. Persistence failure does not break scoring, drift evaluation, drift actions, or the read-only advisory API.
+
+Indexes:
+
+- `created_at` descending
+- `severity`
+- `model_name`, `model_version`
+
+Read-only API:
+
+```text
+GET /governance/advisories
+GET /governance/advisories?limit=25
+GET /governance/advisories?severity=HIGH
+GET /governance/advisories?model_version=2026-04-21.trained.v1
+```
+
+The response is newest-first, bounded to a maximum of 100 events, and returns `status=AVAILABLE`, `PARTIAL`, or `UNAVAILABLE`. Filters are exact bounded filters only: `severity`, `model_version`, and `limit`. There is no free-text search, regex, dynamic query language, or identifier lookup.
+
+Advisory events contain aggregate governance context only. They exclude user IDs, transaction IDs, correlation IDs, raw feature values, request payloads, artifact contents, credentials, raw exception text, and unbounded arrays. Lifecycle context remains bounded and must not be interpreted as causality; drift may be observed after lifecycle activity, but this runtime does not claim lifecycle activity caused drift.
+
 ## Endpoint Contracts
 
 ```text
@@ -346,6 +428,7 @@ GET /governance/profile/reference
 GET /governance/profile/inference
 GET /governance/drift
 GET /governance/drift/actions
+GET /governance/advisories
 GET /governance/history
 ```
 
@@ -390,6 +473,9 @@ Governance metrics:
 - `fraud_ml_model_lifecycle_info{model_name,model_version,lifecycle_mode}`
 - `fraud_ml_model_lifecycle_events_total{event_type,model_name,model_version,status}`
 - `fraud_ml_model_lifecycle_history_available{model_name,model_version,status}`
+- `fraud_ml_governance_advisory_events_emitted_total{severity,model_name,model_version,status}`
+- `fraud_ml_governance_advisory_events_persisted_total{severity,model_name,model_version,status}`
+- `fraud_ml_governance_advisory_persistence_failures_total{severity,model_name,model_version,status}`
 
 Allowed labels are bounded to model metadata and status/severity. Feature-level details stay in JSON endpoints to avoid high-cardinality Prometheus series.
 
@@ -411,6 +497,8 @@ Forbidden metric labels:
 Action metric labels are bounded enums only. They must never include action text, escalation text, explanation text, feature names, raw drift reasons, snapshot IDs, user identifiers, or exception messages.
 
 Lifecycle metric labels are bounded to model metadata, lifecycle mode, fixed lifecycle event types, and status. They must never include artifact paths, checksums, event IDs, timestamps, reason text, exception text, hostnames, or filesystem paths.
+
+Advisory metric labels are bounded to severity, model name, model version, and status. They must never include event IDs, timestamps, explanations, recommended action text, payload data, feature names, exception text, or identifiers.
 
 ## Privacy Policy
 
@@ -457,6 +545,15 @@ For `DRIFT`:
 6. Escalate for model review or retraining analysis outside this runtime path.
 7. Do not rely on drift detection as a fraud decision or automatic rollback trigger.
 
+For advisory events:
+
+1. Inspect `GET /governance/advisories?limit=25`.
+2. Treat the event as operator context, not a fraud alert or model action.
+3. Use recommended actions to guide manual review outside the scoring path.
+4. Check `advisory_confidence_context`; low-sample and partial-data advisories can be misleading.
+5. Do not infer that lifecycle activity caused drift.
+6. Confirm scoring behavior remains unchanged.
+
 ## Limitations
 
 - The reference profile is synthetic/local, not production traffic.
@@ -470,6 +567,7 @@ For `DRIFT`:
 - Drift actions are advisory and do not create tickets, notify PagerDuty, mutate scoring, or trigger workflows.
 - No model quality monitoring is claimed; FDP-7 monitors input and output distribution shift only.
 - FDP-9 adds lifecycle visibility only; it does not implement lifecycle control or model quality validation.
+- FDP-10 adds advisory events only; it does not implement fraud alerts, model automation, retraining triggers, rollback triggers, or frontend surfacing.
 - Drift thresholds are starting guardrails and need calibration against real baselines.
 
 ## Out Of Scope
