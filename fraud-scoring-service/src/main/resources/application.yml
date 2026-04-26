@@ -32,6 +32,11 @@ management:
             requests: true
 
 app:
+  internal-auth:
+    client:
+      enabled: ${INTERNAL_AUTH_CLIENT_ENABLED:false}
+      service-name: ${INTERNAL_AUTH_SERVICE_NAME:fraud-scoring-service}
+      token: ${INTERNAL_AUTH_TOKEN:}
   kafka:
     topics:
       transaction-enriched: transactions.enriched

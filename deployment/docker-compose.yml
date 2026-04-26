@@ -73,6 +73,8 @@ services:
       GOVERNANCE_SNAPSHOT_COLLECTION: ml_governance_snapshots
       GOVERNANCE_SNAPSHOT_RETENTION_LIMIT: "500"
       GOVERNANCE_SNAPSHOT_INTERVAL_REQUESTS: "50"
+      INTERNAL_AUTH_MODE: LOCALDEV
+      INTERNAL_AUTH_ALLOWED_SERVICES: fraud-scoring-service:local-dev-internal-token:ml-score,alert-service:local-dev-internal-token:governance-read
     ports:
       - "127.0.0.1:8090:8090"
     healthcheck:
@@ -248,6 +250,9 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       ML_MODEL_BASE_URL: http://ml-inference-service:8090
       SCORING_MODE: SHADOW
+      INTERNAL_AUTH_CLIENT_ENABLED: "true"
+      INTERNAL_AUTH_SERVICE_NAME: fraud-scoring-service
+      INTERNAL_AUTH_TOKEN: local-dev-internal-token
     ports:
       - "127.0.0.1:8084:8080"
 
@@ -277,6 +282,9 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       MONGODB_URI: mongodb://mongodb:27017/fraud_alerts
       ML_GOVERNANCE_BASE_URL: http://ml-inference-service:8090
+      INTERNAL_AUTH_CLIENT_ENABLED: "true"
+      INTERNAL_AUTH_SERVICE_NAME: alert-service
+      INTERNAL_AUTH_TOKEN: local-dev-internal-token
       ASSISTANT_MODE: OLLAMA
       OLLAMA_BASE_URL: http://ollama:11434
       OLLAMA_MODEL: llama3.2:3b

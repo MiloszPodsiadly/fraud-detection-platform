@@ -1,10 +1,13 @@
 import json
+import os
 import threading
 import unittest
 from datetime import datetime, timedelta, timezone
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+
+os.environ.setdefault("INTERNAL_AUTH_MODE", "LOCALDEV")
 
 from app import server
 from app.governance.advisory import (

@@ -52,6 +52,11 @@ app:
         fraud-analyst: ANALYST
         fraud-reviewer: REVIEWER
         fraud-ops-admin: FRAUD_OPS_ADMIN
+  internal-auth:
+    client:
+      enabled: ${INTERNAL_AUTH_CLIENT_ENABLED:false}
+      service-name: ${INTERNAL_AUTH_SERVICE_NAME:alert-service}
+      token: ${INTERNAL_AUTH_TOKEN:}
   kafka:
     topics:
       transaction-scored: transactions.scored

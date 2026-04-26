@@ -1,7 +1,10 @@
 import threading
 import unittest
+import os
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
+
+os.environ.setdefault("INTERNAL_AUTH_MODE", "LOCALDEV")
 
 from app import server
 
@@ -111,6 +114,74 @@ class MlMetricsEndpointTest(unittest.TestCase):
             parse_metric_value(after, "fraud_ml_inference_errors_total", error_labels),
             parse_metric_value(before, "fraud_ml_inference_errors_total", error_labels),
         )
+
+    def test_required_internal_auth_rejects_anonymous_governance_request(self):
+        previous_mode = os.environ.get("INTERNAL_AUTH_MODE")
+        try:
+            os.environ["INTERNAL_AUTH_MODE"] = "REQUIRED"
+            status, _, payload = self.request("GET", "/governance/model")
+
+            self.assertEqual(status, 401)
+            self.assertIn(b"Internal service authentication is required.", payload)
+        finally:
+            if previous_mode is None:
+                os.environ.pop("INTERNAL_AUTH_MODE", None)
+            else:
+                os.environ["INTERNAL_AUTH_MODE"] = previous_mode
+
+    def test_required_internal_auth_rejects_invalid_identity(self):
+        previous_mode = os.environ.get("INTERNAL_AUTH_MODE")
+        previous_credentials = server.INTERNAL_SERVICE_CREDENTIALS
+        try:
+            os.environ["INTERNAL_AUTH_MODE"] = "REQUIRED"
+            server.INTERNAL_SERVICE_CREDENTIALS = {
+                "known-service": server.InternalServiceCredential("secret", frozenset({"governance-read"}))
+            }
+
+            status, _, payload = self.request(
+                "GET",
+                "/governance/model",
+                headers={
+                    "X-Internal-Service-Name": "unknown-service",
+                    "X-Internal-Service-Token": "bad",
+                },
+            )
+
+            self.assertEqual(status, 403)
+            self.assertIn(b"Internal service is not authorized", payload)
+        finally:
+            server.INTERNAL_SERVICE_CREDENTIALS = previous_credentials
+            if previous_mode is None:
+                os.environ.pop("INTERNAL_AUTH_MODE", None)
+            else:
+                os.environ["INTERNAL_AUTH_MODE"] = previous_mode
+
+    def test_required_internal_auth_allows_known_service(self):
+        previous_mode = os.environ.get("INTERNAL_AUTH_MODE")
+        previous_credentials = server.INTERNAL_SERVICE_CREDENTIALS
+        try:
+            os.environ["INTERNAL_AUTH_MODE"] = "REQUIRED"
+            server.INTERNAL_SERVICE_CREDENTIALS = {
+                "known-service": server.InternalServiceCredential("secret", frozenset({"governance-read"}))
+            }
+
+            status, _, payload = self.request(
+                "GET",
+                "/governance/model",
+                headers={
+                    "X-Internal-Service-Name": "known-service",
+                    "X-Internal-Service-Token": "secret",
+                },
+            )
+
+            self.assertEqual(status, 200)
+            self.assertIn(b"model", payload)
+        finally:
+            server.INTERNAL_SERVICE_CREDENTIALS = previous_credentials
+            if previous_mode is None:
+                os.environ.pop("INTERNAL_AUTH_MODE", None)
+            else:
+                os.environ["INTERNAL_AUTH_MODE"] = previous_mode
 
     def test_model_version_info_and_load_status_exist(self):
         metrics = self.metrics_text()
