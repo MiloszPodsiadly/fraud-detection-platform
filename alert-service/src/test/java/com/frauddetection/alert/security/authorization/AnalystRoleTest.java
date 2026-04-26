@@ -17,21 +17,28 @@ class AnalystRoleTest {
                 )
                 .doesNotContain(
                         AnalystAuthority.ALERT_DECISION_SUBMIT,
-                        AnalystAuthority.FRAUD_CASE_UPDATE
+                        AnalystAuthority.FRAUD_CASE_UPDATE,
+                        AnalystAuthority.GOVERNANCE_ADVISORY_AUDIT_WRITE
                 );
     }
 
     @Test
     void analystShouldSubmitDecisionsButNotUpdateFraudCases() {
         assertThat(AnalystRole.ANALYST.authorities())
-                .contains(AnalystAuthority.ALERT_DECISION_SUBMIT)
+                .contains(
+                        AnalystAuthority.ALERT_DECISION_SUBMIT,
+                        AnalystAuthority.GOVERNANCE_ADVISORY_AUDIT_WRITE
+                )
                 .doesNotContain(AnalystAuthority.FRAUD_CASE_UPDATE);
     }
 
     @Test
     void reviewerShouldHaveCaseUpdateAuthority() {
         assertThat(AnalystRole.REVIEWER.authorities())
-                .contains(AnalystAuthority.FRAUD_CASE_UPDATE);
+                .contains(
+                        AnalystAuthority.FRAUD_CASE_UPDATE,
+                        AnalystAuthority.GOVERNANCE_ADVISORY_AUDIT_WRITE
+                );
     }
 
     @Test

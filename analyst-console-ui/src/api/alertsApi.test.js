@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { listAlerts, listGovernanceAdvisories, setApiSession } from "./alertsApi.js";
+import {
+  getGovernanceAdvisoryAudit,
+  listAlerts,
+  listGovernanceAdvisories,
+  recordGovernanceAdvisoryAudit,
+  setApiSession
+} from "./alertsApi.js";
 import { normalizeSession } from "../auth/session.js";
-import { createOidcAuthProvider } from "../auth/authProvider.js";
+import { createDemoAuthProvider, createOidcAuthProvider } from "../auth/authProvider.js";
 import { createInMemoryOidcSessionSource } from "../auth/oidcSessionSource.js";
 
 describe("alertsApi auth headers", () => {
@@ -103,6 +109,45 @@ describe("alertsApi auth headers", () => {
     );
     expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty("Authorization");
     expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty("X-Demo-User-Id");
+  });
+
+  it("uses auth headers for governance audit history and writes only decision payload", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse({
+        advisory_event_id: "event-1",
+        status: "AVAILABLE",
+        audit_events: []
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        audit_id: "audit-1",
+        advisory_event_id: "event-1",
+        decision: "ACKNOWLEDGED"
+      }, 201));
+    setApiSession(normalizeSession({ userId: "analyst-1", roles: ["ANALYST"] }), createDemoAuthProvider());
+
+    await getGovernanceAdvisoryAudit("event-1");
+    await recordGovernanceAdvisoryAudit("event-1", {
+      decision: "ACKNOWLEDGED",
+      note: "Reviewed by operator"
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/governance/advisories/event-1/audit", expect.objectContaining({
+      headers: expect.objectContaining({
+        "X-Demo-User-Id": "analyst-1",
+        "X-Demo-Roles": "ANALYST"
+      })
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/governance/advisories/event-1/audit", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({
+        decision: "ACKNOWLEDGED",
+        note: "Reviewed by operator"
+      }),
+      headers: expect.objectContaining({
+        "X-Demo-User-Id": "analyst-1"
+      })
+    }));
+    expect(fetchMock.mock.calls[1][1].body).not.toContain("actor");
   });
 });
 
