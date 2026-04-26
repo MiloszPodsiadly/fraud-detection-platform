@@ -227,6 +227,11 @@ components:
           type: string
           description: AVAILABLE when advisory and audit sources are both readable, PARTIAL when one source is degraded or the audit scan limit is exceeded, and UNAVAILABLE when both sources are unavailable.
           enum: [AVAILABLE, PARTIAL, UNAVAILABLE]
+        reason:
+          type: string
+          nullable: true
+          description: Optional degradation reason returned only for PARTIAL or UNAVAILABLE analytics responses.
+          enum: [AUDIT_LIMIT_EXCEEDED, AUDIT_UNAVAILABLE, ADVISORY_UNAVAILABLE]
         window:
           type: object
           additionalProperties: false

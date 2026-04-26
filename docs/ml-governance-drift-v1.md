@@ -556,6 +556,12 @@ Analytics status:
 - `PARTIAL`: one source is degraded, or the bounded audit scan limit is exceeded.
 - `UNAVAILABLE`: both sources are unavailable or a critical dependency is missing.
 
+When analytics are `PARTIAL` or `UNAVAILABLE`, the optional `reason` field explains the safe bounded degradation without exposing sensitive internals:
+
+- `AUDIT_LIMIT_EXCEEDED`
+- `AUDIT_UNAVAILABLE`
+- `ADVISORY_UNAVAILABLE`
+
 Analytics are not an SLA, do not trigger actions, do not persist aggregates, do not change lifecycle state, and do not influence scoring, model behavior, retraining, rollback, alerts, or fraud decisions.
 
 Analytics operates on bounded time windows. `window_days` defaults to `7` and is capped at `30`, the advisory input remains bounded to the recent advisory window, and audit scans are capped by `GOVERNANCE_AUDIT_ANALYTICS_MAX_AUDIT_EVENTS` (default `10000`). Audit queries use `created_at`; lifecycle lookups use `advisory_event_id` with `created_at`.
@@ -569,6 +575,10 @@ Analytics:
 - is NOT for model control
 - is NOT for automation
 - does NOT influence scoring, retraining, rollback, or fraud decisions
+
+### Analytics Metrics Semantics
+
+Analytics metrics represent observational distributions and endpoint health only. They are NOT SLA signals, NOT alerts, and NOT triggers. Metrics must not be used for automated decisions.
 
 ## Endpoint Contracts
 

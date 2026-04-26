@@ -159,6 +159,14 @@ Prometheus metric contract:
   - Type: counter
   - Meaning: bounded audit analytics requests served by `alert-service`. Metrics represent observational distribution only; they do not represent system decisions or actions.
   - Labels: none
+- `fraud_ml_governance_analytics_status_total`
+  - Type: counter
+  - Meaning: analytics responses by bounded availability status.
+  - Labels: `status`
+- `fraud_ml_governance_analytics_latency_seconds`
+  - Type: timer/histogram
+  - Meaning: analytics endpoint computation latency, with p50 and p95 published by the service registry.
+  - Labels: none
 - `fraud_ml_governance_analytics_window_days`
   - Type: gauge
   - Meaning: latest requested bounded audit analytics window in days
@@ -289,6 +297,10 @@ Governance advisory events:
 - Filtering by `lifecycle_status` applies to the bounded advisory result set. It does not guarantee global completeness.
 - Advisory lifecycle status is derived from the latest human-review audit event. It is not persisted as source of truth, not a workflow engine, and not an automation trigger.
 - Advisory audit analytics are read-only, bounded by `window_days`, and provide visibility only. `totals.advisories` is the distinct advisory projection population; audit-only advisory IDs outside that population are not counted. Time-to-first-review ignores missing, negative, and corrupted durations and reports `LOW_CONFIDENCE` below five valid samples. Audit scans are capped by `GOVERNANCE_AUDIT_ANALYTICS_MAX_AUDIT_EVENTS`. Analytics do not define SLA, trigger alerts, or drive automation.
+
+### Analytics Metrics Semantics
+
+Analytics metrics represent observational distributions and endpoint health. They are not SLA enforcement, not alert triggers, and not automation triggers. Metrics must not be used for automated decisions.
 
 Analyst console operator queue:
 

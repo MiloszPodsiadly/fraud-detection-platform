@@ -204,6 +204,8 @@ Filtering by `lifecycle_status` applies to the bounded advisory result set. It d
 
 Audit analytics are derived from advisory and audit history through `GET /governance/advisories/analytics`. `advisories` means distinct `advisory_event_id` values in the bounded advisory projection window; `reviewed`, `open`, decision distribution, and lifecycle distribution all use that same population. Time-to-first-review uses valid non-negative first audit durations only and reports `LOW_CONFIDENCE` below five samples. Analytics are read-only, bounded by `window_days` and `GOVERNANCE_AUDIT_ANALYTICS_MAX_AUDIT_EVENTS`, not persisted as aggregates, not an SLA, and do not trigger actions or influence scoring/model behavior.
 
+The analytics API is stable. Breaking changes require a version bump. `PARTIAL` or `UNAVAILABLE` responses may include a bounded `reason`: `AUDIT_LIMIT_EXCEEDED`, `AUDIT_UNAVAILABLE`, or `ADVISORY_UNAVAILABLE`.
+
 ## Analytics Red Lines
 
 Analytics:
@@ -212,6 +214,8 @@ Analytics:
 - is NOT for SLA enforcement
 - is NOT for model control
 - is NOT for automation
+
+Analytics metrics are observational only. They are not SLA signals, not alert triggers, and must not be used for automated decisions.
 
 ## Lifecycle Red Lines
 
