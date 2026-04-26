@@ -1,5 +1,7 @@
 package com.frauddetection.alert.observability;
 
+import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.audit.AuditOutcome;
 import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -69,5 +71,29 @@ class AlertServiceMetricsTest {
         assertThat(statusMeter.getId().getTags())
                 .extracting(Tag::getValue)
                 .containsExactly("UNAVAILABLE");
+    }
+
+    @Test
+    void shouldUseLowCardinalityPlatformAuditPersistenceMetricLabels() {
+        metrics.recordPlatformAuditEventPersisted(AuditAction.SUBMIT_ANALYST_DECISION, AuditOutcome.SUCCESS);
+        metrics.recordPlatformAuditPersistenceFailure(AuditAction.SUBMIT_ANALYST_DECISION);
+        metrics.recordPlatformAuditReadRequest("AVAILABLE");
+
+        Meter persisted = meterRegistry.get("fraud_platform_audit_events_persisted_total").meter();
+        Meter failures = meterRegistry.get("fraud_platform_audit_persistence_failures_total").meter();
+        Meter reads = meterRegistry.get("fraud_platform_audit_read_requests_total").meter();
+
+        assertThat(persisted.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactlyInAnyOrder("event_type", "outcome");
+        assertThat(failures.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactly("event_type");
+        assertThat(reads.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactly("status");
+        assertThat(persisted.getId().getTags())
+                .extracting(Tag::getKey)
+                .doesNotContain("actor_id", "resource_id", "audit_event_id", "exception", "message");
     }
 }

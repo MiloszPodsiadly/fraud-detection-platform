@@ -9,6 +9,7 @@ import com.frauddetection.alert.assistant.CustomerRecentBehaviorSummary;
 import com.frauddetection.alert.assistant.FraudReasonSummary;
 import com.frauddetection.alert.assistant.RecommendedNextAction;
 import com.frauddetection.alert.assistant.TransactionSummary;
+import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
 import com.frauddetection.alert.domain.AlertCase;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
@@ -111,6 +112,27 @@ class AlertControllerTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultingStatus").value("RESOLVED"));
+    }
+
+    @Test
+    void shouldReturnServiceUnavailableWhenAuditPersistenceFailsOnWrite() throws Exception {
+        when(alertManagementUseCase.submitDecision(org.mockito.ArgumentMatchers.eq("alert-1"), org.mockito.ArgumentMatchers.any()))
+                .thenThrow(new AuditPersistenceUnavailableException());
+
+        SubmitAnalystDecisionRequest request = new SubmitAnalystDecisionRequest(
+                "analyst-1",
+                AnalystDecision.CONFIRMED_FRAUD,
+                "Manual confirmation",
+                List.of("kyc", "velocity"),
+                Map.of()
+        );
+
+        mockMvc.perform(post("/api/v1/alerts/alert-1/decision")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.message").value("Audit persistence is unavailable."))
+                .andExpect(jsonPath("$.details").isEmpty());
     }
 
     @Test

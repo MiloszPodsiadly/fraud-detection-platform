@@ -1,11 +1,14 @@
 package com.frauddetection.alert.audit;
 
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 @Component
+@Order(Ordered.LOWEST_PRECEDENCE)
 public class StructuredAuditEventPublisher implements AuditEventPublisher {
 
     private static final Logger log = LoggerFactory.getLogger(StructuredAuditEventPublisher.class);

@@ -44,6 +44,28 @@ public class AlertServiceMetrics {
         ).increment();
     }
 
+    public void recordPlatformAuditEventPersisted(AuditAction eventType, AuditOutcome outcome) {
+        counter(
+                "fraud_platform_audit_events_persisted_total",
+                "event_type", normalize(eventType),
+                "outcome", normalize(outcome)
+        ).increment();
+    }
+
+    public void recordPlatformAuditPersistenceFailure(AuditAction eventType) {
+        counter(
+                "fraud_platform_audit_persistence_failures_total",
+                "event_type", normalize(eventType)
+        ).increment();
+    }
+
+    public void recordPlatformAuditReadRequest(String status) {
+        counter(
+                "fraud_platform_audit_read_requests_total",
+                "status", normalizeAvailabilityStatus(status)
+        ).increment();
+    }
+
     public void recordAuthenticationFailure(HttpServletRequest request, AuthenticationException exception) {
         counter(
                 "fraud.security.auth.failures",
@@ -149,6 +171,13 @@ public class AlertServiceMetrics {
 
     private String normalizeAnalyticsStatus(String status) {
         if ("AVAILABLE".equals(status) || "PARTIAL".equals(status) || "UNAVAILABLE".equals(status)) {
+            return status;
+        }
+        return "UNAVAILABLE";
+    }
+
+    private String normalizeAvailabilityStatus(String status) {
+        if ("AVAILABLE".equals(status) || "UNAVAILABLE".equals(status)) {
             return status;
         }
         return "UNAVAILABLE";

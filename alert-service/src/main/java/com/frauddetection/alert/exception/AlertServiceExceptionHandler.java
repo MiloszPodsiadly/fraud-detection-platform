@@ -1,5 +1,7 @@
 package com.frauddetection.alert.exception;
 
+import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
+import com.frauddetection.alert.audit.InvalidAuditEventQueryException;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryLookupUnavailableException;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryNotFoundException;
 import com.frauddetection.alert.governance.audit.GovernanceAuditActorUnavailableException;
@@ -75,6 +77,32 @@ public class AlertServiceExceptionHandler {
                         "Service Unavailable",
                         "Governance audit persistence or advisory lookup is unavailable.",
                         List.of()
+                )
+        );
+    }
+
+    @ExceptionHandler(AuditPersistenceUnavailableException.class)
+    public ResponseEntity<ApiErrorResponse> handleAuditPersistenceUnavailable(AuditPersistenceUnavailableException exception) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(
+                new ApiErrorResponse(
+                        Instant.now(),
+                        503,
+                        "Service Unavailable",
+                        "Audit persistence is unavailable.",
+                        List.of()
+                )
+        );
+    }
+
+    @ExceptionHandler(InvalidAuditEventQueryException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidAuditEventQuery(InvalidAuditEventQueryException exception) {
+        return ResponseEntity.badRequest().body(
+                new ApiErrorResponse(
+                        Instant.now(),
+                        400,
+                        "Bad Request",
+                        "Invalid audit event query.",
+                        exception.details()
                 )
         );
     }

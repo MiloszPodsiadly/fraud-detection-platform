@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
@@ -134,5 +135,24 @@ class AuditServiceTest {
         assertThat(event.actor().userId()).isEqualTo("request-analyst");
         assertThat(event.outcome()).isEqualTo(AuditOutcome.REJECTED);
         assertThat(event.failureReason()).isEqualTo("INSUFFICIENT_AUTHORITY");
+    }
+
+    @Test
+    void shouldPublishAuditEventToAllConfiguredPublishersInOrder() {
+        AuditEventPublisher durablePublisher = mock(AuditEventPublisher.class);
+        AuditEventPublisher structuredPublisher = mock(AuditEventPublisher.class);
+        AuditService service = new AuditService(new CurrentAnalystUser(), List.of(durablePublisher, structuredPublisher));
+
+        service.audit(
+                AuditAction.UPDATE_FRAUD_CASE,
+                AuditResourceType.FRAUD_CASE,
+                "case-1",
+                "corr-1",
+                "request-analyst"
+        );
+
+        var inOrder = inOrder(durablePublisher, structuredPublisher);
+        inOrder.verify(durablePublisher).publish(org.mockito.ArgumentMatchers.any(AuditEvent.class));
+        inOrder.verify(structuredPublisher).publish(org.mockito.ArgumentMatchers.any(AuditEvent.class));
     }
 }
