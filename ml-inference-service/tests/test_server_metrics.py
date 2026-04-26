@@ -142,6 +142,20 @@ class MlMetricsEndpointTest(unittest.TestCase):
         self.assertNotIn("event_id=", metrics)
         self.assertNotIn("timestamp=", metrics)
 
+    def test_advisory_metrics_exist_and_remain_low_cardinality(self):
+        metrics = self.metrics_text()
+
+        self.assertIn("fraud_ml_governance_advisory_events_emitted_total", metrics)
+        self.assertIn("fraud_ml_governance_advisory_events_persisted_total", metrics)
+        self.assertIn("fraud_ml_governance_advisory_persistence_failures_total", metrics)
+        self.assertIn("severity=", metrics)
+        self.assertIn("model_name=", metrics)
+        self.assertIn("model_version=", metrics)
+        self.assertIn("status=", metrics)
+        self.assertNotIn("event_id=", metrics)
+        self.assertNotIn("timestamp=", metrics)
+        self.assertNotIn("payload=", metrics)
+
     def test_metrics_do_not_expose_high_cardinality_labels(self):
         metrics = self.metrics_text()
         self.assertNotIn("transactionId", metrics)
