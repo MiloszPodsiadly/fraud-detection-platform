@@ -4,6 +4,7 @@ import { EmptyState } from "../components/EmptyState.jsx";
 import { ErrorState } from "../components/ErrorState.jsx";
 import { FilterBar } from "../components/FilterBar.jsx";
 import { FraudCasePanel } from "../components/FraudCasePanel.jsx";
+import { GovernanceReviewQueue } from "../components/GovernanceReviewQueue.jsx";
 import { LoadingPanel } from "../components/LoadingPanel.jsx";
 import { PaginationControls } from "../components/PaginationControls.jsx";
 import { SessionStatePanel } from "../components/SecurityStatePanels.jsx";
@@ -14,10 +15,16 @@ export function AlertsListPage({
   alertPage,
   fraudCasePage,
   transactionPage,
+  advisoryQueue,
+  advisoryQueueRequest,
   isLoading,
+  isGovernanceLoading,
   error,
+  governanceError,
   sessionState,
   onRetry,
+  onGovernanceRetry,
+  onAdvisoryQueueRequestChange,
   onTransactionPageChange,
   onTransactionPageSizeChange,
   onAlertPageChange,
@@ -104,6 +111,15 @@ export function AlertsListPage({
         onPageChange={onFraudCasePageChange}
         onPageSizeChange={onFraudCasePageSizeChange}
         onOpenCase={onOpenFraudCase}
+      />
+
+      <GovernanceReviewQueue
+        advisoryQueue={advisoryQueue}
+        filters={advisoryQueueRequest}
+        isLoading={isGovernanceLoading}
+        error={governanceError}
+        onFiltersChange={onAdvisoryQueueRequestChange}
+        onRetry={onGovernanceRetry}
       />
 
       <section className="panel">

@@ -274,6 +274,14 @@ Governance advisory events:
 - Advisory lifecycle context is correlation context only; it must not be read as proof that lifecycle activity caused drift.
 - The advisory API supports bounded exact filters only: `severity`, `model_version`, and `limit`; it does not support free-text search or regex.
 
+Analyst console operator queue:
+
+- FDP-12 exposes advisory events in a read-only UI panel.
+- The UI fetches only `GET /governance/advisories` through the local frontend proxy.
+- The UI does not poll, acknowledge, mutate advisories, write audit history, or integrate with `alert-service`.
+- The UI does not trigger scoring changes, retraining, rollback, fraud decisions, or external incident workflows.
+- Empty, partial, unavailable, and error states are visible to the operator instead of hidden by silent retries.
+
 Detailed contract and playbook: [ML Governance And Drift v1](ml-governance-drift-v1.md).
 
 ## Dashboard Queries

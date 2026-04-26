@@ -825,6 +825,8 @@ Model lifecycle visibility is read-only; it does not switch models, retrain, rol
 Governance advisory events are operator signals only; they are not fraud alerts, model actions, retraining triggers, rollback triggers, automatic decisions, or frontend workflow items. Advisory events are heuristic and may be inaccurate under low data conditions; the system does not guarantee correctness of drift or advisory signals. Advisory events include bounded confidence context and are deduplicated to avoid repeated signals from repeated polling.
 Drift actions and advisory events do not block transactions, change scores, switch models, retrain models, roll back models, or trigger external alerting workflows.
 
+FDP-12 surfaces governance advisory events in the analyst console as a read-only operator review queue. The UI consumes only `GET /governance/advisories` with exact-match `severity`, `model_version`, and bounded `limit` filters. It does not add acknowledgement, audit trail, alert-service integration, fraud decisioning, retraining, rollback, polling, or write APIs. The queue is review context only and has no scoring impact.
+
 Training smoke test:
 
 ```bash
@@ -919,6 +921,7 @@ Implemented:
 - automatic synthetic data bootstrap
 - synthetic dataset generators
 - React analyst console with pagination
+- read-only governance advisory review queue
 - scored transaction monitor and alert queue
 - fraud case management for rapid transfer bursts
 - validation and normalized API errors

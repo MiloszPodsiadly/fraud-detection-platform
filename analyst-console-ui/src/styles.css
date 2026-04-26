@@ -252,6 +252,10 @@ code {
   border-color: rgba(180, 52, 52, 0.26);
 }
 
+.governanceQueuePanel {
+  border-color: rgba(82, 97, 60, 0.3);
+}
+
 .fraudCaseCounter {
   min-width: 10rem;
   border: 1px solid rgba(180, 52, 52, 0.18);
@@ -389,6 +393,10 @@ code {
   margin-bottom: 1rem;
 }
 
+.governanceFilterBar {
+  grid-template-columns: 12rem minmax(16rem, 1fr) 8rem;
+}
+
 label {
   display: grid;
   gap: 0.4rem;
@@ -452,6 +460,69 @@ textarea:focus {
 .alertTable td span {
   color: var(--muted);
   font-size: 0.86rem;
+}
+
+.tableCopy {
+  max-width: 26rem;
+  margin: 0.45rem 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.queueMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 0.85rem;
+}
+
+.queueMeta span {
+  border: 1px solid rgba(82, 97, 60, 0.14);
+  border-radius: 999px;
+  background: rgba(82, 97, 60, 0.06);
+  padding: 0.35rem 0.7rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.queueMeta strong {
+  color: var(--ink);
+}
+
+.governanceTable td {
+  vertical-align: top;
+}
+
+.lifecycleFacts {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+}
+
+.lifecycleFacts div {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.lifecycleFacts dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.lifecycleFacts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-weight: 800;
+}
+
+.tagList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
 }
 
 .riskBadge,
@@ -845,6 +916,22 @@ textarea:focus {
   min-height: 18rem;
   text-align: center;
   color: var(--muted);
+}
+
+.stateBanner {
+  border: 1px solid rgba(217, 164, 65, 0.28);
+  border-radius: 1rem;
+  background: rgba(217, 164, 65, 0.12);
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+  color: #74510f;
+  font-weight: 800;
+}
+
+.stateBannerWarning {
+  border-color: rgba(180, 52, 52, 0.24);
+  background: rgba(180, 52, 52, 0.09);
+  color: var(--red);
 }
 
 .errorPanel {
