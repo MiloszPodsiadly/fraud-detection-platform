@@ -9,7 +9,7 @@ paths:
   /api/v1/audit/events:
     get:
       summary: List durable platform audit events
-      description: Returns bounded newest-first durable platform audit events. This is the Audit Read API for already-persisted durable audit events; it is not itself proof that every sensitive platform read was audited. Requires audit:read. Filters are exact-match only; no regex, full-text search, export, aggregation, delete, or update operations are supported. If persistence cannot be read, returns status UNAVAILABLE with an empty events array.
+      description: Returns bounded newest-first durable platform audit events. This is the Audit Read API for already-persisted durable audit events; it is not itself proof that every sensitive platform read was audited. Requires audit:read. Filters are exact-match only; no regex, full-text search, export, aggregation, delete, or update operations are supported. Clients MUST check status before interpreting count or events. AVAILABLE with count 0 is a valid empty result. UNAVAILABLE means audit storage could not be read and returns reason_code AUDIT_STORE_UNAVAILABLE, a stable non-sensitive message, count 0, and an empty events array.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -170,7 +170,7 @@ paths:
   /governance/advisories:
     get:
       summary: List governance advisories with derived lifecycle status
-      description: Returns ML advisory events enriched with lifecycle_status derived at read time from latest audit event. Lifecycle is not persisted as source of truth and does not trigger workflow actions. Filtering by lifecycle_status applies to the bounded advisory result set. It does not guarantee global completeness.
+      description: Returns ML advisory events enriched with lifecycle_status derived at read time from latest audit event. Lifecycle is not persisted as source of truth and does not trigger workflow actions. Filtering by lifecycle_status applies to the bounded advisory result set. It does not guarantee global completeness. Alert-service records a best-effort sensitive read-access audit event with a hashed query shape and bounded metadata only; audit persistence failure does not block the read response.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -388,6 +388,16 @@ components:
         status:
           type: string
           enum: [AVAILABLE, UNAVAILABLE]
+        reason_code:
+          type: string
+          nullable: true
+          description: Null when status is AVAILABLE. When status is UNAVAILABLE, this is AUDIT_STORE_UNAVAILABLE.
+          enum: [AUDIT_STORE_UNAVAILABLE]
+        message:
+          type: string
+          nullable: true
+          description: Null when status is AVAILABLE. When status is UNAVAILABLE, this is a stable non-sensitive reason message.
+          maxLength: 120
         count:
           type: integer
           minimum: 0

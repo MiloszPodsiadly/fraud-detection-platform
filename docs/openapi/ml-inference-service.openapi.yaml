@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: Fraud Detection ML Inference Service
   version: "1.0"
-  description: Current contract for the Python ML inference runtime. Scoring and governance APIs require configured internal service identity in default/production mode. Docker localdev may allow anonymous internal calls only when INTERNAL_AUTH_MODE=LOCALDEV. This is a header-token service-auth foundation, not mTLS.
+  description: Current contract for the Python ML inference runtime. Scoring and governance APIs require configured internal service identity in default/production mode. Docker localdev may allow anonymous internal calls only when INTERNAL_AUTH_MODE=DISABLED_LOCAL_ONLY. This is a token-validator service-auth foundation with an MTLS_READY fail-closed boundary, not implemented mTLS.
 servers:
   - url: http://localhost:8090
 paths:
@@ -29,7 +29,7 @@ paths:
   /v1/fraud/score:
     post:
       summary: Score fraud risk for a feature snapshot
-      description: Requires internal service identity with ml-score authority outside explicit LOCALDEV mode.
+      description: Requires internal service identity with ml-score authority outside explicit DISABLED_LOCAL_ONLY local/dev mode.
       security:
         - internalServiceName: []
           internalServiceToken: []
@@ -73,7 +73,7 @@ paths:
   /governance/model:
     get:
       summary: Active model governance summary
-      description: Requires internal service identity with governance-read authority outside explicit LOCALDEV mode.
+      description: Requires internal service identity with governance-read authority outside explicit DISABLED_LOCAL_ONLY local/dev mode.
       security:
         - internalServiceName: []
           internalServiceToken: []
@@ -91,7 +91,7 @@ paths:
   /governance/model/current:
     get:
       summary: Current active model lifecycle metadata
-      description: Requires internal service identity with governance-read authority outside explicit LOCALDEV mode.
+      description: Requires internal service identity with governance-read authority outside explicit DISABLED_LOCAL_ONLY local/dev mode.
       security:
         - internalServiceName: []
           internalServiceToken: []
@@ -109,7 +109,7 @@ paths:
   /governance/model/lifecycle:
     get:
       summary: Model lifecycle event history
-      description: Requires internal service identity with governance-read authority outside explicit LOCALDEV mode.
+      description: Requires internal service identity with governance-read authority outside explicit DISABLED_LOCAL_ONLY local/dev mode.
       security:
         - internalServiceName: []
           internalServiceToken: []
@@ -127,7 +127,7 @@ paths:
   /governance/profile/reference:
     get:
       summary: Reference profile details
-      description: Requires internal service identity with governance-read authority outside explicit LOCALDEV mode.
+      description: Requires internal service identity with governance-read authority outside explicit DISABLED_LOCAL_ONLY local/dev mode.
       security:
         - internalServiceName: []
           internalServiceToken: []
@@ -145,7 +145,7 @@ paths:
   /governance/profile/inference:
     get:
       summary: Inference profile details
-      description: Requires internal service identity with governance-read authority outside explicit LOCALDEV mode.
+      description: Requires internal service identity with governance-read authority outside explicit DISABLED_LOCAL_ONLY local/dev mode.
       security:
         - internalServiceName: []
           internalServiceToken: []
@@ -163,7 +163,7 @@ paths:
   /governance/drift:
     get:
       summary: Drift status
-      description: Requires internal service identity with governance-read authority outside explicit LOCALDEV mode.
+      description: Requires internal service identity with governance-read authority outside explicit DISABLED_LOCAL_ONLY local/dev mode.
       security:
         - internalServiceName: []
           internalServiceToken: []
@@ -181,7 +181,7 @@ paths:
   /governance/drift/actions:
     get:
       summary: Advisory drift actions
-      description: Requires internal service identity with governance-read authority outside explicit LOCALDEV mode.
+      description: Requires internal service identity with governance-read authority outside explicit DISABLED_LOCAL_ONLY local/dev mode.
       security:
         - internalServiceName: []
           internalServiceToken: []
@@ -199,7 +199,7 @@ paths:
   /governance/advisories:
     get:
       summary: Governance advisory history
-      description: Requires internal service identity with governance-read authority outside explicit LOCALDEV mode.
+      description: Requires internal service identity with governance-read authority outside explicit DISABLED_LOCAL_ONLY local/dev mode.
       security:
         - internalServiceName: []
           internalServiceToken: []
@@ -236,7 +236,7 @@ paths:
   /governance/history:
     get:
       summary: Governance snapshot history
-      description: Requires internal service identity with governance-read authority outside explicit LOCALDEV mode.
+      description: Requires internal service identity with governance-read authority outside explicit DISABLED_LOCAL_ONLY local/dev mode.
       security:
         - internalServiceName: []
           internalServiceToken: []
