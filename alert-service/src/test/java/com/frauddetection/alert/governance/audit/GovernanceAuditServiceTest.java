@@ -34,7 +34,8 @@ class GovernanceAuditServiceTest {
             repository,
             advisoryClient,
             new CurrentAnalystUser(),
-            new GovernanceAuditProperties(URI.create("http://localhost:8090"), 50, 500, Duration.ofSeconds(2))
+            new GovernanceAuditProperties(URI.create("http://localhost:8090"), 50, 500, Duration.ofSeconds(2)),
+            new GovernanceAuditRequestValidator()
     );
 
     @AfterEach
@@ -92,6 +93,33 @@ class GovernanceAuditServiceTest {
 
         assertThatThrownBy(() -> service.appendAudit("advisory-1", new GovernanceAuditRequest("APPROVE_MODEL", null)))
                 .isInstanceOf(InvalidGovernanceAuditDecisionException.class);
+    }
+
+    @Test
+    void shouldNormalizeBlankNoteToNull() {
+        setAnalystPrincipal();
+        when(advisoryClient.getAdvisory("advisory-1")).thenReturn(sampleAdvisory());
+        when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(repository.countByAdvisoryEventId("advisory-1")).thenReturn(1L);
+
+        service.appendAudit("advisory-1", new GovernanceAuditRequest("NEEDS_FOLLOW_UP", "   \t  "));
+
+        ArgumentCaptor<GovernanceAuditEventDocument> documentCaptor = ArgumentCaptor.forClass(GovernanceAuditEventDocument.class);
+        verify(repository).save(documentCaptor.capture());
+        assertThat(documentCaptor.getValue().getNote()).isNull();
+    }
+
+    @Test
+    void shouldRejectOversizedNoteBeforeAdvisoryLookupAndPersistence() {
+        setAnalystPrincipal();
+
+        assertThatThrownBy(() -> service.appendAudit(
+                "advisory-1",
+                new GovernanceAuditRequest("ACKNOWLEDGED", "x".repeat(GovernanceAuditRequestValidator.MAX_NOTE_LENGTH + 1))
+        )).isInstanceOf(InvalidGovernanceAuditRequestException.class);
+
+        verify(advisoryClient, org.mockito.Mockito.never()).getAdvisory(any());
+        verify(repository, org.mockito.Mockito.never()).save(any());
     }
 
     private void setAnalystPrincipal() {

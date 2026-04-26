@@ -5,6 +5,7 @@ import com.frauddetection.alert.governance.audit.GovernanceAdvisoryNotFoundExcep
 import com.frauddetection.alert.governance.audit.GovernanceAuditActorUnavailableException;
 import com.frauddetection.alert.governance.audit.GovernanceAuditDecision;
 import com.frauddetection.alert.governance.audit.GovernanceAuditPersistenceUnavailableException;
+import com.frauddetection.alert.governance.audit.InvalidGovernanceAuditRequestException;
 import com.frauddetection.alert.governance.audit.InvalidGovernanceAuditDecisionException;
 import jakarta.validation.ConstraintViolationException;
 import org.springframework.http.HttpStatus;
@@ -44,6 +45,19 @@ public class AlertServiceExceptionHandler {
                         "Bad Request",
                         "Invalid governance audit decision.",
                         List.of("allowed: " + String.join(",", GovernanceAuditDecision.allowedValues()))
+                )
+        );
+    }
+
+    @ExceptionHandler(InvalidGovernanceAuditRequestException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidGovernanceAuditRequest(InvalidGovernanceAuditRequestException exception) {
+        return ResponseEntity.badRequest().body(
+                new ApiErrorResponse(
+                        Instant.now(),
+                        400,
+                        "Bad Request",
+                        "Invalid governance audit request.",
+                        exception.details()
                 )
         );
     }

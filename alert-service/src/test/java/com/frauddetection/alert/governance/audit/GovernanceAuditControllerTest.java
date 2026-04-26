@@ -97,6 +97,21 @@ class GovernanceAuditControllerTest {
     }
 
     @Test
+    void shouldRejectFrontendProvidedSystemFields() throws Exception {
+        mockMvc.perform(post("/governance/advisories/advisory-1/audit")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "decision": "ACKNOWLEDGED",
+                                  "created_at": "2026-04-26T00:00:00Z",
+                                  "model_version": "spoofed-model"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Malformed JSON request."));
+    }
+
+    @Test
     void shouldRejectInvalidDecision() throws Exception {
         when(governanceAuditService.appendAudit(eq("advisory-1"), any()))
                 .thenThrow(new InvalidGovernanceAuditDecisionException());

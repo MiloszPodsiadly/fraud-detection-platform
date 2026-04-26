@@ -18,21 +18,24 @@ public class GovernanceAuditService {
     private final GovernanceAdvisoryClient advisoryClient;
     private final CurrentAnalystUser currentAnalystUser;
     private final GovernanceAuditProperties properties;
+    private final GovernanceAuditRequestValidator requestValidator;
 
     public GovernanceAuditService(
             GovernanceAuditRepository repository,
             GovernanceAdvisoryClient advisoryClient,
             CurrentAnalystUser currentAnalystUser,
-            GovernanceAuditProperties properties
+            GovernanceAuditProperties properties,
+            GovernanceAuditRequestValidator requestValidator
     ) {
         this.repository = repository;
         this.advisoryClient = advisoryClient;
         this.currentAnalystUser = currentAnalystUser;
         this.properties = properties;
+        this.requestValidator = requestValidator;
     }
 
     public GovernanceAuditEventResponse appendAudit(String advisoryEventId, GovernanceAuditRequest request) {
-        GovernanceAuditDecision decision = GovernanceAuditDecision.parse(request.decision());
+        GovernanceAuditCommand command = requestValidator.validate(request);
         GovernanceAdvisorySnapshot advisory = advisoryClient.getAdvisory(advisoryEventId);
         AnalystPrincipal actor = currentAnalystUser.get()
                 .orElseThrow(GovernanceAuditActorUnavailableException::new);
@@ -40,8 +43,8 @@ public class GovernanceAuditService {
         GovernanceAuditEventDocument document = new GovernanceAuditEventDocument();
         document.setAuditId(UUID.randomUUID().toString());
         document.setAdvisoryEventId(advisory.eventId());
-        document.setDecision(decision);
-        document.setNote(normalizeNote(request.note()));
+        document.setDecision(command.decision());
+        document.setNote(command.note());
         document.setActorId(actor.userId());
         document.setActorDisplayName(actor.userId());
         document.setActorRoles(actor.roles().stream().map(Enum::name).sorted().toList());
@@ -90,10 +93,4 @@ public class GovernanceAuditService {
         repository.deleteAll(stale);
     }
 
-    private String normalizeNote(String note) {
-        if (note == null || note.isBlank()) {
-            return null;
-        }
-        return note.trim();
-    }
 }
