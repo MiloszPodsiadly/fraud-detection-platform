@@ -19,10 +19,12 @@ from jwt import (
     InvalidAlgorithmError,
     InvalidAudienceError,
     InvalidIssuerError,
+    InvalidKeyError,
     InvalidSignatureError,
     InvalidTokenError,
     MissingRequiredClaimError,
 )
+from jwt.algorithms import RSAAlgorithm
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
 from app.governance.advisory import (
@@ -342,6 +344,18 @@ def _jwt_secret() -> str:
     return os.getenv("INTERNAL_AUTH_JWT_SECRET", "").strip()
 
 
+def _jwt_algorithm() -> str:
+    return os.getenv("INTERNAL_AUTH_JWT_ALGORITHM", "HS256").strip().upper()
+
+
+def _jwt_jwks_json() -> str:
+    return os.getenv("INTERNAL_AUTH_JWKS_JSON", "").strip()
+
+
+def _jwt_jwks_path() -> str:
+    return os.getenv("INTERNAL_AUTH_JWKS_PATH", "").strip()
+
+
 def _jwt_service_claim() -> str:
     return os.getenv("INTERNAL_AUTH_JWT_SERVICE_CLAIM", "service_name").strip() or "service_name"
 
@@ -367,13 +381,90 @@ def _allowed_jwt_service_authorities() -> dict[str, frozenset[str]]:
     return services
 
 
+def _allowed_jwt_service_keys() -> dict[str, frozenset[str]]:
+    raw = os.getenv("INTERNAL_AUTH_ALLOWED_SERVICE_KEYS", "")
+    services: dict[str, frozenset[str]] = {}
+    for entry in raw.split(","):
+        parts = entry.strip().split(":", 1)
+        if len(parts) != 2:
+            continue
+        service_name, key_ids = (part.strip() for part in parts)
+        if not service_name:
+            continue
+        key_id_set = frozenset(key_id.strip() for key_id in key_ids.split("|") if key_id.strip())
+        if not key_id_set:
+            continue
+        services[service_name] = key_id_set
+    return services
+
+
+def _jwt_jwks_configured() -> bool:
+    return bool(_jwt_jwks_json() or _jwt_jwks_path())
+
+
 def _jwt_configured() -> bool:
-    return bool(
-        _jwt_issuer()
-        and _jwt_audience()
-        and len(_jwt_secret().encode("utf-8")) >= 32
-        and _allowed_jwt_service_authorities()
-    )
+    algorithm = _jwt_algorithm()
+    if algorithm == "RS256":
+        return bool(
+            _jwt_issuer()
+            and _jwt_audience()
+            and _jwt_jwks_configured()
+            and _allowed_jwt_service_authorities()
+            and _allowed_jwt_service_keys()
+        )
+    if algorithm == "HS256":
+        return bool(
+            _jwt_issuer()
+            and _jwt_audience()
+            and len(_jwt_secret().encode("utf-8")) >= 32
+            and _allowed_jwt_service_authorities()
+        )
+    return False
+
+
+def _load_jwks() -> dict[str, Any]:
+    raw = _jwt_jwks_json()
+    if not raw:
+        path = _jwt_jwks_path()
+        if not path:
+            return {}
+        try:
+            with open(path, encoding="utf-8") as handle:
+                raw = handle.read()
+        except OSError:
+            return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _jwk_for_kid(kid: str) -> dict[str, Any] | None:
+    keys = _load_jwks().get("keys")
+    if not isinstance(keys, list):
+        return None
+    for jwk in keys:
+        if not isinstance(jwk, dict) or jwk.get("kid") != kid:
+            continue
+        if jwk.get("kty") != "RSA" or jwk.get("alg") not in (None, "RS256"):
+            return None
+        if "d" in jwk or "p" in jwk or "q" in jwk:
+            return None
+        if not isinstance(jwk.get("n"), str) or not isinstance(jwk.get("e"), str):
+            return None
+        return jwk
+    return None
+
+
+def _rs256_public_key_for_kid(kid: str) -> Any | None:
+    jwk = _jwk_for_kid(kid)
+    if jwk is None:
+        return None
+    try:
+        return RSAAlgorithm.from_jwk(json.dumps(jwk))
+    except (InvalidKeyError, ValueError, TypeError, KeyError):
+        return None
 
 
 def _jwt_authorities(value: Any) -> frozenset[str]:
@@ -385,11 +476,31 @@ def _jwt_authorities(value: Any) -> frozenset[str]:
 
 
 def _validate_jwt_service_token(token: str, required_authority: str) -> tuple[InternalServicePrincipal | None, int, str]:
+    algorithm = _jwt_algorithm()
+    if algorithm not in {"RS256", "HS256"}:
+        return None, 403, "invalid_internal_token"
+    try:
+        header = jwt.get_unverified_header(token)
+    except InvalidTokenError:
+        return None, 403, "invalid_internal_token"
+    if not isinstance(header, dict) or header.get("alg") != algorithm:
+        return None, 403, "invalid_internal_token"
+    key: Any
+    kid = header.get("kid")
+    if algorithm == "RS256":
+        if not isinstance(kid, str) or not kid.strip():
+            return None, 403, "invalid_internal_token"
+        kid = kid.strip()
+        key = _rs256_public_key_for_kid(kid)
+        if key is None:
+            return None, 403, "invalid_internal_token"
+    else:
+        key = _jwt_secret()
     try:
         claims = jwt.decode(
             token,
-            _jwt_secret(),
-            algorithms=["HS256"],
+            key,
+            algorithms=[algorithm],
             issuer=_jwt_issuer(),
             audience=_jwt_audience(),
             options={
@@ -416,6 +527,10 @@ def _validate_jwt_service_token(token: str, required_authority: str) -> tuple[In
     allowed_authorities = _allowed_jwt_service_authorities().get(service_name)
     if allowed_authorities is None:
         return None, 403, "unknown_internal_service"
+    if algorithm == "RS256":
+        allowed_key_ids = _allowed_jwt_service_keys().get(service_name)
+        if allowed_key_ids is None or kid not in allowed_key_ids:
+            return None, 403, "invalid_internal_token"
     token_authorities = _jwt_authorities(claims.get(_jwt_authorities_claim()))
     if required_authority not in allowed_authorities or required_authority not in token_authorities:
         return None, 403, "missing_internal_authority"
@@ -444,7 +559,9 @@ def _validate_internal_auth_startup(
         if not configured_credentials:
             raise RuntimeError("TOKEN_VALIDATOR internal auth mode requires an allowed service list in prod-like profiles.")
     if normalized_mode == "JWT_SERVICE_IDENTITY" and not _jwt_configured():
-        raise RuntimeError("JWT_SERVICE_IDENTITY internal auth mode requires issuer, audience, HS256 secret of at least 32 bytes, and service authorities.")
+        raise RuntimeError("JWT_SERVICE_IDENTITY internal auth mode requires complete JWT issuer, audience, algorithm, key material, service authorities, and service key bindings.")
+    if normalized_mode == "JWT_SERVICE_IDENTITY" and _jwt_algorithm() == "HS256" and _prod_like_profile(profile):
+        raise RuntimeError("HS256 JWT service identity is local compatibility only and is forbidden in prod-like profiles.")
     if normalized_mode == "MTLS_READY" and _prod_like_profile(profile):
         raise RuntimeError("MTLS_READY internal auth mode is a fail-closed placeholder until mTLS is configured.")
 
