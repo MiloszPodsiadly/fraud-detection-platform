@@ -10,10 +10,16 @@ describe("AlertsListPage session lifecycle", () => {
         alertPage={emptyPage(10)}
         fraudCasePage={emptyPage(4)}
         transactionPage={emptyPage(25)}
+        advisoryQueue={emptyAdvisoryQueue()}
+        advisoryQueueRequest={{ severity: "ALL", modelVersion: "", limit: 25 }}
         isLoading={false}
+        isGovernanceLoading={false}
         error={null}
+        governanceError={null}
         sessionState={{ status: SESSION_STATES.UNAUTHENTICATED }}
         onRetry={vi.fn()}
+        onGovernanceRetry={vi.fn()}
+        onAdvisoryQueueRequestChange={vi.fn()}
         onTransactionPageChange={vi.fn()}
         onTransactionPageSizeChange={vi.fn()}
         onAlertPageChange={vi.fn()}
@@ -35,10 +41,16 @@ describe("AlertsListPage session lifecycle", () => {
         alertPage={emptyPage(10)}
         fraudCasePage={emptyPage(4)}
         transactionPage={emptyPage(25)}
+        advisoryQueue={emptyAdvisoryQueue()}
+        advisoryQueueRequest={{ severity: "ALL", modelVersion: "", limit: 25 }}
         isLoading={false}
+        isGovernanceLoading={false}
         error={null}
+        governanceError={null}
         sessionState={{ status: SESSION_STATES.EXPIRED }}
         onRetry={vi.fn()}
+        onGovernanceRetry={vi.fn()}
+        onAdvisoryQueueRequestChange={vi.fn()}
         onTransactionPageChange={vi.fn()}
         onTransactionPageSizeChange={vi.fn()}
         onAlertPageChange={vi.fn()}
@@ -61,5 +73,14 @@ function emptyPage(size) {
     totalPages: 0,
     page: 0,
     size
+  };
+}
+
+function emptyAdvisoryQueue() {
+  return {
+    status: "AVAILABLE",
+    count: 0,
+    retention_limit: 200,
+    advisory_events: []
   };
 }

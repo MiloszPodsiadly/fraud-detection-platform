@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { listAlerts, setApiSession } from "./alertsApi.js";
+import { listAlerts, listGovernanceAdvisories, setApiSession } from "./alertsApi.js";
 import { normalizeSession } from "../auth/session.js";
 import { createOidcAuthProvider } from "../auth/authProvider.js";
 import { createInMemoryOidcSessionSource } from "../auth/oidcSessionSource.js";
@@ -73,6 +73,36 @@ describe("alertsApi auth headers", () => {
         "Content-Type": "application/json"
       }
     }));
+  });
+
+  it("calls governance advisories with bounded query params and no auth headers", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      status: "AVAILABLE",
+      count: 0,
+      retention_limit: 200,
+      advisory_events: []
+    }));
+    const authProvider = createOidcAuthProvider(createInMemoryOidcSessionSource({
+      accessToken: "oidc-token-123",
+      session: { userId: "oidc-analyst", roles: ["ANALYST"] }
+    }));
+
+    setApiSession(normalizeSession({ userId: "oidc-analyst", roles: ["ANALYST"] }), authProvider);
+
+    await listGovernanceAdvisories({
+      severity: "HIGH",
+      modelVersion: " 2026-04-21.trained.v1 ",
+      limit: 25
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/governance/advisories?limit=25&severity=HIGH&model_version=2026-04-21.trained.v1",
+      expect.objectContaining({
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+    expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty("Authorization");
+    expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty("X-Demo-User-Id");
   });
 });
 
