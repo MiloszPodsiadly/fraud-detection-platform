@@ -37,6 +37,12 @@ Server-side ML configuration:
 - `INTERNAL_AUTH_JWT_AUTHORITIES_CLAIM=authorities`
 - `INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES=fraud-scoring-service:ml-score,alert-service:governance-read`
 - `INTERNAL_AUTH_ALLOWED_SERVICE_KEYS=fraud-scoring-service:scoring-key-1,alert-service:alert-key-1`
+- `INTERNAL_AUTH_JWT_MAX_TOKEN_AGE_SECONDS=300`
+- `INTERNAL_AUTH_JWT_MAX_ALLOWED_TTL_SECONDS=300`
+- `INTERNAL_AUTH_JWT_CLOCK_SKEW_SECONDS=30`
+- `INTERNAL_AUTH_REPLAY_CACHE_ENABLED=false`
+- `INTERNAL_AUTH_REPLAY_CACHE_MODE=log` or `reject`
+- `INTERNAL_AUTH_REPLAY_CACHE_MAX_ENTRIES=10000`
 
 Java client configuration:
 
@@ -68,6 +74,14 @@ HS256 compatibility still requires a local HMAC secret of at least 32 bytes, but
 
 Business clients do not construct JWTs directly. Java clients call `InternalServiceAuthHeaders`, which delegates JWT creation to the internal credential provider.
 
+## Replay Risk and Mitigation
+
+JWT service tokens can be replayed within their validity window if an attacker obtains a token. FDP-17 reduces that window by requiring short-lived tokens, strict `iat` and `exp` validation, maximum token age, maximum `exp - iat` TTL, and explicit clock skew handling.
+
+`ml-inference-service` can also enable an optional in-memory soft replay cache. The cache stores only a hash of the token, is bounded by `INTERNAL_AUTH_REPLAY_CACHE_MAX_ENTRIES`, and expires entries at the token TTL. It is a local-process signal only; it does not provide distributed replay prevention across horizontally scaled instances.
+
+This is not equivalent to mTLS, nonce-based replay prevention, or a zero-replay guarantee. Full replay protection requires `jti` plus a distributed store, or mTLS with channel binding.
+
 ## Failure Behavior
 
 - Missing credentials return `401`.
@@ -77,6 +91,8 @@ Business clients do not construct JWTs directly. Java clients call `InternalServ
 - Metrics remain low-cardinality:
   - `fraud_internal_auth_success_total{source_service,target_service}`
   - `fraud_internal_auth_failure_total{target_service,reason}`
+  - `fraud_internal_auth_replay_rejected_total{reason}`
+  - `fraud_internal_auth_token_age_seconds{reason}`
 
 Allowed failure reasons are bounded and do not include tokens, subjects, paths, exception messages, actor IDs, resource IDs, or audit IDs.
 

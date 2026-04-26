@@ -192,6 +192,15 @@ Prometheus metric contract:
   - Meaning: rejected internal service authentication attempts
   - Labels: `target_service`, `reason`
   - Bounded reasons include missing credentials, expired JWT, invalid JWT, invalid issuer, invalid audience, unknown service, missing authority, invalid shared-token credentials, key/service mismatch collapsed to invalid JWT, and mTLS-not-configured.
+- `fraud_internal_auth_replay_rejected_total`
+  - Type: counter
+  - Meaning: rejected internal service JWT freshness or soft replay attempts
+  - Labels: `reason`
+  - Bounded reasons: `EXPIRED`, `TOO_OLD`, `FUTURE_IAT`, `REPLAY_DETECTED`
+- `fraud_internal_auth_token_age_seconds`
+  - Type: histogram
+  - Meaning: age of internal service JWTs rejected by replay or freshness checks
+  - Labels: `reason`
 - `fraud_read_access_audit_actor_missing_total`
   - Type: counter
   - Meaning: sensitive read-access audit was persisted with `actor_id=unknown` because the backend principal was unavailable

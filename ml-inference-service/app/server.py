@@ -5,7 +5,9 @@ import hashlib
 import hmac
 import os
 import re
+import threading
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from http import HTTPStatus
 from datetime import datetime, timezone
@@ -122,6 +124,17 @@ INTERNAL_AUTH_FAILURES = Counter(
     "fraud_internal_auth_failure_total",
     "Rejected internal service authentication attempts.",
     ("target_service", "reason"),
+)
+INTERNAL_AUTH_REPLAY_REJECTIONS = Counter(
+    "fraud_internal_auth_replay_rejected_total",
+    "Rejected internal service JWT replay or freshness attempts.",
+    ("reason",),
+)
+INTERNAL_AUTH_TOKEN_AGE = Histogram(
+    "fraud_internal_auth_token_age_seconds",
+    "Age of internal service JWTs rejected by replay or freshness checks.",
+    ("reason",),
+    buckets=(0, 1, 5, 15, 30, 60, 120, 300, 600, 900),
 )
 MODEL_LOAD_STATUS = Gauge(
     "fraud_ml_model_load_status",
@@ -268,6 +281,46 @@ INTERNAL_AUTH_FAILURE_REASONS = {
     "missing_internal_authority",
     "mtls_not_configured",
 }
+REPLAY_REASON_EXPIRED = "EXPIRED"
+REPLAY_REASON_TOO_OLD = "TOO_OLD"
+REPLAY_REASON_FUTURE_IAT = "FUTURE_IAT"
+REPLAY_REASON_REPLAY_DETECTED = "REPLAY_DETECTED"
+DEFAULT_JWT_MAX_TOKEN_AGE_SECONDS = 300
+DEFAULT_JWT_MAX_ALLOWED_TTL_SECONDS = 300
+DEFAULT_JWT_CLOCK_SKEW_SECONDS = 30
+DEFAULT_REPLAY_CACHE_MAX_ENTRIES = 10_000
+
+
+class SoftReplayCache:
+    def __init__(self) -> None:
+        self._entries: OrderedDict[str, float] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def seen(self, token_hash: str, expires_at: float, now: float, max_entries: int) -> bool:
+        with self._lock:
+            self._evict(now, max_entries)
+            cached_expires_at = self._entries.get(token_hash)
+            if cached_expires_at is not None and cached_expires_at > now:
+                self._entries.move_to_end(token_hash)
+                return True
+            self._entries[token_hash] = expires_at
+            self._entries.move_to_end(token_hash)
+            self._evict(now, max_entries)
+            return False
+
+    def clear(self) -> None:
+        with self._lock:
+            self._entries.clear()
+
+    def _evict(self, now: float, max_entries: int) -> None:
+        expired = [key for key, expires_at in self._entries.items() if expires_at <= now]
+        for key in expired:
+            self._entries.pop(key, None)
+        while len(self._entries) > max(max_entries, 1):
+            self._entries.popitem(last=False)
+
+
+SOFT_REPLAY_CACHE = SoftReplayCache()
 
 
 def _normalize_internal_auth_mode(mode: str) -> str:
@@ -362,6 +415,38 @@ def _jwt_service_claim() -> str:
 
 def _jwt_authorities_claim() -> str:
     return os.getenv("INTERNAL_AUTH_JWT_AUTHORITIES_CLAIM", "authorities").strip() or "authorities"
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)).strip())
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def _jwt_max_token_age_seconds() -> int:
+    return _env_int("INTERNAL_AUTH_JWT_MAX_TOKEN_AGE_SECONDS", DEFAULT_JWT_MAX_TOKEN_AGE_SECONDS)
+
+
+def _jwt_max_allowed_ttl_seconds() -> int:
+    return _env_int("INTERNAL_AUTH_JWT_MAX_ALLOWED_TTL_SECONDS", DEFAULT_JWT_MAX_ALLOWED_TTL_SECONDS)
+
+
+def _jwt_clock_skew_seconds() -> int:
+    return _env_int("INTERNAL_AUTH_JWT_CLOCK_SKEW_SECONDS", DEFAULT_JWT_CLOCK_SKEW_SECONDS)
+
+
+def _replay_cache_enabled() -> bool:
+    return os.getenv("INTERNAL_AUTH_REPLAY_CACHE_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _replay_cache_reject_mode() -> bool:
+    return os.getenv("INTERNAL_AUTH_REPLAY_CACHE_MODE", "log").strip().lower() == "reject"
+
+
+def _replay_cache_max_entries() -> int:
+    return _env_int("INTERNAL_AUTH_REPLAY_CACHE_MAX_ENTRIES", DEFAULT_REPLAY_CACHE_MAX_ENTRIES)
 
 
 def _allowed_jwt_service_authorities() -> dict[str, frozenset[str]]:
@@ -475,6 +560,30 @@ def _jwt_authorities(value: Any) -> frozenset[str]:
     return frozenset()
 
 
+def _numeric_timestamp(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return int(value)
+
+
+def _record_replay_metric(reason: str, token_age_seconds: float) -> None:
+    INTERNAL_AUTH_REPLAY_REJECTIONS.labels(reason).inc()
+    INTERNAL_AUTH_TOKEN_AGE.labels(reason).observe(max(token_age_seconds, 0.0))
+
+
+def _log_internal_auth_replay_detected() -> None:
+    print(json.dumps({
+        "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+        "service": "ml-inference-service",
+        "event": "internal_auth_replay_detected",
+        "reason": REPLAY_REASON_REPLAY_DETECTED,
+    }, separators=(",", ":"), sort_keys=True), flush=True)
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
 def _validate_jwt_service_token(token: str, required_authority: str) -> tuple[InternalServicePrincipal | None, int, str]:
     algorithm = _jwt_algorithm()
     if algorithm not in {"RS256", "HS256"}:
@@ -504,22 +613,40 @@ def _validate_jwt_service_token(token: str, required_authority: str) -> tuple[In
             issuer=_jwt_issuer(),
             audience=_jwt_audience(),
             options={
-                "require": ["iss", "aud", "exp", _jwt_service_claim(), _jwt_authorities_claim()],
+                "require": ["iss", "aud", "iat", "exp", _jwt_service_claim(), _jwt_authorities_claim()],
+                "verify_exp": False,
                 "verify_iat": False,
             },
         )
-    except ExpiredSignatureError:
-        return None, 401, "expired_internal_token"
     except InvalidIssuerError:
         return None, 403, "invalid_internal_issuer"
     except InvalidAudienceError:
         return None, 403, "invalid_internal_audience"
-    except (InvalidAlgorithmError, InvalidSignatureError, MissingRequiredClaimError, InvalidTokenError):
+    except (ExpiredSignatureError, InvalidAlgorithmError, InvalidSignatureError, MissingRequiredClaimError, InvalidTokenError):
         return None, 403, "invalid_internal_token"
     now = int(time.time())
-    iat = claims.get("iat")
-    if iat is not None and (not isinstance(iat, (int, float)) or int(iat) > now + 60):
+    skew_seconds = _jwt_clock_skew_seconds()
+    max_token_age_seconds = _jwt_max_token_age_seconds()
+    max_allowed_ttl_seconds = _jwt_max_allowed_ttl_seconds()
+    iat = _numeric_timestamp(claims.get("iat"))
+    exp = _numeric_timestamp(claims.get("exp"))
+    if iat is None or exp is None:
         return None, 403, "invalid_internal_token"
+    token_age_seconds = now - iat
+    if iat > now + skew_seconds:
+        _record_replay_metric(REPLAY_REASON_FUTURE_IAT, token_age_seconds)
+        return None, 403, "invalid_internal_token"
+    if exp <= iat:
+        return None, 403, "invalid_internal_token"
+    if exp - iat > max_allowed_ttl_seconds:
+        _record_replay_metric(REPLAY_REASON_TOO_OLD, token_age_seconds)
+        return None, 403, "invalid_internal_token"
+    if token_age_seconds > max_token_age_seconds:
+        _record_replay_metric(REPLAY_REASON_TOO_OLD, token_age_seconds)
+        return None, 403, "invalid_internal_token"
+    if now > exp + skew_seconds:
+        _record_replay_metric(REPLAY_REASON_EXPIRED, token_age_seconds)
+        return None, 401, "expired_internal_token"
     service_name = claims.get(_jwt_service_claim())
     if not isinstance(service_name, str) or not service_name.strip():
         return None, 403, "unknown_internal_service"
@@ -534,6 +661,13 @@ def _validate_jwt_service_token(token: str, required_authority: str) -> tuple[In
     token_authorities = _jwt_authorities(claims.get(_jwt_authorities_claim()))
     if required_authority not in allowed_authorities or required_authority not in token_authorities:
         return None, 403, "missing_internal_authority"
+    if _replay_cache_enabled():
+        replay_expires_at = min(exp + skew_seconds, now + max(exp - iat, 1))
+        if SOFT_REPLAY_CACHE.seen(_token_hash(token), replay_expires_at, now, _replay_cache_max_entries()):
+            _record_replay_metric(REPLAY_REASON_REPLAY_DETECTED, token_age_seconds)
+            _log_internal_auth_replay_detected()
+            if _replay_cache_reject_mode():
+                return None, 403, "invalid_internal_token"
     return InternalServicePrincipal(
         service_name=service_name,
         authorities=token_authorities & allowed_authorities,

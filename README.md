@@ -523,7 +523,9 @@ curl -i -H "Authorization: Bearer invalid-token" http://localhost:8090/governanc
 curl -s http://localhost:8090/metrics | grep fraud_internal_auth
 ```
 
-Expected results: anonymous direct ML calls return `401`, invalid bearer calls return `403`, configured Java clients attach RS256 signed JWT service identity through `InternalServiceAuthHeaders`, `ml-inference-service` validates public JWKS material only, `kid` is required, service-to-key binding is enforced, and internal auth metrics remain low-cardinality. See `docs/service-identity-fdp17.md` for the full contract. This is a JWT service-auth foundation, not enterprise mTLS or enterprise IAM.
+Expected results: anonymous direct ML calls return `401`, invalid bearer calls return `403`, configured Java clients attach RS256 signed JWT service identity through `InternalServiceAuthHeaders`, `ml-inference-service` validates public JWKS material only, `kid` is required, service-to-key binding is enforced, strict `iat`/`exp` freshness checks bound replay risk, and internal auth metrics remain low-cardinality. See `docs/service-identity-fdp17.md` for the full contract. This is a JWT service-auth foundation, not enterprise mTLS or enterprise IAM.
+
+Replay note: JWT service tokens can be replayed within their validity window. FDP-17 mitigates this with short TTLs, strict token age and TTL validation, clock skew bounds, and an optional in-memory soft replay cache. This is not a zero-replay guarantee; full replay protection requires `jti` with a distributed store or mTLS with channel binding.
 
 If you suspect stale local images or containers, rebuild cleanly:
 
