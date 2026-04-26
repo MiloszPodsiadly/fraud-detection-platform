@@ -74,6 +74,16 @@ class GovernanceAdvisoryControllerTest {
                 .andExpect(jsonPath("$.message").value("Validation failed."));
     }
 
+    @Test
+    void shouldReturnNotFoundWhenAdvisoryIsMissing() throws Exception {
+        when(projectionService.getAdvisory("missing-advisory"))
+                .thenThrow(new GovernanceAdvisoryNotFoundException("missing-advisory"));
+
+        mockMvc.perform(get("/governance/advisories/missing-advisory"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("Governance advisory event not found: missing-advisory"));
+    }
+
     private GovernanceAdvisoryEvent advisoryEvent() {
         return new GovernanceAdvisoryEvent(
                 "advisory-1",

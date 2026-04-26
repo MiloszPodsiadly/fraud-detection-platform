@@ -40,6 +40,7 @@ public class GovernanceAdvisoryProjectionService {
     }
 
     private GovernanceAdvisoryEvent withLifecycleStatus(GovernanceAdvisoryEvent event) {
+        // Lifecycle is computed per read. It does not modify advisory events or system behavior.
         GovernanceAdvisoryLifecycleStatus status = lifecycleService.lifecycleStatus(event.eventId());
         metrics.recordGovernanceAdvisoryLifecycle(status.name(), event.modelName(), event.modelVersion());
         return event.withLifecycleStatus(status);

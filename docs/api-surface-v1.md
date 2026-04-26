@@ -77,6 +77,8 @@ Advisory lifecycle status is a read-time projection:
 
 Only the latest audit event matters. Lifecycle status is not persisted independently, is not workflow state, has no SLA, and triggers no automation.
 
+Filtering by `lifecycle_status` applies to the bounded advisory result set. It does not guarantee global completeness.
+
 Advisory list filters:
 
 - `severity`

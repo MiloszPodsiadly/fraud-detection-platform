@@ -498,6 +498,20 @@ Lifecycle status is a derived projection from audit history:
 
 Only the latest audit event is considered. The audit trail remains the source of truth. Lifecycle status is computed at read time, is not stored as authoritative state, and is not a workflow engine.
 
+Filtering by `lifecycle_status` applies to the bounded advisory result set. It does not guarantee global completeness.
+
+## Lifecycle Red Lines
+
+**Lifecycle is a read-only projection of audit history.**
+
+Lifecycle status:
+
+- is NOT a workflow engine
+- does NOT trigger actions
+- does NOT influence scoring
+- does NOT influence model behavior
+- is NOT persisted as authoritative state
+
 Lifecycle limitations:
 
 - no automation
@@ -591,6 +605,8 @@ Forbidden metric labels:
 Action metric labels are bounded enums only. They must never include action text, escalation text, explanation text, feature names, raw drift reasons, snapshot IDs, user identifiers, or exception messages.
 
 Lifecycle metric labels are bounded to model metadata, lifecycle mode, fixed lifecycle event types, advisory lifecycle status, and status. They must never include artifact paths, checksums, event IDs, actor IDs, timestamps, reason text, exception text, hostnames, or filesystem paths.
+
+Lifecycle metrics represent distribution of advisory states, not operational decisions.
 
 Advisory metric labels are bounded to severity, model name, model version, and status. They must never include event IDs, timestamps, explanations, recommended action text, payload data, feature names, exception text, or identifiers.
 

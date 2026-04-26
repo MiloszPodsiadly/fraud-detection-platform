@@ -9,7 +9,7 @@ paths:
   /governance/advisories:
     get:
       summary: List governance advisories with derived lifecycle status
-      description: Returns ML advisory events enriched with lifecycle_status derived at read time from latest audit event. Lifecycle is not persisted as source of truth and does not trigger workflow actions.
+      description: Returns ML advisory events enriched with lifecycle_status derived at read time from latest audit event. Lifecycle is not persisted as source of truth and does not trigger workflow actions. Filtering by lifecycle_status applies to the bounded advisory result set. It does not guarantee global completeness.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -30,6 +30,7 @@ paths:
         - name: lifecycle_status
           in: query
           required: false
+          description: Applied after advisory projection and limited to the bounded advisory result set.
           schema:
             $ref: "#/components/schemas/GovernanceAdvisoryLifecycleStatus"
         - name: limit

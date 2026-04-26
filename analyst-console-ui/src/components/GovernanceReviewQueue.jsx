@@ -82,7 +82,7 @@ export function GovernanceReviewQueue({
           </select>
         </label>
       </div>
-      <p className="sectionCopy">Results are limited to recent advisory events.</p>
+      <p className="sectionCopy">Filters apply to recent advisory events only.</p>
 
       {isPartial && (
         <div className="stateBanner" role="status">

@@ -62,6 +62,8 @@ class GovernanceAuditServiceTest {
         assertThat(saved.getActorRoles()).containsExactly("ANALYST");
         assertThat(saved.getModelName()).isEqualTo("python-logistic-fraud-model");
         assertThat(saved.getAdvisoryConfidenceContext()).isEqualTo("SUFFICIENT_DATA");
+        assertThat(java.util.Arrays.stream(saved.getClass().getDeclaredFields()).map(java.lang.reflect.Field::getName))
+                .doesNotContain("lifecycleStatus");
         assertThat(response.actorId()).isEqualTo("principal-1");
         assertThat(response.note()).isEqualTo("Reviewed by operator");
     }

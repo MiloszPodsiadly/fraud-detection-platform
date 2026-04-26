@@ -20,7 +20,7 @@ describe("GovernanceReviewQueue", () => {
     expect(screen.getByText(/do not trigger system actions/i)).toBeInTheDocument();
     expect(screen.getByText(/do not affect scoring, model behavior, or system decisions/i)).toBeInTheDocument();
     expect(screen.getByText(/Lifecycle status reflects the latest recorded operator review/i)).toBeInTheDocument();
-    expect(screen.getByText(/Results are limited to recent advisory events/i)).toBeInTheDocument();
+    expect(screen.getByText(/Filters apply to recent advisory events only/i)).toBeInTheDocument();
     expect(screen.getAllByText("HIGH").length).toBeGreaterThan(0);
     expect(screen.getAllByText("OPEN").length).toBeGreaterThan(1);
     expect(screen.getByText("DRIFT")).toBeInTheDocument();

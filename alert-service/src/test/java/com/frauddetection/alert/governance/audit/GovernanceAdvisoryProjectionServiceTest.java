@@ -9,6 +9,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class GovernanceAdvisoryProjectionServiceTest {
@@ -37,6 +38,8 @@ class GovernanceAdvisoryProjectionServiceTest {
         GovernanceAdvisoryEvent enriched = response.advisoryEvents().getFirst();
         assertThat(enriched.lifecycleStatus()).isEqualTo(GovernanceAdvisoryLifecycleStatus.NEEDS_FOLLOW_UP);
         assertThat(enriched.eventId()).isEqualTo(event.eventId());
+        assertThat(enriched.driftStatus()).isEqualTo(event.driftStatus());
+        assertThat(enriched.confidence()).isEqualTo(event.confidence());
         assertThat(enriched.recommendedActions()).isEqualTo(event.recommendedActions());
         verify(metrics).recordGovernanceAdvisoryLifecycle(
                 "NEEDS_FOLLOW_UP",
@@ -64,6 +67,46 @@ class GovernanceAdvisoryProjectionServiceTest {
 
         assertThat(response.count()).isEqualTo(1);
         assertThat(response.advisoryEvents()).extracting(GovernanceAdvisoryEvent::eventId).containsExactly("advisory-2");
+    }
+
+    @Test
+    void shouldKeepAdvisoryPayloadStableAcrossLifecycleStates() {
+        GovernanceAdvisoryEvent event = advisoryEvent("advisory-1");
+
+        for (GovernanceAdvisoryLifecycleStatus status : GovernanceAdvisoryLifecycleStatus.values()) {
+            when(advisoryClient.listAdvisories(new GovernanceAdvisoryQuery(null, null, 25)))
+                    .thenReturn(new GovernanceAdvisoryListResponse("AVAILABLE", 1, 200, List.of(event)));
+            when(lifecycleService.lifecycleStatus("advisory-1")).thenReturn(status);
+
+            GovernanceAdvisoryEvent enriched = service.listAdvisories(
+                    new GovernanceAdvisoryQuery(null, null, 25),
+                    null
+            ).advisoryEvents().getFirst();
+
+            assertThat(enriched.lifecycleStatus()).isEqualTo(status);
+            assertThat(enriched.driftStatus()).isEqualTo(event.driftStatus());
+            assertThat(enriched.confidence()).isEqualTo(event.confidence());
+            assertThat(enriched.recommendedActions()).isEqualTo(event.recommendedActions());
+        }
+    }
+
+    @Test
+    void shouldNotResolveLifecycleWhenAdvisoryIsMissing() {
+        when(advisoryClient.getAdvisoryEvent("missing-advisory"))
+                .thenThrow(new GovernanceAdvisoryNotFoundException("missing-advisory"));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.getAdvisory("missing-advisory"))
+                .isInstanceOf(GovernanceAdvisoryNotFoundException.class);
+
+        verifyNoInteractions(lifecycleService);
+        verifyNoInteractions(metrics);
+    }
+
+    @Test
+    void shouldHaveNoScoringPathDependency() {
+        assertThat(GovernanceAdvisoryProjectionService.class.getDeclaredFields())
+                .extracting(field -> field.getType().getName())
+                .noneMatch(typeName -> typeName.toLowerCase().contains("scoring"));
     }
 
     private GovernanceAdvisoryEvent advisoryEvent(String eventId) {

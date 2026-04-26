@@ -21,6 +21,10 @@ public class GovernanceAdvisoryController {
         this.projectionService = projectionService;
     }
 
+    /**
+     * Lifecycle filtering is applied after advisory projection and is limited
+     * to the current bounded advisory window.
+     */
     @GetMapping
     public GovernanceAdvisoryListResponse listAdvisories(
             @RequestParam(required = false)
