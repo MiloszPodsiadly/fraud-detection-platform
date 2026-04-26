@@ -2,6 +2,7 @@ package com.frauddetection.alert.governance.audit;
 
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
@@ -34,6 +35,7 @@ public class GovernanceAuditEventDocument {
     private List<String> actorRoles;
 
     @Field("created_at")
+    @Indexed(name = "created_at_idx")
     private Instant createdAt;
 
     @Field("model_name")

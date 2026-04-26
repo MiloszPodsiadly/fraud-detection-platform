@@ -520,6 +520,56 @@ Lifecycle limitations:
 - no background jobs, timers, or cron
 - no retraining, rollback, alerting, scoring, or decision side effects
 
+## Audit Analytics
+
+FDP-15 adds bounded audit analytics through `alert-service`:
+
+```text
+GET /governance/advisories/analytics?window_days=7
+```
+
+Analytics are derived from advisory history and human-review audit events. They are read-only and are for visibility into operator behavior and advisory handling only.
+
+Definitions:
+
+- `advisory_event_id`: unique identifier of an advisory from the ML governance system.
+- `totals.advisories`: number of distinct `advisory_event_id` values in the bounded advisory projection window.
+- `totals.reviewed`: advisories in that same projection window with at least one matching audit event.
+- `totals.open`: advisories in that same projection window with zero matching audit events.
+- `decision_distribution`: latest audit decision distribution for reviewed advisories in that same projection window.
+- `lifecycle_distribution`: lifecycle distribution after read-time lifecycle enrichment of that same advisory projection; counts sum to `totals.advisories`.
+
+Audit-only advisory IDs outside the bounded advisory projection are not counted in totals or distributions.
+
+Returned analytics include:
+
+- total advisories, reviewed advisories, and open advisories
+- latest audit decision distribution
+- read-time lifecycle distribution
+- time-to-first-review p50 and p95 in minutes
+
+Time-to-first-review is computed as `first_audit.created_at - advisory.created_at`. Only advisories with at least one valid, non-negative audit duration are sampled. If fewer than five valid samples exist, `review_timeliness.status` is `LOW_CONFIDENCE` and percentile values are not presented as reliable operational statistics.
+
+Analytics status:
+
+- `AVAILABLE`: advisory source and audit source are both readable.
+- `PARTIAL`: one source is degraded, or the bounded audit scan limit is exceeded.
+- `UNAVAILABLE`: both sources are unavailable or a critical dependency is missing.
+
+Analytics are not an SLA, do not trigger actions, do not persist aggregates, do not change lifecycle state, and do not influence scoring, model behavior, retraining, rollback, alerts, or fraud decisions.
+
+Analytics operates on bounded time windows. `window_days` defaults to `7` and is capped at `30`, the advisory input remains bounded to the recent advisory window, and audit scans are capped by `GOVERNANCE_AUDIT_ANALYTICS_MAX_AUDIT_EVENTS` (default `10000`). Audit queries use `created_at`; lifecycle lookups use `advisory_event_id` with `created_at`.
+
+### Analytics Red Lines
+
+Analytics:
+
+- is NOT for alert triggering
+- is NOT for SLA enforcement
+- is NOT for model control
+- is NOT for automation
+- does NOT influence scoring, retraining, rollback, or fraud decisions
+
 ## Endpoint Contracts
 
 ```text
@@ -581,6 +631,8 @@ Governance metrics:
 - `fraud_ml_model_lifecycle_events_total{event_type,model_name,model_version,status}`
 - `fraud_ml_model_lifecycle_history_available{model_name,model_version,status}`
 - `fraud_ml_governance_advisory_lifecycle_total{lifecycle_status,model_name,model_version}`
+- `fraud_ml_governance_analytics_requests_total`
+- `fraud_ml_governance_analytics_window_days`
 - `fraud_ml_governance_advisory_events_emitted_total{severity,model_name,model_version,status}`
 - `fraud_ml_governance_advisory_events_persisted_total{severity,model_name,model_version,status}`
 - `fraud_ml_governance_advisory_persistence_failures_total{severity,model_name,model_version,status}`
@@ -607,6 +659,8 @@ Action metric labels are bounded enums only. They must never include action text
 Lifecycle metric labels are bounded to model metadata, lifecycle mode, fixed lifecycle event types, advisory lifecycle status, and status. They must never include artifact paths, checksums, event IDs, actor IDs, timestamps, reason text, exception text, hostnames, or filesystem paths.
 
 Lifecycle metrics represent distribution of advisory states, not operational decisions.
+
+Analytics metrics represent observational distribution of advisory states. They do NOT represent system decisions or actions. Analytics metrics have no user, actor, event, advisory, or payload labels.
 
 Advisory metric labels are bounded to severity, model name, model version, and status. They must never include event IDs, timestamps, explanations, recommended action text, payload data, feature names, exception text, or identifiers.
 

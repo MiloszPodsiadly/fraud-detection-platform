@@ -21,6 +21,16 @@ public class GovernanceAdvisoryController {
         this.projectionService = projectionService;
     }
 
+    @GetMapping("/analytics")
+    public GovernanceAdvisoryAnalyticsResponse analytics(
+            @RequestParam(name = "window_days", required = false, defaultValue = "7")
+            @Min(1)
+            @Max(30)
+            Integer windowDays
+    ) {
+        return projectionService.analytics(windowDays);
+    }
+
     /**
      * Lifecycle filtering is applied after advisory projection and is limited
      * to the current bounded advisory window.

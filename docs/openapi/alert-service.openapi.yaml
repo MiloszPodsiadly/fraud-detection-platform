@@ -56,6 +56,36 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
+  /governance/advisories/analytics:
+    get:
+      summary: Get bounded governance advisory audit analytics
+      description: Returns read-only analytics for the bounded advisory projection window. The advisory population is the distinct advisory_event_id values returned by the advisory projection in the requested window; audit events are used only to classify that population. Analytics are for visibility only; they are not SLA enforcement, do not trigger actions, and are not persisted as source of truth.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: window_days
+          in: query
+          required: false
+          description: Bounded analytics window in days.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 30
+            default: 7
+      responses:
+        "200":
+          description: Analytics returned for the bounded window.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceAdvisoryAnalyticsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /governance/advisories/{event_id}:
     get:
       summary: Get one governance advisory with derived lifecycle status
@@ -182,6 +212,104 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/GovernanceAdvisoryEvent"
+    GovernanceAdvisoryAnalyticsResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - window
+        - totals
+        - decision_distribution
+        - lifecycle_distribution
+        - review_timeliness
+      properties:
+        status:
+          type: string
+          description: AVAILABLE when advisory and audit sources are both readable, PARTIAL when one source is degraded or the audit scan limit is exceeded, and UNAVAILABLE when both sources are unavailable.
+          enum: [AVAILABLE, PARTIAL, UNAVAILABLE]
+        window:
+          type: object
+          additionalProperties: false
+          required: [from, to, days]
+          properties:
+            from:
+              type: string
+              format: date-time
+            to:
+              type: string
+              format: date-time
+            days:
+              type: integer
+              minimum: 1
+              maximum: 30
+        totals:
+          type: object
+          additionalProperties: false
+          description: Counts distinct advisory_event_id values from the bounded advisory projection window. reviewed means at least one matching audit event exists; open means zero matching audit events exist.
+          required: [advisories, reviewed, open]
+          properties:
+            advisories:
+              type: integer
+              minimum: 0
+            reviewed:
+              type: integer
+              minimum: 0
+            open:
+              type: integer
+              minimum: 0
+        decision_distribution:
+          type: object
+          description: Latest audit decision distribution for reviewed advisories in the bounded advisory projection window. Audit-only advisory IDs outside that projection are not counted.
+          additionalProperties:
+            type: integer
+            minimum: 0
+          properties:
+            ACKNOWLEDGED:
+              type: integer
+              minimum: 0
+            NEEDS_FOLLOW_UP:
+              type: integer
+              minimum: 0
+            DISMISSED_AS_NOISE:
+              type: integer
+              minimum: 0
+        lifecycle_distribution:
+          type: object
+          description: Lifecycle distribution of the bounded advisory projection after read-time lifecycle enrichment. Counts sum to totals.advisories.
+          additionalProperties:
+            type: integer
+            minimum: 0
+          properties:
+            OPEN:
+              type: integer
+              minimum: 0
+            ACKNOWLEDGED:
+              type: integer
+              minimum: 0
+            NEEDS_FOLLOW_UP:
+              type: integer
+              minimum: 0
+            DISMISSED_AS_NOISE:
+              type: integer
+              minimum: 0
+        review_timeliness:
+          type: object
+          additionalProperties: false
+          description: Time-to-first-review percentiles in minutes. Only advisories with at least one valid non-negative audit duration are sampled; status is LOW_CONFIDENCE when fewer than five valid samples exist.
+          required:
+            - status
+            - time_to_first_review_p50_minutes
+            - time_to_first_review_p95_minutes
+          properties:
+            status:
+              type: string
+              enum: [AVAILABLE, LOW_CONFIDENCE]
+            time_to_first_review_p50_minutes:
+              type: number
+              minimum: 0
+            time_to_first_review_p95_minutes:
+              type: number
+              minimum: 0
     GovernanceAdvisoryEvent:
       type: object
       required:

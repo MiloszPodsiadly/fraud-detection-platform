@@ -94,6 +94,13 @@ export function listGovernanceAdvisories({ severity = "ALL", modelVersion = "", 
   return request(`/governance/advisories?${params.toString()}`);
 }
 
+export function getGovernanceAdvisoryAnalytics({ windowDays = 7 } = {}) {
+  const params = new URLSearchParams({
+    window_days: String(windowDays)
+  });
+  return request(`/governance/advisories/analytics?${params.toString()}`);
+}
+
 export function getGovernanceAdvisoryAudit(eventId) {
   return request(`/governance/advisories/${encodeURIComponent(eventId)}/audit`);
 }

@@ -11,6 +11,7 @@ import com.frauddetection.alert.controller.ScoredTransactionController;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryController;
+import com.frauddetection.alert.governance.audit.GovernanceAdvisoryAnalyticsResponse;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryListResponse;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryProjectionService;
 import com.frauddetection.alert.governance.audit.GovernanceAuditController;
@@ -140,6 +141,8 @@ class AlertSecurityConfigTest {
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/governance/advisories"))
                 .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/governance/advisories/analytics"))
+                .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/governance/advisories/advisory-1"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/governance/advisories/advisory-1/audit"))
@@ -183,6 +186,19 @@ class AlertSecurityConfigTest {
     void shouldAllowReadOnlyAnalystToReadGovernanceAuditHistoryOnly() throws Exception {
         when(governanceAdvisoryProjectionService.listAdvisories(any(), any()))
                 .thenReturn(new GovernanceAdvisoryListResponse("AVAILABLE", 0, 200, List.of()));
+        when(governanceAdvisoryProjectionService.analytics(7))
+                .thenReturn(new GovernanceAdvisoryAnalyticsResponse(
+                        "AVAILABLE",
+                        new GovernanceAdvisoryAnalyticsResponse.Window(
+                                Instant.parse("2026-04-19T00:00:00Z"),
+                                Instant.parse("2026-04-26T00:00:00Z"),
+                                7
+                        ),
+                        new GovernanceAdvisoryAnalyticsResponse.Totals(0, 0, 0),
+                        GovernanceAdvisoryAnalyticsResponse.emptyDecisionDistribution(),
+                        GovernanceAdvisoryAnalyticsResponse.emptyLifecycleDistribution(),
+                        new GovernanceAdvisoryAnalyticsResponse.ReviewTimeliness("LOW_CONFIDENCE", 0.0, 0.0)
+                ));
         when(governanceAuditService.history("advisory-1"))
                 .thenReturn(new com.frauddetection.alert.governance.audit.GovernanceAuditHistoryResponse(
                         "advisory-1",
@@ -191,6 +207,9 @@ class AlertSecurityConfigTest {
                 ));
 
         mockMvc.perform(get("/governance/advisories").with(demoUser("READ_ONLY_ANALYST")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("AVAILABLE"));
+        mockMvc.perform(get("/governance/advisories/analytics").with(demoUser("READ_ONLY_ANALYST")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("AVAILABLE"));
         mockMvc.perform(get("/governance/advisories/advisory-1/audit").with(demoUser("READ_ONLY_ANALYST")))

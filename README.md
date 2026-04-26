@@ -160,6 +160,7 @@ Representative endpoint matrix:
 | `PATCH /api/v1/fraud-cases/{caseId}` | `fraud-case:update` |
 | `GET /api/v1/transactions/scored` | `transaction-monitor:read` |
 | `GET /governance/advisories` | `transaction-monitor:read` |
+| `GET /governance/advisories/analytics` | `transaction-monitor:read` |
 | `GET /governance/advisories/{event_id}` | `transaction-monitor:read` |
 | `GET /governance/advisories/{event_id}/audit` | `transaction-monitor:read` |
 | `POST /governance/advisories/{event_id}/audit` | `governance-advisory:audit:write` |
@@ -200,6 +201,17 @@ Current sink: structured SLF4J logs through `StructuredAuditEventPublisher`. Dur
 Governance advisory audit entries are separate from fraud workflow audit logs. They are persisted append-only as human review history, derive actor identity from the backend-authenticated principal, and do not affect scoring, model behavior, retraining, rollback, or fraud decisioning. Advisory lifecycle status is a read-time projection from the latest audit entry, not a persisted workflow state or automation trigger.
 
 Filtering by `lifecycle_status` applies to the bounded advisory result set. It does not guarantee global completeness.
+
+Audit analytics are derived from advisory and audit history through `GET /governance/advisories/analytics`. `advisories` means distinct `advisory_event_id` values in the bounded advisory projection window; `reviewed`, `open`, decision distribution, and lifecycle distribution all use that same population. Time-to-first-review uses valid non-negative first audit durations only and reports `LOW_CONFIDENCE` below five samples. Analytics are read-only, bounded by `window_days` and `GOVERNANCE_AUDIT_ANALYTICS_MAX_AUDIT_EVENTS`, not persisted as aggregates, not an SLA, and do not trigger actions or influence scoring/model behavior.
+
+## Analytics Red Lines
+
+Analytics:
+
+- is NOT for alert triggering
+- is NOT for SLA enforcement
+- is NOT for model control
+- is NOT for automation
 
 ## Lifecycle Red Lines
 
@@ -622,6 +634,7 @@ Main local endpoints:
 - `GET http://localhost:8082/api/v1/replay/status`: replay status.
 - `GET http://localhost:8085/api/v1/transactions/scored?page=0&size=25`: paged scored transaction monitor data.
 - `GET http://localhost:8085/governance/advisories`: governance advisory list with audit-derived lifecycle status.
+- `GET http://localhost:8085/governance/advisories/analytics?window_days=7`: bounded read-only advisory audit analytics.
 - `GET http://localhost:8085/governance/advisories/{event_id}`: single governance advisory with audit-derived lifecycle status.
 - `GET http://localhost:8085/governance/advisories/{event_id}/audit`: governance advisory audit history.
 - `POST http://localhost:8085/governance/advisories/{event_id}/audit`: append governance advisory human-review audit entry.
@@ -853,7 +866,7 @@ Model lifecycle visibility is read-only; it does not switch models, retrain, rol
 Governance advisory events are operator signals only; they are not fraud alerts, model actions, retraining triggers, rollback triggers, automatic decisions, or frontend workflow items. Advisory events are heuristic and may be inaccurate under low data conditions; the system does not guarantee correctness of drift or advisory signals. Advisory events include bounded confidence context and are deduplicated to avoid repeated signals from repeated polling.
 Drift actions and advisory events do not block transactions, change scores, switch models, retrain models, roll back models, or trigger external alerting workflows.
 
-FDP-12 surfaces governance advisory events in the analyst console as an operator review queue. FDP-13 adds authenticated human-review audit recording for each advisory event. FDP-14 adds advisory lifecycle badges and filtering derived only from audit history. The UI consumes `GET /governance/advisories` through `alert-service` for advisory context plus lifecycle projection and uses `alert-service` for append-only audit history and writes. Audit entries record only `decision`, optional bounded `note`, backend-derived actor, and bounded advisory metadata; lifecycle status does not change scoring, model behavior, retraining, rollback, advisory emission, or fraud decisioning. Lifecycle filtering applies only to the recent bounded advisory window.
+FDP-12 surfaces governance advisory events in the analyst console as an operator review queue. FDP-13 adds authenticated human-review audit recording for each advisory event. FDP-14 adds advisory lifecycle badges and filtering derived only from audit history. FDP-15 adds read-only audit analytics for recent advisory handling. The UI consumes `GET /governance/advisories` through `alert-service` for advisory context plus lifecycle projection and uses `alert-service` for append-only audit history, audit analytics, and writes. Audit entries record only `decision`, optional bounded `note`, backend-derived actor, and bounded advisory metadata; lifecycle status and analytics do not change scoring, model behavior, retraining, rollback, advisory emission, or fraud decisioning. Lifecycle filtering and analytics apply only to the recent bounded advisory window.
 
 Training smoke test:
 

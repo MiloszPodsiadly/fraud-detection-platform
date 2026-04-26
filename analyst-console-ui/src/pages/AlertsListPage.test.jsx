@@ -11,15 +11,22 @@ describe("AlertsListPage session lifecycle", () => {
         fraudCasePage={emptyPage(4)}
         transactionPage={emptyPage(25)}
         advisoryQueue={emptyAdvisoryQueue()}
-        advisoryQueueRequest={{ severity: "ALL", modelVersion: "", limit: 25 }}
+        advisoryQueueRequest={{ severity: "ALL", modelVersion: "", lifecycleStatus: "ALL", limit: 25 }}
+        governanceAnalytics={emptyAnalytics()}
+        analyticsWindowDays={7}
         isLoading={false}
         isGovernanceLoading={false}
+        isAnalyticsLoading={false}
         error={null}
         governanceError={null}
+        analyticsError={null}
         sessionState={{ status: SESSION_STATES.UNAUTHENTICATED }}
         onRetry={vi.fn()}
         onGovernanceRetry={vi.fn()}
+        onAnalyticsRetry={vi.fn()}
         onAdvisoryQueueRequestChange={vi.fn()}
+        onAnalyticsWindowDaysChange={vi.fn()}
+        onRecordGovernanceAudit={vi.fn()}
         onTransactionPageChange={vi.fn()}
         onTransactionPageSizeChange={vi.fn()}
         onAlertPageChange={vi.fn()}
@@ -42,15 +49,22 @@ describe("AlertsListPage session lifecycle", () => {
         fraudCasePage={emptyPage(4)}
         transactionPage={emptyPage(25)}
         advisoryQueue={emptyAdvisoryQueue()}
-        advisoryQueueRequest={{ severity: "ALL", modelVersion: "", limit: 25 }}
+        advisoryQueueRequest={{ severity: "ALL", modelVersion: "", lifecycleStatus: "ALL", limit: 25 }}
+        governanceAnalytics={emptyAnalytics()}
+        analyticsWindowDays={7}
         isLoading={false}
         isGovernanceLoading={false}
+        isAnalyticsLoading={false}
         error={null}
         governanceError={null}
+        analyticsError={null}
         sessionState={{ status: SESSION_STATES.EXPIRED }}
         onRetry={vi.fn()}
         onGovernanceRetry={vi.fn()}
+        onAnalyticsRetry={vi.fn()}
         onAdvisoryQueueRequestChange={vi.fn()}
+        onAnalyticsWindowDaysChange={vi.fn()}
+        onRecordGovernanceAudit={vi.fn()}
         onTransactionPageChange={vi.fn()}
         onTransactionPageSizeChange={vi.fn()}
         onAlertPageChange={vi.fn()}
@@ -82,5 +96,16 @@ function emptyAdvisoryQueue() {
     count: 0,
     retention_limit: 200,
     advisory_events: []
+  };
+}
+
+function emptyAnalytics() {
+  return {
+    status: "AVAILABLE",
+    window: { from: null, to: null, days: 7 },
+    totals: { advisories: 0, reviewed: 0, open: 0 },
+    decision_distribution: {},
+    lifecycle_distribution: {},
+    review_timeliness: { status: "LOW_CONFIDENCE" }
   };
 }

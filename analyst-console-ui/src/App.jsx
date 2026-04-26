@@ -3,6 +3,7 @@ import {
   listAlerts,
   listFraudCases,
   listGovernanceAdvisories,
+  getGovernanceAdvisoryAnalytics,
   listScoredTransactions,
   getGovernanceAdvisoryAudit,
   recordGovernanceAdvisoryAudit,
@@ -63,14 +64,29 @@ export default function App() {
     lifecycleStatus: "ALL",
     limit: 25
   });
+  const [governanceAnalytics, setGovernanceAnalytics] = useState({
+    status: "UNAVAILABLE",
+    window: { from: null, to: null, days: 7 },
+    totals: { advisories: 0, reviewed: 0, open: 0 },
+    decision_distribution: {},
+    lifecycle_distribution: {},
+    review_timeliness: {
+      status: "LOW_CONFIDENCE",
+      time_to_first_review_p50_minutes: 0,
+      time_to_first_review_p95_minutes: 0
+    }
+  });
+  const [analyticsWindowDays, setAnalyticsWindowDays] = useState(7);
   const [selectedAlertId, setSelectedAlertId] = useState(getInitialAlertId);
   const [selectedFraudCaseId, setSelectedFraudCaseId] = useState(getInitialFraudCaseId);
   const [session, setSession] = useState(() => authProvider.getInitialSession());
   const [sessionState, setSessionState] = useState(() => getSessionStateForProvider(authProvider.getInitialSession(), authProvider));
   const [isLoading, setIsLoading] = useState(true);
   const [isGovernanceLoading, setIsGovernanceLoading] = useState(true);
+  const [isAnalyticsLoading, setIsAnalyticsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [governanceError, setGovernanceError] = useState(null);
+  const [analyticsError, setAnalyticsError] = useState(null);
   const [governanceAuditHistories, setGovernanceAuditHistories] = useState({});
   const [callbackError, setCallbackError] = useState(null);
   const handlingOidcCallback = authProvider.kind === "oidc" && isOidcCallbackPath();
@@ -152,6 +168,17 @@ export default function App() {
     }
     loadGovernanceQueue(advisoryQueueRequest);
   }, [advisoryQueueRequest, handlingOidcCallback, sessionBootstrapPending, sessionState?.status]);
+
+  useEffect(() => {
+    if (handlingOidcCallback || sessionBootstrapPending) {
+      return;
+    }
+    if (shouldBlockDashboardFetch(sessionState)) {
+      setIsAnalyticsLoading(false);
+      return;
+    }
+    loadGovernanceAnalytics(analyticsWindowDays);
+  }, [analyticsWindowDays, handlingOidcCallback, sessionBootstrapPending, sessionState?.status]);
 
   useEffect(() => {
     if (!handlingOidcCallback || typeof authProvider.completeLoginCallback !== "function") {
@@ -241,6 +268,19 @@ export default function App() {
     }
   }
 
+  async function loadGovernanceAnalytics(windowDays = analyticsWindowDays) {
+    setIsAnalyticsLoading(true);
+    setAnalyticsError(null);
+    try {
+      const nextAnalytics = await getGovernanceAdvisoryAnalytics({ windowDays });
+      setGovernanceAnalytics(nextAnalytics);
+    } catch (apiError) {
+      setAnalyticsError(apiError);
+    } finally {
+      setIsAnalyticsLoading(false);
+    }
+  }
+
   async function loadGovernanceAuditHistories(events) {
     const histories = {};
     await Promise.all(events.map(async (event) => {
@@ -272,12 +312,14 @@ export default function App() {
         .map((event) => (event.event_id === eventId ? { ...event, lifecycle_status: latestDecision } : event))
         .filter((event) => advisoryQueueRequest.lifecycleStatus === "ALL" || event.lifecycle_status === advisoryQueueRequest.lifecycleStatus)
     }));
+    loadGovernanceAnalytics(analyticsWindowDays);
   }
 
   function refreshDashboard() {
     loadDashboard({ transaction: transactionPageRequest, alert: alertPageRequest, fraudCase: fraudCasePageRequest });
     if (!shouldBlockDashboardFetch(sessionState)) {
       loadGovernanceQueue(advisoryQueueRequest);
+      loadGovernanceAnalytics(analyticsWindowDays);
     }
   }
 
@@ -409,16 +451,22 @@ export default function App() {
             transactionPage={transactionPage}
             advisoryQueue={advisoryQueue}
             advisoryQueueRequest={advisoryQueueRequest}
+            governanceAnalytics={governanceAnalytics}
+            analyticsWindowDays={analyticsWindowDays}
             isLoading={isLoading}
             isGovernanceLoading={isGovernanceLoading}
+            isAnalyticsLoading={isAnalyticsLoading}
             error={error}
             governanceError={governanceError}
+            analyticsError={analyticsError}
             governanceAuditHistories={governanceAuditHistories}
             session={session}
             sessionState={sessionState}
             onRetry={refreshDashboard}
             onGovernanceRetry={() => loadGovernanceQueue(advisoryQueueRequest)}
+            onAnalyticsRetry={() => loadGovernanceAnalytics(analyticsWindowDays)}
             onAdvisoryQueueRequestChange={setAdvisoryQueueRequest}
+            onAnalyticsWindowDaysChange={setAnalyticsWindowDays}
             onRecordGovernanceAudit={recordGovernanceAudit}
             onTransactionPageChange={changeTransactionPage}
             onTransactionPageSizeChange={changeTransactionPageSize}

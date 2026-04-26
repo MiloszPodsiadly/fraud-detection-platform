@@ -62,6 +62,7 @@ Alert service:
 | `PATCH` | `/api/v1/fraud-cases/{caseId}` | Updates fraud case status/assignment fields. |
 | `GET` | `/api/v1/transactions/scored` | Lists scored transaction projections. |
 | `GET` | `/governance/advisories` | Lists governance advisory events enriched with read-time lifecycle status. |
+| `GET` | `/governance/advisories/analytics` | Returns bounded read-only audit analytics derived from advisory and audit history. |
 | `GET` | `/governance/advisories/{event_id}` | Returns one governance advisory event enriched with read-time lifecycle status. |
 | `GET` | `/governance/advisories/{event_id}/audit` | Returns bounded newest-first human-review audit history for one governance advisory event. |
 | `POST` | `/governance/advisories/{event_id}/audit` | Appends one authenticated human-review audit entry for a governance advisory event. |
@@ -78,6 +79,19 @@ Advisory lifecycle status is a read-time projection:
 Only the latest audit event matters. Lifecycle status is not persisted independently, is not workflow state, has no SLA, and triggers no automation.
 
 Filtering by `lifecycle_status` applies to the bounded advisory result set. It does not guarantee global completeness.
+
+Audit analytics are read-only and derived:
+
+- `GET /governance/advisories/analytics?window_days=7`
+- `window_days` defaults to `7` and is capped at `30`.
+- `totals.advisories` is the number of distinct `advisory_event_id` values in the bounded advisory projection window.
+- `totals.reviewed` means those advisories with at least one matching audit event; `totals.open` means zero matching audit events.
+- `decision_distribution` uses the latest audit decision for reviewed advisories in that same projection window.
+- `lifecycle_distribution` uses read-time lifecycle enrichment of that same projection and sums to `totals.advisories`.
+- `review_timeliness` samples only valid non-negative first-review durations and reports `LOW_CONFIDENCE` when fewer than five samples exist.
+- Status is `AVAILABLE` when advisory and audit sources are both readable, `PARTIAL` when one source is degraded or the audit scan limit is exceeded, and `UNAVAILABLE` when both sources are unavailable.
+- Analytics operate on bounded time windows, cap audit scans with `GOVERNANCE_AUDIT_ANALYTICS_MAX_AUDIT_EVENTS`, and do not guarantee global completeness.
+- Analytics do not persist aggregates, enforce SLA, trigger actions, or change scoring/model behavior.
 
 Advisory list filters:
 
