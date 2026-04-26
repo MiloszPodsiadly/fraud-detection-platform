@@ -349,6 +349,10 @@ Events are emitted only when drift actions are operationally meaningful:
 
 Events are not emitted for `LOW`, `INFO`, or low-confidence actions. This keeps routine local/synthetic drift output from becoming operational noise.
 
+Advisory events are heuristic signals and may be inaccurate under low data conditions. The system does not guarantee correctness of drift or advisory signals. Operators must treat advisories as review context, not proof of model or data failure.
+
+Advisory events are deduplicated to avoid repeated signals. The fingerprint is `model_name`, `model_version`, `severity`, and `drift_status`; an identical advisory emitted within the 5-minute deduplication window is skipped. Deduplication is best-effort and works against both persisted MongoDB history and bounded in-memory fallback history.
+
 Event schema:
 
 ```json
@@ -358,6 +362,7 @@ Event schema:
   "severity": "HIGH",
   "drift_status": "DRIFT",
   "confidence": "HIGH",
+  "advisory_confidence_context": "SUFFICIENT_DATA",
   "model_name": "python-logistic-fraud-model",
   "model_version": "2026-04-21.trained.v1",
   "lifecycle_context": {
@@ -375,6 +380,15 @@ Event schema:
   "created_at": "2026-04-26T08:05:00+00:00"
 }
 ```
+
+Advisory confidence context:
+
+- `LOW_SAMPLE`: inference sample volume is below the current drift guardrail.
+- `PARTIAL_DATA`: reference or inference profile context is incomplete, unavailable, or freshly reset.
+- `STABLE_BASELINE`: the signal has stable baseline context but does not meet the strongest reliability criteria.
+- `SUFFICIENT_DATA`: the signal has enough aggregate runtime context for higher-confidence operator review.
+
+The confidence context is a bounded enum. It does not expose sample counts, raw feature values, payload data, or statistical internals.
 
 Persistence:
 
@@ -396,9 +410,11 @@ Read-only API:
 ```text
 GET /governance/advisories
 GET /governance/advisories?limit=25
+GET /governance/advisories?severity=HIGH
+GET /governance/advisories?model_version=2026-04-21.trained.v1
 ```
 
-The response is newest-first, bounded to a maximum of 100 events, and returns `status=AVAILABLE`, `PARTIAL`, or `UNAVAILABLE`.
+The response is newest-first, bounded to a maximum of 100 events, and returns `status=AVAILABLE`, `PARTIAL`, or `UNAVAILABLE`. Filters are exact bounded filters only: `severity`, `model_version`, and `limit`. There is no free-text search, regex, dynamic query language, or identifier lookup.
 
 Advisory events contain aggregate governance context only. They exclude user IDs, transaction IDs, correlation IDs, raw feature values, request payloads, artifact contents, credentials, raw exception text, and unbounded arrays. Lifecycle context remains bounded and must not be interpreted as causality; drift may be observed after lifecycle activity, but this runtime does not claim lifecycle activity caused drift.
 
@@ -534,8 +550,9 @@ For advisory events:
 1. Inspect `GET /governance/advisories?limit=25`.
 2. Treat the event as operator context, not a fraud alert or model action.
 3. Use recommended actions to guide manual review outside the scoring path.
-4. Do not infer that lifecycle activity caused drift.
-5. Confirm scoring behavior remains unchanged.
+4. Check `advisory_confidence_context`; low-sample and partial-data advisories can be misleading.
+5. Do not infer that lifecycle activity caused drift.
+6. Confirm scoring behavior remains unchanged.
 
 ## Limitations
 

@@ -263,10 +263,14 @@ Governance advisory events:
 
 - `GET /governance/advisories` returns bounded, newest-first advisory events.
 - Events are emitted only for meaningful drift actions: `HIGH` or `CRITICAL` severity, or non-`NONE` escalation, with confidence above `LOW`.
+- Events are deduplicated for 5 minutes by model name, model version, severity, and drift status to avoid repeated operator signals from repeated polling.
+- Events include `advisory_confidence_context` as a bounded enum: `LOW_SAMPLE`, `PARTIAL_DATA`, `STABLE_BASELINE`, or `SUFFICIENT_DATA`.
 - Events are persisted best-effort to `ml_governance_advisory_events` when MongoDB is available.
 - MongoDB outage returns `PARTIAL` when bounded in-memory events exist and does not break scoring or drift actions.
 - An advisory event is not a fraud alert, not a model action, not a retraining trigger, and not a rollback trigger.
+- Advisory events are heuristic signals and may be inaccurate under low data conditions. The system does not guarantee correctness of drift or advisory signals.
 - Advisory lifecycle context is correlation context only; it must not be read as proof that lifecycle activity caused drift.
+- The advisory API supports bounded exact filters only: `severity`, `model_version`, and `limit`; it does not support free-text search or regex.
 
 Detailed contract and playbook: [ML Governance And Drift v1](ml-governance-drift-v1.md).
 
