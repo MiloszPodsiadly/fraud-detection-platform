@@ -19,8 +19,10 @@ describe("GovernanceReviewQueue", () => {
     expect(screen.getByText(/writes audit history only/i)).toBeInTheDocument();
     expect(screen.getByText(/do not trigger system actions/i)).toBeInTheDocument();
     expect(screen.getByText(/do not affect scoring, model behavior, or system decisions/i)).toBeInTheDocument();
-    expect(screen.getByText(/Results are limited to recent advisory events/i)).toBeInTheDocument();
+    expect(screen.getByText(/Lifecycle status reflects the latest recorded operator review/i)).toBeInTheDocument();
+    expect(screen.getByText(/Filters apply to recent advisory events only/i)).toBeInTheDocument();
     expect(screen.getAllByText("HIGH").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("OPEN").length).toBeGreaterThan(1);
     expect(screen.getByText("DRIFT")).toBeInTheDocument();
     expect(screen.getByText("SUFFICIENT_DATA")).toBeInTheDocument();
     expect(screen.getByText("python-logistic-fraud-model")).toBeInTheDocument();
@@ -136,6 +138,7 @@ describe("GovernanceReviewQueue", () => {
     expect(onFiltersChange).toHaveBeenCalledWith({
       severity: "HIGH",
       modelVersion: "",
+      lifecycleStatus: "ALL",
       limit: 25
     });
 
@@ -145,6 +148,15 @@ describe("GovernanceReviewQueue", () => {
     expect(onFiltersChange).toHaveBeenCalledWith({
       severity: "ALL",
       modelVersion: "2026-04-21.trained.v1",
+      lifecycleStatus: "ALL",
+      limit: 25
+    });
+
+    fireEvent.change(screen.getByLabelText("Lifecycle status"), { target: { value: "ACKNOWLEDGED" } });
+    expect(onFiltersChange).toHaveBeenCalledWith({
+      severity: "ALL",
+      modelVersion: "",
+      lifecycleStatus: "ACKNOWLEDGED",
       limit: 25
     });
 
@@ -152,6 +164,7 @@ describe("GovernanceReviewQueue", () => {
     expect(onFiltersChange).toHaveBeenCalledWith({
       severity: "ALL",
       modelVersion: "",
+      lifecycleStatus: "ALL",
       limit: 50
     });
     expect(screen.queryByRole("option", { name: "10" })).not.toBeInTheDocument();
@@ -180,7 +193,7 @@ function queueElement(overrides = {}) {
         retention_limit: 200,
         advisory_events: []
       }}
-      filters={{ severity: "ALL", modelVersion: "", limit: 25 }}
+      filters={{ severity: "ALL", modelVersion: "", lifecycleStatus: "ALL", limit: 25 }}
       isLoading={false}
       error={null}
       onFiltersChange={vi.fn()}
@@ -199,6 +212,7 @@ function advisoryEvent() {
     severity: "HIGH",
     drift_status: "DRIFT",
     confidence: "HIGH",
+    lifecycle_status: "OPEN",
     advisory_confidence_context: "SUFFICIENT_DATA",
     model_name: "python-logistic-fraud-model",
     model_version: "2026-04-21.trained.v1",

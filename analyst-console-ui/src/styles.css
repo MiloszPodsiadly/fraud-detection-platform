@@ -615,6 +615,37 @@ textarea:focus {
   color: var(--ink);
 }
 
+.lifecycleBadge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.35rem 0.65rem;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.lifecycleBadgeOPEN {
+  background: rgba(23, 33, 27, 0.08);
+  color: var(--muted);
+}
+
+.lifecycleBadgeACKNOWLEDGED {
+  background: rgba(54, 104, 156, 0.15);
+  color: #315f91;
+}
+
+.lifecycleBadgeNEEDSFOLLOWUP {
+  background: rgba(217, 164, 65, 0.2);
+  color: #8b620f;
+}
+
+.lifecycleBadgeDISMISSEDASNOISE {
+  background: rgba(92, 100, 96, 0.14);
+  color: #59625e;
+}
+
 .classificationPill {
   display: inline-flex;
   align-items: center;
@@ -636,7 +667,8 @@ textarea:focus {
 
 .alertTable td .classificationPill,
 .alertTable td .riskBadge,
-.alertTable td .statusPill {
+.alertTable td .statusPill,
+.alertTable td .lifecycleBadge {
   display: inline-flex;
 }
 

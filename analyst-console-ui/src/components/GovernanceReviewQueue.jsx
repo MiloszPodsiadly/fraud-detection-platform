@@ -8,6 +8,7 @@ import { RiskBadge } from "./RiskBadge.jsx";
 import { PermissionNotice } from "./SecurityStatePanels.jsx";
 
 const SEVERITIES = ["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"];
+const LIFECYCLE_STATUSES = ["ALL", "OPEN", "ACKNOWLEDGED", "NEEDS_FOLLOW_UP", "DISMISSED_AS_NOISE"];
 const LIMITS = [25, 50, 100];
 const AUDIT_DECISIONS = ["ACKNOWLEDGED", "NEEDS_FOLLOW_UP", "DISMISSED_AS_NOISE"];
 const MAX_NOTE_LENGTH = 500;
@@ -42,7 +43,7 @@ export function GovernanceReviewQueue({
           <p className="sectionCopy">
             Advisory context is read-only. Recording review writes audit history only.
             Audit entries do not trigger system actions. Advisory signals do not affect scoring, model behavior, or system decisions.
-            Operator review is manual.
+            Operator review is manual. Lifecycle status reflects the latest recorded operator review.
           </p>
         </div>
       </div>
@@ -65,6 +66,14 @@ export function GovernanceReviewQueue({
           />
         </label>
         <label>
+          Lifecycle status
+          <select value={filters.lifecycleStatus} onChange={(event) => updateFilter("lifecycleStatus", event.target.value)}>
+            {LIFECYCLE_STATUSES.map((lifecycleStatus) => (
+              <option key={lifecycleStatus} value={lifecycleStatus}>{lifecycleStatus}</option>
+            ))}
+          </select>
+        </label>
+        <label>
           Limit
           <select value={filters.limit} onChange={(event) => updateFilter("limit", Number(event.target.value))}>
             {LIMITS.map((limit) => (
@@ -73,7 +82,7 @@ export function GovernanceReviewQueue({
           </select>
         </label>
       </div>
-      <p className="sectionCopy">Results are limited to recent advisory events.</p>
+      <p className="sectionCopy">Filters apply to recent advisory events only.</p>
 
       {isPartial && (
         <div className="stateBanner" role="status">
@@ -106,6 +115,7 @@ export function GovernanceReviewQueue({
               <thead>
                 <tr>
                   <th>Severity</th>
+                  <th>Lifecycle</th>
                   <th>Signal</th>
                   <th>Model</th>
                   <th>Lifecycle context</th>
@@ -172,6 +182,9 @@ function GovernanceEventRows({ event, auditHistory, canRecordAudit, session, onR
           <RiskBadge riskLevel={event.severity} />
         </td>
         <td>
+          <LifecycleBadge status={event.lifecycle_status || "OPEN"} />
+        </td>
+        <td>
           <strong>{event.drift_status}</strong>
           <span>{event.confidence} confidence</span>
           <span>{event.advisory_confidence_context}</span>
@@ -198,7 +211,7 @@ function GovernanceEventRows({ event, auditHistory, canRecordAudit, session, onR
         </td>
       </tr>
       <tr className="governanceAuditRow">
-        <td colSpan="7">
+        <td colSpan="8">
           <div className="governanceAuditPanel">
             <form className="governanceAuditForm" onSubmit={submitAudit}>
               <div>
@@ -251,6 +264,15 @@ function GovernanceEventRows({ event, auditHistory, canRecordAudit, session, onR
         </td>
       </tr>
     </>
+  );
+}
+
+function LifecycleBadge({ status }) {
+  const normalized = String(status || "OPEN");
+  return (
+    <span className={`lifecycleBadge lifecycleBadge${normalized.replaceAll("_", "")}`}>
+      {normalized}
+    </span>
   );
 }
 

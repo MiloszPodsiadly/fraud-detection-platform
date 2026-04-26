@@ -62,6 +62,15 @@ public class AlertServiceMetrics {
         ).increment();
     }
 
+    public void recordGovernanceAdvisoryLifecycle(String lifecycleStatus, String modelName, String modelVersion) {
+        counter(
+                "fraud_ml_governance_advisory_lifecycle_total",
+                "lifecycle_status", normalizeLabel(lifecycleStatus),
+                "model_name", normalizeLabel(modelName),
+                "model_version", normalizeLabel(modelVersion)
+        ).increment();
+    }
+
     private Counter counter(String name, String... tags) {
         return Counter.builder(name)
                 .tags(tags)
@@ -105,5 +114,12 @@ public class AlertServiceMetrics {
             return "unknown";
         }
         return action.trim().toLowerCase().replaceAll("[^a-z0-9]+", "_");
+    }
+
+    private String normalizeLabel(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "unknown";
+        }
+        return value.trim().replaceAll("[^A-Za-z0-9._:-]+", "_");
     }
 }

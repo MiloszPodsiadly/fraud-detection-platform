@@ -418,7 +418,7 @@ The response is newest-first, bounded to a maximum of 100 events, and returns `s
 
 Advisory events contain aggregate governance context only. They exclude user IDs, transaction IDs, correlation IDs, raw feature values, request payloads, artifact contents, credentials, raw exception text, and unbounded arrays. Lifecycle context remains bounded and must not be interpreted as causality; drift may be observed after lifecycle activity, but this runtime does not claim lifecycle activity caused drift.
 
-FDP-12 adds an analyst console operator queue for this endpoint. FDP-13 adds a minimal human-review audit trail for advisory events through the authenticated `alert-service` boundary. The queue still does not create fraud alerts, submit fraud decisions, change scoring, trigger retraining, or trigger rollback.
+FDP-12 adds an analyst console operator queue for this endpoint. FDP-13 adds a minimal human-review audit trail for advisory events through the authenticated `alert-service` boundary. FDP-14 adds advisory lifecycle visibility derived from that audit trail. The queue still does not create fraud alerts, submit fraud decisions, change scoring, trigger retraining, or trigger rollback.
 
 ## Governance Advisory Audit Trail
 
@@ -480,6 +480,46 @@ Indexes:
 - `actor_id`, `created_at` descending
 - `model_name`, `model_version`, `created_at` descending
 
+### Advisory Lifecycle Status
+
+FDP-14 exposes `lifecycle_status` on governance advisory reads through `alert-service`:
+
+```text
+GET /governance/advisories
+GET /governance/advisories/{event_id}
+```
+
+Lifecycle status is a derived projection from audit history:
+
+- `OPEN`: no audit events exist.
+- `ACKNOWLEDGED`: latest audit decision is `ACKNOWLEDGED`.
+- `NEEDS_FOLLOW_UP`: latest audit decision is `NEEDS_FOLLOW_UP`.
+- `DISMISSED_AS_NOISE`: latest audit decision is `DISMISSED_AS_NOISE`.
+
+Only the latest audit event is considered. The audit trail remains the source of truth. Lifecycle status is computed at read time, is not stored as authoritative state, and is not a workflow engine.
+
+Filtering by `lifecycle_status` applies to the bounded advisory result set. It does not guarantee global completeness.
+
+## Lifecycle Red Lines
+
+**Lifecycle is a read-only projection of audit history.**
+
+Lifecycle status:
+
+- is NOT a workflow engine
+- does NOT trigger actions
+- does NOT influence scoring
+- does NOT influence model behavior
+- is NOT persisted as authoritative state
+
+Lifecycle limitations:
+
+- no automation
+- no SLA
+- no transition graph
+- no background jobs, timers, or cron
+- no retraining, rollback, alerting, scoring, or decision side effects
+
 ## Endpoint Contracts
 
 ```text
@@ -492,6 +532,7 @@ GET /governance/drift
 GET /governance/drift/actions
 GET /governance/advisories
 GET /governance/history
+GET /governance/advisories/{event_id}
 POST /governance/advisories/{event_id}/audit
 GET /governance/advisories/{event_id}/audit
 ```
@@ -539,6 +580,7 @@ Governance metrics:
 - `fraud_ml_model_lifecycle_info{model_name,model_version,lifecycle_mode}`
 - `fraud_ml_model_lifecycle_events_total{event_type,model_name,model_version,status}`
 - `fraud_ml_model_lifecycle_history_available{model_name,model_version,status}`
+- `fraud_ml_governance_advisory_lifecycle_total{lifecycle_status,model_name,model_version}`
 - `fraud_ml_governance_advisory_events_emitted_total{severity,model_name,model_version,status}`
 - `fraud_ml_governance_advisory_events_persisted_total{severity,model_name,model_version,status}`
 - `fraud_ml_governance_advisory_persistence_failures_total{severity,model_name,model_version,status}`
@@ -562,7 +604,9 @@ Forbidden metric labels:
  
 Action metric labels are bounded enums only. They must never include action text, escalation text, explanation text, feature names, raw drift reasons, snapshot IDs, user identifiers, or exception messages.
 
-Lifecycle metric labels are bounded to model metadata, lifecycle mode, fixed lifecycle event types, and status. They must never include artifact paths, checksums, event IDs, timestamps, reason text, exception text, hostnames, or filesystem paths.
+Lifecycle metric labels are bounded to model metadata, lifecycle mode, fixed lifecycle event types, advisory lifecycle status, and status. They must never include artifact paths, checksums, event IDs, actor IDs, timestamps, reason text, exception text, hostnames, or filesystem paths.
+
+Lifecycle metrics represent distribution of advisory states, not operational decisions.
 
 Advisory metric labels are bounded to severity, model name, model version, and status. They must never include event IDs, timestamps, explanations, recommended action text, payload data, feature names, exception text, or identifiers.
 

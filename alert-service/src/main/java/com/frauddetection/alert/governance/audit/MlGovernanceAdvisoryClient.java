@@ -1,13 +1,10 @@
 package com.frauddetection.alert.governance.audit;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
-
-import java.util.List;
 
 @Component
 public class MlGovernanceAdvisoryClient implements GovernanceAdvisoryClient {
@@ -32,65 +29,53 @@ public class MlGovernanceAdvisoryClient implements GovernanceAdvisoryClient {
 
     @Override
     public GovernanceAdvisorySnapshot getAdvisory(String eventId) {
+        GovernanceAdvisoryEvent event = getAdvisoryEvent(eventId);
+        return new GovernanceAdvisorySnapshot(
+                event.eventId(),
+                event.modelName(),
+                event.modelVersion(),
+                event.severity(),
+                event.confidence(),
+                event.advisoryConfidenceContext()
+        );
+    }
+
+    @Override
+    public GovernanceAdvisoryEvent getAdvisoryEvent(String eventId) {
+        return findEvent(listAdvisories(new GovernanceAdvisoryQuery(null, null, LOOKUP_LIMIT)), eventId);
+    }
+
+    @Override
+    public GovernanceAdvisoryListResponse listAdvisories(GovernanceAdvisoryQuery query) {
         try {
-            AdvisoryListResponse response = restClient.get()
+            GovernanceAdvisoryListResponse response = restClient.get()
                     .uri(uriBuilder -> uriBuilder
                             .path("/governance/advisories")
-                            .queryParam("limit", LOOKUP_LIMIT)
+                            .queryParam("limit", query.limit() == null ? LOOKUP_LIMIT : query.limit())
+                            .queryParamIfPresent("severity", java.util.Optional.ofNullable(query.severity()))
+                            .queryParamIfPresent("model_version", java.util.Optional.ofNullable(query.modelVersion()))
                             .build())
                     .retrieve()
                     .onStatus(HttpStatusCode::isError, (request, clientResponse) -> {
                         throw new GovernanceAdvisoryLookupUnavailableException();
                     })
-                    .body(AdvisoryListResponse.class);
-            return findEvent(response, eventId);
+                    .body(GovernanceAdvisoryListResponse.class);
+            if (response == null) {
+                throw new GovernanceAdvisoryLookupUnavailableException();
+            }
+            return response;
         } catch (RestClientException exception) {
             throw new GovernanceAdvisoryLookupUnavailableException();
         }
     }
 
-    private GovernanceAdvisorySnapshot findEvent(AdvisoryListResponse response, String eventId) {
+    private GovernanceAdvisoryEvent findEvent(GovernanceAdvisoryListResponse response, String eventId) {
         if (response == null || response.advisoryEvents() == null) {
             throw new GovernanceAdvisoryLookupUnavailableException();
         }
         return response.advisoryEvents().stream()
                 .filter(event -> eventId.equals(event.eventId()))
                 .findFirst()
-                .map(event -> new GovernanceAdvisorySnapshot(
-                        event.eventId(),
-                        event.modelName(),
-                        event.modelVersion(),
-                        event.severity(),
-                        event.confidence(),
-                        event.advisoryConfidenceContext()
-                ))
                 .orElseThrow(() -> new GovernanceAdvisoryNotFoundException(eventId));
-    }
-
-    private record AdvisoryListResponse(
-            @JsonProperty("advisory_events")
-            List<AdvisoryEvent> advisoryEvents
-    ) {
-    }
-
-    private record AdvisoryEvent(
-            @JsonProperty("event_id")
-            String eventId,
-
-            @JsonProperty("model_name")
-            String modelName,
-
-            @JsonProperty("model_version")
-            String modelVersion,
-
-            @JsonProperty("severity")
-            String severity,
-
-            @JsonProperty("confidence")
-            String confidence,
-
-            @JsonProperty("advisory_confidence_context")
-            String advisoryConfidenceContext
-    ) {
     }
 }

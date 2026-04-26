@@ -15,6 +15,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.time.Instant;
 import java.util.List;
@@ -101,6 +102,19 @@ public class AlertServiceExceptionHandler {
                 new ApiErrorResponse(Instant.now(), 400, "Bad Request", "Validation failed.", exception.getConstraintViolations().stream()
                         .map(violation -> violation.getPropertyPath() + ": " + violation.getMessage())
                         .toList())
+        );
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiErrorResponse> handleArgumentTypeMismatch(MethodArgumentTypeMismatchException exception) {
+        return ResponseEntity.badRequest().body(
+                new ApiErrorResponse(
+                        Instant.now(),
+                        400,
+                        "Bad Request",
+                        "Validation failed.",
+                        List.of(exception.getName() + ": invalid value")
+                )
         );
     }
 

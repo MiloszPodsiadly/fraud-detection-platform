@@ -1,11 +1,85 @@
 openapi: 3.0.3
 info:
   title: Alert Service API
-  version: FDP-13
-  description: Authenticated alert-service contracts for analyst workflows and governance advisory human-review audit.
+  version: FDP-14
+  description: Authenticated alert-service contracts for analyst workflows, governance advisory lifecycle projection, and human-review audit.
 servers:
   - url: http://localhost:8085
 paths:
+  /governance/advisories:
+    get:
+      summary: List governance advisories with derived lifecycle status
+      description: Returns ML advisory events enriched with lifecycle_status derived at read time from latest audit event. Lifecycle is not persisted as source of truth and does not trigger workflow actions. Filtering by lifecycle_status applies to the bounded advisory result set. It does not guarantee global completeness.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: severity
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [LOW, MEDIUM, HIGH, CRITICAL]
+        - name: model_version
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 80
+            pattern: "^[A-Za-z0-9._-]+$"
+        - name: lifecycle_status
+          in: query
+          required: false
+          description: Applied after advisory projection and limited to the bounded advisory result set.
+          schema:
+            $ref: "#/components/schemas/GovernanceAdvisoryLifecycleStatus"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 100
+      responses:
+        "200":
+          description: Advisory list returned with read-time lifecycle projection.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceAdvisoryListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /governance/advisories/{event_id}:
+    get:
+      summary: Get one governance advisory with derived lifecycle status
+      description: Returns one bounded-history advisory event enriched with lifecycle_status derived at read time from latest audit event.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - $ref: "#/components/parameters/EventId"
+      responses:
+        "200":
+          description: Advisory event returned with lifecycle projection.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceAdvisoryEvent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /governance/advisories/{event_id}/audit:
     get:
       summary: List governance advisory audit history
@@ -82,6 +156,78 @@ components:
         maxLength: 120
         pattern: "^[A-Za-z0-9._:-]+$"
   schemas:
+    GovernanceAdvisoryLifecycleStatus:
+      type: string
+      description: Read-time projection from latest audit decision. OPEN means no audit event exists.
+      enum:
+        - OPEN
+        - ACKNOWLEDGED
+        - NEEDS_FOLLOW_UP
+        - DISMISSED_AS_NOISE
+    GovernanceAdvisoryListResponse:
+      type: object
+      required:
+        - status
+        - count
+        - retention_limit
+        - advisory_events
+      properties:
+        status:
+          type: string
+        count:
+          type: integer
+        retention_limit:
+          type: integer
+        advisory_events:
+          type: array
+          items:
+            $ref: "#/components/schemas/GovernanceAdvisoryEvent"
+    GovernanceAdvisoryEvent:
+      type: object
+      required:
+        - event_id
+        - event_type
+        - severity
+        - drift_status
+        - confidence
+        - advisory_confidence_context
+        - model_name
+        - model_version
+        - lifecycle_context
+        - recommended_actions
+        - created_at
+        - lifecycle_status
+      properties:
+        event_id:
+          type: string
+        event_type:
+          type: string
+        severity:
+          type: string
+        drift_status:
+          type: string
+        confidence:
+          type: string
+        advisory_confidence_context:
+          type: string
+        model_name:
+          type: string
+        model_version:
+          type: string
+        lifecycle_context:
+          type: object
+          additionalProperties: true
+        recommended_actions:
+          type: array
+          items:
+            type: string
+        explanation:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+        lifecycle_status:
+          $ref: "#/components/schemas/GovernanceAdvisoryLifecycleStatus"
     GovernanceAuditRequest:
       type: object
       additionalProperties: false

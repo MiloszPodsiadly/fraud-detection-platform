@@ -19,7 +19,7 @@ export default defineConfig({
         changeOrigin: true
       },
       "/governance/advisories": {
-        target: "http://localhost:8090",
+        target: "http://localhost:8085",
         changeOrigin: true
       }
     }
