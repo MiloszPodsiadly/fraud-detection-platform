@@ -74,6 +74,8 @@ Prometheus scrape targets:
 - `GET /health`
 - `POST /v1/fraud/score`
 
+The stable ML API contract is documented in `docs/openapi/ml-inference-service.openapi.yaml` and summarized in `docs/api-surface-v1.md`. Error responses use the platform `timestamp/status/error/message/details` envelope; metrics labels and governance fields remain bounded so observability changes do not alter scoring semantics.
+
 Prometheus metric contract:
 
 - `fraud_ml_inference_requests_total`

@@ -1,6 +1,6 @@
 # API Error Contract
 
-Canonical error envelope for the local Java REST APIs in `fraud-detection-platform`.
+Canonical error envelope for the local REST APIs in `fraud-detection-platform`.
 
 This contract exists to keep local reviewer expectations, frontend parsing, and service error handling aligned without leaking internal implementation details.
 
@@ -17,6 +17,8 @@ All normalized API errors use this JSON shape:
   "details": []
 }
 ```
+
+The Java services and the Python `ml-inference-service` use this same flat envelope. Existing success responses are not wrapped in `data` or `metadata` because that would break current clients; a wrapped shape would require a future versioned endpoint.
 
 Fields:
 
@@ -44,6 +46,7 @@ Rules:
 
 - `details` must always be present.
 - `details` must be an array.
+- field-level validation errors must be exposed through `details`, not a separate `validationErrors` response property.
 - internal exception class names, stack traces, binder object names, and framework diagnostics must not be exposed.
 
 ## Examples
