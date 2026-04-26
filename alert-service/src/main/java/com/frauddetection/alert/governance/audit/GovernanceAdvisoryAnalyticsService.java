@@ -2,7 +2,9 @@ package com.frauddetection.alert.governance.audit;
 
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -23,34 +25,45 @@ import java.util.stream.Collectors;
 public class GovernanceAdvisoryAnalyticsService {
 
     private static final int ADVISORY_WINDOW_LIMIT = 100;
+    private static final int LOW_CONFIDENCE_SAMPLE_THRESHOLD = 5;
 
     private final GovernanceAuditRepository auditRepository;
     private final GovernanceAdvisoryClient advisoryClient;
+    private final GovernanceAdvisoryLifecycleService lifecycleService;
     private final AlertServiceMetrics metrics;
     private final Clock clock;
+    private final int maxAuditEvents;
 
     @Autowired
     public GovernanceAdvisoryAnalyticsService(
             GovernanceAuditRepository auditRepository,
             GovernanceAdvisoryClient advisoryClient,
-            AlertServiceMetrics metrics
+            GovernanceAdvisoryLifecycleService lifecycleService,
+            AlertServiceMetrics metrics,
+            @Value("${app.governance.audit.analytics-max-audit-events:10000}") int maxAuditEvents
     ) {
-        this(auditRepository, advisoryClient, metrics, Clock.systemUTC());
+        this(auditRepository, advisoryClient, lifecycleService, metrics, Clock.systemUTC(), maxAuditEvents);
     }
 
     GovernanceAdvisoryAnalyticsService(
             GovernanceAuditRepository auditRepository,
             GovernanceAdvisoryClient advisoryClient,
+            GovernanceAdvisoryLifecycleService lifecycleService,
             AlertServiceMetrics metrics,
-            Clock clock
+            Clock clock,
+            int maxAuditEvents
     ) {
         this.auditRepository = auditRepository;
         this.advisoryClient = advisoryClient;
+        this.lifecycleService = lifecycleService;
         this.metrics = metrics;
         this.clock = clock;
+        this.maxAuditEvents = maxAuditEvents > 0 ? maxAuditEvents : 10000;
     }
 
     public GovernanceAdvisoryAnalyticsResponse analytics(int windowDays) {
+        // Analytics is observational only.
+        // It MUST NOT be used to trigger system actions.
         metrics.recordGovernanceAnalyticsRequest(windowDays);
         Instant to = Instant.now(clock);
         Instant from = to.minus(Duration.ofDays(windowDays));
@@ -61,13 +74,6 @@ public class GovernanceAdvisoryAnalyticsService {
             return GovernanceAdvisoryAnalyticsResponse.empty("UNAVAILABLE", from, to, windowDays);
         }
 
-        Map<String, List<GovernanceAuditEventDocument>> auditByAdvisory = auditRead.events().stream()
-                .filter(event -> event.getAdvisoryEventId() != null)
-                .collect(Collectors.groupingBy(
-                        GovernanceAuditEventDocument::getAdvisoryEventId,
-                        LinkedHashMap::new,
-                        Collectors.toList()
-                ));
         Map<String, GovernanceAdvisoryEvent> advisoriesById = advisoryRead.events().stream()
                 .filter(event -> event.eventId() != null)
                 .collect(Collectors.toMap(
@@ -77,10 +83,16 @@ public class GovernanceAdvisoryAnalyticsService {
                         LinkedHashMap::new
                 ));
         Set<String> advisoryIds = new LinkedHashSet<>(advisoriesById.keySet());
-        advisoryIds.addAll(auditByAdvisory.keySet());
+        Map<String, List<GovernanceAuditEventDocument>> auditByAdvisory = auditRead.events().stream()
+                .filter(event -> event.getAdvisoryEventId() != null && advisoriesById.containsKey(event.getAdvisoryEventId()))
+                .collect(Collectors.groupingBy(
+                        GovernanceAuditEventDocument::getAdvisoryEventId,
+                        LinkedHashMap::new,
+                        Collectors.toList()
+                ));
 
-        Map<GovernanceAuditDecision, Integer> decisionDistribution = decisionDistribution(auditRead.events());
-        Map<GovernanceAdvisoryLifecycleStatus, Integer> lifecycleDistribution = lifecycleDistribution(advisoryIds, auditByAdvisory);
+        Map<GovernanceAuditDecision, Integer> decisionDistribution = decisionDistribution(advisoryIds, auditByAdvisory);
+        Map<GovernanceAdvisoryLifecycleStatus, Integer> lifecycleDistribution = lifecycleDistribution(advisoriesById.values());
         int reviewed = (int) advisoryIds.stream().filter(id -> auditByAdvisory.containsKey(id)).count();
         int open = Math.max(0, advisoryIds.size() - reviewed);
         List<Double> timeToFirstReviewMinutes = timeToFirstReviewMinutes(advisoriesById, auditByAdvisory);
@@ -92,16 +104,21 @@ public class GovernanceAdvisoryAnalyticsService {
                 new GovernanceAdvisoryAnalyticsResponse.Totals(advisoryIds.size(), reviewed, open),
                 decisionDistribution,
                 lifecycleDistribution,
-                new GovernanceAdvisoryAnalyticsResponse.ReviewTimeliness(
-                        percentile(timeToFirstReviewMinutes, 50),
-                        percentile(timeToFirstReviewMinutes, 95)
-                )
+                reviewTimeliness(timeToFirstReviewMinutes)
         );
     }
 
     private AuditRead readAuditEvents(Instant from, Instant to) {
         try {
-            return new AuditRead(true, auditRepository.findByCreatedAtBetweenOrderByCreatedAtAsc(from, to));
+            List<GovernanceAuditEventDocument> events = auditRepository.findByCreatedAtBetweenOrderByCreatedAtAsc(
+                    from,
+                    to,
+                    PageRequest.of(0, maxAuditEvents + 1)
+            );
+            if (events.size() > maxAuditEvents) {
+                return new AuditRead(false, List.of());
+            }
+            return new AuditRead(true, events);
         } catch (DataAccessException exception) {
             return new AuditRead(false, List.of());
         }
@@ -123,28 +140,28 @@ public class GovernanceAdvisoryAnalyticsService {
         }
     }
 
-    private Map<GovernanceAuditDecision, Integer> decisionDistribution(List<GovernanceAuditEventDocument> events) {
+    private Map<GovernanceAuditDecision, Integer> decisionDistribution(
+            Set<String> advisoryIds,
+            Map<String, List<GovernanceAuditEventDocument>> auditByAdvisory
+    ) {
         EnumMap<GovernanceAuditDecision, Integer> distribution = new EnumMap<>(GovernanceAdvisoryAnalyticsResponse.emptyDecisionDistribution());
-        for (GovernanceAuditEventDocument event : events) {
-            if (event.getDecision() != null) {
-                distribution.computeIfPresent(event.getDecision(), (ignored, count) -> count + 1);
-            }
+        for (String advisoryId : advisoryIds) {
+            latestDecision(auditByAdvisory.getOrDefault(advisoryId, List.of()))
+                    .ifPresent(decision -> distribution.computeIfPresent(decision, (ignored, count) -> count + 1));
         }
         return distribution;
     }
 
     private Map<GovernanceAdvisoryLifecycleStatus, Integer> lifecycleDistribution(
-            Set<String> advisoryIds,
-            Map<String, List<GovernanceAuditEventDocument>> auditByAdvisory
+            Iterable<GovernanceAdvisoryEvent> advisories
     ) {
         EnumMap<GovernanceAdvisoryLifecycleStatus, Integer> distribution =
                 new EnumMap<>(GovernanceAdvisoryAnalyticsResponse.emptyLifecycleDistribution());
-        for (String advisoryId : advisoryIds) {
-            GovernanceAdvisoryLifecycleStatus status = auditByAdvisory.getOrDefault(advisoryId, List.of()).stream()
-                    .max(Comparator.comparing(GovernanceAuditEventDocument::getCreatedAt, Comparator.nullsFirst(Comparator.naturalOrder())))
-                    .map(GovernanceAuditEventDocument::getDecision)
-                    .map(GovernanceAdvisoryLifecycleStatus::fromLatestDecision)
-                    .orElse(GovernanceAdvisoryLifecycleStatus.OPEN);
+        for (GovernanceAdvisoryEvent advisory : advisories) {
+            GovernanceAdvisoryLifecycleStatus status = lifecycleService.lifecycleStatus(advisory.eventId());
+            if (status == null) {
+                status = GovernanceAdvisoryLifecycleStatus.OPEN;
+            }
             distribution.computeIfPresent(status, (ignored, count) -> count + 1);
         }
         return distribution;
@@ -167,6 +184,24 @@ public class GovernanceAdvisoryAnalyticsService {
                     .ifPresent(firstReview -> minutes.add(Duration.between(advisoryCreatedAt, firstReview).toSeconds() / 60.0));
         }
         return minutes;
+    }
+
+    private java.util.Optional<GovernanceAuditDecision> latestDecision(List<GovernanceAuditEventDocument> events) {
+        return events.stream()
+                .max(Comparator.comparing(GovernanceAuditEventDocument::getCreatedAt, Comparator.nullsFirst(Comparator.naturalOrder())))
+                .map(GovernanceAuditEventDocument::getDecision)
+                .filter(decision -> decision != null);
+    }
+
+    private GovernanceAdvisoryAnalyticsResponse.ReviewTimeliness reviewTimeliness(List<Double> values) {
+        if (values.size() < LOW_CONFIDENCE_SAMPLE_THRESHOLD) {
+            return new GovernanceAdvisoryAnalyticsResponse.ReviewTimeliness("LOW_CONFIDENCE", 0.0, 0.0);
+        }
+        return new GovernanceAdvisoryAnalyticsResponse.ReviewTimeliness(
+                "AVAILABLE",
+                percentile(values, 50),
+                percentile(values, 95)
+        );
     }
 
     private boolean isWithinWindow(String timestamp, Instant from, Instant to) {

@@ -32,7 +32,7 @@ public record GovernanceAdvisoryAnalyticsResponse(
                 new Totals(0, 0, 0),
                 emptyDecisionDistribution(),
                 emptyLifecycleDistribution(),
-                new ReviewTimeliness(0.0, 0.0)
+                new ReviewTimeliness("LOW_CONFIDENCE", 0.0, 0.0)
         );
     }
 
@@ -77,6 +77,9 @@ public record GovernanceAdvisoryAnalyticsResponse(
     }
 
     public record ReviewTimeliness(
+            @JsonProperty("status")
+            String status,
+
             @JsonProperty("time_to_first_review_p50_minutes")
             double timeToFirstReviewP50Minutes,
 

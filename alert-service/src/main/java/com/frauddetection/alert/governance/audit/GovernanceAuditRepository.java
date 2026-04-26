@@ -15,7 +15,7 @@ public interface GovernanceAuditRepository extends MongoRepository<GovernanceAud
 
     List<GovernanceAuditEventDocument> findByAdvisoryEventIdOrderByCreatedAtAsc(String advisoryEventId);
 
-    List<GovernanceAuditEventDocument> findByCreatedAtBetweenOrderByCreatedAtAsc(Instant from, Instant to);
+    List<GovernanceAuditEventDocument> findByCreatedAtBetweenOrderByCreatedAtAsc(Instant from, Instant to, Pageable pageable);
 
     long countByAdvisoryEventId(String advisoryEventId);
 }
