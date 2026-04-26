@@ -1,0 +1,11 @@
+package com.frauddetection.alert.audit.read;
+
+public enum ReadAccessResourceType {
+    ALERT,
+    FRAUD_CASE,
+    SCORED_TRANSACTION,
+    GOVERNANCE_ADVISORY,
+    GOVERNANCE_ADVISORY_LIST,
+    GOVERNANCE_ADVISORY_AUDIT,
+    GOVERNANCE_ADVISORY_ANALYTICS
+}

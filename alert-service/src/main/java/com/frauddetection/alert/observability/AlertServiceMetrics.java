@@ -2,6 +2,8 @@ package com.frauddetection.alert.observability;
 
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditOutcome;
+import com.frauddetection.alert.audit.read.ReadAccessAuditOutcome;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
 import com.frauddetection.alert.security.error.SecurityFailureClassifier;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
@@ -41,6 +43,50 @@ public class AlertServiceMetrics {
                 "fraud.alert.audit.events",
                 "action", normalize(action),
                 "outcome", normalize(outcome)
+        ).increment();
+    }
+
+    public void recordPlatformAuditEventPersisted(AuditAction eventType, AuditOutcome outcome) {
+        counter(
+                "fraud_platform_audit_events_persisted_total",
+                "event_type", normalize(eventType),
+                "outcome", normalize(outcome)
+        ).increment();
+    }
+
+    public void recordPlatformAuditPersistenceFailure(AuditAction eventType) {
+        counter(
+                "fraud_platform_audit_persistence_failures_total",
+                "event_type", normalize(eventType)
+        ).increment();
+    }
+
+    public void recordPlatformAuditReadRequest(String status) {
+        counter(
+                "fraud_platform_audit_read_requests_total",
+                "status", normalizeAvailabilityStatus(status)
+        ).increment();
+    }
+
+    public void recordReadAccessAuditPersisted(ReadAccessEndpointCategory endpointCategory, ReadAccessAuditOutcome outcome) {
+        counter(
+                "fraud_platform_read_access_audit_events_persisted_total",
+                "endpoint_category", normalize(endpointCategory),
+                "outcome", normalize(outcome)
+        ).increment();
+    }
+
+    public void recordReadAccessAuditPersistenceFailure(ReadAccessEndpointCategory endpointCategory) {
+        counter(
+                "fraud_platform_read_access_audit_persistence_failures_total",
+                "endpoint_category", normalize(endpointCategory)
+        ).increment();
+    }
+
+    public void recordReadAccessAuditActorMissing(ReadAccessEndpointCategory endpointCategory) {
+        counter(
+                "fraud_read_access_audit_actor_missing_total",
+                "endpoint_category", normalize(endpointCategory)
         ).increment();
     }
 
@@ -149,6 +195,13 @@ public class AlertServiceMetrics {
 
     private String normalizeAnalyticsStatus(String status) {
         if ("AVAILABLE".equals(status) || "PARTIAL".equals(status) || "UNAVAILABLE".equals(status)) {
+            return status;
+        }
+        return "UNAVAILABLE";
+    }
+
+    private String normalizeAvailabilityStatus(String status) {
+        if ("AVAILABLE".equals(status) || "UNAVAILABLE".equals(status)) {
             return status;
         }
         return "UNAVAILABLE";

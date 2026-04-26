@@ -9,6 +9,7 @@ export const AUTHORITIES = Object.freeze({
   FRAUD_CASE_UPDATE: "fraud-case:update",
   TRANSACTION_MONITOR_READ: "transaction-monitor:read",
   GOVERNANCE_ADVISORY_AUDIT_WRITE: "governance-advisory:audit:write",
+  AUDIT_READ: "audit:read",
 });
 
 export const AUTHORITY_VALUES = Object.freeze([
@@ -19,4 +20,5 @@ export const AUTHORITY_VALUES = Object.freeze([
   "fraud-case:update",
   "transaction-monitor:read",
   "governance-advisory:audit:write",
+  "audit:read",
 ]);

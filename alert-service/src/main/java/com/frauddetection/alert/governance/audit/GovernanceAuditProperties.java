@@ -11,7 +11,6 @@ import java.time.Duration;
 public record GovernanceAuditProperties(
         URI mlGovernanceBaseUrl,
         int historyLimit,
-        int retentionPerAdvisoryEvent,
         Duration mlLookupTimeout
 ) {
     public GovernanceAuditProperties {
@@ -20,9 +19,6 @@ public record GovernanceAuditProperties(
         }
         if (historyLimit <= 0) {
             historyLimit = 50;
-        }
-        if (retentionPerAdvisoryEvent <= 0) {
-            retentionPerAdvisoryEvent = 500;
         }
         if (mlLookupTimeout == null || mlLookupTimeout.isNegative() || mlLookupTimeout.isZero()) {
             mlLookupTimeout = Duration.ofSeconds(2);

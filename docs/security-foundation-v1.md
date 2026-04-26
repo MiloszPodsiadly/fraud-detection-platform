@@ -18,7 +18,7 @@ Backend:
 - JWT claims can be mapped into `AnalystPrincipal` through configurable claim names and role mapping.
 - Authorization checks authorities, not role names.
 - Write actions use authenticated principal identity as the actor source of truth.
-- Audit logging v1 records analyst write actions through structured logs.
+- Audit logging v1 records analyst write actions through durable MongoDB audit records and structured logs.
 - Governance advisory audit writes are append-only, authenticated human-review records.
 - Demo auth is ignored when JWT auth is active.
 
@@ -51,11 +51,9 @@ In scope:
 Out of scope:
 
 - production deployment hardening for JWT/OIDC
-- service-to-service authentication
 - shared security module extraction
-- persistent audit store
-- read-access audit
 - silent refresh or refresh-token-heavy frontend session manager
+- mTLS service-to-service authentication
 
 ## Architecture Decision
 
@@ -125,6 +123,7 @@ Roles describe analyst personas. Authorities are the backend authorization contr
 | `fraud-case:update` | Update fraud case decision/status fields. |
 | `transaction-monitor:read` | Read scored transaction monitoring data. |
 | `governance-advisory:audit:write` | Record human review for governance advisory events. |
+| `audit:read` | Read bounded durable platform audit events. |
 
 ### Roles
 
@@ -133,7 +132,7 @@ Roles describe analyst personas. Authorities are the backend authorization contr
 | `READ_ONLY_ANALYST` | Analyst queue visibility without write actions. | `alert:read`, `assistant-summary:read`, `fraud-case:read`, `transaction-monitor:read` |
 | `ANALYST` | Standard analyst who can review alerts and submit alert decisions. | `READ_ONLY_ANALYST` authorities plus `alert:decision:submit`, `governance-advisory:audit:write` |
 | `REVIEWER` | Senior analyst/reviewer who can also update fraud cases. | `ANALYST` authorities plus `fraud-case:update` |
-| `FRAUD_OPS_ADMIN` | Fraud operations lead/admin with full v1 access. | all v1 authorities |
+| `FRAUD_OPS_ADMIN` | Fraud operations lead/admin with full v1 access, including platform audit reads. | all v1 authorities |
 
 ### Endpoint Matrix
 
@@ -147,6 +146,7 @@ Roles describe analyst personas. Authorities are the backend authorization contr
 | `GET /api/v1/fraud-cases/{caseId}` | `fraud-case:read` | Case details read. |
 | `PATCH /api/v1/fraud-cases/{caseId}` | `fraud-case:update` | Write action; audit in v1. |
 | `GET /api/v1/transactions/scored` | `transaction-monitor:read` | Separate from alert read because monitor data may grow beyond alert queue use cases. |
+| `GET /api/v1/audit/events` | `audit:read` | Bounded newest-first Audit Read API for durable platform audit events. Exact filters only; no export, full-text search, delete, or update. |
 | `GET /governance/advisories` | `transaction-monitor:read` | Reads governance advisory context enriched with lifecycle projection from audit history. |
 | `GET /governance/advisories/analytics` | `transaction-monitor:read` | Reads derived, bounded, non-operational audit analytics. Analytics and analytics metrics are observational only and must not be used for automation, SLA enforcement, alert triggering, or model control. |
 | `GET /governance/advisories/{event_id}` | `transaction-monitor:read` | Reads one governance advisory context with derived lifecycle status. |
@@ -205,6 +205,12 @@ The request-body actor remains only as a compatibility fallback for paths withou
 
 ## Audit Logging v1
 
+FDP-16 is split into:
+
+- FDP-16.1 Durable Audit Foundation: append-only platform audit writes to MongoDB plus secondary structured logs.
+- FDP-16.2 Audit Read API: authenticated, `audit:read`-protected, bounded reads of durable platform audit events.
+- FDP-16.3 Sensitive Read-Access Audit: best-effort audit records for selected sensitive read endpoints.
+
 Audit Logging v1 records security-relevant analyst write operations in `alert-service`.
 
 Audited actions:
@@ -222,8 +228,12 @@ Event model:
 - resource id
 - timestamp
 - correlation id when available
+- nullable bounded request id when available
+- source service (`alert-service`)
 - outcome: `SUCCESS`, `REJECTED`, or `FAILED`
-- optional failure reason category
+- failure category: `NONE`, `VALIDATION`, `AUTHORIZATION`, `DEPENDENCY`, `CONFLICT`, or `UNKNOWN`
+- optional bounded failure reason
+- schema version (`1.0`)
 
 Sensitive data intentionally excluded:
 
@@ -240,15 +250,61 @@ Implementation:
 - Write-path services call `AuditService` after persistence and domain publication complete where applicable.
 - `AuditService` builds an `AuditEvent` from the current security principal and falls back to request actor only when no authenticated principal exists.
 - `AuditEventPublisher` is the extension point.
-- `StructuredAuditEventPublisher` writes structured key-value logs through SLF4J.
+- `PersistentAuditEventPublisher` writes append-only audit records to MongoDB collection `audit_events`.
+- `StructuredAuditEventPublisher` writes structured key-value logs through SLF4J after durable persistence succeeds.
+- Audit persistence failures surface as HTTP 503 responses on audited write paths and are not silently dropped.
+- `GET /api/v1/audit/events` reads durable platform write/governance audit events from `audit_events` newest-first with exact-match filters only. This is an Audit Read API for that store, not a claim that every sensitive platform read was audited.
+- `GET /api/v1/audit/events` does not return read-access audit events; those are stored separately in `read_access_audit_events`. A future endpoint would be needed for bounded read-access audit investigation.
+- Audit read filters are `event_type`, `actor_id`, `resource_type`, `resource_id`, inclusive `from`/`to` timestamps, and bounded `limit` default `50`, max `100`.
+- Audit reads return `status=UNAVAILABLE`, `reason_code=AUDIT_STORE_UNAVAILABLE`, a stable non-sensitive `message`, `count=0`, and an empty event list if persistence cannot be read.
+- Clients MUST check `status` before interpreting `count` or `events`; `AVAILABLE` with `count=0` is a valid empty result and is not equivalent to `UNAVAILABLE`.
+- Deployments should configure bounded MongoDB driver timeouts for `alert-service` so datastore outage detection does not depend on long driver defaults; the Docker quickstart sets bounded server-selection, connect, and socket timeouts.
+- Audit reads do not provide regex, free-text search, unbounded export, aggregation, delete, or update operations.
+- `metadata_summary` is bounded and limited to safe correlation/request/source/schema/failure context. Raw payloads, feature vectors, tokens, secrets, stack traces, and customer/account/card data are not stored or returned.
 
-Future sinks can be added behind `AuditEventPublisher`:
+Sensitive read-access audit:
+
+- Covers `GET /api/v1/alerts/{alertId}`, `GET /api/v1/fraud-cases/{caseId}`, `GET /api/v1/transactions/scored`, `GET /governance/advisories`, `GET /governance/advisories/{eventId}`, `GET /governance/advisories/{eventId}/audit`, and `GET /governance/advisories/analytics`.
+- Uses the authenticated backend principal for actor identity.
+- If the backend principal is unexpectedly missing, stores `actor_id=unknown`, emits `fraud_read_access_audit_actor_missing_total{endpoint_category}`, and logs a bounded warning without URL, query, payload, or token content.
+- Stores endpoint category, resource type/id where applicable, page/size, canonical hashed query shape, bounded result count, outcome, correlation id, source service, schema version, and indexed timestamps.
+- Does not store raw query params, filters, response payloads, transaction data, PII/customer/account/card data, advisory content, full URLs, exception messages, tokens, or stack traces.
+- Audit persistence failure does not block the sensitive read; it emits a structured warning and a low-cardinality failure metric.
+
+Operational audit metrics:
+
+- `fraud_platform_audit_events_persisted_total{event_type,outcome}`
+- `fraud_platform_audit_persistence_failures_total{event_type}`
+- `fraud_platform_audit_read_requests_total{status}`
+- `fraud_platform_read_access_audit_events_persisted_total{endpoint_category,outcome}`
+- `fraud_platform_read_access_audit_persistence_failures_total{endpoint_category}`
+- `fraud_read_access_audit_actor_missing_total{endpoint_category}`
+
+These metrics are health signals, not compliance reports, and intentionally exclude actor IDs, resource IDs, audit IDs, exception messages, and other high-cardinality values.
+
+## Internal Service Authentication
+
+Configured internal ML scoring and governance calls use an internal shared-secret service-auth foundation:
+
+- `fraud-scoring-service` sends internal service identity when calling `ml-inference-service` scoring.
+- `alert-service` sends internal service identity when calling `ml-inference-service` governance endpoints.
+- `ml-inference-service` defaults to `TOKEN_VALIDATOR` fail-closed mode and rejects missing internal identity with 401.
+- Unknown identities, invalid tokens, or missing endpoint authority return 403.
+- `INTERNAL_AUTH_MODE=DISABLED_LOCAL_ONLY` is the explicit local/dev bypass mode; `LOCALDEV` remains a compatibility alias.
+- Startup fails if `DISABLED_LOCAL_ONLY` is used with a prod-like profile, if a Java internal-auth client is disabled in prod-like profiles, if service name/token is missing in prod-like profiles, or if `TOKEN_VALIDATOR` is used in a prod-like profile without token hash mode and a valid allowlist.
+- `INTERNAL_AUTH_TOKEN_HASH_MODE=true` lets `ml-inference-service` compare configured SHA-256 token hashes instead of storing plaintext shared secrets in its allowlist. Plain shared-secret comparison is limited to local/dev style runtime.
+- `MTLS_READY` is a fail-closed configuration boundary only; full enterprise mTLS is not implemented.
+- Tokens are not logged, not sent to the frontend, and not used as analyst identity.
+- Security events and metrics are low-cardinality and do not include tokens, actor IDs, resource IDs, paths, or exception messages.
+- Internal auth metrics are `fraud_internal_auth_success_total{source_service,target_service}` and `fraud_internal_auth_failure_total{target_service,reason}`.
+
+This is an internal shared-secret service-auth foundation, not full enterprise mTLS, not bank-grade service identity, and not a replacement for production deployment hardening.
+
+Future sinks can be added behind `AuditEventPublisher`; they are not implemented in FDP-16:
 
 - Kafka audit topic
-- MongoDB audit collection
 - SIEM forwarder
 - retention and masking policies
-- read-access auditing if required
 
 Governance advisory audit entries are stored separately in `ml_governance_audit_events` through the existing MongoDB infrastructure. They are append-only human-review records, not fraud decisions. The frontend may submit only `decision` and optional bounded `note`; `actor_id`, actor roles, display name, and advisory model metadata are derived server-side. Audit writes fail clearly if persistence or advisory lookup is unavailable and are never silently dropped.
 
@@ -400,7 +456,7 @@ Still not implemented:
 
 - real environment-specific deployment config for an IdP
 - silent refresh / token renewal flow
-- service-to-service authentication
+- mTLS for service-to-service authentication
 
 ## Review Focus
 
@@ -417,9 +473,10 @@ Reviewers should check:
 ## Known Limitations
 
 - JWT validation path exists, but no production IdP setup is shipped in this repo.
-- No service-to-service authentication yet.
-- No persistent audit sink yet; v1 logs structured events only.
-- No read-access audit yet.
+- Service-to-service authentication foundation is present for configured internal ML/governance calls.
+- No mTLS yet.
+- Durable audit storage is not WORM/immutable archive storage.
+- No SIEM audit export/integration yet.
 - The frontend still defaults to demo auth unless OIDC env vars are set explicitly.
 - The frontend OIDC path is a local OIDC integration and foundation for production auth, not a production-ready SSO setup.
 - No silent refresh or session management hardening is shipped for deployment environments yet.
@@ -432,5 +489,5 @@ Reviewers should check:
 1. Wire real JWT issuer/JWK configuration per environment and finalize deployment claim names.
 2. Harden the existing frontend OIDC client path for deployment environments and finalize operational login/logout behavior.
 3. Remove request-body actor fields once API compatibility allows it.
-4. Add a durable audit sink if retention requirements appear.
+4. Define audit retention/export policy if compliance requirements need long-term searchable audit history.
 5. Decide whether a shared security module is justified after another service needs the same model.

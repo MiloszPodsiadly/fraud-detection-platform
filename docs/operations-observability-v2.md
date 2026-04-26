@@ -183,6 +183,18 @@ Prometheus metric contract:
   - Type: counter
   - Meaning: governance advisory event persistence failures
   - Labels: `severity`, `model_name`, `model_version`, `status`
+- `fraud_internal_auth_success_total`
+  - Type: counter
+  - Meaning: accepted internal service authentication attempts
+  - Labels: `source_service`, `target_service`
+- `fraud_internal_auth_failure_total`
+  - Type: counter
+  - Meaning: rejected internal service authentication attempts
+  - Labels: `target_service`, `reason`
+- `fraud_read_access_audit_actor_missing_total`
+  - Type: counter
+  - Meaning: sensitive read-access audit was persisted with `actor_id=unknown` because the backend principal was unavailable
+  - Labels: `endpoint_category`
 
 ## Low-Cardinality Policy
 
@@ -201,6 +213,10 @@ Allowed bounded labels:
 - `confidence`
 - `event_type`
 - `lifecycle_mode`
+- `source_service`
+- `target_service`
+- internal auth `reason`
+- `endpoint_category`
 
 Forbidden labels and payload-derived fields:
 
@@ -217,8 +233,12 @@ Forbidden labels and payload-derived fields:
 - hostname if dynamic
 - event ID
 - explanation text
+- tokens or token hashes
+- full URL or path
 - recommended action text
 - raw exception messages
+- tokens or token subjects
+- full paths / URLs
 - request feature names and values
 - merchant, customer, device, or country identifiers
 

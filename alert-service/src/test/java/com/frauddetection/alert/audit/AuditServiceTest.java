@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
@@ -59,6 +60,7 @@ class AuditServiceTest {
         assertThat(event.resourceId()).isEqualTo("alert-1");
         assertThat(event.correlationId()).isEqualTo("corr-1");
         assertThat(event.outcome()).isEqualTo(AuditOutcome.SUCCESS);
+        assertThat(event.failureCategory()).isEqualTo(AuditFailureCategory.NONE);
         assertThat(event.failureReason()).isNull();
         assertThat(event.timestamp()).isNotNull();
     }
@@ -107,6 +109,7 @@ class AuditServiceTest {
         assertThat(event.correlationId()).isNull();
         assertThat(event.failureReason()).isNull();
         assertThat(event.outcome()).isEqualTo(AuditOutcome.FAILED);
+        assertThat(event.failureCategory()).isEqualTo(AuditFailureCategory.UNKNOWN);
     }
 
     @Test
@@ -133,6 +136,26 @@ class AuditServiceTest {
         assertThat(event.correlationId()).isEqualTo("corr-1");
         assertThat(event.actor().userId()).isEqualTo("request-analyst");
         assertThat(event.outcome()).isEqualTo(AuditOutcome.REJECTED);
+        assertThat(event.failureCategory()).isEqualTo(AuditFailureCategory.AUTHORIZATION);
         assertThat(event.failureReason()).isEqualTo("INSUFFICIENT_AUTHORITY");
+    }
+
+    @Test
+    void shouldPublishAuditEventToAllConfiguredPublishersInOrder() {
+        AuditEventPublisher durablePublisher = mock(AuditEventPublisher.class);
+        AuditEventPublisher structuredPublisher = mock(AuditEventPublisher.class);
+        AuditService service = new AuditService(new CurrentAnalystUser(), List.of(durablePublisher, structuredPublisher));
+
+        service.audit(
+                AuditAction.UPDATE_FRAUD_CASE,
+                AuditResourceType.FRAUD_CASE,
+                "case-1",
+                "corr-1",
+                "request-analyst"
+        );
+
+        var inOrder = inOrder(durablePublisher, structuredPublisher);
+        inOrder.verify(durablePublisher).publish(org.mockito.ArgumentMatchers.any(AuditEvent.class));
+        inOrder.verify(structuredPublisher).publish(org.mockito.ArgumentMatchers.any(AuditEvent.class));
     }
 }

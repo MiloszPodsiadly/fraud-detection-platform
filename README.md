@@ -89,7 +89,7 @@ Kafka contracts live in `common-events`. REST DTOs and persistence documents sta
 - Alerting: `HIGH` and `CRITICAL` scored transactions create analyst alerts.
 - Case management: rapid-transfer grouped fraud cases are created for `RAPID_TRANSFER_BURST_20K_PLN`.
 - Analyst console: scored transaction monitor, alert queue, alert details, assistant summary, decision form, and fraud case update flow.
-- Audit logging: analyst write actions emit structured audit events; governance advisory human-review entries are persisted append-only.
+- Audit logging: analyst write actions are persisted append-only and emitted as structured audit events; governance advisory human-review entries are persisted append-only.
 
 ## Security Foundation v1
 
@@ -146,6 +146,7 @@ Example authorities:
 - `fraud-case:update`
 - `transaction-monitor:read`
 - `governance-advisory:audit:write`
+- `audit:read`
 
 Representative endpoint matrix:
 
@@ -159,6 +160,7 @@ Representative endpoint matrix:
 | `GET /api/v1/fraud-cases/{caseId}` | `fraud-case:read` |
 | `PATCH /api/v1/fraud-cases/{caseId}` | `fraud-case:update` |
 | `GET /api/v1/transactions/scored` | `transaction-monitor:read` |
+| `GET /api/v1/audit/events` | `audit:read` |
 | `GET /governance/advisories` | `transaction-monitor:read` |
 | `GET /governance/advisories/analytics` | `transaction-monitor:read` |
 | `GET /governance/advisories/{event_id}` | `transaction-monitor:read` |
@@ -168,6 +170,12 @@ Representative endpoint matrix:
 Full matrix: [Security Foundation v1](docs/security-foundation-v1.md).
 
 ## Audit Logging
+
+FDP-16 is split into explicit production-hardening steps:
+
+- FDP-16.1 Durable Audit Foundation: append-only platform audit writes to MongoDB plus secondary structured logs.
+- FDP-16.2 Audit Read API: authenticated, authority-protected, bounded reads of durable platform audit events.
+- FDP-16.3 Sensitive Read-Access Audit: best-effort audit records for selected sensitive read endpoints.
 
 Audit Logging v1 records security-relevant analyst write operations in `alert-service`.
 
@@ -196,7 +204,18 @@ Audit payloads intentionally exclude sensitive business details:
 - customer data
 - full request payloads
 
-Current sink: structured SLF4J logs through `StructuredAuditEventPublisher`. Durable audit storage is a production follow-up.
+Current sinks:
+
+- durable MongoDB records in `audit_events` through `PersistentAuditEventPublisher`
+- structured SLF4J logs through `StructuredAuditEventPublisher`
+
+Durable audit writes happen before structured log publication. If audit persistence is unavailable, write paths fail explicitly with the platform error envelope instead of silently dropping audit intent.
+
+Platform audit event reads are available through `GET /api/v1/audit/events` and require `audit:read`, which is granted only to `FRAUD_OPS_ADMIN` by the local role model. This is an Audit Read API for durable platform write/governance audit events in `audit_events`; it does not return read-access audit events and is not itself proof that every sensitive data read was audited. Filters are exact-match only (`event_type`, `actor_id`, `resource_type`, `resource_id`) plus an inclusive timestamp window (`from`, `to`) and a bounded `limit` defaulting to 50 and capped at 100. The endpoint returns newest-first results and does not support regex, full-text search, export, aggregation, delete, or update operations. Clients MUST check `status` before interpreting `count` or `events`: `AVAILABLE` with `count=0` means a valid empty result, while `UNAVAILABLE` means audit storage could not be read and includes stable `reason_code=AUDIT_STORE_UNAVAILABLE` plus a non-sensitive message.
+
+Sensitive read-access audit is implemented separately for selected reads in `read_access_audit_events`: alert details, fraud case details, scored transaction monitor, governance advisory list, governance advisory details, governance advisory audit history, and governance advisory analytics. There is no public read-access audit query endpoint in this scope. These audit records are best-effort and do not block the read response if audit persistence fails. They store bounded metadata only: actor identity from the authenticated backend principal or `unknown` with an anomaly metric if no principal is present, endpoint category, resource type/id where applicable, page/size, canonical hashed query shape, bounded result count, outcome, correlation id, source service, and schema version. They do not store raw query params, filters, response payloads, transaction data, customer/account/card data, advisory content, full URLs, exception messages, tokens, or stack traces.
+
+The durable audit store is not WORM archive storage, not SIEM integration, and not a final compliance archive. Metrics such as `fraud_platform_audit_events_persisted_total`, `fraud_platform_audit_persistence_failures_total`, `fraud_platform_audit_read_requests_total`, `fraud_platform_read_access_audit_events_persisted_total`, `fraud_platform_read_access_audit_persistence_failures_total`, `fraud_read_access_audit_actor_missing_total`, `fraud_internal_auth_success_total`, and `fraud_internal_auth_failure_total` are operational health signals only.
 
 Governance advisory audit entries are separate from fraud workflow audit logs. They are persisted append-only as human review history, derive actor identity from the backend-authenticated principal, and do not affect scoring, model behavior, retraining, rollback, or fraud decisioning. Advisory lifecycle status is a read-time projection from the latest audit entry, not a persisted workflow state or automation trigger.
 
@@ -460,7 +479,7 @@ These credentials are local-only and must not be reused outside local test envir
 
 - no silent refresh
 - no token refresh flow
-- no service-to-service auth
+- service-to-service auth uses the internal shared-secret service-auth foundation for configured ML/governance calls; local Docker may use explicit `DISABLED_LOCAL_ONLY`, the token-validator Docker override exercises `TOKEN_VALIDATOR`, and this is not full enterprise mTLS
 - no production IdP config
 - tokens are managed by `oidc-client-ts` for local/dev use, not as hardened production storage
 
@@ -483,6 +502,17 @@ If runtime behavior does not match the current repo state after code changes, re
 docker compose -f deployment/docker-compose.yml build ml-inference-service analyst-console-ui
 docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml up -d
 ```
+
+To verify the token-validator service-auth path instead of the local bypass:
+
+```bash
+docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml -f deployment/docker-compose.internal-auth.yml up --build -d
+curl -i http://localhost:8090/governance/model
+curl -i -H "X-Internal-Service-Name: alert-service" -H "X-Internal-Service-Token: local-dev-internal-token" http://localhost:8090/governance/model
+curl -s http://localhost:8090/metrics | grep fraud_internal_auth
+```
+
+Expected results: the anonymous ML governance call returns `401`, the configured alert-service identity succeeds, and internal auth success/failure metrics are visible. Scoring through `fraud-scoring-service` uses the same shared token through its internal client boundary. This validates the internal shared-secret service-auth foundation; it is not full enterprise mTLS.
 
 If you suspect stale local images or containers, rebuild cleanly:
 
@@ -573,9 +603,7 @@ Full details: [Security Foundation v1](docs/security-foundation-v1.md).
 
 Current non-production gaps:
 
-- No service-to-service authentication or mTLS is implemented.
-- No durable audit store exists yet.
-- No read-access audit exists yet.
+- Internal shared-secret service-auth foundation is implemented for configured ML/governance calls through token validation and an explicit local/dev bypass mode; it is not full enterprise mTLS.
 - The frontend still uses demo auth by default in development.
 - The frontend OIDC path is a local OIDC integration and foundation for production auth, but it does not yet implement silent refresh or production deployment hardening.
 - Request DTOs still accept `analystId` for compatibility, although secured write paths use the principal as actor source of truth.
@@ -585,7 +613,7 @@ Planned production path:
 - Configure real issuer/JWK settings per environment.
 - Finalize IdP claim naming and group/role mapping for deployment.
 - Harden the existing frontend OIDC flow for deployment environments while preserving the `userId`/`roles`/`authorities` UI contract and lifecycle states.
-- Add durable audit sink if retention or compliance requirements need searchable audit history.
+- Define audit retention/export policy if compliance requirements need long-term searchable audit history.
 
 Migration notes: [Security Foundation v1](docs/security-foundation-v1.md).
 
@@ -863,7 +891,8 @@ Governance snapshot and lifecycle persistence use the existing local MongoDB ser
 | `MODEL_LIFECYCLE_RETENTION_LIMIT` | `200` |
 | `GOVERNANCE_ADVISORY_COLLECTION` | `ml_governance_advisory_events` |
 | `GOVERNANCE_ADVISORY_RETENTION_LIMIT` | `200` |
-| `GOVERNANCE_AUDIT_RETENTION_PER_ADVISORY_EVENT` | `500` |
+| `GOVERNANCE_AUDIT_HISTORY_LIMIT` | `50` |
+| `GOVERNANCE_AUDIT_ANALYTICS_MAX_AUDIT_EVENTS` | `10000` |
 
 MongoDB outage pauses persisted governance history but does not fail scoring.
 Model lifecycle visibility is read-only; it does not switch models, retrain, rollback, approve models, validate model quality, or expose raw artifacts. Drift actions include lifecycle context for operator triage only and do not claim model lifecycle activity caused drift.
@@ -950,7 +979,7 @@ Security and architecture:
 - [Security Foundation v1](docs/security-foundation-v1.md): consolidated technical reference for RBAC, local demo auth, actor identity, audit logging, frontend security UX, JWT/OIDC migration, review notes, known limitations, and next steps.
 - [API Surface v1](docs/api-surface-v1.md): public local HTTP endpoint inventory and backward-compatibility rules.
 - [ML Inference OpenAPI](docs/openapi/ml-inference-service.openapi.yaml): current OpenAPI reference for the Python ML runtime.
-- [Alert Service OpenAPI](docs/openapi/alert-service.openapi.yaml): current OpenAPI reference for governance advisory audit endpoints.
+- [Alert Service OpenAPI](docs/openapi/alert-service.openapi.yaml): current OpenAPI reference for platform Audit Read API and governance advisory audit endpoints.
 - [API Error Contract](docs/api-error-contract.md): canonical local REST error envelope for timestamp/status/error/message/details and non-leakage rules.
 - [Operations And Observability v1](docs/operations-observability-v1.md): baseline observability foundation before the local monitoring stack rollout.
 - [Operations And Observability v2](docs/operations-observability-v2.md): current local Prometheus/Grafana runtime guide, ML metrics contract, alert thresholds, and troubleshooting flow.
@@ -989,8 +1018,9 @@ Implemented:
 
 Known production gaps:
 
-- Service-to-service authentication is not implemented yet.
-- Durable audit storage is not implemented yet.
+- Service-to-service authentication is an internal shared-secret service-auth foundation only, with a token-validator path and prod-like fail-closed guards; it is not bank-grade service identity.
+- mTLS is not implemented yet; current internal service authentication has an mTLS-ready boundary with `MTLS_READY` kept fail-closed rather than pretending mTLS exists.
+- Durable audit storage is not WORM/immutable archive storage, not a final compliance archive, and has no SIEM export integration.
 - DLT inspection/replay tooling is not implemented yet.
 - The frontend defaults to demo auth in quickstart mode and supports local OIDC through the Keycloak override, but it is not a production-ready SSO setup.
 - ML governance uses a synthetic/local reference profile and aggregate MongoDB snapshots; the synthetic reference is not suitable for production drift decisions and FDP-7 does not implement automatic retraining, rollback, approval UI, or production alert routing.

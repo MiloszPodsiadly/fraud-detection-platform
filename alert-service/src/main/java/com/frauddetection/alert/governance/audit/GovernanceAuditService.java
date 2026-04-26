@@ -7,7 +7,6 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
-import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
@@ -57,7 +56,6 @@ public class GovernanceAuditService {
 
         try {
             GovernanceAuditEventDocument saved = repository.save(document);
-            enforceRetention(advisoryEventId);
             return GovernanceAuditEventResponse.from(saved);
         } catch (DataAccessException exception) {
             throw new GovernanceAuditPersistenceUnavailableException();
@@ -78,19 +76,6 @@ public class GovernanceAuditService {
         } catch (DataAccessException exception) {
             return new GovernanceAuditHistoryResponse(advisoryEventId, "UNAVAILABLE", List.of());
         }
-    }
-
-    private void enforceRetention(String advisoryEventId) {
-        long excess = repository.countByAdvisoryEventId(advisoryEventId) - properties.retentionPerAdvisoryEvent();
-        if (excess <= 0) {
-            return;
-        }
-        List<GovernanceAuditEventDocument> stale = repository.findByAdvisoryEventIdOrderByCreatedAtAsc(advisoryEventId)
-                .stream()
-                .sorted(Comparator.comparing(GovernanceAuditEventDocument::getCreatedAt))
-                .limit(excess)
-                .toList();
-        repository.deleteAll(stale);
     }
 
 }

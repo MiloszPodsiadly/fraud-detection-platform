@@ -1,15 +1,176 @@
 openapi: 3.0.3
 info:
   title: Alert Service API
-  version: FDP-14
-  description: Authenticated alert-service contracts for analyst workflows, governance advisory lifecycle projection, and human-review audit.
+  version: FDP-16.3
+  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, selected sensitive read-access audit persistence, governance advisory lifecycle projection, and human-review audit. Audit read contracts do not imply full enterprise mTLS, WORM archive storage, SIEM integration, unbounded export, or final compliance archive.
 servers:
   - url: http://localhost:8085
 paths:
+  /api/v1/audit/events:
+    get:
+      summary: List durable platform audit events
+      description: Returns bounded newest-first durable platform write/governance audit events from audit_events. This endpoint does not return read-access audit events from read_access_audit_events and is not itself proof that every sensitive platform read was audited. Requires audit:read. Filters are exact-match only; no regex, full-text search, export, aggregation, delete, or update operations are supported. Clients MUST check status before interpreting count or events. AVAILABLE with count 0 is a valid empty result. UNAVAILABLE means audit storage could not be read and returns reason_code AUDIT_STORE_UNAVAILABLE, a stable non-sensitive message, count 0, and an empty events array.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: event_type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [SUBMIT_ANALYST_DECISION, UPDATE_FRAUD_CASE]
+        - name: actor_id
+          in: query
+          required: false
+          description: Exact backend-derived actor id match.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 120
+        - name: resource_type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [ALERT, FRAUD_CASE]
+        - name: resource_id
+          in: query
+          required: false
+          description: Exact resource id match.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+        - name: from
+          in: query
+          required: false
+          description: Inclusive ISO-8601 lower timestamp bound. If provided without to, the upper bound is request time.
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          description: Inclusive ISO-8601 upper timestamp bound.
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        "200":
+          description: Durable audit events returned or audit storage reported unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditEventReadResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/alerts/{alertId}:
+    get:
+      summary: Get one alert
+      description: Returns one alert for an authenticated analyst. Alert-service records a best-effort sensitive read-access audit event with backend-derived actor identity and bounded metadata only; audit persistence failure does not block the read response.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: alertId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      responses:
+        "200":
+          description: Alert details returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericObject"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/fraud-cases/{caseId}:
+    get:
+      summary: Get one fraud case
+      description: Returns one fraud case for an authenticated analyst. Alert-service records a best-effort sensitive read-access audit event with backend-derived actor identity and bounded metadata only; audit persistence failure does not block the read response.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      responses:
+        "200":
+          description: Fraud case details returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericObject"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/transactions/scored:
+    get:
+      summary: List scored transaction projections
+      description: Returns a bounded scored transaction page for an authenticated analyst. Alert-service records a best-effort sensitive read-access audit event with a hashed query shape, page/size, bounded result count, and backend-derived actor identity; audit persistence failure does not block the read response.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Scored transaction page returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PagedGenericObject"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /governance/advisories:
     get:
       summary: List governance advisories with derived lifecycle status
-      description: Returns ML advisory events enriched with lifecycle_status derived at read time from latest audit event. Lifecycle is not persisted as source of truth and does not trigger workflow actions. Filtering by lifecycle_status applies to the bounded advisory result set. It does not guarantee global completeness.
+      description: Returns ML advisory events enriched with lifecycle_status derived at read time from latest audit event. Lifecycle is not persisted as source of truth and does not trigger workflow actions. Filtering by lifecycle_status applies to the bounded advisory result set. It does not guarantee global completeness. Alert-service records a best-effort sensitive read-access audit event with a hashed query shape and bounded metadata only; audit persistence failure does not block the read response.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -59,7 +220,7 @@ paths:
   /governance/advisories/analytics:
     get:
       summary: Get bounded governance advisory audit analytics
-      description: Returns read-only analytics for the bounded advisory projection window. The advisory population is the distinct advisory_event_id values returned by the advisory projection in the requested window; audit events are used only to classify that population. Analytics are for visibility only; they are not SLA enforcement, do not trigger actions, and are not persisted as source of truth.
+      description: Returns read-only analytics for the bounded advisory projection window. The advisory population is the distinct advisory_event_id values returned by the advisory projection in the requested window; audit events are used only to classify that population. Analytics are for visibility only; they are not SLA enforcement, do not trigger actions, and are not persisted as source of truth. Alert-service records a best-effort sensitive read-access audit event with bounded metadata only; audit persistence failure does not block the read response.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -89,7 +250,7 @@ paths:
   /governance/advisories/{event_id}:
     get:
       summary: Get one governance advisory with derived lifecycle status
-      description: Returns one bounded-history advisory event enriched with lifecycle_status derived at read time from latest audit event.
+      description: Returns one bounded-history advisory event enriched with lifecycle_status derived at read time from latest audit event. Alert-service records a best-effort sensitive read-access audit event with backend-derived actor identity and bounded metadata only; audit persistence failure does not block the read response.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -113,7 +274,7 @@ paths:
   /governance/advisories/{event_id}/audit:
     get:
       summary: List governance advisory audit history
-      description: Returns bounded newest-first human-review audit history for one governance advisory event.
+      description: Returns bounded newest-first human-review audit history for one governance advisory event. Alert-service records a best-effort sensitive read-access audit event with backend-derived actor identity and bounded metadata only; audit persistence failure does not block the read response.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -186,6 +347,150 @@ components:
         maxLength: 120
         pattern: "^[A-Za-z0-9._:-]+$"
   schemas:
+    GenericObject:
+      type: object
+      additionalProperties: true
+    PagedGenericObject:
+      type: object
+      required:
+        - content
+        - page
+        - size
+        - totalElements
+        - totalPages
+      additionalProperties: true
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/GenericObject"
+        page:
+          type: integer
+          minimum: 0
+        size:
+          type: integer
+          minimum: 1
+        totalElements:
+          type: integer
+          minimum: 0
+        totalPages:
+          type: integer
+          minimum: 0
+    AuditEventReadResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - count
+        - limit
+        - events
+      properties:
+        status:
+          type: string
+          enum: [AVAILABLE, UNAVAILABLE]
+        reason_code:
+          type: string
+          nullable: true
+          description: Null when status is AVAILABLE. When status is UNAVAILABLE, this is AUDIT_STORE_UNAVAILABLE.
+          enum: [AUDIT_STORE_UNAVAILABLE]
+        message:
+          type: string
+          nullable: true
+          description: Null when status is AVAILABLE. When status is UNAVAILABLE, this is a stable non-sensitive reason message.
+          maxLength: 120
+        count:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEvent"
+    AuditEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - audit_event_id
+        - event_type
+        - actor_id
+        - actor_display_name
+        - actor_roles
+        - resource_type
+        - resource_id
+        - action
+        - outcome
+        - occurred_at
+        - metadata_summary
+      properties:
+        audit_event_id:
+          type: string
+        event_type:
+          type: string
+          enum: [SUBMIT_ANALYST_DECISION, UPDATE_FRAUD_CASE]
+        actor_id:
+          type: string
+          description: Backend-derived authenticated actor identity.
+        actor_display_name:
+          type: string
+        actor_roles:
+          type: array
+          items:
+            type: string
+        resource_type:
+          type: string
+          enum: [ALERT, FRAUD_CASE]
+        resource_id:
+          type: string
+        action:
+          type: string
+          enum: [SUBMIT_ANALYST_DECISION, UPDATE_FRAUD_CASE]
+        outcome:
+          type: string
+          enum: [SUCCESS, REJECTED, FAILED]
+        occurred_at:
+          type: string
+          format: date-time
+        metadata_summary:
+          $ref: "#/components/schemas/AuditEventMetadataSummary"
+    AuditEventMetadataSummary:
+      type: object
+      additionalProperties: false
+      description: Bounded safe metadata summary. Does not include raw payloads, feature vectors, tokens, secrets, stack traces, or customer/account/card data.
+      required:
+        - correlation_id
+        - request_id
+        - source_service
+        - schema_version
+        - failure_category
+        - failure_reason
+      properties:
+        correlation_id:
+          type: string
+          nullable: true
+          maxLength: 120
+        request_id:
+          type: string
+          nullable: true
+          maxLength: 120
+        source_service:
+          type: string
+          nullable: true
+          enum: [alert-service]
+        schema_version:
+          type: string
+          nullable: true
+          enum: ["1.0"]
+        failure_category:
+          type: string
+          nullable: true
+          enum: [NONE, VALIDATION, AUTHORIZATION, DEPENDENCY, CONFLICT, UNKNOWN]
+        failure_reason:
+          type: string
+          nullable: true
+          maxLength: 120
     GovernanceAdvisoryLifecycleStatus:
       type: string
       description: Read-time projection from latest audit decision. OPEN means no audit event exists.

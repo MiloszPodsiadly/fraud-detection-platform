@@ -471,7 +471,8 @@ Persistence:
 
 ```text
 collection: ml_governance_audit_events
-default retention: 500 events per advisory_event_id
+history reads: bounded by GOVERNANCE_AUDIT_HISTORY_LIMIT, default 50 newest events
+analytics reads: bounded by GOVERNANCE_AUDIT_ANALYTICS_MAX_AUDIT_EVENTS, default 10000 events
 ```
 
 Indexes:

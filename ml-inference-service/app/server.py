@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import hmac
+import os
+import re
 import time
+from dataclasses import dataclass
 from http import HTTPStatus
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -95,6 +100,16 @@ ERROR_COUNTER = Counter(
     "fraud_ml_inference_errors_total",
     "Rejected or failed ML inference requests.",
     ("endpoint", "method", "outcome"),
+)
+INTERNAL_AUTH_SUCCESSES = Counter(
+    "fraud_internal_auth_success_total",
+    "Accepted internal service authentication attempts.",
+    ("source_service", "target_service"),
+)
+INTERNAL_AUTH_FAILURES = Counter(
+    "fraud_internal_auth_failure_total",
+    "Rejected internal service authentication attempts.",
+    ("target_service", "reason"),
 )
 MODEL_LOAD_STATUS = Gauge(
     "fraud_ml_model_load_status",
@@ -210,6 +225,108 @@ for _status in ("available", "partial", "unavailable"):
     MODEL_LIFECYCLE_HISTORY_AVAILABLE.labels(MODEL_NAME, MODEL_VERSION, _status).set(0)
 
 
+@dataclass(frozen=True)
+class InternalServicePrincipal:
+    service_name: str
+    authorities: frozenset[str]
+    authenticated_at: datetime
+    auth_mode: str
+
+
+@dataclass(frozen=True)
+class InternalServiceCredential:
+    token: str
+    authorities: frozenset[str]
+
+
+INTERNAL_AUTH_TARGET_SERVICE = "ml-inference-service"
+LOCAL_INTERNAL_AUTH_MODES = {"LOCALDEV", "DISABLED_LOCAL_ONLY"}
+TOKEN_INTERNAL_AUTH_MODES = {"REQUIRED", "TOKEN_VALIDATOR"}
+PROD_LIKE_PROFILES = {"prod", "production", "staging"}
+INTERNAL_AUTH_FAILURE_REASONS = {
+    "missing_internal_credentials",
+    "invalid_internal_credentials",
+    "missing_internal_authority",
+    "mtls_not_configured",
+}
+
+
+def _internal_auth_mode() -> str:
+    mode = os.getenv("INTERNAL_AUTH_MODE", "REQUIRED").strip().upper()
+    if mode in LOCAL_INTERNAL_AUTH_MODES:
+        return "DISABLED_LOCAL_ONLY"
+    if mode in TOKEN_INTERNAL_AUTH_MODES:
+        return "TOKEN_VALIDATOR"
+    if mode == "MTLS_READY":
+        return "MTLS_READY"
+    return "TOKEN_VALIDATOR"
+
+
+def _runtime_profile() -> str:
+    return (
+        os.getenv("INTERNAL_AUTH_PROFILE")
+        or os.getenv("APP_PROFILE")
+        or os.getenv("ENVIRONMENT")
+        or os.getenv("SPRING_PROFILES_ACTIVE")
+        or "localdev"
+    ).strip().lower()
+
+
+def _prod_like_profile(profile: str | None = None) -> bool:
+    value = (profile or _runtime_profile()).strip().lower()
+    profiles = {part.strip() for part in value.replace(";", ",").split(",") if part.strip()}
+    return bool(profiles & PROD_LIKE_PROFILES)
+
+
+def _token_hash_mode() -> bool:
+    return os.getenv("INTERNAL_AUTH_TOKEN_HASH_MODE", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _allowed_internal_services() -> dict[str, InternalServiceCredential]:
+    raw = os.getenv("INTERNAL_AUTH_ALLOWED_SERVICES", "")
+    services: dict[str, InternalServiceCredential] = {}
+    hash_mode = _token_hash_mode()
+    for entry in raw.split(","):
+        parts = entry.strip().split(":", 2)
+        if len(parts) != 3:
+            continue
+        service_name, token, authorities = (part.strip() for part in parts)
+        if not service_name or not token:
+            continue
+        authority_set = frozenset(authority.strip() for authority in authorities.split("|") if authority.strip())
+        if not authority_set:
+            continue
+        if hash_mode and not re.fullmatch(r"[A-Fa-f0-9]{64}", token):
+            continue
+        services[service_name] = InternalServiceCredential(token=token, authorities=authority_set)
+    return services
+
+
+INTERNAL_SERVICE_CREDENTIALS = _allowed_internal_services()
+
+
+def _validate_internal_auth_startup(
+        mode: str | None = None,
+        profile: str | None = None,
+        credentials: dict[str, InternalServiceCredential] | None = None,
+) -> None:
+    normalized_mode = _internal_auth_mode() if mode is None else (
+        "DISABLED_LOCAL_ONLY" if mode.strip().upper() in LOCAL_INTERNAL_AUTH_MODES
+        else "MTLS_READY" if mode.strip().upper() == "MTLS_READY"
+        else "TOKEN_VALIDATOR"
+    )
+    configured_credentials = INTERNAL_SERVICE_CREDENTIALS if credentials is None else credentials
+    if normalized_mode == "DISABLED_LOCAL_ONLY" and _prod_like_profile(profile):
+        raise RuntimeError("DISABLED_LOCAL_ONLY internal auth mode is forbidden in prod-like profiles.")
+    if normalized_mode == "TOKEN_VALIDATOR" and _prod_like_profile(profile) and not _token_hash_mode():
+        raise RuntimeError("TOKEN_VALIDATOR internal auth mode requires token hash mode in prod-like profiles.")
+    if normalized_mode == "TOKEN_VALIDATOR" and _prod_like_profile(profile) and not configured_credentials:
+        raise RuntimeError("TOKEN_VALIDATOR internal auth mode requires an allowed service list in prod-like profiles.")
+
+
+_validate_internal_auth_startup()
+
+
 def _initialize_lifecycle_tracking() -> None:
     summary = lifecycle_metadata_summary(MODEL_LIFECYCLE)
     summary["feature_count"] = len(MODEL_GOVERNANCE.get("feature_set") or [])
@@ -271,17 +388,23 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             self._send_metrics()
             return
         if path == "/governance/model":
+            if not self._require_internal_auth(path, "governance-read"):
+                return
             started_at = time.perf_counter()
             inference = INFERENCE_PROFILE.snapshot()
             self._send_json(200, governance_response(MODEL_GOVERNANCE, REFERENCE_PROFILE, inference))
             self._record_request(path, "GET", 200, "success", started_at)
             return
         if path == "/governance/model/current":
+            if not self._require_internal_auth(path, "governance-read"):
+                return
             started_at = time.perf_counter()
             self._send_json(200, MODEL_LIFECYCLE)
             self._record_request(path, "GET", 200, "success", started_at)
             return
         if path == "/governance/model/lifecycle":
+            if not self._require_internal_auth(path, "governance-read"):
+                return
             started_at = time.perf_counter()
             history = LIFECYCLE_SERVICE.history_response(MODEL_LIFECYCLE)
             _record_lifecycle_history_available(history["status"])
@@ -289,6 +412,8 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             self._record_request(path, "GET", 200, "success", started_at)
             return
         if path == "/governance/profile/reference":
+            if not self._require_internal_auth(path, "governance-read"):
+                return
             started_at = time.perf_counter()
             inference = INFERENCE_PROFILE.snapshot()
             self._send_json(
@@ -303,6 +428,8 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             self._record_request(path, "GET", 200, "success", started_at)
             return
         if path == "/governance/profile/inference":
+            if not self._require_internal_auth(path, "governance-read"):
+                return
             started_at = time.perf_counter()
             inference = INFERENCE_PROFILE.snapshot()
             self._send_json(
@@ -317,6 +444,8 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             self._record_request(path, "GET", 200, "success", started_at)
             return
         if path == "/governance/drift":
+            if not self._require_internal_auth(path, "governance-read"):
+                return
             started_at = time.perf_counter()
             inference = INFERENCE_PROFILE.snapshot()
             drift = evaluate_drift(REFERENCE_PROFILE, inference)
@@ -325,6 +454,8 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             self._record_request(path, "GET", 200, "success", started_at)
             return
         if path == "/governance/drift/actions":
+            if not self._require_internal_auth(path, "governance-read"):
+                return
             started_at = time.perf_counter()
             inference = INFERENCE_PROFILE.snapshot()
             drift = evaluate_drift(REFERENCE_PROFILE, inference)
@@ -338,6 +469,8 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             self._record_request(path, "GET", 200, "success", started_at)
             return
         if path == "/governance/advisories":
+            if not self._require_internal_auth(path, "governance-read"):
+                return
             started_at = time.perf_counter()
             limit = self._advisory_limit(parsed_url.query)
             filters = self._advisory_filters(parsed_url.query)
@@ -346,6 +479,8 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             self._record_request(path, "GET", 200, "success", started_at)
             return
         if path == "/governance/history":
+            if not self._require_internal_auth(path, "governance-read"):
+                return
             started_at = time.perf_counter()
             limit = self._history_limit(parsed_url.query)
             inference = INFERENCE_PROFILE.snapshot()
@@ -371,6 +506,9 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             self._send_error(404, "Not Found", "Not found.")
             self._record_request(path, "POST", 404, "not_found", started_at)
             self._log_event("not_found", method="POST", path=path, statusCode=404)
+            return
+
+        if not self._require_internal_auth(path, "ml-score"):
             return
 
         payload = self._read_json()
@@ -516,6 +654,70 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
         self._record_request("/metrics", "GET", 200, "success", started_at)
+
+    def _require_internal_auth(self, endpoint: str, required_authority: str) -> bool:
+        principal, status_code, reason = self._internal_service_principal(required_authority)
+        if principal is not None:
+            self._record_internal_auth_success(principal)
+            self._log_event(
+                "internal_auth_allowed",
+                serviceName=principal.service_name,
+                authority=required_authority,
+                authMode=principal.auth_mode,
+            )
+            return True
+        self._record_internal_auth_failure(endpoint, reason)
+        if status_code == 401:
+            self._send_error(401, "Unauthorized", "Internal service authentication is required.")
+        else:
+            self._send_error(403, "Forbidden", "Internal service is not authorized for this endpoint.")
+        return False
+
+    def _internal_service_principal(self, required_authority: str) -> tuple[InternalServicePrincipal | None, int, str]:
+        mode = _internal_auth_mode()
+        service_name = self.headers.get("X-Internal-Service-Name", "").strip()
+        token = self.headers.get("X-Internal-Service-Token", "").strip()
+        if mode == "DISABLED_LOCAL_ONLY" and not service_name and not token:
+            return InternalServicePrincipal(
+                service_name="localdev-anonymous",
+                authorities=frozenset({required_authority}),
+                authenticated_at=datetime.now(timezone.utc),
+                auth_mode=mode,
+            ), 200, "allowed_localdev"
+        if mode == "MTLS_READY":
+            return None, 401, "mtls_not_configured"
+        if not service_name or not token:
+            return None, 401, "missing_internal_credentials"
+        credential = INTERNAL_SERVICE_CREDENTIALS.get(service_name)
+        if credential is None or not self._internal_token_matches(token, credential.token):
+            return None, 403, "invalid_internal_credentials"
+        if required_authority not in credential.authorities:
+            return None, 403, "missing_internal_authority"
+        return InternalServicePrincipal(
+            service_name=service_name,
+            authorities=credential.authorities,
+            authenticated_at=datetime.now(timezone.utc),
+            auth_mode=mode,
+        ), 200, "allowed"
+
+    def _internal_token_matches(self, presented_token: str, configured_token: str) -> bool:
+        if _token_hash_mode():
+            presented_hash = hashlib.sha256(presented_token.encode("utf-8")).hexdigest()
+            return hmac.compare_digest(presented_hash, configured_token.lower())
+        return hmac.compare_digest(configured_token, presented_token)
+
+    def _record_internal_auth_success(self, principal: InternalServicePrincipal) -> None:
+        source_service = principal.service_name if principal.service_name in INTERNAL_SERVICE_CREDENTIALS else "localdev"
+        INTERNAL_AUTH_SUCCESSES.labels(source_service, INTERNAL_AUTH_TARGET_SERVICE).inc()
+
+    def _record_internal_auth_failure(self, endpoint: str, reason: str) -> None:
+        normalized_reason = reason if reason in INTERNAL_AUTH_FAILURE_REASONS else "invalid_internal_credentials"
+        INTERNAL_AUTH_FAILURES.labels(INTERNAL_AUTH_TARGET_SERVICE, normalized_reason).inc()
+        self._log_event(
+            "internal_auth_rejected",
+            targetService=INTERNAL_AUTH_TARGET_SERVICE,
+            reason=normalized_reason,
+        )
 
     def _log_score(
             self,

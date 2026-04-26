@@ -9,7 +9,11 @@ import org.springframework.web.client.RestClient;
 public class MlModelClientConfig {
 
     @Bean
-    public RestClient mlModelRestClient(MlModelClientProperties properties, RestClient.Builder builder) {
+    public RestClient mlModelRestClient(
+            MlModelClientProperties properties,
+            InternalServiceAuthHeaders internalAuthHeaders,
+            RestClient.Builder builder
+    ) {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(properties.connectTimeout());
         requestFactory.setReadTimeout(properties.readTimeout());
@@ -17,6 +21,10 @@ public class MlModelClientConfig {
         return builder
                 .baseUrl(properties.baseUrl())
                 .requestFactory(requestFactory)
+                .requestInterceptor((request, body, execution) -> {
+                    internalAuthHeaders.apply(request.getHeaders());
+                    return execution.execute(request, body);
+                })
                 .build();
     }
 }

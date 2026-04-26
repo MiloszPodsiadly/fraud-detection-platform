@@ -2,9 +2,11 @@ package com.frauddetection.alert.audit;
 
 import com.frauddetection.alert.security.principal.AnalystPrincipal;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
@@ -13,11 +15,19 @@ import java.util.TreeSet;
 public class AuditService {
 
     private final CurrentAnalystUser currentAnalystUser;
-    private final AuditEventPublisher auditEventPublisher;
+    private final List<AuditEventPublisher> auditEventPublishers;
 
-    public AuditService(CurrentAnalystUser currentAnalystUser, AuditEventPublisher auditEventPublisher) {
+    @Autowired
+    public AuditService(CurrentAnalystUser currentAnalystUser, List<AuditEventPublisher> auditEventPublishers) {
         this.currentAnalystUser = currentAnalystUser;
-        this.auditEventPublisher = auditEventPublisher;
+        if (auditEventPublishers == null || auditEventPublishers.isEmpty()) {
+            throw new IllegalArgumentException("at least one audit event publisher is required");
+        }
+        this.auditEventPublishers = List.copyOf(auditEventPublishers);
+    }
+
+    AuditService(CurrentAnalystUser currentAnalystUser, AuditEventPublisher auditEventPublisher) {
+        this(currentAnalystUser, List.of(auditEventPublisher));
     }
 
     public void audit(
@@ -49,7 +59,7 @@ public class AuditService {
                 Objects.requireNonNull(outcome, "outcome must not be null"),
                 normalizeOptional(failureReason)
         );
-        auditEventPublisher.publish(event);
+        auditEventPublishers.forEach(publisher -> publisher.publish(event));
     }
 
     private AuditActor actor(String fallbackActorId) {

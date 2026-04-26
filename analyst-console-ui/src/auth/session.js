@@ -36,7 +36,8 @@ export const AUTHORITY_LABELS = {
   [AUTHORITIES.FRAUD_CASE_READ]: "fraud case read access",
   [AUTHORITIES.FRAUD_CASE_UPDATE]: "update fraud case",
   [AUTHORITIES.TRANSACTION_MONITOR_READ]: "transaction monitor access",
-  [AUTHORITIES.GOVERNANCE_ADVISORY_AUDIT_WRITE]: "record governance advisory review"
+  [AUTHORITIES.GOVERNANCE_ADVISORY_AUDIT_WRITE]: "record governance advisory review",
+  [AUTHORITIES.AUDIT_READ]: "read platform audit events"
 };
 
 export function normalizeSession(session) {

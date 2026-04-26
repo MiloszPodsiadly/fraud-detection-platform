@@ -33,4 +33,24 @@ class StructuredAuditEventPublisherTest {
                 .counter()
                 .count()).isEqualTo(1.0d);
     }
+
+    @Test
+    void shouldNotRecordDurablePersistenceMetrics() {
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        AlertServiceMetrics metrics = new AlertServiceMetrics(meterRegistry);
+        StructuredAuditEventPublisher publisher = new StructuredAuditEventPublisher(metrics);
+
+        publisher.publish(new AuditEvent(
+                new AuditActor("analyst-1", Set.of("ANALYST"), Set.of("alert:read")),
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT,
+                "alert-1",
+                Instant.parse("2026-04-23T10:00:00Z"),
+                "corr-1",
+                AuditOutcome.SUCCESS,
+                null
+        ));
+
+        assertThat(meterRegistry.find("fraud_platform_audit_events_persisted_total").counter()).isNull();
+    }
 }

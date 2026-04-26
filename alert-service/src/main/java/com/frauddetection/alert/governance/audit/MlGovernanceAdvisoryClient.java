@@ -1,5 +1,6 @@
 package com.frauddetection.alert.governance.audit;
 
+import com.frauddetection.alert.security.internal.InternalServiceAuthHeaders;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -13,7 +14,7 @@ public class MlGovernanceAdvisoryClient implements GovernanceAdvisoryClient {
 
     private final RestClient restClient;
 
-    public MlGovernanceAdvisoryClient(GovernanceAuditProperties properties) {
+    public MlGovernanceAdvisoryClient(GovernanceAuditProperties properties, InternalServiceAuthHeaders internalAuthHeaders) {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(properties.mlLookupTimeout());
         requestFactory.setReadTimeout(properties.mlLookupTimeout());
@@ -22,6 +23,7 @@ public class MlGovernanceAdvisoryClient implements GovernanceAdvisoryClient {
                 .requestFactory(requestFactory)
                 .requestInterceptor((request, body, execution) -> {
                     request.getHeaders().set("Accept", "application/json");
+                    internalAuthHeaders.apply(request.getHeaders());
                     return execution.execute(request, body);
                 })
                 .build();
