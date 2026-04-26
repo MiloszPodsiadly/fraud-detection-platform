@@ -126,6 +126,22 @@ class MlMetricsEndpointTest(unittest.TestCase):
         self.assertEqual(parse_metric_value(metrics, "fraud_ml_model_info", info_labels), 1.0)
         self.assertEqual(parse_metric_value(metrics, "fraud_ml_model_load_status", load_labels), 1.0)
 
+    def test_model_lifecycle_metrics_exist_and_remain_low_cardinality(self):
+        metrics = self.metrics_text()
+        lifecycle_info_labels = {
+            "lifecycle_mode": "READ_ONLY",
+            "model_name": server.MODEL_NAME,
+            "model_version": server.MODEL_VERSION,
+        }
+
+        self.assertEqual(parse_metric_value(metrics, "fraud_ml_model_lifecycle_info", lifecycle_info_labels), 1.0)
+        self.assertIn("fraud_ml_model_lifecycle_events_total", metrics)
+        self.assertIn("fraud_ml_model_lifecycle_history_available", metrics)
+        self.assertNotIn("artifact_path=", metrics)
+        self.assertNotIn("checksum=", metrics)
+        self.assertNotIn("event_id=", metrics)
+        self.assertNotIn("timestamp=", metrics)
+
     def test_metrics_do_not_expose_high_cardinality_labels(self):
         metrics = self.metrics_text()
         self.assertNotIn("transactionId", metrics)

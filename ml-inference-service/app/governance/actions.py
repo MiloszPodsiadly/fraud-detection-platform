@@ -34,6 +34,25 @@ def recommend_drift_actions(
     }
 
 
+def with_model_lifecycle_context(actions: dict[str, Any], lifecycle_context: dict[str, Any]) -> dict[str, Any]:
+    """Attach lifecycle context without turning drift guidance into causality."""
+    result = dict(actions)
+    result["model_lifecycle"] = {
+        "current_model_version": lifecycle_context.get("current_model_version"),
+        "model_loaded_at": lifecycle_context.get("model_loaded_at"),
+        "model_changed_recently": bool(lifecycle_context.get("model_changed_recently")),
+        "recent_lifecycle_event_count": int(lifecycle_context.get("recent_lifecycle_event_count") or 0),
+    }
+    if (
+            result.get("drift_status") in {"WATCH", "DRIFT"}
+            and result["model_lifecycle"]["recent_lifecycle_event_count"] > 0
+    ):
+        result["explanation"] = (
+            f"{result.get('explanation')}; drift was observed after recent model lifecycle activity"
+        )
+    return result
+
+
 def _recommendation(drift: dict[str, Any], severity: str) -> dict[str, Any]:
     status = str(drift.get("status", "UNKNOWN"))
     confidence = str(drift.get("confidence", "LOW"))

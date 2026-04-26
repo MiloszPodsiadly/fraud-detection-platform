@@ -9,8 +9,20 @@ from urllib.parse import parse_qs, urlparse
 
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
-from app.governance.actions import ACTION_SEVERITIES, MAX_HISTORY_FOR_ACTIONS, recommend_drift_actions
+from app.governance.actions import (
+    ACTION_SEVERITIES,
+    MAX_HISTORY_FOR_ACTIONS,
+    recommend_drift_actions,
+    with_model_lifecycle_context,
+)
 from app.governance.drift import evaluate_drift
+from app.governance.lifecycle import (
+    LifecyclePersistenceConfig,
+    ModelLifecycleService,
+    create_lifecycle_repository,
+    current_model_lifecycle_metadata,
+    lifecycle_metadata_summary,
+)
 from app.governance.profile import (
     InferenceProfile,
     governance_model_metadata,
@@ -33,6 +45,13 @@ PORT = 8090
 MODEL = FraudModel()
 REFERENCE_PROFILE = load_reference_profile()
 MODEL_GOVERNANCE = governance_model_metadata(MODEL, DEFAULT_ARTIFACT_PATH)
+MODEL_LOADED_AT = datetime.now(timezone.utc)
+MODEL_LIFECYCLE = current_model_lifecycle_metadata(
+    MODEL_GOVERNANCE,
+    DEFAULT_ARTIFACT_PATH,
+    REFERENCE_PROFILE,
+    MODEL_LOADED_AT,
+)
 INFERENCE_PROFILE = InferenceProfile(
     MODEL_NAME,
     MODEL_VERSION,
@@ -42,6 +61,11 @@ PERSISTENCE_CONFIG = GovernancePersistenceConfig.from_env()
 SNAPSHOT_SERVICE = GovernanceSnapshotService(
     create_snapshot_repository(PERSISTENCE_CONFIG),
     PERSISTENCE_CONFIG,
+)
+LIFECYCLE_CONFIG = LifecyclePersistenceConfig.from_env()
+LIFECYCLE_SERVICE = ModelLifecycleService(
+    create_lifecycle_repository(LIFECYCLE_CONFIG),
+    LIFECYCLE_CONFIG,
 )
 REQUEST_COUNTER = Counter(
     "fraud_ml_inference_requests_total",
@@ -119,10 +143,26 @@ GOVERNANCE_DRIFT_ACTION_RECOMMENDATION = Gauge(
     "Current advisory drift action recommendation.",
     ("model_name", "model_version", "severity"),
 )
+MODEL_LIFECYCLE_INFO = Gauge(
+    "fraud_ml_model_lifecycle_info",
+    "Read-only model lifecycle metadata for the active runtime.",
+    ("model_name", "model_version", "lifecycle_mode"),
+)
+MODEL_LIFECYCLE_EVENTS = Counter(
+    "fraud_ml_model_lifecycle_events_total",
+    "Read-only model lifecycle events by event type and persistence status.",
+    ("event_type", "model_name", "model_version", "status"),
+)
+MODEL_LIFECYCLE_HISTORY_AVAILABLE = Gauge(
+    "fraud_ml_model_lifecycle_history_available",
+    "Whether model lifecycle event history is available from persistent storage.",
+    ("model_name", "model_version", "status"),
+)
 
 MODEL_LOAD_STATUS.labels("success", MODEL_NAME, MODEL_VERSION).set(1)
 MODEL_LOAD_STATUS.labels("failure", MODEL_NAME, MODEL_VERSION).set(0)
 MODEL_INFO.labels(MODEL_NAME, MODEL_VERSION).set(1)
+MODEL_LIFECYCLE_INFO.labels(MODEL_NAME, MODEL_VERSION, "READ_ONLY").set(1)
 GOVERNANCE_REFERENCE_PROFILE_LOADED.labels(MODEL_NAME, MODEL_VERSION, "loaded").set(
     1 if REFERENCE_PROFILE.get("available") else 0
 )
@@ -138,6 +178,53 @@ GOVERNANCE_SNAPSHOT_HISTORY_AVAILABLE.labels(MODEL_NAME, MODEL_VERSION, "availab
 GOVERNANCE_SNAPSHOT_HISTORY_AVAILABLE.labels(MODEL_NAME, MODEL_VERSION, "unavailable").set(1)
 for _severity in ACTION_SEVERITIES:
     GOVERNANCE_DRIFT_ACTION_RECOMMENDATION.labels(MODEL_NAME, MODEL_VERSION, _severity).set(0)
+for _status in ("available", "partial", "unavailable"):
+    MODEL_LIFECYCLE_HISTORY_AVAILABLE.labels(MODEL_NAME, MODEL_VERSION, _status).set(0)
+
+
+def _initialize_lifecycle_tracking() -> None:
+    summary = lifecycle_metadata_summary(MODEL_LIFECYCLE)
+    summary["feature_count"] = len(MODEL_GOVERNANCE.get("feature_set") or [])
+    for event_type, source, reason, metadata in (
+            ("MODEL_LOADED", "model_runtime", "active model loaded by inference runtime", summary),
+            ("MODEL_METADATA_DETECTED", "model_artifact", "safe model metadata detected from artifact", summary),
+    ):
+        event, status = LIFECYCLE_SERVICE.record_event(event_type, MODEL_LIFECYCLE, source, reason, metadata)
+        _record_lifecycle_event(event, status)
+    if REFERENCE_PROFILE.get("available"):
+        event, status = LIFECYCLE_SERVICE.record_event(
+            "REFERENCE_PROFILE_LOADED",
+            MODEL_LIFECYCLE,
+            "reference_profile",
+            "reference profile loaded for drift context",
+            {"reference_profile_id": MODEL_LIFECYCLE.get("reference_profile_id")},
+        )
+        _record_lifecycle_event(event, status)
+    event, status = LIFECYCLE_SERVICE.record_history_status(MODEL_LIFECYCLE)
+    _record_lifecycle_event(event, status)
+    _record_lifecycle_history_available("AVAILABLE" if event["event_type"] == "GOVERNANCE_HISTORY_AVAILABLE" else "PARTIAL")
+
+
+def _record_lifecycle_event(event: dict[str, Any], status: str) -> None:
+    MODEL_LIFECYCLE_EVENTS.labels(
+        str(event.get("event_type", "UNKNOWN")),
+        str(event.get("model_name", "unknown")),
+        str(event.get("model_version", "unknown")),
+        status,
+    ).inc()
+
+
+def _record_lifecycle_history_available(status: str) -> None:
+    normalized = str(status).lower()
+    if normalized not in {"available", "partial", "unavailable"}:
+        normalized = "unavailable"
+    for candidate in ("available", "partial", "unavailable"):
+        MODEL_LIFECYCLE_HISTORY_AVAILABLE.labels(MODEL_NAME, MODEL_VERSION, candidate).set(
+            1 if candidate == normalized else 0
+        )
+
+
+_initialize_lifecycle_tracking()
 
 
 class FraudInferenceHandler(BaseHTTPRequestHandler):
@@ -159,6 +246,18 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             started_at = time.perf_counter()
             inference = INFERENCE_PROFILE.snapshot()
             self._send_json(200, governance_response(MODEL_GOVERNANCE, REFERENCE_PROFILE, inference))
+            self._record_request(path, "GET", 200, "success", started_at)
+            return
+        if path == "/governance/model/current":
+            started_at = time.perf_counter()
+            self._send_json(200, MODEL_LIFECYCLE)
+            self._record_request(path, "GET", 200, "success", started_at)
+            return
+        if path == "/governance/model/lifecycle":
+            started_at = time.perf_counter()
+            history = LIFECYCLE_SERVICE.history_response(MODEL_LIFECYCLE)
+            _record_lifecycle_history_available(history["status"])
+            self._send_json(200, history)
             self._record_request(path, "GET", 200, "success", started_at)
             return
         if path == "/governance/profile/reference":
@@ -203,6 +302,7 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             drift = evaluate_drift(REFERENCE_PROFILE, inference)
             history = self._snapshot_history_for_actions()
             actions = recommend_drift_actions(MODEL_GOVERNANCE, drift, history)
+            actions = with_model_lifecycle_context(actions, LIFECYCLE_SERVICE.lifecycle_context(MODEL_LIFECYCLE))
             self._record_governance_drift(drift)
             self._record_drift_action(actions)
             self._send_json(200, actions)
@@ -496,6 +596,8 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             "/metrics",
             "/v1/fraud/score",
             "/governance/model",
+            "/governance/model/current",
+            "/governance/model/lifecycle",
             "/governance/profile/reference",
             "/governance/profile/inference",
             "/governance/drift",
