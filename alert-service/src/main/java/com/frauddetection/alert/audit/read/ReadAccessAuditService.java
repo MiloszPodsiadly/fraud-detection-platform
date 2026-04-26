@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
@@ -55,7 +56,15 @@ public class ReadAccessAuditService {
             int resultCount,
             String correlationId
     ) {
-        AnalystPrincipal principal = currentAnalystUser.get().orElse(null);
+        Optional<AnalystPrincipal> principalOptional = currentAnalystUser.get();
+        AnalystPrincipal principal = principalOptional == null ? null : principalOptional.orElse(null);
+        if (principal == null) {
+            metrics.recordReadAccessAuditActorMissing(target.endpointCategory());
+            log.atWarn()
+                    .addKeyValue("endpointCategory", target.endpointCategory())
+                    .addKeyValue("resourceType", target.resourceType())
+                    .log("Read-access audit actor principal was missing; persisted audit with unknown actor.");
+        }
         return new ReadAccessAuditEvent(
                 UUID.randomUUID().toString(),
                 Instant.now(),

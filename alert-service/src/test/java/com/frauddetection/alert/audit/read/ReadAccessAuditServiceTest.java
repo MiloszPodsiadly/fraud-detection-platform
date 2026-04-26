@@ -51,6 +51,7 @@ class ReadAccessAuditServiceTest {
         ReadAccessAuditEventDocument document = captor.getValue();
         assertThat(document.action()).isEqualTo(ReadAccessAuditAction.READ);
         assertThat(document.resultCount()).isEqualTo(100);
+        assertThat(document.createdAt()).isEqualTo(document.occurredAt());
         assertThat(document.actorRoles()).containsExactly("FRAUD_OPS_ADMIN");
         assertThat(document.toString())
                 .doesNotContain("request", "response", "payload", "customerId", "accountId", "cardNumber", "token", "stack");
@@ -63,6 +64,11 @@ class ReadAccessAuditServiceTest {
 
     @Test
     void shouldNotThrowWhenPersistenceFails() {
+        when(currentAnalystUser.get()).thenReturn(java.util.Optional.of(new AnalystPrincipal(
+                "analyst-1",
+                Set.of(AnalystRole.FRAUD_OPS_ADMIN),
+                AnalystRole.FRAUD_OPS_ADMIN.authorities()
+        )));
         doThrow(new DataAccessResourceFailureException("mongo unavailable"))
                 .when(repository).save(org.mockito.ArgumentMatchers.any());
         ReadAccessAuditTarget target = new ReadAccessAuditTarget(
@@ -78,6 +84,29 @@ class ReadAccessAuditServiceTest {
 
         assertThat(meterRegistry.get("fraud_platform_read_access_audit_persistence_failures_total")
                 .tag("endpoint_category", "governance_advisory_analytics")
+                .counter()
+                .count()).isEqualTo(1.0);
+    }
+
+    @Test
+    void shouldPersistUnknownActorAndEmitAnomalyMetricWhenPrincipalIsMissing() {
+        when(currentAnalystUser.get()).thenReturn(java.util.Optional.empty());
+        ReadAccessAuditTarget target = new ReadAccessAuditTarget(
+                ReadAccessEndpointCategory.ALERT_DETAIL,
+                ReadAccessResourceType.ALERT,
+                "alert-1",
+                null,
+                null,
+                null
+        );
+
+        service.audit(target, ReadAccessAuditOutcome.SUCCESS, 1, "corr-1");
+
+        ArgumentCaptor<ReadAccessAuditEventDocument> captor = ArgumentCaptor.forClass(ReadAccessAuditEventDocument.class);
+        verify(repository).save(captor.capture());
+        assertThat(captor.getValue().actorId()).isEqualTo("unknown");
+        assertThat(meterRegistry.get("fraud_read_access_audit_actor_missing_total")
+                .tag("endpoint_category", "alert_detail")
                 .counter()
                 .count()).isEqualTo(1.0);
     }

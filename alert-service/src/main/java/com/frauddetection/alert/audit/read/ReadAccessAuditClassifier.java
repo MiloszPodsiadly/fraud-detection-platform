@@ -7,8 +7,10 @@ import org.springframework.web.servlet.HandlerMapping;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.Optional;
+import java.util.TreeMap;
 
 @Component
 public class ReadAccessAuditClassifier {
@@ -56,7 +58,7 @@ public class ReadAccessAuditClassifier {
                 category,
                 resourceType,
                 normalize(resourceId),
-                queryHash(request.getQueryString()),
+                queryHash(request),
                 intParameter(request, "page"),
                 intParameter(request, "size")
         );
@@ -74,13 +76,14 @@ public class ReadAccessAuditClassifier {
         }
     }
 
-    private String queryHash(String queryString) {
-        if (queryString == null || queryString.isBlank()) {
+    private String queryHash(HttpServletRequest request) {
+        String canonicalQuery = canonicalQuery(request);
+        if (canonicalQuery == null) {
             return null;
         }
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(queryString.getBytes(StandardCharsets.UTF_8));
+                    .digest(canonicalQuery.getBytes(StandardCharsets.UTF_8));
             StringBuilder builder = new StringBuilder();
             for (int i = 0; i < 16 && i < digest.length; i++) {
                 builder.append(String.format("%02x", digest[i]));
@@ -89,6 +92,35 @@ public class ReadAccessAuditClassifier {
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 is required for read-access audit query hashing", exception);
         }
+    }
+
+    private String canonicalQuery(HttpServletRequest request) {
+        Map<String, String[]> parameterMap = request.getParameterMap();
+        if (parameterMap == null || parameterMap.isEmpty()) {
+            return null;
+        }
+        TreeMap<String, String[]> sorted = new TreeMap<>();
+        parameterMap.forEach((name, values) -> {
+            if (name == null || name.isBlank() || values == null) {
+                return;
+            }
+            String[] normalizedValues = Arrays.stream(values)
+                    .filter(value -> value != null && !value.isBlank())
+                    .map(String::trim)
+                    .sorted()
+                    .toArray(String[]::new);
+            if (normalizedValues.length > 0) {
+                sorted.put(name.trim(), normalizedValues);
+            }
+        });
+        if (sorted.isEmpty()) {
+            return null;
+        }
+        StringBuilder canonical = new StringBuilder();
+        sorted.forEach((name, values) -> Arrays.stream(values).forEach(value ->
+                canonical.append(name).append('=').append(value).append('\n')
+        ));
+        return canonical.toString();
     }
 
     private String normalize(String value) {

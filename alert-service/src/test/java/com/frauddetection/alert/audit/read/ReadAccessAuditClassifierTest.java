@@ -64,4 +64,37 @@ class ReadAccessAuditClassifierTest {
         assertThat(target.toString())
                 .doesNotContain("severity", "HIGH", "model_version", "2026-04-21.trained.v1");
     }
+
+    @Test
+    void shouldUseCanonicalQueryHashIndependentOfParameterOrder() {
+        MockHttpServletRequest first = new MockHttpServletRequest("GET", "/api/v1/transactions/scored");
+        first.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/api/v1/transactions/scored");
+        first.addParameter("a", "1");
+        first.addParameter("b", "2");
+
+        MockHttpServletRequest second = new MockHttpServletRequest("GET", "/api/v1/transactions/scored");
+        second.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/api/v1/transactions/scored");
+        second.addParameter("b", "2");
+        second.addParameter("a", "1");
+
+        assertThat(classifier.classify(first).orElseThrow().queryHash())
+                .isEqualTo(classifier.classify(second).orElseThrow().queryHash());
+    }
+
+    @Test
+    void shouldUseDeterministicQueryHashForRepeatedParamsAndIgnoreEmptyValues() {
+        MockHttpServletRequest first = new MockHttpServletRequest("GET", "/api/v1/transactions/scored");
+        first.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/api/v1/transactions/scored");
+        first.addParameter("tag", "beta");
+        first.addParameter("tag", "");
+        first.addParameter("tag", "alpha");
+
+        MockHttpServletRequest second = new MockHttpServletRequest("GET", "/api/v1/transactions/scored");
+        second.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/api/v1/transactions/scored");
+        second.addParameter("tag", "alpha");
+        second.addParameter("tag", "beta");
+
+        assertThat(classifier.classify(first).orElseThrow().queryHash())
+                .isEqualTo(classifier.classify(second).orElseThrow().queryHash());
+    }
 }

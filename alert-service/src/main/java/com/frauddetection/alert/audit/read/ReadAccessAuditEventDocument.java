@@ -13,9 +13,9 @@ import java.util.List;
 
 @Document(collection = "read_access_audit_events")
 @CompoundIndexes({
-        @CompoundIndex(name = "read_access_actor_occurred_at_idx", def = "{'actor_id': 1, 'occurred_at': -1}"),
-        @CompoundIndex(name = "read_access_endpoint_occurred_at_idx", def = "{'endpoint_category': 1, 'occurred_at': -1}"),
-        @CompoundIndex(name = "read_access_resource_occurred_at_idx", def = "{'resource_type': 1, 'resource_id': 1, 'occurred_at': -1}")
+        @CompoundIndex(name = "read_access_actor_created_at_idx", def = "{'actor_id': 1, 'created_at': -1}"),
+        @CompoundIndex(name = "read_access_endpoint_created_at_idx", def = "{'endpoint_category': 1, 'created_at': -1}"),
+        @CompoundIndex(name = "read_access_resource_created_at_idx", def = "{'resource_type': 1, 'resource_id': 1, 'created_at': -1}")
 })
 public record ReadAccessAuditEventDocument(
         @Id
@@ -25,6 +25,10 @@ public record ReadAccessAuditEventDocument(
         @Field("occurred_at")
         @Indexed(name = "read_access_occurred_at_idx", direction = IndexDirection.DESCENDING)
         Instant occurredAt,
+
+        @Field("created_at")
+        @Indexed(name = "read_access_created_at_idx", direction = IndexDirection.DESCENDING)
+        Instant createdAt,
 
         @Field("actor_id")
         String actorId,
@@ -71,6 +75,7 @@ public record ReadAccessAuditEventDocument(
     static ReadAccessAuditEventDocument from(ReadAccessAuditEvent event) {
         return new ReadAccessAuditEventDocument(
                 event.auditId(),
+                event.occurredAt(),
                 event.occurredAt(),
                 event.actorId(),
                 event.actorRoles().stream().sorted().toList(),

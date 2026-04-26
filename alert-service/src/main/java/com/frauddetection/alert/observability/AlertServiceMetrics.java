@@ -83,6 +83,13 @@ public class AlertServiceMetrics {
         ).increment();
     }
 
+    public void recordReadAccessAuditActorMissing(ReadAccessEndpointCategory endpointCategory) {
+        counter(
+                "fraud_read_access_audit_actor_missing_total",
+                "endpoint_category", normalize(endpointCategory)
+        ).increment();
+    }
+
     public void recordAuthenticationFailure(HttpServletRequest request, AuthenticationException exception) {
         counter(
                 "fraud.security.auth.failures",
