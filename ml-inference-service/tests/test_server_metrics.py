@@ -776,10 +776,22 @@ class MlMetricsEndpointTest(unittest.TestCase):
         )}
         score_body = b'{"features":{"amount":42,"recentTransactionCount":1}}'
         valid_scoring_token = rs256_service_token()
+        valid_alert_token = rs256_service_token(
+            private_key_path=ALERT_PRIVATE_KEY,
+            key_id="alert-key-1",
+            service_name="alert-service",
+            authorities=["governance-read"],
+        )
         alert_score_token = rs256_service_token(
             private_key_path=ALERT_PRIVATE_KEY,
             key_id="alert-key-1",
             service_name="alert-service",
+            authorities=["ml-score"],
+        )
+        alert_key_scoring_service_token = rs256_service_token(
+            private_key_path=ALERT_PRIVATE_KEY,
+            key_id="alert-key-1",
+            service_name="fraud-scoring-service",
             authorities=["ml-score"],
         )
         wrong_key_service_token = rs256_service_token(
@@ -808,6 +820,11 @@ class MlMetricsEndpointTest(unittest.TestCase):
                     "Authorization": f"Bearer {valid_scoring_token}",
                 },
             )
+            valid_alert_status, _, _ = self.request(
+                "GET",
+                "/governance/model",
+                headers={"Authorization": f"Bearer {valid_alert_token}"},
+            )
             scoring_governance_status, _, _ = self.request(
                 "GET",
                 "/governance/model",
@@ -822,6 +839,15 @@ class MlMetricsEndpointTest(unittest.TestCase):
                     "Authorization": f"Bearer {alert_score_token}",
                 },
             )
+            alert_key_scoring_status, _, _ = self.request(
+                "POST",
+                "/v1/fraud/score",
+                body=score_body,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {alert_key_scoring_service_token}",
+                },
+            )
             wrong_key_status, _, _ = self.request(
                 "GET",
                 "/governance/model",
@@ -829,8 +855,10 @@ class MlMetricsEndpointTest(unittest.TestCase):
             )
 
             self.assertEqual(valid_status, 200)
+            self.assertEqual(valid_alert_status, 200)
             self.assertEqual(scoring_governance_status, 403)
             self.assertEqual(alert_score_status, 403)
+            self.assertEqual(alert_key_scoring_status, 403)
             self.assertEqual(wrong_key_status, 403)
         finally:
             for key, value in saved.items():
@@ -852,12 +880,14 @@ class MlMetricsEndpointTest(unittest.TestCase):
         )}
         tokens = {
             "unknown_kid": rs256_service_token(key_id="unknown-key"),
+            "known_kid_unknown_service": rs256_service_token(service_name="unknown-service"),
             "wrong_issuer": rs256_service_token(issuer="attacker"),
             "wrong_audience": rs256_service_token(audience="wrong-service"),
             "expired": rs256_service_token(expires_in_seconds=-1),
             "future_iat": rs256_service_token(issued_at_offset_seconds=600),
             "missing_authorities": rs256_service_token(include_authorities=False),
             "hs256": jwt_service_token(),
+            "none": jwt_service_token(algorithm="none"),
         }
         try:
             os.environ["INTERNAL_AUTH_MODE"] = "JWT_SERVICE_IDENTITY"
@@ -886,6 +916,8 @@ class MlMetricsEndpointTest(unittest.TestCase):
             self.assertNotIn(tokens["unknown_kid"], output.getvalue())
             self.assertNotIn("BEGIN PRIVATE KEY", output.getvalue())
             self.assertNotIn("scoring-key-1", output.getvalue())
+            with open(JWKS_PATH, encoding="utf-8") as handle:
+                self.assertNotIn(handle.read(), output.getvalue())
         finally:
             for key, value in saved.items():
                 if value is None:

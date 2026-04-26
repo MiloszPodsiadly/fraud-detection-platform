@@ -123,6 +123,41 @@ class InternalServiceClientProdGuardTest {
     }
 
     @Test
+    void shouldRequireRs256PrivateKeyMaterial() {
+        assertThatThrownBy(() -> new InternalServiceClientProperties(
+                true,
+                "JWT_SERVICE_IDENTITY",
+                "alert-service",
+                "",
+                false,
+                new InternalServiceClientProperties.Jwt(
+                        "RS256",
+                        "fraud-platform-local",
+                        "ml-inference-service",
+                        "",
+                        "alert-key-1",
+                        "",
+                        "",
+                        Duration.ofMinutes(5),
+                        "governance-read"
+                )
+        ))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("app.internal-auth.client.jwt issuer, audience, algorithm, key material, ttl, and authorities are required when JWT_SERVICE_IDENTITY is enabled");
+    }
+
+    @Test
+    void shouldFailCleanlyWhenRs256PrivateKeyIsInvalid() {
+        HttpHeaders headers = new HttpHeaders();
+
+        assertThatThrownBy(() -> new InternalServiceAuthHeaders(invalidPrivateKeyJwtProperties()).apply(headers))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Internal JWT signing is not available.")
+                .hasMessageNotContaining("not-a-private-key")
+                .hasMessageNotContaining("alert-key-1");
+    }
+
+    @Test
     void shouldAllowDockerLocalProfileWithExplicitLocalConfiguration() {
         InternalServiceClientProdGuard guard = new InternalServiceClientProdGuard(
                 disabledProperties(),
@@ -152,6 +187,27 @@ class InternalServiceClientProdGuardTest {
                         "local-dev-jwt-service-secret-32bytes",
                         "alert-key-1",
                         privateKeyPem(),
+                        "",
+                        Duration.ofMinutes(5),
+                        "governance-read"
+                )
+        );
+    }
+
+    private InternalServiceClientProperties invalidPrivateKeyJwtProperties() {
+        return new InternalServiceClientProperties(
+                true,
+                "JWT_SERVICE_IDENTITY",
+                "alert-service",
+                "",
+                false,
+                new InternalServiceClientProperties.Jwt(
+                        "RS256",
+                        "fraud-platform-local",
+                        "ml-inference-service",
+                        "",
+                        "alert-key-1",
+                        "not-a-private-key",
                         "",
                         Duration.ofMinutes(5),
                         "governance-read"
