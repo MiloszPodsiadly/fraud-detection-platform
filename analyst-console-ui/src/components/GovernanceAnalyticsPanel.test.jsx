@@ -11,6 +11,10 @@ describe("GovernanceAnalyticsPanel", () => {
     expect(screen.getByText(/do not define SLAs, trigger actions, or change scoring/i)).toBeInTheDocument();
     expect(screen.getByText("Total advisories")).toBeInTheDocument();
     expect(screen.getByText("Reviewed vs open")).toBeInTheDocument();
+    expect(screen.getByText("Status AVAILABLE")).toHaveAttribute(
+      "title",
+      "All data sources were available and processed successfully."
+    );
     expect(screen.getByText("25%")).toBeInTheDocument();
     expect(screen.getByText("50%")).toBeInTheDocument();
     expect(screen.getByText("NEEDS_FOLLOW_UP")).toBeInTheDocument();
@@ -35,7 +39,10 @@ describe("GovernanceAnalyticsPanel", () => {
       }
     });
 
-    expect(screen.getByText("Partial analytics available. Some audit or advisory data may be missing.")).toBeInTheDocument();
+    expect(screen.getByText("Partial analytics available. Some audit or advisory data may be missing.")).toHaveAttribute(
+      "title",
+      "Some data sources were unavailable or limits were exceeded. Results may be incomplete."
+    );
 
     rerender(panelElement({
       analytics: {
@@ -45,6 +52,24 @@ describe("GovernanceAnalyticsPanel", () => {
     }));
 
     expect(screen.getByRole("heading", { name: "No advisory analytics in this window" })).toBeInTheDocument();
+  });
+
+  it("explains low-confidence timeliness without implying urgency", () => {
+    renderPanel({
+      analytics: {
+        ...analyticsFixture(),
+        review_timeliness: {
+          status: "LOW_CONFIDENCE",
+          time_to_first_review_p50_minutes: 0,
+          time_to_first_review_p95_minutes: 0
+        }
+      }
+    });
+
+    expect(screen.getByText("Timeliness LOW_CONFIDENCE")).toHaveAttribute(
+      "title",
+      "Insufficient valid samples to compute reliable percentiles."
+    );
   });
 });
 

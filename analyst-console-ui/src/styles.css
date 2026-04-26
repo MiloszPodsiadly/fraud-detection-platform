@@ -260,6 +260,23 @@ code {
   border-color: rgba(63, 123, 85, 0.26);
 }
 
+.analyticsMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+}
+
+.analyticsMeta span {
+  border: 1px solid rgba(82, 97, 60, 0.16);
+  border-radius: 999px;
+  background: rgba(82, 97, 60, 0.08);
+  color: var(--muted);
+  padding: 0.25rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+
 .compactControl {
   min-width: 8rem;
 }
