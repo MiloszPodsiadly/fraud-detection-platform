@@ -5,7 +5,7 @@ import { LoadingPanel } from "./LoadingPanel.jsx";
 import { RiskBadge } from "./RiskBadge.jsx";
 
 const SEVERITIES = ["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"];
-const LIMITS = [10, 25, 50, 100];
+const LIMITS = [25, 50, 100];
 
 export function GovernanceReviewQueue({
   advisoryQueue,
@@ -16,7 +16,7 @@ export function GovernanceReviewQueue({
   onRetry
 }) {
   const status = advisoryQueue?.status || "UNAVAILABLE";
-  const events = advisoryQueue?.advisory_events || [];
+  const events = status === "UNAVAILABLE" ? [] : advisoryQueue?.advisory_events || [];
   const isUnavailable = status === "UNAVAILABLE";
   const isPartial = status === "PARTIAL";
 
@@ -31,8 +31,8 @@ export function GovernanceReviewQueue({
           <p className="eyebrow">Governance</p>
           <h2>Operator review queue</h2>
           <p className="sectionCopy">
-            Advisory signal, not fraud alert. Events are heuristic, read-only operator signals;
-            they do not change scoring, trigger retraining, start rollback, or create fraud decisions.
+            This view is read-only. Advisory events do not trigger system actions.
+            Advisory signals do not affect scoring, model behavior, or system decisions.
             Operator review is manual.
           </p>
         </div>
@@ -64,24 +64,25 @@ export function GovernanceReviewQueue({
           </select>
         </label>
       </div>
+      <p className="sectionCopy">Results are limited to recent advisory events.</p>
 
       {isPartial && (
         <div className="stateBanner" role="status">
-          Advisory history is partial because the backend is using bounded in-memory data.
+          Partial data available. Some advisory events may be missing.
         </div>
       )}
       {isUnavailable && !isLoading && !error && (
         <div className="stateBanner stateBannerWarning" role="status">
-          Advisory history is unavailable. No automation runs from this queue.
+          Advisory data is currently unavailable.
         </div>
       )}
 
       {isLoading && <LoadingPanel label="Loading governance advisories..." />}
       {!isLoading && error && <ErrorState error={error} onRetry={onRetry} />}
-      {!isLoading && !error && events.length === 0 && (
+      {!isLoading && !error && !isUnavailable && events.length === 0 && (
         <EmptyState
-          title="No advisory signals match this view"
-          message="No governance advisory events are available for the selected exact-match filters."
+          title="No advisory signals available for the selected filters."
+          message="This does not guarantee absence of model drift."
         />
       )}
       {!isLoading && !error && events.length > 0 && (
@@ -113,7 +114,11 @@ export function GovernanceReviewQueue({
                       <strong>{event.drift_status}</strong>
                       <span>{event.confidence} confidence</span>
                       <span>{event.advisory_confidence_context}</span>
-                      {event.explanation && <p className="tableCopy">{event.explanation}</p>}
+                      {event.explanation && (
+                        <p className="tableCopy">
+                          <strong>Explanation (heuristic):</strong> {event.explanation}
+                        </p>
+                      )}
                     </td>
                     <td>
                       <strong>{event.model_name || "Unknown model"}</strong>

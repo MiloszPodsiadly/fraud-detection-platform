@@ -14,13 +14,16 @@ describe("GovernanceReviewQueue", () => {
     });
 
     expect(screen.getByRole("heading", { name: "Operator review queue" })).toBeInTheDocument();
-    expect(screen.getByText(/Advisory signal, not fraud alert/i)).toBeInTheDocument();
-    expect(screen.getByText(/do not change scoring/i)).toBeInTheDocument();
+    expect(screen.getByText(/This view is read-only/i)).toBeInTheDocument();
+    expect(screen.getByText(/do not trigger system actions/i)).toBeInTheDocument();
+    expect(screen.getByText(/do not affect scoring, model behavior, or system decisions/i)).toBeInTheDocument();
+    expect(screen.getByText(/Results are limited to recent advisory events/i)).toBeInTheDocument();
     expect(screen.getAllByText("HIGH").length).toBeGreaterThan(0);
     expect(screen.getByText("DRIFT")).toBeInTheDocument();
     expect(screen.getByText("SUFFICIENT_DATA")).toBeInTheDocument();
     expect(screen.getByText("python-logistic-fraud-model")).toBeInTheDocument();
     expect(screen.getByText("ESCALATE_MODEL_REVIEW")).toBeInTheDocument();
+    expect(screen.getByText("Explanation (heuristic):")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /approve|reject|retrain|rollback/i })).not.toBeInTheDocument();
   });
 
@@ -34,7 +37,8 @@ describe("GovernanceReviewQueue", () => {
       }
     });
 
-    expect(screen.getByRole("heading", { name: "No advisory signals match this view" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "No advisory signals available for the selected filters." })).toBeInTheDocument();
+    expect(screen.getByText("This does not guarantee absence of model drift.")).toBeInTheDocument();
   });
 
   it("renders partial and unavailable backend states", () => {
@@ -47,7 +51,7 @@ describe("GovernanceReviewQueue", () => {
       }
     });
 
-    expect(screen.getByText(/Advisory history is partial/i)).toBeInTheDocument();
+    expect(screen.getByText("Partial data available. Some advisory events may be missing.")).toBeInTheDocument();
 
     rerender(queueElement({
       advisoryQueue: {
@@ -58,7 +62,8 @@ describe("GovernanceReviewQueue", () => {
       }
     }));
 
-    expect(screen.getByText(/Advisory history is unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText("Advisory data is currently unavailable.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "No advisory signals available for the selected filters." })).not.toBeInTheDocument();
   });
 
   it("filters call exact API query state", () => {
@@ -87,6 +92,7 @@ describe("GovernanceReviewQueue", () => {
       modelVersion: "",
       limit: 50
     });
+    expect(screen.queryByRole("option", { name: "10" })).not.toBeInTheDocument();
   });
 
   it("renders deterministic API error state", () => {
