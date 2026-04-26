@@ -4,6 +4,8 @@ import {
   listFraudCases,
   listGovernanceAdvisories,
   listScoredTransactions,
+  getGovernanceAdvisoryAudit,
+  recordGovernanceAdvisoryAudit,
   setApiSession
 } from "./api/alertsApi.js";
 import { getConfiguredAuthProvider } from "./auth/authProvider.js";
@@ -68,6 +70,7 @@ export default function App() {
   const [isGovernanceLoading, setIsGovernanceLoading] = useState(true);
   const [error, setError] = useState(null);
   const [governanceError, setGovernanceError] = useState(null);
+  const [governanceAuditHistories, setGovernanceAuditHistories] = useState({});
   const [callbackError, setCallbackError] = useState(null);
   const handlingOidcCallback = authProvider.kind === "oidc" && isOidcCallbackPath();
   const [sessionBootstrapPending, setSessionBootstrapPending] = useState(authProvider.kind === "oidc");
@@ -226,12 +229,41 @@ export default function App() {
     setIsGovernanceLoading(true);
     setGovernanceError(null);
     try {
-      setAdvisoryQueue(await listGovernanceAdvisories(nextRequest));
+      const nextQueue = await listGovernanceAdvisories(nextRequest);
+      setAdvisoryQueue(nextQueue);
+      await loadGovernanceAuditHistories(nextQueue.advisory_events || []);
     } catch (apiError) {
       setGovernanceError(apiError);
+      setGovernanceAuditHistories({});
     } finally {
       setIsGovernanceLoading(false);
     }
+  }
+
+  async function loadGovernanceAuditHistories(events) {
+    const histories = {};
+    await Promise.all(events.map(async (event) => {
+      try {
+        histories[event.event_id] = await getGovernanceAdvisoryAudit(event.event_id);
+      } catch (apiError) {
+        histories[event.event_id] = {
+          advisory_event_id: event.event_id,
+          status: "UNAVAILABLE",
+          audit_events: [],
+          error: apiError.message
+        };
+      }
+    }));
+    setGovernanceAuditHistories(histories);
+  }
+
+  async function recordGovernanceAudit(eventId, audit) {
+    await recordGovernanceAdvisoryAudit(eventId, audit);
+    const nextHistory = await getGovernanceAdvisoryAudit(eventId);
+    setGovernanceAuditHistories((current) => ({
+      ...current,
+      [eventId]: nextHistory
+    }));
   }
 
   function refreshDashboard() {
@@ -373,10 +405,13 @@ export default function App() {
             isGovernanceLoading={isGovernanceLoading}
             error={error}
             governanceError={governanceError}
+            governanceAuditHistories={governanceAuditHistories}
+            session={session}
             sessionState={sessionState}
             onRetry={refreshDashboard}
             onGovernanceRetry={() => loadGovernanceQueue(advisoryQueueRequest)}
             onAdvisoryQueueRequestChange={setAdvisoryQueueRequest}
+            onRecordGovernanceAudit={recordGovernanceAudit}
             onTransactionPageChange={changeTransactionPage}
             onTransactionPageSizeChange={changeTransactionPageSize}
             onAlertPageChange={changeAlertPage}

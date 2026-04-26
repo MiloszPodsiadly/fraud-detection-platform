@@ -1,24 +1,33 @@
+import { useState } from "react";
+import { AUTHORITIES, hasAuthority } from "../auth/session.js";
 import { formatDateTime } from "../utils/format.js";
 import { EmptyState } from "./EmptyState.jsx";
 import { ErrorState } from "./ErrorState.jsx";
 import { LoadingPanel } from "./LoadingPanel.jsx";
 import { RiskBadge } from "./RiskBadge.jsx";
+import { PermissionNotice } from "./SecurityStatePanels.jsx";
 
 const SEVERITIES = ["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"];
 const LIMITS = [25, 50, 100];
+const AUDIT_DECISIONS = ["ACKNOWLEDGED", "NEEDS_FOLLOW_UP", "DISMISSED_AS_NOISE"];
+const MAX_NOTE_LENGTH = 500;
 
 export function GovernanceReviewQueue({
   advisoryQueue,
   filters,
   isLoading,
   error,
+  auditHistories = {},
+  session,
   onFiltersChange,
-  onRetry
+  onRetry,
+  onRecordAudit
 }) {
   const status = advisoryQueue?.status || "UNAVAILABLE";
   const events = status === "UNAVAILABLE" ? [] : advisoryQueue?.advisory_events || [];
   const isUnavailable = status === "UNAVAILABLE";
   const isPartial = status === "PARTIAL";
+  const canRecordAudit = hasAuthority(session, AUTHORITIES.GOVERNANCE_ADVISORY_AUDIT_WRITE);
 
   function updateFilter(field, value) {
     onFiltersChange({ ...filters, [field]: value });
@@ -31,8 +40,8 @@ export function GovernanceReviewQueue({
           <p className="eyebrow">Governance</p>
           <h2>Operator review queue</h2>
           <p className="sectionCopy">
-            This view is read-only. Advisory events do not trigger system actions.
-            Advisory signals do not affect scoring, model behavior, or system decisions.
+            Advisory context is read-only. Recording review writes audit history only.
+            Audit entries do not trigger system actions. Advisory signals do not affect scoring, model behavior, or system decisions.
             Operator review is manual.
           </p>
         </div>
@@ -102,36 +111,19 @@ export function GovernanceReviewQueue({
                   <th>Lifecycle context</th>
                   <th>Recommended review</th>
                   <th>Created</th>
+                  <th>Human review</th>
                 </tr>
               </thead>
               <tbody>
                 {events.map((event) => (
-                  <tr key={event.event_id}>
-                    <td>
-                      <RiskBadge riskLevel={event.severity} />
-                    </td>
-                    <td>
-                      <strong>{event.drift_status}</strong>
-                      <span>{event.confidence} confidence</span>
-                      <span>{event.advisory_confidence_context}</span>
-                      {event.explanation && (
-                        <p className="tableCopy">
-                          <strong>Explanation (heuristic):</strong> {event.explanation}
-                        </p>
-                      )}
-                    </td>
-                    <td>
-                      <strong>{event.model_name || "Unknown model"}</strong>
-                      <span>{event.model_version || "Unknown version"}</span>
-                    </td>
-                    <td>
-                      <LifecycleContext context={event.lifecycle_context} />
-                    </td>
-                    <td>
-                      <ActionTags actions={event.recommended_actions} />
-                    </td>
-                    <td>{formatDateTime(event.created_at)}</td>
-                  </tr>
+                  <GovernanceEventRows
+                    key={event.event_id}
+                    event={event}
+                    auditHistory={auditHistories[event.event_id]}
+                    canRecordAudit={canRecordAudit}
+                    session={session}
+                    onRecordAudit={onRecordAudit}
+                  />
                 ))}
               </tbody>
             </table>
@@ -139,6 +131,157 @@ export function GovernanceReviewQueue({
         </>
       )}
     </section>
+  );
+}
+
+function GovernanceEventRows({ event, auditHistory, canRecordAudit, session, onRecordAudit }) {
+  const [decision, setDecision] = useState("ACKNOWLEDGED");
+  const [note, setNote] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState("");
+
+  async function submitAudit(formEvent) {
+    formEvent.preventDefault();
+    if (!canRecordAudit || isSubmitting) {
+      return;
+    }
+    setIsSubmitting(true);
+    setError("");
+    setResult("");
+    try {
+      await onRecordAudit(event.event_id, {
+        decision,
+        note: note.trim() || undefined
+      });
+      setNote("");
+      setResult("Human review recorded.");
+    } catch (apiError) {
+      setError(apiError.message || "Unable to record review.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  const auditEvents = auditHistory?.audit_events || [];
+
+  return (
+    <>
+      <tr>
+        <td>
+          <RiskBadge riskLevel={event.severity} />
+        </td>
+        <td>
+          <strong>{event.drift_status}</strong>
+          <span>{event.confidence} confidence</span>
+          <span>{event.advisory_confidence_context}</span>
+          {event.explanation && (
+            <p className="tableCopy">
+              <strong>Explanation (heuristic):</strong> {event.explanation}
+            </p>
+          )}
+        </td>
+        <td>
+          <strong>{event.model_name || "Unknown model"}</strong>
+          <span>{event.model_version || "Unknown version"}</span>
+        </td>
+        <td>
+          <LifecycleContext context={event.lifecycle_context} />
+        </td>
+        <td>
+          <ActionTags actions={event.recommended_actions} />
+        </td>
+        <td>{formatDateTime(event.created_at)}</td>
+        <td>
+          <strong>{auditEvents.length}</strong>
+          <span>review entries</span>
+        </td>
+      </tr>
+      <tr className="governanceAuditRow">
+        <td colSpan="7">
+          <div className="governanceAuditPanel">
+            <form className="governanceAuditForm" onSubmit={submitAudit}>
+              <div>
+                <strong>Record review</strong>
+                <p className="tableCopy">
+                  This records human review only. It does not affect scoring or model behavior.
+                </p>
+              </div>
+              {!canRecordAudit && (
+                <PermissionNotice
+                  session={session}
+                  authority={AUTHORITIES.GOVERNANCE_ADVISORY_AUDIT_WRITE}
+                  action="recording governance advisory review"
+                />
+              )}
+              <label>
+                Decision
+                <select
+                  value={decision}
+                  onChange={(selectEvent) => setDecision(selectEvent.target.value)}
+                  disabled={!canRecordAudit || isSubmitting}
+                >
+                  {AUDIT_DECISIONS.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Note
+                <textarea
+                  value={note}
+                  onChange={(textEvent) => setNote(textEvent.target.value.slice(0, MAX_NOTE_LENGTH))}
+                  disabled={!canRecordAudit || isSubmitting}
+                  maxLength={MAX_NOTE_LENGTH}
+                  rows="3"
+                  placeholder="Optional bounded operator note."
+                />
+              </label>
+              <div className="governanceAuditActions">
+                <span className="muted">{note.length}/{MAX_NOTE_LENGTH}</span>
+                <button className="secondaryButton" type="submit" disabled={!canRecordAudit || isSubmitting}>
+                  {isSubmitting ? "Recording..." : "Mark reviewed"}
+                </button>
+              </div>
+              {error && <p className="formError">{error}</p>}
+              {result && <p className="formSuccess">{result}</p>}
+            </form>
+            <AuditHistory history={auditHistory} />
+          </div>
+        </td>
+      </tr>
+    </>
+  );
+}
+
+function AuditHistory({ history }) {
+  const auditEvents = history?.audit_events || [];
+  if (history?.status === "UNAVAILABLE") {
+    return (
+      <div className="governanceAuditHistory">
+        <strong>Audit history</strong>
+        <p className="formError">{history.error || "Audit history is currently unavailable."}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="governanceAuditHistory">
+      <strong>Audit history</strong>
+      {auditEvents.length === 0 ? (
+        <p className="muted">No human review entries recorded for this advisory event.</p>
+      ) : (
+        <ol>
+          {auditEvents.map((auditEvent) => (
+            <li key={auditEvent.audit_id}>
+              <strong>{auditEvent.decision}</strong>
+              <span>{formatDateTime(auditEvent.created_at)} by {auditEvent.actor_display_name || auditEvent.actor_id}</span>
+              {auditEvent.note && <p>{auditEvent.note}</p>}
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
   );
 }
 
