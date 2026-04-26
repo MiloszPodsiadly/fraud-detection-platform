@@ -5,6 +5,9 @@ import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
 import com.frauddetection.alert.api.SubmitAnalystDecisionResponse;
 import com.frauddetection.alert.api.UpdateFraudCaseRequest;
 import com.frauddetection.alert.assistant.AnalystCaseSummaryUseCase;
+import com.frauddetection.alert.audit.AuditEventController;
+import com.frauddetection.alert.audit.AuditEventReadResponse;
+import com.frauddetection.alert.audit.AuditEventReadService;
 import com.frauddetection.alert.controller.AlertController;
 import com.frauddetection.alert.controller.FraudCaseController;
 import com.frauddetection.alert.controller.ScoredTransactionController;
@@ -65,6 +68,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         AlertController.class,
         FraudCaseController.class,
         ScoredTransactionController.class,
+        AuditEventController.class,
         GovernanceAdvisoryController.class,
         GovernanceAuditController.class
 })
@@ -107,6 +111,9 @@ class AlertSecurityConfigTest {
     private AlertServiceMetrics alertServiceMetrics;
 
     @MockBean
+    private AuditEventReadService auditEventReadService;
+
+    @MockBean
     private GovernanceAuditService governanceAuditService;
 
     @MockBean
@@ -138,6 +145,8 @@ class AlertSecurityConfigTest {
                         .content(objectMapper.writeValueAsString(updateFraudCaseRequest())))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/transactions/scored"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/audit/events"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/governance/advisories"))
                 .andExpect(status().isUnauthorized());
@@ -310,6 +319,23 @@ class AlertSecurityConfigTest {
                         .content(objectMapper.writeValueAsString(submitDecisionRequest())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultingStatus").value("RESOLVED"));
+    }
+
+    @Test
+    void shouldProtectPlatformAuditReadWithDedicatedAuthority() throws Exception {
+        when(auditEventReadService.readEvents(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(new AuditEventReadResponse("AVAILABLE", 0, 50, List.of()));
+
+        mockMvc.perform(get("/api/v1/audit/events").with(demoUser("FRAUD_OPS_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("AVAILABLE"));
+
+        mockMvc.perform(get("/api/v1/audit/events").with(demoUser("ANALYST")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/audit/events").with(demoUser("REVIEWER")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/audit/events").with(demoUser("READ_ONLY_ANALYST")))
+                .andExpect(status().isForbidden());
     }
 
     @Test
