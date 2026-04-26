@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import hashlib
 import hmac
@@ -242,24 +244,35 @@ class InternalServiceCredential:
 INTERNAL_AUTH_TARGET_SERVICE = "ml-inference-service"
 LOCAL_INTERNAL_AUTH_MODES = {"LOCALDEV", "DISABLED_LOCAL_ONLY"}
 TOKEN_INTERNAL_AUTH_MODES = {"REQUIRED", "TOKEN_VALIDATOR"}
+JWT_INTERNAL_AUTH_MODES = {"JWT_SERVICE_IDENTITY"}
+SUPPORTED_INTERNAL_AUTH_MODES = LOCAL_INTERNAL_AUTH_MODES | TOKEN_INTERNAL_AUTH_MODES | JWT_INTERNAL_AUTH_MODES | {"MTLS_READY"}
 PROD_LIKE_PROFILES = {"prod", "production", "staging"}
 INTERNAL_AUTH_FAILURE_REASONS = {
     "missing_internal_credentials",
     "invalid_internal_credentials",
+    "expired_internal_token",
+    "invalid_internal_token",
+    "invalid_internal_issuer",
+    "invalid_internal_audience",
+    "unknown_internal_service",
     "missing_internal_authority",
     "mtls_not_configured",
 }
 
 
-def _internal_auth_mode() -> str:
-    mode = os.getenv("INTERNAL_AUTH_MODE", "REQUIRED").strip().upper()
-    if mode in LOCAL_INTERNAL_AUTH_MODES:
+def _normalize_internal_auth_mode(mode: str) -> str:
+    candidate = mode.strip().upper()
+    if candidate not in SUPPORTED_INTERNAL_AUTH_MODES:
+        raise RuntimeError("Unsupported internal auth mode.")
+    if candidate in LOCAL_INTERNAL_AUTH_MODES:
         return "DISABLED_LOCAL_ONLY"
-    if mode in TOKEN_INTERNAL_AUTH_MODES:
+    if candidate in TOKEN_INTERNAL_AUTH_MODES:
         return "TOKEN_VALIDATOR"
-    if mode == "MTLS_READY":
-        return "MTLS_READY"
-    return "TOKEN_VALIDATOR"
+    return candidate
+
+
+def _internal_auth_mode() -> str:
+    return _normalize_internal_auth_mode(os.getenv("INTERNAL_AUTH_MODE", "REQUIRED"))
 
 
 def _runtime_profile() -> str:
@@ -280,6 +293,10 @@ def _prod_like_profile(profile: str | None = None) -> bool:
 
 def _token_hash_mode() -> bool:
     return os.getenv("INTERNAL_AUTH_TOKEN_HASH_MODE", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _allow_token_validator_in_prod() -> bool:
+    return os.getenv("INTERNAL_AUTH_ALLOW_TOKEN_VALIDATOR_IN_PROD", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _allowed_internal_services() -> dict[str, InternalServiceCredential]:
@@ -305,23 +322,134 @@ def _allowed_internal_services() -> dict[str, InternalServiceCredential]:
 INTERNAL_SERVICE_CREDENTIALS = _allowed_internal_services()
 
 
+def _jwt_issuer() -> str:
+    return os.getenv("INTERNAL_AUTH_JWT_ISSUER", "").strip()
+
+
+def _jwt_audience() -> str:
+    return os.getenv("INTERNAL_AUTH_JWT_AUDIENCE", "").strip()
+
+
+def _jwt_secret() -> str:
+    return os.getenv("INTERNAL_AUTH_JWT_SECRET", "").strip()
+
+
+def _jwt_service_claim() -> str:
+    return os.getenv("INTERNAL_AUTH_JWT_SERVICE_CLAIM", "service_name").strip() or "service_name"
+
+
+def _jwt_authorities_claim() -> str:
+    return os.getenv("INTERNAL_AUTH_JWT_AUTHORITIES_CLAIM", "authorities").strip() or "authorities"
+
+
+def _allowed_jwt_service_authorities() -> dict[str, frozenset[str]]:
+    raw = os.getenv("INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES", "")
+    services: dict[str, frozenset[str]] = {}
+    for entry in raw.split(","):
+        parts = entry.strip().split(":", 1)
+        if len(parts) != 2:
+            continue
+        service_name, authorities = (part.strip() for part in parts)
+        if not service_name:
+            continue
+        authority_set = frozenset(authority.strip() for authority in authorities.split("|") if authority.strip())
+        if not authority_set:
+            continue
+        services[service_name] = authority_set
+    return services
+
+
+def _jwt_configured() -> bool:
+    return bool(_jwt_issuer() and _jwt_audience() and _jwt_secret() and _allowed_jwt_service_authorities())
+
+
+def _json_b64url_decode(value: str) -> Any:
+    padded = value + "=" * (-len(value) % 4)
+    decoded = base64.urlsafe_b64decode(padded.encode("ascii"))
+    return json.loads(decoded.decode("utf-8"))
+
+
+def _jwt_authorities(value: Any) -> frozenset[str]:
+    if isinstance(value, list):
+        return frozenset(item.strip() for item in value if isinstance(item, str) and item.strip())
+    if isinstance(value, str):
+        return frozenset(part.strip() for part in re.split(r"[\s,]+", value) if part.strip())
+    return frozenset()
+
+
+def _jwt_audience_matches(value: Any, expected: str) -> bool:
+    if isinstance(value, str):
+        return hmac.compare_digest(value, expected)
+    if isinstance(value, list):
+        return any(isinstance(candidate, str) and hmac.compare_digest(candidate, expected) for candidate in value)
+    return False
+
+
+def _validate_jwt_service_token(token: str, required_authority: str) -> tuple[InternalServicePrincipal | None, int, str]:
+    parts = token.split(".")
+    if len(parts) != 3:
+        return None, 403, "invalid_internal_token"
+    try:
+        header = _json_b64url_decode(parts[0])
+        claims = _json_b64url_decode(parts[1])
+        signature = base64.urlsafe_b64decode((parts[2] + "=" * (-len(parts[2]) % 4)).encode("ascii"))
+    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        return None, 403, "invalid_internal_token"
+    if not isinstance(header, dict) or not isinstance(claims, dict) or header.get("alg") != "HS256":
+        return None, 403, "invalid_internal_token"
+    signing_input = f"{parts[0]}.{parts[1]}".encode("ascii")
+    expected_signature = hmac.new(_jwt_secret().encode("utf-8"), signing_input, hashlib.sha256).digest()
+    if not hmac.compare_digest(signature, expected_signature):
+        return None, 403, "invalid_internal_token"
+    now = int(time.time())
+    exp = claims.get("exp")
+    if not isinstance(exp, (int, float)) or int(exp) <= now:
+        return None, 401, "expired_internal_token"
+    iat = claims.get("iat")
+    if iat is not None and (not isinstance(iat, (int, float)) or int(iat) > now + 60):
+        return None, 403, "invalid_internal_token"
+    if not isinstance(claims.get("iss"), str) or not hmac.compare_digest(claims["iss"], _jwt_issuer()):
+        return None, 403, "invalid_internal_issuer"
+    if not _jwt_audience_matches(claims.get("aud"), _jwt_audience()):
+        return None, 403, "invalid_internal_audience"
+    service_name = claims.get(_jwt_service_claim())
+    if not isinstance(service_name, str) or not service_name.strip():
+        return None, 403, "unknown_internal_service"
+    service_name = service_name.strip()
+    allowed_authorities = _allowed_jwt_service_authorities().get(service_name)
+    if allowed_authorities is None:
+        return None, 403, "unknown_internal_service"
+    token_authorities = _jwt_authorities(claims.get(_jwt_authorities_claim()))
+    if required_authority not in allowed_authorities or required_authority not in token_authorities:
+        return None, 403, "missing_internal_authority"
+    return InternalServicePrincipal(
+        service_name=service_name,
+        authorities=token_authorities & allowed_authorities,
+        authenticated_at=datetime.now(timezone.utc),
+        auth_mode="JWT_SERVICE_IDENTITY",
+    ), 200, "allowed"
+
+
 def _validate_internal_auth_startup(
         mode: str | None = None,
         profile: str | None = None,
         credentials: dict[str, InternalServiceCredential] | None = None,
 ) -> None:
-    normalized_mode = _internal_auth_mode() if mode is None else (
-        "DISABLED_LOCAL_ONLY" if mode.strip().upper() in LOCAL_INTERNAL_AUTH_MODES
-        else "MTLS_READY" if mode.strip().upper() == "MTLS_READY"
-        else "TOKEN_VALIDATOR"
-    )
+    normalized_mode = _internal_auth_mode() if mode is None else _normalize_internal_auth_mode(mode)
     configured_credentials = INTERNAL_SERVICE_CREDENTIALS if credentials is None else credentials
     if normalized_mode == "DISABLED_LOCAL_ONLY" and _prod_like_profile(profile):
         raise RuntimeError("DISABLED_LOCAL_ONLY internal auth mode is forbidden in prod-like profiles.")
-    if normalized_mode == "TOKEN_VALIDATOR" and _prod_like_profile(profile) and not _token_hash_mode():
-        raise RuntimeError("TOKEN_VALIDATOR internal auth mode requires token hash mode in prod-like profiles.")
-    if normalized_mode == "TOKEN_VALIDATOR" and _prod_like_profile(profile) and not configured_credentials:
-        raise RuntimeError("TOKEN_VALIDATOR internal auth mode requires an allowed service list in prod-like profiles.")
+    if normalized_mode == "TOKEN_VALIDATOR" and _prod_like_profile(profile):
+        if not _allow_token_validator_in_prod():
+            raise RuntimeError("TOKEN_VALIDATOR internal auth mode requires explicit prod compatibility opt-in.")
+        if not _token_hash_mode():
+            raise RuntimeError("TOKEN_VALIDATOR internal auth mode requires token hash mode in prod-like profiles.")
+        if not configured_credentials:
+            raise RuntimeError("TOKEN_VALIDATOR internal auth mode requires an allowed service list in prod-like profiles.")
+    if normalized_mode == "JWT_SERVICE_IDENTITY" and not _jwt_configured():
+        raise RuntimeError("JWT_SERVICE_IDENTITY internal auth mode requires issuer, audience, secret, and service authorities.")
+    if normalized_mode == "MTLS_READY" and _prod_like_profile(profile):
+        raise RuntimeError("MTLS_READY internal auth mode is a fail-closed placeholder until mTLS is configured.")
 
 
 _validate_internal_auth_startup()
@@ -686,6 +814,13 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             ), 200, "allowed_localdev"
         if mode == "MTLS_READY":
             return None, 401, "mtls_not_configured"
+        if mode == "JWT_SERVICE_IDENTITY":
+            authorization = self.headers.get("Authorization", "").strip()
+            if not authorization:
+                return None, 401, "missing_internal_credentials"
+            if not authorization.startswith("Bearer ") or not authorization[7:].strip():
+                return None, 403, "invalid_internal_token"
+            return _validate_jwt_service_token(authorization[7:].strip(), required_authority)
         if not service_name or not token:
             return None, 401, "missing_internal_credentials"
         credential = INTERNAL_SERVICE_CREDENTIALS.get(service_name)
@@ -707,11 +842,15 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
         return hmac.compare_digest(configured_token, presented_token)
 
     def _record_internal_auth_success(self, principal: InternalServicePrincipal) -> None:
-        source_service = principal.service_name if principal.service_name in INTERNAL_SERVICE_CREDENTIALS else "localdev"
+        if principal.auth_mode == "JWT_SERVICE_IDENTITY":
+            allowed_services = _allowed_jwt_service_authorities()
+            source_service = principal.service_name if principal.service_name in allowed_services else "unknown"
+        else:
+            source_service = principal.service_name if principal.service_name in INTERNAL_SERVICE_CREDENTIALS else "localdev"
         INTERNAL_AUTH_SUCCESSES.labels(source_service, INTERNAL_AUTH_TARGET_SERVICE).inc()
 
     def _record_internal_auth_failure(self, endpoint: str, reason: str) -> None:
-        normalized_reason = reason if reason in INTERNAL_AUTH_FAILURE_REASONS else "invalid_internal_credentials"
+        normalized_reason = reason if reason in INTERNAL_AUTH_FAILURE_REASONS else "invalid_internal_token"
         INTERNAL_AUTH_FAILURES.labels(INTERNAL_AUTH_TARGET_SERVICE, normalized_reason).inc()
         self._log_event(
             "internal_auth_rejected",
