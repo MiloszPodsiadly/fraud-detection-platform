@@ -3,7 +3,6 @@ package com.frauddetection.scoring.config;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
@@ -37,7 +36,7 @@ public record InternalServiceClientProperties(
             throw new IllegalArgumentException("app.internal-auth.client.token is required when TOKEN_VALIDATOR is enabled");
         }
         if (enabled && "JWT_SERVICE_IDENTITY".equals(mode) && !jwt.complete()) {
-            throw new IllegalArgumentException("app.internal-auth.client.jwt issuer, audience, HS256 secret of at least 32 bytes, ttl, and authorities are required when JWT_SERVICE_IDENTITY is enabled");
+            throw new IllegalArgumentException("app.internal-auth.client.jwt issuer, audience, algorithm, key material, ttl, and authorities are required when JWT_SERVICE_IDENTITY is enabled");
         }
     }
 
@@ -74,31 +73,68 @@ public record InternalServiceClientProperties(
     }
 
     public record Jwt(
+            String algorithm,
             String issuer,
             String audience,
             String secret,
+            String keyId,
+            String privateKeyPem,
+            String privateKeyPath,
             Duration ttl,
             String authorities
     ) {
         static Jwt empty() {
-            return new Jwt("", "", "", Duration.ofMinutes(5), "");
+            return new Jwt("HS256", "", "", "", "", "", "", Duration.ofMinutes(5), "");
         }
 
         Jwt normalized() {
             return new Jwt(
+                    normalizeAlgorithm(algorithm),
                     issuer == null ? "" : issuer.trim(),
                     audience == null ? "" : audience.trim(),
                     secret == null ? "" : secret.trim(),
+                    keyId == null ? "" : keyId.trim(),
+                    privateKeyPem == null ? "" : privateKeyPem.trim(),
+                    privateKeyPath == null ? "" : privateKeyPath.trim(),
                     ttl == null ? Duration.ofMinutes(5) : ttl,
                     authorities == null ? "" : authorities.trim()
             );
         }
 
         boolean complete() {
+            if (issuer.isBlank()
+                    || audience.isBlank()
+                    || ttl == null
+                    || ttl.isNegative()
+                    || ttl.isZero()
+                    || authorityList().isEmpty()) {
+                return false;
+            }
+            if ("RS256".equals(algorithm)) {
+                return !keyId.isBlank() && (!privateKeyPem.isBlank() || !privateKeyPath.isBlank());
+            }
+            if ("HS256".equals(algorithm)) {
+                return !secret.isBlank()
+                    && secret.getBytes(java.nio.charset.StandardCharsets.UTF_8).length >= 32;
+            }
+            return false;
+        }
+
+        boolean productionTarget() {
+            return "RS256".equals(algorithm);
+        }
+
+        private static String normalizeAlgorithm(String value) {
+            String candidate = value == null || value.isBlank() ? "HS256" : value.trim().toUpperCase();
+            return switch (candidate) {
+                case "RS256", "HS256" -> candidate;
+                default -> candidate;
+            };
+        }
+
+        boolean baseClaimsComplete() {
             return !issuer.isBlank()
                     && !audience.isBlank()
-                    && !secret.isBlank()
-                    && secret.getBytes(StandardCharsets.UTF_8).length >= 32
                     && ttl != null
                     && !ttl.isNegative()
                     && !ttl.isZero()

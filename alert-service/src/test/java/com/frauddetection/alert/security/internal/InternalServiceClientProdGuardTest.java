@@ -7,6 +7,9 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.mock.env.MockEnvironment;
 
 import java.text.ParseException;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Date;
 
@@ -70,7 +73,8 @@ class InternalServiceClientProdGuardTest {
         assertThat(headers.containsKey("X-Internal-Service-Token")).isFalse();
         String token = headers.getFirst("Authorization").substring("Bearer ".length());
         SignedJWT jwt = SignedJWT.parse(token);
-        assertThat(jwt.getHeader().getAlgorithm()).isEqualTo(JWSAlgorithm.HS256);
+        assertThat(jwt.getHeader().getAlgorithm()).isEqualTo(JWSAlgorithm.RS256);
+        assertThat(jwt.getHeader().getKeyID()).isEqualTo("alert-key-1");
         assertThat(jwt.getJWTClaimsSet().getIssuer()).isEqualTo("fraud-platform-local");
         assertThat(jwt.getJWTClaimsSet().getAudience()).containsExactly("ml-inference-service");
         assertThat(jwt.getJWTClaimsSet().getStringClaim("service_name")).isEqualTo("alert-service");
@@ -80,6 +84,42 @@ class InternalServiceClientProdGuardTest {
         assertThat(jwt.getJWTClaimsSet().getExpirationTime()).isBeforeOrEqualTo(
                 Date.from(jwt.getJWTClaimsSet().getIssueTime().toInstant().plus(Duration.ofMinutes(5).plusSeconds(1)))
         );
+    }
+
+    @Test
+    void shouldRejectHs256JwtServiceIdentityForProdProfile() {
+        InternalServiceClientProdGuard guard = new InternalServiceClientProdGuard(
+                hs256JwtProperties(),
+                environment("prod")
+        );
+
+        assertThatThrownBy(guard::afterPropertiesSet)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("HS256 internal auth client JWT mode is local compatibility only and is forbidden in prod-like profiles.");
+    }
+
+    @Test
+    void shouldRequireRs256KidAndPrivateKey() {
+        assertThatThrownBy(() -> new InternalServiceClientProperties(
+                true,
+                "JWT_SERVICE_IDENTITY",
+                "alert-service",
+                "",
+                false,
+                new InternalServiceClientProperties.Jwt(
+                        "RS256",
+                        "fraud-platform-local",
+                        "ml-inference-service",
+                        "",
+                        "",
+                        "unused-test-private-key",
+                        "",
+                        Duration.ofMinutes(5),
+                        "governance-read"
+                )
+        ))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("app.internal-auth.client.jwt issuer, audience, algorithm, key material, ttl, and authorities are required when JWT_SERVICE_IDENTITY is enabled");
     }
 
     @Test
@@ -106,13 +146,58 @@ class InternalServiceClientProdGuardTest {
                 "",
                 false,
                 new InternalServiceClientProperties.Jwt(
+                        "RS256",
                         "fraud-platform-local",
                         "ml-inference-service",
                         "local-dev-jwt-service-secret-32bytes",
+                        "alert-key-1",
+                        privateKeyPem(),
+                        "",
                         Duration.ofMinutes(5),
                         "governance-read"
                 )
         );
+    }
+
+    private InternalServiceClientProperties hs256JwtProperties() {
+        return new InternalServiceClientProperties(
+                true,
+                "JWT_SERVICE_IDENTITY",
+                "alert-service",
+                "",
+                false,
+                new InternalServiceClientProperties.Jwt(
+                        "HS256",
+                        "fraud-platform-local",
+                        "ml-inference-service",
+                        "local-dev-jwt-service-secret-32bytes",
+                        "",
+                        "",
+                        "",
+                        Duration.ofMinutes(5),
+                        "governance-read"
+                )
+        );
+    }
+
+    private String privateKeyPem() {
+        try {
+            return Files.readString(repoPath("deployment/service-identity/alert-service-private.pem"));
+        } catch (IOException exception) {
+            throw new IllegalStateException("Test private key is unavailable.");
+        }
+    }
+
+    private Path repoPath(String relativePath) {
+        Path candidate = Path.of("").toAbsolutePath();
+        while (candidate != null) {
+            Path resolved = candidate.resolve(relativePath);
+            if (Files.exists(resolved)) {
+                return resolved;
+            }
+            candidate = candidate.getParent();
+        }
+        return Path.of(relativePath);
     }
 
     private InternalServiceClientProperties disabledProperties() {
