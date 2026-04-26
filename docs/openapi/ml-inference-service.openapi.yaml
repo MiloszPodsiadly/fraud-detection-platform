@@ -300,12 +300,14 @@ components:
       properties:
         artifact_checksum:
           type: string
+          nullable: true
         artifact_path_or_id:
           type: string
         artifact_source:
           type: string
         feature_set_version:
           type: string
+          nullable: true
         lifecycle_mode:
           type: string
           enum: [READ_ONLY]
@@ -320,10 +322,12 @@ components:
           type: string
         reference_profile_id:
           type: string
+          nullable: true
         runtime_environment:
           type: string
         training_mode:
           type: string
+          nullable: true
     DriftActionsResponse:
       type: object
       required:
