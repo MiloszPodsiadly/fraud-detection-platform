@@ -106,6 +106,6 @@ function emptyAnalytics() {
     totals: { advisories: 0, reviewed: 0, open: 0 },
     decision_distribution: {},
     lifecycle_distribution: {},
-    review_timeliness: {}
+    review_timeliness: { status: "LOW_CONFIDENCE" }
   };
 }

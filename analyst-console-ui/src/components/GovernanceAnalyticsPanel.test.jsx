@@ -91,6 +91,7 @@ function analyticsFixture() {
       DISMISSED_AS_NOISE: 2
     },
     review_timeliness: {
+      status: "AVAILABLE",
       time_to_first_review_p50_minutes: 10,
       time_to_first_review_p95_minutes: 20
     }

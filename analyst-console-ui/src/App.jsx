@@ -71,6 +71,7 @@ export default function App() {
     decision_distribution: {},
     lifecycle_distribution: {},
     review_timeliness: {
+      status: "LOW_CONFIDENCE",
       time_to_first_review_p50_minutes: 0,
       time_to_first_review_p95_minutes: 0
     }

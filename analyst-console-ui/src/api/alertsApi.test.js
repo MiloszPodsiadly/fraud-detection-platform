@@ -122,7 +122,7 @@ describe("alertsApi auth headers", () => {
       totals: { advisories: 0, reviewed: 0, open: 0 },
       decision_distribution: {},
       lifecycle_distribution: {},
-      review_timeliness: {}
+      review_timeliness: { status: "LOW_CONFIDENCE" }
     }));
     setApiSession(normalizeSession({ userId: "analyst-1", roles: ["READ_ONLY_ANALYST"] }), createDemoAuthProvider());
 
