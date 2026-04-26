@@ -4,6 +4,7 @@ import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.security.error.SecurityFailureClassifier;
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.security.core.AuthenticationException;
@@ -11,13 +12,18 @@ import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import java.util.concurrent.atomic.AtomicInteger;
+
 @Component
 public class AlertServiceMetrics {
 
     private final MeterRegistry meterRegistry;
+    private final AtomicInteger governanceAnalyticsWindowDays = new AtomicInteger(0);
 
     public AlertServiceMetrics(MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
+        Gauge.builder("fraud_ml_governance_analytics_window_days", governanceAnalyticsWindowDays, AtomicInteger::get)
+                .register(meterRegistry);
     }
 
     public void recordAnalystDecisionSubmitted() {
@@ -69,6 +75,11 @@ public class AlertServiceMetrics {
                 "model_name", normalizeLabel(modelName),
                 "model_version", normalizeLabel(modelVersion)
         ).increment();
+    }
+
+    public void recordGovernanceAnalyticsRequest(int windowDays) {
+        governanceAnalyticsWindowDays.set(windowDays);
+        counter("fraud_ml_governance_analytics_requests_total").increment();
     }
 
     private Counter counter(String name, String... tags) {

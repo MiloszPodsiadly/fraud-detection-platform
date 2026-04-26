@@ -10,15 +10,18 @@ public class GovernanceAdvisoryProjectionService {
 
     private final GovernanceAdvisoryClient advisoryClient;
     private final GovernanceAdvisoryLifecycleService lifecycleService;
+    private final GovernanceAdvisoryAnalyticsService analyticsService;
     private final AlertServiceMetrics metrics;
 
     public GovernanceAdvisoryProjectionService(
             GovernanceAdvisoryClient advisoryClient,
             GovernanceAdvisoryLifecycleService lifecycleService,
+            GovernanceAdvisoryAnalyticsService analyticsService,
             AlertServiceMetrics metrics
     ) {
         this.advisoryClient = advisoryClient;
         this.lifecycleService = lifecycleService;
+        this.analyticsService = analyticsService;
         this.metrics = metrics;
     }
 
@@ -37,6 +40,10 @@ public class GovernanceAdvisoryProjectionService {
 
     public GovernanceAdvisoryEvent getAdvisory(String eventId) {
         return withLifecycleStatus(advisoryClient.getAdvisoryEvent(eventId));
+    }
+
+    public GovernanceAdvisoryAnalyticsResponse analytics(int windowDays) {
+        return analyticsService.analytics(windowDays);
     }
 
     private GovernanceAdvisoryEvent withLifecycleStatus(GovernanceAdvisoryEvent event) {
