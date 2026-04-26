@@ -147,6 +147,8 @@ Roles describe analyst personas. Authorities are the backend authorization contr
 | `GET /api/v1/fraud-cases/{caseId}` | `fraud-case:read` | Case details read. |
 | `PATCH /api/v1/fraud-cases/{caseId}` | `fraud-case:update` | Write action; audit in v1. |
 | `GET /api/v1/transactions/scored` | `transaction-monitor:read` | Separate from alert read because monitor data may grow beyond alert queue use cases. |
+| `GET /governance/advisories` | `transaction-monitor:read` | Reads governance advisory context enriched with lifecycle projection from audit history. |
+| `GET /governance/advisories/{event_id}` | `transaction-monitor:read` | Reads one governance advisory context with derived lifecycle status. |
 | `GET /governance/advisories/{event_id}/audit` | `transaction-monitor:read` | Reads human-review history for governance advisory context. |
 | `POST /governance/advisories/{event_id}/audit` | `governance-advisory:audit:write` | Write action; records human review only. |
 
@@ -248,6 +250,8 @@ Future sinks can be added behind `AuditEventPublisher`:
 - read-access auditing if required
 
 Governance advisory audit entries are stored separately in `ml_governance_audit_events` through the existing MongoDB infrastructure. They are append-only human-review records, not fraud decisions. The frontend may submit only `decision` and optional bounded `note`; `actor_id`, actor roles, display name, and advisory model metadata are derived server-side. Audit writes fail clearly if persistence or advisory lookup is unavailable and are never silently dropped.
+
+Advisory lifecycle status is derived from the latest audit entry at read time. It is not persisted as an authoritative status, not trusted from the frontend, and not used to drive scoring, alerting, model lifecycle actions, or workflow automation.
 
 ## Frontend Security UX
 

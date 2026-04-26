@@ -159,6 +159,8 @@ Representative endpoint matrix:
 | `GET /api/v1/fraud-cases/{caseId}` | `fraud-case:read` |
 | `PATCH /api/v1/fraud-cases/{caseId}` | `fraud-case:update` |
 | `GET /api/v1/transactions/scored` | `transaction-monitor:read` |
+| `GET /governance/advisories` | `transaction-monitor:read` |
+| `GET /governance/advisories/{event_id}` | `transaction-monitor:read` |
 | `GET /governance/advisories/{event_id}/audit` | `transaction-monitor:read` |
 | `POST /governance/advisories/{event_id}/audit` | `governance-advisory:audit:write` |
 
@@ -195,7 +197,7 @@ Audit payloads intentionally exclude sensitive business details:
 
 Current sink: structured SLF4J logs through `StructuredAuditEventPublisher`. Durable audit storage is a production follow-up.
 
-Governance advisory audit entries are separate from fraud workflow audit logs. They are persisted append-only as human review history, derive actor identity from the backend-authenticated principal, and do not affect scoring, model behavior, retraining, rollback, or fraud decisioning.
+Governance advisory audit entries are separate from fraud workflow audit logs. They are persisted append-only as human review history, derive actor identity from the backend-authenticated principal, and do not affect scoring, model behavior, retraining, rollback, or fraud decisioning. Advisory lifecycle status is a read-time projection from the latest audit entry, not a persisted workflow state or automation trigger.
 
 Full details: [Security Foundation v1](docs/security-foundation-v1.md).
 
@@ -605,6 +607,8 @@ Main local endpoints:
 - `POST http://localhost:8082/api/v1/replay/stop`: stop replay.
 - `GET http://localhost:8082/api/v1/replay/status`: replay status.
 - `GET http://localhost:8085/api/v1/transactions/scored?page=0&size=25`: paged scored transaction monitor data.
+- `GET http://localhost:8085/governance/advisories`: governance advisory list with audit-derived lifecycle status.
+- `GET http://localhost:8085/governance/advisories/{event_id}`: single governance advisory with audit-derived lifecycle status.
 - `GET http://localhost:8085/governance/advisories/{event_id}/audit`: governance advisory audit history.
 - `POST http://localhost:8085/governance/advisories/{event_id}/audit`: append governance advisory human-review audit entry.
 - `GET http://localhost:8085/api/v1/alerts`: alert queue.
@@ -835,7 +839,7 @@ Model lifecycle visibility is read-only; it does not switch models, retrain, rol
 Governance advisory events are operator signals only; they are not fraud alerts, model actions, retraining triggers, rollback triggers, automatic decisions, or frontend workflow items. Advisory events are heuristic and may be inaccurate under low data conditions; the system does not guarantee correctness of drift or advisory signals. Advisory events include bounded confidence context and are deduplicated to avoid repeated signals from repeated polling.
 Drift actions and advisory events do not block transactions, change scores, switch models, retrain models, roll back models, or trigger external alerting workflows.
 
-FDP-12 surfaces governance advisory events in the analyst console as an operator review queue. FDP-13 adds authenticated human-review audit recording for each advisory event. The UI consumes `GET /governance/advisories` for advisory context and uses `alert-service` for append-only audit history and writes. Audit entries record only `decision`, optional bounded `note`, backend-derived actor, and bounded advisory metadata; they do not change scoring, model behavior, retraining, rollback, advisory status, or fraud decisioning.
+FDP-12 surfaces governance advisory events in the analyst console as an operator review queue. FDP-13 adds authenticated human-review audit recording for each advisory event. FDP-14 adds advisory lifecycle badges and filtering derived only from audit history. The UI consumes `GET /governance/advisories` through `alert-service` for advisory context plus lifecycle projection and uses `alert-service` for append-only audit history and writes. Audit entries record only `decision`, optional bounded `note`, backend-derived actor, and bounded advisory metadata; lifecycle status does not change scoring, model behavior, retraining, rollback, advisory emission, or fraud decisioning.
 
 Training smoke test:
 

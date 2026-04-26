@@ -61,10 +61,28 @@ Alert service:
 | `GET` | `/api/v1/fraud-cases/{caseId}` | Returns one fraud case. |
 | `PATCH` | `/api/v1/fraud-cases/{caseId}` | Updates fraud case status/assignment fields. |
 | `GET` | `/api/v1/transactions/scored` | Lists scored transaction projections. |
+| `GET` | `/governance/advisories` | Lists governance advisory events enriched with read-time lifecycle status. |
+| `GET` | `/governance/advisories/{event_id}` | Returns one governance advisory event enriched with read-time lifecycle status. |
 | `GET` | `/governance/advisories/{event_id}/audit` | Returns bounded newest-first human-review audit history for one governance advisory event. |
 | `POST` | `/governance/advisories/{event_id}/audit` | Appends one authenticated human-review audit entry for a governance advisory event. |
 
-Governance advisory audit endpoints are owned by `alert-service`, not `ml-inference-service`, because writes require authenticated operator actor attribution. They do not mutate advisory events, scoring, model behavior, retraining, rollback, or fraud decisioning.
+Governance advisory audit and lifecycle projection endpoints are owned by `alert-service`, not `ml-inference-service`, because lifecycle status is derived from authenticated human-review audit history. They do not mutate advisory events, scoring, model behavior, retraining, rollback, or fraud decisioning.
+
+Advisory lifecycle status is a read-time projection:
+
+- `OPEN`: no audit events exist.
+- `ACKNOWLEDGED`: latest audit decision is `ACKNOWLEDGED`.
+- `NEEDS_FOLLOW_UP`: latest audit decision is `NEEDS_FOLLOW_UP`.
+- `DISMISSED_AS_NOISE`: latest audit decision is `DISMISSED_AS_NOISE`.
+
+Only the latest audit event matters. Lifecycle status is not persisted independently, is not workflow state, has no SLA, and triggers no automation.
+
+Advisory list filters:
+
+- `severity`
+- `model_version`
+- `lifecycle_status`
+- `limit`
 
 POST request:
 

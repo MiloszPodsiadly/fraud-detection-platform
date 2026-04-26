@@ -151,6 +151,10 @@ Prometheus metric contract:
   - Type: gauge
   - Meaning: persisted lifecycle history availability
   - Labels: `model_name`, `model_version`, `status`
+- `fraud_ml_governance_advisory_lifecycle_total`
+  - Type: counter
+  - Meaning: read-time advisory lifecycle projection observations
+  - Labels: `lifecycle_status`, `model_name`, `model_version`
 - `fraud_ml_governance_advisory_events_emitted_total`
   - Type: counter
   - Meaning: governance advisory events emitted
@@ -273,13 +277,15 @@ Governance advisory events:
 - An advisory event is not a fraud alert, not a model action, not a retraining trigger, and not a rollback trigger.
 - Advisory events are heuristic signals and may be inaccurate under low data conditions. The system does not guarantee correctness of drift or advisory signals.
 - Advisory lifecycle context is correlation context only; it must not be read as proof that lifecycle activity caused drift.
-- The advisory API supports bounded exact filters only: `severity`, `model_version`, and `limit`; it does not support free-text search or regex.
+- The advisory API supports bounded exact filters only: `severity`, `model_version`, `lifecycle_status`, and `limit`; it does not support free-text search or regex.
+- Advisory lifecycle status is derived from the latest human-review audit event. It is not persisted as source of truth, not a workflow engine, and not an automation trigger.
 
 Analyst console operator queue:
 
 - FDP-12 exposes advisory events in an operator review UI panel.
 - FDP-13 adds an authenticated human-review audit form and audit history per advisory event.
-- The UI fetches only `GET /governance/advisories` through the local frontend proxy.
+- FDP-14 adds a visual lifecycle badge derived from audit history.
+- The UI fetches `GET /governance/advisories` through the local frontend proxy and alert-service projection boundary.
 - Audit history uses `GET /governance/advisories/{event_id}/audit` and `POST /governance/advisories/{event_id}/audit` through `alert-service`.
 - The UI submits only `decision` and optional bounded `note`; the backend derives actor attribution from the authenticated principal/session.
 - Audit entries are append-only human review records; they do not mutate advisory events.
