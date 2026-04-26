@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  getGovernanceAdvisoryAnalytics,
   getGovernanceAdvisoryAudit,
   listAlerts,
   listGovernanceAdvisories,
@@ -112,6 +113,30 @@ describe("alertsApi auth headers", () => {
       })
     );
     expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty("X-Demo-User-Id");
+  });
+
+  it("calls governance analytics with bounded window and auth headers", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      status: "AVAILABLE",
+      window: { days: 7 },
+      totals: { advisories: 0, reviewed: 0, open: 0 },
+      decision_distribution: {},
+      lifecycle_distribution: {},
+      review_timeliness: {}
+    }));
+    setApiSession(normalizeSession({ userId: "analyst-1", roles: ["READ_ONLY_ANALYST"] }), createDemoAuthProvider());
+
+    await getGovernanceAdvisoryAnalytics({ windowDays: 14 });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/governance/advisories/analytics?window_days=14",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+          "X-Demo-User-Id": "analyst-1"
+        })
+      })
+    );
   });
 
   it("uses auth headers for governance audit history and writes only decision payload", async () => {
