@@ -256,6 +256,14 @@ code {
   border-color: rgba(82, 97, 60, 0.3);
 }
 
+.governanceAnalyticsPanel {
+  border-color: rgba(63, 123, 85, 0.26);
+}
+
+.compactControl {
+  min-width: 8rem;
+}
+
 .fraudCaseCounter {
   min-width: 10rem;
   border: 1px solid rgba(180, 52, 52, 0.18);
@@ -761,6 +769,49 @@ textarea:focus {
   margin: 1rem 0;
 }
 
+.analyticsGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+.analyticsBars {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.analyticsBarRow {
+  display: grid;
+  grid-template-columns: minmax(11rem, 14rem) minmax(10rem, 1fr) 3rem;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.analyticsBarRow span {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.analyticsBarRow strong {
+  text-align: right;
+}
+
+.analyticsBarTrack {
+  overflow: hidden;
+  height: 0.75rem;
+  border-radius: 999px;
+  background: rgba(82, 97, 60, 0.12);
+}
+
+.analyticsBarTrack div {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--olive);
+}
+
 .metricCard,
 .summaryItem {
   padding: 1rem;
@@ -1089,6 +1140,7 @@ textarea:focus {
 
   .filterBar,
   .metricGrid,
+  .analyticsGrid,
   .summaryGrid,
   .splitGrid,
   .assistantFacts,
@@ -1096,6 +1148,10 @@ textarea:focus {
   .fraudCaseFacts,
   .governanceAuditPanel {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .analyticsBarRow {
+    grid-template-columns: minmax(8rem, 12rem) minmax(8rem, 1fr) 2.5rem;
   }
 }
 
@@ -1113,6 +1169,7 @@ textarea:focus {
   .heroStats,
   .filterBar,
   .metricGrid,
+  .analyticsGrid,
   .summaryGrid,
   .splitGrid,
   .assistantFacts,
@@ -1120,6 +1177,14 @@ textarea:focus {
   .fraudCaseFacts,
   .governanceAuditPanel {
     grid-template-columns: 1fr;
+  }
+
+  .analyticsBarRow {
+    grid-template-columns: 1fr;
+  }
+
+  .analyticsBarRow strong {
+    text-align: left;
   }
 
   .panelHeader,

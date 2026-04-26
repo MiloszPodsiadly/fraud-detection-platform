@@ -4,6 +4,7 @@ import { EmptyState } from "../components/EmptyState.jsx";
 import { ErrorState } from "../components/ErrorState.jsx";
 import { FilterBar } from "../components/FilterBar.jsx";
 import { FraudCasePanel } from "../components/FraudCasePanel.jsx";
+import { GovernanceAnalyticsPanel } from "../components/GovernanceAnalyticsPanel.jsx";
 import { GovernanceReviewQueue } from "../components/GovernanceReviewQueue.jsx";
 import { LoadingPanel } from "../components/LoadingPanel.jsx";
 import { PaginationControls } from "../components/PaginationControls.jsx";
@@ -17,16 +18,22 @@ export function AlertsListPage({
   transactionPage,
   advisoryQueue,
   advisoryQueueRequest,
+  governanceAnalytics,
+  analyticsWindowDays,
   isLoading,
   isGovernanceLoading,
+  isAnalyticsLoading,
   error,
   governanceError,
+  analyticsError,
   governanceAuditHistories,
   session,
   sessionState,
   onRetry,
   onGovernanceRetry,
+  onAnalyticsRetry,
   onAdvisoryQueueRequestChange,
+  onAnalyticsWindowDaysChange,
   onRecordGovernanceAudit,
   onTransactionPageChange,
   onTransactionPageSizeChange,
@@ -114,6 +121,15 @@ export function AlertsListPage({
         onPageChange={onFraudCasePageChange}
         onPageSizeChange={onFraudCasePageSizeChange}
         onOpenCase={onOpenFraudCase}
+      />
+
+      <GovernanceAnalyticsPanel
+        analytics={governanceAnalytics}
+        windowDays={analyticsWindowDays}
+        isLoading={isAnalyticsLoading}
+        error={analyticsError}
+        onWindowDaysChange={onAnalyticsWindowDaysChange}
+        onRetry={onAnalyticsRetry}
       />
 
       <GovernanceReviewQueue
