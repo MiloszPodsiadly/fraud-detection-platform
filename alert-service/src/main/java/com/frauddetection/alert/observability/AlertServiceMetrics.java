@@ -2,6 +2,8 @@ package com.frauddetection.alert.observability;
 
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditOutcome;
+import com.frauddetection.alert.audit.read.ReadAccessAuditOutcome;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
 import com.frauddetection.alert.security.error.SecurityFailureClassifier;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
@@ -63,6 +65,21 @@ public class AlertServiceMetrics {
         counter(
                 "fraud_platform_audit_read_requests_total",
                 "status", normalizeAvailabilityStatus(status)
+        ).increment();
+    }
+
+    public void recordReadAccessAuditPersisted(ReadAccessEndpointCategory endpointCategory, ReadAccessAuditOutcome outcome) {
+        counter(
+                "fraud_platform_read_access_audit_events_persisted_total",
+                "endpoint_category", normalize(endpointCategory),
+                "outcome", normalize(outcome)
+        ).increment();
+    }
+
+    public void recordReadAccessAuditPersistenceFailure(ReadAccessEndpointCategory endpointCategory) {
+        counter(
+                "fraud_platform_read_access_audit_persistence_failures_total",
+                "endpoint_category", normalize(endpointCategory)
         ).increment();
     }
 
