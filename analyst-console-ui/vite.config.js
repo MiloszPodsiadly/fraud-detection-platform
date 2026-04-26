@@ -13,6 +13,10 @@ export default defineConfig({
       "/api": {
         target: "http://localhost:8085",
         changeOrigin: true
+      },
+      "/governance/advisories": {
+        target: "http://localhost:8090",
+        changeOrigin: true
       }
     }
   },

@@ -3,6 +3,7 @@ import { authHeadersForSession } from "../auth/authHeaders.js";
 import { getConfiguredAuthProvider } from "../auth/authProvider.js";
 
 const API_BASE_URL = import.meta.env.VITE_ALERT_API_BASE_URL ?? "";
+const ML_API_BASE_URL = import.meta.env.VITE_ML_API_BASE_URL ?? "";
 let activeSession = null;
 let activeAuthProvider = getConfiguredAuthProvider();
 
@@ -12,13 +13,19 @@ export function setApiSession(session, authProvider = activeAuthProvider) {
 }
 
 async function request(path, options = {}) {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const {
+    baseUrl = API_BASE_URL,
+    includeAuth = true,
+    ...fetchOptions
+  } = options;
+  const authHeaders = includeAuth ? authHeadersForSession(activeAuthProvider, activeSession) : {};
+  const response = await fetch(`${baseUrl}${path}`, {
     headers: {
       "Content-Type": "application/json",
-      ...authHeadersForSession(activeAuthProvider, activeSession),
-      ...options.headers
+      ...authHeaders,
+      ...fetchOptions.headers
     },
-    ...options
+    ...fetchOptions
   });
 
   if (!response.ok) {
@@ -70,6 +77,22 @@ export function listScoredTransactions({ page = 0, size = 25 } = {}) {
     size: String(size)
   });
   return request(`/api/v1/transactions/scored?${params.toString()}`);
+}
+
+export function listGovernanceAdvisories({ severity = "ALL", modelVersion = "", limit = 25 } = {}) {
+  const params = new URLSearchParams({
+    limit: String(limit)
+  });
+  if (severity && severity !== "ALL") {
+    params.set("severity", severity);
+  }
+  if (modelVersion && modelVersion.trim()) {
+    params.set("model_version", modelVersion.trim());
+  }
+  return request(`/governance/advisories?${params.toString()}`, {
+    baseUrl: ML_API_BASE_URL,
+    includeAuth: false
+  });
 }
 
 export function getAlert(alertId) {

@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { listAlerts, listFraudCases, listScoredTransactions, setApiSession } from "./api/alertsApi.js";
+import {
+  listAlerts,
+  listFraudCases,
+  listGovernanceAdvisories,
+  listScoredTransactions,
+  setApiSession
+} from "./api/alertsApi.js";
 import { getConfiguredAuthProvider } from "./auth/authProvider.js";
 import { isOidcCallbackPath } from "./auth/oidcClient.js";
 import { normalizeSession } from "./auth/session.js";
@@ -43,12 +49,25 @@ export default function App() {
     size: 25
   });
   const [transactionPageRequest, setTransactionPageRequest] = useState({ page: 0, size: 25 });
+  const [advisoryQueue, setAdvisoryQueue] = useState({
+    status: "UNAVAILABLE",
+    count: 0,
+    retention_limit: 0,
+    advisory_events: []
+  });
+  const [advisoryQueueRequest, setAdvisoryQueueRequest] = useState({
+    severity: "ALL",
+    modelVersion: "",
+    limit: 25
+  });
   const [selectedAlertId, setSelectedAlertId] = useState(getInitialAlertId);
   const [selectedFraudCaseId, setSelectedFraudCaseId] = useState(getInitialFraudCaseId);
   const [session, setSession] = useState(() => authProvider.getInitialSession());
   const [sessionState, setSessionState] = useState(() => getSessionStateForProvider(authProvider.getInitialSession(), authProvider));
   const [isLoading, setIsLoading] = useState(true);
+  const [isGovernanceLoading, setIsGovernanceLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [governanceError, setGovernanceError] = useState(null);
   const [callbackError, setCallbackError] = useState(null);
   const handlingOidcCallback = authProvider.kind === "oidc" && isOidcCallbackPath();
   const [sessionBootstrapPending, setSessionBootstrapPending] = useState(authProvider.kind === "oidc");
@@ -118,6 +137,17 @@ export default function App() {
     setApiSession(session, authProvider);
     loadDashboard({ transaction: transactionPageRequest, alert: alertPageRequest, fraudCase: fraudCasePageRequest });
   }, [authProvider, transactionPageRequest, alertPageRequest, fraudCasePageRequest, handlingOidcCallback, session, sessionBootstrapPending]);
+
+  useEffect(() => {
+    if (handlingOidcCallback || sessionBootstrapPending) {
+      return;
+    }
+    if (shouldBlockDashboardFetch(sessionState)) {
+      setIsGovernanceLoading(false);
+      return;
+    }
+    loadGovernanceQueue(advisoryQueueRequest);
+  }, [advisoryQueueRequest, handlingOidcCallback, sessionBootstrapPending, sessionState?.status]);
 
   useEffect(() => {
     if (!handlingOidcCallback || typeof authProvider.completeLoginCallback !== "function") {
@@ -192,8 +222,23 @@ export default function App() {
     }
   }
 
+  async function loadGovernanceQueue(nextRequest = advisoryQueueRequest) {
+    setIsGovernanceLoading(true);
+    setGovernanceError(null);
+    try {
+      setAdvisoryQueue(await listGovernanceAdvisories(nextRequest));
+    } catch (apiError) {
+      setGovernanceError(apiError);
+    } finally {
+      setIsGovernanceLoading(false);
+    }
+  }
+
   function refreshDashboard() {
     loadDashboard({ transaction: transactionPageRequest, alert: alertPageRequest, fraudCase: fraudCasePageRequest });
+    if (!shouldBlockDashboardFetch(sessionState)) {
+      loadGovernanceQueue(advisoryQueueRequest);
+    }
   }
 
   function changeSession(nextSession) {
@@ -322,10 +367,16 @@ export default function App() {
             alertPage={alertPage}
             fraudCasePage={fraudCasePage}
             transactionPage={transactionPage}
+            advisoryQueue={advisoryQueue}
+            advisoryQueueRequest={advisoryQueueRequest}
             isLoading={isLoading}
+            isGovernanceLoading={isGovernanceLoading}
             error={error}
+            governanceError={governanceError}
             sessionState={sessionState}
             onRetry={refreshDashboard}
+            onGovernanceRetry={() => loadGovernanceQueue(advisoryQueueRequest)}
+            onAdvisoryQueueRequestChange={setAdvisoryQueueRequest}
             onTransactionPageChange={changeTransactionPage}
             onTransactionPageSizeChange={changeTransactionPageSize}
             onAlertPageChange={changeAlertPage}
