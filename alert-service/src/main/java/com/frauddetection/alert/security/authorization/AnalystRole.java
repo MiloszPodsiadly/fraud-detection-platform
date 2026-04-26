@@ -14,7 +14,8 @@ public enum AnalystRole {
             AnalystAuthority.ASSISTANT_SUMMARY_READ,
             AnalystAuthority.ALERT_DECISION_SUBMIT,
             AnalystAuthority.FRAUD_CASE_READ,
-            AnalystAuthority.TRANSACTION_MONITOR_READ
+            AnalystAuthority.TRANSACTION_MONITOR_READ,
+            AnalystAuthority.GOVERNANCE_ADVISORY_AUDIT_WRITE
     )),
     REVIEWER(Set.of(
             AnalystAuthority.ALERT_READ,
@@ -22,7 +23,8 @@ public enum AnalystRole {
             AnalystAuthority.ALERT_DECISION_SUBMIT,
             AnalystAuthority.FRAUD_CASE_READ,
             AnalystAuthority.FRAUD_CASE_UPDATE,
-            AnalystAuthority.TRANSACTION_MONITOR_READ
+            AnalystAuthority.TRANSACTION_MONITOR_READ,
+            AnalystAuthority.GOVERNANCE_ADVISORY_AUDIT_WRITE
     )),
     FRAUD_OPS_ADMIN(AnalystAuthority.ALL);
 
