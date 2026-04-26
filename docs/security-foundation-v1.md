@@ -291,15 +291,15 @@ Configured internal ML scoring and governance calls use an internal service-auth
 - `ml-inference-service` defaults to `TOKEN_VALIDATOR` compatibility mode and rejects missing internal identity with 401 when service identity is required.
 - Unknown identities, invalid tokens, or missing endpoint authority return 403.
 - `INTERNAL_AUTH_MODE=DISABLED_LOCAL_ONLY` is the explicit local/dev bypass mode; `LOCALDEV` remains a compatibility alias.
-- `INTERNAL_AUTH_MODE=JWT_SERVICE_IDENTITY` validates signed JWT service identity, including issuer, audience, expiration, signature, service identity claim, service allowlist, and required authority. Java clients attach this through `InternalServiceAuthHeaders`; business clients do not construct JWTs directly.
-- Startup fails if an unknown auth mode is configured, if `DISABLED_LOCAL_ONLY` is used with a prod-like profile, if a Java internal-auth client is disabled in prod-like profiles, if `JWT_SERVICE_IDENTITY` is missing issuer/audience/secret/service authorities, or if `TOKEN_VALIDATOR` is used in a prod-like profile without explicit compatibility opt-in, token hash mode, and a valid allowlist.
+- `INTERNAL_AUTH_MODE=JWT_SERVICE_IDENTITY` validates signed JWT service identity. `RS256` is the production-target path: `ml-inference-service` validates public JWKS material only, requires `kid`, validates issuer, audience, expiration, future `iat`, signature, service identity claim, service allowlist, service-to-key binding, and required authority. Java clients attach this through `InternalServiceAuthHeaders`; business clients do not construct JWTs directly.
+- HS256 remains local compatibility only and is forbidden in prod-like profiles. Startup fails if an unknown auth mode is configured, if `DISABLED_LOCAL_ONLY` is used with a prod-like profile, if a Java internal-auth client is disabled in prod-like profiles, if `JWT_SERVICE_IDENTITY` is missing issuer/audience/algorithm/key material/service authorities/service key bindings, or if `TOKEN_VALIDATOR` is used in a prod-like profile without explicit compatibility opt-in, token hash mode, and a valid allowlist.
 - `INTERNAL_AUTH_TOKEN_HASH_MODE=true` lets `ml-inference-service` compare configured SHA-256 token hashes instead of storing plaintext shared secrets in its allowlist. Plain shared-secret comparison is limited to local/dev style runtime.
 - `MTLS_READY` is a fail-closed configuration boundary only; full enterprise mTLS is not implemented.
 - Tokens are not logged, not sent to the frontend, and not used as analyst identity.
 - Security events and metrics are low-cardinality and do not include tokens, actor IDs, resource IDs, paths, or exception messages.
 - Internal auth metrics are `fraud_internal_auth_success_total{source_service,target_service}` and `fraud_internal_auth_failure_total{target_service,reason}`.
 
-See `docs/service-identity-fdp17.md` for the FDP-17 JWT service identity contract. This is an internal service-auth foundation, not full enterprise mTLS, not enterprise IAM, not bank-grade certification, and not a replacement for production deployment hardening.
+See `docs/service-identity-fdp17.md` for the FDP-17 JWT service identity contract. This is an internal service-auth foundation, not full enterprise mTLS, not enterprise IAM, not external JWKS discovery, not automated key rotation, not HSM/KMS integration, not bank-grade certification, and not a replacement for production deployment hardening.
 
 Future sinks can be added behind `AuditEventPublisher`; they are not implemented in FDP-16:
 
