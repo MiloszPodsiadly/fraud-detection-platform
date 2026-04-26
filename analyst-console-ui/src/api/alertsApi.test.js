@@ -81,7 +81,7 @@ describe("alertsApi auth headers", () => {
     }));
   });
 
-  it("calls governance advisories with bounded query params and no auth headers", async () => {
+  it("calls governance advisories with bounded query params and auth headers", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
       status: "AVAILABLE",
       count: 0,
@@ -98,16 +98,19 @@ describe("alertsApi auth headers", () => {
     await listGovernanceAdvisories({
       severity: "HIGH",
       modelVersion: " 2026-04-21.trained.v1 ",
+      lifecycleStatus: "ACKNOWLEDGED",
       limit: 25
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/governance/advisories?limit=25&severity=HIGH&model_version=2026-04-21.trained.v1",
+      "/governance/advisories?limit=25&severity=HIGH&model_version=2026-04-21.trained.v1&lifecycle_status=ACKNOWLEDGED",
       expect.objectContaining({
-        headers: { "Content-Type": "application/json" }
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+          Authorization: "Bearer oidc-token-123"
+        })
       })
     );
-    expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty("Authorization");
     expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty("X-Demo-User-Id");
   });
 
