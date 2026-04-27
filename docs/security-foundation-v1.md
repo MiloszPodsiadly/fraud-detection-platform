@@ -274,16 +274,23 @@ It does not create legal non-repudiation.
 - External anchor publication is disabled by default (`app.audit.external-anchoring.enabled=false`). Supported sink names are `disabled`, `local-file`, and reserved `external-object-store`. `external-object-store` is not implemented and fails startup if selected. When enabled with `app.audit.external-anchoring.sink=local-file`, local Mongo anchors are published idempotently to a local verification JSONL file sink outside MongoDB. Publication failure is observable through logs and low-cardinality metrics and does not block durable audit writes.
 - Local-file external anchors are development verification artifacts only. They are not production WORM storage, not object lock, not scalable archival storage, and are not suitable for high-volume production retention because reads scan the whole JSONL file. Prod-like profiles (`prod`, `production`, `staging`) reject local-file.
 - `GET /api/v1/audit/integrity/external` requires `audit:verify`, compares bounded local/external anchor state for `source_service=alert-service`, and returns `VALID`, `INVALID`, `PARTIAL`, or `UNAVAILABLE`. Missing/stale external anchors are not hidden; mismatched hash, chain position, hash algorithm, schema version, or local anchor id are violations.
-- `GET /api/v1/audit/evidence/export` requires `audit:export`; `audit:read` alone is insufficient. The endpoint requires `from`, `to`, and `source_service`, caps `limit` at `500`, returns safe audit summaries plus hash/anchor references, `external_anchor_status`, `anchor_coverage`, and a deterministic `export_fingerprint`, and audits export access. `anchor_coverage` includes total exported events, local-anchor coverage, external-anchor coverage, missing external anchors, and `coverage_ratio`. It returns `PARTIAL` when external anchors are disabled, unavailable, or incomplete. `strict=true` rejects partial evidence packages with `409` while still auditing the attempt. It applies a soft in-memory per-actor limit of five exports per minute and returns `429` on exceed. It does not return raw payloads, tokens, stack traces, transaction payloads, customer/account/card identifiers, advisory content, or full URLs.
+- `GET /api/v1/audit/evidence/export` requires `audit:export`; `audit:read` alone is insufficient. The endpoint requires `from`, `to`, and `source_service`, caps `limit` at `500`, returns safe audit summaries plus hash/anchor references, `external_anchor_status`, `anchor_coverage`, and a deterministic `export_fingerprint`, and audits export access. `anchor_coverage` includes total exported events, local-anchor coverage, external-anchor coverage, missing external anchors, and `coverage_ratio`. It returns `PARTIAL` when external anchors are disabled, unavailable, or incomplete. `strict=true` rejects partial evidence packages with `409`, returns no event data, and records `export_status=REJECTED_STRICT_MODE` in the export audit metadata. It applies a soft in-memory per-actor limit of five exports per minute per service instance and returns `429` on exceed. In multi-instance deployments, effective evidence export rate limiting must be enforced at API gateway or shared infrastructure level. It does not return raw payloads, tokens, stack traces, transaction payloads, customer/account/card identifiers, advisory content, or full URLs.
 - Evidence completeness is explicit: `AVAILABLE` means local chain evidence and external anchors are complete for the export; `PARTIAL` means local audit evidence may be present but external verification is incomplete and callers must inspect `reason_code`, `external_anchor_status`, and `anchor_coverage`.
 - Export audit events store only bounded export metadata: query window, source service, limit, returned count, export status, reason code, external anchor status, anchor coverage, and export fingerprint. They do not store the exported events themselves.
-- Companion publication status records track external publication status fields for later operational inspection. These fields are not part of the event hash chain and updating them does not mutate audit events or local anchor records.
+- Evidence export may include sensitive audit metadata such as `actor_id` and `resource_id`. Protection is backend-enforced `audit:export`, bounded query windows and result limits, an audit trail of export access, deterministic export fingerprinting, and per-instance rate limiting.
+- Companion publication status records track external publication status fields for later operational inspection. Success records require `external_published=true`, `external_published_at`, and `external_sink_type`; failure records set `external_published=false` and may include `last_external_publish_failure_reason`. A bounded repository query can list not-yet-externalized anchors by partition for operator visibility. These fields are not part of the event hash chain and updating them does not mutate audit events or local anchor records.
 - Audit read filters are `event_type`, `actor_id`, `resource_type`, `resource_id`, inclusive `from`/`to` timestamps, and bounded `limit` default `50`, max `100`.
 - Audit reads return `status=UNAVAILABLE`, `reason_code=AUDIT_STORE_UNAVAILABLE`, a stable non-sensitive `message`, `count=0`, and an empty event list if persistence cannot be read.
 - Clients MUST check `status` before interpreting `count` or `events`; `AVAILABLE` with `count=0` is a valid empty result and is not equivalent to `UNAVAILABLE`.
 - Deployments should configure bounded MongoDB driver timeouts for `alert-service` so datastore outage detection does not depend on long driver defaults; the Docker quickstart sets bounded server-selection, connect, and socket timeouts.
 - Audit reads do not provide regex, free-text search, unbounded export, aggregation, delete, or update operations.
 - `metadata_summary` is bounded and limited to safe correlation/request/source/schema/failure context. Raw payloads, feature vectors, tokens, secrets, stack traces, and customer/account/card data are not stored or returned.
+
+## FDP-20 Operational Guarantees
+
+FDP-20 guarantees append-only durable audit events, local chain anchors, external tamper-evidence publication when a supported sink is enabled, bounded external verification, bounded evidence export, explicit `AVAILABLE` versus `PARTIAL` versus `UNAVAILABLE` status, strict-mode rejection of partial evidence packages, and complete bounded export audit metadata. It also guarantees that local-file external anchoring is blocked in prod-like profiles and remains development-only.
+
+FDP-20 does not guarantee certified WORM storage, legal notarization, legal non-repudiation, HSM/KMS-backed signatures, SIEM integration, a production object-store implementation, a regulator-ready archive, or cross-instance rate limiting. Evidence export rate limiting is enforced per service instance; in multi-instance deployments, effective rate limiting must be enforced at API gateway or shared infrastructure level. FDP-20 provides external tamper-evidence, not external trust enforcement.
 
 Sensitive read-access audit:
 
@@ -304,6 +311,13 @@ Operational audit metrics:
 - `fraud_platform_audit_integrity_check_total{status}`
 - `fraud_platform_audit_integrity_checks_total{status}`
 - `fraud_platform_audit_integrity_violations_total{violation_type}`
+- `fraud_platform_audit_external_anchor_published_total{sink,status}`
+- `fraud_platform_audit_external_anchor_publish_failed_total{sink,reason}`
+- `fraud_platform_audit_external_anchor_lag_seconds`
+- `fraud_platform_audit_external_integrity_checks_total{status}`
+- `fraud_platform_audit_evidence_exports_total{status}`
+- `fraud_platform_audit_evidence_export_rate_limited_total`
+- `fraud_platform_audit_evidence_export_repeated_fingerprint_total`
 - `fraud_audit_integrity_check_total{status}`
 - `fraud_audit_integrity_violation_total{violation_type}`
 - `fraud_audit_chain_head_hash`

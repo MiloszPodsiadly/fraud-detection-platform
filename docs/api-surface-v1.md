@@ -127,9 +127,11 @@ Platform Audit Evidence Export API:
 - Response includes safe audit event summaries, event hash, previous hash, chain position, local anchor references, external anchor references when available, `external_anchor_status`, `export_fingerprint`, and `anchor_coverage`.
 - `anchor_coverage` includes `total_events`, `events_with_local_anchor`, `events_with_external_anchor`, `events_missing_external_anchor`, and `coverage_ratio`; `coverage_ratio=1.0` is required for a complete external evidence export.
 - Response status is `AVAILABLE`, `PARTIAL`, or `UNAVAILABLE`. `PARTIAL` is used when external anchors are disabled, unavailable, or incomplete for exported events. Clients MUST check `status` and `anchor_coverage` before treating an export as a complete evidence package.
-- `strict=true` rejects partial evidence packages with `409`; repeated export attempts are softly rate-limited per authenticated actor and return `429` on exceed.
+- `strict=true` rejects partial evidence packages with `409`, returns no event data, and records `export_status=REJECTED_STRICT_MODE` in the audit metadata.
+- Repeated export attempts are softly rate-limited per authenticated actor per service instance and return `429` on exceed. In multi-instance deployments, effective evidence export rate limiting must be enforced at API gateway or shared infrastructure level.
 - Export access audit metadata records bounded query/count/status/coverage/fingerprint details only; it does not persist exported event bodies.
 - Export access creates an `EXPORT_AUDIT_EVIDENCE` audit event with bounded metadata.
+- Evidence export may include sensitive audit metadata such as `actor_id` and `resource_id`; access protection relies on backend `audit:export`, bounded queries, audit trail, fingerprinting, and rate limiting.
 - The endpoint does not support unbounded export, full-text search, cursor pagination, aggregation, delete, or update, and it does not return raw payloads, tokens, stack traces, transaction payloads, customer/account/card identifiers, advisory content, or full URLs.
 
 Sensitive read-access audit:

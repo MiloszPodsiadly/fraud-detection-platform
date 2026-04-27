@@ -173,7 +173,7 @@ paths:
   /api/v1/audit/evidence/export:
     get:
       summary: Export bounded audit evidence
-      description: Returns a bounded JSON evidence package for a required source_service and inclusive from/to window. Requires audit:export. Includes safe audit event summaries, event hashes, previous hashes, chain positions, local anchor references, external anchor references when available, external_anchor_status, anchor_coverage, and export_fingerprint. Clients must treat status=PARTIAL as an incomplete evidence package. strict=true rejects partial packages with 409. Repeated export attempts are softly rate-limited per authenticated actor and return 429 on exceed. It never returns raw payloads, tokens, stack traces, transaction payloads, customer/account/card identifiers, or advisory note bodies. No unbounded export, full-text search, delete, update, cursor pagination, or aggregation is provided.
+      description: Returns a bounded JSON evidence package for a required source_service and inclusive from/to window. Requires audit:export. Includes safe audit event summaries, event hashes, previous hashes, chain positions, local anchor references, external anchor references when available, external_anchor_status, anchor_coverage, and export_fingerprint. Clients must treat status=PARTIAL as an incomplete evidence package. strict=true rejects partial packages with 409 and does not return event data. Repeated export attempts are softly rate-limited per authenticated actor per service instance and return 429 on exceed. Multi-instance deployments require API gateway or shared infrastructure rate limiting. It never returns raw payloads, tokens, stack traces, transaction payloads, customer/account/card identifiers, or advisory note bodies. No unbounded export, full-text search, delete, update, cursor pagination, or aggregation is provided.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -744,7 +744,7 @@ components:
         export_status:
           type: string
           nullable: true
-          enum: [AVAILABLE, PARTIAL, UNAVAILABLE, RATE_LIMITED]
+          enum: [AVAILABLE, PARTIAL, UNAVAILABLE, RATE_LIMITED, REJECTED_STRICT_MODE]
         reason_code:
           type: string
           nullable: true
