@@ -232,7 +232,30 @@ Prometheus metric contract:
   - Type: counter
   - Meaning: bounded audit integrity verification detected a violation
   - Labels: `violation_type`
-  - Bounded violation types: `EVENT_HASH_MISMATCH`, `PREVIOUS_HASH_MISMATCH`, `INVALID_SCHEMA_VERSION`, `UNSUPPORTED_HASH_ALGORITHM`, `UNKNOWN`
+  - Bounded violation types: `EVENT_HASH_MISMATCH`, `PREVIOUS_HASH_MISMATCH`, `INVALID_SCHEMA_VERSION`, `UNSUPPORTED_HASH_ALGORITHM`, `ANCHOR_MISSING`, `ANCHOR_HASH_MISMATCH`, `ANCHOR_CHAIN_POSITION_MISMATCH`, `CHAIN_FORK_DETECTED`, `UNKNOWN`
+- `fraud_audit_integrity_check_total`
+  - Type: counter
+  - Meaning: scheduled/manual application-level audit integrity checks completed
+  - Labels: `status`
+  - Bounded statuses: `VALID`, `INVALID`, `PARTIAL`, `UNAVAILABLE`
+- `fraud_audit_integrity_violation_total`
+  - Type: counter
+  - Meaning: application-level audit integrity verification detected a violation
+  - Labels: `violation_type`
+  - Bounded violation types only; no hashes, actor IDs, resource IDs, paths, or exception messages
+- `fraud_audit_chain_head_hash`
+  - Type: gauge
+  - Meaning: numeric fingerprint of the latest checked audit chain head hash
+  - Labels: none
+- `fraud_audit_last_anchor_hash`
+  - Type: gauge
+  - Meaning: numeric fingerprint of the latest checked append-only anchor hash
+  - Labels: none
+- `fraud_audit_integrity_status`
+  - Type: gauge
+  - Meaning: latest application-level integrity status as one-hot gauges
+  - Labels: `status`
+  - Bounded statuses: `VALID`, `INVALID`
 
 ## Low-Cardinality Policy
 

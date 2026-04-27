@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: Alert Service API
   version: FDP-19
-  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, governance advisory lifecycle projection, and human-review audit. Audit integrity is application-level hash-chain verification; it does not imply WORM archive storage, external notarization, SIEM integration, unbounded export, legal non-repudiation, HSM/KMS signing, or final compliance archive.
+  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, governance advisory lifecycle projection, and human-review audit. Audit integrity is application-level partitioned hash-chain verification with local append-only chain anchors; it does not imply WORM archive storage, external notarization, external chain anchoring, SIEM integration, unbounded export, legal non-repudiation, HSM/KMS signing, or final compliance archive.
 servers:
   - url: http://localhost:8085
 paths:
@@ -80,7 +80,7 @@ paths:
   /api/v1/audit/integrity:
     get:
       summary: Verify bounded audit hash-chain integrity
-      description: Performs read-only bounded application-level verification of durable platform audit events. Requires audit:read. Verifies deterministic event hashes, previous-hash continuity, schema version, and hash algorithm. Returns VALID, INVALID, PARTIAL, or UNAVAILABLE. This endpoint does not repair data, export full audit history, delete/update audit records, provide WORM storage, external notarization, legal non-repudiation, SIEM integration, HSM/KMS signing, or regulator-ready evidence packaging. Successful integrity reads create a bounded VERIFY_AUDIT_INTEGRITY audit event.
+      description: Performs read-only bounded application-level verification of durable platform audit events. Requires audit:read. Verifies deterministic event hashes, partition-scoped previous-hash continuity, schema version, hash algorithm, fork indicators, and latest local chain-anchor consistency. Returns VALID, INVALID, PARTIAL, or UNAVAILABLE. This endpoint does not repair data, export full audit history, delete/update audit records, provide WORM storage, external notarization, external chain anchoring, legal non-repudiation, SIEM integration, HSM/KMS signing, or regulator-ready evidence packaging. Successful integrity reads create a bounded VERIFY_AUDIT_INTEGRITY audit event.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -476,6 +476,7 @@ components:
         - occurred_at
         - correlation_id
         - source_service
+        - partition_key
         - request_id
         - metadata_summary
         - previous_event_hash
@@ -522,6 +523,10 @@ components:
         source_service:
           type: string
           enum: [alert-service]
+        partition_key:
+          type: string
+          enum: ["source_service:alert-service"]
+          description: Partition used for previous_event_hash continuity.
         request_id:
           type: string
           nullable: true
@@ -626,6 +631,13 @@ components:
         last_event_hash:
           type: string
           nullable: true
+        partition_key:
+          type: string
+          nullable: true
+          enum: ["source_service:alert-service"]
+        last_anchor_hash:
+          type: string
+          nullable: true
         violations:
           type: array
           items:
@@ -640,13 +652,13 @@ components:
       properties:
         violation_type:
           type: string
-          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, INVALID_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM]
+          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, INVALID_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, CHAIN_FORK_DETECTED]
         position:
           type: integer
           minimum: 1
         reason_code:
           type: string
-          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, UNSUPPORTED_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM]
+          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, UNSUPPORTED_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, CHAIN_FORK_DETECTED]
     GovernanceAdvisoryLifecycleStatus:
       type: string
       description: Read-time projection from latest audit decision. OPEN means no audit event exists.

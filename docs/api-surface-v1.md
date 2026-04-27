@@ -96,10 +96,13 @@ Platform Audit Integrity API:
 - Requires backend-enforced `audit:read`.
 - Query parameters: optional inclusive ISO-8601 `from`/`to`, optional bounded `source_service=alert-service`, and `limit` default `100`, maximum `500`.
 - Response status is `VALID`, `INVALID`, `PARTIAL`, or `UNAVAILABLE`.
-- Verification checks deterministic event hash, previous hash continuity, schema version, and hash algorithm. It reports bounded violation types and never mutates, repairs, exports, or deletes audit data.
+- Verification checks deterministic event hash, previous hash continuity, schema version, hash algorithm, fork indicators, and latest append-only anchor consistency. It reports bounded violation types and never mutates, repairs, exports, or deletes audit data.
+- Durable audit chains are partitioned by `partition_key`; the current platform partition is `source_service:alert-service`.
+- Each inserted durable audit event creates an append-only anchor in `audit_chain_anchors` with the latest event hash, chain position, partition key, and hash algorithm. This protects against silent full-chain rewrite inside the application store but is not external notarization.
 - A `PARTIAL` result means the bounded window was filled and should not be treated as full-chain verification.
 - Integrity checks create a follow-up `VERIFY_AUDIT_INTEGRITY` audit event with bounded metadata.
-- FDP-19 integrity verification is application-level evidence support. It is not WORM storage, external notarization, legal non-repudiation, SIEM integration, long-term archival policy, regulator-ready evidence package, or HSM/KMS signing.
+- Protected analyst decision and fraud-case update writes attempt durable audit persistence before the business repository save; audit failure fails the request before that business write is persisted.
+- FDP-19 integrity verification is application-level evidence support. It is not WORM storage, external notarization, legal non-repudiation, SIEM integration, long-term archival policy, regulator-ready evidence package, external chain anchoring, or HSM/KMS signing.
 
 Sensitive read-access audit:
 
@@ -131,6 +134,7 @@ Platform audit read response:
       "occurred_at": "2026-04-26T09:00:00Z",
       "correlation_id": "corr-1",
       "source_service": "alert-service",
+      "partition_key": "source_service:alert-service",
       "request_id": null,
       "metadata_summary": {
         "correlation_id": "corr-1",
@@ -158,6 +162,8 @@ Platform audit integrity response:
   "limit": 100,
   "first_event_hash": "sha256-hex",
   "last_event_hash": "sha256-hex",
+  "partition_key": "source_service:alert-service",
+  "last_anchor_hash": "sha256-hex",
   "violations": []
 }
 ```
