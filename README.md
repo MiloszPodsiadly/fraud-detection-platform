@@ -479,7 +479,7 @@ These credentials are local-only and must not be reused outside local test envir
 
 - no silent refresh
 - no token refresh flow
-- service-to-service auth uses the internal service-auth foundation for configured ML/governance calls; local Docker may use explicit `DISABLED_LOCAL_ONLY`, the token-validator Docker override exercises compatibility `TOKEN_VALIDATOR`, and `deployment/docker-compose.service-identity-rs256.yml` exercises production-target `JWT_SERVICE_IDENTITY` with RS256, JWKS public-key validation, `kid`, and service-to-key binding; this is not full enterprise mTLS
+- service-to-service auth uses the internal service-auth foundation for configured ML/governance calls; local Docker may use explicit `DISABLED_LOCAL_ONLY`, the token-validator Docker override exercises compatibility `TOKEN_VALIDATOR`, `deployment/docker-compose.service-identity-rs256.yml` exercises production-target `JWT_SERVICE_IDENTITY`, and `deployment/docker-compose.service-identity-mtls.yml` exercises FDP-18 internal mTLS service identity; this is not enterprise IAM or automated certificate lifecycle management
 - no production IdP config
 - tokens are managed by `oidc-client-ts` for local/dev use, not as hardened production storage
 
@@ -512,7 +512,7 @@ curl -i -H "X-Internal-Service-Name: alert-service" -H "X-Internal-Service-Token
 curl -s http://localhost:8090/metrics | grep fraud_internal_auth
 ```
 
-Expected results: the anonymous ML governance call returns `401`, the configured alert-service identity succeeds, and internal auth success/failure metrics are visible. Scoring through `fraud-scoring-service` uses the same shared token through its internal client boundary. This validates the internal shared-secret service-auth foundation; it is not full enterprise mTLS.
+Expected results: the anonymous ML governance call returns `401`, the configured alert-service identity succeeds, and internal auth success/failure metrics are visible. Scoring through `fraud-scoring-service` uses the same shared token through its internal client boundary. This validates only the internal shared-secret compatibility path; use the FDP-18 override to exercise mTLS.
 
 ## RS256 Service Identity
 
@@ -532,6 +532,33 @@ curl -s http://localhost:8090/metrics | grep fraud_internal_auth
 ```
 
 Expected results: anonymous direct ML calls return `401`, invalid bearer calls return `403`, configured Java clients attach RS256 signed JWT service identity through `InternalServiceAuthHeaders`, `ml-inference-service` validates public JWKS material only, `kid` is required, service-to-key binding is enforced, strict `iat`/`exp` freshness checks bound replay risk, and internal auth metrics remain low-cardinality. See `docs/service-identity-fdp17.md` for the full contract. This is a JWT service-auth foundation, not enterprise mTLS or enterprise IAM.
+
+## FDP-18 mTLS Service Identity
+
+FDP-18 adds internal mTLS service identity for configured service-to-service calls into `ml-inference-service`.
+
+Scope:
+
+- `fraud-scoring-service` -> `ml-inference-service` scoring with `ml-score`
+- `alert-service` -> `ml-inference-service` governance reads with `governance-read`
+- browser/OIDC traffic remains separate and does not use mTLS
+
+Identity is derived from SAN URI, not CN:
+
+- `spiffe://fraud-platform/fraud-scoring-service`
+- `spiffe://fraud-platform/alert-service`
+
+Run the local-only mTLS fixture stack with:
+
+```bash
+docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml -f deployment/docker-compose.service-identity-mtls.yml up --build -d
+```
+
+Expected results: direct protected ML calls without a client certificate fail, scoring through `fraud-scoring-service` succeeds, governance reads through `alert-service` succeed, wrong service authority is rejected, and internal auth metrics include `mode=MTLS_SERVICE_IDENTITY`.
+
+Local mTLS keys under `deployment/service-identity/mtls/` are committed intentionally for local development and verification only. They must NEVER be used in any production or shared environment. Production deployments must use externally managed CA, server certificate, client certificate, and private-key material.
+
+FDP-18 is an internal mTLS service identity foundation. It is not enterprise IAM, not automated certificate rotation, not cert-manager/Vault/KMS integration, not full zero-trust certification, not WORM storage, and not SIEM integration. See `docs/service-identity-fdp18.md`.
 
 ## Replay Risk
 
@@ -558,13 +585,13 @@ Full replay protection requires:
 
 ## Local Keys
 
-`deployment/service-identity/` contains local RS256 keys for Docker verification.
+`deployment/service-identity/` contains local RS256 keys and local mTLS certificate fixtures for Docker verification.
 
 They are committed intentionally for local development and verification only.
 
 They must NEVER be used in any production or shared environment.
 
-Production deployments must use externally managed private keys and JWKS material.
+Production deployments must use externally managed private keys, JWKS material, CA material, and service certificates.
 
 If you suspect stale local images or containers, rebuild cleanly:
 
@@ -655,7 +682,7 @@ Full details: [Security Foundation v1](docs/security-foundation-v1.md).
 
 Current non-production gaps:
 
-- Internal service-auth foundation is implemented for configured ML/governance calls through RS256 JWT service identity, compatibility token validation, and an explicit local/dev bypass mode; it is not full enterprise mTLS or enterprise IAM.
+- Internal service-auth foundation is implemented for configured ML/governance calls through RS256 JWT service identity, FDP-18 internal mTLS service identity, compatibility token validation, and an explicit local/dev bypass mode; it is not enterprise IAM or automated certificate lifecycle management.
 - The frontend still uses demo auth by default in development.
 - The frontend OIDC path is a local OIDC integration and foundation for production auth, but it does not yet implement silent refresh or production deployment hardening.
 - Request DTOs still accept `analystId` for compatibility, although secured write paths use the principal as actor source of truth.
@@ -663,6 +690,7 @@ Current non-production gaps:
 Planned production path:
 
 - Configure real issuer/JWK settings per environment.
+- Configure externally managed CA, service certificates, and private-key material for FDP-18 mTLS deployments.
 - Finalize IdP claim naming and group/role mapping for deployment.
 - Harden the existing frontend OIDC flow for deployment environments while preserving the `userId`/`roles`/`authorities` UI contract and lifecycle states.
 - Define audit retention/export policy if compliance requirements need long-term searchable audit history.
@@ -1070,8 +1098,8 @@ Implemented:
 
 Known production gaps:
 
-- Service-to-service authentication is an internal service-auth foundation with RS256 JWT service identity, JWKS public-key validation, per-service private-key signing, `kid` validation, service-to-key binding, a compatibility token-validator path, and prod-like fail-closed guards; it is not enterprise mTLS, enterprise IAM, or bank-grade certification.
-- mTLS is not implemented yet; current internal service authentication has an mTLS-ready boundary with `MTLS_READY` kept fail-closed rather than pretending mTLS exists.
+- Service-to-service authentication is an internal service-auth foundation with RS256 JWT service identity, JWKS public-key validation, per-service private-key signing, `kid` validation, service-to-key binding, FDP-18 internal mTLS service identity, a compatibility token-validator path, and prod-like fail-closed guards; it is not enterprise IAM, automated certificate lifecycle management, or bank-grade certification.
+- mTLS is implemented only for declared internal ML scoring/governance service calls; browser/OIDC traffic, automated rotation, cert-manager, Vault/KMS, external PKI automation, and enterprise certificate lifecycle management remain out of scope.
 - Durable audit storage is not WORM/immutable archive storage, not a final compliance archive, and has no SIEM export integration.
 - DLT inspection/replay tooling is not implemented yet.
 - The frontend defaults to demo auth in quickstart mode and supports local OIDC through the Keycloak override, but it is not a production-ready SSO setup.

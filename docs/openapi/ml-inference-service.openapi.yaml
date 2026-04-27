@@ -2,9 +2,10 @@ openapi: 3.0.3
 info:
   title: Fraud Detection ML Inference Service
   version: "1.0"
-  description: Current contract for the Python ML inference runtime. Scoring and governance APIs require configured internal service identity in default/production mode. Docker localdev may allow anonymous internal calls only when INTERNAL_AUTH_MODE=DISABLED_LOCAL_ONLY. TOKEN_VALIDATOR remains a compatibility shared-token mode; JWT_SERVICE_IDENTITY validates RS256 signed service JWTs with public JWKS material, required kid, issuer, audience, expiration, future iat, service identity, service allowlist, service-to-key binding, and authority checks. HS256 is local compatibility only and is forbidden in prod-like profiles. This is an internal service-auth foundation with an MTLS_READY fail-closed boundary; it is not full enterprise mTLS.
+  description: Current contract for the Python ML inference runtime. Scoring and governance APIs require configured internal service identity in default/production mode. Docker localdev may allow anonymous internal calls only when INTERNAL_AUTH_MODE=DISABLED_LOCAL_ONLY. TOKEN_VALIDATOR remains a compatibility shared-token mode; JWT_SERVICE_IDENTITY validates RS256 signed service JWTs with public JWKS material, required kid, issuer, audience, expiration, future iat, service identity, service allowlist, service-to-key binding, and authority checks. MTLS_SERVICE_IDENTITY validates trusted client certificates, derives identity from SAN URI rather than CN, and enforces service authority per endpoint. HS256 is local compatibility only and is forbidden in prod-like profiles. This is an internal service-auth foundation, not enterprise IAM or automated certificate lifecycle management.
 servers:
   - url: http://localhost:8090
+  - url: https://localhost:8090
 paths:
   /health:
     get:
@@ -29,7 +30,7 @@ paths:
   /v1/fraud/score:
     post:
       summary: Score fraud risk for a feature snapshot
-      description: Requires internal service identity with ml-score authority outside explicit DISABLED_LOCAL_ONLY local/dev mode.
+      description: Requires internal service identity with ml-score authority outside explicit DISABLED_LOCAL_ONLY local/dev mode. MTLS_SERVICE_IDENTITY uses trusted client certificate identity derived from SAN URI; OpenAPI 3.0.3 cannot model mutual TLS as a portable security scheme.
       security:
         - internalServiceJwt: []
         - internalServiceName: []

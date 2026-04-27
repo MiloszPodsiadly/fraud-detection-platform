@@ -186,12 +186,16 @@ Prometheus metric contract:
 - `fraud_internal_auth_success_total`
   - Type: counter
   - Meaning: accepted internal service authentication attempts
-  - Labels: `source_service`, `target_service`
+  - Labels: `source_service`, `target_service`, `mode`
 - `fraud_internal_auth_failure_total`
   - Type: counter
   - Meaning: rejected internal service authentication attempts
-  - Labels: `target_service`, `reason`
-  - Bounded reasons include missing credentials, expired JWT, invalid JWT, invalid issuer, invalid audience, unknown service, missing authority, invalid shared-token credentials, key/service mismatch collapsed to invalid JWT, and mTLS-not-configured.
+  - Labels: `target_service`, `mode`, `reason`
+  - Bounded reasons include missing credentials, missing client certificate, expired JWT, invalid JWT, invalid issuer, invalid audience, unknown service, missing authority, invalid shared-token credentials, key/service mismatch collapsed to invalid JWT, and mTLS-not-configured.
+- `fraud_internal_mtls_certificate_expiry_seconds`
+  - Type: gauge
+  - Meaning: seconds until the accepted internal mTLS client certificate expires
+  - Labels: `source_service`, `target_service`
 - `fraud_internal_auth_replay_rejected_total`
   - Type: counter
   - Meaning: rejected internal service JWT freshness or soft replay attempts

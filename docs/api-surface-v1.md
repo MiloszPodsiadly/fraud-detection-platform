@@ -13,9 +13,9 @@ FDP-11 freezes the public HTTP API surface for local services without changing s
 
 ## ML Inference Service
 
-Base URL in Docker: `http://ml-inference-service:8090`
+Base URL in default Docker: `http://ml-inference-service:8090`. The FDP-18 mTLS override uses `https://ml-inference-service:8090`.
 
-Internal ML scoring and governance endpoints require configured service identity in non-localdev runtime. Docker localdev may allow anonymous internal calls only when `INTERNAL_AUTH_MODE=DISABLED_LOCAL_ONLY` (`LOCALDEV` remains a compatibility alias). `TOKEN_VALIDATOR` remains a compatibility shared-token mode, and `JWT_SERVICE_IDENTITY` validates RS256 signed service JWTs with public JWKS material, required `kid`, issuer, audience, expiration, future `iat`, service identity, service allowlist, service-to-key binding, and authority checks. HS256 is local compatibility only and is forbidden in prod-like profiles. This is an internal service-auth foundation with an `MTLS_READY` fail-closed boundary; it is not full enterprise mTLS.
+Internal ML scoring and governance endpoints require configured service identity in non-localdev runtime. Docker localdev may allow anonymous internal calls only when `INTERNAL_AUTH_MODE=DISABLED_LOCAL_ONLY` (`LOCALDEV` remains a compatibility alias). `TOKEN_VALIDATOR` remains a compatibility shared-token mode. `JWT_SERVICE_IDENTITY` validates RS256 signed service JWTs with public JWKS material, required `kid`, issuer, audience, expiration, future `iat`, service identity, service allowlist, service-to-key binding, and authority checks. `MTLS_SERVICE_IDENTITY` validates trusted client certificates, derives identity from SAN URI rather than CN, and enforces service authority per endpoint. HS256 is local compatibility only and is forbidden in prod-like profiles. This is an internal service-auth foundation, not enterprise IAM or automated certificate lifecycle management.
 
 | Method | Path | Contract |
 | --- | --- | --- |
