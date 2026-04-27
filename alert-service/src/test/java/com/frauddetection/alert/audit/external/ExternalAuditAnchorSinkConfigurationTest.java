@@ -44,6 +44,21 @@ class ExternalAuditAnchorSinkConfigurationTest {
     }
 
     @Test
+    void shouldRejectLocalFileSinkInProdLikeProfileEvenWithOverride() {
+        MockEnvironment environment = new MockEnvironment();
+        environment.setActiveProfiles("production");
+
+        assertThatThrownBy(() -> configuration.externalAuditAnchorSink(
+                new ObjectMapper(),
+                environment,
+                "local-file",
+                "./target/test-audit-external-anchors.jsonl",
+                true
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Local-file external audit anchor sink is not allowed");
+    }
+
+    @Test
     void shouldFailClosedWhenExternalObjectStoreSinkIsSelectedButNotImplemented() {
         assertThatThrownBy(() -> configuration.externalAuditAnchorSink(
                 new ObjectMapper(),

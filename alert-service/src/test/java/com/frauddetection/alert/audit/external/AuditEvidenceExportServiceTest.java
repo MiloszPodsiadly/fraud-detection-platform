@@ -12,19 +12,28 @@ import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.security.authorization.AnalystRole;
+import com.frauddetection.alert.security.principal.AnalystPrincipal;
+import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataAccessResourceFailureException;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -38,13 +47,20 @@ class AuditEvidenceExportServiceTest {
     private final AuditAnchorRepository anchorRepository = mock(AuditAnchorRepository.class);
     private final ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
     private final AuditService auditService = mock(AuditService.class);
+    private final CurrentAnalystUser currentAnalystUser = mock(CurrentAnalystUser.class);
+    private final AuditEvidenceExportRateLimiter rateLimiter = new AuditEvidenceExportRateLimiter(
+            Clock.fixed(Instant.parse("2026-04-27T10:00:00Z"), ZoneOffset.UTC),
+            5
+    );
     private final AuditEvidenceExportService service = new AuditEvidenceExportService(
             eventRepository,
             anchorRepository,
             sink,
             new AuditEvidenceExportQueryParser(),
             new AlertServiceMetrics(new SimpleMeterRegistry()),
-            auditService
+            auditService,
+            currentAnalystUser,
+            rateLimiter
     );
 
     @Test
@@ -66,6 +82,7 @@ class AuditEvidenceExportServiceTest {
                 Instant.parse("2026-04-28T00:00:00Z"),
                 100
         )).thenReturn(List.of(externalAnchor));
+        when(currentAnalystUser.get()).thenReturn(Optional.of(adminPrincipal()));
 
         AuditEvidenceExportResponse response = service.export(
                 "2026-04-27T00:00:00Z",
@@ -82,10 +99,13 @@ class AuditEvidenceExportServiceTest {
         assertThat(response.anchorCoverage().eventsWithExternalAnchor()).isEqualTo(1);
         assertThat(response.anchorCoverage().eventsMissingExternalAnchor()).isZero();
         assertThat(response.anchorCoverage().coverageRatio()).isEqualTo(1.0d);
+        assertThat(response.exportFingerprint()).hasSize(64);
         assertThat(response.events().getFirst().eventHash()).isEqualTo("hash-1");
         assertThat(response.events().getFirst().localAnchor()).isNotNull();
+        assertThat(response.events().getFirst().localAnchor().publicationStatus()).isNull();
         assertThat(response.events().getFirst().externalAnchor()).isNotNull();
         assertThat(response.toString()).doesNotContain("raw", "token", "stack", "private", "secret");
+        ArgumentCaptor<AuditEventMetadataSummary> metadata = forClass(AuditEventMetadataSummary.class);
         verify(auditService).audit(
                 eq(AuditAction.EXPORT_AUDIT_EVIDENCE),
                 eq(AuditResourceType.AUDIT_EVIDENCE_EXPORT),
@@ -94,8 +114,18 @@ class AuditEvidenceExportServiceTest {
                 eq("audit-evidence-exporter"),
                 eq(AuditOutcome.SUCCESS),
                 any(),
-                any(AuditEventMetadataSummary.class)
+                metadata.capture()
         );
+        assertThat(metadata.getValue().from()).isEqualTo("2026-04-27T00:00:00Z");
+        assertThat(metadata.getValue().to()).isEqualTo("2026-04-28T00:00:00Z");
+        assertThat(metadata.getValue().sourceService()).isEqualTo("alert-service");
+        assertThat(metadata.getValue().limit()).isEqualTo(100);
+        assertThat(metadata.getValue().returnedCount()).isEqualTo(1);
+        assertThat(metadata.getValue().exportStatus()).isEqualTo("AVAILABLE");
+        assertThat(metadata.getValue().reasonCode()).isNull();
+        assertThat(metadata.getValue().externalAnchorStatus()).isEqualTo("AVAILABLE");
+        assertThat(metadata.getValue().anchorCoverage().coverageRatio()).isEqualTo(1.0d);
+        assertThat(metadata.getValue().exportFingerprint()).isEqualTo(response.exportFingerprint());
     }
 
     @Test
@@ -178,7 +208,9 @@ class AuditEvidenceExportServiceTest {
                 new DisabledExternalAuditAnchorSink(),
                 new AuditEvidenceExportQueryParser(),
                 new AlertServiceMetrics(new SimpleMeterRegistry()),
-                auditService
+                auditService,
+                currentAnalystUser,
+                new AuditEvidenceExportRateLimiter(Clock.fixed(Instant.parse("2026-04-27T10:00:00Z"), ZoneOffset.UTC), 5)
         );
         AuditEventDocument event = event("audit-1", 1L);
         AuditAnchorDocument localAnchor = localAnchor("local-anchor-1", 1L, "hash-1");
@@ -214,6 +246,7 @@ class AuditEvidenceExportServiceTest {
         assertThat(response.externalAnchorStatus()).isEqualTo("AVAILABLE");
         assertThat(response.anchorCoverage().totalEvents()).isZero();
         assertThat(response.anchorCoverage().coverageRatio()).isEqualTo(1.0d);
+        assertThat(response.exportFingerprint()).hasSize(64);
     }
 
     @Test
@@ -267,6 +300,7 @@ class AuditEvidenceExportServiceTest {
                 "to",
                 "external_anchor_status",
                 "anchor_coverage",
+                "export_fingerprint",
                 "events"
         );
         String serialized = objectMapper.writeValueAsString(response);
@@ -283,6 +317,76 @@ class AuditEvidenceExportServiceTest {
         assertQueryError(() -> service.export("2026-04-27T00:00:00Z", "2026-04-28T00:00:00Z", "unknown-service", 100), "source_service: unsupported value");
         assertQueryError(() -> service.export("2026-04-27T00:00:00Z", "2026-04-28T00:00:00Z", "alert-service", 0), "limit: must be greater than 0");
         assertQueryError(() -> service.export("2026-04-27T00:00:00Z", "2026-04-28T00:00:00Z", "alert-service", 501), "limit: must be less than or equal to 500");
+    }
+
+    @Test
+    void shouldRejectStrictExportWhenEvidenceWouldBePartial() {
+        AuditEventDocument event = event("audit-1", 1L);
+        AuditAnchorDocument localAnchor = localAnchor("local-anchor-1", 1L, "hash-1");
+        when(eventRepository.findEvidenceWindow(any(), any(), any(), anyInt())).thenReturn(List.of(event));
+        when(anchorRepository.findByPartitionKeyAndChainPositionBetween("source_service:alert-service", 1L, 1L, 100))
+                .thenReturn(List.of(localAnchor));
+        when(sink.findByRange(any(), any(), any(), anyInt())).thenReturn(List.of());
+
+        assertThatThrownBy(() -> service.export(
+                "2026-04-27T00:00:00Z",
+                "2026-04-28T00:00:00Z",
+                "alert-service",
+                null,
+                true
+        )).isInstanceOfSatisfying(AuditEvidenceExportRejectedException.class, exception -> {
+            assertThat(exception.status().value()).isEqualTo(409);
+            assertThat(exception.reasonCode()).isEqualTo("EXTERNAL_ANCHORS_UNAVAILABLE");
+        });
+        verify(auditService).audit(
+                eq(AuditAction.EXPORT_AUDIT_EVIDENCE),
+                eq(AuditResourceType.AUDIT_EVIDENCE_EXPORT),
+                any(),
+                any(),
+                eq("audit-evidence-exporter"),
+                eq(AuditOutcome.FAILED),
+                eq("EXTERNAL_ANCHORS_UNAVAILABLE"),
+                any(AuditEventMetadataSummary.class)
+        );
+    }
+
+    @Test
+    void shouldRateLimitRepeatedExportsByActorAndAuditRejectedAttempt() {
+        CurrentAnalystUser rateLimitedUser = mock(CurrentAnalystUser.class);
+        when(rateLimitedUser.get()).thenReturn(Optional.of(adminPrincipal()));
+        AuditEvidenceExportService rateLimitedService = new AuditEvidenceExportService(
+                eventRepository,
+                anchorRepository,
+                sink,
+                new AuditEvidenceExportQueryParser(),
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                auditService,
+                rateLimitedUser,
+                new AuditEvidenceExportRateLimiter(Clock.fixed(Instant.parse("2026-04-27T10:00:00Z"), ZoneOffset.UTC), 1)
+        );
+        when(eventRepository.findEvidenceWindow(any(), any(), any(), anyInt())).thenReturn(List.of());
+
+        rateLimitedService.export("2026-04-27T00:00:00Z", "2026-04-28T00:00:00Z", "alert-service", null);
+
+        assertThatThrownBy(() -> rateLimitedService.export(
+                "2026-04-27T00:00:00Z",
+                "2026-04-28T00:00:00Z",
+                "alert-service",
+                null
+        )).isInstanceOfSatisfying(AuditEvidenceExportRejectedException.class, exception -> {
+            assertThat(exception.status().value()).isEqualTo(429);
+            assertThat(exception.reasonCode()).isEqualTo("RATE_LIMITED");
+        });
+        verify(auditService).audit(
+                eq(AuditAction.EXPORT_AUDIT_EVIDENCE),
+                eq(AuditResourceType.AUDIT_EVIDENCE_EXPORT),
+                any(),
+                any(),
+                eq("audit-evidence-exporter"),
+                eq(AuditOutcome.FAILED),
+                eq("RATE_LIMITED"),
+                any(AuditEventMetadataSummary.class)
+        );
     }
 
     private void assertQueryError(Runnable action, String expectedDetail) {
@@ -328,6 +432,14 @@ class AuditEvidenceExportServiceTest {
                 hash,
                 chainPosition,
                 "SHA-256"
+        );
+    }
+
+    private AnalystPrincipal adminPrincipal() {
+        return new AnalystPrincipal(
+                "admin-1",
+                Set.of(AnalystRole.FRAUD_OPS_ADMIN),
+                Set.of("audit:export")
         );
     }
 }

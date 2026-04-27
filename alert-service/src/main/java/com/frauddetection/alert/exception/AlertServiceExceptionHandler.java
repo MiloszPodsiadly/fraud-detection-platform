@@ -2,6 +2,7 @@ package com.frauddetection.alert.exception;
 
 import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
 import com.frauddetection.alert.audit.InvalidAuditEventQueryException;
+import com.frauddetection.alert.audit.external.AuditEvidenceExportRejectedException;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryLookupUnavailableException;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryNotFoundException;
 import com.frauddetection.alert.governance.audit.GovernanceAuditActorUnavailableException;
@@ -106,6 +107,19 @@ public class AlertServiceExceptionHandler {
                         400,
                         "Bad Request",
                         "Invalid audit event query.",
+                        exception.details()
+                )
+        );
+    }
+
+    @ExceptionHandler(AuditEvidenceExportRejectedException.class)
+    public ResponseEntity<ApiErrorResponse> handleAuditEvidenceExportRejected(AuditEvidenceExportRejectedException exception) {
+        return ResponseEntity.status(exception.status()).body(
+                new ApiErrorResponse(
+                        Instant.now(),
+                        exception.status().value(),
+                        exception.status().getReasonPhrase(),
+                        exception.getMessage(),
                         exception.details()
                 )
         );

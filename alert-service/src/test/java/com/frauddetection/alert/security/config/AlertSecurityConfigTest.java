@@ -363,7 +363,7 @@ class AlertSecurityConfigTest {
                 .thenReturn(new AuditIntegrityResponse("VALID", 0, 100, "HEAD", false, false, false, null, null, null, null, null, null, List.of()));
         when(externalAuditIntegrityService.verify(any(), any()))
                 .thenReturn(new ExternalAuditIntegrityResponse("VALID", 0, 100, "alert-service", "source_service:alert-service", null, null, null, null, List.of()));
-        when(auditEvidenceExportService.export(any(), any(), any(), any()))
+        when(auditEvidenceExportService.export(any(), any(), any(), any(), any(Boolean.class)))
                 .thenReturn(new AuditEvidenceExportResponse(
                         "AVAILABLE",
                         0,
@@ -417,7 +417,7 @@ class AlertSecurityConfigTest {
     void shouldRequireDedicatedFdp20AuthoritiesInsteadOfAuditRead() throws Exception {
         when(externalAuditIntegrityService.verify(any(), any()))
                 .thenReturn(new ExternalAuditIntegrityResponse("VALID", 0, 100, "alert-service", "source_service:alert-service", null, null, null, null, List.of()));
-        when(auditEvidenceExportService.export(any(), any(), any(), any()))
+        when(auditEvidenceExportService.export(any(), any(), any(), any(), any(Boolean.class)))
                 .thenReturn(new AuditEvidenceExportResponse(
                         "AVAILABLE",
                         0,

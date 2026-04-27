@@ -20,6 +20,8 @@ import static org.mockito.Mockito.when;
 class ExternalAuditAnchorPublisherTest {
 
     private final AuditAnchorRepository anchorRepository = mock(AuditAnchorRepository.class);
+    private final ExternalAuditAnchorPublicationStatusRepository publicationStatusRepository =
+            mock(ExternalAuditAnchorPublicationStatusRepository.class);
     private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
     private final AlertServiceMetrics metrics = new AlertServiceMetrics(meterRegistry);
 
@@ -30,6 +32,7 @@ class ExternalAuditAnchorPublisherTest {
                 .thenReturn(List.of(localAnchor("local-anchor-1", 1L, "hash-1")));
         ExternalAuditAnchorPublisher publisher = new ExternalAuditAnchorPublisher(
                 anchorRepository,
+                publicationStatusRepository,
                 sink,
                 metrics,
                 Clock.fixed(Instant.parse("2026-04-27T10:01:00Z"), ZoneOffset.UTC),
@@ -59,6 +62,7 @@ class ExternalAuditAnchorPublisherTest {
                 .thenAnswer(invocation -> invocation.getArgument(0));
         ExternalAuditAnchorPublisher publisher = new ExternalAuditAnchorPublisher(
                 anchorRepository,
+                publicationStatusRepository,
                 sink,
                 metrics,
                 Clock.fixed(Instant.parse("2026-04-27T10:01:00Z"), ZoneOffset.UTC),
@@ -70,6 +74,8 @@ class ExternalAuditAnchorPublisherTest {
         assertThat(result.published()).isEqualTo(1);
         verify(anchorRepository)
                 .findByPartitionKeyAndChainPositionGreaterThan("source_service:alert-service", 1L, 100);
+        verify(publicationStatusRepository)
+                .recordSuccess(next, Instant.parse("2026-04-27T10:01:00Z"), "local-file");
     }
 
     @Test
@@ -86,6 +92,7 @@ class ExternalAuditAnchorPublisherTest {
                 .thenAnswer(invocation -> invocation.getArgument(0));
         ExternalAuditAnchorPublisher publisher = new ExternalAuditAnchorPublisher(
                 anchorRepository,
+                publicationStatusRepository,
                 sink,
                 metrics,
                 Clock.fixed(Instant.parse("2026-04-27T10:01:00Z"), ZoneOffset.UTC),
@@ -96,6 +103,8 @@ class ExternalAuditAnchorPublisherTest {
 
         assertThat(result.failed()).isEqualTo(1);
         assertThat(result.published()).isEqualTo(1);
+        verify(publicationStatusRepository).recordFailure(first, Instant.parse("2026-04-27T10:01:00Z"), "CONFLICT");
+        verify(publicationStatusRepository).recordSuccess(second, Instant.parse("2026-04-27T10:01:00Z"), "local-file");
         assertThat(meterRegistry.get("fraud_platform_audit_external_anchor_publish_failed_total")
                 .tag("sink", "local-file")
                 .tag("reason", "CONFLICT")
@@ -112,6 +121,7 @@ class ExternalAuditAnchorPublisherTest {
                 .thenReturn(List.of());
         ExternalAuditAnchorPublisher publisher = new ExternalAuditAnchorPublisher(
                 anchorRepository,
+                publicationStatusRepository,
                 sink,
                 metrics,
                 Clock.fixed(Instant.parse("2026-04-27T10:01:00Z"), ZoneOffset.UTC),
@@ -132,6 +142,7 @@ class ExternalAuditAnchorPublisherTest {
                 .thenThrow(new ExternalAuditAnchorSinkException("IO_ERROR", "file path detail"));
         ExternalAuditAnchorPublisher publisher = new ExternalAuditAnchorPublisher(
                 anchorRepository,
+                publicationStatusRepository,
                 sink,
                 metrics,
                 Clock.fixed(Instant.parse("2026-04-27T10:01:00Z"), ZoneOffset.UTC),

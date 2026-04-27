@@ -1,5 +1,10 @@
 package com.frauddetection.alert.audit.external;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.MapperFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditAnchorDocument;
 import com.frauddetection.alert.audit.AuditAnchorRepository;
@@ -11,13 +16,21 @@ import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.security.principal.AnalystPrincipal;
+import com.frauddetection.alert.security.principal.CurrentAnalystUser;
+import org.springframework.http.HttpStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -25,6 +38,10 @@ import java.util.stream.Collectors;
 public class AuditEvidenceExportService {
 
     private static final Logger log = LoggerFactory.getLogger(AuditEvidenceExportService.class);
+    private static final ObjectMapper CANONICAL_JSON = JsonMapper.builder()
+            .configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true)
+            .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true)
+            .build();
 
     private final AuditEventRepository eventRepository;
     private final AuditAnchorRepository anchorRepository;
@@ -32,6 +49,8 @@ public class AuditEvidenceExportService {
     private final AuditEvidenceExportQueryParser queryParser;
     private final AlertServiceMetrics metrics;
     private final AuditService auditService;
+    private final CurrentAnalystUser currentAnalystUser;
+    private final AuditEvidenceExportRateLimiter rateLimiter;
 
     private record ExternalAnchorLookup(String status, Map<Long, ExternalAuditAnchor> anchors) {
     }
@@ -42,7 +61,9 @@ public class AuditEvidenceExportService {
             ExternalAuditAnchorSink sink,
             AuditEvidenceExportQueryParser queryParser,
             AlertServiceMetrics metrics,
-            AuditService auditService
+            AuditService auditService,
+            CurrentAnalystUser currentAnalystUser,
+            AuditEvidenceExportRateLimiter rateLimiter
     ) {
         this.eventRepository = eventRepository;
         this.anchorRepository = anchorRepository;
@@ -50,10 +71,26 @@ public class AuditEvidenceExportService {
         this.queryParser = queryParser;
         this.metrics = metrics;
         this.auditService = auditService;
+        this.currentAnalystUser = currentAnalystUser;
+        this.rateLimiter = rateLimiter;
     }
 
     public AuditEvidenceExportResponse export(String from, String to, String sourceService, Integer limit) {
+        return export(from, to, sourceService, limit, false);
+    }
+
+    public AuditEvidenceExportResponse export(String from, String to, String sourceService, Integer limit, boolean strict) {
         AuditEvidenceExportQuery query = queryParser.parse(from, to, sourceService, limit);
+        if (!rateLimiter.allow(currentActorId())) {
+            metrics.recordEvidenceExportRateLimited();
+            auditEvidenceExport(query, 0, "RATE_LIMITED", "RATE_LIMITED", null, AuditEvidenceExportResponse.AnchorCoverage.empty(), null, AuditOutcome.FAILED);
+            throw new AuditEvidenceExportRejectedException(
+                    HttpStatus.TOO_MANY_REQUESTS,
+                    "RATE_LIMITED",
+                    "Audit evidence export rate limit exceeded.",
+                    List.of("reason_code:RATE_LIMITED")
+            );
+        }
         try {
             List<AuditEventDocument> documents = eventRepository.findEvidenceWindow(
                     query.sourceService(),
@@ -62,14 +99,24 @@ public class AuditEvidenceExportService {
                     query.limit()
             );
             AuditEvidenceExportResponse response = available(query, documents);
+            if (strict && "PARTIAL".equals(response.status())) {
+                metrics.recordEvidenceExport(response.status());
+                auditEvidenceExport(query, 0, response.status(), response.reasonCode(), response.externalAnchorStatus(), response.anchorCoverage(), response.exportFingerprint(), AuditOutcome.FAILED);
+                throw new AuditEvidenceExportRejectedException(
+                        HttpStatus.CONFLICT,
+                        response.reasonCode(),
+                        "Strict audit evidence export rejected a partial evidence package.",
+                        List.of("reason_code:" + response.reasonCode())
+                );
+            }
             metrics.recordEvidenceExport(response.status());
-            auditEvidenceExport(query, response.count(), AuditOutcome.SUCCESS, null);
+            auditEvidenceExport(query, response.count(), response.status(), response.reasonCode(), response.externalAnchorStatus(), response.anchorCoverage(), response.exportFingerprint(), AuditOutcome.SUCCESS);
             return response;
         } catch (DataAccessException exception) {
             AuditEvidenceExportResponse response = AuditEvidenceExportResponse.unavailable(query);
             metrics.recordEvidenceExport("UNAVAILABLE");
             try {
-                auditEvidenceExport(query, response.count(), AuditOutcome.FAILED, "INTERNAL_ERROR");
+                auditEvidenceExport(query, response.count(), response.status(), response.reasonCode(), response.externalAnchorStatus(), response.anchorCoverage(), response.exportFingerprint(), AuditOutcome.FAILED);
             } catch (AuditPersistenceUnavailableException ignored) {
                 log.warn("Audit evidence export access audit could not be persisted.");
             }
@@ -90,6 +137,7 @@ public class AuditEvidenceExportService {
                     null,
                     "AVAILABLE",
                     AuditEvidenceExportResponse.AnchorCoverage.empty(),
+                    fingerprint(query, AuditEvidenceExportResponse.AnchorCoverage.empty(), List.of()),
                     List.of()
             );
         }
@@ -123,6 +171,7 @@ public class AuditEvidenceExportService {
         String externalAnchorStatus = externalAnchorStatus(coverage, externalAnchorLookup.status());
         String reasonCode = reasonCode(coverage, externalAnchorStatus);
         String status = reasonCode == null ? "AVAILABLE" : "PARTIAL";
+        String fingerprint = fingerprint(query, coverage, events);
         return new AuditEvidenceExportResponse(
                 status,
                 events.size(),
@@ -134,6 +183,7 @@ public class AuditEvidenceExportService {
                 message(reasonCode),
                 externalAnchorStatus,
                 coverage,
+                fingerprint,
                 events
         );
     }
@@ -226,11 +276,58 @@ public class AuditEvidenceExportService {
         };
     }
 
+    private String currentActorId() {
+        Optional<AnalystPrincipal> principal = currentAnalystUser.get();
+        return principal == null ? "unknown" : principal.map(value -> value.userId()).orElse("unknown");
+    }
+
+    private String fingerprint(
+            AuditEvidenceExportQuery query,
+            AuditEvidenceExportResponse.AnchorCoverage coverage,
+            List<AuditEvidenceExportEvent> events
+    ) {
+        Map<String, Object> canonical = new LinkedHashMap<>();
+        canonical.put("query", Map.of(
+                "from", query.from().toString(),
+                "to", query.to().toString(),
+                "source_service", query.sourceService(),
+                "limit", query.limit()
+        ));
+        canonical.put("audit_event_ids", events.stream().map(AuditEvidenceExportEvent::auditEventId).toList());
+        canonical.put("event_hashes", events.stream().map(AuditEvidenceExportEvent::eventHash).toList());
+        canonical.put("local_anchor_ids", events.stream()
+                .map(AuditEvidenceExportEvent::localAnchor)
+                .map(anchor -> anchor == null ? null : anchor.anchorId())
+                .toList());
+        canonical.put("external_anchor_ids", events.stream()
+                .map(AuditEvidenceExportEvent::externalAnchor)
+                .map(anchor -> anchor == null ? null : anchor.externalAnchorId())
+                .toList());
+        canonical.put("anchor_coverage", Map.of(
+                "coverage_ratio", coverage.coverageRatio(),
+                "events_missing_external_anchor", coverage.eventsMissingExternalAnchor(),
+                "events_with_external_anchor", coverage.eventsWithExternalAnchor(),
+                "events_with_local_anchor", coverage.eventsWithLocalAnchor(),
+                "total_events", coverage.totalEvents()
+        ));
+        try {
+            byte[] canonicalJson = CANONICAL_JSON.writeValueAsBytes(canonical);
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(digest.digest(canonicalJson));
+        } catch (JsonProcessingException | NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("Audit evidence export fingerprint could not be computed.");
+        }
+    }
+
     private void auditEvidenceExport(
             AuditEvidenceExportQuery query,
             int countReturned,
-            AuditOutcome outcome,
-            String failureReason
+            String exportStatus,
+            String reasonCode,
+            String externalAnchorStatus,
+            AuditEvidenceExportResponse.AnchorCoverage anchorCoverage,
+            String exportFingerprint,
+            AuditOutcome outcome
     ) {
         auditService.audit(
                 AuditAction.EXPORT_AUDIT_EVIDENCE,
@@ -239,14 +336,25 @@ public class AuditEvidenceExportService {
                 null,
                 "audit-evidence-exporter",
                 outcome,
-                failureReason,
-                AuditEventMetadataSummary.auditRead(
-                        null,
+                reasonCode,
+                AuditEventMetadataSummary.evidenceExport(
                         "alert-service",
                         "1.0",
-                        "GET /api/v1/audit/evidence/export",
-                        "source_service=" + query.sourceService() + ";from=present;to=present;limit=" + query.limit(),
-                        countReturned
+                        query.from().toString(),
+                        query.to().toString(),
+                        query.limit(),
+                        countReturned,
+                        exportStatus,
+                        reasonCode,
+                        externalAnchorStatus,
+                        new AuditEventMetadataSummary.AnchorCoverageSummary(
+                                anchorCoverage.totalEvents(),
+                                anchorCoverage.eventsWithLocalAnchor(),
+                                anchorCoverage.eventsWithExternalAnchor(),
+                                anchorCoverage.eventsMissingExternalAnchor(),
+                                anchorCoverage.coverageRatio()
+                        ),
+                        exportFingerprint
                 )
         );
     }

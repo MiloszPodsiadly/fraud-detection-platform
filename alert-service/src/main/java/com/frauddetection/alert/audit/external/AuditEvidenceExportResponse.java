@@ -39,9 +39,29 @@ public record AuditEvidenceExportResponse(
         @JsonProperty("anchor_coverage")
         AnchorCoverage anchorCoverage,
 
+        @JsonProperty("export_fingerprint")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        String exportFingerprint,
+
         @JsonProperty("events")
         List<AuditEvidenceExportEvent> events
 ) {
+    public AuditEvidenceExportResponse(
+            String status,
+            int count,
+            int limit,
+            String sourceService,
+            Instant from,
+            Instant to,
+            String reasonCode,
+            String message,
+            String externalAnchorStatus,
+            AnchorCoverage anchorCoverage,
+            List<AuditEvidenceExportEvent> events
+    ) {
+        this(status, count, limit, sourceService, from, to, reasonCode, message, externalAnchorStatus, anchorCoverage, null, events);
+    }
+
     static AuditEvidenceExportResponse unavailable(AuditEvidenceExportQuery query) {
         return new AuditEvidenceExportResponse(
                 "UNAVAILABLE",
@@ -54,6 +74,7 @@ public record AuditEvidenceExportResponse(
                 "Audit evidence store is currently unavailable.",
                 "UNAVAILABLE",
                 AnchorCoverage.empty(),
+                null,
                 List.of()
         );
     }

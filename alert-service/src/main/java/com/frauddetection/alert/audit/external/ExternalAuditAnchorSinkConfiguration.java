@@ -39,8 +39,11 @@ class ExternalAuditAnchorSinkConfiguration {
 
     private void validateLocalFileSink(Environment environment, boolean allowLocalFileInProd) {
         Set<String> profiles = Set.copyOf(Arrays.asList(environment.getActiveProfiles()));
-        if (!allowLocalFileInProd && profiles.stream().anyMatch(PROD_LIKE_PROFILES::contains)) {
+        if (profiles.stream().anyMatch(PROD_LIKE_PROFILES::contains)) {
             throw new IllegalStateException("Local-file external audit anchor sink is not allowed in prod-like profiles.");
+        }
+        if (allowLocalFileInProd) {
+            log.warn("Ignoring local-file external audit anchor prod override; local-file is never allowed in prod-like profiles.");
         }
         if (profiles.stream().noneMatch(LOCAL_PROFILES::contains)) {
             log.warn("Local-file external audit anchor sink is for development verification only and is not production WORM storage.");

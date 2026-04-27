@@ -168,6 +168,10 @@ public class AlertServiceMetrics {
         ).increment();
     }
 
+    public void recordEvidenceExportRateLimited() {
+        counter("fraud_platform_audit_evidence_export_rate_limited_total").increment();
+    }
+
     public void recordReadAccessAuditPersisted(ReadAccessEndpointCategory endpointCategory, ReadAccessAuditOutcome outcome) {
         counter(
                 "fraud_platform_read_access_audit_events_persisted_total",

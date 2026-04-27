@@ -22,6 +22,7 @@ public class ExternalAuditAnchorPublisher {
     private static final String DEFAULT_PARTITION_KEY = "source_service:alert-service";
 
     private final AuditAnchorRepository anchorRepository;
+    private final ExternalAuditAnchorPublicationStatusRepository publicationStatusRepository;
     private final ExternalAuditAnchorSink sink;
     private final AlertServiceMetrics metrics;
     private final Clock clock;
@@ -30,21 +31,24 @@ public class ExternalAuditAnchorPublisher {
     @Autowired
     public ExternalAuditAnchorPublisher(
             AuditAnchorRepository anchorRepository,
+            ExternalAuditAnchorPublicationStatusRepository publicationStatusRepository,
             ExternalAuditAnchorSink sink,
             AlertServiceMetrics metrics,
             @Value("${app.audit.external-anchoring.publish-limit:100}") int defaultLimit
     ) {
-        this(anchorRepository, sink, metrics, Clock.systemUTC(), defaultLimit);
+        this(anchorRepository, publicationStatusRepository, sink, metrics, Clock.systemUTC(), defaultLimit);
     }
 
     ExternalAuditAnchorPublisher(
             AuditAnchorRepository anchorRepository,
+            ExternalAuditAnchorPublicationStatusRepository publicationStatusRepository,
             ExternalAuditAnchorSink sink,
             AlertServiceMetrics metrics,
             Clock clock,
             int defaultLimit
     ) {
         this.anchorRepository = anchorRepository;
+        this.publicationStatusRepository = publicationStatusRepository;
         this.sink = sink;
         this.metrics = metrics;
         this.clock = clock;
@@ -80,10 +84,12 @@ public class ExternalAuditAnchorPublisher {
                         metrics.recordExternalAnchorPublished(sink.sinkType(), "DUPLICATE");
                         duplicates++;
                     }
+                    recordPublicationSuccess(localAnchor);
                     recordLag(localAnchor.createdAt());
                 } catch (ExternalAuditAnchorSinkException exception) {
                     metrics.recordExternalAnchorPublishFailed(sink.sinkType(), exception.reason());
                     failed++;
+                    recordPublicationFailure(localAnchor, exception.reason());
                     log.warn("External audit anchor publication failed: reason={}", exception.reason());
                 }
             }
@@ -96,6 +102,22 @@ public class ExternalAuditAnchorPublisher {
             metrics.recordExternalAnchorPublishFailed(sink.sinkType(), exception.reason());
             log.warn("External audit anchor lookup failed before publication: reason={}", exception.reason());
             return new ExternalAuditAnchorPublishResult(0, 0, 1, boundedLimit);
+        }
+    }
+
+    private void recordPublicationSuccess(AuditAnchorDocument localAnchor) {
+        try {
+            publicationStatusRepository.recordSuccess(localAnchor, clock.instant(), sink.sinkType());
+        } catch (DataAccessException exception) {
+            log.warn("External audit anchor publication status update failed after publish.");
+        }
+    }
+
+    private void recordPublicationFailure(AuditAnchorDocument localAnchor, String reason) {
+        try {
+            publicationStatusRepository.recordFailure(localAnchor, clock.instant(), reason);
+        } catch (DataAccessException exception) {
+            log.warn("External audit anchor publication failure status update failed.");
         }
     }
 

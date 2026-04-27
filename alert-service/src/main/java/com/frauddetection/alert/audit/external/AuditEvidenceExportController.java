@@ -20,8 +20,9 @@ public class AuditEvidenceExportController {
             @RequestParam String from,
             @RequestParam String to,
             @RequestParam(name = "source_service") String sourceService,
-            @RequestParam(required = false) Integer limit
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false, defaultValue = "false") boolean strict
     ) {
-        return service.export(from, to, sourceService, limit);
+        return service.export(from, to, sourceService, limit, strict);
     }
 }

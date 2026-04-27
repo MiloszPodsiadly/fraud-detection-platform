@@ -85,6 +85,7 @@ class AlertServiceMetricsTest {
         metrics.recordExternalAnchorLag(Duration.ofSeconds(3));
         metrics.recordExternalIntegrityCheck("PARTIAL");
         metrics.recordEvidenceExport("PARTIAL");
+        metrics.recordEvidenceExportRateLimited();
 
         Meter persisted = meterRegistry.get("fraud_platform_audit_events_persisted_total").meter();
         Meter failures = meterRegistry.get("fraud_platform_audit_persistence_failures_total").meter();
@@ -96,6 +97,7 @@ class AlertServiceMetricsTest {
         Meter externalAnchorLag = meterRegistry.get("fraud_platform_audit_external_anchor_lag_seconds").meter();
         Meter externalIntegrityChecks = meterRegistry.get("fraud_platform_audit_external_integrity_checks_total").meter();
         Meter evidenceExports = meterRegistry.get("fraud_platform_audit_evidence_exports_total").meter();
+        Meter evidenceExportRateLimited = meterRegistry.get("fraud_platform_audit_evidence_export_rate_limited_total").meter();
 
         assertThat(persisted.getId().getTags())
                 .extracting(Tag::getKey)
@@ -128,6 +130,7 @@ class AlertServiceMetricsTest {
         assertThat(evidenceExports.getId().getTags())
                 .extracting(Tag::getValue)
                 .containsExactly("PARTIAL");
+        assertThat(evidenceExportRateLimited.getId().getTags()).isEmpty();
         assertThat(persisted.getId().getTags())
                 .extracting(Tag::getKey)
                 .doesNotContain("actor_id", "resource_id", "audit_event_id", "hash", "exception", "message");
