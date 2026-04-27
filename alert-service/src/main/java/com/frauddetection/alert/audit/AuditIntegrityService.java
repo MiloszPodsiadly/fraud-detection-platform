@@ -18,6 +18,7 @@ public class AuditIntegrityService {
 
     private static final String SUPPORTED_SCHEMA_VERSION = "1.0";
     private static final String SUPPORTED_HASH_ALGORITHM = "SHA-256";
+    private static final String DEFAULT_SOURCE_SERVICE = "alert-service";
 
     private final AuditEventRepository repository;
     private final AuditAnchorRepository anchorRepository;
@@ -40,23 +41,23 @@ public class AuditIntegrityService {
     }
 
     public AuditIntegrityResponse verify(String from, String to, String sourceService, Integer limit) {
-        AuditIntegrityQuery query = queryParser.parse(from, to, sourceService, limit);
+        AuditIntegrityQuery query = queryParser.parse(from, to, sourceService, null, limit);
+        return verify(query, true);
+    }
+
+    public AuditIntegrityResponse verify(String from, String to, String sourceService, String mode, Integer limit) {
+        AuditIntegrityQuery query = queryParser.parse(from, to, sourceService, mode, limit);
         return verify(query, true);
     }
 
     AuditIntegrityResponse verifyScheduled(String sourceService, int limit) {
-        AuditIntegrityQuery query = queryParser.parse(null, null, sourceService, limit);
+        AuditIntegrityQuery query = queryParser.parse(null, null, sourceService, AuditIntegrityVerificationMode.HEAD.name(), limit);
         return verify(query, false);
     }
 
     private AuditIntegrityResponse verify(AuditIntegrityQuery query, boolean auditRead) {
         try {
-            List<AuditEventDocument> documents = repository.findIntegrityWindow(
-                    query.sourceService(),
-                    query.from(),
-                    query.to(),
-                    query.limit()
-            );
+            List<AuditEventDocument> documents = documents(query);
             AuditIntegrityResponse response = verifyDocuments(documents, query);
             metrics.recordAuditIntegrityCheck(response.status());
             metrics.recordForensicAuditIntegrityCheck(response.status());
@@ -81,6 +82,20 @@ public class AuditIntegrityService {
             }
             return response;
         }
+    }
+
+    private List<AuditEventDocument> documents(AuditIntegrityQuery query) {
+        String partitionKey = partitionKey(query);
+        return switch (query.mode()) {
+            case HEAD -> repository.findHeadWindow(partitionKey, query.limit());
+            case FULL_CHAIN -> repository.findFullChain(partitionKey, query.limit());
+            case WINDOW -> repository.findIntegrityWindow(
+                    query.sourceService() == null ? DEFAULT_SOURCE_SERVICE : query.sourceService(),
+                    query.from(),
+                    query.to(),
+                    query.limit()
+            );
+        };
     }
 
     private AuditIntegrityResponse verifyDocuments(List<AuditEventDocument> documents, AuditIntegrityQuery query) {
@@ -108,20 +123,26 @@ public class AuditIntegrityService {
         }
 
         String partitionKey = partitionKey(query, documents);
+        boolean externalPredecessor = firstEventHasExternalPredecessor(documents, partitionKey);
+        if (query.mode() == AuditIntegrityVerificationMode.FULL_CHAIN
+                && !documents.isEmpty()
+                && documents.getFirst().previousEventHash() != null) {
+            violations.add(new AuditIntegrityViolation("MISSING_PREDECESSOR", 1, "MISSING_PREDECESSOR"));
+        }
         String lastEventHash = documents.isEmpty() ? null : documents.getLast().eventHash();
         String lastAnchorHash = null;
         if (partitionKey != null) {
             AuditEventDocument chainHead = repository.findLatestByPartitionKey(partitionKey).orElse(null);
             AuditAnchorDocument anchor = anchorRepository.findLatestByPartitionKey(partitionKey).orElse(null);
             if (chainHead != null && anchor == null) {
-                violations.add(new AuditIntegrityViolation("ANCHOR_MISSING", documents.size(), "ANCHOR_MISSING"));
+                violations.add(new AuditIntegrityViolation("ANCHOR_MISSING", violationPosition(documents), "ANCHOR_MISSING"));
             } else if (chainHead != null) {
                 lastAnchorHash = anchor.lastEventHash();
                 if (!safeEquals(chainHead.eventHash(), anchor.lastEventHash())) {
-                    violations.add(new AuditIntegrityViolation("ANCHOR_HASH_MISMATCH", documents.size(), "ANCHOR_HASH_MISMATCH"));
+                    violations.add(new AuditIntegrityViolation("ANCHOR_HASH_MISMATCH", violationPosition(documents), "ANCHOR_HASH_MISMATCH"));
                 }
                 if (repository.countByPartitionKey(partitionKey) != anchor.chainPosition()) {
-                    violations.add(new AuditIntegrityViolation("ANCHOR_CHAIN_POSITION_MISMATCH", documents.size(), "ANCHOR_CHAIN_POSITION_MISMATCH"));
+                    violations.add(new AuditIntegrityViolation("ANCHOR_CHAIN_POSITION_MISMATCH", violationPosition(documents), "ANCHOR_CHAIN_POSITION_MISMATCH"));
                 }
             }
         }
@@ -134,6 +155,10 @@ public class AuditIntegrityService {
                 status,
                 documents.size(),
                 query.limit(),
+                query.mode().name(),
+                partialWindow(query, externalPredecessor),
+                externalPredecessor,
+                externalPredecessor,
                 null,
                 null,
                 documents.isEmpty() ? null : documents.getFirst().eventHash(),
@@ -144,6 +169,10 @@ public class AuditIntegrityService {
         );
     }
 
+    private String partitionKey(AuditIntegrityQuery query) {
+        return AuditIntegrityQueryParser.partitionKey(query.sourceService() == null ? DEFAULT_SOURCE_SERVICE : query.sourceService());
+    }
+
     private String partitionKey(AuditIntegrityQuery query, List<AuditEventDocument> documents) {
         if (query.sourceService() != null) {
             return AuditIntegrityQueryParser.partitionKey(query.sourceService());
@@ -152,6 +181,21 @@ public class AuditIntegrityService {
             return AuditEventDocument.PARTITION_KEY;
         }
         return documents.getFirst().partitionKey();
+    }
+
+    private boolean firstEventHasExternalPredecessor(List<AuditEventDocument> documents, String partitionKey) {
+        if (documents.isEmpty() || documents.getFirst().previousEventHash() == null) {
+            return false;
+        }
+        return repository.findByPartitionKeyAndEventHash(partitionKey, documents.getFirst().previousEventHash()).isPresent();
+    }
+
+    private boolean partialWindow(AuditIntegrityQuery query, boolean externalPredecessor) {
+        return query.mode() != AuditIntegrityVerificationMode.FULL_CHAIN && externalPredecessor;
+    }
+
+    private int violationPosition(List<AuditEventDocument> documents) {
+        return Math.max(1, documents.size());
     }
 
     private void auditIntegrityRead(

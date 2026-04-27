@@ -20,12 +20,13 @@ class AuditIntegrityQueryParser {
         return "source_service:" + sourceService;
     }
 
-    AuditIntegrityQuery parse(String from, String to, String sourceService, Integer limit) {
+    AuditIntegrityQuery parse(String from, String to, String sourceService, String mode, Integer limit) {
         List<String> errors = new ArrayList<>();
         int normalizedLimit = parseLimit(limit, errors);
         Instant parsedFrom = parseInstant(from, "from", errors);
         Instant parsedTo = parseInstant(to, "to", errors);
         String parsedSourceService = parseSourceService(sourceService, errors);
+        AuditIntegrityVerificationMode parsedMode = parseMode(mode, parsedFrom, parsedTo, errors);
 
         if (parsedFrom != null && parsedTo != null && parsedFrom.isAfter(parsedTo)) {
             errors.add("from: must be before or equal to to");
@@ -33,7 +34,11 @@ class AuditIntegrityQueryParser {
         if (!errors.isEmpty()) {
             throw new InvalidAuditEventQueryException(errors);
         }
-        return new AuditIntegrityQuery(parsedFrom, parsedTo, parsedSourceService, normalizedLimit);
+        return new AuditIntegrityQuery(parsedFrom, parsedTo, parsedSourceService, parsedMode, normalizedLimit);
+    }
+
+    AuditIntegrityQuery parse(String from, String to, String sourceService, Integer limit) {
+        return parse(from, to, sourceService, null, limit);
     }
 
     private int parseLimit(Integer limit, List<String> errors) {
@@ -70,6 +75,26 @@ class AuditIntegrityQueryParser {
             return null;
         }
         return normalized;
+    }
+
+    private AuditIntegrityVerificationMode parseMode(
+            String value,
+            Instant from,
+            Instant to,
+            List<String> errors
+    ) {
+        String normalized = normalize(value);
+        if (normalized == null) {
+            return from != null || to != null
+                    ? AuditIntegrityVerificationMode.WINDOW
+                    : AuditIntegrityVerificationMode.HEAD;
+        }
+        try {
+            return AuditIntegrityVerificationMode.valueOf(normalized.toUpperCase());
+        } catch (IllegalArgumentException exception) {
+            errors.add("mode: unsupported value");
+            return AuditIntegrityVerificationMode.HEAD;
+        }
     }
 
     private String normalize(String value) {

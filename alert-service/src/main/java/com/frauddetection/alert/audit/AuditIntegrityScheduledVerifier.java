@@ -1,11 +1,17 @@
 package com.frauddetection.alert.audit;
 
+import com.frauddetection.alert.observability.AlertServiceMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 @Component
+@ConditionalOnProperty(
+        value = "app.audit.integrity.scheduled-verification-enabled",
+        havingValue = "true"
+)
 public class AuditIntegrityScheduledVerifier {
 
     private static final Logger log = LoggerFactory.getLogger(AuditIntegrityScheduledVerifier.class);
@@ -13,9 +19,11 @@ public class AuditIntegrityScheduledVerifier {
     private static final int WINDOW_LIMIT = 500;
 
     private final AuditIntegrityService auditIntegrityService;
+    private final AlertServiceMetrics metrics;
 
-    public AuditIntegrityScheduledVerifier(AuditIntegrityService auditIntegrityService) {
+    public AuditIntegrityScheduledVerifier(AuditIntegrityService auditIntegrityService, AlertServiceMetrics metrics) {
         this.auditIntegrityService = auditIntegrityService;
+        this.metrics = metrics;
     }
 
     @Scheduled(
@@ -38,6 +46,9 @@ public class AuditIntegrityScheduledVerifier {
                 log.error("Audit integrity verification unavailable checked={} limit={}", response.checked(), response.limit());
             }
         } catch (RuntimeException exception) {
+            metrics.recordAuditIntegrityCheck("UNAVAILABLE");
+            metrics.recordForensicAuditIntegrityCheck("UNAVAILABLE");
+            metrics.recordAuditIntegritySnapshot("UNAVAILABLE", null, null);
             log.error(
                     "Audit integrity scheduled verification failed without repair error_type={}",
                     exception.getClass().getSimpleName()

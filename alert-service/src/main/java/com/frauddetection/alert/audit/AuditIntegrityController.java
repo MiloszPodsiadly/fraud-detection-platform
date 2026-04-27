@@ -20,8 +20,9 @@ public class AuditIntegrityController {
             @RequestParam(required = false) String from,
             @RequestParam(required = false) String to,
             @RequestParam(name = "source_service", required = false) String sourceService,
+            @RequestParam(required = false) String mode,
             @RequestParam(required = false) Integer limit
     ) {
-        return auditIntegrityService.verify(from, to, sourceService, limit);
+        return auditIntegrityService.verify(from, to, sourceService, mode, limit);
     }
 }

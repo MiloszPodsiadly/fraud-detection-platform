@@ -15,6 +15,18 @@ public record AuditIntegrityResponse(
         @JsonProperty("limit")
         int limit,
 
+        @JsonProperty("verification_mode")
+        String verificationMode,
+
+        @JsonProperty("partial_window")
+        boolean partialWindow,
+
+        @JsonProperty("external_predecessor")
+        boolean externalPredecessor,
+
+        @JsonProperty("window_start_has_external_predecessor")
+        boolean windowStartHasExternalPredecessor,
+
         @JsonProperty("reason_code")
         @JsonInclude(JsonInclude.Include.NON_NULL)
         String reasonCode,
@@ -47,6 +59,10 @@ public record AuditIntegrityResponse(
                 "UNAVAILABLE",
                 0,
                 limit,
+                null,
+                false,
+                false,
+                false,
                 "AUDIT_STORE_UNAVAILABLE",
                 "Audit event store is currently unavailable.",
                 null,

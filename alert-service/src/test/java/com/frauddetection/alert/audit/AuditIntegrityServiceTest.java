@@ -34,14 +34,14 @@ class AuditIntegrityServiceTest {
 
     @Test
     void shouldVerifyValidBoundedHashChainAndAuditTheRead() {
-        AuditEventDocument first = document("audit-1", "alert-1", "2026-04-26T09:00:00Z", null);
-        AuditEventDocument second = document("audit-2", "alert-2", "2026-04-26T09:01:00Z", first.eventHash());
-        when(repository.findIntegrityWindow("alert-service", null, null, 100))
+        AuditEventDocument first = document("audit-1", "alert-1", "2026-04-26T09:00:00Z", null, 1L);
+        AuditEventDocument second = document("audit-2", "alert-2", "2026-04-26T09:01:00Z", first.eventHash(), 2L);
+        when(repository.findHeadWindow(AuditEventDocument.PARTITION_KEY, 100))
                 .thenReturn(List.of(first, second));
         when(repository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY))
                 .thenReturn(java.util.Optional.of(second));
         when(anchorRepository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY))
-                .thenReturn(java.util.Optional.of(AuditAnchorDocument.from("anchor-1", second, 2)));
+                .thenReturn(java.util.Optional.of(AuditAnchorDocument.from("anchor-1", second)));
         when(repository.countByPartitionKey(AuditEventDocument.PARTITION_KEY)).thenReturn(2L);
 
         AuditIntegrityResponse response = service.verify(null, null, "alert-service", null);
@@ -51,6 +51,8 @@ class AuditIntegrityServiceTest {
         assertThat(response.limit()).isEqualTo(100);
         assertThat(response.firstEventHash()).isEqualTo(first.eventHash());
         assertThat(response.lastEventHash()).isEqualTo(second.eventHash());
+        assertThat(response.verificationMode()).isEqualTo("HEAD");
+        assertThat(response.partialWindow()).isFalse();
         assertThat(response.partitionKey()).isEqualTo(AuditEventDocument.PARTITION_KEY);
         assertThat(response.lastAnchorHash()).isEqualTo(second.eventHash());
         assertThat(response.violations()).isEmpty();
@@ -68,15 +70,15 @@ class AuditIntegrityServiceTest {
 
     @Test
     void shouldDetectTamperedEventAndPreviousHashMismatch() {
-        AuditEventDocument first = document("audit-1", "alert-1", "2026-04-26T09:00:00Z", null);
-        AuditEventDocument tampered = document("audit-2", "alert-2", "2026-04-26T09:01:00Z", "wrong-previous")
+        AuditEventDocument first = document("audit-1", "alert-1", "2026-04-26T09:00:00Z", null, 1L);
+        AuditEventDocument tampered = document("audit-2", "alert-2", "2026-04-26T09:01:00Z", "wrong-previous", 2L)
                 .withEventHash("tampered-hash");
-        when(repository.findIntegrityWindow(null, null, null, 100))
+        when(repository.findHeadWindow(AuditEventDocument.PARTITION_KEY, 100))
                 .thenReturn(List.of(first, tampered));
         when(repository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY))
                 .thenReturn(java.util.Optional.of(tampered));
         when(anchorRepository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY))
-                .thenReturn(java.util.Optional.of(AuditAnchorDocument.from("anchor-1", tampered, 2)));
+                .thenReturn(java.util.Optional.of(AuditAnchorDocument.from("anchor-1", tampered)));
         when(repository.countByPartitionKey(AuditEventDocument.PARTITION_KEY)).thenReturn(2L);
 
         AuditIntegrityResponse response = service.verify(null, null, null, null);
@@ -93,8 +95,8 @@ class AuditIntegrityServiceTest {
 
     @Test
     void shouldDetectAnchorMismatch() {
-        AuditEventDocument first = document("audit-1", "alert-1", "2026-04-26T09:00:00Z", null);
-        when(repository.findIntegrityWindow("alert-service", null, null, 100))
+        AuditEventDocument first = document("audit-1", "alert-1", "2026-04-26T09:00:00Z", null, 1L);
+        when(repository.findHeadWindow(AuditEventDocument.PARTITION_KEY, 100))
                 .thenReturn(List.of(first));
         when(repository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY))
                 .thenReturn(java.util.Optional.of(first));
@@ -119,15 +121,15 @@ class AuditIntegrityServiceTest {
 
     @Test
     void shouldDetectChainForkWithinWindow() {
-        AuditEventDocument first = document("audit-1", "alert-1", "2026-04-26T09:00:00Z", null);
-        AuditEventDocument second = document("audit-2", "alert-2", "2026-04-26T09:01:00Z", first.eventHash());
-        AuditEventDocument fork = document("audit-3", "alert-3", "2026-04-26T09:02:00Z", first.eventHash());
-        when(repository.findIntegrityWindow("alert-service", null, null, 100))
+        AuditEventDocument first = document("audit-1", "alert-1", "2026-04-26T09:00:00Z", null, 1L);
+        AuditEventDocument second = document("audit-2", "alert-2", "2026-04-26T09:01:00Z", first.eventHash(), 2L);
+        AuditEventDocument fork = document("audit-3", "alert-3", "2026-04-26T09:02:00Z", first.eventHash(), 3L);
+        when(repository.findHeadWindow(AuditEventDocument.PARTITION_KEY, 100))
                 .thenReturn(List.of(first, second, fork));
         when(repository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY))
                 .thenReturn(java.util.Optional.of(fork));
         when(anchorRepository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY))
-                .thenReturn(java.util.Optional.of(AuditAnchorDocument.from("anchor-1", fork, 3)));
+                .thenReturn(java.util.Optional.of(AuditAnchorDocument.from("anchor-1", fork)));
         when(repository.countByPartitionKey(AuditEventDocument.PARTITION_KEY)).thenReturn(3L);
 
         AuditIntegrityResponse response = service.verify(null, null, "alert-service", null);
@@ -140,14 +142,14 @@ class AuditIntegrityServiceTest {
 
     @Test
     void shouldDetectFirstDeletionThroughAnchorChainPositionMismatch() {
-        AuditEventDocument first = document("audit-1", "alert-1", "2026-04-26T09:00:00Z", null);
-        AuditEventDocument second = document("audit-2", "alert-2", "2026-04-26T09:01:00Z", first.eventHash());
-        when(repository.findIntegrityWindow("alert-service", null, null, 100))
+        AuditEventDocument first = document("audit-1", "alert-1", "2026-04-26T09:00:00Z", null, 1L);
+        AuditEventDocument second = document("audit-2", "alert-2", "2026-04-26T09:01:00Z", first.eventHash(), 2L);
+        when(repository.findHeadWindow(AuditEventDocument.PARTITION_KEY, 100))
                 .thenReturn(List.of(second));
         when(repository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY))
                 .thenReturn(java.util.Optional.of(second));
         when(anchorRepository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY))
-                .thenReturn(java.util.Optional.of(AuditAnchorDocument.from("anchor-1", second, 2)));
+                .thenReturn(java.util.Optional.of(AuditAnchorDocument.from("anchor-1", second)));
         when(repository.countByPartitionKey(AuditEventDocument.PARTITION_KEY)).thenReturn(1L);
 
         AuditIntegrityResponse response = service.verify(null, null, "alert-service", null);
@@ -172,7 +174,7 @@ class AuditIntegrityServiceTest {
 
     @Test
     void shouldReturnUnavailableWithoutLeakingDatastoreDetails() {
-        when(repository.findIntegrityWindow(null, null, null, 25))
+        when(repository.findHeadWindow(AuditEventDocument.PARTITION_KEY, 25))
                 .thenThrow(new DataAccessResourceFailureException("mongo down"));
 
         AuditIntegrityResponse response = service.verify(null, null, null, 25);
@@ -184,7 +186,68 @@ class AuditIntegrityServiceTest {
         assertThat(response.toString()).doesNotContain("mongo down", "DataAccessResourceFailureException");
     }
 
+    @Test
+    void shouldTreatMiddleWindowPredecessorAsExternalWithoutFalseViolation() {
+        AuditEventDocument first = document("audit-1", "alert-1", "2026-04-26T09:00:00Z", null, 1L);
+        AuditEventDocument second = document("audit-2", "alert-2", "2026-04-26T09:01:00Z", first.eventHash(), 2L);
+        when(repository.findIntegrityWindow("alert-service", Instant.parse("2026-04-26T09:01:00Z"), null, 100))
+                .thenReturn(List.of(second));
+        when(repository.findByPartitionKeyAndEventHash(AuditEventDocument.PARTITION_KEY, first.eventHash()))
+                .thenReturn(java.util.Optional.of(first));
+        when(repository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY))
+                .thenReturn(java.util.Optional.of(second));
+        when(anchorRepository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY))
+                .thenReturn(java.util.Optional.of(AuditAnchorDocument.from("anchor-1", second)));
+        when(repository.countByPartitionKey(AuditEventDocument.PARTITION_KEY)).thenReturn(2L);
+
+        AuditIntegrityResponse response = service.verify("2026-04-26T09:01:00Z", null, "alert-service", "WINDOW", 100);
+
+        assertThat(response.status()).isEqualTo("VALID");
+        assertThat(response.verificationMode()).isEqualTo("WINDOW");
+        assertThat(response.partialWindow()).isTrue();
+        assertThat(response.externalPredecessor()).isTrue();
+        assertThat(response.violations()).isEmpty();
+    }
+
+    @Test
+    void shouldDetectMissingPredecessorInFullChainMode() {
+        AuditEventDocument orphan = document("audit-2", "alert-2", "2026-04-26T09:01:00Z", "missing-hash", 2L);
+        when(repository.findFullChain(AuditEventDocument.PARTITION_KEY, 100))
+                .thenReturn(List.of(orphan));
+        when(repository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY))
+                .thenReturn(java.util.Optional.of(orphan));
+        when(anchorRepository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY))
+                .thenReturn(java.util.Optional.of(AuditAnchorDocument.from("anchor-1", orphan)));
+        when(repository.countByPartitionKey(AuditEventDocument.PARTITION_KEY)).thenReturn(1L);
+
+        AuditIntegrityResponse response = service.verify(null, null, "alert-service", "FULL_CHAIN", 100);
+
+        assertThat(response.status()).isEqualTo("INVALID");
+        assertThat(response.violations())
+                .extracting(AuditIntegrityViolation::violationType)
+                .contains("MISSING_PREDECESSOR");
+    }
+
+    @Test
+    void shouldReturnPartialWhenLimitReached() {
+        AuditEventDocument first = document("audit-1", "alert-1", "2026-04-26T09:00:00Z", null, 1L);
+        when(repository.findHeadWindow(AuditEventDocument.PARTITION_KEY, 1)).thenReturn(List.of(first));
+        when(repository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY))
+                .thenReturn(java.util.Optional.of(first));
+        when(anchorRepository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY))
+                .thenReturn(java.util.Optional.of(AuditAnchorDocument.from("anchor-1", first)));
+        when(repository.countByPartitionKey(AuditEventDocument.PARTITION_KEY)).thenReturn(1L);
+
+        AuditIntegrityResponse response = service.verify(null, null, "alert-service", "HEAD", 1);
+
+        assertThat(response.status()).isEqualTo("PARTIAL");
+    }
+
     private AuditEventDocument document(String auditId, String resourceId, String occurredAt, String previousHash) {
+        return document(auditId, resourceId, occurredAt, previousHash, 1L);
+    }
+
+    private AuditEventDocument document(String auditId, String resourceId, String occurredAt, String previousHash, long chainPosition) {
         return AuditEventDocument.from(auditId, new AuditEvent(
                 new AuditActor("admin-1", Set.of("FRAUD_OPS_ADMIN"), Set.of("audit:read")),
                 AuditAction.SUBMIT_ANALYST_DECISION,
@@ -194,6 +257,6 @@ class AuditIntegrityServiceTest {
                 "corr-1",
                 AuditOutcome.SUCCESS,
                 null
-        ), previousHash);
+        ), previousHash, chainPosition);
     }
 }

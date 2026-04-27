@@ -41,11 +41,15 @@ class AuditIntegrityControllerTest {
 
     @Test
     void shouldReturnStableIntegrityContract() throws Exception {
-        when(auditIntegrityService.verify(isNull(), isNull(), eq("alert-service"), eq(100)))
+        when(auditIntegrityService.verify(isNull(), isNull(), eq("alert-service"), isNull(), eq(100)))
                 .thenReturn(new AuditIntegrityResponse(
                         "VALID",
                         2,
                         100,
+                        "HEAD",
+                        false,
+                        false,
+                        false,
                         null,
                         null,
                         "hash-1",
@@ -62,6 +66,10 @@ class AuditIntegrityControllerTest {
                 .andExpect(jsonPath("$.status").value("VALID"))
                 .andExpect(jsonPath("$.checked").value(2))
                 .andExpect(jsonPath("$.limit").value(100))
+                .andExpect(jsonPath("$.verification_mode").value("HEAD"))
+                .andExpect(jsonPath("$.partial_window").value(false))
+                .andExpect(jsonPath("$.external_predecessor").value(false))
+                .andExpect(jsonPath("$.window_start_has_external_predecessor").value(false))
                 .andExpect(jsonPath("$.first_event_hash").value("hash-1"))
                 .andExpect(jsonPath("$.last_event_hash").value("hash-2"))
                 .andExpect(jsonPath("$.partition_key").value("source_service:alert-service"))
@@ -73,7 +81,7 @@ class AuditIntegrityControllerTest {
 
     @Test
     void shouldReturnBadRequestForInvalidIntegrityQuery() throws Exception {
-        when(auditIntegrityService.verify(isNull(), isNull(), eq("unknown-service"), isNull()))
+        when(auditIntegrityService.verify(isNull(), isNull(), eq("unknown-service"), isNull(), isNull()))
                 .thenThrow(new InvalidAuditEventQueryException(List.of("source_service: unsupported value")));
 
         mockMvc.perform(get("/api/v1/audit/integrity").param("source_service", "unknown-service"))
