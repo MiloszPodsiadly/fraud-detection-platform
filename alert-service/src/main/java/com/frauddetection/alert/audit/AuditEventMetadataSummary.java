@@ -28,7 +28,34 @@ public record AuditEventMetadataSummary(
         String filtersSummary,
 
         @JsonProperty("count_returned")
-        Integer countReturned
+        Integer countReturned,
+
+        @JsonProperty("from")
+        String from,
+
+        @JsonProperty("to")
+        String to,
+
+        @JsonProperty("limit")
+        Integer limit,
+
+        @JsonProperty("returned_count")
+        Integer returnedCount,
+
+        @JsonProperty("export_status")
+        String exportStatus,
+
+        @JsonProperty("reason_code")
+        String reasonCode,
+
+        @JsonProperty("external_anchor_status")
+        String externalAnchorStatus,
+
+        @JsonProperty("anchor_coverage")
+        AnchorCoverageSummary anchorCoverage,
+
+        @JsonProperty("export_fingerprint")
+        String exportFingerprint
 ) {
     private static final int MAX_FIELD_LENGTH = 120;
 
@@ -42,10 +69,33 @@ public record AuditEventMetadataSummary(
         endpointAction = safe(endpointAction);
         filtersSummary = safe(filtersSummary);
         countReturned = countReturned == null ? null : Math.max(0, Math.min(countReturned, 500));
+        from = safe(from);
+        to = safe(to);
+        limit = limit == null ? null : Math.max(0, Math.min(limit, 500));
+        returnedCount = returnedCount == null ? null : Math.max(0, Math.min(returnedCount, 500));
+        exportStatus = safe(exportStatus);
+        reasonCode = safe(reasonCode);
+        externalAnchorStatus = safe(externalAnchorStatus);
+        exportFingerprint = safe(exportFingerprint);
     }
 
     public AuditEventMetadataSummary(String correlationId, String failureReason) {
-        this(correlationId, null, null, null, null, failureReason, null, null, null);
+        this(correlationId, null, null, null, null, failureReason, null, null, null, null, null, null, null, null, null, null, null, null);
+    }
+
+    public AuditEventMetadataSummary(
+            String correlationId,
+            String requestId,
+            String sourceService,
+            String schemaVersion,
+            String failureCategory,
+            String failureReason,
+            String endpointAction,
+            String filtersSummary,
+            Integer countReturned
+    ) {
+        this(correlationId, requestId, sourceService, schemaVersion, failureCategory, failureReason, endpointAction, filtersSummary, countReturned,
+                null, null, null, null, null, null, null, null, null);
     }
 
     public static AuditEventMetadataSummary auditRead(
@@ -69,7 +119,42 @@ public record AuditEventMetadataSummary(
         );
     }
 
-    static AuditEventMetadataSummary from(AuditEventDocument document) {
+    public static AuditEventMetadataSummary evidenceExport(
+            String sourceService,
+            String schemaVersion,
+            String from,
+            String to,
+            Integer limit,
+            Integer returnedCount,
+            String exportStatus,
+            String reasonCode,
+            String externalAnchorStatus,
+            AnchorCoverageSummary anchorCoverage,
+            String exportFingerprint
+    ) {
+        return new AuditEventMetadataSummary(
+                null,
+                null,
+                sourceService,
+                schemaVersion,
+                null,
+                safe(reasonCode),
+                "GET /api/v1/audit/evidence/export",
+                "source_service=" + safe(sourceService) + ";from=present;to=present;limit=" + limit,
+                returnedCount,
+                from,
+                to,
+                limit,
+                returnedCount,
+                exportStatus,
+                reasonCode,
+                externalAnchorStatus,
+                anchorCoverage,
+                exportFingerprint
+        );
+    }
+
+    public static AuditEventMetadataSummary from(AuditEventDocument document) {
         if (document.metadataSummary() != null) {
             return document.metadataSummary();
         }
@@ -84,6 +169,31 @@ public record AuditEventMetadataSummary(
                 null,
                 null
         );
+    }
+
+    public record AnchorCoverageSummary(
+            @JsonProperty("total_events")
+            int totalEvents,
+
+            @JsonProperty("events_with_local_anchor")
+            int eventsWithLocalAnchor,
+
+            @JsonProperty("events_with_external_anchor")
+            int eventsWithExternalAnchor,
+
+            @JsonProperty("events_missing_external_anchor")
+            int eventsMissingExternalAnchor,
+
+            @JsonProperty("coverage_ratio")
+            double coverageRatio
+    ) {
+        public AnchorCoverageSummary {
+            totalEvents = Math.max(0, Math.min(totalEvents, 500));
+            eventsWithLocalAnchor = Math.max(0, Math.min(eventsWithLocalAnchor, 500));
+            eventsWithExternalAnchor = Math.max(0, Math.min(eventsWithExternalAnchor, 500));
+            eventsMissingExternalAnchor = Math.max(0, Math.min(eventsMissingExternalAnchor, 500));
+            coverageRatio = Math.max(0.0d, Math.min(coverageRatio, 1.0d));
+        }
     }
 
     static String safe(String value) {

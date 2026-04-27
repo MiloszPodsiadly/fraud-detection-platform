@@ -11,6 +11,12 @@ import com.frauddetection.alert.audit.AuditEventReadService;
 import com.frauddetection.alert.audit.AuditIntegrityController;
 import com.frauddetection.alert.audit.AuditIntegrityResponse;
 import com.frauddetection.alert.audit.AuditIntegrityService;
+import com.frauddetection.alert.audit.external.AuditEvidenceExportController;
+import com.frauddetection.alert.audit.external.AuditEvidenceExportResponse;
+import com.frauddetection.alert.audit.external.AuditEvidenceExportService;
+import com.frauddetection.alert.audit.external.ExternalAuditIntegrityController;
+import com.frauddetection.alert.audit.external.ExternalAuditIntegrityResponse;
+import com.frauddetection.alert.audit.external.ExternalAuditIntegrityService;
 import com.frauddetection.alert.controller.AlertController;
 import com.frauddetection.alert.controller.FraudCaseController;
 import com.frauddetection.alert.controller.ScoredTransactionController;
@@ -32,9 +38,12 @@ import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.security.auth.AnalystAuthenticationFactory;
 import com.frauddetection.alert.security.auth.DemoAuthHeaderParser;
 import com.frauddetection.alert.security.auth.DemoAuthHeaders;
+import com.frauddetection.alert.security.authorization.AnalystAuthority;
+import com.frauddetection.alert.security.authorization.AnalystRole;
 import com.frauddetection.alert.security.error.ApiAccessDeniedHandler;
 import com.frauddetection.alert.security.error.ApiAuthenticationEntryPoint;
 import com.frauddetection.alert.security.error.SecurityErrorResponseWriter;
+import com.frauddetection.alert.security.principal.AnalystPrincipal;
 import com.frauddetection.alert.service.AlertManagementUseCase;
 import com.frauddetection.alert.service.FraudCaseManagementService;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
@@ -48,6 +57,8 @@ import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
@@ -56,6 +67,7 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -63,6 +75,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -73,6 +86,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         ScoredTransactionController.class,
         AuditEventController.class,
         AuditIntegrityController.class,
+        ExternalAuditIntegrityController.class,
+        AuditEvidenceExportController.class,
         GovernanceAdvisoryController.class,
         GovernanceAuditController.class
 })
@@ -121,6 +136,12 @@ class AlertSecurityConfigTest {
     private AuditIntegrityService auditIntegrityService;
 
     @MockBean
+    private ExternalAuditIntegrityService externalAuditIntegrityService;
+
+    @MockBean
+    private AuditEvidenceExportService auditEvidenceExportService;
+
+    @MockBean
     private GovernanceAuditService governanceAuditService;
 
     @MockBean
@@ -156,6 +177,10 @@ class AlertSecurityConfigTest {
         mockMvc.perform(get("/api/v1/audit/events"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/audit/integrity"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/audit/integrity/external"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/audit/evidence/export"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/governance/advisories"))
                 .andExpect(status().isUnauthorized());
@@ -336,6 +361,22 @@ class AlertSecurityConfigTest {
                 .thenReturn(new AuditEventReadResponse("AVAILABLE", null, null, 0, 50, List.of()));
         when(auditIntegrityService.verify(any(), any(), any(), any(), any()))
                 .thenReturn(new AuditIntegrityResponse("VALID", 0, 100, "HEAD", false, false, false, null, null, null, null, null, null, List.of()));
+        when(externalAuditIntegrityService.verify(any(), any()))
+                .thenReturn(new ExternalAuditIntegrityResponse("VALID", 0, 100, "alert-service", "source_service:alert-service", null, null, null, null, List.of()));
+        when(auditEvidenceExportService.export(any(), any(), any(), any(), any(Boolean.class)))
+                .thenReturn(new AuditEvidenceExportResponse(
+                        "AVAILABLE",
+                        0,
+                        100,
+                        "alert-service",
+                        Instant.parse("2026-04-27T00:00:00Z"),
+                        Instant.parse("2026-04-28T00:00:00Z"),
+                        null,
+                        null,
+                        "AVAILABLE",
+                        AuditEvidenceExportResponse.AnchorCoverage.empty(),
+                        List.of()
+                ));
 
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("FRAUD_OPS_ADMIN")))
                 .andExpect(status().isOk())
@@ -343,15 +384,76 @@ class AlertSecurityConfigTest {
         mockMvc.perform(get("/api/v1/audit/integrity").with(demoUser("FRAUD_OPS_ADMIN")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("VALID"));
+        mockMvc.perform(get("/api/v1/audit/integrity/external").with(demoUser("FRAUD_OPS_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("VALID"));
+        mockMvc.perform(get("/api/v1/audit/evidence/export")
+                        .param("from", "2026-04-27T00:00:00Z")
+                        .param("to", "2026-04-28T00:00:00Z")
+                        .param("source_service", "alert-service")
+                        .with(demoUser("FRAUD_OPS_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("AVAILABLE"));
 
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/audit/integrity").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/audit/integrity/external").with(demoUser("ANALYST")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/audit/evidence/export")
+                        .param("from", "2026-04-27T00:00:00Z")
+                        .param("to", "2026-04-28T00:00:00Z")
+                        .param("source_service", "alert-service")
+                        .with(demoUser("ANALYST")))
+                .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("REVIEWER")))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("READ_ONLY_ANALYST")))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void shouldRequireDedicatedFdp20AuthoritiesInsteadOfAuditRead() throws Exception {
+        when(externalAuditIntegrityService.verify(any(), any()))
+                .thenReturn(new ExternalAuditIntegrityResponse("VALID", 0, 100, "alert-service", "source_service:alert-service", null, null, null, null, List.of()));
+        when(auditEvidenceExportService.export(any(), any(), any(), any(), any(Boolean.class)))
+                .thenReturn(new AuditEvidenceExportResponse(
+                        "AVAILABLE",
+                        0,
+                        100,
+                        "alert-service",
+                        Instant.parse("2026-04-27T00:00:00Z"),
+                        Instant.parse("2026-04-28T00:00:00Z"),
+                        null,
+                        null,
+                        "AVAILABLE",
+                        AuditEvidenceExportResponse.AnchorCoverage.empty(),
+                        List.of()
+                ));
+
+        mockMvc.perform(get("/api/v1/audit/integrity/external").with(authorities(AnalystAuthority.AUDIT_READ)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/audit/integrity/external").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/audit/evidence/export")
+                        .param("from", "2026-04-27T00:00:00Z")
+                        .param("to", "2026-04-28T00:00:00Z")
+                        .param("source_service", "alert-service")
+                        .with(authorities(AnalystAuthority.AUDIT_READ)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/audit/evidence/export")
+                        .param("from", "2026-04-27T00:00:00Z")
+                        .param("to", "2026-04-28T00:00:00Z")
+                        .param("source_service", "alert-service")
+                        .with(authorities(AnalystAuthority.AUDIT_VERIFY)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/audit/evidence/export")
+                        .param("from", "2026-04-27T00:00:00Z")
+                        .param("to", "2026-04-28T00:00:00Z")
+                        .param("source_service", "alert-service")
+                        .with(authorities(AnalystAuthority.AUDIT_EXPORT)))
+                .andExpect(status().isOk());
     }
 
     @Test
@@ -414,6 +516,16 @@ class AlertSecurityConfigTest {
             request.addHeader(DemoAuthHeaders.ROLES, roles);
             return request;
         };
+    }
+
+    private RequestPostProcessor authorities(String... authorities) {
+        AnalystPrincipal principal = new AnalystPrincipal("auditor-1", Set.of(AnalystRole.FRAUD_OPS_ADMIN), Set.of(authorities));
+        UsernamePasswordAuthenticationToken token = new UsernamePasswordAuthenticationToken(
+                principal,
+                null,
+                Set.of(authorities).stream().map(SimpleGrantedAuthority::new).toList()
+        );
+        return authentication(token);
     }
 
     private SubmitAnalystDecisionRequest submitDecisionRequest() {
