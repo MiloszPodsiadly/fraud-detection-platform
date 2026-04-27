@@ -6,10 +6,12 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Repository;
 import org.springframework.util.StringUtils;
 
 import java.time.Instant;
+import java.util.List;
 
 @Repository
 class ExternalAuditAnchorPublicationStatusRepository {
@@ -36,8 +38,19 @@ class ExternalAuditAnchorPublicationStatusRepository {
         Update status = base(anchor, attemptedAt)
                 .set("external_published", false)
                 .inc("external_publish_attempts", 1)
+                .unset("external_published_at")
+                .unset("external_sink_type")
                 .set("last_external_publish_failure_reason", safe(reason));
         mongoTemplate.upsert(query, status, ExternalAuditAnchorPublicationStatusDocument.class);
+    }
+
+    List<ExternalAuditAnchorPublicationStatusDocument> findNotPublished(String partitionKey, int limit) throws DataAccessException {
+        int boundedLimit = Math.max(1, Math.min(limit, 500));
+        Query query = new Query(Criteria.where("partition_key").is(partitionKey)
+                .and("external_published").is(false))
+                .with(Sort.by(Sort.Direction.ASC, "chain_position"))
+                .limit(boundedLimit);
+        return mongoTemplate.find(query, ExternalAuditAnchorPublicationStatusDocument.class);
     }
 
     private Query query(String localAnchorId) {

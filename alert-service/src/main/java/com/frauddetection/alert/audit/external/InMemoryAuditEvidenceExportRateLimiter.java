@@ -1,7 +1,8 @@
 package com.frauddetection.alert.audit.external;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.time.Clock;
@@ -12,7 +13,12 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Component
-public class AuditEvidenceExportRateLimiter {
+@ConditionalOnProperty(
+        name = "app.audit.evidence-export.rate-limiter",
+        havingValue = "in-memory",
+        matchIfMissing = true
+)
+public class InMemoryAuditEvidenceExportRateLimiter implements AuditEvidenceExportRateLimiterStrategy {
 
     private static final Duration WINDOW = Duration.ofMinutes(1);
 
@@ -21,16 +27,17 @@ public class AuditEvidenceExportRateLimiter {
     private final int maxExportsPerMinute;
 
     @Autowired
-    public AuditEvidenceExportRateLimiter(@Value("${app.audit.evidence-export.max-per-minute:5}") int maxExportsPerMinute) {
+    public InMemoryAuditEvidenceExportRateLimiter(@Value("${app.audit.evidence-export.max-per-minute:5}") int maxExportsPerMinute) {
         this(Clock.systemUTC(), maxExportsPerMinute);
     }
 
-    AuditEvidenceExportRateLimiter(Clock clock, int maxExportsPerMinute) {
+    InMemoryAuditEvidenceExportRateLimiter(Clock clock, int maxExportsPerMinute) {
         this.clock = clock;
         this.maxExportsPerMinute = Math.max(1, Math.min(maxExportsPerMinute, 20));
     }
 
-    boolean allow(String actorId) {
+    @Override
+    public boolean allow(String actorId) {
         String key = actorId == null || actorId.isBlank() ? "unknown" : actorId.trim();
         Instant now = clock.instant();
         ArrayDeque<Instant> actorWindow = exportsByActor.computeIfAbsent(key, ignored -> new ArrayDeque<>());

@@ -48,19 +48,23 @@ class AuditEvidenceExportServiceTest {
     private final ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
     private final AuditService auditService = mock(AuditService.class);
     private final CurrentAnalystUser currentAnalystUser = mock(CurrentAnalystUser.class);
-    private final AuditEvidenceExportRateLimiter rateLimiter = new AuditEvidenceExportRateLimiter(
+    private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+    private final AlertServiceMetrics metrics = new AlertServiceMetrics(meterRegistry);
+    private final InMemoryAuditEvidenceExportRateLimiter rateLimiter = new InMemoryAuditEvidenceExportRateLimiter(
             Clock.fixed(Instant.parse("2026-04-27T10:00:00Z"), ZoneOffset.UTC),
             5
     );
+    private final AuditEvidenceExportAbuseDetector abuseDetector = new AuditEvidenceExportAbuseDetector(metrics);
     private final AuditEvidenceExportService service = new AuditEvidenceExportService(
             eventRepository,
             anchorRepository,
             sink,
             new AuditEvidenceExportQueryParser(),
-            new AlertServiceMetrics(new SimpleMeterRegistry()),
+            metrics,
             auditService,
             currentAnalystUser,
-            rateLimiter
+            rateLimiter,
+            abuseDetector
     );
 
     @Test
@@ -210,7 +214,8 @@ class AuditEvidenceExportServiceTest {
                 new AlertServiceMetrics(new SimpleMeterRegistry()),
                 auditService,
                 currentAnalystUser,
-                new AuditEvidenceExportRateLimiter(Clock.fixed(Instant.parse("2026-04-27T10:00:00Z"), ZoneOffset.UTC), 5)
+                new InMemoryAuditEvidenceExportRateLimiter(Clock.fixed(Instant.parse("2026-04-27T10:00:00Z"), ZoneOffset.UTC), 5),
+                new AuditEvidenceExportAbuseDetector(new AlertServiceMetrics(new SimpleMeterRegistry()))
         );
         AuditEventDocument event = event("audit-1", 1L);
         AuditAnchorDocument localAnchor = localAnchor("local-anchor-1", 1L, "hash-1");
@@ -338,6 +343,7 @@ class AuditEvidenceExportServiceTest {
             assertThat(exception.status().value()).isEqualTo(409);
             assertThat(exception.reasonCode()).isEqualTo("EXTERNAL_ANCHORS_UNAVAILABLE");
         });
+        ArgumentCaptor<AuditEventMetadataSummary> metadata = forClass(AuditEventMetadataSummary.class);
         verify(auditService).audit(
                 eq(AuditAction.EXPORT_AUDIT_EVIDENCE),
                 eq(AuditResourceType.AUDIT_EVIDENCE_EXPORT),
@@ -346,8 +352,90 @@ class AuditEvidenceExportServiceTest {
                 eq("audit-evidence-exporter"),
                 eq(AuditOutcome.FAILED),
                 eq("EXTERNAL_ANCHORS_UNAVAILABLE"),
-                any(AuditEventMetadataSummary.class)
+                metadata.capture()
         );
+        assertThat(metadata.getValue().exportStatus()).isEqualTo("REJECTED_STRICT_MODE");
+        assertThat(metadata.getValue().reasonCode()).isEqualTo("EXTERNAL_ANCHORS_UNAVAILABLE");
+        assertThat(metadata.getValue().exportFingerprint()).hasSize(64);
+    }
+
+    @Test
+    void shouldAllowPartialExportWhenStrictModeIsDisabled() {
+        AuditEventDocument event = event("audit-1", 1L);
+        AuditAnchorDocument localAnchor = localAnchor("local-anchor-1", 1L, "hash-1");
+        when(eventRepository.findEvidenceWindow(any(), any(), any(), anyInt())).thenReturn(List.of(event));
+        when(anchorRepository.findByPartitionKeyAndChainPositionBetween("source_service:alert-service", 1L, 1L, 100))
+                .thenReturn(List.of(localAnchor));
+        when(sink.findByRange(any(), any(), any(), anyInt())).thenReturn(List.of());
+
+        AuditEvidenceExportResponse response = service.export(
+                "2026-04-27T00:00:00Z",
+                "2026-04-28T00:00:00Z",
+                "alert-service",
+                null,
+                false
+        );
+
+        assertThat(response.status()).isEqualTo("PARTIAL");
+        assertThat(response.events()).hasSize(1);
+    }
+
+    @Test
+    void shouldAuditCompleteMetadataForPartialEvidenceExport() {
+        AuditEventDocument event = event("audit-1", 1L);
+        AuditAnchorDocument localAnchor = localAnchor("local-anchor-1", 1L, "hash-1");
+        when(eventRepository.findEvidenceWindow(any(), any(), any(), anyInt())).thenReturn(List.of(event));
+        when(anchorRepository.findByPartitionKeyAndChainPositionBetween("source_service:alert-service", 1L, 1L, 100))
+                .thenReturn(List.of(localAnchor));
+        when(sink.findByRange(any(), any(), any(), anyInt())).thenReturn(List.of());
+
+        AuditEvidenceExportResponse response = service.export(
+                "2026-04-27T00:00:00Z",
+                "2026-04-28T00:00:00Z",
+                "alert-service",
+                null
+        );
+
+        ArgumentCaptor<AuditEventMetadataSummary> metadata = forClass(AuditEventMetadataSummary.class);
+        verify(auditService).audit(
+                eq(AuditAction.EXPORT_AUDIT_EVIDENCE),
+                eq(AuditResourceType.AUDIT_EVIDENCE_EXPORT),
+                any(),
+                any(),
+                eq("audit-evidence-exporter"),
+                eq(AuditOutcome.SUCCESS),
+                eq("EXTERNAL_ANCHORS_UNAVAILABLE"),
+                metadata.capture()
+        );
+        AuditEventMetadataSummary value = metadata.getValue();
+        assertThat(value.from()).isEqualTo("2026-04-27T00:00:00Z");
+        assertThat(value.to()).isEqualTo("2026-04-28T00:00:00Z");
+        assertThat(value.sourceService()).isEqualTo("alert-service");
+        assertThat(value.limit()).isEqualTo(100);
+        assertThat(value.returnedCount()).isEqualTo(response.count());
+        assertThat(value.exportStatus()).isEqualTo("PARTIAL");
+        assertThat(value.reasonCode()).isEqualTo("EXTERNAL_ANCHORS_UNAVAILABLE");
+        assertThat(value.externalAnchorStatus()).isEqualTo("PARTIAL");
+        assertThat(value.anchorCoverage()).isNotNull();
+        assertThat(value.anchorCoverage().totalEvents()).isEqualTo(1);
+        assertThat(value.anchorCoverage().eventsWithLocalAnchor()).isEqualTo(1);
+        assertThat(value.anchorCoverage().eventsWithExternalAnchor()).isZero();
+        assertThat(value.anchorCoverage().eventsMissingExternalAnchor()).isEqualTo(1);
+        assertThat(value.anchorCoverage().coverageRatio()).isZero();
+        assertThat(value.exportFingerprint()).isEqualTo(response.exportFingerprint());
+    }
+
+    @Test
+    void shouldRecordRepeatedFingerprintMetricForSameActor() {
+        when(currentAnalystUser.get()).thenReturn(Optional.of(adminPrincipal()));
+        when(eventRepository.findEvidenceWindow(any(), any(), any(), anyInt())).thenReturn(List.of());
+
+        service.export("2026-04-27T00:00:00Z", "2026-04-28T00:00:00Z", "alert-service", null);
+        service.export("2026-04-27T00:00:00Z", "2026-04-28T00:00:00Z", "alert-service", null);
+
+        assertThat(meterRegistry.get("fraud_platform_audit_evidence_export_repeated_fingerprint_total")
+                .counter()
+                .count()).isEqualTo(1.0d);
     }
 
     @Test
@@ -362,7 +450,8 @@ class AuditEvidenceExportServiceTest {
                 new AlertServiceMetrics(new SimpleMeterRegistry()),
                 auditService,
                 rateLimitedUser,
-                new AuditEvidenceExportRateLimiter(Clock.fixed(Instant.parse("2026-04-27T10:00:00Z"), ZoneOffset.UTC), 1)
+                new InMemoryAuditEvidenceExportRateLimiter(Clock.fixed(Instant.parse("2026-04-27T10:00:00Z"), ZoneOffset.UTC), 1),
+                new AuditEvidenceExportAbuseDetector(new AlertServiceMetrics(new SimpleMeterRegistry()))
         );
         when(eventRepository.findEvidenceWindow(any(), any(), any(), anyInt())).thenReturn(List.of());
 

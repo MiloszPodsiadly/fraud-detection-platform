@@ -50,7 +50,8 @@ public class AuditEvidenceExportService {
     private final AlertServiceMetrics metrics;
     private final AuditService auditService;
     private final CurrentAnalystUser currentAnalystUser;
-    private final AuditEvidenceExportRateLimiter rateLimiter;
+    private final AuditEvidenceExportRateLimiterStrategy rateLimiter;
+    private final AuditEvidenceExportAbuseDetector abuseDetector;
 
     private record ExternalAnchorLookup(String status, Map<Long, ExternalAuditAnchor> anchors) {
     }
@@ -63,7 +64,8 @@ public class AuditEvidenceExportService {
             AlertServiceMetrics metrics,
             AuditService auditService,
             CurrentAnalystUser currentAnalystUser,
-            AuditEvidenceExportRateLimiter rateLimiter
+            AuditEvidenceExportRateLimiterStrategy rateLimiter,
+            AuditEvidenceExportAbuseDetector abuseDetector
     ) {
         this.eventRepository = eventRepository;
         this.anchorRepository = anchorRepository;
@@ -73,6 +75,7 @@ public class AuditEvidenceExportService {
         this.auditService = auditService;
         this.currentAnalystUser = currentAnalystUser;
         this.rateLimiter = rateLimiter;
+        this.abuseDetector = abuseDetector;
     }
 
     public AuditEvidenceExportResponse export(String from, String to, String sourceService, Integer limit) {
@@ -81,7 +84,8 @@ public class AuditEvidenceExportService {
 
     public AuditEvidenceExportResponse export(String from, String to, String sourceService, Integer limit, boolean strict) {
         AuditEvidenceExportQuery query = queryParser.parse(from, to, sourceService, limit);
-        if (!rateLimiter.allow(currentActorId())) {
+        String actorId = currentActorId();
+        if (!rateLimiter.allow(actorId)) {
             metrics.recordEvidenceExportRateLimited();
             auditEvidenceExport(query, 0, "RATE_LIMITED", "RATE_LIMITED", null, AuditEvidenceExportResponse.AnchorCoverage.empty(), null, AuditOutcome.FAILED);
             throw new AuditEvidenceExportRejectedException(
@@ -99,9 +103,10 @@ public class AuditEvidenceExportService {
                     query.limit()
             );
             AuditEvidenceExportResponse response = available(query, documents);
+            abuseDetector.record(actorId, response.exportFingerprint());
             if (strict && "PARTIAL".equals(response.status())) {
                 metrics.recordEvidenceExport(response.status());
-                auditEvidenceExport(query, 0, response.status(), response.reasonCode(), response.externalAnchorStatus(), response.anchorCoverage(), response.exportFingerprint(), AuditOutcome.FAILED);
+                auditEvidenceExport(query, 0, "REJECTED_STRICT_MODE", response.reasonCode(), response.externalAnchorStatus(), response.anchorCoverage(), response.exportFingerprint(), AuditOutcome.FAILED);
                 throw new AuditEvidenceExportRejectedException(
                         HttpStatus.CONFLICT,
                         response.reasonCode(),
