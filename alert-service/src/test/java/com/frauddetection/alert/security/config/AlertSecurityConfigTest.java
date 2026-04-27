@@ -8,6 +8,9 @@ import com.frauddetection.alert.assistant.AnalystCaseSummaryUseCase;
 import com.frauddetection.alert.audit.AuditEventController;
 import com.frauddetection.alert.audit.AuditEventReadResponse;
 import com.frauddetection.alert.audit.AuditEventReadService;
+import com.frauddetection.alert.audit.AuditIntegrityController;
+import com.frauddetection.alert.audit.AuditIntegrityResponse;
+import com.frauddetection.alert.audit.AuditIntegrityService;
 import com.frauddetection.alert.controller.AlertController;
 import com.frauddetection.alert.controller.FraudCaseController;
 import com.frauddetection.alert.controller.ScoredTransactionController;
@@ -69,6 +72,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         FraudCaseController.class,
         ScoredTransactionController.class,
         AuditEventController.class,
+        AuditIntegrityController.class,
         GovernanceAdvisoryController.class,
         GovernanceAuditController.class
 })
@@ -114,6 +118,9 @@ class AlertSecurityConfigTest {
     private AuditEventReadService auditEventReadService;
 
     @MockBean
+    private AuditIntegrityService auditIntegrityService;
+
+    @MockBean
     private GovernanceAuditService governanceAuditService;
 
     @MockBean
@@ -147,6 +154,8 @@ class AlertSecurityConfigTest {
         mockMvc.perform(get("/api/v1/transactions/scored"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/audit/events"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/audit/integrity"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/governance/advisories"))
                 .andExpect(status().isUnauthorized());
@@ -325,12 +334,19 @@ class AlertSecurityConfigTest {
     void shouldProtectPlatformAuditReadWithDedicatedAuthority() throws Exception {
         when(auditEventReadService.readEvents(any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new AuditEventReadResponse("AVAILABLE", null, null, 0, 50, List.of()));
+        when(auditIntegrityService.verify(any(), any(), any(), any()))
+                .thenReturn(new AuditIntegrityResponse("VALID", 0, 100, null, null, null, null, List.of()));
 
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("FRAUD_OPS_ADMIN")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("AVAILABLE"));
+        mockMvc.perform(get("/api/v1/audit/integrity").with(demoUser("FRAUD_OPS_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("VALID"));
 
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("ANALYST")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/audit/integrity").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("REVIEWER")))
                 .andExpect(status().isForbidden());

@@ -6,7 +6,11 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataAccessResourceFailureException;
 
+import java.lang.reflect.Method;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.Arrays;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -37,16 +41,19 @@ class PersistentAuditEventPublisherTest {
                 null
         );
 
+        when(repository.findLatestBySourceService("alert-service")).thenReturn(Optional.empty());
+
         publisher.publish(event);
 
         ArgumentCaptor<AuditEventDocument> documentCaptor = ArgumentCaptor.forClass(AuditEventDocument.class);
-        verify(repository).save(documentCaptor.capture());
+        verify(repository).insert(documentCaptor.capture());
         AuditEventDocument document = documentCaptor.getValue();
         assertThat(document.auditId()).isNotBlank();
         assertThat(document.eventType()).isEqualTo(AuditAction.SUBMIT_ANALYST_DECISION);
         assertThat(document.actorId()).isEqualTo("analyst-1");
         assertThat(document.actorDisplayName()).isEqualTo("analyst-1");
         assertThat(document.actorRoles()).containsExactly("ANALYST");
+        assertThat(document.actorType()).isEqualTo("HUMAN");
         assertThat(document.actorAuthorities()).containsExactly("alert:decision:submit");
         assertThat(document.action()).isEqualTo(AuditAction.SUBMIT_ANALYST_DECISION);
         assertThat(document.resourceType()).isEqualTo(AuditResourceType.ALERT);
@@ -58,6 +65,9 @@ class PersistentAuditEventPublisherTest {
         assertThat(document.outcome()).isEqualTo(AuditOutcome.SUCCESS);
         assertThat(document.failureCategory()).isEqualTo(AuditFailureCategory.NONE);
         assertThat(document.failureReason()).isNull();
+        assertThat(document.previousEventHash()).isNull();
+        assertThat(document.eventHash()).isNotBlank();
+        assertThat(document.hashAlgorithm()).isEqualTo("SHA-256");
         assertThat(document.schemaVersion()).isEqualTo("1.0");
         assertThat(java.util.Arrays.stream(document.getClass().getDeclaredFields()).map(java.lang.reflect.Field::getName))
                 .doesNotContain("requestBody", "responseBody", "transactionPayload", "featureVector", "customerId", "accountId", "cardNumber");
@@ -71,7 +81,7 @@ class PersistentAuditEventPublisherTest {
     void shouldFailClearlyWhenAuditPersistenceIsUnavailable() {
         AuditEventRepository repository = mock(AuditEventRepository.class);
         SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
-        when(repository.save(any())).thenThrow(new DataAccessResourceFailureException("mongo down"));
+        when(repository.findLatestBySourceService("alert-service")).thenThrow(new DataAccessResourceFailureException("mongo down"));
         PersistentAuditEventPublisher publisher = new PersistentAuditEventPublisher(
                 repository,
                 new AlertServiceMetrics(meterRegistry)
@@ -94,5 +104,57 @@ class PersistentAuditEventPublisherTest {
                 .tag("event_type", "update_fraud_case")
                 .counter()
                 .count()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void shouldProduceDeterministicHashForSameImmutableEventInput() {
+        AuditEvent event = new AuditEvent(
+                new AuditActor("analyst-1", Set.of("ANALYST"), Set.of("alert:decision:submit")),
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT,
+                "alert-1",
+                Instant.parse("2026-04-23T10:00:00.123456789Z"),
+                "corr-1",
+                AuditOutcome.SUCCESS,
+                null
+        );
+
+        AuditEventDocument first = AuditEventDocument.from("audit-1", event, "previous-hash");
+        AuditEventDocument second = AuditEventDocument.from("audit-1", event, "previous-hash");
+        AuditEventDocument persistedMongoShape = new AuditEventDocument(
+                first.auditId(),
+                first.eventType(),
+                first.actorId(),
+                first.actorDisplayName(),
+                first.actorRoles(),
+                first.actorType(),
+                first.actorAuthorities(),
+                first.action(),
+                first.resourceType(),
+                first.resourceId(),
+                first.createdAt().truncatedTo(ChronoUnit.MILLIS),
+                first.correlationId(),
+                first.requestId(),
+                first.sourceService(),
+                first.outcome(),
+                first.failureCategory(),
+                first.failureReason(),
+                first.metadataSummary(),
+                first.previousEventHash(),
+                first.eventHash(),
+                first.hashAlgorithm(),
+                first.schemaVersion()
+        );
+
+        assertThat(first.eventHash()).isEqualTo(second.eventHash());
+        assertThat(AuditEventHasher.matches(first)).isTrue();
+        assertThat(AuditEventHasher.matches(persistedMongoShape)).isTrue();
+    }
+
+    @Test
+    void shouldExposeInsertOnlyRepositoryContract() {
+        assertThat(Arrays.stream(AuditEventRepository.class.getDeclaredMethods()).map(Method::getName))
+                .contains("insert")
+                .doesNotContain("save", "update", "delete", "deleteById", "deleteAll");
     }
 }
