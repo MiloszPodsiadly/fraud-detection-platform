@@ -173,7 +173,7 @@ paths:
   /api/v1/audit/evidence/export:
     get:
       summary: Export bounded audit evidence
-      description: Returns a bounded JSON evidence package for a required source_service and inclusive from/to window. Requires audit:export. Includes safe audit event summaries, event hashes, previous hashes, chain positions, local anchor references, external anchor references when available, external_anchor_status, and anchor_coverage. Clients must treat status=PARTIAL as an incomplete evidence package. It never returns raw payloads, tokens, stack traces, transaction payloads, customer/account/card identifiers, or advisory note bodies. No unbounded export, full-text search, delete, update, cursor pagination, or aggregation is provided.
+      description: Returns a bounded JSON evidence package for a required source_service and inclusive from/to window. Requires audit:export. Includes safe audit event summaries, event hashes, previous hashes, chain positions, local anchor references, external anchor references when available, external_anchor_status, anchor_coverage, and export_fingerprint. Clients must treat status=PARTIAL as an incomplete evidence package. strict=true rejects partial packages with 409. Repeated export attempts are softly rate-limited per authenticated actor and return 429 on exceed. It never returns raw payloads, tokens, stack traces, transaction payloads, customer/account/card identifiers, or advisory note bodies. No unbounded export, full-text search, delete, update, cursor pagination, or aggregation is provided.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -204,6 +204,13 @@ paths:
             minimum: 1
             maximum: 500
             default: 100
+        - name: strict
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: When true, PARTIAL evidence packages are rejected with 409 instead of returning partial event summaries.
       responses:
         "200":
           description: Bounded audit evidence export or unavailable local audit store status.
@@ -217,6 +224,18 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Strict evidence export rejected a partial evidence package.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "429":
+          description: Soft per-actor evidence export rate limit exceeded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
   /api/v1/alerts/{alertId}:
     get:
       summary: Get one alert
@@ -657,6 +676,15 @@ components:
         - endpoint_action
         - filters_summary
         - count_returned
+        - from
+        - to
+        - limit
+        - returned_count
+        - export_status
+        - reason_code
+        - external_anchor_status
+        - anchor_coverage
+        - export_fingerprint
       properties:
         correlation_id:
           type: string
@@ -695,6 +723,44 @@ components:
           nullable: true
           minimum: 0
           maximum: 10000
+        from:
+          type: string
+          nullable: true
+          maxLength: 120
+        to:
+          type: string
+          nullable: true
+          maxLength: 120
+        limit:
+          type: integer
+          nullable: true
+          minimum: 0
+          maximum: 500
+        returned_count:
+          type: integer
+          nullable: true
+          minimum: 0
+          maximum: 500
+        export_status:
+          type: string
+          nullable: true
+          enum: [AVAILABLE, PARTIAL, UNAVAILABLE, RATE_LIMITED]
+        reason_code:
+          type: string
+          nullable: true
+          maxLength: 120
+        external_anchor_status:
+          type: string
+          nullable: true
+          enum: [AVAILABLE, PARTIAL, UNAVAILABLE, DISABLED]
+        anchor_coverage:
+          nullable: true
+          $ref: "#/components/schemas/AuditEvidenceExportAnchorCoverage"
+        export_fingerprint:
+          type: string
+          nullable: true
+          minLength: 64
+          maxLength: 64
     AuditIntegrityResponse:
       type: object
       additionalProperties: false
@@ -850,6 +916,12 @@ components:
           enum: [AVAILABLE, PARTIAL, UNAVAILABLE, DISABLED]
         anchor_coverage:
           $ref: "#/components/schemas/AuditEvidenceExportAnchorCoverage"
+        export_fingerprint:
+          type: string
+          nullable: true
+          minLength: 64
+          maxLength: 64
+          description: SHA-256 over canonical export query/result identifiers and anchor coverage. Unavailable local store responses may omit it.
         events:
           type: array
           items:
@@ -960,7 +1032,7 @@ components:
         publication_status:
           type: string
           nullable: true
-          enum: [PUBLISHED]
+          enum: [PUBLISHED, PENDING, FAILED]
     AuditAnchorSummary:
       type: object
       additionalProperties: false
@@ -998,7 +1070,7 @@ components:
         publication_status:
           type: string
           nullable: true
-          enum: [PUBLISHED]
+          enum: [PUBLISHED, PENDING, FAILED]
     GovernanceAdvisoryLifecycleStatus:
       type: string
       description: Read-time projection from latest audit decision. OPEN means no audit event exists.
