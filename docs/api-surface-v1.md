@@ -64,6 +64,7 @@ Alert service:
 | `PATCH` | `/api/v1/fraud-cases/{caseId}` | Updates fraud case status/assignment fields. |
 | `GET` | `/api/v1/transactions/scored` | Lists scored transaction projections. |
 | `GET` | `/api/v1/audit/events` | Returns bounded newest-first durable platform audit events; requires `audit:read`. |
+| `GET` | `/api/v1/audit/integrity` | Performs bounded read-only hash-chain integrity verification; requires `audit:read`. |
 | `GET` | `/governance/advisories` | Lists governance advisory events enriched with read-time lifecycle status. |
 | `GET` | `/governance/advisories/analytics` | Returns bounded read-only audit analytics derived from advisory and audit history. |
 | `GET` | `/governance/advisories/{event_id}` | Returns one governance advisory event enriched with read-time lifecycle status. |
@@ -77,6 +78,8 @@ Platform Audit Read API:
 - `GET /api/v1/audit/events`
 - Requires backend-enforced `audit:read`; the local role model grants it only to `FRAUD_OPS_ADMIN`.
 - Returns only durable platform write/governance audit events from `audit_events`. It does not return read-access audit records from `read_access_audit_events`.
+- Audit events include a `source_service`-scoped SHA-256 hash chain: `previous_event_hash`, `event_hash`, `hash_algorithm`, and `schema_version`.
+- Successful audit reads create a follow-up `READ_AUDIT_EVENTS` event with bounded filter/count metadata. If durable audit write fails after an available audit read, the request fails with the platform audit persistence error instead of returning unaudited audit data.
 - Query filters are exact match only: `event_type`, `actor_id`, `resource_type`, `resource_id`.
 - Timestamp filters `from` and `to` are inclusive ISO-8601 instants. If only `from` is provided, the upper bound is request time; if only `to` is provided, the lower bound is open-ended.
 - `limit` defaults to `50`, maximum `100`; invalid limits or `from > to` return the platform 400 error envelope.
@@ -86,6 +89,17 @@ Platform Audit Read API:
 - Clients MUST check `status` before interpreting `count` or `events`; `AVAILABLE` with `count=0` is a valid empty result and is distinct from `UNAVAILABLE`.
 - Runtime environments should set bounded MongoDB driver timeouts for `alert-service`; the Docker quickstart does this so store outages resolve to the `UNAVAILABLE` contract instead of relying on long driver defaults.
 - This endpoint reads durable platform audit events. It is not itself proof that every sensitive data read was audited. Read-access audit is persisted separately and would need a separate bounded endpoint in a future scope.
+
+Platform Audit Integrity API:
+
+- `GET /api/v1/audit/integrity`
+- Requires backend-enforced `audit:read`.
+- Query parameters: optional inclusive ISO-8601 `from`/`to`, optional bounded `source_service=alert-service`, and `limit` default `100`, maximum `500`.
+- Response status is `VALID`, `INVALID`, `PARTIAL`, or `UNAVAILABLE`.
+- Verification checks deterministic event hash, previous hash continuity, schema version, and hash algorithm. It reports bounded violation types and never mutates, repairs, exports, or deletes audit data.
+- A `PARTIAL` result means the bounded window was filled and should not be treated as full-chain verification.
+- Integrity checks create a follow-up `VERIFY_AUDIT_INTEGRITY` audit event with bounded metadata.
+- FDP-19 integrity verification is application-level evidence support. It is not WORM storage, external notarization, legal non-repudiation, SIEM integration, long-term archival policy, regulator-ready evidence package, or HSM/KMS signing.
 
 Sensitive read-access audit:
 
@@ -109,11 +123,15 @@ Platform audit read response:
       "actor_id": "admin-1",
       "actor_display_name": "admin-1",
       "actor_roles": ["FRAUD_OPS_ADMIN"],
+      "actor_type": "HUMAN",
       "resource_type": "ALERT",
       "resource_id": "alert-1",
       "action": "SUBMIT_ANALYST_DECISION",
       "outcome": "SUCCESS",
       "occurred_at": "2026-04-26T09:00:00Z",
+      "correlation_id": "corr-1",
+      "source_service": "alert-service",
+      "request_id": null,
       "metadata_summary": {
         "correlation_id": "corr-1",
         "request_id": null,
@@ -121,9 +139,26 @@ Platform audit read response:
         "schema_version": "1.0",
         "failure_category": "NONE",
         "failure_reason": null
-      }
+      },
+      "previous_event_hash": null,
+      "event_hash": "sha256-hex",
+      "hash_algorithm": "SHA-256",
+      "schema_version": "1.0"
     }
   ]
+}
+```
+
+Platform audit integrity response:
+
+```json
+{
+  "status": "VALID",
+  "checked": 100,
+  "limit": 100,
+  "first_event_hash": "sha256-hex",
+  "last_event_hash": "sha256-hex",
+  "violations": []
 }
 ```
 

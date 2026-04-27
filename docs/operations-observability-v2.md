@@ -223,6 +223,16 @@ Prometheus metric contract:
   - Type: counter
   - Meaning: sensitive read-access audit was persisted with `actor_id=unknown` because the backend principal was unavailable
   - Labels: `endpoint_category`
+- `fraud_platform_audit_integrity_checks_total`
+  - Type: counter
+  - Meaning: bounded audit integrity verification requests completed by `alert-service`
+  - Labels: `status`
+  - Bounded statuses: `VALID`, `INVALID`, `PARTIAL`, `UNAVAILABLE`
+- `fraud_platform_audit_integrity_violations_total`
+  - Type: counter
+  - Meaning: bounded audit integrity verification detected a violation
+  - Labels: `violation_type`
+  - Bounded violation types: `EVENT_HASH_MISMATCH`, `PREVIOUS_HASH_MISMATCH`, `INVALID_SCHEMA_VERSION`, `UNSUPPORTED_HASH_ALGORITHM`, `UNKNOWN`
 
 ## Low-Cardinality Policy
 
