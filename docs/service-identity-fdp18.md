@@ -77,11 +77,13 @@ Metrics are low-cardinality:
 
 Labels do not include token values, certificate serials, SAN values, fingerprints, paths, IPs, users, resources, exception messages, or raw subjects.
 
+The ML server monitors its configured server certificate. Java internal clients monitor their configured client certificates.
+
 `/health` includes an `mtlsCert` component. `UP` means the configured certificate is valid, `WARN` means it is close to expiration, and `DOWN` means the certificate is expired or unavailable. Protected endpoints still enforce mTLS identity independently from health reporting.
 
 ## Certificate Lifecycle & Operational Risk
 
-Certificates must be rotated before expiration. FDP-18 exposes expiry and age metrics, logs warnings before expiration, and treats expired configured certificates as hard startup failures.
+Certificates must be rotated before expiration. FDP-18 exposes expiry and age metrics for both the ML server certificate and Java client certificates, logs warnings before expiration, and treats expired configured certificates as hard startup failures.
 
 Operators must monitor expiry metrics and rotate certificates manually.
 

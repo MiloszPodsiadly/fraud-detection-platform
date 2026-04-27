@@ -5,9 +5,11 @@ import hashlib
 import time
 import json
 from contextlib import redirect_stdout
+from datetime import datetime, timedelta, timezone
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 from io import StringIO
+from unittest.mock import patch
 
 import jwt
 
@@ -689,6 +691,33 @@ class MlMetricsEndpointTest(unittest.TestCase):
         finally:
             self.restore_env(saved)
 
+    def test_mtls_service_identity_rejects_missing_san_uri_and_wrong_trust_domain(self):
+        saved = {key: os.environ.get(key) for key in (
+            "INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES",
+            "INTERNAL_AUTH_MTLS_SPIFFE_TRUST_DOMAIN",
+        )}
+        try:
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES"] = "fraud-scoring-service:ml-score"
+            os.environ["INTERNAL_AUTH_MTLS_SPIFFE_TRUST_DOMAIN"] = "fraud-platform"
+
+            missing_san_uri = server._mtls_service_principal_from_certificate(
+                {
+                    "subjectAltName": (("DNS", "fraud-scoring-service"),),
+                    "notBefore": "Apr 27 12:00:00 2020 GMT",
+                    "notAfter": "Apr 27 12:00:00 2030 GMT",
+                },
+                "ml-score",
+            )
+            wrong_trust_domain = server._mtls_service_principal_from_certificate(
+                self.mtls_certificate("spiffe://wrong-domain/fraud-scoring-service"),
+                "ml-score",
+            )
+
+            self.assertEqual(missing_san_uri[1:], (403, "unknown_internal_service"))
+            self.assertEqual(wrong_trust_domain[1:], (403, "unknown_internal_service"))
+        finally:
+            self.restore_env(saved)
+
     def test_mtls_service_identity_rejects_expired_client_certificate(self):
         saved = {key: os.environ.get(key) for key in (
             "INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES",
@@ -750,6 +779,74 @@ class MlMetricsEndpointTest(unittest.TestCase):
                 os.environ.pop(key, None)
             with self.assertRaises(RuntimeError):
                 server._validate_internal_auth_startup(mode="MTLS_SERVICE_IDENTITY", profile="prod")
+        finally:
+            self.restore_env(saved)
+
+    def test_mtls_server_certificate_expiring_soon_reports_warn_health_and_metrics(self):
+        saved = {key: os.environ.get(key) for key in (
+            "INTERNAL_AUTH_MODE",
+            "INTERNAL_AUTH_MTLS_SERVER_CERTFILE",
+            "INTERNAL_AUTH_MTLS_SERVER_KEYFILE",
+            "INTERNAL_AUTH_MTLS_CA_FILE",
+            "INTERNAL_AUTH_MTLS_CA_FILES",
+            "INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES",
+        )}
+        try:
+            now = datetime.now(timezone.utc)
+            os.environ["INTERNAL_AUTH_MODE"] = "MTLS_SERVICE_IDENTITY"
+            os.environ["INTERNAL_AUTH_MTLS_SERVER_CERTFILE"] = "server.pem"
+            os.environ["INTERNAL_AUTH_MTLS_SERVER_KEYFILE"] = "server-key.pem"
+            os.environ["INTERNAL_AUTH_MTLS_CA_FILE"] = "ca.pem"
+            os.environ.pop("INTERNAL_AUTH_MTLS_CA_FILES", None)
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES"] = "fraud-scoring-service:ml-score"
+
+            with patch.object(
+                    server,
+                    "_certificate_validity_from_pem",
+                    return_value=(now - timedelta(hours=1), now + timedelta(hours=12)),
+            ):
+                health = server._mtls_certificate_health()
+                metrics = self.metrics_text()
+                labels = {
+                    "source_service": "ml-inference-service",
+                    "target_service": "ml-inference-service",
+                }
+
+                self.assertEqual(health, {"status": "WARN", "reason": "CERTIFICATE_EXPIRES_SOON"})
+                self.assertGreater(
+                    parse_metric_value(metrics, "fraud_internal_mtls_cert_expiry_seconds", labels),
+                    0,
+                )
+                self.assertGreater(
+                    parse_metric_value(metrics, "fraud_internal_mtls_cert_age_seconds", labels),
+                    0,
+                )
+        finally:
+            self.restore_env(saved)
+
+    def test_mtls_server_certificate_expired_fails_startup(self):
+        saved = {key: os.environ.get(key) for key in (
+            "INTERNAL_AUTH_MTLS_SERVER_CERTFILE",
+            "INTERNAL_AUTH_MTLS_SERVER_KEYFILE",
+            "INTERNAL_AUTH_MTLS_CA_FILE",
+            "INTERNAL_AUTH_MTLS_CA_FILES",
+            "INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES",
+        )}
+        try:
+            now = datetime.now(timezone.utc)
+            os.environ["INTERNAL_AUTH_MTLS_SERVER_CERTFILE"] = "server.pem"
+            os.environ["INTERNAL_AUTH_MTLS_SERVER_KEYFILE"] = "server-key.pem"
+            os.environ["INTERNAL_AUTH_MTLS_CA_FILE"] = "ca.pem"
+            os.environ.pop("INTERNAL_AUTH_MTLS_CA_FILES", None)
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES"] = "fraud-scoring-service:ml-score"
+
+            with patch.object(
+                    server,
+                    "_certificate_validity_from_pem",
+                    return_value=(now - timedelta(days=2), now - timedelta(days=1)),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "server certificate is expired"):
+                    server._validate_internal_auth_startup(mode="MTLS_SERVICE_IDENTITY", profile="prod")
         finally:
             self.restore_env(saved)
 

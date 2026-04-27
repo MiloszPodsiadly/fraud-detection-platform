@@ -202,6 +202,48 @@ class InternalServiceClientProdGuardTest {
     }
 
     @Test
+    void shouldRejectMtlsConfigurationWithoutCaMaterial() {
+        assertThatThrownBy(() -> new InternalServiceClientProperties(
+                true,
+                "MTLS_SERVICE_IDENTITY",
+                "fraud-scoring-service",
+                "",
+                false,
+                InternalServiceClientProperties.Jwt.empty(),
+                new InternalServiceClientProperties.Mtls(
+                        "client.pem",
+                        "client-key.pem",
+                        " ",
+                        "ml-inference-service",
+                        false
+                )
+        ))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("app.internal-auth.client.mtls client certificate, private key, CA, and expected server identity are required when MTLS_SERVICE_IDENTITY is enabled");
+    }
+
+    @Test
+    void shouldRejectMtlsConfigurationWithoutClientPrivateKey() {
+        assertThatThrownBy(() -> new InternalServiceClientProperties(
+                true,
+                "MTLS_SERVICE_IDENTITY",
+                "fraud-scoring-service",
+                "",
+                false,
+                InternalServiceClientProperties.Jwt.empty(),
+                new InternalServiceClientProperties.Mtls(
+                        "client.pem",
+                        " ",
+                        "ca.pem",
+                        "ml-inference-service",
+                        false
+                )
+        ))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("app.internal-auth.client.mtls client certificate, private key, CA, and expected server identity are required when MTLS_SERVICE_IDENTITY is enabled");
+    }
+
+    @Test
     void shouldRejectMtlsTrustAllMode() {
         assertThatThrownBy(() -> new InternalServiceClientProperties(
                 true,
@@ -220,6 +262,19 @@ class InternalServiceClientProdGuardTest {
         ))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("app.internal-auth.client.mtls trust-all is not allowed");
+    }
+
+    @Test
+    void shouldNotInstallCustomHostnameVerifierOrTrustAllSslContext() throws IOException {
+        String source = Files.readString(repoPath("fraud-scoring-service/src/main/java/com/frauddetection/scoring/config/InternalServiceClientRequestFactory.java"));
+
+        assertThat(source)
+                .doesNotContain("setHostnameVerifier")
+                .doesNotContain("HostnameVerifier")
+                .doesNotContain("NoopHostnameVerifier")
+                .doesNotContain("TrustAllStrategy")
+                .doesNotContain("X509TrustManager")
+                .doesNotContain("trustAll");
     }
 
     @Test
