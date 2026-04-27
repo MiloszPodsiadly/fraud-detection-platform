@@ -205,6 +205,11 @@ Prometheus metric contract:
   - Type: gauge
   - Meaning: seconds since an internal mTLS certificate became valid
   - Labels: `source_service`, `target_service`
+- `fraud_internal_mtls_cert_expiry_state_total`
+  - Type: counter
+  - Meaning: observed internal mTLS certificate lifecycle states during startup, health checks, and runtime monitoring
+  - Labels: `state`
+  - Bounded states: `UP`, `WARN`, `CRITICAL`, `DOWN`
 - `fraud_internal_auth_replay_rejected_total`
   - Type: counter
   - Meaning: rejected internal service JWT freshness or soft replay attempts

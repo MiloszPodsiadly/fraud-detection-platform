@@ -565,10 +565,13 @@ FDP-18.1 exposes certificate lifecycle signals for internal mTLS:
 - `fraud_internal_mtls_cert_expiry_seconds{source_service,target_service}`
 - `fraud_internal_mtls_cert_age_seconds{source_service,target_service}`
 - `fraud_internal_mtls_handshake_failures_total{reason}`
+- `fraud_internal_mtls_cert_expiry_state_total{state}`
 
-The ML server monitors its configured server certificate. Java internal clients monitor their configured client certificates and expose `mtlsCert` health with `UP`, `WARN`, or `DOWN` state.
+The ML server monitors its configured server certificate. Java internal clients monitor their configured client certificates and expose `mtlsCert` health with `UP`, `WARN`, `CRITICAL`, or `DOWN` state.
 
-The system logs warnings before certificate expiration and fails startup when a configured mTLS certificate is already expired. Operators must monitor expiry metrics and rotate certificates manually.
+The system logs warnings/errors before certificate expiration, runs runtime lifecycle checks every six hours, and fails startup when a configured mTLS certificate is missing, invalid, expired, or not trusted by configured CA material. Operators must monitor expiry metrics and rotate certificates manually with overlap.
+
+If certificates are rotated without overlap, service downtime will occur. The manual rotation flow is: generate new cert material, add new CA/trust while keeping old trust, deploy server trust update, deploy client certificate update, verify health/metrics, then remove old certificate and trust material.
 
 FDP-18.1 does not provide automated certificate rotation, a certificate management system, CA integration, secret rotation automation, cert-manager, Vault, KMS/HSM, or external PKI automation.
 
