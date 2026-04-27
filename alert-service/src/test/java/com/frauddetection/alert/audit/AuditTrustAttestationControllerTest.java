@@ -56,6 +56,8 @@ class AuditTrustAttestationControllerTest {
                         null,
                         null,
                         "disabled",
+                        "NONE",
+                        "OPTIONAL",
                         "alert-service",
                         100,
                         List.of("not_legal_notarization")
@@ -72,6 +74,9 @@ class AuditTrustAttestationControllerTest {
                 .andExpect(jsonPath("$.external_anchor_status").value("DISABLED"))
                 .andExpect(jsonPath("$.attestation_fingerprint").value("fingerprint"))
                 .andExpect(jsonPath("$.attestation_signature").doesNotExist())
+                .andExpect(jsonPath("$.signer_mode").value("disabled"))
+                .andExpect(jsonPath("$.attestation_signature_strength").value("NONE"))
+                .andExpect(jsonPath("$.external_trust_dependency").value("OPTIONAL"))
                 .andExpect(jsonPath("$.limitations[0]").value("not_legal_notarization"));
     }
 }

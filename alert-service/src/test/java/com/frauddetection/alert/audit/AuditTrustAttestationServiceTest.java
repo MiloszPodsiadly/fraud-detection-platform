@@ -7,13 +7,18 @@ import com.frauddetection.alert.audit.external.ExternalAuditIntegrityService;
 import com.frauddetection.alert.audit.trust.DisabledAuditTrustAttestationSigner;
 import com.frauddetection.alert.audit.trust.LocalDevAuditTrustAttestationSigner;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class AuditTrustAttestationServiceTest {
@@ -21,6 +26,7 @@ class AuditTrustAttestationServiceTest {
     private final AuditIntegrityService internalIntegrityService = mock(AuditIntegrityService.class);
     private final ExternalAuditIntegrityService externalIntegrityService = mock(ExternalAuditIntegrityService.class);
     private final ExternalAuditAnchorSink externalAnchorSink = mock(ExternalAuditAnchorSink.class);
+    private final AuditService auditService = mock(AuditService.class);
 
     @Test
     void shouldReportInternalOnlyWhenExternalAnchorsAreDisabled() {
@@ -37,7 +43,13 @@ class AuditTrustAttestationServiceTest {
         assertThat(response.trustLevel()).isEqualTo(AuditTrustLevel.INTERNAL_ONLY);
         assertThat(response.externalAnchorStatus()).isEqualTo("DISABLED");
         assertThat(response.attestationSignature()).isNull();
-        assertThat(response.limitations()).contains("external_anchor_not_valid", "derived_from_fdp19_fdp20_source_of_truth");
+        assertThat(response.attestationSignatureStrength()).isEqualTo("NONE");
+        assertThat(response.externalTrustDependency()).isEqualTo("OPTIONAL");
+        assertThat(response.limitations()).contains(
+                "external_anchor_not_valid",
+                "external_trust_incomplete",
+                "derived_from_fdp19_fdp20_source_of_truth"
+        );
     }
 
     @Test
@@ -71,10 +83,13 @@ class AuditTrustAttestationServiceTest {
         assertThat(response.externalAnchorStatus()).isEqualTo("VALID");
         assertThat(response.latestExternalAnchorReference()).isNotNull();
         assertThat(response.anchorCoverage().coverageRatio()).isEqualTo(1.0d);
+        assertThat(response.attestationSignature()).isNull();
+        assertThat(response.attestationSignatureStrength()).isEqualTo("NONE");
+        assertThat(response.externalTrustDependency()).isEqualTo("REQUIRED");
     }
 
     @Test
-    void shouldReportSignedAttestationWhenValidExternalAnchorAndSigningEnabled() {
+    void shouldNotUpgradeTrustLevelWhenLocalDevSigningIsEnabled() {
         when(externalAnchorSink.sinkType()).thenReturn("local-file");
         when(internalIntegrityService.verify(null, null, "alert-service", "HEAD", 100))
                 .thenReturn(internal("VALID"));
@@ -84,10 +99,12 @@ class AuditTrustAttestationServiceTest {
         AuditTrustAttestationResponse response = service(localDevSigner())
                 .attest("alert-service", 100, null);
 
-        assertThat(response.trustLevel()).isEqualTo(AuditTrustLevel.SIGNED_ATTESTATION);
+        assertThat(response.trustLevel()).isEqualTo(AuditTrustLevel.EXTERNALLY_ANCHORED);
         assertThat(response.attestationSignature()).isNotBlank();
         assertThat(response.signingKeyId()).isEqualTo("local-key");
-        assertThat(response.signingMode()).isEqualTo("local-dev");
+        assertThat(response.signerMode()).isEqualTo("local-dev");
+        assertThat(response.attestationSignatureStrength()).isEqualTo("LOCAL_DEV");
+        assertThat(response.limitations()).contains("local_signature_not_external_trust");
     }
 
     @Test
@@ -120,8 +137,84 @@ class AuditTrustAttestationServiceTest {
         assertThat(response.trustLevel()).isEqualTo(AuditTrustLevel.UNAVAILABLE);
     }
 
+    @Test
+    void shouldIncludeAttestationContextInFingerprint() {
+        when(externalAnchorSink.sinkType()).thenReturn("local-file");
+        when(internalIntegrityService.verify(null, null, "alert-service", "HEAD", 100))
+                .thenReturn(internal("VALID"));
+        when(externalIntegrityService.verify("alert-service", 100))
+                .thenReturn(validExternal());
+        when(internalIntegrityService.verify(null, null, "alert-service", "HEAD", 101))
+                .thenReturn(internal("VALID"));
+        when(externalIntegrityService.verify("alert-service", 101))
+                .thenReturn(validExternal());
+        when(internalIntegrityService.verify(null, null, "other-service", "HEAD", 100))
+                .thenReturn(internal("VALID"));
+        when(externalIntegrityService.verify("other-service", 100))
+                .thenReturn(validExternal("other-service", "other-event-hash"));
+
+        AuditTrustAttestationService service = service(new DisabledAuditTrustAttestationSigner());
+
+        AuditTrustAttestationResponse first = service.attest("alert-service", 100, "HEAD");
+        AuditTrustAttestationResponse same = service.attest("alert-service", 100, "HEAD");
+        AuditTrustAttestationResponse differentLimit = service.attest("alert-service", 101, "HEAD");
+        AuditTrustAttestationResponse differentSource = service.attest("other-service", 100, "HEAD");
+
+        assertThat(same.attestationFingerprint()).isEqualTo(first.attestationFingerprint());
+        assertThat(differentLimit.attestationFingerprint()).isNotEqualTo(first.attestationFingerprint());
+        assertThat(differentSource.attestationFingerprint()).isNotEqualTo(first.attestationFingerprint());
+    }
+
+    @Test
+    void shouldChangeFingerprintWhenExternalAnchorChanges() {
+        when(externalAnchorSink.sinkType()).thenReturn("local-file");
+        when(internalIntegrityService.verify(null, null, "alert-service", "HEAD", 100))
+                .thenReturn(internal("VALID"));
+        when(externalIntegrityService.verify("alert-service", 100))
+                .thenReturn(validExternal("alert-service", "event-hash", "external-anchor-1"))
+                .thenReturn(validExternal("alert-service", "event-hash", "external-anchor-2"));
+
+        AuditTrustAttestationService service = service(new DisabledAuditTrustAttestationSigner());
+
+        AuditTrustAttestationResponse first = service.attest("alert-service", 100, "HEAD");
+        AuditTrustAttestationResponse changedAnchor = service.attest("alert-service", 100, "HEAD");
+
+        assertThat(changedAnchor.attestationFingerprint()).isNotEqualTo(first.attestationFingerprint());
+    }
+
+    @Test
+    void shouldAuditAttestationEndpointAccess() {
+        when(externalAnchorSink.sinkType()).thenReturn("local-file");
+        when(internalIntegrityService.verify(null, null, "alert-service", "HEAD", 100))
+                .thenReturn(internal("VALID"));
+        when(externalIntegrityService.verify("alert-service", 100))
+                .thenReturn(validExternal());
+
+        AuditTrustAttestationResponse response = service(new DisabledAuditTrustAttestationSigner())
+                .attest("alert-service", 100, "HEAD");
+
+        ArgumentCaptor<AuditEventMetadataSummary> metadata = ArgumentCaptor.forClass(AuditEventMetadataSummary.class);
+        verify(auditService).audit(
+                eq(AuditAction.READ_AUDIT_TRUST_ATTESTATION),
+                eq(AuditResourceType.AUDIT_TRUST_ATTESTATION),
+                isNull(),
+                isNull(),
+                eq("audit-trust-attestation-reader"),
+                eq(AuditOutcome.SUCCESS),
+                isNull(),
+                metadata.capture()
+        );
+        assertThat(metadata.getValue().sourceService()).isEqualTo("alert-service");
+        assertThat(metadata.getValue().limit()).isEqualTo(100);
+        assertThat(metadata.getValue().trustLevel()).isEqualTo(response.trustLevel().name());
+        assertThat(metadata.getValue().internalIntegrityStatus()).isEqualTo("VALID");
+        assertThat(metadata.getValue().externalIntegrityStatus()).isEqualTo("VALID");
+        assertThat(metadata.getValue().externalAnchorStatus()).isEqualTo("VALID");
+        assertThat(metadata.getValue().attestationFingerprint()).isEqualTo(response.attestationFingerprint());
+    }
+
     private AuditTrustAttestationService service(com.frauddetection.alert.audit.trust.AuditTrustAttestationSigner signer) {
-        return new AuditTrustAttestationService(internalIntegrityService, externalIntegrityService, externalAnchorSink, signer);
+        return new AuditTrustAttestationService(internalIntegrityService, externalIntegrityService, externalAnchorSink, signer, auditService);
     }
 
     private LocalDevAuditTrustAttestationSigner localDevSigner() {
@@ -148,16 +241,24 @@ class AuditTrustAttestationServiceTest {
     }
 
     private ExternalAuditIntegrityResponse validExternal() {
+        return validExternal("alert-service", "event-hash");
+    }
+
+    private ExternalAuditIntegrityResponse validExternal(String sourceService, String eventHash) {
+        return validExternal(sourceService, eventHash, "external-anchor-1");
+    }
+
+    private ExternalAuditIntegrityResponse validExternal(String sourceService, String eventHash, String externalAnchorId) {
         return new ExternalAuditIntegrityResponse(
                 "VALID",
                 1,
                 100,
-                "alert-service",
-                "source_service:alert-service",
+                sourceService,
+                "source_service:" + sourceService,
                 null,
                 null,
-                localAnchor(),
-                externalAnchor(),
+                localAnchor(eventHash),
+                externalAnchor(eventHash, externalAnchorId),
                 List.of()
         );
     }
@@ -178,12 +279,16 @@ class AuditTrustAttestationServiceTest {
     }
 
     private ExternalAuditAnchorSummary localAnchor() {
+        return localAnchor("event-hash");
+    }
+
+    private ExternalAuditAnchorSummary localAnchor(String eventHash) {
         return new ExternalAuditAnchorSummary(
                 "anchor-1",
                 null,
                 null,
                 7,
-                "event-hash",
+                eventHash,
                 "SHA-256",
                 null,
                 Instant.parse("2026-04-27T00:00:00Z"),
@@ -193,12 +298,20 @@ class AuditTrustAttestationServiceTest {
     }
 
     private ExternalAuditAnchorSummary externalAnchor() {
+        return externalAnchor("event-hash");
+    }
+
+    private ExternalAuditAnchorSummary externalAnchor(String eventHash) {
+        return externalAnchor(eventHash, "external-anchor-1");
+    }
+
+    private ExternalAuditAnchorSummary externalAnchor(String eventHash, String externalAnchorId) {
         return new ExternalAuditAnchorSummary(
                 null,
-                "external-anchor-1",
+                externalAnchorId,
                 "anchor-1",
                 7,
-                "event-hash",
+                eventHash,
                 "SHA-256",
                 "1.0",
                 Instant.parse("2026-04-27T00:00:00Z"),

@@ -402,6 +402,8 @@ class AlertSecurityConfigTest {
                         null,
                         null,
                         "disabled",
+                        "NONE",
+                        "OPTIONAL",
                         "alert-service",
                         100,
                         List.of("not_legal_notarization")
@@ -480,6 +482,8 @@ class AlertSecurityConfigTest {
                         null,
                         null,
                         "disabled",
+                        "NONE",
+                        "OPTIONAL",
                         "alert-service",
                         100,
                         List.of("not_legal_notarization")

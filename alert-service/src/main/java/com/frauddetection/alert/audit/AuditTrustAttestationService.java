@@ -39,17 +39,20 @@ public class AuditTrustAttestationService {
     private final ExternalAuditIntegrityService externalIntegrityService;
     private final ExternalAuditAnchorSink externalAnchorSink;
     private final AuditTrustAttestationSigner signer;
+    private final AuditService auditService;
 
     public AuditTrustAttestationService(
             AuditIntegrityService internalIntegrityService,
             ExternalAuditIntegrityService externalIntegrityService,
             ExternalAuditAnchorSink externalAnchorSink,
-            AuditTrustAttestationSigner signer
+            AuditTrustAttestationSigner signer,
+            AuditService auditService
     ) {
         this.internalIntegrityService = internalIntegrityService;
         this.externalIntegrityService = externalIntegrityService;
         this.externalAnchorSink = externalAnchorSink;
         this.signer = signer;
+        this.auditService = auditService;
     }
 
     public AuditTrustAttestationResponse attest(String sourceService, Integer limit, String mode) {
@@ -63,7 +66,9 @@ public class AuditTrustAttestationService {
         try {
             AuditIntegrityResponse internal = internalIntegrityService.verify(null, null, normalizedSourceService, "HEAD", normalizedLimit);
             ExternalAuditIntegrityResponse external = externalIntegrityService.verify(normalizedSourceService, normalizedLimit);
-            return response(normalizedSourceService, normalizedLimit, internal, external);
+            AuditTrustAttestationResponse response = response(normalizedSourceService, normalizedLimit, "HEAD", internal, external);
+            auditAttestationRead(response);
+            return response;
         } catch (DataAccessException | AuditTrustAttestationException exception) {
             throw new AuditTrustAttestationUnavailableException();
         }
@@ -87,10 +92,12 @@ public class AuditTrustAttestationService {
     private AuditTrustAttestationResponse response(
             String sourceService,
             int limit,
+            String mode,
             AuditIntegrityResponse internal,
             ExternalAuditIntegrityResponse external
     ) {
         String externalAnchorStatus = externalAnchorStatus(external);
+        validateExternalConsistency(external, externalAnchorStatus);
         AuditTrustLevel trustLevel = trustLevel(internal, external, externalAnchorStatus);
         String status = "UNAVAILABLE".equals(internal.status()) ? "UNAVAILABLE" : "AVAILABLE";
         AuditTrustAttestationResponse.AnchorCoverage coverage = anchorCoverage(external, externalAnchorStatus);
@@ -98,8 +105,16 @@ public class AuditTrustAttestationService {
         String latestEventHash = latestEventHash(internal, external);
         AuditTrustAttestationResponse.ExternalAnchorReference latestExternalAnchor = latestExternalAnchor(external);
         List<String> limitations = limitations(internal, external, externalAnchorStatus, trustLevel);
+        String signatureKeyId = signer.signingEnabled() ? signer.keyId() : null;
+        String signatureStrength = signer.signingEnabled() ? signer.signatureStrength() : "NONE";
+        String externalTrustDependency = externalTrustDependency(trustLevel);
 
         Map<String, Object> canonical = canonical(
+                sourceService,
+                limit,
+                mode,
+                signer.mode(),
+                signatureKeyId,
                 trustLevel,
                 internal.status(),
                 external.status(),
@@ -112,12 +127,17 @@ public class AuditTrustAttestationService {
         );
         String fingerprint = sha256(canonicalBytes(canonical));
         AuditTrustAttestationSignature signature = signature(canonicalBytes(canonicalWithFingerprint(canonical, fingerprint)));
-        AuditTrustLevel finalTrustLevel = trustLevel == AuditTrustLevel.EXTERNALLY_ANCHORED && signature != null
+        AuditTrustLevel finalTrustLevel = trustLevel == AuditTrustLevel.EXTERNALLY_ANCHORED && "PRODUCTION_READY".equals(signatureStrength)
                 ? AuditTrustLevel.SIGNED_ATTESTATION
                 : trustLevel;
 
         if (finalTrustLevel != trustLevel) {
             canonical = canonical(
+                    sourceService,
+                    limit,
+                    mode,
+                    signer.mode(),
+                    signatureKeyId,
                     finalTrustLevel,
                     internal.status(),
                     external.status(),
@@ -146,10 +166,18 @@ public class AuditTrustAttestationService {
                 signature == null ? null : signature.signature(),
                 signature == null ? null : signature.keyId(),
                 signer.mode(),
+                signatureStrength,
+                externalTrustDependency,
                 sourceService,
                 limit,
                 limitations
         );
+    }
+
+    private void validateExternalConsistency(ExternalAuditIntegrityResponse external, String externalAnchorStatus) {
+        if ("VALID".equals(externalAnchorStatus) && !"VALID".equals(external.status())) {
+            throw new AuditTrustAttestationUnavailableException();
+        }
     }
 
     private AuditTrustLevel trustLevel(
@@ -256,6 +284,10 @@ public class AuditTrustAttestationService {
         }
         if (!"VALID".equals(externalAnchorStatus)) {
             limitations.add("external_anchor_not_valid");
+            limitations.add("external_trust_incomplete");
+        }
+        if ("LOCAL_DEV".equals(signer.signatureStrength())) {
+            limitations.add("local_signature_not_external_trust");
         }
         if (trustLevel == AuditTrustLevel.INTERNAL_ONLY && signer.signingEnabled()) {
             limitations.add("local_signature_does_not_add_external_trust");
@@ -263,7 +295,19 @@ public class AuditTrustAttestationService {
         return List.copyOf(limitations);
     }
 
+    private String externalTrustDependency(AuditTrustLevel trustLevel) {
+        if (trustLevel == AuditTrustLevel.EXTERNALLY_ANCHORED || trustLevel == AuditTrustLevel.SIGNED_ATTESTATION) {
+            return "REQUIRED";
+        }
+        return "OPTIONAL";
+    }
+
     private Map<String, Object> canonical(
+            String sourceService,
+            int limit,
+            String mode,
+            String signerMode,
+            String signatureKeyId,
             AuditTrustLevel trustLevel,
             String internalIntegrityStatus,
             String externalIntegrityStatus,
@@ -275,6 +319,11 @@ public class AuditTrustAttestationService {
             List<String> limitations
     ) {
         Map<String, Object> canonical = new LinkedHashMap<>();
+        canonical.put("source_service", sourceService);
+        canonical.put("limit", limit);
+        canonical.put("mode", mode);
+        canonical.put("signer_mode", signerMode);
+        canonical.put("signature_key_id", signatureKeyId);
         canonical.put("trust_level", trustLevel.name());
         canonical.put("internal_integrity_status", internalIntegrityStatus);
         canonical.put("external_integrity_status", externalIntegrityStatus);
@@ -333,5 +382,27 @@ public class AuditTrustAttestationService {
         }
         return signer.sign(canonicalBytes)
                 .orElseThrow(AuditTrustAttestationUnavailableException::new);
+    }
+
+    private void auditAttestationRead(AuditTrustAttestationResponse response) {
+        auditService.audit(
+                AuditAction.READ_AUDIT_TRUST_ATTESTATION,
+                AuditResourceType.AUDIT_TRUST_ATTESTATION,
+                null,
+                null,
+                "audit-trust-attestation-reader",
+                AuditOutcome.SUCCESS,
+                null,
+                AuditEventMetadataSummary.trustAttestation(
+                        response.sourceService(),
+                        "1.0",
+                        response.limit(),
+                        response.trustLevel().name(),
+                        response.internalIntegrityStatus(),
+                        response.externalIntegrityStatus(),
+                        response.externalAnchorStatus(),
+                        response.attestationFingerprint()
+                )
+        );
     }
 }

@@ -47,8 +47,14 @@ public record AuditTrustAttestationResponse(
         @JsonInclude(JsonInclude.Include.NON_NULL)
         String signingKeyId,
 
-        @JsonProperty("signing_mode")
-        String signingMode,
+        @JsonProperty("signer_mode")
+        String signerMode,
+
+        @JsonProperty("attestation_signature_strength")
+        String attestationSignatureStrength,
+
+        @JsonProperty("external_trust_dependency")
+        String externalTrustDependency,
 
         @JsonProperty("source_service")
         String sourceService,

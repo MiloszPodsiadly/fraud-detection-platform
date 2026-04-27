@@ -30,6 +30,16 @@ public class LocalDevAuditTrustAttestationSigner implements AuditTrustAttestatio
     }
 
     @Override
+    public String signatureStrength() {
+        return "LOCAL_DEV";
+    }
+
+    @Override
+    public String keyId() {
+        return keyId;
+    }
+
+    @Override
     public Optional<AuditTrustAttestationSignature> sign(byte[] canonicalPayload) {
         try {
             Mac mac = Mac.getInstance(MAC_ALGORITHM);
