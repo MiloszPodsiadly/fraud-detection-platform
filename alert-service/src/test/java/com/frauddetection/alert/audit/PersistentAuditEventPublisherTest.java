@@ -7,9 +7,12 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataAccessResourceFailureException;
 
 import java.lang.reflect.Method;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -25,9 +28,11 @@ class PersistentAuditEventPublisherTest {
     @Test
     void shouldPersistAppendOnlyAuditDocumentWithoutPayloadData() {
         AuditEventRepository repository = mock(AuditEventRepository.class);
+        AuditAnchorRepository anchorRepository = mock(AuditAnchorRepository.class);
         SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
         PersistentAuditEventPublisher publisher = new PersistentAuditEventPublisher(
                 repository,
+                anchorRepository,
                 new AlertServiceMetrics(meterRegistry)
         );
         AuditEvent event = new AuditEvent(
@@ -41,7 +46,9 @@ class PersistentAuditEventPublisherTest {
                 null
         );
 
-        when(repository.findLatestBySourceService("alert-service")).thenReturn(Optional.empty());
+        when(repository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY)).thenReturn(Optional.empty());
+        when(repository.insert(any(AuditEventDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(repository.countByPartitionKey(AuditEventDocument.PARTITION_KEY)).thenReturn(1L);
 
         publisher.publish(event);
 
@@ -62,6 +69,7 @@ class PersistentAuditEventPublisherTest {
         assertThat(document.correlationId()).isEqualTo("corr-1");
         assertThat(document.requestId()).isNull();
         assertThat(document.sourceService()).isEqualTo("alert-service");
+        assertThat(document.partitionKey()).isEqualTo(AuditEventDocument.PARTITION_KEY);
         assertThat(document.outcome()).isEqualTo(AuditOutcome.SUCCESS);
         assertThat(document.failureCategory()).isEqualTo(AuditFailureCategory.NONE);
         assertThat(document.failureReason()).isNull();
@@ -75,15 +83,22 @@ class PersistentAuditEventPublisherTest {
                 .tags("event_type", "submit_analyst_decision", "outcome", "success")
                 .counter()
                 .count()).isEqualTo(1.0d);
+        ArgumentCaptor<AuditAnchorDocument> anchorCaptor = ArgumentCaptor.forClass(AuditAnchorDocument.class);
+        verify(anchorRepository).insert(anchorCaptor.capture());
+        assertThat(anchorCaptor.getValue().partitionKey()).isEqualTo(AuditEventDocument.PARTITION_KEY);
+        assertThat(anchorCaptor.getValue().lastEventHash()).isEqualTo(document.eventHash());
+        assertThat(anchorCaptor.getValue().chainPosition()).isEqualTo(1L);
     }
 
     @Test
     void shouldFailClearlyWhenAuditPersistenceIsUnavailable() {
         AuditEventRepository repository = mock(AuditEventRepository.class);
+        AuditAnchorRepository anchorRepository = mock(AuditAnchorRepository.class);
         SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
-        when(repository.findLatestBySourceService("alert-service")).thenThrow(new DataAccessResourceFailureException("mongo down"));
+        when(repository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY)).thenThrow(new DataAccessResourceFailureException("mongo down"));
         PersistentAuditEventPublisher publisher = new PersistentAuditEventPublisher(
                 repository,
+                anchorRepository,
                 new AlertServiceMetrics(meterRegistry)
         );
 
@@ -136,6 +151,7 @@ class PersistentAuditEventPublisherTest {
                 first.correlationId(),
                 first.requestId(),
                 first.sourceService(),
+                first.partitionKey(),
                 first.outcome(),
                 first.failureCategory(),
                 first.failureReason(),
@@ -154,7 +170,48 @@ class PersistentAuditEventPublisherTest {
     @Test
     void shouldExposeInsertOnlyRepositoryContract() {
         assertThat(Arrays.stream(AuditEventRepository.class.getDeclaredMethods()).map(Method::getName))
-                .contains("insert")
+                .contains("insert", "findLatestByPartitionKey", "countByPartitionKey")
                 .doesNotContain("save", "update", "delete", "deleteById", "deleteAll");
+        assertThat(Arrays.stream(AuditAnchorRepository.class.getDeclaredMethods()).map(Method::getName))
+                .contains("insert", "findLatestByPartitionKey")
+                .doesNotContain("save", "update", "delete", "deleteById", "deleteAll");
+    }
+
+    @Test
+    void shouldRejectApplicationLevelAuditMutationAttempts() {
+        AuditImmutabilityGuard guard = new AuditImmutabilityGuard();
+
+        assertThatThrownBy(() -> guard.rejectMutation("update"))
+                .isInstanceOf(AuditImmutableMutationException.class)
+                .hasMessageContaining("append-only");
+    }
+
+    @Test
+    void shouldNotContainDurableAuditUpdateOrDeleteOperations() throws Exception {
+        Path auditSource = Path.of("src/main/java/com/frauddetection/alert/audit");
+        List<String> forbiddenFragments = List.of(
+                "mongoTemplate.save",
+                "mongoTemplate.remove",
+                "updateFirst(",
+                "updateMulti(",
+                "updateOne(",
+                "findAndModify("
+        );
+
+        try (var paths = Files.walk(auditSource)) {
+            List<Path> offenders = paths
+                    .filter(path -> path.toString().endsWith(".java"))
+                    .filter(path -> !path.toString().contains("\\read\\"))
+                    .filter(path -> {
+                        try {
+                            String content = Files.readString(path);
+                            return forbiddenFragments.stream().anyMatch(content::contains);
+                        } catch (Exception exception) {
+                            return true;
+                        }
+                    })
+                    .toList();
+            assertThat(offenders).isEmpty();
+        }
     }
 }

@@ -63,6 +63,7 @@ final class AuditEventHasher {
         values.put("resource_id", document.resourceId());
         values.put("correlation_id", document.correlationId());
         values.put("source_service", document.sourceService());
+        values.put("partition_key", document.partitionKey());
         values.put("request_id", document.requestId());
         values.put("metadata_summary", metadata(document.metadataSummary()));
         values.put("previous_event_hash", document.previousEventHash());

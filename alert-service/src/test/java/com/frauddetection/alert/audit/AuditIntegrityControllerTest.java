@@ -50,6 +50,8 @@ class AuditIntegrityControllerTest {
                         null,
                         "hash-1",
                         "hash-2",
+                        "source_service:alert-service",
+                        "hash-2",
                         List.of()
                 ));
 
@@ -62,6 +64,8 @@ class AuditIntegrityControllerTest {
                 .andExpect(jsonPath("$.limit").value(100))
                 .andExpect(jsonPath("$.first_event_hash").value("hash-1"))
                 .andExpect(jsonPath("$.last_event_hash").value("hash-2"))
+                .andExpect(jsonPath("$.partition_key").value("source_service:alert-service"))
+                .andExpect(jsonPath("$.last_anchor_hash").value("hash-2"))
                 .andExpect(jsonPath("$.violations").isEmpty())
                 .andExpect(jsonPath("$.reason_code").doesNotExist())
                 .andExpect(jsonPath("$.message").doesNotExist());

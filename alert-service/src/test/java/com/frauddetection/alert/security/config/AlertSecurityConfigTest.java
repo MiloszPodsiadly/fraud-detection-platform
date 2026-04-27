@@ -335,7 +335,7 @@ class AlertSecurityConfigTest {
         when(auditEventReadService.readEvents(any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new AuditEventReadResponse("AVAILABLE", null, null, 0, 50, List.of()));
         when(auditIntegrityService.verify(any(), any(), any(), any()))
-                .thenReturn(new AuditIntegrityResponse("VALID", 0, 100, null, null, null, null, List.of()));
+                .thenReturn(new AuditIntegrityResponse("VALID", 0, 100, null, null, null, null, null, null, List.of()));
 
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("FRAUD_OPS_ADMIN")))
                 .andExpect(status().isOk())

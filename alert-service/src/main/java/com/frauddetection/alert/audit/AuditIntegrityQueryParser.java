@@ -16,6 +16,10 @@ class AuditIntegrityQueryParser {
     static final int MAX_LIMIT = 500;
     private static final Set<String> ALLOWED_SOURCE_SERVICES = Set.of("alert-service");
 
+    static String partitionKey(String sourceService) {
+        return "source_service:" + sourceService;
+    }
+
     AuditIntegrityQuery parse(String from, String to, String sourceService, Integer limit) {
         List<String> errors = new ArrayList<>();
         int normalizedLimit = parseLimit(limit, errors);

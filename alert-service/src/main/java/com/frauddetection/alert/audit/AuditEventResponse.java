@@ -45,6 +45,9 @@ public record AuditEventResponse(
         @JsonProperty("source_service")
         String sourceService,
 
+        @JsonProperty("partition_key")
+        String partitionKey,
+
         @JsonProperty("request_id")
         String requestId,
 
@@ -78,6 +81,7 @@ public record AuditEventResponse(
                 document.createdAt(),
                 document.correlationId(),
                 document.sourceService(),
+                document.partitionKey(),
                 document.requestId(),
                 AuditEventMetadataSummary.from(document),
                 document.previousEventHash(),

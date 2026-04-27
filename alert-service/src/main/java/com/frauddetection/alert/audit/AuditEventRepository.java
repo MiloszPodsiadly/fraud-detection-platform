@@ -32,6 +32,18 @@ public class AuditEventRepository {
         return Optional.ofNullable(mongoTemplate.findOne(query, AuditEventDocument.class));
     }
 
+    public Optional<AuditEventDocument> findLatestByPartitionKey(String partitionKey) throws DataAccessException {
+        Query query = new Query(Criteria.where("partition_key").is(partitionKey))
+                .with(Sort.by(Sort.Direction.DESC, "created_at"))
+                .limit(1);
+        return Optional.ofNullable(mongoTemplate.findOne(query, AuditEventDocument.class));
+    }
+
+    public long countByPartitionKey(String partitionKey) throws DataAccessException {
+        Query query = new Query(Criteria.where("partition_key").is(partitionKey));
+        return mongoTemplate.count(query, AuditEventDocument.class);
+    }
+
     public List<AuditEventDocument> findIntegrityWindow(
             String sourceService,
             Instant from,
@@ -40,7 +52,7 @@ public class AuditEventRepository {
     ) throws DataAccessException {
         List<Criteria> filters = new ArrayList<>();
         if (sourceService != null) {
-            filters.add(Criteria.where("source_service").is(sourceService));
+            filters.add(Criteria.where("partition_key").is(AuditIntegrityQueryParser.partitionKey(sourceService)));
         }
         if (from != null && to != null) {
             filters.add(Criteria.where("created_at").gte(from).lte(to));

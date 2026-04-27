@@ -31,6 +31,14 @@ public record AuditIntegrityResponse(
         @JsonInclude(JsonInclude.Include.NON_NULL)
         String lastEventHash,
 
+        @JsonProperty("partition_key")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        String partitionKey,
+
+        @JsonProperty("last_anchor_hash")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        String lastAnchorHash,
+
         @JsonProperty("violations")
         List<AuditIntegrityViolation> violations
 ) {
@@ -41,6 +49,8 @@ public record AuditIntegrityResponse(
                 limit,
                 "AUDIT_STORE_UNAVAILABLE",
                 "Audit event store is currently unavailable.",
+                null,
+                null,
                 null,
                 null,
                 List.of()

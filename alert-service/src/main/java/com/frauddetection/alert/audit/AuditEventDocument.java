@@ -1,6 +1,7 @@
 package com.frauddetection.alert.audit;
 
 import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Immutable;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.index.IndexDirection;
@@ -12,11 +13,13 @@ import java.time.Instant;
 import java.util.List;
 
 @Document(collection = "audit_events")
+@Immutable
 @CompoundIndexes({
         @CompoundIndex(name = "audit_actor_created_at_idx", def = "{'actor_id': 1, 'created_at': -1}"),
         @CompoundIndex(name = "audit_event_type_created_at_idx", def = "{'event_type': 1, 'created_at': -1}"),
         @CompoundIndex(name = "audit_resource_created_at_idx", def = "{'resource_type': 1, 'resource_id': 1, 'created_at': -1}"),
-        @CompoundIndex(name = "audit_source_service_created_at_idx", def = "{'source_service': 1, 'created_at': -1}")
+        @CompoundIndex(name = "audit_source_service_created_at_idx", def = "{'source_service': 1, 'created_at': -1}"),
+        @CompoundIndex(name = "audit_partition_created_at_idx", def = "{'partition_key': 1, 'created_at': -1}")
 })
 public record AuditEventDocument(
         @Id
@@ -63,6 +66,9 @@ public record AuditEventDocument(
         @Field("source_service")
         String sourceService,
 
+        @Field("partition_key")
+        String partitionKey,
+
         @Field("outcome")
         AuditOutcome outcome,
 
@@ -89,6 +95,7 @@ public record AuditEventDocument(
 ) {
     private static final String SCHEMA_VERSION = "1.0";
     private static final String SOURCE_SERVICE = "alert-service";
+    static final String PARTITION_KEY = "source_service:alert-service";
     static final String HASH_ALGORITHM = "SHA-256";
     private static final int MAX_REQUEST_ID_LENGTH = 120;
 
@@ -124,6 +131,7 @@ public record AuditEventDocument(
                 event.correlationId(),
                 bounded(event.requestId(), MAX_REQUEST_ID_LENGTH),
                 SOURCE_SERVICE,
+                PARTITION_KEY,
                 event.outcome(),
                 failureCategory,
                 event.failureReason(),
@@ -160,6 +168,7 @@ public record AuditEventDocument(
                 correlationId,
                 requestId,
                 sourceService,
+                partitionKey,
                 outcome,
                 failureCategory,
                 failureReason,
@@ -192,6 +201,7 @@ public record AuditEventDocument(
                 event.correlationId(),
                 bounded(event.requestId(), MAX_REQUEST_ID_LENGTH),
                 SOURCE_SERVICE,
+                PARTITION_KEY,
                 event.outcome(),
                 event.failureCategory() == null
                         ? AuditEvent.failureCategory(event.outcome(), event.failureReason())

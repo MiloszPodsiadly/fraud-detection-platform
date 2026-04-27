@@ -70,6 +70,7 @@ class AuditEventControllerTest {
                         Instant.parse("2026-04-26T09:00:00Z"),
                         "corr-1",
                         "alert-service",
+                        "source_service:alert-service",
                         null,
                         new AuditEventMetadataSummary("corr-1", null),
                         null,

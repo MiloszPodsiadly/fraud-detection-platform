@@ -7,7 +7,9 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 @Service
 public class AuditIntegrityService {
@@ -18,17 +20,20 @@ public class AuditIntegrityService {
     private static final String SUPPORTED_HASH_ALGORITHM = "SHA-256";
 
     private final AuditEventRepository repository;
+    private final AuditAnchorRepository anchorRepository;
     private final AuditIntegrityQueryParser queryParser;
     private final AlertServiceMetrics metrics;
     private final AuditService auditService;
 
     public AuditIntegrityService(
             AuditEventRepository repository,
+            AuditAnchorRepository anchorRepository,
             AuditIntegrityQueryParser queryParser,
             AlertServiceMetrics metrics,
             AuditService auditService
     ) {
         this.repository = repository;
+        this.anchorRepository = anchorRepository;
         this.queryParser = queryParser;
         this.metrics = metrics;
         this.auditService = auditService;
@@ -36,6 +41,15 @@ public class AuditIntegrityService {
 
     public AuditIntegrityResponse verify(String from, String to, String sourceService, Integer limit) {
         AuditIntegrityQuery query = queryParser.parse(from, to, sourceService, limit);
+        return verify(query, true);
+    }
+
+    AuditIntegrityResponse verifyScheduled(String sourceService, int limit) {
+        AuditIntegrityQuery query = queryParser.parse(null, null, sourceService, limit);
+        return verify(query, false);
+    }
+
+    private AuditIntegrityResponse verify(AuditIntegrityQuery query, boolean auditRead) {
         try {
             List<AuditEventDocument> documents = repository.findIntegrityWindow(
                     query.sourceService(),
@@ -43,25 +57,35 @@ public class AuditIntegrityService {
                     query.to(),
                     query.limit()
             );
-            AuditIntegrityResponse response = verifyDocuments(documents, query.limit());
+            AuditIntegrityResponse response = verifyDocuments(documents, query);
             metrics.recordAuditIntegrityCheck(response.status());
+            metrics.recordForensicAuditIntegrityCheck(response.status());
+            metrics.recordAuditIntegritySnapshot(response.status(), response.lastEventHash(), response.lastAnchorHash());
             response.violations().forEach(violation -> metrics.recordAuditIntegrityViolation(violation.violationType()));
-            auditIntegrityRead(query, response, AuditOutcome.SUCCESS, null);
+            response.violations().forEach(violation -> metrics.recordForensicAuditIntegrityViolation(violation.violationType()));
+            if (auditRead) {
+                auditIntegrityRead(query, response, AuditOutcome.SUCCESS, null);
+            }
             return response;
         } catch (DataAccessException exception) {
             metrics.recordAuditIntegrityCheck("UNAVAILABLE");
+            metrics.recordForensicAuditIntegrityCheck("UNAVAILABLE");
+            metrics.recordAuditIntegritySnapshot("UNAVAILABLE", null, null);
             AuditIntegrityResponse response = AuditIntegrityResponse.unavailable(query.limit());
-            try {
-                auditIntegrityRead(query, response, AuditOutcome.FAILED, "AUDIT_STORE_UNAVAILABLE");
-            } catch (AuditPersistenceUnavailableException ignored) {
-                log.warn("Audit read access audit could not be persisted for audit integrity verification.");
+            if (auditRead) {
+                try {
+                    auditIntegrityRead(query, response, AuditOutcome.FAILED, "AUDIT_STORE_UNAVAILABLE");
+                } catch (AuditPersistenceUnavailableException ignored) {
+                    log.warn("Audit read access audit could not be persisted for audit integrity verification.");
+                }
             }
             return response;
         }
     }
 
-    private AuditIntegrityResponse verifyDocuments(List<AuditEventDocument> documents, int limit) {
+    private AuditIntegrityResponse verifyDocuments(List<AuditEventDocument> documents, AuditIntegrityQuery query) {
         List<AuditIntegrityViolation> violations = new ArrayList<>();
+        Set<String> seenPreviousHashes = new HashSet<>();
         AuditEventDocument previous = null;
         for (int i = 0; i < documents.size(); i++) {
             AuditEventDocument current = documents.get(i);
@@ -77,23 +101,57 @@ public class AuditIntegrityService {
             if (previous != null && !safeEquals(previous.eventHash(), current.previousEventHash())) {
                 violations.add(new AuditIntegrityViolation("PREVIOUS_HASH_MISMATCH", position, "PREVIOUS_HASH_MISMATCH"));
             }
+            if (current.previousEventHash() != null && !seenPreviousHashes.add(current.previousEventHash())) {
+                violations.add(new AuditIntegrityViolation("CHAIN_FORK_DETECTED", position, "CHAIN_FORK_DETECTED"));
+            }
             previous = current;
         }
 
+        String partitionKey = partitionKey(query, documents);
+        String lastEventHash = documents.isEmpty() ? null : documents.getLast().eventHash();
+        String lastAnchorHash = null;
+        if (partitionKey != null) {
+            AuditEventDocument chainHead = repository.findLatestByPartitionKey(partitionKey).orElse(null);
+            AuditAnchorDocument anchor = anchorRepository.findLatestByPartitionKey(partitionKey).orElse(null);
+            if (chainHead != null && anchor == null) {
+                violations.add(new AuditIntegrityViolation("ANCHOR_MISSING", documents.size(), "ANCHOR_MISSING"));
+            } else if (chainHead != null) {
+                lastAnchorHash = anchor.lastEventHash();
+                if (!safeEquals(chainHead.eventHash(), anchor.lastEventHash())) {
+                    violations.add(new AuditIntegrityViolation("ANCHOR_HASH_MISMATCH", documents.size(), "ANCHOR_HASH_MISMATCH"));
+                }
+                if (repository.countByPartitionKey(partitionKey) != anchor.chainPosition()) {
+                    violations.add(new AuditIntegrityViolation("ANCHOR_CHAIN_POSITION_MISMATCH", documents.size(), "ANCHOR_CHAIN_POSITION_MISMATCH"));
+                }
+            }
+        }
+
         String status = violations.isEmpty() ? "VALID" : "INVALID";
-        if (violations.isEmpty() && documents.size() == limit) {
+        if (violations.isEmpty() && documents.size() == query.limit()) {
             status = "PARTIAL";
         }
         return new AuditIntegrityResponse(
                 status,
                 documents.size(),
-                limit,
+                query.limit(),
                 null,
                 null,
                 documents.isEmpty() ? null : documents.getFirst().eventHash(),
-                documents.isEmpty() ? null : documents.getLast().eventHash(),
+                lastEventHash,
+                partitionKey,
+                lastAnchorHash,
                 violations
         );
+    }
+
+    private String partitionKey(AuditIntegrityQuery query, List<AuditEventDocument> documents) {
+        if (query.sourceService() != null) {
+            return AuditIntegrityQueryParser.partitionKey(query.sourceService());
+        }
+        if (documents.isEmpty()) {
+            return AuditEventDocument.PARTITION_KEY;
+        }
+        return documents.getFirst().partitionKey();
     }
 
     private void auditIntegrityRead(
