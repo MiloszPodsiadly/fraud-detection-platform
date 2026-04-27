@@ -838,11 +838,9 @@ components:
           type: string
           nullable: true
           enum:
-            - AUDIT_STORE_UNAVAILABLE
-            - EXTERNAL_ANCHORS_DISABLED
             - EXTERNAL_ANCHORS_UNAVAILABLE
-            - EXTERNAL_ANCHOR_COVERAGE_INCOMPLETE
-            - LEGACY_UNANCHORED_EVENTS
+            - EXTERNAL_ANCHOR_GAPS
+            - INTERNAL_ERROR
         message:
           type: string
           nullable: true
@@ -860,23 +858,29 @@ components:
       type: object
       additionalProperties: false
       required:
-        - local_anchors_available_count
-        - external_anchors_available_count
-        - events_without_local_anchor_count
-        - events_without_external_anchor_count
+        - total_events
+        - events_with_local_anchor
+        - events_with_external_anchor
+        - events_missing_external_anchor
+        - coverage_ratio
       properties:
-        local_anchors_available_count:
+        total_events:
           type: integer
           minimum: 0
-        external_anchors_available_count:
+        events_with_local_anchor:
           type: integer
           minimum: 0
-        events_without_local_anchor_count:
+        events_with_external_anchor:
           type: integer
           minimum: 0
-        events_without_external_anchor_count:
+        events_missing_external_anchor:
           type: integer
           minimum: 0
+        coverage_ratio:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
     AuditEvidenceExportEvent:
       type: object
       additionalProperties: false
