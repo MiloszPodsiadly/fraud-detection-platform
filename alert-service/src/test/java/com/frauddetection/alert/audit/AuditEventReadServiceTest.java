@@ -16,7 +16,9 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -24,11 +26,13 @@ import static org.mockito.Mockito.when;
 class AuditEventReadServiceTest {
 
     private final MongoTemplate mongoTemplate = mock(MongoTemplate.class);
+    private final AuditService auditService = mock(AuditService.class);
     private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
     private final AuditEventReadService service = new AuditEventReadService(
             mongoTemplate,
             new AuditEventQueryParser(Clock.fixed(Instant.parse("2026-04-26T10:00:00Z"), ZoneOffset.UTC)),
-            new AlertServiceMetrics(meterRegistry)
+            new AlertServiceMetrics(meterRegistry),
+            auditService
     );
 
     @Test
@@ -87,6 +91,19 @@ class AuditEventReadServiceTest {
         assertThat(event.metadataSummary().sourceService()).isEqualTo("alert-service");
         assertThat(event.metadataSummary().schemaVersion()).isEqualTo("1.0");
         assertThat(event.metadataSummary().failureCategory()).isEqualTo("NONE");
+        assertThat(event.actorType()).isEqualTo("HUMAN");
+        assertThat(event.eventHash()).isNotBlank();
+        assertThat(event.hashAlgorithm()).isEqualTo("SHA-256");
+        verify(auditService).audit(
+                eq(AuditAction.READ_AUDIT_EVENTS),
+                eq(AuditResourceType.AUDIT_EVENT),
+                isNull(),
+                isNull(),
+                eq("audit-events-reader"),
+                eq(AuditOutcome.SUCCESS),
+                isNull(),
+                any(AuditEventMetadataSummary.class)
+        );
     }
 
     @Test

@@ -803,8 +803,8 @@ class MlMetricsEndpointTest(unittest.TestCase):
             with patch.object(
                     server,
                     "_certificate_validity_from_pem",
-                    return_value=(now - timedelta(hours=1), now + timedelta(hours=12)),
-            ):
+                    return_value=(now - timedelta(hours=1), now + timedelta(days=5)),
+            ), patch.object(server, "_validate_mtls_server_certificate_trust_chain", return_value=None):
                 health = server._mtls_certificate_health()
                 metrics = self.metrics_text()
                 labels = {
@@ -821,6 +821,72 @@ class MlMetricsEndpointTest(unittest.TestCase):
                     parse_metric_value(metrics, "fraud_internal_mtls_cert_age_seconds", labels),
                     0,
                 )
+        finally:
+            self.restore_env(saved)
+
+    def test_mtls_server_certificate_critical_when_expiring_within_twenty_four_hours(self):
+        saved = {key: os.environ.get(key) for key in (
+            "INTERNAL_AUTH_MODE",
+            "INTERNAL_AUTH_MTLS_SERVER_CERTFILE",
+            "INTERNAL_AUTH_MTLS_SERVER_KEYFILE",
+            "INTERNAL_AUTH_MTLS_CA_FILE",
+            "INTERNAL_AUTH_MTLS_CA_FILES",
+            "INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES",
+        )}
+        try:
+            now = datetime.now(timezone.utc)
+            os.environ["INTERNAL_AUTH_MODE"] = "MTLS_SERVICE_IDENTITY"
+            os.environ["INTERNAL_AUTH_MTLS_SERVER_CERTFILE"] = "server.pem"
+            os.environ["INTERNAL_AUTH_MTLS_SERVER_KEYFILE"] = "server-key.pem"
+            os.environ["INTERNAL_AUTH_MTLS_CA_FILE"] = "ca.pem"
+            os.environ.pop("INTERNAL_AUTH_MTLS_CA_FILES", None)
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES"] = "fraud-scoring-service:ml-score"
+
+            with patch.object(
+                    server,
+                    "_certificate_validity_from_pem",
+                    return_value=(now - timedelta(hours=1), now + timedelta(hours=12)),
+            ), patch.object(server, "_validate_mtls_server_certificate_trust_chain", return_value=None):
+                health = server._mtls_certificate_health()
+
+                self.assertEqual(health, {"status": "CRITICAL", "reason": "CERTIFICATE_EXPIRES_IMMINENTLY"})
+                metrics_status, _, metrics_payload = self.request("GET", "/metrics")
+                self.assertEqual(metrics_status, 200)
+                self.assertIn(
+                    'fraud_internal_mtls_cert_expiry_state_total{state="CRITICAL"}',
+                    metrics_payload.decode("utf-8"),
+                )
+        finally:
+            self.restore_env(saved)
+
+    def test_mtls_server_certificate_runtime_monitor_updates_metrics_without_crashing(self):
+        saved = {key: os.environ.get(key) for key in (
+            "INTERNAL_AUTH_MODE",
+            "INTERNAL_AUTH_MTLS_SERVER_CERTFILE",
+            "INTERNAL_AUTH_MTLS_SERVER_KEYFILE",
+            "INTERNAL_AUTH_MTLS_CA_FILE",
+            "INTERNAL_AUTH_MTLS_CA_FILES",
+            "INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES",
+        )}
+        try:
+            now = datetime.now(timezone.utc)
+            os.environ["INTERNAL_AUTH_MODE"] = "MTLS_SERVICE_IDENTITY"
+            os.environ["INTERNAL_AUTH_MTLS_SERVER_CERTFILE"] = "server.pem"
+            os.environ["INTERNAL_AUTH_MTLS_SERVER_KEYFILE"] = "server-key.pem"
+            os.environ["INTERNAL_AUTH_MTLS_CA_FILE"] = "ca.pem"
+            os.environ.pop("INTERNAL_AUTH_MTLS_CA_FILES", None)
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES"] = "fraud-scoring-service:ml-score"
+
+            with patch.object(
+                    server,
+                    "_certificate_validity_from_pem",
+                    return_value=(now - timedelta(hours=1), now + timedelta(days=30)),
+            ):
+                with patch.object(server, "_validate_mtls_server_certificate_trust_chain", return_value=None):
+                    server._run_mtls_certificate_lifecycle_check()
+                    metrics = self.metrics_text()
+
+            self.assertIn('fraud_internal_mtls_cert_expiry_state_total{state="UP"}', metrics)
         finally:
             self.restore_env(saved)
 
@@ -844,9 +910,62 @@ class MlMetricsEndpointTest(unittest.TestCase):
                     server,
                     "_certificate_validity_from_pem",
                     return_value=(now - timedelta(days=2), now - timedelta(days=1)),
-            ):
+            ), patch.object(server, "_validate_mtls_server_certificate_trust_chain", return_value=None):
                 with self.assertRaisesRegex(RuntimeError, "server certificate is expired"):
                     server._validate_internal_auth_startup(mode="MTLS_SERVICE_IDENTITY", profile="prod")
+        finally:
+            self.restore_env(saved)
+
+    def test_mtls_server_certificate_trust_chain_rotation_overlap_and_old_removal(self):
+        saved = {key: os.environ.get(key) for key in (
+            "INTERNAL_AUTH_MTLS_SERVER_CERTFILE",
+            "INTERNAL_AUTH_MTLS_SERVER_KEYFILE",
+            "INTERNAL_AUTH_MTLS_CA_FILE",
+            "INTERNAL_AUTH_MTLS_CA_FILES",
+            "INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES",
+        )}
+        server_cert = os.path.join(SERVICE_IDENTITY_DIR, "mtls", "ml-inference-service.pem")
+        server_key = os.path.join(SERVICE_IDENTITY_DIR, "mtls", "ml-inference-service-key.pem")
+        valid_ca = os.path.join(SERVICE_IDENTITY_DIR, "mtls", "local-dev-ca.pem")
+        wrong_ca = os.path.join(SERVICE_IDENTITY_DIR, "mtls", "unknown-service.pem")
+        try:
+            os.environ["INTERNAL_AUTH_MTLS_SERVER_CERTFILE"] = server_cert
+            os.environ["INTERNAL_AUTH_MTLS_SERVER_KEYFILE"] = server_key
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES"] = "fraud-scoring-service:ml-score"
+
+            os.environ["INTERNAL_AUTH_MTLS_CA_FILES"] = f"{wrong_ca},{valid_ca}"
+            os.environ.pop("INTERNAL_AUTH_MTLS_CA_FILE", None)
+            server._validate_mtls_server_certificate_trust_chain()
+
+            os.environ["INTERNAL_AUTH_MTLS_CA_FILES"] = wrong_ca
+            with self.assertRaisesRegex(RuntimeError, "not trusted"):
+                server._validate_mtls_server_certificate_trust_chain()
+        finally:
+            self.restore_env(saved)
+
+    def test_mtls_server_certificate_removed_or_trust_chain_break_fails_startup(self):
+        saved = {key: os.environ.get(key) for key in (
+            "INTERNAL_AUTH_MTLS_SERVER_CERTFILE",
+            "INTERNAL_AUTH_MTLS_SERVER_KEYFILE",
+            "INTERNAL_AUTH_MTLS_CA_FILE",
+            "INTERNAL_AUTH_MTLS_CA_FILES",
+            "INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES",
+        )}
+        server_cert = os.path.join(SERVICE_IDENTITY_DIR, "mtls", "ml-inference-service.pem")
+        server_key = os.path.join(SERVICE_IDENTITY_DIR, "mtls", "ml-inference-service-key.pem")
+        wrong_ca = os.path.join(SERVICE_IDENTITY_DIR, "mtls", "unknown-service.pem")
+        try:
+            os.environ["INTERNAL_AUTH_MTLS_SERVER_CERTFILE"] = "missing-server.pem"
+            os.environ["INTERNAL_AUTH_MTLS_SERVER_KEYFILE"] = server_key
+            os.environ["INTERNAL_AUTH_MTLS_CA_FILE"] = wrong_ca
+            os.environ.pop("INTERNAL_AUTH_MTLS_CA_FILES", None)
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES"] = "fraud-scoring-service:ml-score"
+            with self.assertRaisesRegex(RuntimeError, "invalid or unavailable"):
+                server._validate_internal_auth_startup(mode="MTLS_SERVICE_IDENTITY", profile="prod")
+
+            os.environ["INTERNAL_AUTH_MTLS_SERVER_CERTFILE"] = server_cert
+            with self.assertRaisesRegex(RuntimeError, "not trusted"):
+                server._validate_internal_auth_startup(mode="MTLS_SERVICE_IDENTITY", profile="prod")
         finally:
             self.restore_env(saved)
 

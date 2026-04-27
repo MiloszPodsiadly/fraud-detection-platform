@@ -2,6 +2,7 @@ package com.frauddetection.alert.service;
 
 import com.frauddetection.alert.api.UpdateFraudCaseRequest;
 import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.domain.FraudCaseStatus;
@@ -24,7 +25,10 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.any;
@@ -160,6 +164,43 @@ class FraudCaseManagementServiceTest {
                 "principal-9"
         );
         verify(metrics).recordFraudCaseUpdated();
+    }
+
+    @Test
+    void shouldBlockFraudCaseUpdateWhenDurableAuditFails() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
+        AuditService auditService = mock(AuditService.class);
+        AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        FraudCaseManagementService service = new FraudCaseManagementService(fraudCaseRepository, scoredTransactionRepository, auditService, analystActorResolver, metrics);
+
+        FraudCaseDocument storedCase = new FraudCaseDocument();
+        storedCase.setCaseId("case-1");
+        storedCase.setStatus(FraudCaseStatus.OPEN);
+        storedCase.setTransactions(List.of(scoredCaseTransaction("rapid-txn-1", new BigDecimal("10000.00"))));
+
+        when(fraudCaseRepository.findById("case-1")).thenReturn(Optional.of(storedCase));
+        when(analystActorResolver.resolveActorId(eq("analyst-9"), eq("UPDATE_FRAUD_CASE"), eq("case-1")))
+                .thenReturn("principal-9");
+        doThrow(new AuditPersistenceUnavailableException()).when(auditService).audit(
+                AuditAction.UPDATE_FRAUD_CASE,
+                AuditResourceType.FRAUD_CASE,
+                "case-1",
+                "corr-rapid-txn-1",
+                "principal-9"
+        );
+
+        assertThatThrownBy(() -> service.updateCase("case-1", new UpdateFraudCaseRequest(
+                FraudCaseStatus.CONFIRMED_FRAUD,
+                "analyst-9",
+                "Confirmed after review",
+                List.of("manual-review")
+        ))).isInstanceOf(AuditPersistenceUnavailableException.class);
+
+        verify(fraudCaseRepository, never()).save(any(FraudCaseDocument.class));
+        verify(metrics, never()).recordFraudCaseUpdated();
+        assertThat(storedCase.getStatus()).isEqualTo(FraudCaseStatus.OPEN);
     }
 
     private ScoredTransactionDocument scoredTransaction(String transactionId, String customerId, BigDecimal amount) {

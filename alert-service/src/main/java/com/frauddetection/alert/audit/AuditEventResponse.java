@@ -21,6 +21,9 @@ public record AuditEventResponse(
         @JsonProperty("actor_roles")
         List<String> actorRoles,
 
+        @JsonProperty("actor_type")
+        String actorType,
+
         @JsonProperty("resource_type")
         String resourceType,
 
@@ -36,8 +39,35 @@ public record AuditEventResponse(
         @JsonProperty("occurred_at")
         Instant occurredAt,
 
+        @JsonProperty("correlation_id")
+        String correlationId,
+
+        @JsonProperty("source_service")
+        String sourceService,
+
+        @JsonProperty("partition_key")
+        String partitionKey,
+
+        @JsonProperty("chain_position")
+        Long chainPosition,
+
+        @JsonProperty("request_id")
+        String requestId,
+
         @JsonProperty("metadata_summary")
-        AuditEventMetadataSummary metadataSummary
+        AuditEventMetadataSummary metadataSummary,
+
+        @JsonProperty("previous_event_hash")
+        String previousEventHash,
+
+        @JsonProperty("event_hash")
+        String eventHash,
+
+        @JsonProperty("hash_algorithm")
+        String hashAlgorithm,
+
+        @JsonProperty("schema_version")
+        String schemaVersion
 ) {
     static AuditEventResponse from(AuditEventDocument document) {
         return new AuditEventResponse(
@@ -46,12 +76,22 @@ public record AuditEventResponse(
                 document.actorId(),
                 document.actorDisplayName(),
                 document.actorRoles(),
+                document.actorType(),
                 document.resourceType().name(),
                 document.resourceId(),
                 document.action().name(),
                 document.outcome().name(),
                 document.createdAt(),
-                AuditEventMetadataSummary.from(document)
+                document.correlationId(),
+                document.sourceService(),
+                document.partitionKey(),
+                document.chainPosition(),
+                document.requestId(),
+                AuditEventMetadataSummary.from(document),
+                document.previousEventHash(),
+                document.eventHash(),
+                document.hashAlgorithm(),
+                document.schemaVersion()
         );
     }
 }

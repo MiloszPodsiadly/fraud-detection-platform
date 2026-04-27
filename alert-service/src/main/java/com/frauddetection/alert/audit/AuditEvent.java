@@ -12,8 +12,24 @@ public record AuditEvent(
         String requestId,
         AuditOutcome outcome,
         AuditFailureCategory failureCategory,
-        String failureReason
+        String failureReason,
+        AuditEventMetadataSummary metadataSummary
 ) {
+    public AuditEvent(
+            AuditActor actor,
+            AuditAction action,
+            AuditResourceType resourceType,
+            String resourceId,
+            Instant timestamp,
+            String correlationId,
+            String requestId,
+            AuditOutcome outcome,
+            AuditFailureCategory failureCategory,
+            String failureReason
+    ) {
+        this(actor, action, resourceType, resourceId, timestamp, correlationId, requestId, outcome, failureCategory, failureReason, null);
+    }
+
     public AuditEvent(
             AuditActor actor,
             AuditAction action,
@@ -34,7 +50,34 @@ public record AuditEvent(
                 null,
                 outcome,
                 failureCategory(outcome, failureReason),
-                failureReason
+                failureReason,
+                null
+        );
+    }
+
+    public AuditEvent(
+            AuditActor actor,
+            AuditAction action,
+            AuditResourceType resourceType,
+            String resourceId,
+            Instant timestamp,
+            String correlationId,
+            AuditOutcome outcome,
+            String failureReason,
+            AuditEventMetadataSummary metadataSummary
+    ) {
+        this(
+                actor,
+                action,
+                resourceType,
+                resourceId,
+                timestamp,
+                correlationId,
+                null,
+                outcome,
+                failureCategory(outcome, failureReason),
+                failureReason,
+                metadataSummary
         );
     }
 

@@ -205,6 +205,11 @@ Prometheus metric contract:
   - Type: gauge
   - Meaning: seconds since an internal mTLS certificate became valid
   - Labels: `source_service`, `target_service`
+- `fraud_internal_mtls_cert_expiry_state_total`
+  - Type: counter
+  - Meaning: observed internal mTLS certificate lifecycle states during startup, health checks, and runtime monitoring
+  - Labels: `state`
+  - Bounded states: `UP`, `WARN`, `CRITICAL`, `DOWN`
 - `fraud_internal_auth_replay_rejected_total`
   - Type: counter
   - Meaning: rejected internal service JWT freshness or soft replay attempts
@@ -218,6 +223,52 @@ Prometheus metric contract:
   - Type: counter
   - Meaning: sensitive read-access audit was persisted with `actor_id=unknown` because the backend principal was unavailable
   - Labels: `endpoint_category`
+- `fraud_platform_audit_anchor_write_failures_total`
+  - Type: counter
+  - Meaning: durable audit event insertion succeeded but local anchor insertion failed, causing the audited request to fail explicitly
+  - Labels: none
+- `fraud_platform_audit_chain_conflicts_total`
+  - Type: counter
+  - Meaning: audit chain partition lock or unique chain-position conflict was detected and failed explicitly
+  - Labels: none
+- `fraud_platform_audit_integrity_check_total`
+  - Type: counter
+  - Meaning: bounded audit integrity verification requests completed by `alert-service`
+  - Labels: `status`
+  - Bounded statuses: `VALID`, `INVALID`, `PARTIAL`, `UNAVAILABLE`
+- `fraud_platform_audit_integrity_checks_total`
+  - Type: counter
+  - Meaning: bounded audit integrity verification requests completed by `alert-service`
+  - Labels: `status`
+  - Bounded statuses: `VALID`, `INVALID`, `PARTIAL`, `UNAVAILABLE`
+- `fraud_platform_audit_integrity_violations_total`
+  - Type: counter
+  - Meaning: bounded audit integrity verification detected a violation
+  - Labels: `violation_type`
+  - Bounded violation types: `EVENT_HASH_MISMATCH`, `PREVIOUS_HASH_MISMATCH`, `INVALID_SCHEMA_VERSION`, `UNSUPPORTED_HASH_ALGORITHM`, `ANCHOR_MISSING`, `ANCHOR_HASH_MISMATCH`, `ANCHOR_CHAIN_POSITION_MISMATCH`, `MISSING_PREDECESSOR`, `CHAIN_FORK_DETECTED`, `CHAIN_POSITION_INVALID`, `CHAIN_POSITION_DUPLICATE`, `CHAIN_POSITION_GAP`, `UNKNOWN`
+- `fraud_audit_integrity_check_total`
+  - Type: counter
+  - Meaning: scheduled/manual application-level audit integrity checks completed
+  - Labels: `status`
+  - Bounded statuses: `VALID`, `INVALID`, `PARTIAL`, `UNAVAILABLE`
+- `fraud_audit_integrity_violation_total`
+  - Type: counter
+  - Meaning: application-level audit integrity verification detected a violation
+  - Labels: `violation_type`
+  - Bounded violation types only; no hashes, actor IDs, resource IDs, paths, or exception messages
+- `fraud_audit_chain_head_hash`
+  - Type: gauge
+  - Meaning: numeric fingerprint of the latest checked audit chain head hash
+  - Labels: none
+- `fraud_audit_last_anchor_hash`
+  - Type: gauge
+  - Meaning: numeric fingerprint of the latest checked append-only anchor hash
+  - Labels: none
+- `fraud_audit_integrity_status`
+  - Type: gauge
+  - Meaning: latest application-level integrity status as one-hot gauges
+  - Labels: `status`
+  - Bounded statuses: `VALID`, `INVALID`
 
 ## Low-Cardinality Policy
 

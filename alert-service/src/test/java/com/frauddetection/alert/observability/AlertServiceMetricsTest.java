@@ -78,10 +78,14 @@ class AlertServiceMetricsTest {
         metrics.recordPlatformAuditEventPersisted(AuditAction.SUBMIT_ANALYST_DECISION, AuditOutcome.SUCCESS);
         metrics.recordPlatformAuditPersistenceFailure(AuditAction.SUBMIT_ANALYST_DECISION);
         metrics.recordPlatformAuditReadRequest("AVAILABLE");
+        metrics.recordAuditIntegrityCheck("INVALID");
+        metrics.recordAuditIntegrityViolation("EVENT_HASH_MISMATCH");
 
         Meter persisted = meterRegistry.get("fraud_platform_audit_events_persisted_total").meter();
         Meter failures = meterRegistry.get("fraud_platform_audit_persistence_failures_total").meter();
         Meter reads = meterRegistry.get("fraud_platform_audit_read_requests_total").meter();
+        Meter integrityChecks = meterRegistry.get("fraud_platform_audit_integrity_checks_total").meter();
+        Meter integrityViolations = meterRegistry.get("fraud_platform_audit_integrity_violations_total").meter();
 
         assertThat(persisted.getId().getTags())
                 .extracting(Tag::getKey)
@@ -92,8 +96,14 @@ class AlertServiceMetricsTest {
         assertThat(reads.getId().getTags())
                 .extracting(Tag::getKey)
                 .containsExactly("status");
+        assertThat(integrityChecks.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactly("status");
+        assertThat(integrityViolations.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactly("violation_type");
         assertThat(persisted.getId().getTags())
                 .extracting(Tag::getKey)
-                .doesNotContain("actor_id", "resource_id", "audit_event_id", "exception", "message");
+                .doesNotContain("actor_id", "resource_id", "audit_event_id", "hash", "exception", "message");
     }
 }

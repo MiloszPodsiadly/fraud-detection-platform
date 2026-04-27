@@ -147,6 +147,7 @@ Roles describe analyst personas. Authorities are the backend authorization contr
 | `PATCH /api/v1/fraud-cases/{caseId}` | `fraud-case:update` | Write action; audit in v1. |
 | `GET /api/v1/transactions/scored` | `transaction-monitor:read` | Separate from alert read because monitor data may grow beyond alert queue use cases. |
 | `GET /api/v1/audit/events` | `audit:read` | Bounded newest-first Audit Read API for durable platform audit events. Exact filters only; no export, full-text search, delete, or update. |
+| `GET /api/v1/audit/integrity` | `audit:read` | Bounded read-only audit hash-chain verification. No repair, export, delete, or update. |
 | `GET /governance/advisories` | `transaction-monitor:read` | Reads governance advisory context enriched with lifecycle projection from audit history. |
 | `GET /governance/advisories/analytics` | `transaction-monitor:read` | Reads derived, bounded, non-operational audit analytics. Analytics and analytics metrics are observational only and must not be used for automation, SLA enforcement, alert triggering, or model control. |
 | `GET /governance/advisories/{event_id}` | `transaction-monitor:read` | Reads one governance advisory context with derived lifecycle status. |
@@ -247,14 +248,22 @@ Sensitive data intentionally excluded:
 Implementation:
 
 - Controllers do not contain audit logic.
-- Write-path services call `AuditService` after persistence and domain publication complete where applicable.
+- Protected analyst decision and fraud-case update paths call `AuditService` before the business repository save. If durable audit persistence fails, the request fails before that protected business write is persisted.
+- Other non-mutating read-access audit records remain best-effort and do not block read responses.
 - `AuditService` builds an `AuditEvent` from the current security principal and falls back to request actor only when no authenticated principal exists.
 - `AuditEventPublisher` is the extension point.
-- `PersistentAuditEventPublisher` writes append-only audit records to MongoDB collection `audit_events`.
+- `PersistentAuditEventPublisher` writes append-only audit records to MongoDB collection `audit_events` through an insert-only repository contract.
 - `StructuredAuditEventPublisher` writes structured key-value logs through SLF4J after durable persistence succeeds.
 - Audit persistence failures surface as HTTP 503 responses on audited write paths and are not silently dropped.
+- FDP-19 adds an application-level partitioned SHA-256 hash chain with `partition_key`, unique `chain_position`, `previous_event_hash`, `event_hash`, `hash_algorithm`, and `schema_version`. The current partition is `source_service:alert-service`; previous hashes are resolved within that partition. The `partition_key + chain_position` uniqueness constraint applies to positioned FDP-19 records; older local development records without `chain_position` are left immutable and new writes continue at a counted next position.
+- Multi-instance writers acquire a local Mongo partition lock before reading the current chain head and inserting the audit event/local anchor. Transient lock conflicts use a bounded local retry; exhausted race conflicts fail explicitly and are counted.
+- Each durable audit event insertion appends a local anchor in `audit_chain_anchors` containing the latest event hash, chain position, partition key, and hash algorithm. The anchor is application-level and local to the durable audit store.
 - `GET /api/v1/audit/events` reads durable platform write/governance audit events from `audit_events` newest-first with exact-match filters only. This is an Audit Read API for that store, not a claim that every sensitive platform read was audited.
 - `GET /api/v1/audit/events` does not return read-access audit events; those are stored separately in `read_access_audit_events`. A future endpoint would be needed for bounded read-access audit investigation.
+- `GET /api/v1/audit/events` creates a follow-up `READ_AUDIT_EVENTS` audit event for successful reads with bounded filter/count metadata.
+- `GET /api/v1/audit/integrity` requires `audit:read` and performs bounded read-only verification of event hashes, previous-hash continuity, chain-position continuity, schema version, hash algorithm, fork indicators, and latest local anchor-to-chain-head consistency. It supports `mode=HEAD|WINDOW|FULL_CHAIN`, returns `VALID`, `INVALID`, `PARTIAL`, or `UNAVAILABLE`, and never repairs or mutates audit data. `limit` defaults to `100` and is capped at `10000`; if the local verification time budget is reached the response is `PARTIAL` with reason code `INTEGRITY_VERIFICATION_TIME_BUDGET_EXCEEDED`.
+- `WINDOW` and `HEAD` may report `external_predecessor=true` when the first checked event links to a predecessor outside the bounded checked set; this is not treated as a false violation. `FULL_CHAIN` detects missing predecessors.
+- Scheduled integrity verification is disabled by default. When `app.audit.integrity.scheduled-verification-enabled=true`, it is read-only observability automation only: metrics/logs, no repair, no workflow, no audit mutation.
 - Audit read filters are `event_type`, `actor_id`, `resource_type`, `resource_id`, inclusive `from`/`to` timestamps, and bounded `limit` default `50`, max `100`.
 - Audit reads return `status=UNAVAILABLE`, `reason_code=AUDIT_STORE_UNAVAILABLE`, a stable non-sensitive `message`, `count=0`, and an empty event list if persistence cannot be read.
 - Clients MUST check `status` before interpreting `count` or `events`; `AVAILABLE` with `count=0` is a valid empty result and is not equivalent to `UNAVAILABLE`.
@@ -275,7 +284,17 @@ Operational audit metrics:
 
 - `fraud_platform_audit_events_persisted_total{event_type,outcome}`
 - `fraud_platform_audit_persistence_failures_total{event_type}`
+- `fraud_platform_audit_anchor_write_failures_total`
+- `fraud_platform_audit_chain_conflicts_total`
 - `fraud_platform_audit_read_requests_total{status}`
+- `fraud_platform_audit_integrity_check_total{status}`
+- `fraud_platform_audit_integrity_checks_total{status}`
+- `fraud_platform_audit_integrity_violations_total{violation_type}`
+- `fraud_audit_integrity_check_total{status}`
+- `fraud_audit_integrity_violation_total{violation_type}`
+- `fraud_audit_chain_head_hash`
+- `fraud_audit_last_anchor_hash`
+- `fraud_audit_integrity_status{status}`
 - `fraud_platform_read_access_audit_events_persisted_total{endpoint_category,outcome}`
 - `fraud_platform_read_access_audit_persistence_failures_total{endpoint_category}`
 - `fraud_read_access_audit_actor_missing_total{endpoint_category}`
@@ -477,8 +496,8 @@ Reviewers should check:
 
 - JWT validation path exists, but no production IdP setup is shipped in this repo.
 - Service-to-service authentication foundation is present for configured internal ML/governance calls.
-- No mTLS yet.
-- Durable audit storage is not WORM/immutable archive storage.
+- Internal mTLS service identity exists for configured internal ML/governance calls, but no enterprise PKI automation, cert-manager, Vault/KMS, dynamic reload, or automated rotation is shipped.
+- Durable audit storage is not WORM/immutable archive storage, external notarization, external chain anchoring, protection against full database administrator rewrite, legal non-repudiation, SIEM integration, long-term archival policy, regulator-ready evidence package, or HSM/KMS signing. External anchoring is future FDP-20.
 - No SIEM audit export/integration yet.
 - The frontend still defaults to demo auth unless OIDC env vars are set explicitly.
 - The frontend OIDC path is a local OIDC integration and foundation for production auth, not a production-ready SSO setup.

@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: Alert Service API
-  version: FDP-16.3
-  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, selected sensitive read-access audit persistence, governance advisory lifecycle projection, and human-review audit. Audit read contracts do not imply full enterprise mTLS, WORM archive storage, SIEM integration, unbounded export, or final compliance archive.
+  version: FDP-19
+  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, governance advisory lifecycle projection, and human-review audit. Audit integrity is application-level partitioned hash-chain verification with local append-only chain anchors; it does not imply WORM archive storage, external notarization, external chain anchoring, SIEM integration, unbounded export, legal non-repudiation, HSM/KMS signing, or final compliance archive.
 servers:
   - url: http://localhost:8085
 paths:
@@ -19,7 +19,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [SUBMIT_ANALYST_DECISION, UPDATE_FRAUD_CASE]
+            enum: [SUBMIT_ANALYST_DECISION, UPDATE_FRAUD_CASE, READ_AUDIT_EVENTS, VERIFY_AUDIT_INTEGRITY]
         - name: actor_id
           in: query
           required: false
@@ -71,6 +71,64 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuditEventReadResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/audit/integrity:
+    get:
+      summary: Verify bounded audit hash-chain integrity
+      description: Performs read-only bounded application-level verification of durable platform audit events. Requires audit:read. Verifies deterministic event hashes, partition-scoped previous-hash continuity, chain-position continuity, schema version, hash algorithm, fork indicators, and latest local chain-anchor consistency. Supports mode=HEAD, WINDOW, or FULL_CHAIN. WINDOW and HEAD can report an external predecessor without treating it as a false violation; FULL_CHAIN reports missing predecessors as violations. Returns VALID, INVALID, PARTIAL, or UNAVAILABLE. PARTIAL can mean the bounded result set was filled or the local verification time budget was reached. This endpoint does not repair data, export full audit history, delete/update audit records, provide WORM storage, protection against full DB administrator rewrite, external notarization, external chain anchoring, legal non-repudiation, SIEM integration, HSM/KMS signing, or regulator-ready evidence packaging. Successful integrity reads create a bounded VERIFY_AUDIT_INTEGRITY audit event.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: from
+          in: query
+          required: false
+          description: Inclusive ISO-8601 lower timestamp bound.
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          description: Inclusive ISO-8601 upper timestamp bound.
+          schema:
+            type: string
+            format: date-time
+        - name: source_service
+          in: query
+          required: false
+          description: Optional bounded source-service chain scope.
+          schema:
+            type: string
+            enum: [alert-service]
+        - name: mode
+          in: query
+          required: false
+          description: Verification mode. Defaults to HEAD unless from/to is supplied, in which case default is WINDOW.
+          schema:
+            type: string
+            enum: [HEAD, WINDOW, FULL_CHAIN]
+            default: HEAD
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10000
+            default: 100
+      responses:
+        "200":
+          description: Bounded audit integrity verification result or unavailable store status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditIntegrityResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -418,18 +476,28 @@ components:
         - actor_id
         - actor_display_name
         - actor_roles
+        - actor_type
         - resource_type
         - resource_id
         - action
         - outcome
         - occurred_at
+        - correlation_id
+        - source_service
+        - partition_key
+        - chain_position
+        - request_id
         - metadata_summary
+        - previous_event_hash
+        - event_hash
+        - hash_algorithm
+        - schema_version
       properties:
         audit_event_id:
           type: string
         event_type:
           type: string
-          enum: [SUBMIT_ANALYST_DECISION, UPDATE_FRAUD_CASE]
+          enum: [SUBMIT_ANALYST_DECISION, UPDATE_FRAUD_CASE, READ_AUDIT_EVENTS, VERIFY_AUDIT_INTEGRITY]
         actor_id:
           type: string
           description: Backend-derived authenticated actor identity.
@@ -439,22 +507,60 @@ components:
           type: array
           items:
             type: string
+        actor_type:
+          type: string
+          enum: [HUMAN]
         resource_type:
           type: string
-          enum: [ALERT, FRAUD_CASE]
+          enum: [ALERT, FRAUD_CASE, AUDIT_EVENT, AUDIT_INTEGRITY]
         resource_id:
           type: string
+          nullable: true
         action:
           type: string
-          enum: [SUBMIT_ANALYST_DECISION, UPDATE_FRAUD_CASE]
+          enum: [SUBMIT_ANALYST_DECISION, UPDATE_FRAUD_CASE, READ_AUDIT_EVENTS, VERIFY_AUDIT_INTEGRITY]
         outcome:
           type: string
           enum: [SUCCESS, REJECTED, FAILED]
         occurred_at:
           type: string
           format: date-time
+        correlation_id:
+          type: string
+          nullable: true
+          maxLength: 120
+        source_service:
+          type: string
+          enum: [alert-service]
+        partition_key:
+          type: string
+          enum: ["source_service:alert-service"]
+          description: Partition used for previous_event_hash continuity.
+        chain_position:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 1
+          description: Unique per-partition chain position for FDP-19 audit records; null only for immutable legacy local records created before chain positions existed.
+        request_id:
+          type: string
+          nullable: true
+          maxLength: 120
         metadata_summary:
           $ref: "#/components/schemas/AuditEventMetadataSummary"
+        previous_event_hash:
+          type: string
+          nullable: true
+          description: Previous event hash within the source_service-scoped audit chain.
+        event_hash:
+          type: string
+          description: SHA-256 canonical hash of immutable audit event fields excluding event_hash itself.
+        hash_algorithm:
+          type: string
+          enum: [SHA-256]
+        schema_version:
+          type: string
+          enum: ["1.0"]
     AuditEventMetadataSummary:
       type: object
       additionalProperties: false
@@ -466,6 +572,9 @@ components:
         - schema_version
         - failure_category
         - failure_reason
+        - endpoint_action
+        - filters_summary
+        - count_returned
       properties:
         correlation_id:
           type: string
@@ -491,6 +600,94 @@ components:
           type: string
           nullable: true
           maxLength: 120
+        endpoint_action:
+          type: string
+          nullable: true
+          maxLength: 120
+        filters_summary:
+          type: string
+          nullable: true
+          maxLength: 120
+        count_returned:
+          type: integer
+          nullable: true
+          minimum: 0
+          maximum: 10000
+    AuditIntegrityResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - checked
+        - limit
+        - verification_mode
+        - partial_window
+        - external_predecessor
+        - window_start_has_external_predecessor
+        - violations
+      properties:
+        status:
+          type: string
+          enum: [VALID, INVALID, PARTIAL, UNAVAILABLE]
+        checked:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 10000
+        verification_mode:
+          type: string
+          nullable: true
+          enum: [HEAD, WINDOW, FULL_CHAIN]
+        partial_window:
+          type: boolean
+        external_predecessor:
+          type: boolean
+        window_start_has_external_predecessor:
+          type: boolean
+        reason_code:
+          type: string
+          nullable: true
+          enum: [AUDIT_STORE_UNAVAILABLE, INTEGRITY_VERIFICATION_TIME_BUDGET_EXCEEDED]
+        message:
+          type: string
+          nullable: true
+          maxLength: 120
+        first_event_hash:
+          type: string
+          nullable: true
+        last_event_hash:
+          type: string
+          nullable: true
+        partition_key:
+          type: string
+          nullable: true
+          enum: ["source_service:alert-service"]
+        last_anchor_hash:
+          type: string
+          nullable: true
+        violations:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditIntegrityViolation"
+    AuditIntegrityViolation:
+      type: object
+      additionalProperties: false
+      required:
+        - violation_type
+        - position
+        - reason_code
+      properties:
+        violation_type:
+          type: string
+          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, INVALID_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, MISSING_PREDECESSOR, CHAIN_FORK_DETECTED, CHAIN_POSITION_INVALID, CHAIN_POSITION_DUPLICATE, CHAIN_POSITION_GAP]
+        position:
+          type: integer
+          minimum: 1
+        reason_code:
+          type: string
+          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, UNSUPPORTED_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, MISSING_PREDECESSOR, CHAIN_FORK_DETECTED, CHAIN_POSITION_INVALID, CHAIN_POSITION_DUPLICATE, CHAIN_POSITION_GAP]
     GovernanceAdvisoryLifecycleStatus:
       type: string
       description: Read-time projection from latest audit decision. OPEN means no audit event exists.

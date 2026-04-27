@@ -45,7 +45,7 @@ Unknown SAN URI, CN-only certificates, missing certificates, expired/untrusted c
 - `INTERNAL_AUTH_MTLS_SPIFFE_TRUST_DOMAIN=fraud-platform`
 
 Startup fails closed if required material or service authority configuration is missing.
-Startup also fails if the configured `ml-inference-service` server certificate is already expired. Certificates close to expiration produce structured startup warnings without dumping certificate contents, serial numbers, subjects, SAN values, fingerprints, paths, or private material.
+Startup also fails if the configured `ml-inference-service` server certificate is missing, invalid, expired, or not trusted by configured CA material. Certificates close to expiration produce structured startup warnings/errors without dumping certificate contents, serial numbers, subjects, SAN values, fingerprints, paths, or private material.
 
 ## Java Client Configuration
 
@@ -63,7 +63,7 @@ Required client configuration:
 - `INTERNAL_AUTH_MTLS_TRUST_ALL=false`
 
 Trust-all mode is rejected. Server certificate validation uses configured CA material and the target host must match the expected server identity.
-Java clients keep the platform hostname verifier; FDP-18 does not override it, does not install a trust-all manager, and does not disable certificate-chain or SAN hostname validation. Java client startup fails if its configured client certificate is expired.
+Java clients keep the platform hostname verifier; FDP-18 does not override it, does not install a trust-all manager, and does not disable certificate-chain or SAN hostname validation. Java client startup fails if its configured client certificate is missing, invalid, expired, or not trusted by configured CA material.
 
 ## Observability
 
@@ -74,18 +74,39 @@ Metrics are low-cardinality:
 - `fraud_internal_mtls_handshake_failures_total{reason}`
 - `fraud_internal_mtls_cert_expiry_seconds{source_service,target_service}`
 - `fraud_internal_mtls_cert_age_seconds{source_service,target_service}`
+- `fraud_internal_mtls_cert_expiry_state_total{state}`
 
 Labels do not include token values, certificate serials, SAN values, fingerprints, paths, IPs, users, resources, exception messages, or raw subjects.
 
 The ML server monitors its configured server certificate. Java internal clients monitor their configured client certificates.
 
-`/health` includes an `mtlsCert` component. `UP` means the configured certificate is valid, `WARN` means it is close to expiration, and `DOWN` means the certificate is expired or unavailable. Protected endpoints still enforce mTLS identity independently from health reporting.
+`/health` includes an `mtlsCert` component. `UP` means the configured certificate is valid and has more than seven days remaining, `WARN` means it expires within seven days, `CRITICAL` means it expires within 24 hours, and `DOWN` means the certificate is expired, unavailable, invalid, or no longer trusted. Protected endpoints still enforce mTLS identity independently from health reporting.
 
 ## Certificate Lifecycle & Operational Risk
 
-Certificates must be rotated before expiration. FDP-18 exposes expiry and age metrics for both the ML server certificate and Java client certificates, logs warnings before expiration, and treats expired configured certificates as hard startup failures.
+Certificates must be rotated before expiration. FDP-19 extends FDP-18 by exposing expiry and age metrics for both the ML server certificate and Java client certificates, recording bounded lifecycle state, logging warnings/errors before expiration, and treating expired configured certificates as hard startup failures.
+
+Log escalation:
+
+- expiry under seven days: `WARN`
+- expiry under three days: `WARN` with `CERTIFICATE_EXPIRES_WITHIN_3_DAYS`
+- expiry under 24 hours: `ERROR`/`CRITICAL`
+- expired, missing, invalid, or untrusted configured certificate: `DOWN`; startup fails for configured certificates
+
+Runtime lifecycle monitoring runs every six hours. It updates metrics and emits lifecycle logs without blocking request processing or crashing the app.
 
 Operators must monitor expiry metrics and rotate certificates manually.
+
+## Rotation Runbook
+
+Manual rotation must use overlap. If certificates are rotated without overlap, service downtime will occur.
+
+1. Generate the new server/client certificate and private key from the approved CA material.
+2. Add the new CA or intermediate trust material while keeping the old CA trusted.
+3. Deploy the server trust update and verify `mtlsCert` health is not `DOWN`.
+4. Deploy the client with the new certificate/private key.
+5. Verify `fraud_internal_mtls_cert_expiry_seconds`, `fraud_internal_mtls_cert_age_seconds`, `fraud_internal_mtls_cert_expiry_state_total`, and `/health` `mtlsCert`.
+6. Remove the old certificate and old CA trust material only after all clients and servers have moved.
 
 FDP-18 DOES NOT provide:
 

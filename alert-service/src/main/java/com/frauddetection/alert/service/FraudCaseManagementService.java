@@ -98,9 +98,17 @@ public class FraudCaseManagementService {
     }
 
     public FraudCaseDocument updateCase(String caseId, UpdateFraudCaseRequest request) {
-        FraudCaseDocument document = getCase(caseId);
+        FraudCaseDocument document = fraudCaseRepository.findById(caseId)
+                .orElseThrow(() -> new com.frauddetection.alert.exception.AlertNotFoundException(caseId));
         Instant now = Instant.now();
         String actorId = analystActorResolver.resolveActorId(request.analystId(), "UPDATE_FRAUD_CASE", caseId);
+        auditService.audit(
+                AuditAction.UPDATE_FRAUD_CASE,
+                AuditResourceType.FRAUD_CASE,
+                document.getCaseId(),
+                correlationId(document),
+                actorId
+        );
         document.setStatus(request.status());
         document.setAnalystId(actorId);
         document.setDecisionReason(request.decisionReason());
@@ -108,13 +116,6 @@ public class FraudCaseManagementService {
         document.setDecidedAt(now);
         document.setUpdatedAt(now);
         FraudCaseDocument saved = fraudCaseRepository.save(document);
-        auditService.audit(
-                AuditAction.UPDATE_FRAUD_CASE,
-                AuditResourceType.FRAUD_CASE,
-                saved.getCaseId(),
-                correlationId(saved),
-                actorId
-        );
         metrics.recordFraudCaseUpdated();
         return saved;
     }

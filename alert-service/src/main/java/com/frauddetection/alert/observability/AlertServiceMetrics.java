@@ -16,17 +16,33 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.time.Duration;
+import java.util.HexFormat;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Component
 public class AlertServiceMetrics {
 
     private final MeterRegistry meterRegistry;
     private final AtomicInteger governanceAnalyticsWindowDays = new AtomicInteger(0);
+    private final AtomicLong auditChainHeadHashFingerprint = new AtomicLong(0);
+    private final AtomicLong auditLastAnchorHashFingerprint = new AtomicLong(0);
+    private final AtomicInteger auditIntegrityValid = new AtomicInteger(0);
+    private final AtomicInteger auditIntegrityInvalid = new AtomicInteger(0);
 
     public AlertServiceMetrics(MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
         Gauge.builder("fraud_ml_governance_analytics_window_days", governanceAnalyticsWindowDays, AtomicInteger::get)
+                .register(meterRegistry);
+        Gauge.builder("fraud_audit_chain_head_hash", auditChainHeadHashFingerprint, AtomicLong::get)
+                .register(meterRegistry);
+        Gauge.builder("fraud_audit_last_anchor_hash", auditLastAnchorHashFingerprint, AtomicLong::get)
+                .register(meterRegistry);
+        Gauge.builder("fraud_audit_integrity_status", auditIntegrityValid, AtomicInteger::get)
+                .tag("status", "VALID")
+                .register(meterRegistry);
+        Gauge.builder("fraud_audit_integrity_status", auditIntegrityInvalid, AtomicInteger::get)
+                .tag("status", "INVALID")
                 .register(meterRegistry);
     }
 
@@ -61,11 +77,59 @@ public class AlertServiceMetrics {
         ).increment();
     }
 
+    public void recordPlatformAuditAnchorWriteFailure() {
+        counter("fraud_platform_audit_anchor_write_failures_total").increment();
+    }
+
+    public void recordPlatformAuditChainConflict() {
+        counter("fraud_platform_audit_chain_conflicts_total").increment();
+    }
+
     public void recordPlatformAuditReadRequest(String status) {
         counter(
                 "fraud_platform_audit_read_requests_total",
                 "status", normalizeAvailabilityStatus(status)
         ).increment();
+    }
+
+    public void recordAuditIntegrityCheck(String status) {
+        counter(
+                "fraud_platform_audit_integrity_checks_total",
+                "status", normalizeIntegrityStatus(status)
+        ).increment();
+        counter(
+                "fraud_platform_audit_integrity_check_total",
+                "status", normalizeIntegrityStatus(status)
+        ).increment();
+    }
+
+    public void recordForensicAuditIntegrityCheck(String status) {
+        counter(
+                "fraud_audit_integrity_check_total",
+                "status", normalizeIntegrityStatus(status)
+        ).increment();
+    }
+
+    public void recordAuditIntegrityViolation(String violationType) {
+        counter(
+                "fraud_platform_audit_integrity_violations_total",
+                "violation_type", normalizeIntegrityViolationType(violationType)
+        ).increment();
+    }
+
+    public void recordForensicAuditIntegrityViolation(String violationType) {
+        counter(
+                "fraud_audit_integrity_violation_total",
+                "violation_type", normalizeIntegrityViolationType(violationType)
+        ).increment();
+    }
+
+    public void recordAuditIntegritySnapshot(String status, String chainHeadHash, String lastAnchorHash) {
+        auditChainHeadHashFingerprint.set(hashFingerprint(chainHeadHash));
+        auditLastAnchorHashFingerprint.set(hashFingerprint(lastAnchorHash));
+        boolean valid = "VALID".equals(status) || "PARTIAL".equals(status);
+        auditIntegrityValid.set(valid ? 1 : 0);
+        auditIntegrityInvalid.set("INVALID".equals(status) ? 1 : 0);
     }
 
     public void recordReadAccessAuditPersisted(ReadAccessEndpointCategory endpointCategory, ReadAccessAuditOutcome outcome) {
@@ -205,5 +269,46 @@ public class AlertServiceMetrics {
             return status;
         }
         return "UNAVAILABLE";
+    }
+
+    private String normalizeIntegrityStatus(String status) {
+        if ("VALID".equals(status) || "INVALID".equals(status) || "PARTIAL".equals(status) || "UNAVAILABLE".equals(status)) {
+            return status;
+        }
+        return "UNAVAILABLE";
+    }
+
+    private String normalizeIntegrityViolationType(String violationType) {
+        return switch (violationType) {
+            case "EVENT_HASH_MISMATCH",
+                 "PREVIOUS_HASH_MISMATCH",
+                 "INVALID_SCHEMA_VERSION",
+                 "UNSUPPORTED_HASH_ALGORITHM",
+                 "ANCHOR_MISSING",
+                 "ANCHOR_HASH_MISMATCH",
+                 "ANCHOR_CHAIN_POSITION_MISMATCH",
+                 "MISSING_PREDECESSOR",
+                 "CHAIN_FORK_DETECTED",
+                 "CHAIN_POSITION_INVALID",
+                 "CHAIN_POSITION_DUPLICATE",
+                 "CHAIN_POSITION_GAP" -> violationType;
+            default -> "UNKNOWN";
+        };
+    }
+
+    private long hashFingerprint(String hash) {
+        if (hash == null || hash.length() < 12) {
+            return 0L;
+        }
+        try {
+            byte[] bytes = HexFormat.of().parseHex(hash.substring(0, 12));
+            long value = 0L;
+            for (byte current : bytes) {
+                value = (value << 8) | (current & 0xffL);
+            }
+            return value;
+        } catch (IllegalArgumentException exception) {
+            return 0L;
+        }
     }
 }

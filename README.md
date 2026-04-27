@@ -161,6 +161,7 @@ Representative endpoint matrix:
 | `PATCH /api/v1/fraud-cases/{caseId}` | `fraud-case:update` |
 | `GET /api/v1/transactions/scored` | `transaction-monitor:read` |
 | `GET /api/v1/audit/events` | `audit:read` |
+| `GET /api/v1/audit/integrity` | `audit:read` |
 | `GET /governance/advisories` | `transaction-monitor:read` |
 | `GET /governance/advisories/analytics` | `transaction-monitor:read` |
 | `GET /governance/advisories/{event_id}` | `transaction-monitor:read` |
@@ -176,6 +177,7 @@ FDP-16 is split into explicit production-hardening steps:
 - FDP-16.1 Durable Audit Foundation: append-only platform audit writes to MongoDB plus secondary structured logs.
 - FDP-16.2 Audit Read API: authenticated, authority-protected, bounded reads of durable platform audit events.
 - FDP-16.3 Sensitive Read-Access Audit: best-effort audit records for selected sensitive read endpoints.
+- FDP-19 Audit Integrity Foundation: application-level append-only audit hash chain, bounded integrity verification, and audit-read tracking.
 
 Audit Logging v1 records security-relevant analyst write operations in `alert-service`.
 
@@ -211,11 +213,31 @@ Current sinks:
 
 Durable audit writes happen before structured log publication. If audit persistence is unavailable, write paths fail explicitly with the platform error envelope instead of silently dropping audit intent.
 
-Platform audit event reads are available through `GET /api/v1/audit/events` and require `audit:read`, which is granted only to `FRAUD_OPS_ADMIN` by the local role model. This is an Audit Read API for durable platform write/governance audit events in `audit_events`; it does not return read-access audit events and is not itself proof that every sensitive data read was audited. Filters are exact-match only (`event_type`, `actor_id`, `resource_type`, `resource_id`) plus an inclusive timestamp window (`from`, `to`) and a bounded `limit` defaulting to 50 and capped at 100. The endpoint returns newest-first results and does not support regex, full-text search, export, aggregation, delete, or update operations. Clients MUST check `status` before interpreting `count` or `events`: `AVAILABLE` with `count=0` means a valid empty result, while `UNAVAILABLE` means audit storage could not be read and includes stable `reason_code=AUDIT_STORE_UNAVAILABLE` plus a non-sensitive message.
+Platform audit writes use an insert-only repository contract and store `partition_key`, `previous_event_hash`, `event_hash`, `hash_algorithm=SHA-256`, and `schema_version`. The current partition strategy is per-service (`partition_key=source_service:alert-service`), so `previous_event_hash` is resolved inside that partition. Corrections must be represented as new audit events, not mutation of existing events.
+
+## Audit Integrity Guarantees
+
+FDP-19 provides application-level audit integrity support:
+
+- durable platform audit records are inserted through append-only repository contracts; update/delete paths are not exposed for `audit_events` or `audit_chain_anchors`
+- each durable audit event is linked into a per-partition SHA-256 hash chain using unique `partition_key + chain_position` and `previous_event_hash`
+- multi-instance writes acquire a local Mongo partition lock before reading the head and inserting the event/anchor; transient lock conflicts use a bounded local retry, and exhausted duplicate/race conflicts fail explicitly instead of reordering events
+- each inserted audit event creates a local append-only chain anchor in `audit_chain_anchors`; the local anchor stores the latest event hash, chain position, partition key, and hash algorithm
+- bounded integrity verification checks event hashes, previous-hash continuity, chain-position continuity, schema version, hash algorithm, fork indicators, and latest local anchor-to-chain-head consistency
+- scheduled verification is disabled by default and must be enabled with `app.audit.integrity.scheduled-verification-enabled=true`; when enabled it is read-only observability automation that records low-cardinality metrics, logs visible errors on violations, and never repairs data
+- selected sensitive reads are audited separately in `read_access_audit_events` with bounded metadata only
+
+The unique `partition_key + chain_position` constraint is enforced for positioned FDP-19 audit records. Older local development records created before `chain_position` existed may remain readable without receiving synthetic positions; new writes after such a legacy head continue at a counted next position and keep the previous-hash link.
+
+Write-path audit atomicity is explicit: for protected analyst decision and fraud-case update actions, the durable audit write is attempted before the business repository save. If the durable audit write fails, the request fails before the business action is persisted. This is not a Mongo multi-document transaction and does not claim rollback of already written side effects outside that guarded sequence.
+
+Platform audit event reads are available through `GET /api/v1/audit/events` and require `audit:read`, which is granted only to `FRAUD_OPS_ADMIN` by the local role model. This is an Audit Read API for durable platform write/governance audit events in `audit_events`; it does not return read-access audit events and is not itself proof that every sensitive data read was audited. Filters are exact-match only (`event_type`, `actor_id`, `resource_type`, `resource_id`) plus an inclusive timestamp window (`from`, `to`) and a bounded `limit` defaulting to 50 and capped at 100. The endpoint returns newest-first results and does not support regex, full-text search, export, aggregation, delete, or update operations. Clients MUST check `status` before interpreting `count` or `events`: `AVAILABLE` with `count=0` means a valid empty result, while `UNAVAILABLE` means audit storage could not be read and includes stable `reason_code=AUDIT_STORE_UNAVAILABLE` plus a non-sensitive message. Successful audit reads create a follow-up `READ_AUDIT_EVENTS` audit event with bounded filter/count metadata.
+
+Audit integrity verification is available through `GET /api/v1/audit/integrity` and requires `audit:read`. The endpoint is read-only, bounded (`limit` default 100, max 10000), supports bounded `source_service=alert-service`, explicit `mode=HEAD|WINDOW|FULL_CHAIN`, and optional inclusive `from`/`to` for `WINDOW`. Default mode is `HEAD` unless a timestamp window is supplied, in which case default mode is `WINDOW`. `WINDOW` and `HEAD` can report `external_predecessor=true` without treating the first checked event as invalid; `FULL_CHAIN` reports a missing predecessor as a violation. Integrity checks are themselves audited with `VERIFY_AUDIT_INTEGRITY`. If verification exceeds its local time budget, the response is `PARTIAL` with stable reason code `INTEGRITY_VERIFICATION_TIME_BUDGET_EXCEEDED`.
 
 Sensitive read-access audit is implemented separately for selected reads in `read_access_audit_events`: alert details, fraud case details, scored transaction monitor, governance advisory list, governance advisory details, governance advisory audit history, and governance advisory analytics. There is no public read-access audit query endpoint in this scope. These audit records are best-effort and do not block the read response if audit persistence fails. They store bounded metadata only: actor identity from the authenticated backend principal or `unknown` with an anomaly metric if no principal is present, endpoint category, resource type/id where applicable, page/size, canonical hashed query shape, bounded result count, outcome, correlation id, source service, and schema version. They do not store raw query params, filters, response payloads, transaction data, customer/account/card data, advisory content, full URLs, exception messages, tokens, or stack traces.
 
-The durable audit store is not WORM archive storage, not SIEM integration, and not a final compliance archive. Metrics such as `fraud_platform_audit_events_persisted_total`, `fraud_platform_audit_persistence_failures_total`, `fraud_platform_audit_read_requests_total`, `fraud_platform_read_access_audit_events_persisted_total`, `fraud_platform_read_access_audit_persistence_failures_total`, `fraud_read_access_audit_actor_missing_total`, `fraud_internal_auth_success_total`, and `fraud_internal_auth_failure_total` are operational health signals only.
+The durable audit store is not WORM archive storage, not external notarization, not legal non-repudiation, not SIEM integration, not a long-term archival policy, not a regulator-ready evidence package, not external chain anchoring, and not cryptographic signing with HSM/KMS. Local Mongo anchors provide application-level tamper evidence for accidental or partial tampering; they do not protect against a full database administrator rewrite. External anchoring is future FDP-20. Metrics such as `fraud_platform_audit_events_persisted_total`, `fraud_platform_audit_persistence_failures_total`, `fraud_platform_audit_anchor_write_failures_total`, `fraud_platform_audit_chain_conflicts_total`, `fraud_platform_audit_read_requests_total`, `fraud_platform_audit_integrity_check_total`, `fraud_platform_audit_integrity_checks_total`, `fraud_platform_audit_integrity_violations_total`, `fraud_audit_integrity_check_total`, `fraud_audit_integrity_violation_total`, `fraud_audit_chain_head_hash`, `fraud_audit_last_anchor_hash`, `fraud_audit_integrity_status`, `fraud_platform_read_access_audit_events_persisted_total`, `fraud_platform_read_access_audit_persistence_failures_total`, `fraud_read_access_audit_actor_missing_total`, `fraud_internal_auth_success_total`, and `fraud_internal_auth_failure_total` are operational health signals only. The hash gauges are numeric fingerprints and are not compliance evidence.
 
 Governance advisory audit entries are separate from fraud workflow audit logs. They are persisted append-only as human review history, derive actor identity from the backend-authenticated principal, and do not affect scoring, model behavior, retraining, rollback, or fraud decisioning. Advisory lifecycle status is a read-time projection from the latest audit entry, not a persisted workflow state or automation trigger.
 
@@ -565,10 +587,13 @@ FDP-18.1 exposes certificate lifecycle signals for internal mTLS:
 - `fraud_internal_mtls_cert_expiry_seconds{source_service,target_service}`
 - `fraud_internal_mtls_cert_age_seconds{source_service,target_service}`
 - `fraud_internal_mtls_handshake_failures_total{reason}`
+- `fraud_internal_mtls_cert_expiry_state_total{state}`
 
-The ML server monitors its configured server certificate. Java internal clients monitor their configured client certificates and expose `mtlsCert` health with `UP`, `WARN`, or `DOWN` state.
+The ML server monitors its configured server certificate. Java internal clients monitor their configured client certificates and expose `mtlsCert` health with `UP`, `WARN`, `CRITICAL`, or `DOWN` state.
 
-The system logs warnings before certificate expiration and fails startup when a configured mTLS certificate is already expired. Operators must monitor expiry metrics and rotate certificates manually.
+The system logs warnings/errors before certificate expiration, runs runtime lifecycle checks every six hours, and fails startup when a configured mTLS certificate is missing, invalid, expired, or not trusted by configured CA material. Operators must monitor expiry metrics and rotate certificates manually with overlap.
+
+If certificates are rotated without overlap, service downtime will occur. The manual rotation flow is: generate new cert material, add new CA/trust while keeping old trust, deploy server trust update, deploy client certificate update, verify health/metrics, then remove old certificate and trust material.
 
 FDP-18.1 does not provide automated certificate rotation, a certificate management system, CA integration, secret rotation automation, cert-manager, Vault, KMS/HSM, or external PKI automation.
 
@@ -1114,7 +1139,7 @@ Known production gaps:
 
 - Service-to-service authentication is an internal service-auth foundation with RS256 JWT service identity, JWKS public-key validation, per-service private-key signing, `kid` validation, service-to-key binding, FDP-18 internal mTLS service identity, a compatibility token-validator path, and prod-like fail-closed guards; it is not enterprise IAM, automated certificate lifecycle management, or bank-grade certification.
 - mTLS is implemented only for declared internal ML scoring/governance service calls; browser/OIDC traffic, automated rotation, cert-manager, Vault/KMS, external PKI automation, and enterprise certificate lifecycle management remain out of scope.
-- Durable audit storage is not WORM/immutable archive storage, not a final compliance archive, and has no SIEM export integration.
+- Durable audit storage is not WORM/immutable archive storage, external notarization, legal non-repudiation, SIEM integration, long-term archival policy, regulator-ready evidence package, HSM/KMS signing, or a final compliance archive.
 - DLT inspection/replay tooling is not implemented yet.
 - The frontend defaults to demo auth in quickstart mode and supports local OIDC through the Keycloak override, but it is not a production-ready SSO setup.
 - ML governance uses a synthetic/local reference profile and aggregate MongoDB snapshots; the synthetic reference is not suitable for production drift decisions and FDP-7 does not implement automatic retraining, rollback, approval UI, or production alert routing.

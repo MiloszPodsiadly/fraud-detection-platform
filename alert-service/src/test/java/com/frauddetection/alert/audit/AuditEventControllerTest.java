@@ -62,12 +62,22 @@ class AuditEventControllerTest {
                         "admin-1",
                         "admin-1",
                         List.of("FRAUD_OPS_ADMIN"),
+                        "HUMAN",
                         "ALERT",
                         "alert-1",
                         "SUBMIT_ANALYST_DECISION",
                         "SUCCESS",
                         Instant.parse("2026-04-26T09:00:00Z"),
-                        new AuditEventMetadataSummary("corr-1", null)
+                        "corr-1",
+                        "alert-service",
+                        "source_service:alert-service",
+                        1L,
+                        null,
+                        new AuditEventMetadataSummary("corr-1", null),
+                        null,
+                        "hash-1",
+                        "SHA-256",
+                        "1.0"
                 ))
         ));
 
@@ -90,12 +100,15 @@ class AuditEventControllerTest {
                 .andExpect(jsonPath("$.events[0].actor_id").value("admin-1"))
                 .andExpect(jsonPath("$.events[0].actor_display_name").value("admin-1"))
                 .andExpect(jsonPath("$.events[0].actor_roles[0]").value("FRAUD_OPS_ADMIN"))
+                .andExpect(jsonPath("$.events[0].actor_type").value("HUMAN"))
                 .andExpect(jsonPath("$.events[0].resource_type").value("ALERT"))
                 .andExpect(jsonPath("$.events[0].resource_id").value("alert-1"))
                 .andExpect(jsonPath("$.events[0].action").value("SUBMIT_ANALYST_DECISION"))
                 .andExpect(jsonPath("$.events[0].outcome").value("SUCCESS"))
                 .andExpect(jsonPath("$.events[0].occurred_at").value("2026-04-26T09:00:00Z"))
                 .andExpect(jsonPath("$.events[0].metadata_summary.correlation_id").value("corr-1"))
+                .andExpect(jsonPath("$.events[0].event_hash").value("hash-1"))
+                .andExpect(jsonPath("$.events[0].hash_algorithm").value("SHA-256"))
                 .andExpect(jsonPath("$.events[0].actor_authorities").doesNotExist())
                 .andExpect(jsonPath("$.events[0].request_body").doesNotExist())
                 .andExpect(jsonPath("$.events[0].response_body").doesNotExist());
