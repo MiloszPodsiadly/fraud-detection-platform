@@ -152,6 +152,7 @@ Roles describe analyst personas. Authorities are the backend authorization contr
 | `GET /api/v1/audit/integrity` | `audit:read` | Bounded read-only audit hash-chain verification. No repair, export, delete, or update. |
 | `GET /api/v1/audit/integrity/external` | `audit:verify` | Bounded read-only external anchor verification. No repair, export, delete, or update. |
 | `GET /api/v1/audit/evidence/export` | `audit:export` | Required-window bounded evidence export. No unbounded export, full-text search, cursor, delete, or update. |
+| `GET /api/v1/audit/trust/attestation` | `audit:verify` | Bounded derived trust attestation. No raw events, raw payloads, secrets, delete, update, or unbounded export. |
 | `GET /governance/advisories` | `transaction-monitor:read` | Reads governance advisory context enriched with lifecycle projection from audit history. |
 | `GET /governance/advisories/analytics` | `transaction-monitor:read` | Reads derived, bounded, non-operational audit analytics. Analytics and analytics metrics are observational only and must not be used for automation, SLA enforcement, alert triggering, or model control. |
 | `GET /governance/advisories/{event_id}` | `transaction-monitor:read` | Reads one governance advisory context with derived lifecycle status. |
@@ -215,7 +216,9 @@ FDP-16 is split into:
 - FDP-16.1 Durable Audit Foundation: append-only platform audit writes to MongoDB plus secondary structured logs.
 - FDP-16.2 Audit Read API: authenticated, `audit:read`-protected, bounded reads of durable platform audit events.
 - FDP-16.3 Sensitive Read-Access Audit: best-effort audit records for selected sensitive read endpoints.
+- FDP-19 Audit Integrity Foundation: application-level append-only audit hash chain, local anchors, and bounded verification.
 - FDP-20 External Anchoring & Evidence Export: external anchor publication, bounded external anchor verification, and bounded evidence export.
+- FDP-21 Audit Trust Attestation Layer: derived trust assessment built on FDP-19/FDP-20 source-of-truth signals.
 
 Audit Logging v1 records security-relevant analyst write operations in `alert-service`.
 
@@ -279,6 +282,14 @@ It does not create legal non-repudiation.
 - Export audit events store only bounded export metadata: query window, source service, limit, returned count, export status, reason code, external anchor status, anchor coverage, and export fingerprint. They do not store the exported events themselves.
 - Evidence export may include sensitive audit metadata such as `actor_id` and `resource_id`. Protection is backend-enforced `audit:export`, bounded query windows and result limits, an audit trail of export access, deterministic export fingerprinting, and per-instance rate limiting.
 - Companion publication status records track external publication status fields for later operational inspection. Success records require `external_published=true`, `external_published_at`, and `external_sink_type`; failure records set `external_published=false` and may include `last_external_publish_failure_reason`. A bounded repository query can list not-yet-externalized anchors by partition for operator visibility. These fields are not part of the event hash chain and updating them does not mutate audit events or local anchor records.
+- `GET /api/v1/audit/trust/attestation` requires `audit:verify`, audits access with `READ_AUDIT_TRUST_ATTESTATION`, and returns only bounded status fields: `status`, `trust_level`, internal integrity status, external integrity status, external anchor status, single-head anchor coverage, latest chain head fields, latest external anchor reference, `attestation_fingerprint`, optional `attestation_signature`, `signing_key_id`, `signer_mode`, `attestation_signature_strength`, `external_trust_dependency`, and explicit limitations.
+- `attestation_signature_strength` is mandatory for interpreting FDP-21 trust. `SIGNED_ATTESTATION` represents stronger trust only when `attestation_signature_strength=PRODUCTION_READY` and `signer_mode` is backed by externally managed KMS/HSM signing material. Otherwise a signature is integrity metadata only and does not increase external trust.
+- FDP-21 trust levels are derived only. `INTERNAL_ONLY` means local application-level integrity is the only available signal. `PARTIAL_EXTERNAL` means an external boundary is configured or visible but not fully valid. `EXTERNALLY_ANCHORED` requires FDP-20 external anchor verification to be valid. `SIGNED_ATTESTATION` requires valid external anchoring plus production-ready attestation signing; local-dev signing never upgrades trust. `UNAVAILABLE` means internal audit integrity could not be read.
+- The attestation fingerprint is canonical over the full attestation context, including `source_service`, `limit`, `mode`, `signer_mode`, `signature_key_id` when present, trust status fields, anchor coverage, latest chain fields, external anchor reference, and limitations.
+- Audit trust attestation signing is controlled by `app.audit.trust-attestation.signing.mode=disabled|local-dev|kms-ready`. `local-dev` is for development and verification only, provides integrity metadata only, does not add external trust, and is rejected in prod-like profiles. `kms-ready` requires `app.audit.trust.signing.kms-enabled=true` and still fails startup until a real KMS/HSM adapter exists; the server must not silently fall back to unsigned attestation when signing mode is enabled.
+- Consumers must not treat a signed attestation as legal proof unless it is backed by production signing and matching operational controls outside this repository. FDP-21 is not legal notarization, not legal non-repudiation, not WORM storage, not a regulator-certified archive, and not SIEM evidence.
+- Examples: local-dev signer returns `EXTERNALLY_ANCHORED` with `LOCAL_DEV`; disabled signer returns `EXTERNALLY_ANCHORED` with `NONE`; a future real KMS/HSM signer can return `SIGNED_ATTESTATION` with `PRODUCTION_READY`.
+- FDP-21 verification relies on FDP-19/FDP-20 source-of-truth services. It does not implement a second external verification stack, a second evidence export, a second external anchor sink, WORM storage, SIEM integration, or legal notarization.
 - Audit read filters are `event_type`, `actor_id`, `resource_type`, `resource_id`, inclusive `from`/`to` timestamps, and bounded `limit` default `50`, max `100`.
 - Audit reads return `status=UNAVAILABLE`, `reason_code=AUDIT_STORE_UNAVAILABLE`, a stable non-sensitive `message`, `count=0`, and an empty event list if persistence cannot be read.
 - Clients MUST check `status` before interpreting `count` or `events`; `AVAILABLE` with `count=0` is a valid empty result and is not equivalent to `UNAVAILABLE`.
@@ -328,6 +339,8 @@ Operational audit metrics:
 - `fraud_read_access_audit_actor_missing_total{endpoint_category}`
 
 These metrics are health signals, not compliance reports, and intentionally exclude actor IDs, resource IDs, audit IDs, exception messages, and other high-cardinality values.
+
+FDP-21 does not implement enterprise WORM storage, legal timestamping, SIEM integration, automated retention, full compliance archive, HSM/KMS integration, or mTLS channel binding. Full production external trust requires real externally managed public verification material/object storage/KMS configuration and operational controls outside this code boundary.
 
 ## Internal Service Authentication
 
@@ -526,6 +539,7 @@ Reviewers should check:
 - Service-to-service authentication foundation is present for configured internal ML/governance calls.
 - Internal mTLS service identity exists for configured internal ML/governance calls, but no enterprise PKI automation, cert-manager, Vault/KMS, dynamic reload, or automated rotation is shipped.
 - Durable audit storage is not WORM/immutable archive storage, legal notarization, legal non-repudiation, SIEM integration, long-term archival policy, regulator-ready evidence package, or HSM/KMS signing. FDP-20 external anchoring extends tamper evidence outside the primary MongoDB boundary, but the local-file sink is not certified immutable storage and does not create legal non-repudiation.
+- FDP-21 trust attestation is a derived trust assessment over FDP-19/FDP-20 signals. Local-dev signing provides integrity metadata only; it is not KMS/HSM signing, legal notarization, WORM storage, SIEM integration, or a compliance archive.
 - No SIEM audit export/integration yet.
 - The frontend still defaults to demo auth unless OIDC env vars are set explicitly.
 - The frontend OIDC path is a local OIDC integration and foundation for production auth, not a production-ready SSO setup.

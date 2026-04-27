@@ -55,7 +55,19 @@ public record AuditEventMetadataSummary(
         AnchorCoverageSummary anchorCoverage,
 
         @JsonProperty("export_fingerprint")
-        String exportFingerprint
+        String exportFingerprint,
+
+        @JsonProperty("trust_level")
+        String trustLevel,
+
+        @JsonProperty("internal_integrity_status")
+        String internalIntegrityStatus,
+
+        @JsonProperty("external_integrity_status")
+        String externalIntegrityStatus,
+
+        @JsonProperty("attestation_fingerprint")
+        String attestationFingerprint
 ) {
     private static final int MAX_FIELD_LENGTH = 120;
 
@@ -77,10 +89,15 @@ public record AuditEventMetadataSummary(
         reasonCode = safe(reasonCode);
         externalAnchorStatus = safe(externalAnchorStatus);
         exportFingerprint = safe(exportFingerprint);
+        trustLevel = safe(trustLevel);
+        internalIntegrityStatus = safe(internalIntegrityStatus);
+        externalIntegrityStatus = safe(externalIntegrityStatus);
+        attestationFingerprint = safe(attestationFingerprint);
     }
 
     public AuditEventMetadataSummary(String correlationId, String failureReason) {
-        this(correlationId, null, null, null, null, failureReason, null, null, null, null, null, null, null, null, null, null, null, null);
+        this(correlationId, null, null, null, null, failureReason, null, null, null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null);
     }
 
     public AuditEventMetadataSummary(
@@ -95,7 +112,7 @@ public record AuditEventMetadataSummary(
             Integer countReturned
     ) {
         this(correlationId, requestId, sourceService, schemaVersion, failureCategory, failureReason, endpointAction, filtersSummary, countReturned,
-                null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     public static AuditEventMetadataSummary auditRead(
@@ -150,7 +167,47 @@ public record AuditEventMetadataSummary(
                 reasonCode,
                 externalAnchorStatus,
                 anchorCoverage,
-                exportFingerprint
+                exportFingerprint,
+                null,
+                null,
+                null,
+                null
+        );
+    }
+
+    public static AuditEventMetadataSummary trustAttestation(
+            String sourceService,
+            String schemaVersion,
+            Integer limit,
+            String trustLevel,
+            String internalIntegrityStatus,
+            String externalIntegrityStatus,
+            String externalAnchorStatus,
+            String attestationFingerprint
+    ) {
+        return new AuditEventMetadataSummary(
+                null,
+                null,
+                sourceService,
+                schemaVersion,
+                null,
+                null,
+                "GET /api/v1/audit/trust/attestation",
+                "source_service=" + safe(sourceService) + ";limit=" + limit,
+                null,
+                null,
+                null,
+                limit,
+                null,
+                null,
+                null,
+                externalAnchorStatus,
+                null,
+                null,
+                trustLevel,
+                internalIntegrityStatus,
+                externalIntegrityStatus,
+                attestationFingerprint
         );
     }
 

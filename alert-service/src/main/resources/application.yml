@@ -36,6 +36,15 @@ management:
             requests: true
 
 app:
+  audit:
+    trust-attestation:
+      signing:
+        mode: ${AUDIT_TRUST_ATTESTATION_SIGNING_MODE:disabled}
+        local-dev-key-id: ${AUDIT_TRUST_ATTESTATION_LOCAL_DEV_KEY_ID:local-dev-trust-attestation-key}
+        local-dev-secret: ${AUDIT_TRUST_ATTESTATION_LOCAL_DEV_SECRET:}
+    trust:
+      signing:
+        kms-enabled: ${AUDIT_TRUST_SIGNING_KMS_ENABLED:false}
   security:
     demo-auth:
       enabled: ${APP_SECURITY_DEMO_AUTH_ENABLED:false}
