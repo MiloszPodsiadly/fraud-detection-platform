@@ -67,6 +67,7 @@ Alert service:
 | `GET` | `/api/v1/audit/integrity` | Performs bounded read-only hash-chain integrity verification; requires `audit:read`. |
 | `GET` | `/api/v1/audit/integrity/external` | Performs bounded read-only external anchor verification; requires `audit:verify`. |
 | `GET` | `/api/v1/audit/evidence/export` | Returns required-window bounded audit evidence export; requires `audit:export`. |
+| `GET` | `/api/v1/audit/trust/attestation` | Returns a bounded derived trust attestation over FDP-19/FDP-20 signals; requires `audit:verify`. |
 | `GET` | `/governance/advisories` | Lists governance advisory events enriched with read-time lifecycle status. |
 | `GET` | `/governance/advisories/analytics` | Returns bounded read-only audit analytics derived from advisory and audit history. |
 | `GET` | `/governance/advisories/{event_id}` | Returns one governance advisory event enriched with read-time lifecycle status. |
@@ -133,6 +134,18 @@ Platform Audit Evidence Export API:
 - Export access creates an `EXPORT_AUDIT_EVIDENCE` audit event with bounded metadata.
 - Evidence export may include sensitive audit metadata such as `actor_id` and `resource_id`; access protection relies on backend `audit:export`, bounded queries, audit trail, fingerprinting, and rate limiting.
 - The endpoint does not support unbounded export, full-text search, cursor pagination, aggregation, delete, or update, and it does not return raw payloads, tokens, stack traces, transaction payloads, customer/account/card identifiers, advisory content, or full URLs.
+
+Platform Audit Trust Attestation API:
+
+- `GET /api/v1/audit/trust/attestation`
+- Requires backend-enforced `audit:verify`; the local role model grants it through `FRAUD_OPS_ADMIN`.
+- Query parameters are bounded to optional `source_service=alert-service`, `limit` default `100`, maximum `500`, and optional `mode=HEAD`.
+- Returns bounded status fields only: `status`, `trust_level`, internal integrity status, external integrity status, external anchor status, single-head anchor coverage, latest chain head fields, latest external anchor reference when present, `attestation_fingerprint`, optional `attestation_signature`, `signing_key_id`, `signing_mode`, and explicit limitations.
+- Trust levels are `INTERNAL_ONLY`, `PARTIAL_EXTERNAL`, `EXTERNALLY_ANCHORED`, `SIGNED_ATTESTATION`, and `UNAVAILABLE`.
+- `INTERNAL_ONLY` means local application-level integrity is the only available signal. `PARTIAL_EXTERNAL` means an external boundary is configured or visible but not fully valid. `EXTERNALLY_ANCHORED` requires FDP-20 external anchor verification to be valid. `SIGNED_ATTESTATION` requires valid external anchoring plus enabled attestation signing. `UNAVAILABLE` means internal audit integrity could not be read.
+- `app.audit.trust-attestation.signing.mode=disabled|local-dev|kms-ready`. `local-dev` is for local development and verification only, provides integrity metadata only, and is rejected in prod-like profiles. `kms-ready` fails startup until a real KMS/HSM adapter is supplied.
+- Verification relies on FDP-19/FDP-20 source-of-truth services; FDP-21 does not implement a second external verification stack, a second evidence export, or an object-store sink.
+- This endpoint does not expose raw audit events, response bodies, raw payloads, Mongo internals, secrets, stack traces, full URLs, unbounded export, delete, update, WORM proof, SIEM evidence, legal non-repudiation, or compliance archive.
 
 Sensitive read-access audit:
 

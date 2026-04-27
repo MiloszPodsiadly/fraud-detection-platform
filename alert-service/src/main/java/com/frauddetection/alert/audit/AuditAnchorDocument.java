@@ -1,5 +1,4 @@
 package com.frauddetection.alert.audit;
-
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Immutable;
 import org.springframework.data.mongodb.core.index.CompoundIndex;

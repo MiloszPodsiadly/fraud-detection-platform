@@ -1,5 +1,4 @@
 package com.frauddetection.alert.audit;
-
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
@@ -345,7 +344,6 @@ class PersistentAuditEventPublisherTest {
         assertThat(meterRegistry.get("fraud_platform_audit_anchor_write_failures_total").counter().count()).isEqualTo(1.0d);
     }
 
-    @Test
     void shouldRejectApplicationLevelAuditMutationAttempts() {
         AuditImmutabilityGuard guard = new AuditImmutabilityGuard();
 

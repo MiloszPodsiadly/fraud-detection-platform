@@ -11,6 +11,10 @@ import com.frauddetection.alert.audit.AuditEventReadService;
 import com.frauddetection.alert.audit.AuditIntegrityController;
 import com.frauddetection.alert.audit.AuditIntegrityResponse;
 import com.frauddetection.alert.audit.AuditIntegrityService;
+import com.frauddetection.alert.audit.AuditTrustAttestationController;
+import com.frauddetection.alert.audit.AuditTrustAttestationResponse;
+import com.frauddetection.alert.audit.AuditTrustAttestationService;
+import com.frauddetection.alert.audit.AuditTrustLevel;
 import com.frauddetection.alert.audit.external.AuditEvidenceExportController;
 import com.frauddetection.alert.audit.external.AuditEvidenceExportResponse;
 import com.frauddetection.alert.audit.external.AuditEvidenceExportService;
@@ -88,6 +92,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         AuditIntegrityController.class,
         ExternalAuditIntegrityController.class,
         AuditEvidenceExportController.class,
+        AuditTrustAttestationController.class,
         GovernanceAdvisoryController.class,
         GovernanceAuditController.class
 })
@@ -142,6 +147,9 @@ class AlertSecurityConfigTest {
     private AuditEvidenceExportService auditEvidenceExportService;
 
     @MockBean
+    private AuditTrustAttestationService auditTrustAttestationService;
+
+    @MockBean
     private GovernanceAuditService governanceAuditService;
 
     @MockBean
@@ -181,6 +189,8 @@ class AlertSecurityConfigTest {
         mockMvc.perform(get("/api/v1/audit/integrity/external"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/audit/evidence/export"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/audit/trust/attestation"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/governance/advisories"))
                 .andExpect(status().isUnauthorized());
@@ -377,6 +387,25 @@ class AlertSecurityConfigTest {
                         AuditEvidenceExportResponse.AnchorCoverage.empty(),
                         List.of()
                 ));
+        when(auditTrustAttestationService.attest(any(), any(), any()))
+                .thenReturn(new AuditTrustAttestationResponse(
+                        "AVAILABLE",
+                        AuditTrustLevel.INTERNAL_ONLY,
+                        "VALID",
+                        "PARTIAL",
+                        "DISABLED",
+                        AuditTrustAttestationResponse.AnchorCoverage.empty(),
+                        null,
+                        null,
+                        null,
+                        "fingerprint",
+                        null,
+                        null,
+                        "disabled",
+                        "alert-service",
+                        100,
+                        List.of("not_legal_notarization")
+                ));
 
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("FRAUD_OPS_ADMIN")))
                 .andExpect(status().isOk())
@@ -394,6 +423,9 @@ class AlertSecurityConfigTest {
                         .with(demoUser("FRAUD_OPS_ADMIN")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("AVAILABLE"));
+        mockMvc.perform(get("/api/v1/audit/trust/attestation").with(demoUser("FRAUD_OPS_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.trust_level").value("INTERNAL_ONLY"));
 
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
@@ -406,6 +438,8 @@ class AlertSecurityConfigTest {
                         .param("to", "2026-04-28T00:00:00Z")
                         .param("source_service", "alert-service")
                         .with(demoUser("ANALYST")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/audit/trust/attestation").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("REVIEWER")))
                 .andExpect(status().isForbidden());
@@ -431,10 +465,33 @@ class AlertSecurityConfigTest {
                         AuditEvidenceExportResponse.AnchorCoverage.empty(),
                         List.of()
                 ));
+        when(auditTrustAttestationService.attest(any(), any(), any()))
+                .thenReturn(new AuditTrustAttestationResponse(
+                        "AVAILABLE",
+                        AuditTrustLevel.INTERNAL_ONLY,
+                        "VALID",
+                        "PARTIAL",
+                        "DISABLED",
+                        AuditTrustAttestationResponse.AnchorCoverage.empty(),
+                        null,
+                        null,
+                        null,
+                        "fingerprint",
+                        null,
+                        null,
+                        "disabled",
+                        "alert-service",
+                        100,
+                        List.of("not_legal_notarization")
+                ));
 
         mockMvc.perform(get("/api/v1/audit/integrity/external").with(authorities(AnalystAuthority.AUDIT_READ)))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/audit/integrity/external").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/audit/trust/attestation").with(authorities(AnalystAuthority.AUDIT_READ)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/audit/trust/attestation").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
                 .andExpect(status().isOk());
         mockMvc.perform(get("/api/v1/audit/evidence/export")
                         .param("from", "2026-04-27T00:00:00Z")

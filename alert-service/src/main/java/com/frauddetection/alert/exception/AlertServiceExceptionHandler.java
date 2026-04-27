@@ -1,6 +1,7 @@
 package com.frauddetection.alert.exception;
 
 import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
+import com.frauddetection.alert.audit.AuditTrustAttestationUnavailableException;
 import com.frauddetection.alert.audit.InvalidAuditEventQueryException;
 import com.frauddetection.alert.audit.external.AuditEvidenceExportRejectedException;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryLookupUnavailableException;
@@ -94,6 +95,19 @@ public class AlertServiceExceptionHandler {
                         503,
                         "Service Unavailable",
                         "Audit persistence is unavailable.",
+                        List.of()
+                )
+        );
+    }
+
+    @ExceptionHandler(AuditTrustAttestationUnavailableException.class)
+    public ResponseEntity<ApiErrorResponse> handleAuditTrustAttestationUnavailable(AuditTrustAttestationUnavailableException exception) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(
+                new ApiErrorResponse(
+                        Instant.now(),
+                        503,
+                        "Service Unavailable",
+                        "Audit trust attestation is unavailable.",
                         List.of()
                 )
         );

@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: Alert Service API
-  version: FDP-20
-  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, external anchor verification, bounded evidence export, governance advisory lifecycle projection, and human-review audit. FDP-20 extends tamper evidence outside the primary database boundary. It does not create legal non-repudiation. Audit integrity does not imply certified WORM archive storage, legal notarization, SIEM integration, unbounded export, HSM/KMS signing, or final compliance archive.
+  version: FDP-21
+  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, external anchor verification, bounded evidence export, derived audit trust attestation, governance advisory lifecycle projection, and human-review audit. FDP-20 extends tamper evidence outside the primary database boundary. FDP-21 derives a trust attestation from FDP-19/FDP-20 source-of-truth signals and optional local-dev integrity signing. Audit integrity and trust attestation do not imply certified WORM archive storage, legal notarization, SIEM integration, unbounded export, KMS/HSM signing unless explicitly integrated, or final compliance archive.
 servers:
   - url: http://localhost:8085
 paths:
@@ -146,6 +146,7 @@ paths:
         - name: source_service
           in: query
           required: false
+          description: Optional bounded source-service chain scope.
           schema:
             type: string
             enum: [alert-service]
@@ -236,6 +237,51 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiErrorResponse"
+  /api/v1/audit/trust/attestation:
+    get:
+      summary: Get derived audit trust attestation
+      description: Returns a bounded derived trust assessment over FDP-19 internal integrity and FDP-20 external anchor verification signals. Requires audit:verify. This endpoint does not implement a second external verification stack, a second evidence export, an external anchor sink, legal notarization, WORM storage, SIEM integration, or KMS/HSM signing unless explicitly integrated. Local-dev signing provides integrity metadata only.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: source_service
+          in: query
+          required: false
+          description: Optional bounded source-service chain scope.
+          schema:
+            type: string
+            enum: [alert-service]
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+        - name: mode
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [HEAD]
+            default: HEAD
+      responses:
+        "200":
+          description: Bounded audit trust attestation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditTrustAttestationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /api/v1/alerts/{alertId}:
     get:
       summary: Get one alert
@@ -1070,6 +1116,118 @@ components:
         publication_status:
           type: string
           nullable: true
+          enum: [PUBLISHED, PENDING, FAILED]
+    AuditTrustAttestationResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - trust_level
+        - internal_integrity_status
+        - external_integrity_status
+        - external_anchor_status
+        - anchor_coverage
+        - attestation_fingerprint
+        - signing_mode
+        - source_service
+        - limit
+        - limitations
+      properties:
+        status:
+          type: string
+          enum: [AVAILABLE, UNAVAILABLE]
+        trust_level:
+          type: string
+          enum: [INTERNAL_ONLY, PARTIAL_EXTERNAL, EXTERNALLY_ANCHORED, SIGNED_ATTESTATION, UNAVAILABLE]
+          description: Derived trust assessment. SIGNED_ATTESTATION requires valid external anchoring plus enabled attestation signing.
+        internal_integrity_status:
+          type: string
+          enum: [VALID, INVALID, PARTIAL, UNAVAILABLE]
+        external_integrity_status:
+          type: string
+          enum: [VALID, INVALID, PARTIAL, UNAVAILABLE]
+        external_anchor_status:
+          type: string
+          enum: [VALID, DISABLED, MISSING, STALE, PARTIAL, INVALID, UNAVAILABLE]
+        anchor_coverage:
+          $ref: "#/components/schemas/AuditTrustAttestationAnchorCoverage"
+        latest_chain_position:
+          type: integer
+          format: int64
+          nullable: true
+        latest_event_hash:
+          type: string
+          nullable: true
+        latest_external_anchor_reference:
+          nullable: true
+          $ref: "#/components/schemas/AuditTrustAttestationExternalAnchorReference"
+        attestation_fingerprint:
+          type: string
+          minLength: 64
+          maxLength: 64
+          description: SHA-256 fingerprint of the bounded trust attestation payload.
+        attestation_signature:
+          type: string
+          nullable: true
+          description: Present only when attestation signing is enabled. Local-dev signing is integrity metadata only, not legal signing.
+        signing_key_id:
+          type: string
+          nullable: true
+          description: Signing key id for attestation_signature; no private key material is exposed.
+        signing_mode:
+          type: string
+          enum: [disabled, local-dev]
+        source_service:
+          type: string
+          enum: [alert-service]
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 500
+        limitations:
+          type: array
+          items:
+            type: string
+          description: Explicit limitations such as not_legal_notarization, not_worm_storage, not_siem_integration, and derived_from_fdp19_fdp20_source_of_truth.
+    AuditTrustAttestationAnchorCoverage:
+      type: object
+      additionalProperties: false
+      required:
+        - total_anchors_checked
+        - external_anchors_matched
+        - external_anchors_missing
+        - coverage_ratio
+      properties:
+        total_anchors_checked:
+          type: integer
+          minimum: 0
+        external_anchors_matched:
+          type: integer
+          minimum: 0
+        external_anchors_missing:
+          type: integer
+          minimum: 0
+        coverage_ratio:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+    AuditTrustAttestationExternalAnchorReference:
+      type: object
+      additionalProperties: false
+      required: [external_anchor_id, chain_position, sink_type, publication_status]
+      properties:
+        external_anchor_id:
+          type: string
+        chain_position:
+          type: integer
+          format: int64
+          minimum: 1
+        sink_type:
+          type: string
+          enum: [local-file]
+        publication_status:
+          type: string
           enum: [PUBLISHED, PENDING, FAILED]
     GovernanceAdvisoryLifecycleStatus:
       type: string

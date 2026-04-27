@@ -1,5 +1,4 @@
 package com.frauddetection.alert.audit;
-
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.Ordered;
@@ -122,4 +121,5 @@ public class PersistentAuditEventPublisher implements AuditEventPublisher {
         }
         return repository.countByPartitionKey(AuditEventDocument.PARTITION_KEY) + 1L;
     }
+
 }

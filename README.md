@@ -166,6 +166,7 @@ Representative endpoint matrix:
 | `GET /api/v1/audit/integrity` | `audit:read` |
 | `GET /api/v1/audit/integrity/external` | `audit:verify` |
 | `GET /api/v1/audit/evidence/export` | `audit:export` |
+| `GET /api/v1/audit/trust/attestation` | `audit:verify` |
 | `GET /governance/advisories` | `transaction-monitor:read` |
 | `GET /governance/advisories/analytics` | `transaction-monitor:read` |
 | `GET /governance/advisories/{event_id}` | `transaction-monitor:read` |
@@ -183,6 +184,7 @@ FDP-16 is split into explicit production-hardening steps:
 - FDP-16.3 Sensitive Read-Access Audit: best-effort audit records for selected sensitive read endpoints.
 - FDP-19 Audit Integrity Foundation: application-level append-only audit hash chain, bounded integrity verification, and audit-read tracking.
 - FDP-20 External Anchoring & Evidence Export: local-file external anchor publication, bounded external anchor verification, and bounded evidence export.
+- FDP-21 Audit Trust Attestation Layer: derived trust assessment built on FDP-19 internal integrity and FDP-20 external anchor/export source-of-truth signals.
 
 Audit Logging v1 records security-relevant analyst write operations in `alert-service`.
 
@@ -269,6 +271,22 @@ FDP-20 guarantees append-only durable audit events, local chain anchors, externa
 FDP-20 does not guarantee certified WORM storage, legal notarization, legal non-repudiation, HSM/KMS-backed signatures, SIEM integration, a production object-store implementation, a regulator-ready archive, zero data exfiltration risk, or cross-instance rate limiting. Local-file sink is development-only and blocked in prod-like profiles. Evidence export rate limiting is enforced per service instance; in multi-instance deployments, effective rate limiting must be enforced at API gateway or shared infrastructure level. FDP-20 provides external tamper-evidence, not external trust enforcement.
 
 Metrics such as `fraud_platform_audit_events_persisted_total`, `fraud_platform_audit_persistence_failures_total`, `fraud_platform_audit_anchor_write_failures_total`, `fraud_platform_audit_chain_conflicts_total`, `fraud_platform_audit_read_requests_total`, `fraud_platform_audit_integrity_check_total`, `fraud_platform_audit_integrity_checks_total`, `fraud_platform_audit_integrity_violations_total`, `fraud_platform_audit_external_anchor_published_total`, `fraud_platform_audit_external_anchor_publish_failed_total`, `fraud_platform_audit_external_anchor_lag_seconds`, `fraud_platform_audit_external_integrity_checks_total`, `fraud_platform_audit_evidence_exports_total`, `fraud_platform_audit_evidence_export_rate_limited_total`, `fraud_platform_audit_evidence_export_repeated_fingerprint_total`, `fraud_audit_integrity_check_total`, `fraud_audit_integrity_violation_total`, `fraud_audit_chain_head_hash`, `fraud_audit_last_anchor_hash`, `fraud_audit_integrity_status`, `fraud_platform_read_access_audit_events_persisted_total`, `fraud_platform_read_access_audit_persistence_failures_total`, `fraud_read_access_audit_actor_missing_total`, `fraud_internal_auth_success_total`, and `fraud_internal_auth_failure_total` are operational health signals only. The hash gauges are numeric fingerprints and are not compliance evidence.
+
+### FDP-21 Trust Attestation
+
+FDP-21 adds `GET /api/v1/audit/trust/attestation`, protected by `audit:verify`, as a derived trust assessment. It does not replace FDP-19 internal integrity verification, FDP-20 external anchor verification, or FDP-20 evidence export. The response reports `trust_level`, internal integrity status, external integrity status, external anchor status, single-head anchor coverage, latest chain head fields, an `attestation_fingerprint`, optional `attestation_signature`, `signing_key_id`, `signing_mode`, and explicit limitations.
+
+Trust levels:
+
+- `INTERNAL_ONLY`: local application-level integrity is the only available signal.
+- `PARTIAL_EXTERNAL`: an external boundary is configured or visible, but full external anchor consistency is not proven.
+- `EXTERNALLY_ANCHORED`: FDP-20 external anchor verification is valid for the local head.
+- `SIGNED_ATTESTATION`: the attestation report is signed and external anchor verification is valid.
+- `UNAVAILABLE`: internal audit integrity cannot be read.
+
+The FDP-21 local-dev signer provides integrity metadata only. It is not legal signing, not legal notarization, not WORM storage, not SIEM, and not KMS/HSM signing unless a real KMS/HSM adapter is explicitly integrated. `local-dev` signing is rejected in prod-like profiles; `kms-ready` fails startup until a real adapter exists. `external-object-store` remains an FDP-20/FDP-22+ external anchor sink placeholder and fails startup if selected; FDP-21 does not add a second object-store or external verification implementation.
+
+FDP-21 relies on FDP-19/FDP-20 source-of-truth services. It does not mutate audit events, publish external anchors, export evidence, trigger alerts, enforce workflow, alter scoring, change Kafka contracts, switch models, retrain, rollback, or provide a compliance archive.
 
 Governance advisory audit entries are separate from fraud workflow audit logs. They are persisted append-only as human review history, derive actor identity from the backend-authenticated principal, and do not affect scoring, model behavior, retraining, rollback, or fraud decisioning. Advisory lifecycle status is a read-time projection from the latest audit entry, not a persisted workflow state or automation trigger.
 
@@ -1170,7 +1188,7 @@ Known production gaps:
 
 - Service-to-service authentication is an internal service-auth foundation with RS256 JWT service identity, JWKS public-key validation, per-service private-key signing, `kid` validation, service-to-key binding, FDP-18 internal mTLS service identity, a compatibility token-validator path, and prod-like fail-closed guards; it is not enterprise IAM, automated certificate lifecycle management, or bank-grade certification.
 - mTLS is implemented only for declared internal ML scoring/governance service calls; browser/OIDC traffic, automated rotation, cert-manager, Vault/KMS, external PKI automation, and enterprise certificate lifecycle management remain out of scope.
-- Durable audit storage is not WORM/immutable archive storage, external notarization, legal non-repudiation, SIEM integration, long-term archival policy, regulator-ready evidence package, HSM/KMS signing, or a final compliance archive.
+- Durable audit storage is not WORM/immutable archive storage, legal non-repudiation, SIEM integration, long-term archival policy, regulator-ready evidence package, full HSM/KMS signing, or a final compliance archive. FDP-21 adds a derived trust attestation over FDP-19/FDP-20 signals with optional local-dev integrity signing; real external object-store, WORM, SIEM, and KMS/HSM integrations remain future deployment work.
 - DLT inspection/replay tooling is not implemented yet.
 - The frontend defaults to demo auth in quickstart mode and supports local OIDC through the Keycloak override, but it is not a production-ready SSO setup.
 - ML governance uses a synthetic/local reference profile and aggregate MongoDB snapshots; the synthetic reference is not suitable for production drift decisions and FDP-7 does not implement automatic retraining, rollback, approval UI, or production alert routing.
