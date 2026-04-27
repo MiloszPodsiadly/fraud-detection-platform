@@ -77,10 +77,11 @@ class AuditEvidenceExportServiceTest {
         assertThat(response.status()).isEqualTo("AVAILABLE");
         assertThat(response.count()).isEqualTo(1);
         assertThat(response.externalAnchorStatus()).isEqualTo("AVAILABLE");
-        assertThat(response.anchorCoverage().localAnchorsAvailableCount()).isEqualTo(1);
-        assertThat(response.anchorCoverage().externalAnchorsAvailableCount()).isEqualTo(1);
-        assertThat(response.anchorCoverage().eventsWithoutLocalAnchorCount()).isZero();
-        assertThat(response.anchorCoverage().eventsWithoutExternalAnchorCount()).isZero();
+        assertThat(response.anchorCoverage().totalEvents()).isEqualTo(1);
+        assertThat(response.anchorCoverage().eventsWithLocalAnchor()).isEqualTo(1);
+        assertThat(response.anchorCoverage().eventsWithExternalAnchor()).isEqualTo(1);
+        assertThat(response.anchorCoverage().eventsMissingExternalAnchor()).isZero();
+        assertThat(response.anchorCoverage().coverageRatio()).isEqualTo(1.0d);
         assertThat(response.events().getFirst().eventHash()).isEqualTo("hash-1");
         assertThat(response.events().getFirst().localAnchor()).isNotNull();
         assertThat(response.events().getFirst().externalAnchor()).isNotNull();
@@ -118,8 +119,9 @@ class AuditEvidenceExportServiceTest {
         assertThat(response.reasonCode()).isEqualTo("EXTERNAL_ANCHORS_UNAVAILABLE");
         assertThat(response.externalAnchorStatus()).isEqualTo("UNAVAILABLE");
         assertThat(response.message()).doesNotContain("/internal/detail", "filesystem");
-        assertThat(response.anchorCoverage().localAnchorsAvailableCount()).isEqualTo(1);
-        assertThat(response.anchorCoverage().eventsWithoutExternalAnchorCount()).isEqualTo(1);
+        assertThat(response.anchorCoverage().eventsWithLocalAnchor()).isEqualTo(1);
+        assertThat(response.anchorCoverage().eventsMissingExternalAnchor()).isEqualTo(1);
+        assertThat(response.anchorCoverage().coverageRatio()).isZero();
     }
 
     @Test
@@ -142,9 +144,11 @@ class AuditEvidenceExportServiceTest {
         );
 
         assertThat(response.status()).isEqualTo("PARTIAL");
-        assertThat(response.reasonCode()).isEqualTo("EXTERNAL_ANCHOR_COVERAGE_INCOMPLETE");
-        assertThat(response.anchorCoverage().externalAnchorsAvailableCount()).isEqualTo(1);
-        assertThat(response.anchorCoverage().eventsWithoutExternalAnchorCount()).isEqualTo(1);
+        assertThat(response.reasonCode()).isEqualTo("EXTERNAL_ANCHOR_GAPS");
+        assertThat(response.externalAnchorStatus()).isEqualTo("PARTIAL");
+        assertThat(response.anchorCoverage().eventsWithExternalAnchor()).isEqualTo(1);
+        assertThat(response.anchorCoverage().eventsMissingExternalAnchor()).isEqualTo(1);
+        assertThat(response.anchorCoverage().coverageRatio()).isEqualTo(0.5d);
     }
 
     @Test
@@ -161,8 +165,9 @@ class AuditEvidenceExportServiceTest {
         );
 
         assertThat(response.status()).isEqualTo("PARTIAL");
-        assertThat(response.reasonCode()).isEqualTo("LEGACY_UNANCHORED_EVENTS");
-        assertThat(response.anchorCoverage().eventsWithoutLocalAnchorCount()).isEqualTo(1);
+        assertThat(response.reasonCode()).isEqualTo("INTERNAL_ERROR");
+        assertThat(response.anchorCoverage().eventsWithLocalAnchor()).isZero();
+        assertThat(response.anchorCoverage().eventsMissingExternalAnchor()).isEqualTo(1);
     }
 
     @Test
@@ -189,8 +194,26 @@ class AuditEvidenceExportServiceTest {
         );
 
         assertThat(response.status()).isEqualTo("PARTIAL");
-        assertThat(response.reasonCode()).isEqualTo("EXTERNAL_ANCHORS_DISABLED");
+        assertThat(response.reasonCode()).isEqualTo("EXTERNAL_ANCHORS_UNAVAILABLE");
         assertThat(response.externalAnchorStatus()).isEqualTo("DISABLED");
+    }
+
+    @Test
+    void shouldReturnAvailableWithFullCoverageForEmptyExport() {
+        when(eventRepository.findEvidenceWindow(any(), any(), any(), anyInt())).thenReturn(List.of());
+
+        AuditEvidenceExportResponse response = service.export(
+                "2026-04-27T00:00:00Z",
+                "2026-04-28T00:00:00Z",
+                "alert-service",
+                null
+        );
+
+        assertThat(response.status()).isEqualTo("AVAILABLE");
+        assertThat(response.reasonCode()).isNull();
+        assertThat(response.externalAnchorStatus()).isEqualTo("AVAILABLE");
+        assertThat(response.anchorCoverage().totalEvents()).isZero();
+        assertThat(response.anchorCoverage().coverageRatio()).isEqualTo(1.0d);
     }
 
     @Test
@@ -206,7 +229,7 @@ class AuditEvidenceExportServiceTest {
         );
 
         assertThat(response.status()).isEqualTo("UNAVAILABLE");
-        assertThat(response.reasonCode()).isEqualTo("AUDIT_STORE_UNAVAILABLE");
+        assertThat(response.reasonCode()).isEqualTo("INTERNAL_ERROR");
         assertThat(response.externalAnchorStatus()).isEqualTo("UNAVAILABLE");
         assertThat(response.events()).isEmpty();
         assertThat(response.message()).doesNotContain("mongo", "internal-host", "timeout");

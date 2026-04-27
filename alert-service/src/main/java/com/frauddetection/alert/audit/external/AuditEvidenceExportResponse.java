@@ -50,7 +50,7 @@ public record AuditEvidenceExportResponse(
                 query.sourceService(),
                 query.from(),
                 query.to(),
-                "AUDIT_STORE_UNAVAILABLE",
+                "INTERNAL_ERROR",
                 "Audit evidence store is currently unavailable.",
                 "UNAVAILABLE",
                 AnchorCoverage.empty(),
@@ -59,20 +59,23 @@ public record AuditEvidenceExportResponse(
     }
 
     public record AnchorCoverage(
-            @JsonProperty("local_anchors_available_count")
-            int localAnchorsAvailableCount,
+            @JsonProperty("total_events")
+            int totalEvents,
 
-            @JsonProperty("external_anchors_available_count")
-            int externalAnchorsAvailableCount,
+            @JsonProperty("events_with_local_anchor")
+            int eventsWithLocalAnchor,
 
-            @JsonProperty("events_without_local_anchor_count")
-            int eventsWithoutLocalAnchorCount,
+            @JsonProperty("events_with_external_anchor")
+            int eventsWithExternalAnchor,
 
-            @JsonProperty("events_without_external_anchor_count")
-            int eventsWithoutExternalAnchorCount
+            @JsonProperty("events_missing_external_anchor")
+            int eventsMissingExternalAnchor,
+
+            @JsonProperty("coverage_ratio")
+            double coverageRatio
     ) {
         public static AnchorCoverage empty() {
-            return new AnchorCoverage(0, 0, 0, 0);
+            return new AnchorCoverage(0, 0, 0, 0, 1.0d);
         }
     }
 }

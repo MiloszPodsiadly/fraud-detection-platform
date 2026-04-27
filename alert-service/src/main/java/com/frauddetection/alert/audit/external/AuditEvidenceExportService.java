@@ -69,7 +69,7 @@ public class AuditEvidenceExportService {
             AuditEvidenceExportResponse response = AuditEvidenceExportResponse.unavailable(query);
             metrics.recordEvidenceExport("UNAVAILABLE");
             try {
-                auditEvidenceExport(query, response.count(), AuditOutcome.FAILED, "AUDIT_STORE_UNAVAILABLE");
+                auditEvidenceExport(query, response.count(), AuditOutcome.FAILED, "INTERNAL_ERROR");
             } catch (AuditPersistenceUnavailableException ignored) {
                 log.warn("Audit evidence export access audit could not be persisted.");
             }
@@ -79,22 +79,16 @@ public class AuditEvidenceExportService {
 
     private AuditEvidenceExportResponse available(AuditEvidenceExportQuery query, List<AuditEventDocument> documents) {
         if (documents.isEmpty()) {
-            String externalAnchorStatus = "disabled".equals(sink.sinkType()) ? "DISABLED" : "AVAILABLE";
-            String status = "DISABLED".equals(externalAnchorStatus) ? "PARTIAL" : "AVAILABLE";
-            String reasonCode = "DISABLED".equals(externalAnchorStatus) ? "EXTERNAL_ANCHORS_DISABLED" : null;
-            String message = "DISABLED".equals(externalAnchorStatus)
-                    ? "External audit anchoring is disabled; export contains local audit evidence only."
-                    : null;
             return new AuditEvidenceExportResponse(
-                    status,
+                    "AVAILABLE",
                     0,
                     query.limit(),
                     query.sourceService(),
                     query.from(),
                     query.to(),
-                    reasonCode,
-                    message,
-                    externalAnchorStatus,
+                    null,
+                    null,
+                    "AVAILABLE",
                     AuditEvidenceExportResponse.AnchorCoverage.empty(),
                     List.of()
             );
@@ -126,7 +120,8 @@ public class AuditEvidenceExportService {
                 })
                 .toList();
         AuditEvidenceExportResponse.AnchorCoverage coverage = coverage(events);
-        String reasonCode = reasonCode(coverage, externalAnchorLookup.status());
+        String externalAnchorStatus = externalAnchorStatus(coverage, externalAnchorLookup.status());
+        String reasonCode = reasonCode(coverage, externalAnchorStatus);
         String status = reasonCode == null ? "AVAILABLE" : "PARTIAL";
         return new AuditEvidenceExportResponse(
                 status,
@@ -137,7 +132,7 @@ public class AuditEvidenceExportService {
                 query.to(),
                 reasonCode,
                 message(reasonCode),
-                externalAnchorLookup.status(),
+                externalAnchorStatus,
                 coverage,
                 events
         );
@@ -173,40 +168,48 @@ public class AuditEvidenceExportService {
     private AuditEvidenceExportResponse.AnchorCoverage coverage(List<AuditEvidenceExportEvent> events) {
         int localAvailable = 0;
         int externalAvailable = 0;
-        int withoutLocal = 0;
-        int withoutExternal = 0;
         for (AuditEvidenceExportEvent event : events) {
-            if (event.localAnchor() == null) {
-                withoutLocal++;
-            } else {
+            if (event.localAnchor() != null) {
                 localAvailable++;
             }
-            if (event.externalAnchor() == null) {
-                withoutExternal++;
-            } else {
+            if (event.externalAnchor() != null) {
                 externalAvailable++;
             }
         }
+        int total = events.size();
+        int missingExternal = total - externalAvailable;
+        double coverageRatio = total == 0 ? 1.0d : (double) externalAvailable / (double) total;
         return new AuditEvidenceExportResponse.AnchorCoverage(
+                total,
                 localAvailable,
                 externalAvailable,
-                withoutLocal,
-                withoutExternal
+                missingExternal,
+                coverageRatio
         );
     }
 
+    private String externalAnchorStatus(AuditEvidenceExportResponse.AnchorCoverage coverage, String lookupStatus) {
+        if ("DISABLED".equals(lookupStatus) || "UNAVAILABLE".equals(lookupStatus)) {
+            return lookupStatus;
+        }
+        if (coverage.eventsMissingExternalAnchor() > 0) {
+            return "PARTIAL";
+        }
+        return "AVAILABLE";
+    }
+
     private String reasonCode(AuditEvidenceExportResponse.AnchorCoverage coverage, String externalAnchorStatus) {
-        if (coverage.eventsWithoutLocalAnchorCount() > 0) {
-            return "LEGACY_UNANCHORED_EVENTS";
+        if (coverage.eventsWithLocalAnchor() < coverage.totalEvents()) {
+            return "INTERNAL_ERROR";
         }
-        if ("DISABLED".equals(externalAnchorStatus)) {
-            return "EXTERNAL_ANCHORS_DISABLED";
-        }
-        if ("UNAVAILABLE".equals(externalAnchorStatus)) {
+        if ("DISABLED".equals(externalAnchorStatus) || "UNAVAILABLE".equals(externalAnchorStatus)) {
             return "EXTERNAL_ANCHORS_UNAVAILABLE";
         }
-        if (coverage.eventsWithoutExternalAnchorCount() > 0) {
-            return "EXTERNAL_ANCHOR_COVERAGE_INCOMPLETE";
+        if (coverage.eventsWithExternalAnchor() == 0 && coverage.totalEvents() > 0) {
+            return "EXTERNAL_ANCHORS_UNAVAILABLE";
+        }
+        if (coverage.eventsMissingExternalAnchor() > 0) {
+            return "EXTERNAL_ANCHOR_GAPS";
         }
         return null;
     }
@@ -216,10 +219,9 @@ public class AuditEvidenceExportService {
             return null;
         }
         return switch (reasonCode) {
-            case "LEGACY_UNANCHORED_EVENTS" -> "Some exported audit events do not have local chain anchor references.";
-            case "EXTERNAL_ANCHORS_DISABLED" -> "External audit anchoring is disabled; export contains local audit evidence only.";
+            case "INTERNAL_ERROR" -> "Audit evidence export is incomplete due to missing local anchor coverage.";
             case "EXTERNAL_ANCHORS_UNAVAILABLE" -> "External audit anchors could not be loaded; export is incomplete as an evidence package.";
-            case "EXTERNAL_ANCHOR_COVERAGE_INCOMPLETE" -> "Some exported audit events do not have matching external anchor references.";
+            case "EXTERNAL_ANCHOR_GAPS" -> "Some exported audit events do not have matching external anchor references.";
             default -> "Audit evidence export is partial.";
         };
     }
