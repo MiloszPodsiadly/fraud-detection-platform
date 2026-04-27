@@ -274,17 +274,21 @@ Metrics such as `fraud_platform_audit_events_persisted_total`, `fraud_platform_a
 
 ### FDP-21 Trust Attestation
 
-FDP-21 adds `GET /api/v1/audit/trust/attestation`, protected by `audit:verify`, as a derived trust assessment. It does not replace FDP-19 internal integrity verification, FDP-20 external anchor verification, or FDP-20 evidence export. The response reports `trust_level`, internal integrity status, external integrity status, external anchor status, single-head anchor coverage, latest chain head fields, an `attestation_fingerprint`, optional `attestation_signature`, `signing_key_id`, `signing_mode`, and explicit limitations.
+FDP-21 adds `GET /api/v1/audit/trust/attestation`, protected by `audit:verify`, as a derived trust assessment. Access is itself audited with `READ_AUDIT_TRUST_ATTESTATION` and bounded metadata only. It does not replace FDP-19 internal integrity verification, FDP-20 external anchor verification, or FDP-20 evidence export. The response reports `trust_level`, internal integrity status, external integrity status, external anchor status, single-head anchor coverage, latest chain head fields, an `attestation_fingerprint`, optional `attestation_signature`, `signing_key_id`, `signer_mode`, `attestation_signature_strength`, `external_trust_dependency`, and explicit limitations.
+
+#### FDP-21 Trust Model
 
 Trust levels:
 
 - `INTERNAL_ONLY`: local application-level integrity is the only available signal.
 - `PARTIAL_EXTERNAL`: an external boundary is configured or visible, but full external anchor consistency is not proven.
 - `EXTERNALLY_ANCHORED`: FDP-20 external anchor verification is valid for the local head.
-- `SIGNED_ATTESTATION`: the attestation report is signed and external anchor verification is valid.
+- `SIGNED_ATTESTATION`: external anchor verification is valid and attestation signing is production-ready.
 - `UNAVAILABLE`: internal audit integrity cannot be read.
 
-The FDP-21 local-dev signer provides integrity metadata only. It is not legal signing, not legal notarization, not WORM storage, not SIEM, and not KMS/HSM signing unless a real KMS/HSM adapter is explicitly integrated. `local-dev` signing is rejected in prod-like profiles; `kms-ready` fails startup until a real adapter exists. `external-object-store` remains an FDP-20/FDP-22+ external anchor sink placeholder and fails startup if selected; FDP-21 does not add a second object-store or external verification implementation.
+The attestation fingerprint is canonical over the full attestation context, including `source_service`, `limit`, `mode`, `signer_mode`, `signature_key_id` when present, trust status fields, anchor coverage, latest chain fields, external anchor reference, and limitations. Changing the query context or external anchor changes the fingerprint.
+
+The FDP-21 local-dev signer provides integrity metadata only. It does not increase `trust_level`, does not provide external trust, and is not legal signing, not legal notarization, not WORM storage, not SIEM, and not KMS/HSM signing unless a real KMS/HSM adapter is explicitly integrated. `local-dev` signing is rejected in prod-like profiles; `kms-ready` fails startup until a real adapter exists. `external-object-store` remains an FDP-20/FDP-22+ external anchor sink placeholder and fails startup if selected; FDP-21 does not add a second object-store or external verification implementation.
 
 FDP-21 relies on FDP-19/FDP-20 source-of-truth services. It does not mutate audit events, publish external anchors, export evidence, trigger alerts, enforce workflow, alter scoring, change Kafka contracts, switch models, retrain, rollback, or provide a compliance archive.
 

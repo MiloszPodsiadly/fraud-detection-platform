@@ -19,7 +19,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [SUBMIT_ANALYST_DECISION, UPDATE_FRAUD_CASE, READ_AUDIT_EVENTS, VERIFY_AUDIT_INTEGRITY, VERIFY_EXTERNAL_AUDIT_INTEGRITY, EXPORT_AUDIT_EVIDENCE]
+            enum: [SUBMIT_ANALYST_DECISION, UPDATE_FRAUD_CASE, READ_AUDIT_EVENTS, VERIFY_AUDIT_INTEGRITY, VERIFY_EXTERNAL_AUDIT_INTEGRITY, EXPORT_AUDIT_EVIDENCE, READ_AUDIT_TRUST_ATTESTATION]
         - name: actor_id
           in: query
           required: false
@@ -33,7 +33,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [ALERT, FRAUD_CASE, AUDIT_EVENT, AUDIT_INTEGRITY, AUDIT_EXTERNAL_INTEGRITY, AUDIT_EVIDENCE_EXPORT]
+            enum: [ALERT, FRAUD_CASE, AUDIT_EVENT, AUDIT_INTEGRITY, AUDIT_EXTERNAL_INTEGRITY, AUDIT_EVIDENCE_EXPORT, AUDIT_TRUST_ATTESTATION]
         - name: resource_id
           in: query
           required: false
@@ -240,7 +240,7 @@ paths:
   /api/v1/audit/trust/attestation:
     get:
       summary: Get derived audit trust attestation
-      description: Returns a bounded derived trust assessment over FDP-19 internal integrity and FDP-20 external anchor verification signals. Requires audit:verify. This endpoint does not implement a second external verification stack, a second evidence export, an external anchor sink, legal notarization, WORM storage, SIEM integration, or KMS/HSM signing unless explicitly integrated. Local-dev signing provides integrity metadata only.
+      description: Returns a bounded derived trust assessment over FDP-19 internal integrity and FDP-20 external anchor verification signals. Requires audit:verify and records READ_AUDIT_TRUST_ATTESTATION with bounded metadata. The attestation fingerprint includes source_service, limit, mode, signer_mode, signature_key_id when present, trust status fields, anchor coverage, latest chain fields, external anchor reference, and limitations so it can be reproduced externally. This endpoint does not implement a second external verification stack, a second evidence export, an external anchor sink, legal notarization, WORM storage, SIEM integration, or KMS/HSM signing unless explicitly integrated. Local-dev signing provides integrity metadata only and never upgrades trust level.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -731,6 +731,10 @@ components:
         - external_anchor_status
         - anchor_coverage
         - export_fingerprint
+        - trust_level
+        - internal_integrity_status
+        - external_integrity_status
+        - attestation_fingerprint
       properties:
         correlation_id:
           type: string
@@ -798,11 +802,28 @@ components:
         external_anchor_status:
           type: string
           nullable: true
-          enum: [AVAILABLE, PARTIAL, UNAVAILABLE, DISABLED]
+          enum: [AVAILABLE, PARTIAL, UNAVAILABLE, DISABLED, VALID, MISSING, STALE, INVALID]
         anchor_coverage:
           nullable: true
           $ref: "#/components/schemas/AuditEvidenceExportAnchorCoverage"
         export_fingerprint:
+          type: string
+          nullable: true
+          minLength: 64
+          maxLength: 64
+        trust_level:
+          type: string
+          nullable: true
+          enum: [INTERNAL_ONLY, PARTIAL_EXTERNAL, EXTERNALLY_ANCHORED, SIGNED_ATTESTATION, UNAVAILABLE]
+        internal_integrity_status:
+          type: string
+          nullable: true
+          enum: [VALID, INVALID, PARTIAL, UNAVAILABLE]
+        external_integrity_status:
+          type: string
+          nullable: true
+          enum: [VALID, INVALID, PARTIAL, UNAVAILABLE]
+        attestation_fingerprint:
           type: string
           nullable: true
           minLength: 64
@@ -1128,7 +1149,9 @@ components:
         - external_anchor_status
         - anchor_coverage
         - attestation_fingerprint
-        - signing_mode
+        - signer_mode
+        - attestation_signature_strength
+        - external_trust_dependency
         - source_service
         - limit
         - limitations
@@ -1139,7 +1162,7 @@ components:
         trust_level:
           type: string
           enum: [INTERNAL_ONLY, PARTIAL_EXTERNAL, EXTERNALLY_ANCHORED, SIGNED_ATTESTATION, UNAVAILABLE]
-          description: Derived trust assessment. SIGNED_ATTESTATION requires valid external anchoring plus enabled attestation signing.
+          description: Derived trust assessment. SIGNED_ATTESTATION requires valid external anchoring plus production-ready attestation signing; local-dev signing never upgrades trust level.
         internal_integrity_status:
           type: string
           enum: [VALID, INVALID, PARTIAL, UNAVAILABLE]
@@ -1174,9 +1197,18 @@ components:
           type: string
           nullable: true
           description: Signing key id for attestation_signature; no private key material is exposed.
-        signing_mode:
+        signer_mode:
           type: string
-          enum: [disabled, local-dev]
+          enum: [disabled, local-dev, kms-ready]
+          description: Configured attestation signer mode. kms-ready fails closed unless a real KMS/HSM adapter is integrated.
+        attestation_signature_strength:
+          type: string
+          enum: [NONE, LOCAL_DEV, PRODUCTION_READY]
+          description: LOCAL_DEV signatures are integrity-only and do not add external trust. PRODUCTION_READY is reserved for future real KMS/HSM-backed signing.
+        external_trust_dependency:
+          type: string
+          enum: [REQUIRED, OPTIONAL]
+          description: REQUIRED when the derived trust level depends on valid FDP-20 external anchors.
         source_service:
           type: string
           enum: [alert-service]
@@ -1188,7 +1220,7 @@ components:
           type: array
           items:
             type: string
-          description: Explicit limitations such as not_legal_notarization, not_worm_storage, not_siem_integration, and derived_from_fdp19_fdp20_source_of_truth.
+          description: Explicit limitations such as not_legal_notarization, not_worm_storage, not_siem_integration, not_kms_hsm_signing_unless_explicitly_integrated, local_signature_not_external_trust, external_trust_incomplete, and derived_from_fdp19_fdp20_source_of_truth.
     AuditTrustAttestationAnchorCoverage:
       type: object
       additionalProperties: false
