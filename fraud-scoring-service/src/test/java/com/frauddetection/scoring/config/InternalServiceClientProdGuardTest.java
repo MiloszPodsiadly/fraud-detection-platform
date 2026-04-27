@@ -2,15 +2,22 @@ package com.frauddetection.scoring.config;
 
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jwt.SignedJWT;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.mock.env.MockEnvironment;
 
+import javax.net.ssl.SSLHandshakeException;
 import java.text.ParseException;
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.security.cert.CertificateExpiredException;
 import java.util.Date;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -226,6 +233,85 @@ class InternalServiceClientProdGuardTest {
         assertThat(headers.containsKey("X-Internal-Service-Token")).isFalse();
     }
 
+    @Test
+    void shouldRejectMismatchedMtlsExpectedServerIdentityBeforeCreatingClient() {
+        assertThatThrownBy(() -> InternalServiceClientRequestFactory.create(
+                URI.create("https://wrong-service:8090"),
+                Duration.ofSeconds(1),
+                Duration.ofSeconds(1),
+                mtlsProperties()
+        ))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Internal mTLS expected server identity does not match target host.");
+    }
+
+    @Test
+    void shouldExposeMtlsCertificateExpiryAndAgeMetrics() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        InternalMtlsCertificateMonitor monitor = new InternalMtlsCertificateMonitor(
+                mtlsPropertiesWithCertificate("deployment/service-identity/mtls/fraud-scoring-service.pem"),
+                registry
+        );
+
+        monitor.afterPropertiesSet();
+
+        assertThat(registry.get("fraud_internal_mtls_cert_expiry_seconds")
+                .tag("source_service", "fraud-scoring-service")
+                .tag("target_service", "ml-inference-service")
+                .gauge()
+                .value()).isGreaterThan(0);
+        assertThat(registry.get("fraud_internal_mtls_cert_age_seconds")
+                .tag("source_service", "fraud-scoring-service")
+                .tag("target_service", "ml-inference-service")
+                .gauge()
+                .value()).isGreaterThan(0);
+    }
+
+    @Test
+    void shouldFailStartupWhenMtlsCertificateIsExpired() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        InternalMtlsCertificateMonitor monitor = new InternalMtlsCertificateMonitor(
+                mtlsPropertiesWithCertificate("deployment/service-identity/mtls/expired-service.pem"),
+                registry
+        );
+
+        assertThatThrownBy(monitor::afterPropertiesSet)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Internal mTLS client certificate is expired.");
+    }
+
+    @Test
+    void shouldReportWarnHealthWhenMtlsCertificateExpiresSoon() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        Instant now = Instant.parse("2026-04-27T12:00:00Z");
+        InternalMtlsCertificateMonitor monitor = new InternalMtlsCertificateMonitor(
+                mtlsProperties(),
+                registry,
+                Clock.fixed(now, ZoneOffset.UTC),
+                () -> new InternalMtlsCertificateMonitor.CertificateWindow(
+                        Date.from(now.minus(Duration.ofHours(1))),
+                        Date.from(now.plus(Duration.ofHours(12)))
+                )
+        );
+
+        monitor.afterPropertiesSet();
+
+        assertThat(monitor.health().getStatus().getCode()).isEqualTo("WARN");
+    }
+
+    @Test
+    void shouldClassifyMtlsHandshakeFailuresWithBoundedReasons() {
+        assertThat(InternalMtlsClientHandshakeMetrics.reason(
+                new RuntimeException(new CertificateExpiredException())
+        )).isEqualTo("EXPIRED_CERT");
+        assertThat(InternalMtlsClientHandshakeMetrics.reason(
+                new RuntimeException(new SSLHandshakeException("No name matching ml-inference-service found"))
+        )).isEqualTo("HOSTNAME_MISMATCH");
+        assertThat(InternalMtlsClientHandshakeMetrics.reason(
+                new RuntimeException(new SSLHandshakeException("PKIX path building failed"))
+        )).isEqualTo("UNTRUSTED_CA");
+    }
+
     private MockEnvironment environment(String profile) {
         MockEnvironment environment = new MockEnvironment();
         environment.setActiveProfiles(profile);
@@ -299,6 +385,10 @@ class InternalServiceClientProdGuardTest {
     }
 
     private InternalServiceClientProperties mtlsProperties() {
+        return mtlsPropertiesWithCertificate("client.pem");
+    }
+
+    private InternalServiceClientProperties mtlsPropertiesWithCertificate(String certificatePath) {
         return new InternalServiceClientProperties(
                 true,
                 "MTLS_SERVICE_IDENTITY",
@@ -307,7 +397,7 @@ class InternalServiceClientProdGuardTest {
                 false,
                 InternalServiceClientProperties.Jwt.empty(),
                 new InternalServiceClientProperties.Mtls(
-                        "client.pem",
+                        repoPath(certificatePath).toString(),
                         "client-key.pem",
                         "ca.pem",
                         "ml-inference-service",

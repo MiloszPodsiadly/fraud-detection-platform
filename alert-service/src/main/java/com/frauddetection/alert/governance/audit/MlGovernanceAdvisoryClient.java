@@ -3,6 +3,8 @@ package com.frauddetection.alert.governance.audit;
 import com.frauddetection.alert.security.internal.InternalServiceAuthHeaders;
 import com.frauddetection.alert.security.internal.InternalServiceClientProperties;
 import com.frauddetection.alert.security.internal.InternalServiceClientRequestFactory;
+import com.frauddetection.alert.security.internal.InternalMtlsClientHandshakeMetrics;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -18,7 +20,8 @@ public class MlGovernanceAdvisoryClient implements GovernanceAdvisoryClient {
     public MlGovernanceAdvisoryClient(
             GovernanceAuditProperties properties,
             InternalServiceAuthHeaders internalAuthHeaders,
-            InternalServiceClientProperties internalAuthProperties
+            InternalServiceClientProperties internalAuthProperties,
+            MeterRegistry meterRegistry
     ) {
         this.restClient = RestClient.builder()
                 .baseUrl(properties.mlGovernanceBaseUrl().toString())
@@ -34,7 +37,14 @@ public class MlGovernanceAdvisoryClient implements GovernanceAdvisoryClient {
                         request.getHeaders().set("Connection", "close");
                     }
                     internalAuthHeaders.apply(request.getHeaders());
-                    return execution.execute(request, body);
+                    try {
+                        return execution.execute(request, body);
+                    } catch (RuntimeException exception) {
+                        if ("MTLS_SERVICE_IDENTITY".equals(internalAuthProperties.normalizedMode())) {
+                            InternalMtlsClientHandshakeMetrics.recordIfMtlsFailure(exception, meterRegistry);
+                        }
+                        throw exception;
+                    }
                 })
                 .build();
     }

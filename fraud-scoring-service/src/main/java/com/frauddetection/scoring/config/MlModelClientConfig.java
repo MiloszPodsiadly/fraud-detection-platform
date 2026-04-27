@@ -1,5 +1,6 @@
 package com.frauddetection.scoring.config;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.client.RestClient;
@@ -14,6 +15,7 @@ public class MlModelClientConfig {
             MlModelClientProperties properties,
             InternalServiceAuthHeaders internalAuthHeaders,
             InternalServiceClientProperties internalAuthProperties,
+            MeterRegistry meterRegistry,
             RestClient.Builder builder
     ) {
         return builder
@@ -29,7 +31,14 @@ public class MlModelClientConfig {
                         request.getHeaders().set("Connection", "close");
                     }
                     internalAuthHeaders.apply(request.getHeaders());
-                    return execution.execute(request, body);
+                    try {
+                        return execution.execute(request, body);
+                    } catch (RuntimeException exception) {
+                        if ("MTLS_SERVICE_IDENTITY".equals(internalAuthProperties.normalizedMode())) {
+                            InternalMtlsClientHandshakeMetrics.recordIfMtlsFailure(exception, meterRegistry);
+                        }
+                        throw exception;
+                    }
                 })
                 .build();
     }
