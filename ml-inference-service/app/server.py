@@ -17,6 +17,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import jwt
+from cryptography import x509
 from jwt import (
     ExpiredSignatureError,
     InvalidAlgorithmError,
@@ -130,6 +131,21 @@ INTERNAL_MTLS_CERTIFICATE_EXPIRY = Gauge(
     "fraud_internal_mtls_certificate_expiry_seconds",
     "Seconds until the accepted internal mTLS client certificate expires.",
     ("source_service", "target_service"),
+)
+INTERNAL_MTLS_CERT_EXPIRY = Gauge(
+    "fraud_internal_mtls_cert_expiry_seconds",
+    "Seconds until an internal mTLS certificate expires.",
+    ("source_service", "target_service"),
+)
+INTERNAL_MTLS_CERT_AGE = Gauge(
+    "fraud_internal_mtls_cert_age_seconds",
+    "Seconds since an internal mTLS certificate became valid.",
+    ("source_service", "target_service"),
+)
+INTERNAL_MTLS_HANDSHAKE_FAILURES = Counter(
+    "fraud_internal_mtls_handshake_failures_total",
+    "Rejected internal mTLS certificate handshakes or certificate-presenting requests.",
+    ("reason",),
 )
 INTERNAL_AUTH_REPLAY_REJECTIONS = Counter(
     "fraud_internal_auth_replay_rejected_total",
@@ -263,6 +279,7 @@ class InternalServicePrincipal:
     authenticated_at: datetime
     auth_mode: str
     certificate_expires_at: datetime | None = None
+    certificate_not_before: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -301,6 +318,15 @@ REPLAY_REASON_EXPIRED = "EXPIRED"
 REPLAY_REASON_TOO_OLD = "TOO_OLD"
 REPLAY_REASON_FUTURE_IAT = "FUTURE_IAT"
 REPLAY_REASON_REPLAY_DETECTED = "REPLAY_DETECTED"
+MTLS_HANDSHAKE_FAILURE_REASONS = {
+    "EXPIRED_CERT",
+    "UNTRUSTED_CA",
+    "HOSTNAME_MISMATCH",
+    "MISSING_CERT",
+}
+MTLS_CERT_EXPIRES_SOON_SECONDS = 7 * 24 * 60 * 60
+MTLS_CERT_EXPIRES_IMMINENTLY_SECONDS = 24 * 60 * 60
+MTLS_CERT_ROTATION_AGE_WARNING_SECONDS = 90 * 24 * 60 * 60
 DEFAULT_JWT_MAX_TOKEN_AGE_SECONDS = 300
 DEFAULT_JWT_MAX_ALLOWED_TTL_SECONDS = 300
 DEFAULT_JWT_CLOCK_SKEW_SECONDS = 30
@@ -561,6 +587,112 @@ def _spiffe_uri_for_service(service_name: str) -> str:
     return f"spiffe://{_mtls_spiffe_trust_domain()}/{service_name}"
 
 
+def _certificate_datetime(value: Any) -> datetime:
+    if not isinstance(value, datetime):
+        raise ValueError("certificate timestamp is invalid")
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _load_pem_certificate(path: str) -> x509.Certificate:
+    with open(path, "rb") as handle:
+        return x509.load_pem_x509_certificate(handle.read())
+
+
+def _certificate_validity_from_pem(path: str) -> tuple[datetime, datetime]:
+    certificate = _load_pem_certificate(path)
+    raw_not_before = certificate.not_valid_before_utc if hasattr(certificate, "not_valid_before_utc") else certificate.not_valid_before
+    raw_not_after = certificate.not_valid_after_utc if hasattr(certificate, "not_valid_after_utc") else certificate.not_valid_after
+    not_before = _certificate_datetime(raw_not_before)
+    not_after = _certificate_datetime(raw_not_after)
+    return not_before, not_after
+
+
+def _certificate_validity_from_peer(peer_certificate: dict[str, Any]) -> tuple[datetime | None, datetime | None]:
+    not_before: datetime | None = None
+    not_after: datetime | None = None
+    raw_not_before = peer_certificate.get("notBefore")
+    raw_not_after = peer_certificate.get("notAfter")
+    if isinstance(raw_not_before, str) and raw_not_before.strip():
+        not_before = datetime.fromtimestamp(ssl.cert_time_to_seconds(raw_not_before), timezone.utc)
+    if isinstance(raw_not_after, str) and raw_not_after.strip():
+        not_after = datetime.fromtimestamp(ssl.cert_time_to_seconds(raw_not_after), timezone.utc)
+    return not_before, not_after
+
+
+def _record_mtls_handshake_failure(reason: str) -> None:
+    normalized = reason if reason in MTLS_HANDSHAKE_FAILURE_REASONS else "UNTRUSTED_CA"
+    INTERNAL_MTLS_HANDSHAKE_FAILURES.labels(normalized).inc()
+
+
+def _record_mtls_certificate_lifecycle(
+        source_service: str,
+        target_service: str,
+        not_before: datetime | None,
+        not_after: datetime | None,
+) -> None:
+    now = datetime.now(timezone.utc)
+    if not_after is not None:
+        INTERNAL_MTLS_CERT_EXPIRY.labels(source_service, target_service).set(
+            max((not_after - now).total_seconds(), 0.0)
+        )
+    if not_before is not None:
+        INTERNAL_MTLS_CERT_AGE.labels(source_service, target_service).set(
+            max((now - not_before).total_seconds(), 0.0)
+        )
+
+
+def _mtls_certificate_health() -> dict[str, Any]:
+    if _internal_auth_mode() != "MTLS_SERVICE_IDENTITY":
+        return {"status": "UP", "mode": _internal_auth_mode()}
+    try:
+        not_before, not_after = _certificate_validity_from_pem(_mtls_server_certfile())
+    except (OSError, ValueError):
+        return {"status": "DOWN", "reason": "CERTIFICATE_UNAVAILABLE"}
+    now = datetime.now(timezone.utc)
+    seconds_until_expiry = (not_after - now).total_seconds()
+    _record_mtls_certificate_lifecycle(
+        INTERNAL_AUTH_TARGET_SERVICE,
+        INTERNAL_AUTH_TARGET_SERVICE,
+        not_before,
+        not_after,
+    )
+    if seconds_until_expiry <= 0:
+        return {"status": "DOWN", "reason": "CERTIFICATE_EXPIRED"}
+    if seconds_until_expiry < MTLS_CERT_EXPIRES_SOON_SECONDS:
+        return {"status": "WARN", "reason": "CERTIFICATE_EXPIRES_SOON"}
+    return {"status": "UP"}
+
+
+def _log_mtls_certificate_lifecycle(source_service: str, target_service: str, not_before: datetime, not_after: datetime) -> None:
+    now = datetime.now(timezone.utc)
+    seconds_until_expiry = (not_after - now).total_seconds()
+    age_seconds = (now - not_before).total_seconds()
+    level = None
+    event = None
+    if seconds_until_expiry <= 0:
+        raise RuntimeError("MTLS_SERVICE_IDENTITY server certificate is expired.")
+    if seconds_until_expiry < MTLS_CERT_EXPIRES_IMMINENTLY_SECONDS:
+        level = "error"
+        event = "internal_mtls_certificate_expires_imminently"
+    elif seconds_until_expiry < MTLS_CERT_EXPIRES_SOON_SECONDS:
+        level = "warning"
+        event = "internal_mtls_certificate_expires_soon"
+    elif age_seconds > MTLS_CERT_ROTATION_AGE_WARNING_SECONDS:
+        level = "warning"
+        event = "internal_mtls_certificate_rotation_age_high"
+    if level is not None and event is not None:
+        print(json.dumps({
+            "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+            "service": "ml-inference-service",
+            "event": event,
+            "level": level,
+            "sourceService": source_service,
+            "targetService": target_service,
+        }, separators=(",", ":"), sort_keys=True), flush=True)
+
+
 def _load_jwks() -> dict[str, Any]:
     raw = _jwt_jwks_json()
     if not raw:
@@ -753,19 +885,21 @@ def _mtls_service_principal_from_certificate(
     authorities = allowed_authorities[matched_service_name]
     if required_authority not in authorities:
         return None, 403, "missing_internal_authority"
+    certificate_not_before: datetime | None = None
     certificate_expires_at: datetime | None = None
-    not_after = peer_certificate.get("notAfter")
-    if isinstance(not_after, str) and not_after.strip():
-        try:
-            certificate_expires_at = datetime.fromtimestamp(ssl.cert_time_to_seconds(not_after), timezone.utc)
-        except (OSError, ValueError):
-            return None, 403, "invalid_client_certificate"
+    try:
+        certificate_not_before, certificate_expires_at = _certificate_validity_from_peer(peer_certificate)
+    except (OSError, ValueError):
+        return None, 403, "invalid_client_certificate"
+    if certificate_expires_at is not None and certificate_expires_at <= datetime.now(timezone.utc):
+        return None, 403, "invalid_client_certificate"
     return InternalServicePrincipal(
         service_name=matched_service_name,
         authorities=authorities,
         authenticated_at=datetime.now(timezone.utc),
         auth_mode="MTLS_SERVICE_IDENTITY",
         certificate_expires_at=certificate_expires_at,
+        certificate_not_before=certificate_not_before,
     ), 200, "allowed"
 
 
@@ -793,6 +927,23 @@ def _validate_internal_auth_startup(
         raise RuntimeError("MTLS_READY internal auth mode is a fail-closed placeholder until mTLS is configured.")
     if normalized_mode == "MTLS_SERVICE_IDENTITY" and not _mtls_configured():
         raise RuntimeError("MTLS_SERVICE_IDENTITY internal auth mode requires server certificate, server private key, CA trust material, and service authorities.")
+    if normalized_mode == "MTLS_SERVICE_IDENTITY" and _mtls_configured():
+        try:
+            not_before, not_after = _certificate_validity_from_pem(_mtls_server_certfile())
+        except (OSError, ValueError) as exc:
+            raise RuntimeError("MTLS_SERVICE_IDENTITY server certificate is invalid or unavailable.") from exc
+        _record_mtls_certificate_lifecycle(
+            INTERNAL_AUTH_TARGET_SERVICE,
+            INTERNAL_AUTH_TARGET_SERVICE,
+            not_before,
+            not_after,
+        )
+        _log_mtls_certificate_lifecycle(
+            INTERNAL_AUTH_TARGET_SERVICE,
+            INTERNAL_AUTH_TARGET_SERVICE,
+            not_before,
+            not_after,
+        )
 
 
 _validate_internal_auth_startup()
@@ -851,7 +1002,12 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
         path = parsed_url.path
         if path == "/health":
             started_at = time.perf_counter()
-            self._send_json(200, {"status": "UP", "modelName": MODEL_NAME, "modelVersion": MODEL_VERSION})
+            self._send_json(200, {
+                "status": "UP",
+                "modelName": MODEL_NAME,
+                "modelVersion": MODEL_VERSION,
+                "mtlsCert": _mtls_certificate_health(),
+            })
             self._record_request(path, "GET", 200, "success", started_at)
             self._log_event("health_check", statusCode=200)
             return
@@ -1200,10 +1356,21 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
         if principal.auth_mode == "MTLS_SERVICE_IDENTITY" and principal.certificate_expires_at is not None:
             expires_in = max((principal.certificate_expires_at - datetime.now(timezone.utc)).total_seconds(), 0.0)
             INTERNAL_MTLS_CERTIFICATE_EXPIRY.labels(source_service, INTERNAL_AUTH_TARGET_SERVICE).set(expires_in)
+            _record_mtls_certificate_lifecycle(
+                source_service,
+                INTERNAL_AUTH_TARGET_SERVICE,
+                principal.certificate_not_before,
+                principal.certificate_expires_at,
+            )
 
     def _record_internal_auth_failure(self, endpoint: str, reason: str) -> None:
         normalized_reason = reason if reason in INTERNAL_AUTH_FAILURE_REASONS else "invalid_internal_token"
         INTERNAL_AUTH_FAILURES.labels(INTERNAL_AUTH_TARGET_SERVICE, _internal_auth_mode(), normalized_reason).inc()
+        if _internal_auth_mode() == "MTLS_SERVICE_IDENTITY":
+            if normalized_reason == "missing_client_certificate":
+                _record_mtls_handshake_failure("MISSING_CERT")
+            elif normalized_reason == "invalid_client_certificate":
+                _record_mtls_handshake_failure("EXPIRED_CERT")
         self._log_event(
             "internal_auth_rejected",
             targetService=INTERNAL_AUTH_TARGET_SERVICE,

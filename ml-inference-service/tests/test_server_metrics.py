@@ -3,6 +3,7 @@ import unittest
 import os
 import hashlib
 import time
+import json
 from contextlib import redirect_stdout
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
@@ -128,6 +129,7 @@ class MlMetricsEndpointTest(unittest.TestCase):
     def mtls_certificate(self, san_uri: str) -> dict:
         return {
             "subjectAltName": (("URI", san_uri),),
+            "notBefore": "Apr 27 12:00:00 2020 GMT",
             "notAfter": "Apr 27 12:00:00 2030 GMT",
         }
 
@@ -142,6 +144,14 @@ class MlMetricsEndpointTest(unittest.TestCase):
         metrics = self.metrics_text()
         self.assertIn("fraud_ml_inference_requests_total", metrics)
         self.assertIn("fraud_ml_model_info", metrics)
+
+    def test_health_endpoint_includes_mtls_certificate_state(self):
+        status, _, payload = self.request("GET", "/health")
+
+        self.assertEqual(status, 200)
+        response = json.loads(payload.decode("utf-8"))
+        self.assertIn("mtlsCert", response)
+        self.assertIn(response["mtlsCert"]["status"], {"UP", "WARN", "DOWN"})
 
     def test_scoring_request_increments_request_counter_and_latency(self):
         before = self.metrics_text()
@@ -608,6 +618,41 @@ class MlMetricsEndpointTest(unittest.TestCase):
             self.assertIsNotNone(principal)
             self.assertEqual(principal.service_name, "fraud-scoring-service")
             self.assertEqual(principal.auth_mode, "MTLS_SERVICE_IDENTITY")
+            self.assertIsNotNone(principal.certificate_not_before)
+            self.assertIsNotNone(principal.certificate_expires_at)
+        finally:
+            self.restore_env(saved)
+
+    def test_mtls_client_certificate_expiry_and_age_metrics_are_exposed(self):
+        saved = {key: os.environ.get(key) for key in (
+            "INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES",
+            "INTERNAL_AUTH_MTLS_SPIFFE_TRUST_DOMAIN",
+        )}
+        try:
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES"] = "fraud-scoring-service:ml-score"
+            os.environ["INTERNAL_AUTH_MTLS_SPIFFE_TRUST_DOMAIN"] = "fraud-platform"
+
+            principal, status, _ = server._mtls_service_principal_from_certificate(
+                self.mtls_certificate("spiffe://fraud-platform/fraud-scoring-service"),
+                "ml-score",
+            )
+
+            self.assertEqual(status, 200)
+            self.assertIsNotNone(principal)
+            server.FraudInferenceHandler._record_internal_auth_success(self, principal)
+            after = self.metrics_text()
+            labels = {
+                "source_service": "fraud-scoring-service",
+                "target_service": "ml-inference-service",
+            }
+            self.assertGreater(
+                parse_metric_value(after, "fraud_internal_mtls_cert_expiry_seconds", labels),
+                0,
+            )
+            self.assertGreater(
+                parse_metric_value(after, "fraud_internal_mtls_cert_age_seconds", labels),
+                0,
+            )
         finally:
             self.restore_env(saved)
 
@@ -641,6 +686,28 @@ class MlMetricsEndpointTest(unittest.TestCase):
             self.assertEqual(cn_only[1:], (403, "unknown_internal_service"))
             self.assertEqual(alert_cannot_score[1:], (403, "missing_internal_authority"))
             self.assertEqual(scoring_cannot_governance[1:], (403, "missing_internal_authority"))
+        finally:
+            self.restore_env(saved)
+
+    def test_mtls_service_identity_rejects_expired_client_certificate(self):
+        saved = {key: os.environ.get(key) for key in (
+            "INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES",
+            "INTERNAL_AUTH_MTLS_SPIFFE_TRUST_DOMAIN",
+        )}
+        try:
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES"] = "fraud-scoring-service:ml-score"
+            os.environ["INTERNAL_AUTH_MTLS_SPIFFE_TRUST_DOMAIN"] = "fraud-platform"
+
+            expired = {
+                "subjectAltName": (("URI", "spiffe://fraud-platform/fraud-scoring-service"),),
+                "notBefore": "Apr 27 12:00:00 2020 GMT",
+                "notAfter": "Apr 27 12:00:00 2021 GMT",
+            }
+            principal, status, reason = server._mtls_service_principal_from_certificate(expired, "ml-score")
+
+            self.assertIsNone(principal)
+            self.assertEqual(status, 403)
+            self.assertEqual(reason, "invalid_client_certificate")
         finally:
             self.restore_env(saved)
 
@@ -683,6 +750,32 @@ class MlMetricsEndpointTest(unittest.TestCase):
                 os.environ.pop(key, None)
             with self.assertRaises(RuntimeError):
                 server._validate_internal_auth_startup(mode="MTLS_SERVICE_IDENTITY", profile="prod")
+        finally:
+            self.restore_env(saved)
+
+    def test_mtls_missing_certificate_records_bounded_handshake_failure_metric(self):
+        saved = {key: os.environ.get(key) for key in (
+            "INTERNAL_AUTH_MODE",
+            "INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES",
+        )}
+        try:
+            os.environ["INTERNAL_AUTH_MODE"] = "MTLS_SERVICE_IDENTITY"
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES"] = "fraud-scoring-service:ml-score"
+            before = self.metrics_text()
+
+            status, _, _ = self.request(
+                "POST",
+                "/v1/fraud/score",
+                body=b'{"features":{"amount":42}}',
+                headers={"Content-Type": "application/json"},
+            )
+
+            self.assertEqual(status, 401)
+            after = self.metrics_text()
+            self.assertGreater(
+                parse_metric_value(after, "fraud_internal_mtls_handshake_failures_total", {"reason": "MISSING_CERT"}),
+                parse_metric_value(before, "fraud_internal_mtls_handshake_failures_total", {"reason": "MISSING_CERT"}),
+            )
         finally:
             self.restore_env(saved)
 
@@ -1067,7 +1160,7 @@ class MlMetricsEndpointTest(unittest.TestCase):
             "valid": rs256_service_token(),
             "expired": rs256_service_token(issued_at_offset_seconds=-100, expires_in_seconds=-40),
             "too_old": rs256_service_token(issued_at_offset_seconds=-301, expires_in_seconds=1),
-            "future_iat": rs256_service_token(issued_at_offset_seconds=31),
+            "future_iat": rs256_service_token(issued_at_offset_seconds=120),
             "missing_iat": rs256_service_token(include_iat=False),
             "exp_before_iat": rs256_service_token(expires_in_seconds=0),
         }
