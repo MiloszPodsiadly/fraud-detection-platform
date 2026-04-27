@@ -51,6 +51,14 @@ class InternalServiceClientProdGuard implements InitializingBean {
                 throw new IllegalStateException("HS256 internal auth client JWT mode is local compatibility only and is forbidden in prod-like profiles.");
             }
         }
+        if ("MTLS_SERVICE_IDENTITY".equals(properties.normalizedMode())) {
+            if (properties.mtls().trustAll()) {
+                throw new IllegalStateException("Internal mTLS client trust-all mode is forbidden in prod-like profiles.");
+            }
+            if (!properties.mtls().complete()) {
+                throw new IllegalStateException("MTLS_SERVICE_IDENTITY internal auth client mode requires client certificate, private key, CA trust material, and expected server identity in prod-like profiles.");
+            }
+        }
         if ("MTLS_READY".equals(properties.normalizedMode())) {
             throw new IllegalStateException("MTLS_READY internal auth client mode is a fail-closed placeholder until mTLS is configured.");
         }

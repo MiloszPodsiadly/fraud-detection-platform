@@ -69,6 +69,12 @@ app:
         private-key-path: ${INTERNAL_AUTH_JWT_PRIVATE_KEY_PATH:}
         ttl: ${INTERNAL_AUTH_JWT_TTL:5m}
         authorities: ${INTERNAL_AUTH_JWT_AUTHORITIES:}
+      mtls:
+        client-certificate-path: ${INTERNAL_AUTH_MTLS_CLIENT_CERTIFICATE_PATH:}
+        client-private-key-path: ${INTERNAL_AUTH_MTLS_CLIENT_PRIVATE_KEY_PATH:}
+        ca-certificate-paths: ${INTERNAL_AUTH_MTLS_CA_CERTIFICATE_PATHS:}
+        expected-server-identity: ${INTERNAL_AUTH_MTLS_EXPECTED_SERVER_IDENTITY:}
+        trust-all: ${INTERNAL_AUTH_MTLS_TRUST_ALL:false}
   kafka:
     topics:
       transaction-scored: transactions.scored

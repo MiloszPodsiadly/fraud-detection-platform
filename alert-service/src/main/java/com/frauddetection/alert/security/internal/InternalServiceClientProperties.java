@@ -15,12 +15,14 @@ public record InternalServiceClientProperties(
         String serviceName,
         String token,
         boolean allowTokenValidatorInProd,
-        Jwt jwt
+        Jwt jwt,
+        Mtls mtls
 ) {
     private static final List<String> MODES = List.of(
             "DISABLED_LOCAL_ONLY",
             "TOKEN_VALIDATOR",
             "JWT_SERVICE_IDENTITY",
+            "MTLS_SERVICE_IDENTITY",
             "MTLS_READY"
     );
 
@@ -29,6 +31,7 @@ public record InternalServiceClientProperties(
         serviceName = serviceName == null ? "" : serviceName.trim();
         token = token == null ? "" : token.trim();
         jwt = jwt == null ? Jwt.empty() : jwt.normalized();
+        mtls = mtls == null ? Mtls.empty() : mtls.normalized();
         if (enabled && serviceName.isBlank()) {
             throw new IllegalArgumentException("app.internal-auth.client.service-name is required when internal auth is enabled");
         }
@@ -37,6 +40,12 @@ public record InternalServiceClientProperties(
         }
         if (enabled && "JWT_SERVICE_IDENTITY".equals(mode) && !jwt.complete()) {
             throw new IllegalArgumentException("app.internal-auth.client.jwt issuer, audience, algorithm, key material, ttl, and authorities are required when JWT_SERVICE_IDENTITY is enabled");
+        }
+        if (enabled && "MTLS_SERVICE_IDENTITY".equals(mode) && mtls.trustAll()) {
+            throw new IllegalArgumentException("app.internal-auth.client.mtls trust-all is not allowed");
+        }
+        if (enabled && "MTLS_SERVICE_IDENTITY".equals(mode) && !mtls.complete()) {
+            throw new IllegalArgumentException("app.internal-auth.client.mtls client certificate, private key, CA, and expected server identity are required when MTLS_SERVICE_IDENTITY is enabled");
         }
     }
 
@@ -150,6 +159,36 @@ public record InternalServiceClientProperties(
                     .filter(value -> !value.isBlank())
                     .distinct()
                     .toList();
+        }
+    }
+
+    public record Mtls(
+            String clientCertificatePath,
+            String clientPrivateKeyPath,
+            String caCertificatePaths,
+            String expectedServerIdentity,
+            boolean trustAll
+    ) {
+        static Mtls empty() {
+            return new Mtls("", "", "", "", false);
+        }
+
+        Mtls normalized() {
+            return new Mtls(
+                    clientCertificatePath == null ? "" : clientCertificatePath.trim(),
+                    clientPrivateKeyPath == null ? "" : clientPrivateKeyPath.trim(),
+                    caCertificatePaths == null ? "" : caCertificatePaths.trim(),
+                    expectedServerIdentity == null ? "" : expectedServerIdentity.trim(),
+                    trustAll
+            );
+        }
+
+        boolean complete() {
+            return !trustAll
+                    && !clientCertificatePath.isBlank()
+                    && !clientPrivateKeyPath.isBlank()
+                    && !caCertificatePaths.isBlank()
+                    && !expectedServerIdentity.isBlank();
         }
     }
 }

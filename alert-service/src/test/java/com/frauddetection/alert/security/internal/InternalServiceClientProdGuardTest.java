@@ -33,7 +33,7 @@ class InternalServiceClientProdGuardTest {
 
     @Test
     void shouldFailClosedWhenProdProfileMissesToken() {
-        assertThatThrownBy(() -> new InternalServiceClientProperties(true, "TOKEN_VALIDATOR", "alert-service", " ", false, InternalServiceClientProperties.Jwt.empty()))
+        assertThatThrownBy(() -> new InternalServiceClientProperties(true, "TOKEN_VALIDATOR", "alert-service", " ", false, InternalServiceClientProperties.Jwt.empty(), InternalServiceClientProperties.Mtls.empty()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("app.internal-auth.client.token is required when TOKEN_VALIDATOR is enabled")
                 .hasMessageNotContaining("secret-token");
@@ -42,7 +42,7 @@ class InternalServiceClientProdGuardTest {
     @Test
     void shouldRequireTokenValidatorCompatibilityOptInForProdProfile() {
         InternalServiceClientProdGuard guard = new InternalServiceClientProdGuard(
-                new InternalServiceClientProperties(true, "TOKEN_VALIDATOR", "alert-service", "token", false, InternalServiceClientProperties.Jwt.empty()),
+                new InternalServiceClientProperties(true, "TOKEN_VALIDATOR", "alert-service", "token", false, InternalServiceClientProperties.Jwt.empty(), InternalServiceClientProperties.Mtls.empty()),
                 environment("prod")
         );
 
@@ -116,7 +116,8 @@ class InternalServiceClientProdGuardTest {
                         "",
                         Duration.ofMinutes(5),
                         "governance-read"
-                )
+                ),
+                InternalServiceClientProperties.Mtls.empty()
         ))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("app.internal-auth.client.jwt issuer, audience, algorithm, key material, ttl, and authorities are required when JWT_SERVICE_IDENTITY is enabled");
@@ -140,7 +141,8 @@ class InternalServiceClientProdGuardTest {
                         "",
                         Duration.ofMinutes(5),
                         "governance-read"
-                )
+                ),
+                InternalServiceClientProperties.Mtls.empty()
         ))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("app.internal-auth.client.jwt issuer, audience, algorithm, key material, ttl, and authorities are required when JWT_SERVICE_IDENTITY is enabled");
@@ -167,6 +169,63 @@ class InternalServiceClientProdGuardTest {
         assertThatCode(guard::afterPropertiesSet).doesNotThrowAnyException();
     }
 
+    @Test
+    void shouldAllowCompleteMtlsServiceIdentityConfigForProdProfile() {
+        InternalServiceClientProdGuard guard = new InternalServiceClientProdGuard(
+                mtlsProperties(),
+                environment("prod")
+        );
+
+        assertThatCode(guard::afterPropertiesSet).doesNotThrowAnyException();
+    }
+
+    @Test
+    void shouldRejectIncompleteMtlsServiceIdentityConfig() {
+        assertThatThrownBy(() -> new InternalServiceClientProperties(
+                true,
+                "MTLS_SERVICE_IDENTITY",
+                "alert-service",
+                "",
+                false,
+                InternalServiceClientProperties.Jwt.empty(),
+                InternalServiceClientProperties.Mtls.empty()
+        ))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("app.internal-auth.client.mtls client certificate, private key, CA, and expected server identity are required when MTLS_SERVICE_IDENTITY is enabled");
+    }
+
+    @Test
+    void shouldRejectMtlsTrustAllMode() {
+        assertThatThrownBy(() -> new InternalServiceClientProperties(
+                true,
+                "MTLS_SERVICE_IDENTITY",
+                "alert-service",
+                "",
+                false,
+                InternalServiceClientProperties.Jwt.empty(),
+                new InternalServiceClientProperties.Mtls(
+                        "client.pem",
+                        "client-key.pem",
+                        "ca.pem",
+                        "ml-inference-service",
+                        true
+                )
+        ))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("app.internal-auth.client.mtls trust-all is not allowed");
+    }
+
+    @Test
+    void shouldNotAttachHeaderIdentityWhenMtlsModeIsEnabled() {
+        HttpHeaders headers = new HttpHeaders();
+
+        new InternalServiceAuthHeaders(mtlsProperties()).apply(headers);
+
+        assertThat(headers.containsKey("Authorization")).isFalse();
+        assertThat(headers.containsKey("X-Internal-Service-Name")).isFalse();
+        assertThat(headers.containsKey("X-Internal-Service-Token")).isFalse();
+    }
+
     private MockEnvironment environment(String profile) {
         MockEnvironment environment = new MockEnvironment();
         environment.setActiveProfiles(profile);
@@ -190,7 +249,8 @@ class InternalServiceClientProdGuardTest {
                         "",
                         Duration.ofMinutes(5),
                         "governance-read"
-                )
+                ),
+                InternalServiceClientProperties.Mtls.empty()
         );
     }
 
@@ -211,7 +271,8 @@ class InternalServiceClientProdGuardTest {
                         "",
                         Duration.ofMinutes(5),
                         "governance-read"
-                )
+                ),
+                InternalServiceClientProperties.Mtls.empty()
         );
     }
 
@@ -232,6 +293,25 @@ class InternalServiceClientProdGuardTest {
                         "",
                         Duration.ofMinutes(5),
                         "governance-read"
+                ),
+                InternalServiceClientProperties.Mtls.empty()
+        );
+    }
+
+    private InternalServiceClientProperties mtlsProperties() {
+        return new InternalServiceClientProperties(
+                true,
+                "MTLS_SERVICE_IDENTITY",
+                "alert-service",
+                "",
+                false,
+                InternalServiceClientProperties.Jwt.empty(),
+                new InternalServiceClientProperties.Mtls(
+                        "client.pem",
+                        "client-key.pem",
+                        "ca.pem",
+                        "ml-inference-service",
+                        false
                 )
         );
     }
@@ -263,7 +343,8 @@ class InternalServiceClientProdGuardTest {
                 "alert-service",
                 "",
                 false,
-                InternalServiceClientProperties.Jwt.empty()
+                InternalServiceClientProperties.Jwt.empty(),
+                InternalServiceClientProperties.Mtls.empty()
         );
     }
 
