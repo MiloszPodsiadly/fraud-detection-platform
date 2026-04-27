@@ -80,7 +80,7 @@ paths:
   /api/v1/audit/integrity:
     get:
       summary: Verify bounded audit hash-chain integrity
-      description: Performs read-only bounded application-level verification of durable platform audit events. Requires audit:read. Verifies deterministic event hashes, partition-scoped previous-hash continuity, schema version, hash algorithm, fork indicators, and latest local chain-anchor consistency. Supports mode=HEAD, WINDOW, or FULL_CHAIN. WINDOW and HEAD can report an external predecessor without treating it as a false violation; FULL_CHAIN reports missing predecessors as violations. Returns VALID, INVALID, PARTIAL, or UNAVAILABLE. This endpoint does not repair data, export full audit history, delete/update audit records, provide WORM storage, protection against full DB administrator rewrite, external notarization, external chain anchoring, legal non-repudiation, SIEM integration, HSM/KMS signing, or regulator-ready evidence packaging. Successful integrity reads create a bounded VERIFY_AUDIT_INTEGRITY audit event.
+      description: Performs read-only bounded application-level verification of durable platform audit events. Requires audit:read. Verifies deterministic event hashes, partition-scoped previous-hash continuity, chain-position continuity, schema version, hash algorithm, fork indicators, and latest local chain-anchor consistency. Supports mode=HEAD, WINDOW, or FULL_CHAIN. WINDOW and HEAD can report an external predecessor without treating it as a false violation; FULL_CHAIN reports missing predecessors as violations. Returns VALID, INVALID, PARTIAL, or UNAVAILABLE. PARTIAL can mean the bounded result set was filled or the local verification time budget was reached. This endpoint does not repair data, export full audit history, delete/update audit records, provide WORM storage, protection against full DB administrator rewrite, external notarization, external chain anchoring, legal non-repudiation, SIEM integration, HSM/KMS signing, or regulator-ready evidence packaging. Successful integrity reads create a bounded VERIFY_AUDIT_INTEGRITY audit event.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -120,7 +120,7 @@ paths:
           schema:
             type: integer
             minimum: 1
-            maximum: 500
+            maximum: 10000
             default: 100
       responses:
         "200":
@@ -612,7 +612,7 @@ components:
           type: integer
           nullable: true
           minimum: 0
-          maximum: 500
+          maximum: 10000
     AuditIntegrityResponse:
       type: object
       additionalProperties: false
@@ -635,7 +635,7 @@ components:
         limit:
           type: integer
           minimum: 1
-          maximum: 500
+          maximum: 10000
         verification_mode:
           type: string
           nullable: true
@@ -649,7 +649,7 @@ components:
         reason_code:
           type: string
           nullable: true
-          enum: [AUDIT_STORE_UNAVAILABLE]
+          enum: [AUDIT_STORE_UNAVAILABLE, INTEGRITY_VERIFICATION_TIME_BUDGET_EXCEEDED]
         message:
           type: string
           nullable: true
@@ -681,13 +681,13 @@ components:
       properties:
         violation_type:
           type: string
-          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, INVALID_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, MISSING_PREDECESSOR, CHAIN_FORK_DETECTED]
+          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, INVALID_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, MISSING_PREDECESSOR, CHAIN_FORK_DETECTED, CHAIN_POSITION_INVALID, CHAIN_POSITION_DUPLICATE, CHAIN_POSITION_GAP]
         position:
           type: integer
           minimum: 1
         reason_code:
           type: string
-          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, UNSUPPORTED_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, MISSING_PREDECESSOR, CHAIN_FORK_DETECTED]
+          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, UNSUPPORTED_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, MISSING_PREDECESSOR, CHAIN_FORK_DETECTED, CHAIN_POSITION_INVALID, CHAIN_POSITION_DUPLICATE, CHAIN_POSITION_GAP]
     GovernanceAdvisoryLifecycleStatus:
       type: string
       description: Read-time projection from latest audit decision. OPEN means no audit event exists.

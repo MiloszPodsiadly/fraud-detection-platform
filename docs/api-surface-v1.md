@@ -94,14 +94,14 @@ Platform Audit Integrity API:
 
 - `GET /api/v1/audit/integrity`
 - Requires backend-enforced `audit:read`.
-- Query parameters: optional inclusive ISO-8601 `from`/`to`, optional bounded `source_service=alert-service`, `mode=HEAD|WINDOW|FULL_CHAIN`, and `limit` default `100`, maximum `500`.
+- Query parameters: optional inclusive ISO-8601 `from`/`to`, optional bounded `source_service=alert-service`, `mode=HEAD|WINDOW|FULL_CHAIN`, and `limit` default `100`, maximum `10000`.
 - Response status is `VALID`, `INVALID`, `PARTIAL`, or `UNAVAILABLE`.
-- Verification checks deterministic event hash, previous hash continuity, schema version, hash algorithm, fork indicators, and latest append-only anchor consistency. It reports bounded violation types and never mutates, repairs, exports, or deletes audit data.
+- Verification checks deterministic event hash, previous hash continuity, chain-position continuity, schema version, hash algorithm, fork indicators, and latest append-only anchor consistency. It reports bounded violation types and never mutates, repairs, exports, or deletes audit data.
 - Durable audit chains are partitioned by `partition_key`; the current platform partition is `source_service:alert-service`. `partition_key + chain_position` is unique for positioned FDP-19 audit records. Older local development records created before `chain_position` existed are not silently rewritten; new writes continue at a counted next position and keep the previous-hash link.
-- Multi-instance writes acquire a local Mongo partition lock before head read and event/anchor insertion; race conflicts fail explicitly and are not silently retried.
+- Multi-instance writes acquire a local Mongo partition lock before head read and event/anchor insertion; transient lock conflicts use a bounded local retry, and exhausted race conflicts fail explicitly.
 - Each inserted durable audit event creates a local append-only anchor in `audit_chain_anchors` with the latest event hash, chain position, partition key, and hash algorithm. This provides application-level tamper evidence for accidental or partial tampering, but it does not protect against a full database administrator rewrite and is not external notarization.
 - `WINDOW` and `HEAD` verification may return `external_predecessor=true` when the first checked event links to a predecessor outside the bounded checked set. This is not a false integrity violation. `FULL_CHAIN` treats a missing predecessor as a violation.
-- A `PARTIAL` result means the bounded window was filled and should not be treated as full-chain verification.
+- A `PARTIAL` result means the bounded window was filled or the local verification time budget was reached; it should not be treated as full-chain verification. Time-budget partials use stable reason code `INTEGRITY_VERIFICATION_TIME_BUDGET_EXCEEDED`.
 - Integrity checks create a follow-up `VERIFY_AUDIT_INTEGRITY` audit event with bounded metadata.
 - Protected analyst decision and fraud-case update writes attempt durable audit persistence before the business repository save; audit failure fails the request before that business write is persisted.
 - Scheduled verification is disabled by default and must be enabled explicitly with `app.audit.integrity.scheduled-verification-enabled=true`; when enabled it is read-only observability automation only.

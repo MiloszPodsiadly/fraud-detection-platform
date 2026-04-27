@@ -245,7 +245,7 @@ Prometheus metric contract:
   - Type: counter
   - Meaning: bounded audit integrity verification detected a violation
   - Labels: `violation_type`
-  - Bounded violation types: `EVENT_HASH_MISMATCH`, `PREVIOUS_HASH_MISMATCH`, `INVALID_SCHEMA_VERSION`, `UNSUPPORTED_HASH_ALGORITHM`, `ANCHOR_MISSING`, `ANCHOR_HASH_MISMATCH`, `ANCHOR_CHAIN_POSITION_MISMATCH`, `MISSING_PREDECESSOR`, `CHAIN_FORK_DETECTED`, `UNKNOWN`
+  - Bounded violation types: `EVENT_HASH_MISMATCH`, `PREVIOUS_HASH_MISMATCH`, `INVALID_SCHEMA_VERSION`, `UNSUPPORTED_HASH_ALGORITHM`, `ANCHOR_MISSING`, `ANCHOR_HASH_MISMATCH`, `ANCHOR_CHAIN_POSITION_MISMATCH`, `MISSING_PREDECESSOR`, `CHAIN_FORK_DETECTED`, `CHAIN_POSITION_INVALID`, `CHAIN_POSITION_DUPLICATE`, `CHAIN_POSITION_GAP`, `UNKNOWN`
 - `fraud_audit_integrity_check_total`
   - Type: counter
   - Meaning: scheduled/manual application-level audit integrity checks completed
