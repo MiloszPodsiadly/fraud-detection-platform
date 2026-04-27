@@ -38,9 +38,12 @@ import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.security.auth.AnalystAuthenticationFactory;
 import com.frauddetection.alert.security.auth.DemoAuthHeaderParser;
 import com.frauddetection.alert.security.auth.DemoAuthHeaders;
+import com.frauddetection.alert.security.authorization.AnalystAuthority;
+import com.frauddetection.alert.security.authorization.AnalystRole;
 import com.frauddetection.alert.security.error.ApiAccessDeniedHandler;
 import com.frauddetection.alert.security.error.ApiAuthenticationEntryPoint;
 import com.frauddetection.alert.security.error.SecurityErrorResponseWriter;
+import com.frauddetection.alert.security.principal.AnalystPrincipal;
 import com.frauddetection.alert.service.AlertManagementUseCase;
 import com.frauddetection.alert.service.FraudCaseManagementService;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
@@ -54,6 +57,8 @@ import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
@@ -62,6 +67,7 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -69,6 +75,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -366,6 +373,8 @@ class AlertSecurityConfigTest {
                         Instant.parse("2026-04-28T00:00:00Z"),
                         null,
                         null,
+                        "AVAILABLE",
+                        AuditEvidenceExportResponse.AnchorCoverage.empty(),
                         List.of()
                 ));
 
@@ -402,6 +411,49 @@ class AlertSecurityConfigTest {
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("READ_ONLY_ANALYST")))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void shouldRequireDedicatedFdp20AuthoritiesInsteadOfAuditRead() throws Exception {
+        when(externalAuditIntegrityService.verify(any(), any()))
+                .thenReturn(new ExternalAuditIntegrityResponse("VALID", 0, 100, "alert-service", "source_service:alert-service", null, null, null, null, List.of()));
+        when(auditEvidenceExportService.export(any(), any(), any(), any()))
+                .thenReturn(new AuditEvidenceExportResponse(
+                        "AVAILABLE",
+                        0,
+                        100,
+                        "alert-service",
+                        Instant.parse("2026-04-27T00:00:00Z"),
+                        Instant.parse("2026-04-28T00:00:00Z"),
+                        null,
+                        null,
+                        "AVAILABLE",
+                        AuditEvidenceExportResponse.AnchorCoverage.empty(),
+                        List.of()
+                ));
+
+        mockMvc.perform(get("/api/v1/audit/integrity/external").with(authorities(AnalystAuthority.AUDIT_READ)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/audit/integrity/external").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/audit/evidence/export")
+                        .param("from", "2026-04-27T00:00:00Z")
+                        .param("to", "2026-04-28T00:00:00Z")
+                        .param("source_service", "alert-service")
+                        .with(authorities(AnalystAuthority.AUDIT_READ)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/audit/evidence/export")
+                        .param("from", "2026-04-27T00:00:00Z")
+                        .param("to", "2026-04-28T00:00:00Z")
+                        .param("source_service", "alert-service")
+                        .with(authorities(AnalystAuthority.AUDIT_VERIFY)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/audit/evidence/export")
+                        .param("from", "2026-04-27T00:00:00Z")
+                        .param("to", "2026-04-28T00:00:00Z")
+                        .param("source_service", "alert-service")
+                        .with(authorities(AnalystAuthority.AUDIT_EXPORT)))
+                .andExpect(status().isOk());
     }
 
     @Test
@@ -464,6 +516,16 @@ class AlertSecurityConfigTest {
             request.addHeader(DemoAuthHeaders.ROLES, roles);
             return request;
         };
+    }
+
+    private RequestPostProcessor authorities(String... authorities) {
+        AnalystPrincipal principal = new AnalystPrincipal("auditor-1", Set.of(AnalystRole.FRAUD_OPS_ADMIN), Set.of(authorities));
+        UsernamePasswordAuthenticationToken token = new UsernamePasswordAuthenticationToken(
+                principal,
+                null,
+                Set.of(authorities).stream().map(SimpleGrantedAuthority::new).toList()
+        );
+        return authentication(token);
     }
 
     private SubmitAnalystDecisionRequest submitDecisionRequest() {

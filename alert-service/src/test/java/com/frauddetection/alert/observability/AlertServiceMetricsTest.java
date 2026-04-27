@@ -84,7 +84,7 @@ class AlertServiceMetricsTest {
         metrics.recordExternalAnchorPublishFailed("local-file", "IO_ERROR");
         metrics.recordExternalAnchorLag(Duration.ofSeconds(3));
         metrics.recordExternalIntegrityCheck("PARTIAL");
-        metrics.recordEvidenceExport("AVAILABLE");
+        metrics.recordEvidenceExport("PARTIAL");
 
         Meter persisted = meterRegistry.get("fraud_platform_audit_events_persisted_total").meter();
         Meter failures = meterRegistry.get("fraud_platform_audit_persistence_failures_total").meter();
@@ -125,6 +125,9 @@ class AlertServiceMetricsTest {
         assertThat(evidenceExports.getId().getTags())
                 .extracting(Tag::getKey)
                 .containsExactly("status");
+        assertThat(evidenceExports.getId().getTags())
+                .extracting(Tag::getValue)
+                .containsExactly("PARTIAL");
         assertThat(persisted.getId().getTags())
                 .extracting(Tag::getKey)
                 .doesNotContain("actor_id", "resource_id", "audit_event_id", "hash", "exception", "message");
