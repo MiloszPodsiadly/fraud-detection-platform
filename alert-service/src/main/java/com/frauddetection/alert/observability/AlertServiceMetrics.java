@@ -301,7 +301,7 @@ public class AlertServiceMetrics {
     }
 
     private String normalizeAvailabilityStatus(String status) {
-        if ("AVAILABLE".equals(status) || "UNAVAILABLE".equals(status)) {
+        if ("AVAILABLE".equals(status) || "PARTIAL".equals(status) || "UNAVAILABLE".equals(status)) {
             return status;
         }
         return "UNAVAILABLE";

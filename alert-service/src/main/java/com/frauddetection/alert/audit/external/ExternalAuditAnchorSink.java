@@ -6,6 +6,12 @@ import java.util.Optional;
 
 public interface ExternalAuditAnchorSink {
 
+    /*
+     * Production external anchor sinks must provide append-only semantics,
+     * independent storage outside Mongo, no overwrite/delete paths, bounded reads,
+     * and durable retention controls outside the application database.
+     */
+
     String sinkType();
 
     ExternalAuditAnchor publish(ExternalAuditAnchor anchor);
