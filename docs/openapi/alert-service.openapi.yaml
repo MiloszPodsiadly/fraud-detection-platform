@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: Alert Service API
-  version: FDP-19
-  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, governance advisory lifecycle projection, and human-review audit. Audit integrity is application-level partitioned hash-chain verification with local append-only chain anchors; it does not imply WORM archive storage, external notarization, external chain anchoring, SIEM integration, unbounded export, legal non-repudiation, HSM/KMS signing, or final compliance archive.
+  version: FDP-20
+  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, external anchor verification, bounded evidence export, governance advisory lifecycle projection, and human-review audit. FDP-20 extends tamper evidence outside the primary database boundary. It does not create legal non-repudiation. Audit integrity does not imply certified WORM archive storage, legal notarization, SIEM integration, unbounded export, HSM/KMS signing, or final compliance archive.
 servers:
   - url: http://localhost:8085
 paths:
@@ -19,7 +19,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [SUBMIT_ANALYST_DECISION, UPDATE_FRAUD_CASE, READ_AUDIT_EVENTS, VERIFY_AUDIT_INTEGRITY]
+            enum: [SUBMIT_ANALYST_DECISION, UPDATE_FRAUD_CASE, READ_AUDIT_EVENTS, VERIFY_AUDIT_INTEGRITY, VERIFY_EXTERNAL_AUDIT_INTEGRITY, EXPORT_AUDIT_EVIDENCE]
         - name: actor_id
           in: query
           required: false
@@ -33,7 +33,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [ALERT, FRAUD_CASE]
+            enum: [ALERT, FRAUD_CASE, AUDIT_EVENT, AUDIT_INTEGRITY, AUDIT_EXTERNAL_INTEGRITY, AUDIT_EVIDENCE_EXPORT]
         - name: resource_id
           in: query
           required: false
@@ -80,7 +80,7 @@ paths:
   /api/v1/audit/integrity:
     get:
       summary: Verify bounded audit hash-chain integrity
-      description: Performs read-only bounded application-level verification of durable platform audit events. Requires audit:read. Verifies deterministic event hashes, partition-scoped previous-hash continuity, chain-position continuity, schema version, hash algorithm, fork indicators, and latest local chain-anchor consistency. Supports mode=HEAD, WINDOW, or FULL_CHAIN. WINDOW and HEAD can report an external predecessor without treating it as a false violation; FULL_CHAIN reports missing predecessors as violations. Returns VALID, INVALID, PARTIAL, or UNAVAILABLE. PARTIAL can mean the bounded result set was filled or the local verification time budget was reached. This endpoint does not repair data, export full audit history, delete/update audit records, provide WORM storage, protection against full DB administrator rewrite, external notarization, external chain anchoring, legal non-repudiation, SIEM integration, HSM/KMS signing, or regulator-ready evidence packaging. Successful integrity reads create a bounded VERIFY_AUDIT_INTEGRITY audit event.
+      description: Performs read-only bounded application-level verification of durable platform audit events against local chain anchors. Requires audit:read. Verifies deterministic event hashes, partition-scoped previous-hash continuity, chain-position continuity, schema version, hash algorithm, fork indicators, and latest local chain-anchor consistency. Supports mode=HEAD, WINDOW, or FULL_CHAIN. WINDOW and HEAD can report an external predecessor without treating the first checked event as a false violation; FULL_CHAIN reports missing predecessors as violations. Returns VALID, INVALID, PARTIAL, or UNAVAILABLE. PARTIAL can mean the bounded result set was filled or the local verification time budget was reached. This endpoint does not repair data, export full audit history, delete/update audit records, provide WORM storage, protection against full DB administrator rewrite, legal notarization, legal non-repudiation, SIEM integration, HSM/KMS signing, or regulator-ready evidence packaging. External anchor verification is a separate audit:verify endpoint. Successful integrity reads create a bounded VERIFY_AUDIT_INTEGRITY audit event.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -129,6 +129,88 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuditIntegrityResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/audit/integrity/external:
+    get:
+      summary: Verify external audit anchor consistency
+      description: Performs bounded read-only comparison between the latest local audit chain anchor and the latest external anchor. Requires audit:verify. Returns VALID, INVALID, PARTIAL, or UNAVAILABLE. Detects missing, stale, ahead, mismatched hash, mismatched local anchor id, mismatched hash algorithm, and unsupported external schema version. This endpoint does not repair data, mutate audit records, export full history, or provide WORM/legal notarization.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: source_service
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [alert-service]
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        "200":
+          description: External anchor verification result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExternalAuditIntegrityResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/audit/evidence/export:
+    get:
+      summary: Export bounded audit evidence
+      description: Returns a bounded JSON evidence package for a required source_service and inclusive from/to window. Requires audit:export. Includes safe audit event summaries, event hashes, previous hashes, chain positions, local anchor references, and external anchor references when available. It never returns raw payloads, tokens, stack traces, transaction payloads, customer/account/card identifiers, or advisory note bodies. No unbounded export, full-text search, delete, update, cursor pagination, or aggregation is provided.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - name: source_service
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [alert-service]
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        "200":
+          description: Bounded audit evidence export or unavailable local audit store status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditEvidenceExportResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -497,7 +579,7 @@ components:
           type: string
         event_type:
           type: string
-          enum: [SUBMIT_ANALYST_DECISION, UPDATE_FRAUD_CASE, READ_AUDIT_EVENTS, VERIFY_AUDIT_INTEGRITY]
+          enum: [SUBMIT_ANALYST_DECISION, UPDATE_FRAUD_CASE, READ_AUDIT_EVENTS, VERIFY_AUDIT_INTEGRITY, VERIFY_EXTERNAL_AUDIT_INTEGRITY, EXPORT_AUDIT_EVIDENCE]
         actor_id:
           type: string
           description: Backend-derived authenticated actor identity.
@@ -512,13 +594,13 @@ components:
           enum: [HUMAN]
         resource_type:
           type: string
-          enum: [ALERT, FRAUD_CASE, AUDIT_EVENT, AUDIT_INTEGRITY]
+          enum: [ALERT, FRAUD_CASE, AUDIT_EVENT, AUDIT_INTEGRITY, AUDIT_EXTERNAL_INTEGRITY, AUDIT_EVIDENCE_EXPORT]
         resource_id:
           type: string
           nullable: true
         action:
           type: string
-          enum: [SUBMIT_ANALYST_DECISION, UPDATE_FRAUD_CASE, READ_AUDIT_EVENTS, VERIFY_AUDIT_INTEGRITY]
+          enum: [SUBMIT_ANALYST_DECISION, UPDATE_FRAUD_CASE, READ_AUDIT_EVENTS, VERIFY_AUDIT_INTEGRITY, VERIFY_EXTERNAL_AUDIT_INTEGRITY, EXPORT_AUDIT_EVIDENCE]
         outcome:
           type: string
           enum: [SUCCESS, REJECTED, FAILED]
@@ -681,13 +763,171 @@ components:
       properties:
         violation_type:
           type: string
-          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, INVALID_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, MISSING_PREDECESSOR, CHAIN_FORK_DETECTED, CHAIN_POSITION_INVALID, CHAIN_POSITION_DUPLICATE, CHAIN_POSITION_GAP]
+          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, INVALID_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, MISSING_PREDECESSOR, CHAIN_FORK_DETECTED, CHAIN_POSITION_INVALID, CHAIN_POSITION_DUPLICATE, CHAIN_POSITION_GAP, EXTERNAL_ANCHOR_MISSING, STALE_EXTERNAL_ANCHOR, EXTERNAL_CHAIN_POSITION_AHEAD, EXTERNAL_HASH_MISMATCH, EXTERNAL_CHAIN_POSITION_MISMATCH, EXTERNAL_HASH_ALGORITHM_MISMATCH, EXTERNAL_SCHEMA_VERSION_UNSUPPORTED, EXTERNAL_LOCAL_ANCHOR_ID_MISMATCH]
         position:
           type: integer
           minimum: 1
         reason_code:
           type: string
-          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, UNSUPPORTED_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, MISSING_PREDECESSOR, CHAIN_FORK_DETECTED, CHAIN_POSITION_INVALID, CHAIN_POSITION_DUPLICATE, CHAIN_POSITION_GAP]
+          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, UNSUPPORTED_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, MISSING_PREDECESSOR, CHAIN_FORK_DETECTED, CHAIN_POSITION_INVALID, CHAIN_POSITION_DUPLICATE, CHAIN_POSITION_GAP, EXTERNAL_ANCHOR_MISSING, STALE_EXTERNAL_ANCHOR, EXTERNAL_CHAIN_POSITION_AHEAD, EXTERNAL_HASH_MISMATCH, EXTERNAL_CHAIN_POSITION_MISMATCH, EXTERNAL_HASH_ALGORITHM_MISMATCH, EXTERNAL_SCHEMA_VERSION_UNSUPPORTED, EXTERNAL_LOCAL_ANCHOR_ID_MISMATCH]
+    ExternalAuditIntegrityResponse:
+      type: object
+      additionalProperties: false
+      required: [status, checked, limit, source_service, partition_key, violations]
+      properties:
+        status:
+          type: string
+          enum: [VALID, INVALID, PARTIAL, UNAVAILABLE]
+        checked:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 500
+        source_service:
+          type: string
+          enum: [alert-service]
+        partition_key:
+          type: string
+          enum: ["source_service:alert-service"]
+        reason_code:
+          type: string
+          nullable: true
+          enum: [AUDIT_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_MISSING, STALE_EXTERNAL_ANCHOR]
+        message:
+          type: string
+          nullable: true
+          maxLength: 160
+        local_anchor:
+          nullable: true
+          $ref: "#/components/schemas/AuditAnchorSummary"
+        external_anchor:
+          nullable: true
+          $ref: "#/components/schemas/AuditAnchorSummary"
+        violations:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditIntegrityViolation"
+    AuditEvidenceExportResponse:
+      type: object
+      additionalProperties: false
+      required: [status, count, limit, source_service, from, to, events]
+      properties:
+        status:
+          type: string
+          enum: [AVAILABLE, UNAVAILABLE]
+        count:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 500
+        source_service:
+          type: string
+          enum: [alert-service]
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        reason_code:
+          type: string
+          nullable: true
+          enum: [AUDIT_STORE_UNAVAILABLE]
+        message:
+          type: string
+          nullable: true
+          maxLength: 160
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEvidenceExportEvent"
+    AuditEvidenceExportEvent:
+      type: object
+      additionalProperties: false
+      required: [audit_event_id, event_type, actor_id, actor_roles, resource_type, action, outcome, occurred_at, metadata_summary, event_hash, chain_position]
+      properties:
+        audit_event_id:
+          type: string
+        event_type:
+          type: string
+        actor_id:
+          type: string
+        actor_roles:
+          type: array
+          items:
+            type: string
+        resource_type:
+          type: string
+        resource_id:
+          type: string
+          nullable: true
+        action:
+          type: string
+        outcome:
+          type: string
+          enum: [SUCCESS, REJECTED, FAILED]
+        occurred_at:
+          type: string
+          format: date-time
+        metadata_summary:
+          $ref: "#/components/schemas/AuditEventMetadataSummary"
+        event_hash:
+          type: string
+        previous_event_hash:
+          type: string
+          nullable: true
+        chain_position:
+          type: integer
+          format: int64
+          nullable: true
+        local_anchor:
+          nullable: true
+          $ref: "#/components/schemas/AuditAnchorSummary"
+        external_anchor:
+          nullable: true
+          $ref: "#/components/schemas/AuditAnchorSummary"
+    AuditAnchorSummary:
+      type: object
+      additionalProperties: false
+      properties:
+        anchor_id:
+          type: string
+          nullable: true
+        external_anchor_id:
+          type: string
+          nullable: true
+        local_anchor_id:
+          type: string
+          nullable: true
+        chain_position:
+          type: integer
+          format: int64
+          minimum: 1
+        last_event_hash:
+          type: string
+        hash_algorithm:
+          type: string
+          enum: [SHA-256]
+        schema_version:
+          type: string
+          nullable: true
+          enum: ["1.0"]
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        sink_type:
+          type: string
+          nullable: true
+          enum: [local-file, disabled]
+        publication_status:
+          type: string
+          nullable: true
+          enum: [PUBLISHED]
     GovernanceAdvisoryLifecycleStatus:
       type: string
       description: Read-time projection from latest audit decision. OPEN means no audit event exists.

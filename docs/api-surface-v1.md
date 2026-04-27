@@ -65,6 +65,8 @@ Alert service:
 | `GET` | `/api/v1/transactions/scored` | Lists scored transaction projections. |
 | `GET` | `/api/v1/audit/events` | Returns bounded newest-first durable platform audit events; requires `audit:read`. |
 | `GET` | `/api/v1/audit/integrity` | Performs bounded read-only hash-chain integrity verification; requires `audit:read`. |
+| `GET` | `/api/v1/audit/integrity/external` | Performs bounded read-only external anchor verification; requires `audit:verify`. |
+| `GET` | `/api/v1/audit/evidence/export` | Returns required-window bounded audit evidence export; requires `audit:export`. |
 | `GET` | `/governance/advisories` | Lists governance advisory events enriched with read-time lifecycle status. |
 | `GET` | `/governance/advisories/analytics` | Returns bounded read-only audit analytics derived from advisory and audit history. |
 | `GET` | `/governance/advisories/{event_id}` | Returns one governance advisory event enriched with read-time lifecycle status. |
@@ -105,7 +107,26 @@ Platform Audit Integrity API:
 - Integrity checks create a follow-up `VERIFY_AUDIT_INTEGRITY` audit event with bounded metadata.
 - Protected analyst decision and fraud-case update writes attempt durable audit persistence before the business repository save; audit failure fails the request before that business write is persisted.
 - Scheduled verification is disabled by default and must be enabled explicitly with `app.audit.integrity.scheduled-verification-enabled=true`; when enabled it is read-only observability automation only.
-- FDP-19 integrity verification is application-level evidence support. It is not WORM storage, external notarization, legal non-repudiation, SIEM integration, long-term archival policy, regulator-ready evidence package, protection against full DB administrator rewrite, external chain anchoring, or HSM/KMS signing. External anchoring is future FDP-20.
+- FDP-19 integrity verification is application-level evidence support. It is not WORM storage, legal notarization, legal non-repudiation, SIEM integration, long-term archival policy, regulator-ready evidence package, protection against full DB administrator rewrite, or HSM/KMS signing. FDP-20 extends tamper evidence outside the primary database boundary. It does not create legal non-repudiation.
+
+Platform External Audit Anchor Verification API:
+
+- `GET /api/v1/audit/integrity/external`
+- Requires backend-enforced `audit:verify`.
+- Query parameters: optional bounded `source_service=alert-service` and `limit` default `100`, maximum `500`.
+- Compares latest local and external anchors for local anchor id, chain position, last event hash, hash algorithm, and schema version.
+- Response status is `VALID`, `INVALID`, `PARTIAL`, or `UNAVAILABLE`; missing/stale external anchors are explicit and never reported as a valid empty result.
+- The endpoint is read-only and does not repair, mutate, delete, export, or resynchronize audit data.
+
+Platform Audit Evidence Export API:
+
+- `GET /api/v1/audit/evidence/export`
+- Requires backend-enforced `audit:export`; `audit:read` alone is insufficient.
+- Requires inclusive ISO-8601 `from`, `to`, and bounded `source_service=alert-service`.
+- `limit` defaults to `100`, maximum `500`; invalid windows or limits return the platform 400 envelope.
+- Response includes safe audit event summaries, event hash, previous hash, chain position, local anchor references, and external anchor references when available.
+- Export access creates an `EXPORT_AUDIT_EVIDENCE` audit event with bounded metadata.
+- The endpoint does not support unbounded export, full-text search, cursor pagination, aggregation, delete, or update, and it does not return raw payloads, tokens, stack traces, transaction payloads, customer/account/card identifiers, advisory content, or full URLs.
 
 Sensitive read-access audit:
 

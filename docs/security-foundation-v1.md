@@ -124,6 +124,8 @@ Roles describe analyst personas. Authorities are the backend authorization contr
 | `transaction-monitor:read` | Read scored transaction monitoring data. |
 | `governance-advisory:audit:write` | Record human review for governance advisory events. |
 | `audit:read` | Read bounded durable platform audit events. |
+| `audit:verify` | Verify external audit anchor consistency. |
+| `audit:export` | Export bounded audit evidence packages. |
 
 ### Roles
 
@@ -148,6 +150,8 @@ Roles describe analyst personas. Authorities are the backend authorization contr
 | `GET /api/v1/transactions/scored` | `transaction-monitor:read` | Separate from alert read because monitor data may grow beyond alert queue use cases. |
 | `GET /api/v1/audit/events` | `audit:read` | Bounded newest-first Audit Read API for durable platform audit events. Exact filters only; no export, full-text search, delete, or update. |
 | `GET /api/v1/audit/integrity` | `audit:read` | Bounded read-only audit hash-chain verification. No repair, export, delete, or update. |
+| `GET /api/v1/audit/integrity/external` | `audit:verify` | Bounded read-only external anchor verification. No repair, export, delete, or update. |
+| `GET /api/v1/audit/evidence/export` | `audit:export` | Required-window bounded evidence export. No unbounded export, full-text search, cursor, delete, or update. |
 | `GET /governance/advisories` | `transaction-monitor:read` | Reads governance advisory context enriched with lifecycle projection from audit history. |
 | `GET /governance/advisories/analytics` | `transaction-monitor:read` | Reads derived, bounded, non-operational audit analytics. Analytics and analytics metrics are observational only and must not be used for automation, SLA enforcement, alert triggering, or model control. |
 | `GET /governance/advisories/{event_id}` | `transaction-monitor:read` | Reads one governance advisory context with derived lifecycle status. |
@@ -211,6 +215,7 @@ FDP-16 is split into:
 - FDP-16.1 Durable Audit Foundation: append-only platform audit writes to MongoDB plus secondary structured logs.
 - FDP-16.2 Audit Read API: authenticated, `audit:read`-protected, bounded reads of durable platform audit events.
 - FDP-16.3 Sensitive Read-Access Audit: best-effort audit records for selected sensitive read endpoints.
+- FDP-20 External Anchoring & Evidence Export: external anchor publication, bounded external anchor verification, and bounded evidence export.
 
 Audit Logging v1 records security-relevant analyst write operations in `alert-service`.
 
@@ -264,6 +269,11 @@ Implementation:
 - `GET /api/v1/audit/integrity` requires `audit:read` and performs bounded read-only verification of event hashes, previous-hash continuity, chain-position continuity, schema version, hash algorithm, fork indicators, and latest local anchor-to-chain-head consistency. It supports `mode=HEAD|WINDOW|FULL_CHAIN`, returns `VALID`, `INVALID`, `PARTIAL`, or `UNAVAILABLE`, and never repairs or mutates audit data. `limit` defaults to `100` and is capped at `10000`; if the local verification time budget is reached the response is `PARTIAL` with reason code `INTEGRITY_VERIFICATION_TIME_BUDGET_EXCEEDED`.
 - `WINDOW` and `HEAD` may report `external_predecessor=true` when the first checked event links to a predecessor outside the bounded checked set; this is not treated as a false violation. `FULL_CHAIN` detects missing predecessors.
 - Scheduled integrity verification is disabled by default. When `app.audit.integrity.scheduled-verification-enabled=true`, it is read-only observability automation only: metrics/logs, no repair, no workflow, no audit mutation.
+- FDP-20 extends tamper evidence outside the primary database boundary.
+It does not create legal non-repudiation.
+- External anchor publication is disabled by default (`app.audit.external-anchoring.enabled=false`). When enabled with `app.audit.external-anchoring.sink=local-file`, local Mongo anchors are published idempotently to an append-only JSONL file sink outside MongoDB. Publication failure is observable through logs and low-cardinality metrics and does not block durable audit writes.
+- `GET /api/v1/audit/integrity/external` requires `audit:verify`, compares bounded local/external anchor state for `source_service=alert-service`, and returns `VALID`, `INVALID`, `PARTIAL`, or `UNAVAILABLE`. Missing/stale external anchors are not hidden; mismatched hash, chain position, hash algorithm, schema version, or local anchor id are violations.
+- `GET /api/v1/audit/evidence/export` requires `audit:export`; `audit:read` alone is insufficient. The endpoint requires `from`, `to`, and `source_service`, caps `limit` at `500`, returns safe audit summaries plus hash/anchor references, and audits export access. It does not return raw payloads, tokens, stack traces, transaction payloads, customer/account/card identifiers, advisory content, or full URLs.
 - Audit read filters are `event_type`, `actor_id`, `resource_type`, `resource_id`, inclusive `from`/`to` timestamps, and bounded `limit` default `50`, max `100`.
 - Audit reads return `status=UNAVAILABLE`, `reason_code=AUDIT_STORE_UNAVAILABLE`, a stable non-sensitive `message`, `count=0`, and an empty event list if persistence cannot be read.
 - Clients MUST check `status` before interpreting `count` or `events`; `AVAILABLE` with `count=0` is a valid empty result and is not equivalent to `UNAVAILABLE`.
@@ -497,7 +507,7 @@ Reviewers should check:
 - JWT validation path exists, but no production IdP setup is shipped in this repo.
 - Service-to-service authentication foundation is present for configured internal ML/governance calls.
 - Internal mTLS service identity exists for configured internal ML/governance calls, but no enterprise PKI automation, cert-manager, Vault/KMS, dynamic reload, or automated rotation is shipped.
-- Durable audit storage is not WORM/immutable archive storage, external notarization, external chain anchoring, protection against full database administrator rewrite, legal non-repudiation, SIEM integration, long-term archival policy, regulator-ready evidence package, or HSM/KMS signing. External anchoring is future FDP-20.
+- Durable audit storage is not WORM/immutable archive storage, legal notarization, legal non-repudiation, SIEM integration, long-term archival policy, regulator-ready evidence package, or HSM/KMS signing. FDP-20 external anchoring extends tamper evidence outside the primary MongoDB boundary, but the local-file sink is not certified immutable storage and does not create legal non-repudiation.
 - No SIEM audit export/integration yet.
 - The frontend still defaults to demo auth unless OIDC env vars are set explicitly.
 - The frontend OIDC path is a local OIDC integration and foundation for production auth, not a production-ready SSO setup.
