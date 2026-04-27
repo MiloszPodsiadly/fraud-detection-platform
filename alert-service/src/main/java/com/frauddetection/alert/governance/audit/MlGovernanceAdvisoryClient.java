@@ -1,8 +1,11 @@
 package com.frauddetection.alert.governance.audit;
 
 import com.frauddetection.alert.security.internal.InternalServiceAuthHeaders;
+import com.frauddetection.alert.security.internal.InternalServiceClientProperties;
+import com.frauddetection.alert.security.internal.InternalServiceClientRequestFactory;
+import com.frauddetection.alert.security.internal.InternalMtlsClientHandshakeMetrics;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.http.HttpStatusCode;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
@@ -14,17 +17,34 @@ public class MlGovernanceAdvisoryClient implements GovernanceAdvisoryClient {
 
     private final RestClient restClient;
 
-    public MlGovernanceAdvisoryClient(GovernanceAuditProperties properties, InternalServiceAuthHeaders internalAuthHeaders) {
-        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
-        requestFactory.setConnectTimeout(properties.mlLookupTimeout());
-        requestFactory.setReadTimeout(properties.mlLookupTimeout());
+    public MlGovernanceAdvisoryClient(
+            GovernanceAuditProperties properties,
+            InternalServiceAuthHeaders internalAuthHeaders,
+            InternalServiceClientProperties internalAuthProperties,
+            MeterRegistry meterRegistry
+    ) {
         this.restClient = RestClient.builder()
                 .baseUrl(properties.mlGovernanceBaseUrl().toString())
-                .requestFactory(requestFactory)
+                .requestFactory(InternalServiceClientRequestFactory.create(
+                        properties.mlGovernanceBaseUrl(),
+                        properties.mlLookupTimeout(),
+                        properties.mlLookupTimeout(),
+                        internalAuthProperties
+                ))
                 .requestInterceptor((request, body, execution) -> {
                     request.getHeaders().set("Accept", "application/json");
+                    if ("MTLS_SERVICE_IDENTITY".equals(internalAuthProperties.normalizedMode())) {
+                        request.getHeaders().set("Connection", "close");
+                    }
                     internalAuthHeaders.apply(request.getHeaders());
-                    return execution.execute(request, body);
+                    try {
+                        return execution.execute(request, body);
+                    } catch (RuntimeException exception) {
+                        if ("MTLS_SERVICE_IDENTITY".equals(internalAuthProperties.normalizedMode())) {
+                            InternalMtlsClientHandshakeMetrics.recordIfMtlsFailure(exception, meterRegistry);
+                        }
+                        throw exception;
+                    }
                 })
                 .build();
     }

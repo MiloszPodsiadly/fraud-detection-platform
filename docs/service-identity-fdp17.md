@@ -16,7 +16,8 @@ FDP-17 does not change scoring behavior, ML model behavior, Kafka contracts, gov
 - `DISABLED_LOCAL_ONLY`: explicit local/dev/test/docker-local bypass. This mode is forbidden in prod-like profiles.
 - `TOKEN_VALIDATOR`: compatibility shared-token mode. In prod-like profiles it requires `INTERNAL_AUTH_ALLOW_TOKEN_VALIDATOR_IN_PROD=true`, token hash mode, and an allowlist.
 - `JWT_SERVICE_IDENTITY`: signed JWT service identity mode. `RS256` is the production-target algorithm. `HS256` remains local compatibility only and is rejected in prod-like profiles.
-- `MTLS_READY`: fail-closed configuration boundary only. Full enterprise mTLS is not implemented.
+- `MTLS_READY`: fail-closed compatibility boundary.
+- `MTLS_SERVICE_IDENTITY`: implemented in FDP-18 as certificate-backed internal service identity. See `docs/service-identity-fdp18.md`.
 
 Unknown modes fail startup instead of downgrading.
 
@@ -89,8 +90,8 @@ This is not equivalent to mTLS, nonce-based replay prevention, or a zero-replay 
 - Missing or unknown `kid`, unsupported algorithms, `alg=none`, HS256 in RS256 mode, invalid signature, issuer, audience, unknown service, key/service mismatch, or missing authority return `403`.
 - Auth failure logs a structured warning without token contents.
 - Metrics remain low-cardinality:
-  - `fraud_internal_auth_success_total{source_service,target_service}`
-  - `fraud_internal_auth_failure_total{target_service,reason}`
+  - `fraud_internal_auth_success_total{source_service,target_service,mode}`
+  - `fraud_internal_auth_failure_total{target_service,mode,reason}`
   - `fraud_internal_auth_replay_rejected_total{reason}`
   - `fraud_internal_auth_token_age_seconds{reason}`
 
@@ -122,4 +123,4 @@ Expected checks:
 
 `deployment/service-identity/` contains local development keys only. Do not use them in production.
 
-This is a service-auth foundation. It is not enterprise IAM, not external JWKS discovery, not automated key rotation, not HSM/KMS integration, not full mTLS, not zero-trust certification, not WORM storage, not SIEM integration, and not a compliance archive.
+This is a JWT service-auth foundation. FDP-18 adds internal mTLS in a separate contract. FDP-17 remains not enterprise IAM, not external JWKS discovery, not automated key rotation, not HSM/KMS integration, not zero-trust certification, not WORM storage, not SIEM integration, and not a compliance archive.
