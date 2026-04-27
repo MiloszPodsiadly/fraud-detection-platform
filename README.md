@@ -558,6 +558,18 @@ Expected results: direct protected ML calls without a client certificate fail, s
 
 Local mTLS keys under `deployment/service-identity/mtls/` are committed intentionally for local development and verification only. They must NEVER be used in any production or shared environment. Production deployments must use externally managed CA, server certificate, client certificate, and private-key material.
 
+### Certificate Lifecycle & Operational Risk
+
+FDP-18.1 exposes certificate lifecycle signals for internal mTLS:
+
+- `fraud_internal_mtls_cert_expiry_seconds{source_service,target_service}`
+- `fraud_internal_mtls_cert_age_seconds{source_service,target_service}`
+- `fraud_internal_mtls_handshake_failures_total{reason}`
+
+The system logs warnings before certificate expiration and fails startup when a configured mTLS certificate is already expired. Operators must monitor expiry metrics and rotate certificates manually.
+
+FDP-18.1 does not provide automated certificate rotation, a certificate management system, CA integration, secret rotation automation, cert-manager, Vault, KMS/HSM, or external PKI automation.
+
 FDP-18 is an internal mTLS service identity foundation. It is not enterprise IAM, not automated certificate rotation, not cert-manager/Vault/KMS integration, not full zero-trust certification, not WORM storage, and not SIEM integration. See `docs/service-identity-fdp18.md`.
 
 ## Replay Risk

@@ -45,6 +45,7 @@ Unknown SAN URI, CN-only certificates, missing certificates, expired/untrusted c
 - `INTERNAL_AUTH_MTLS_SPIFFE_TRUST_DOMAIN=fraud-platform`
 
 Startup fails closed if required material or service authority configuration is missing.
+Startup also fails if the configured `ml-inference-service` server certificate is already expired. Certificates close to expiration produce structured startup warnings without dumping certificate contents, serial numbers, subjects, SAN values, fingerprints, paths, or private material.
 
 ## Java Client Configuration
 
@@ -62,6 +63,7 @@ Required client configuration:
 - `INTERNAL_AUTH_MTLS_TRUST_ALL=false`
 
 Trust-all mode is rejected. Server certificate validation uses configured CA material and the target host must match the expected server identity.
+Java clients keep the platform hostname verifier; FDP-18 does not override it, does not install a trust-all manager, and does not disable certificate-chain or SAN hostname validation. Java client startup fails if its configured client certificate is expired.
 
 ## Observability
 
@@ -69,9 +71,27 @@ Metrics are low-cardinality:
 
 - `fraud_internal_auth_success_total{source_service,target_service,mode}`
 - `fraud_internal_auth_failure_total{target_service,mode,reason}`
-- `fraud_internal_mtls_certificate_expiry_seconds{source_service,target_service}`
+- `fraud_internal_mtls_handshake_failures_total{reason}`
+- `fraud_internal_mtls_cert_expiry_seconds{source_service,target_service}`
+- `fraud_internal_mtls_cert_age_seconds{source_service,target_service}`
 
 Labels do not include token values, certificate serials, SAN values, fingerprints, paths, IPs, users, resources, exception messages, or raw subjects.
+
+`/health` includes an `mtlsCert` component. `UP` means the configured certificate is valid, `WARN` means it is close to expiration, and `DOWN` means the certificate is expired or unavailable. Protected endpoints still enforce mTLS identity independently from health reporting.
+
+## Certificate Lifecycle & Operational Risk
+
+Certificates must be rotated before expiration. FDP-18 exposes expiry and age metrics, logs warnings before expiration, and treats expired configured certificates as hard startup failures.
+
+Operators must monitor expiry metrics and rotate certificates manually.
+
+FDP-18 DOES NOT provide:
+
+- automated certificate rotation
+- certificate management system
+- CA integration
+- secret rotation automation
+- cert-manager, Vault, KMS/HSM, or external PKI automation
 
 ## Local Docker Fixture
 
