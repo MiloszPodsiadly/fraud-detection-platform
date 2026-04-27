@@ -1,6 +1,7 @@
 package com.frauddetection.alert.audit;
 
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.dao.DataAccessException;
@@ -12,25 +13,60 @@ import java.util.UUID;
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class PersistentAuditEventPublisher implements AuditEventPublisher {
 
+    private static final int DEFAULT_MAX_APPEND_ATTEMPTS = 2_000;
+    private static final long DEFAULT_LOCK_RETRY_BACKOFF_MILLIS = 5L;
+
     private final AuditEventRepository repository;
     private final AuditAnchorRepository anchorRepository;
     private final AuditChainLockRepository lockRepository;
     private final AlertServiceMetrics metrics;
+    private final int maxAppendAttempts;
+    private final long lockRetryBackoffMillis;
 
+    @Autowired
     public PersistentAuditEventPublisher(
             AuditEventRepository repository,
             AuditAnchorRepository anchorRepository,
             AuditChainLockRepository lockRepository,
             AlertServiceMetrics metrics
     ) {
+        this(repository, anchorRepository, lockRepository, metrics, DEFAULT_MAX_APPEND_ATTEMPTS, DEFAULT_LOCK_RETRY_BACKOFF_MILLIS);
+    }
+
+    PersistentAuditEventPublisher(
+            AuditEventRepository repository,
+            AuditAnchorRepository anchorRepository,
+            AuditChainLockRepository lockRepository,
+            AlertServiceMetrics metrics,
+            int maxAppendAttempts,
+            long lockRetryBackoffMillis
+    ) {
         this.repository = repository;
         this.anchorRepository = anchorRepository;
         this.lockRepository = lockRepository;
         this.metrics = metrics;
+        this.maxAppendAttempts = maxAppendAttempts;
+        this.lockRetryBackoffMillis = lockRetryBackoffMillis;
     }
 
     @Override
     public void publish(AuditEvent event) {
+        for (int attempt = 1; attempt <= maxAppendAttempts; attempt++) {
+            try {
+                appendOnce(event);
+                return;
+            } catch (AuditChainConflictException exception) {
+                if (attempt == maxAppendAttempts) {
+                    metrics.recordPlatformAuditChainConflict();
+                    metrics.recordPlatformAuditPersistenceFailure(event.action());
+                    throw new AuditPersistenceUnavailableException();
+                }
+                backoffBeforeRetry();
+            }
+        }
+    }
+
+    private void appendOnce(AuditEvent event) {
         String lockOwner = UUID.randomUUID().toString();
         boolean lockAcquired = false;
         boolean auditEventInserted = false;
@@ -50,9 +86,7 @@ public class PersistentAuditEventPublisher implements AuditEventPublisher {
             anchorRepository.insert(AuditAnchorDocument.from(UUID.randomUUID().toString(), document));
             metrics.recordPlatformAuditEventPersisted(event.action(), event.outcome());
         } catch (AuditChainConflictException exception) {
-            metrics.recordPlatformAuditChainConflict();
-            metrics.recordPlatformAuditPersistenceFailure(event.action());
-            throw new AuditPersistenceUnavailableException();
+            throw exception;
         } catch (DataAccessException exception) {
             if (auditEventInserted) {
                 metrics.recordPlatformAuditAnchorWriteFailure();
@@ -67,6 +101,15 @@ public class PersistentAuditEventPublisher implements AuditEventPublisher {
                     metrics.recordPlatformAuditChainConflict();
                 }
             }
+        }
+    }
+
+    private void backoffBeforeRetry() {
+        try {
+            Thread.sleep(lockRetryBackoffMillis);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new AuditPersistenceUnavailableException();
         }
     }
 

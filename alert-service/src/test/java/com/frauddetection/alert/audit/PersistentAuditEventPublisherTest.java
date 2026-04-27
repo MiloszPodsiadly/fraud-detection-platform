@@ -43,7 +43,9 @@ class PersistentAuditEventPublisherTest {
                 repository,
                 anchorRepository,
                 lockRepository,
-                new AlertServiceMetrics(meterRegistry)
+                new AlertServiceMetrics(meterRegistry),
+                3,
+                1L
         );
         AuditEvent event = new AuditEvent(
                 new AuditActor("analyst-1", Set.of("ANALYST"), Set.of("alert:decision:submit")),
@@ -172,7 +174,9 @@ class PersistentAuditEventPublisherTest {
                 repository,
                 anchorRepository,
                 lockRepository,
-                new AlertServiceMetrics(meterRegistry)
+                new AlertServiceMetrics(meterRegistry),
+                3,
+                1L
         );
 
         assertThatThrownBy(() -> publisher.publish(new AuditEvent(
@@ -261,7 +265,9 @@ class PersistentAuditEventPublisherTest {
                 repository,
                 anchorRepository,
                 lockRepository,
-                new AlertServiceMetrics(meterRegistry)
+                new AlertServiceMetrics(meterRegistry),
+                3,
+                1L
         );
         AtomicReference<AuditEventDocument> latest = new AtomicReference<>();
         List<AuditEventDocument> inserted = java.util.Collections.synchronizedList(new ArrayList<>());
@@ -308,7 +314,9 @@ class PersistentAuditEventPublisherTest {
                 repository,
                 anchorRepository,
                 lockRepository,
-                new AlertServiceMetrics(meterRegistry)
+                new AlertServiceMetrics(meterRegistry),
+                3,
+                1L
         );
 
         assertThatThrownBy(() -> publisher.publish(event("alert-1")))

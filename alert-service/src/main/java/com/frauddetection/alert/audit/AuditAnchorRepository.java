@@ -24,7 +24,7 @@ public class AuditAnchorRepository {
 
     public Optional<AuditAnchorDocument> findLatestByPartitionKey(String partitionKey) throws DataAccessException {
         Query query = new Query(Criteria.where("partition_key").is(partitionKey))
-                .with(Sort.by(Sort.Direction.DESC, "created_at"))
+                .with(Sort.by(Sort.Order.desc("chain_position"), Sort.Order.desc("created_at")))
                 .limit(1);
         return Optional.ofNullable(mongoTemplate.findOne(query, AuditAnchorDocument.class));
     }

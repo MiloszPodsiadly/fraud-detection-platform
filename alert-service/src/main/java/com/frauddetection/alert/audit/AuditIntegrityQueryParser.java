@@ -13,7 +13,7 @@ import java.util.Set;
 class AuditIntegrityQueryParser {
 
     static final int DEFAULT_LIMIT = 100;
-    static final int MAX_LIMIT = 500;
+    static final int MAX_LIMIT = 10_000;
     private static final Set<String> ALLOWED_SOURCE_SERVICES = Set.of("alert-service");
 
     static String partitionKey(String sourceService) {

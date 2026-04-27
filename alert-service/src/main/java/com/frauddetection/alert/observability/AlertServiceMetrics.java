@@ -288,7 +288,10 @@ public class AlertServiceMetrics {
                  "ANCHOR_HASH_MISMATCH",
                  "ANCHOR_CHAIN_POSITION_MISMATCH",
                  "MISSING_PREDECESSOR",
-                 "CHAIN_FORK_DETECTED" -> violationType;
+                 "CHAIN_FORK_DETECTED",
+                 "CHAIN_POSITION_INVALID",
+                 "CHAIN_POSITION_DUPLICATE",
+                 "CHAIN_POSITION_GAP" -> violationType;
             default -> "UNKNOWN";
         };
     }
