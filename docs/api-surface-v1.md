@@ -124,7 +124,8 @@ Platform Audit Evidence Export API:
 - Requires backend-enforced `audit:export`; `audit:read` alone is insufficient.
 - Requires inclusive ISO-8601 `from`, `to`, and bounded `source_service=alert-service`.
 - `limit` defaults to `100`, maximum `500`; invalid windows or limits return the platform 400 envelope.
-- Response includes safe audit event summaries, event hash, previous hash, chain position, local anchor references, and external anchor references when available.
+- Response includes safe audit event summaries, event hash, previous hash, chain position, local anchor references, external anchor references when available, `external_anchor_status`, and `anchor_coverage`.
+- Response status is `AVAILABLE`, `PARTIAL`, or `UNAVAILABLE`. `PARTIAL` is used when external anchors are disabled, unavailable, incomplete for exported events, or when legacy events lack local chain positions. Clients MUST check `status` and `anchor_coverage` before treating an export as a complete evidence package.
 - Export access creates an `EXPORT_AUDIT_EVIDENCE` audit event with bounded metadata.
 - The endpoint does not support unbounded export, full-text search, cursor pagination, aggregation, delete, or update, and it does not return raw payloads, tokens, stack traces, transaction payloads, customer/account/card identifiers, advisory content, or full URLs.
 

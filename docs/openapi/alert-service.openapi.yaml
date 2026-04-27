@@ -173,7 +173,7 @@ paths:
   /api/v1/audit/evidence/export:
     get:
       summary: Export bounded audit evidence
-      description: Returns a bounded JSON evidence package for a required source_service and inclusive from/to window. Requires audit:export. Includes safe audit event summaries, event hashes, previous hashes, chain positions, local anchor references, and external anchor references when available. It never returns raw payloads, tokens, stack traces, transaction payloads, customer/account/card identifiers, or advisory note bodies. No unbounded export, full-text search, delete, update, cursor pagination, or aggregation is provided.
+      description: Returns a bounded JSON evidence package for a required source_service and inclusive from/to window. Requires audit:export. Includes safe audit event summaries, event hashes, previous hashes, chain positions, local anchor references, external anchor references when available, external_anchor_status, and anchor_coverage. Clients must treat status=PARTIAL as an incomplete evidence package. It never returns raw payloads, tokens, stack traces, transaction payloads, customer/account/card identifiers, or advisory note bodies. No unbounded export, full-text search, delete, update, cursor pagination, or aggregation is provided.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -812,11 +812,12 @@ components:
     AuditEvidenceExportResponse:
       type: object
       additionalProperties: false
-      required: [status, count, limit, source_service, from, to, events]
+      required: [status, count, limit, source_service, from, to, external_anchor_status, anchor_coverage, events]
       properties:
         status:
           type: string
-          enum: [AVAILABLE, UNAVAILABLE]
+          enum: [AVAILABLE, PARTIAL, UNAVAILABLE]
+          description: AVAILABLE means local events, local anchors, and external anchors were available. PARTIAL means the export is incomplete as an evidence package.
         count:
           type: integer
           minimum: 0
@@ -836,15 +837,46 @@ components:
         reason_code:
           type: string
           nullable: true
-          enum: [AUDIT_STORE_UNAVAILABLE]
+          enum:
+            - AUDIT_STORE_UNAVAILABLE
+            - EXTERNAL_ANCHORS_DISABLED
+            - EXTERNAL_ANCHORS_UNAVAILABLE
+            - EXTERNAL_ANCHOR_COVERAGE_INCOMPLETE
+            - LEGACY_UNANCHORED_EVENTS
         message:
           type: string
           nullable: true
           maxLength: 160
+        external_anchor_status:
+          type: string
+          enum: [AVAILABLE, PARTIAL, UNAVAILABLE, DISABLED]
+        anchor_coverage:
+          $ref: "#/components/schemas/AuditEvidenceExportAnchorCoverage"
         events:
           type: array
           items:
             $ref: "#/components/schemas/AuditEvidenceExportEvent"
+    AuditEvidenceExportAnchorCoverage:
+      type: object
+      additionalProperties: false
+      required:
+        - local_anchors_available_count
+        - external_anchors_available_count
+        - events_without_local_anchor_count
+        - events_without_external_anchor_count
+      properties:
+        local_anchors_available_count:
+          type: integer
+          minimum: 0
+        external_anchors_available_count:
+          type: integer
+          minimum: 0
+        events_without_local_anchor_count:
+          type: integer
+          minimum: 0
+        events_without_external_anchor_count:
+          type: integer
+          minimum: 0
     AuditEvidenceExportEvent:
       type: object
       additionalProperties: false
@@ -886,10 +918,45 @@ components:
           nullable: true
         local_anchor:
           nullable: true
-          $ref: "#/components/schemas/AuditAnchorSummary"
+          $ref: "#/components/schemas/AuditEvidenceExportAnchorReference"
         external_anchor:
           nullable: true
-          $ref: "#/components/schemas/AuditAnchorSummary"
+          $ref: "#/components/schemas/AuditEvidenceExportAnchorReference"
+    AuditEvidenceExportAnchorReference:
+      type: object
+      additionalProperties: false
+      required: [chain_position, last_event_hash, hash_algorithm]
+      properties:
+        anchor_id:
+          type: string
+          nullable: true
+        external_anchor_id:
+          type: string
+          nullable: true
+        local_anchor_id:
+          type: string
+          nullable: true
+        chain_position:
+          type: integer
+          format: int64
+          minimum: 1
+        last_event_hash:
+          type: string
+        hash_algorithm:
+          type: string
+          enum: [SHA-256]
+        schema_version:
+          type: string
+          nullable: true
+          enum: ["1.0"]
+        sink_type:
+          type: string
+          nullable: true
+          enum: [local-file]
+        publication_status:
+          type: string
+          nullable: true
+          enum: [PUBLISHED]
     AuditAnchorSummary:
       type: object
       additionalProperties: false
