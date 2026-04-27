@@ -80,7 +80,7 @@ paths:
   /api/v1/audit/integrity:
     get:
       summary: Verify bounded audit hash-chain integrity
-      description: Performs read-only bounded application-level verification of durable platform audit events. Requires audit:read. Verifies deterministic event hashes, partition-scoped previous-hash continuity, schema version, hash algorithm, fork indicators, and latest local chain-anchor consistency. Returns VALID, INVALID, PARTIAL, or UNAVAILABLE. This endpoint does not repair data, export full audit history, delete/update audit records, provide WORM storage, external notarization, external chain anchoring, legal non-repudiation, SIEM integration, HSM/KMS signing, or regulator-ready evidence packaging. Successful integrity reads create a bounded VERIFY_AUDIT_INTEGRITY audit event.
+      description: Performs read-only bounded application-level verification of durable platform audit events. Requires audit:read. Verifies deterministic event hashes, partition-scoped previous-hash continuity, schema version, hash algorithm, fork indicators, and latest local chain-anchor consistency. Supports mode=HEAD, WINDOW, or FULL_CHAIN. WINDOW and HEAD can report an external predecessor without treating it as a false violation; FULL_CHAIN reports missing predecessors as violations. Returns VALID, INVALID, PARTIAL, or UNAVAILABLE. This endpoint does not repair data, export full audit history, delete/update audit records, provide WORM storage, protection against full DB administrator rewrite, external notarization, external chain anchoring, legal non-repudiation, SIEM integration, HSM/KMS signing, or regulator-ready evidence packaging. Successful integrity reads create a bounded VERIFY_AUDIT_INTEGRITY audit event.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -106,6 +106,14 @@ paths:
           schema:
             type: string
             enum: [alert-service]
+        - name: mode
+          in: query
+          required: false
+          description: Verification mode. Defaults to HEAD unless from/to is supplied, in which case default is WINDOW.
+          schema:
+            type: string
+            enum: [HEAD, WINDOW, FULL_CHAIN]
+            default: HEAD
         - name: limit
           in: query
           required: false
@@ -477,6 +485,7 @@ components:
         - correlation_id
         - source_service
         - partition_key
+        - chain_position
         - request_id
         - metadata_summary
         - previous_event_hash
@@ -527,6 +536,12 @@ components:
           type: string
           enum: ["source_service:alert-service"]
           description: Partition used for previous_event_hash continuity.
+        chain_position:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 1
+          description: Unique per-partition chain position for FDP-19 audit records; null only for immutable legacy local records created before chain positions existed.
         request_id:
           type: string
           nullable: true
@@ -605,6 +620,10 @@ components:
         - status
         - checked
         - limit
+        - verification_mode
+        - partial_window
+        - external_predecessor
+        - window_start_has_external_predecessor
         - violations
       properties:
         status:
@@ -617,6 +636,16 @@ components:
           type: integer
           minimum: 1
           maximum: 500
+        verification_mode:
+          type: string
+          nullable: true
+          enum: [HEAD, WINDOW, FULL_CHAIN]
+        partial_window:
+          type: boolean
+        external_predecessor:
+          type: boolean
+        window_start_has_external_predecessor:
+          type: boolean
         reason_code:
           type: string
           nullable: true
@@ -652,13 +681,13 @@ components:
       properties:
         violation_type:
           type: string
-          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, INVALID_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, CHAIN_FORK_DETECTED]
+          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, INVALID_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, MISSING_PREDECESSOR, CHAIN_FORK_DETECTED]
         position:
           type: integer
           minimum: 1
         reason_code:
           type: string
-          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, UNSUPPORTED_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, CHAIN_FORK_DETECTED]
+          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, UNSUPPORTED_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, MISSING_PREDECESSOR, CHAIN_FORK_DETECTED]
     GovernanceAdvisoryLifecycleStatus:
       type: string
       description: Read-time projection from latest audit decision. OPEN means no audit event exists.

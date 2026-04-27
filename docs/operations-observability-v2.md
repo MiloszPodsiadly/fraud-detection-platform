@@ -223,6 +223,19 @@ Prometheus metric contract:
   - Type: counter
   - Meaning: sensitive read-access audit was persisted with `actor_id=unknown` because the backend principal was unavailable
   - Labels: `endpoint_category`
+- `fraud_platform_audit_anchor_write_failures_total`
+  - Type: counter
+  - Meaning: durable audit event insertion succeeded but local anchor insertion failed, causing the audited request to fail explicitly
+  - Labels: none
+- `fraud_platform_audit_chain_conflicts_total`
+  - Type: counter
+  - Meaning: audit chain partition lock or unique chain-position conflict was detected and failed explicitly
+  - Labels: none
+- `fraud_platform_audit_integrity_check_total`
+  - Type: counter
+  - Meaning: bounded audit integrity verification requests completed by `alert-service`
+  - Labels: `status`
+  - Bounded statuses: `VALID`, `INVALID`, `PARTIAL`, `UNAVAILABLE`
 - `fraud_platform_audit_integrity_checks_total`
   - Type: counter
   - Meaning: bounded audit integrity verification requests completed by `alert-service`
@@ -232,7 +245,7 @@ Prometheus metric contract:
   - Type: counter
   - Meaning: bounded audit integrity verification detected a violation
   - Labels: `violation_type`
-  - Bounded violation types: `EVENT_HASH_MISMATCH`, `PREVIOUS_HASH_MISMATCH`, `INVALID_SCHEMA_VERSION`, `UNSUPPORTED_HASH_ALGORITHM`, `ANCHOR_MISSING`, `ANCHOR_HASH_MISMATCH`, `ANCHOR_CHAIN_POSITION_MISMATCH`, `CHAIN_FORK_DETECTED`, `UNKNOWN`
+  - Bounded violation types: `EVENT_HASH_MISMATCH`, `PREVIOUS_HASH_MISMATCH`, `INVALID_SCHEMA_VERSION`, `UNSUPPORTED_HASH_ALGORITHM`, `ANCHOR_MISSING`, `ANCHOR_HASH_MISMATCH`, `ANCHOR_CHAIN_POSITION_MISMATCH`, `MISSING_PREDECESSOR`, `CHAIN_FORK_DETECTED`, `UNKNOWN`
 - `fraud_audit_integrity_check_total`
   - Type: counter
   - Meaning: scheduled/manual application-level audit integrity checks completed
