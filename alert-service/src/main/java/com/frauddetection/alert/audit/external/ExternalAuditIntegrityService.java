@@ -1,0 +1,202 @@
+package com.frauddetection.alert.audit.external;
+
+import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.audit.AuditAnchorDocument;
+import com.frauddetection.alert.audit.AuditAnchorRepository;
+import com.frauddetection.alert.audit.AuditEventMetadataSummary;
+import com.frauddetection.alert.audit.AuditIntegrityViolation;
+import com.frauddetection.alert.audit.AuditOutcome;
+import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
+import com.frauddetection.alert.audit.AuditResourceType;
+import com.frauddetection.alert.audit.AuditService;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
+import org.springframework.stereotype.Service;
+
+import java.util.ArrayList;
+import java.util.List;
+
+@Service
+public class ExternalAuditIntegrityService {
+
+    private static final Logger log = LoggerFactory.getLogger(ExternalAuditIntegrityService.class);
+    private static final String SUPPORTED_SCHEMA_VERSION = "1.0";
+
+    private final AuditAnchorRepository anchorRepository;
+    private final ExternalAuditAnchorSink sink;
+    private final ExternalAuditIntegrityQueryParser queryParser;
+    private final AlertServiceMetrics metrics;
+    private final AuditService auditService;
+
+    public ExternalAuditIntegrityService(
+            AuditAnchorRepository anchorRepository,
+            ExternalAuditAnchorSink sink,
+            ExternalAuditIntegrityQueryParser queryParser,
+            AlertServiceMetrics metrics,
+            AuditService auditService
+    ) {
+        this.anchorRepository = anchorRepository;
+        this.sink = sink;
+        this.queryParser = queryParser;
+        this.metrics = metrics;
+        this.auditService = auditService;
+    }
+
+    public ExternalAuditIntegrityResponse verify(String sourceService, Integer limit) {
+        ExternalAuditIntegrityQuery query = queryParser.parse(sourceService, limit);
+        try {
+            ExternalAuditIntegrityResponse response = verify(query);
+            metrics.recordExternalIntegrityCheck(response.status());
+            auditExternalIntegrityRead(query, response, AuditOutcome.SUCCESS, null);
+            return response;
+        } catch (DataAccessException exception) {
+            ExternalAuditIntegrityResponse response = ExternalAuditIntegrityResponse.unavailable(
+                    query,
+                    "AUDIT_STORE_UNAVAILABLE",
+                    "Local audit anchor store is currently unavailable."
+            );
+            metrics.recordExternalIntegrityCheck(response.status());
+            auditFailureBestEffort(query, response, "AUDIT_STORE_UNAVAILABLE");
+            return response;
+        } catch (ExternalAuditAnchorSinkException exception) {
+            ExternalAuditIntegrityResponse response = ExternalAuditIntegrityResponse.unavailable(
+                    query,
+                    "EXTERNAL_ANCHOR_STORE_UNAVAILABLE",
+                    "External audit anchor sink is currently unavailable."
+            );
+            metrics.recordExternalIntegrityCheck(response.status());
+            auditFailureBestEffort(query, response, "EXTERNAL_ANCHOR_STORE_UNAVAILABLE");
+            return response;
+        }
+    }
+
+    private ExternalAuditIntegrityResponse verify(ExternalAuditIntegrityQuery query) {
+        AuditAnchorDocument local = anchorRepository.findLatestByPartitionKey(query.partitionKey()).orElse(null);
+        if (local == null) {
+            return new ExternalAuditIntegrityResponse(
+                    "VALID",
+                    0,
+                    query.limit(),
+                    query.sourceService(),
+                    query.partitionKey(),
+                    null,
+                    null,
+                    null,
+                    null,
+                    List.of()
+            );
+        }
+
+        ExternalAuditAnchor external = sink.latest(query.partitionKey()).orElse(null);
+        if (external == null) {
+            return partial(query, local, null, "EXTERNAL_ANCHOR_MISSING", "External anchor is missing for the local chain head.");
+        }
+
+        List<AuditIntegrityViolation> violations = new ArrayList<>();
+        if (external.chainPosition() < local.chainPosition()) {
+            violations.add(new AuditIntegrityViolation("STALE_EXTERNAL_ANCHOR", 1, "STALE_EXTERNAL_ANCHOR"));
+            return response("PARTIAL", query, local, external, violations, "STALE_EXTERNAL_ANCHOR", "External anchor is behind the local chain head.");
+        }
+        if (external.chainPosition() > local.chainPosition()) {
+            violations.add(new AuditIntegrityViolation("EXTERNAL_CHAIN_POSITION_AHEAD", 1, "EXTERNAL_CHAIN_POSITION_AHEAD"));
+        }
+        if (external.chainPosition() == local.chainPosition() && !same(external.localAnchorId(), local.anchorId())) {
+            violations.add(new AuditIntegrityViolation("EXTERNAL_LOCAL_ANCHOR_ID_MISMATCH", 1, "EXTERNAL_LOCAL_ANCHOR_ID_MISMATCH"));
+        }
+        if (!same(external.lastEventHash(), local.lastEventHash())) {
+            violations.add(new AuditIntegrityViolation("EXTERNAL_HASH_MISMATCH", 1, "EXTERNAL_HASH_MISMATCH"));
+        }
+        if (!same(external.hashAlgorithm(), local.hashAlgorithm())) {
+            violations.add(new AuditIntegrityViolation("EXTERNAL_HASH_ALGORITHM_MISMATCH", 1, "EXTERNAL_HASH_ALGORITHM_MISMATCH"));
+        }
+        if (!SUPPORTED_SCHEMA_VERSION.equals(external.schemaVersion())) {
+            violations.add(new AuditIntegrityViolation("EXTERNAL_SCHEMA_VERSION_UNSUPPORTED", 1, "EXTERNAL_SCHEMA_VERSION_UNSUPPORTED"));
+        }
+
+        String status = violations.isEmpty() ? "VALID" : "INVALID";
+        return response(status, query, local, external, violations, null, null);
+    }
+
+    private ExternalAuditIntegrityResponse partial(
+            ExternalAuditIntegrityQuery query,
+            AuditAnchorDocument local,
+            ExternalAuditAnchor external,
+            String reasonCode,
+            String message
+    ) {
+        return response(
+                "PARTIAL",
+                query,
+                local,
+                external,
+                List.of(new AuditIntegrityViolation(reasonCode, 1, reasonCode)),
+                reasonCode,
+                message
+        );
+    }
+
+    private ExternalAuditIntegrityResponse response(
+            String status,
+            ExternalAuditIntegrityQuery query,
+            AuditAnchorDocument local,
+            ExternalAuditAnchor external,
+            List<AuditIntegrityViolation> violations,
+            String reasonCode,
+            String message
+    ) {
+        return new ExternalAuditIntegrityResponse(
+                status,
+                1,
+                query.limit(),
+                query.sourceService(),
+                query.partitionKey(),
+                reasonCode,
+                message,
+                ExternalAuditAnchorSummary.fromLocal(local),
+                external == null ? null : ExternalAuditAnchorSummary.fromExternal(external),
+                violations
+        );
+    }
+
+    private void auditFailureBestEffort(ExternalAuditIntegrityQuery query, ExternalAuditIntegrityResponse response, String reason) {
+        try {
+            auditExternalIntegrityRead(query, response, AuditOutcome.FAILED, reason);
+        } catch (AuditPersistenceUnavailableException ignored) {
+            log.warn("External audit integrity verification access audit could not be persisted.");
+        }
+    }
+
+    private void auditExternalIntegrityRead(
+            ExternalAuditIntegrityQuery query,
+            ExternalAuditIntegrityResponse response,
+            AuditOutcome outcome,
+            String failureReason
+    ) {
+        auditService.audit(
+                AuditAction.VERIFY_EXTERNAL_AUDIT_INTEGRITY,
+                AuditResourceType.AUDIT_EXTERNAL_INTEGRITY,
+                null,
+                null,
+                "external-audit-integrity-reader",
+                outcome,
+                failureReason,
+                AuditEventMetadataSummary.auditRead(
+                        null,
+                        "alert-service",
+                        "1.0",
+                        "GET /api/v1/audit/integrity/external",
+                        "source_service=" + query.sourceService() + ";limit=" + query.limit(),
+                        response.checked()
+                )
+        );
+    }
+
+    private boolean same(String left, String right) {
+        if (left == null) {
+            return right == null;
+        }
+        return left.equals(right);
+    }
+}

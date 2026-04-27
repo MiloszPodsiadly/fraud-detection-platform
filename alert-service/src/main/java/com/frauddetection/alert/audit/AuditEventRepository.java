@@ -96,4 +96,19 @@ public class AuditEventRepository {
         }
         return mongoTemplate.find(query, AuditEventDocument.class);
     }
+
+    public List<AuditEventDocument> findEvidenceWindow(
+            String sourceService,
+            Instant from,
+            Instant to,
+            int limit
+    ) throws DataAccessException {
+        Query query = new Query(new Criteria().andOperator(
+                Criteria.where("partition_key").is(AuditIntegrityQueryParser.partitionKey(sourceService)),
+                Criteria.where("created_at").gte(from).lte(to)
+        ))
+                .with(Sort.by(Sort.Direction.ASC, "chain_position"))
+                .limit(limit);
+        return mongoTemplate.find(query, AuditEventDocument.class);
+    }
 }

@@ -69,7 +69,7 @@ public record AuditEventMetadataSummary(
         );
     }
 
-    static AuditEventMetadataSummary from(AuditEventDocument document) {
+    public static AuditEventMetadataSummary from(AuditEventDocument document) {
         if (document.metadataSummary() != null) {
             return document.metadataSummary();
         }

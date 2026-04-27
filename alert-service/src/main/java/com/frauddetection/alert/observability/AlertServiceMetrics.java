@@ -132,6 +132,42 @@ public class AlertServiceMetrics {
         auditIntegrityInvalid.set("INVALID".equals(status) ? 1 : 0);
     }
 
+    public void recordExternalAnchorPublished(String sink, String status) {
+        counter(
+                "fraud_platform_audit_external_anchor_published_total",
+                "sink", normalizeExternalSink(sink),
+                "status", normalizeExternalAnchorPublishStatus(status)
+        ).increment();
+    }
+
+    public void recordExternalAnchorPublishFailed(String sink, String reason) {
+        counter(
+                "fraud_platform_audit_external_anchor_publish_failed_total",
+                "sink", normalizeExternalSink(sink),
+                "reason", normalizeExternalAnchorFailureReason(reason)
+        ).increment();
+    }
+
+    public void recordExternalAnchorLag(Duration lag) {
+        Timer.builder("fraud_platform_audit_external_anchor_lag_seconds")
+                .register(meterRegistry)
+                .record(lag.isNegative() ? Duration.ZERO : lag);
+    }
+
+    public void recordExternalIntegrityCheck(String status) {
+        counter(
+                "fraud_platform_audit_external_integrity_checks_total",
+                "status", normalizeIntegrityStatus(status)
+        ).increment();
+    }
+
+    public void recordEvidenceExport(String status) {
+        counter(
+                "fraud_platform_audit_evidence_exports_total",
+                "status", normalizeAvailabilityStatus(status)
+        ).increment();
+    }
+
     public void recordReadAccessAuditPersisted(ReadAccessEndpointCategory endpointCategory, ReadAccessAuditOutcome outcome) {
         counter(
                 "fraud_platform_read_access_audit_events_persisted_total",
@@ -291,7 +327,36 @@ public class AlertServiceMetrics {
                  "CHAIN_FORK_DETECTED",
                  "CHAIN_POSITION_INVALID",
                  "CHAIN_POSITION_DUPLICATE",
-                 "CHAIN_POSITION_GAP" -> violationType;
+                 "CHAIN_POSITION_GAP",
+                 "EXTERNAL_ANCHOR_MISSING",
+                 "STALE_EXTERNAL_ANCHOR",
+                 "EXTERNAL_CHAIN_POSITION_AHEAD",
+                 "EXTERNAL_HASH_MISMATCH",
+                 "EXTERNAL_CHAIN_POSITION_MISMATCH",
+                 "EXTERNAL_HASH_ALGORITHM_MISMATCH",
+                 "EXTERNAL_SCHEMA_VERSION_UNSUPPORTED",
+                 "EXTERNAL_LOCAL_ANCHOR_ID_MISMATCH" -> violationType;
+            default -> "UNKNOWN";
+        };
+    }
+
+    private String normalizeExternalSink(String sink) {
+        if ("local-file".equals(sink) || "disabled".equals(sink)) {
+            return sink;
+        }
+        return "unknown";
+    }
+
+    private String normalizeExternalAnchorPublishStatus(String status) {
+        if ("PUBLISHED".equals(status) || "DUPLICATE".equals(status)) {
+            return status;
+        }
+        return "FAILED";
+    }
+
+    private String normalizeExternalAnchorFailureReason(String reason) {
+        return switch (reason) {
+            case "DISABLED", "UNAVAILABLE", "CONFLICT", "IO_ERROR" -> reason;
             default -> "UNKNOWN";
         };
     }

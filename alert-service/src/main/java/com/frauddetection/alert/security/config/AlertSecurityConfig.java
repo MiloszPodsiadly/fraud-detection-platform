@@ -78,6 +78,8 @@ public class AlertSecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/transactions/scored").hasAuthority(AnalystAuthority.TRANSACTION_MONITOR_READ)
                         .requestMatchers(HttpMethod.GET, "/api/v1/audit/events").hasAuthority(AnalystAuthority.AUDIT_READ)
                         .requestMatchers(HttpMethod.GET, "/api/v1/audit/integrity").hasAuthority(AnalystAuthority.AUDIT_READ)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/audit/integrity/external").hasAuthority(AnalystAuthority.AUDIT_VERIFY)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/audit/evidence/export").hasAuthority(AnalystAuthority.AUDIT_EXPORT)
                         .requestMatchers(HttpMethod.GET, "/governance/advisories/analytics").hasAuthority(AnalystAuthority.TRANSACTION_MONITOR_READ)
                         .requestMatchers(HttpMethod.GET, "/governance/advisories").hasAuthority(AnalystAuthority.TRANSACTION_MONITOR_READ)
                         .requestMatchers(HttpMethod.GET, "/governance/advisories/{eventId}").hasAuthority(AnalystAuthority.TRANSACTION_MONITOR_READ)
