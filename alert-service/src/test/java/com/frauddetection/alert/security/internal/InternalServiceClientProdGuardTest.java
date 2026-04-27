@@ -340,7 +340,26 @@ class InternalServiceClientProdGuardTest {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         Instant now = Instant.parse("2026-04-27T12:00:00Z");
         InternalMtlsCertificateMonitor monitor = new InternalMtlsCertificateMonitor(
-                mtlsProperties(),
+                mtlsPropertiesWithCertificate("deployment/service-identity/mtls/alert-service.pem"),
+                registry,
+                Clock.fixed(now, ZoneOffset.UTC),
+                () -> new InternalMtlsCertificateMonitor.CertificateWindow(
+                        Date.from(now.minus(Duration.ofHours(1))),
+                        Date.from(now.plus(Duration.ofDays(5)))
+                )
+        );
+
+        monitor.afterPropertiesSet();
+
+        assertThat(monitor.health().getStatus().getCode()).isEqualTo("WARN");
+    }
+
+    @Test
+    void shouldReportCriticalHealthWhenMtlsCertificateExpiresWithinTwentyFourHours() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        Instant now = Instant.parse("2026-04-27T12:00:00Z");
+        InternalMtlsCertificateMonitor monitor = new InternalMtlsCertificateMonitor(
+                mtlsPropertiesWithCertificate("deployment/service-identity/mtls/alert-service.pem"),
                 registry,
                 Clock.fixed(now, ZoneOffset.UTC),
                 () -> new InternalMtlsCertificateMonitor.CertificateWindow(
@@ -351,7 +370,85 @@ class InternalServiceClientProdGuardTest {
 
         monitor.afterPropertiesSet();
 
-        assertThat(monitor.health().getStatus().getCode()).isEqualTo("WARN");
+        assertThat(monitor.health().getStatus().getCode()).isEqualTo("CRITICAL");
+        assertThat(registry.get("fraud_internal_mtls_cert_expiry_state_total")
+                .tag("state", "CRITICAL")
+                .counter()
+                .count()).isGreaterThan(0);
+    }
+
+    @Test
+    void shouldFailStartupWhenMtlsCertificateIsRemoved() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        InternalMtlsCertificateMonitor monitor = new InternalMtlsCertificateMonitor(
+                mtlsPropertiesWithCertificate("deployment/service-identity/mtls/missing-service.pem"),
+                registry
+        );
+
+        assertThatThrownBy(monitor::afterPropertiesSet)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Internal mTLS certificate trust material is unavailable or invalid.");
+    }
+
+    @Test
+    void shouldFailStartupWhenMtlsTrustChainIsBroken() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        InternalMtlsCertificateMonitor monitor = new InternalMtlsCertificateMonitor(
+                mtlsPropertiesWithCertificateAndCa(
+                        "deployment/service-identity/mtls/alert-service.pem",
+                        "deployment/service-identity/mtls/unknown-service.pem"
+                ),
+                registry
+        );
+
+        assertThatThrownBy(monitor::afterPropertiesSet)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Internal mTLS client certificate is not trusted by configured CA material.");
+    }
+
+    @Test
+    void shouldAllowRotationOverlapAndRejectOldTrustAfterRemoval() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        InternalMtlsCertificateMonitor overlap = new InternalMtlsCertificateMonitor(
+                mtlsPropertiesWithCertificateAndCa(
+                        "deployment/service-identity/mtls/alert-service.pem",
+                        "deployment/service-identity/mtls/unknown-service.pem,deployment/service-identity/mtls/local-dev-ca.pem"
+                ),
+                registry
+        );
+        InternalMtlsCertificateMonitor oldTrustOnly = new InternalMtlsCertificateMonitor(
+                mtlsPropertiesWithCertificateAndCa(
+                        "deployment/service-identity/mtls/alert-service.pem",
+                        "deployment/service-identity/mtls/unknown-service.pem"
+                ),
+                registry
+        );
+
+        assertThatCode(overlap::afterPropertiesSet).doesNotThrowAnyException();
+        assertThatThrownBy(oldTrustOnly::afterPropertiesSet)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Internal mTLS client certificate is not trusted by configured CA material.");
+    }
+
+    @Test
+    void shouldRefreshLifecycleMetricsDuringPeriodicMonitor() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        InternalMtlsCertificateMonitor monitor = new InternalMtlsCertificateMonitor(
+                mtlsPropertiesWithCertificate("deployment/service-identity/mtls/alert-service.pem"),
+                registry
+        );
+
+        monitor.monitorLifecycle();
+
+        assertThat(registry.get("fraud_internal_mtls_cert_expiry_seconds")
+                .tag("source_service", "alert-service")
+                .tag("target_service", "ml-inference-service")
+                .gauge()
+                .value()).isGreaterThan(0);
+        assertThat(registry.get("fraud_internal_mtls_cert_expiry_state_total")
+                .tag("state", "UP")
+                .counter()
+                .count()).isGreaterThan(0);
     }
 
     @Test
@@ -444,6 +541,10 @@ class InternalServiceClientProdGuardTest {
     }
 
     private InternalServiceClientProperties mtlsPropertiesWithCertificate(String certificatePath) {
+        return mtlsPropertiesWithCertificateAndCa(certificatePath, "deployment/service-identity/mtls/local-dev-ca.pem");
+    }
+
+    private InternalServiceClientProperties mtlsPropertiesWithCertificateAndCa(String certificatePath, String caCertificatePaths) {
         return new InternalServiceClientProperties(
                 true,
                 "MTLS_SERVICE_IDENTITY",
@@ -454,11 +555,20 @@ class InternalServiceClientProdGuardTest {
                 new InternalServiceClientProperties.Mtls(
                         repoPath(certificatePath).toString(),
                         "client-key.pem",
-                        "ca.pem",
+                        caPaths(caCertificatePaths),
                         "ml-inference-service",
                         false
                 )
         );
+    }
+
+    private String caPaths(String caCertificatePaths) {
+        return java.util.Arrays.stream(caCertificatePaths.split("[,;]"))
+                .map(String::trim)
+                .filter(path -> !path.isBlank())
+                .map(path -> repoPath(path).toString())
+                .reduce((left, right) -> left + "," + right)
+                .orElse(caCertificatePaths);
     }
 
     private String privateKeyPem() {
