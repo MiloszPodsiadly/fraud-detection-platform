@@ -124,6 +124,14 @@ public class AlertManagementService implements AlertManagementUseCase {
         AlertStatus resultingStatus = analystDecisionStatusMapper.toAlertStatus(request);
         String actorId = analystActorResolver.resolveActorId(request.analystId(), "SUBMIT_ANALYST_DECISION", alertId);
 
+        auditService.audit(
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT,
+                document.getAlertId(),
+                document.getCorrelationId(),
+                actorId
+        );
+
         document.setAlertStatus(resultingStatus);
         document.setAnalystDecision(request.decision());
         document.setAnalystId(actorId);
@@ -135,13 +143,6 @@ public class AlertManagementService implements AlertManagementUseCase {
         AlertCase alertCase = alertDocumentMapper.toDomain(saved);
         FraudDecisionEvent event = fraudDecisionEventMapper.toEvent(alertCase, request, resultingStatus, actorId);
         fraudDecisionEventPublisher.publish(event);
-        auditService.audit(
-                AuditAction.SUBMIT_ANALYST_DECISION,
-                AuditResourceType.ALERT,
-                saved.getAlertId(),
-                saved.getCorrelationId(),
-                actorId
-        );
         metrics.recordAnalystDecisionSubmitted();
 
         return new SubmitAnalystDecisionResponse(alertId, request.decision(), resultingStatus, event.eventId(), event.decidedAt());
