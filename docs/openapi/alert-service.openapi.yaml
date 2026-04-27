@@ -240,7 +240,7 @@ paths:
   /api/v1/audit/trust/attestation:
     get:
       summary: Get derived audit trust attestation
-      description: Returns a bounded derived trust assessment over FDP-19 internal integrity and FDP-20 external anchor verification signals. Requires audit:verify and records READ_AUDIT_TRUST_ATTESTATION with bounded metadata. The attestation fingerprint includes source_service, limit, mode, signer_mode, signature_key_id when present, trust status fields, anchor coverage, latest chain fields, external anchor reference, and limitations so it can be reproduced externally. This endpoint does not implement a second external verification stack, a second evidence export, an external anchor sink, legal notarization, WORM storage, SIEM integration, or KMS/HSM signing unless explicitly integrated. Local-dev signing provides integrity metadata only and never upgrades trust level.
+      description: Returns a bounded derived trust assessment over FDP-19 internal integrity and FDP-20 external anchor verification signals. Requires audit:verify and records READ_AUDIT_TRUST_ATTESTATION with bounded metadata. The attestation fingerprint includes source_service, limit, mode, signer_mode, signature_key_id when present, trust status fields, anchor coverage, latest chain fields, external anchor reference, and limitations so it can be reproduced externally. Clients must interpret trust_level together with attestation_signature_strength. SIGNED_ATTESTATION represents stronger trust only when attestation_signature_strength=PRODUCTION_READY and signer_mode is backed by externally managed KMS/HSM signing material. This endpoint does not implement a second external verification stack, a second evidence export, an external anchor sink, legal notarization, legal non-repudiation, regulator-certified archive, WORM storage, SIEM integration, or KMS/HSM signing unless explicitly integrated. Local-dev signing provides integrity metadata only and never upgrades trust level.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1162,7 +1162,7 @@ components:
         trust_level:
           type: string
           enum: [INTERNAL_ONLY, PARTIAL_EXTERNAL, EXTERNALLY_ANCHORED, SIGNED_ATTESTATION, UNAVAILABLE]
-          description: Derived trust assessment. SIGNED_ATTESTATION requires valid external anchoring plus production-ready attestation signing; local-dev signing never upgrades trust level.
+          description: Derived trust assessment. SIGNED_ATTESTATION requires valid external anchoring plus PRODUCTION_READY attestation signing backed by externally managed KMS/HSM signing material; local-dev signing never upgrades trust level.
         internal_integrity_status:
           type: string
           enum: [VALID, INVALID, PARTIAL, UNAVAILABLE]
@@ -1200,11 +1200,11 @@ components:
         signer_mode:
           type: string
           enum: [disabled, local-dev, kms-ready]
-          description: Configured attestation signer mode. kms-ready fails closed unless a real KMS/HSM adapter is integrated.
+          description: Configured attestation signer mode. kms-ready requires app.audit.trust.signing.kms-enabled=true and fails closed unless a real KMS/HSM adapter is integrated.
         attestation_signature_strength:
           type: string
           enum: [NONE, LOCAL_DEV, PRODUCTION_READY]
-          description: LOCAL_DEV signatures are integrity-only and do not add external trust. PRODUCTION_READY is reserved for future real KMS/HSM-backed signing.
+          description: Mandatory for interpreting trust_level. LOCAL_DEV signatures are integrity-only and do not add external trust. PRODUCTION_READY is reserved for future real KMS/HSM-backed signing.
         external_trust_dependency:
           type: string
           enum: [REQUIRED, OPTIONAL]
