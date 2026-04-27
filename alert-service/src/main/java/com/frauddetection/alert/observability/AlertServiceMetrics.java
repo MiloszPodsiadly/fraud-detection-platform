@@ -77,6 +77,14 @@ public class AlertServiceMetrics {
         ).increment();
     }
 
+    public void recordPlatformAuditAnchorWriteFailure() {
+        counter("fraud_platform_audit_anchor_write_failures_total").increment();
+    }
+
+    public void recordPlatformAuditChainConflict() {
+        counter("fraud_platform_audit_chain_conflicts_total").increment();
+    }
+
     public void recordPlatformAuditReadRequest(String status) {
         counter(
                 "fraud_platform_audit_read_requests_total",
@@ -87,6 +95,10 @@ public class AlertServiceMetrics {
     public void recordAuditIntegrityCheck(String status) {
         counter(
                 "fraud_platform_audit_integrity_checks_total",
+                "status", normalizeIntegrityStatus(status)
+        ).increment();
+        counter(
+                "fraud_platform_audit_integrity_check_total",
                 "status", normalizeIntegrityStatus(status)
         ).increment();
     }
@@ -275,6 +287,7 @@ public class AlertServiceMetrics {
                  "ANCHOR_MISSING",
                  "ANCHOR_HASH_MISMATCH",
                  "ANCHOR_CHAIN_POSITION_MISMATCH",
+                 "MISSING_PREDECESSOR",
                  "CHAIN_FORK_DETECTED" -> violationType;
             default -> "UNKNOWN";
         };

@@ -10,6 +10,8 @@ import com.frauddetection.alert.governance.audit.GovernanceAuditPersistenceUnava
 import com.frauddetection.alert.governance.audit.InvalidGovernanceAuditRequestException;
 import com.frauddetection.alert.governance.audit.InvalidGovernanceAuditDecisionException;
 import jakarta.validation.ConstraintViolationException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -24,6 +26,8 @@ import java.util.List;
 
 @RestControllerAdvice
 public class AlertServiceExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(AlertServiceExceptionHandler.class);
 
     @ExceptionHandler(AlertNotFoundException.class)
     public ResponseEntity<ApiErrorResponse> handleNotFound(AlertNotFoundException exception) {
@@ -155,6 +159,7 @@ public class AlertServiceExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiErrorResponse> handleUnexpected(Exception exception) {
+        log.error("Unhandled alert-service exception.", exception);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
                 new ApiErrorResponse(Instant.now(), 500, "Internal Server Error", "An unexpected error occurred.", List.of())
         );

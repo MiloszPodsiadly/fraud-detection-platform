@@ -31,13 +31,13 @@ public record AuditAnchorDocument(
         @Field("hash_algorithm")
         String hashAlgorithm
 ) {
-    static AuditAnchorDocument from(String anchorId, AuditEventDocument event, long chainPosition) {
+    static AuditAnchorDocument from(String anchorId, AuditEventDocument event) {
         return new AuditAnchorDocument(
                 anchorId,
                 Instant.now(),
                 event.partitionKey(),
                 event.eventHash(),
-                chainPosition,
+                event.chainPosition(),
                 event.hashAlgorithm()
         );
     }

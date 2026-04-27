@@ -71,6 +71,7 @@ class AuditEventControllerTest {
                         "corr-1",
                         "alert-service",
                         "source_service:alert-service",
+                        1L,
                         null,
                         new AuditEventMetadataSummary("corr-1", null),
                         null,

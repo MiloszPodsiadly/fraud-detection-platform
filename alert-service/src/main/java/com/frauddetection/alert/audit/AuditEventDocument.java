@@ -69,6 +69,9 @@ public record AuditEventDocument(
         @Field("partition_key")
         String partitionKey,
 
+        @Field("chain_position")
+        Long chainPosition,
+
         @Field("outcome")
         AuditOutcome outcome,
 
@@ -99,7 +102,7 @@ public record AuditEventDocument(
     static final String HASH_ALGORITHM = "SHA-256";
     private static final int MAX_REQUEST_ID_LENGTH = 120;
 
-    static AuditEventDocument from(String auditId, AuditEvent event, String previousEventHash) {
+    static AuditEventDocument from(String auditId, AuditEvent event, String previousEventHash, long chainPosition) {
         AuditFailureCategory failureCategory = event.failureCategory() == null
                 ? AuditEvent.failureCategory(event.outcome(), event.failureReason())
                 : event.failureCategory();
@@ -132,6 +135,7 @@ public record AuditEventDocument(
                 bounded(event.requestId(), MAX_REQUEST_ID_LENGTH),
                 SOURCE_SERVICE,
                 PARTITION_KEY,
+                chainPosition,
                 event.outcome(),
                 failureCategory,
                 event.failureReason(),
@@ -144,8 +148,13 @@ public record AuditEventDocument(
                 auditId,
                 event,
                 previousEventHash,
+                chainPosition,
                 metadataSummary
         )));
+    }
+
+    static AuditEventDocument from(String auditId, AuditEvent event, String previousEventHash) {
+        return from(auditId, event, previousEventHash, 1L);
     }
 
     static AuditEventDocument from(String auditId, AuditEvent event) {
@@ -169,6 +178,7 @@ public record AuditEventDocument(
                 requestId,
                 sourceService,
                 partitionKey,
+                chainPosition,
                 outcome,
                 failureCategory,
                 failureReason,
@@ -184,6 +194,7 @@ public record AuditEventDocument(
             String auditId,
             AuditEvent event,
             String previousEventHash,
+            long chainPosition,
             AuditEventMetadataSummary metadataSummary
     ) {
         return new AuditEventDocument(
@@ -202,6 +213,7 @@ public record AuditEventDocument(
                 bounded(event.requestId(), MAX_REQUEST_ID_LENGTH),
                 SOURCE_SERVICE,
                 PARTITION_KEY,
+                chainPosition,
                 event.outcome(),
                 event.failureCategory() == null
                         ? AuditEvent.failureCategory(event.outcome(), event.failureReason())

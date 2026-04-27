@@ -48,6 +48,9 @@ public record AuditEventResponse(
         @JsonProperty("partition_key")
         String partitionKey,
 
+        @JsonProperty("chain_position")
+        Long chainPosition,
+
         @JsonProperty("request_id")
         String requestId,
 
@@ -82,6 +85,7 @@ public record AuditEventResponse(
                 document.correlationId(),
                 document.sourceService(),
                 document.partitionKey(),
+                document.chainPosition(),
                 document.requestId(),
                 AuditEventMetadataSummary.from(document),
                 document.previousEventHash(),
