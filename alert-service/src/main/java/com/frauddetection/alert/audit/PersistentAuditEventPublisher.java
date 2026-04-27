@@ -21,9 +21,12 @@ public class PersistentAuditEventPublisher implements AuditEventPublisher {
     }
 
     @Override
-    public void publish(AuditEvent event) {
+    public synchronized void publish(AuditEvent event) {
         try {
-            repository.save(AuditEventDocument.from(UUID.randomUUID().toString(), event));
+            String previousHash = repository.findLatestBySourceService("alert-service")
+                    .map(AuditEventDocument::eventHash)
+                    .orElse(null);
+            repository.insert(AuditEventDocument.from(UUID.randomUUID().toString(), event, previousHash));
             metrics.recordPlatformAuditEventPersisted(event.action(), event.outcome());
         } catch (DataAccessException exception) {
             metrics.recordPlatformAuditPersistenceFailure(event.action());

@@ -15,7 +15,8 @@ import java.util.List;
 @CompoundIndexes({
         @CompoundIndex(name = "audit_actor_created_at_idx", def = "{'actor_id': 1, 'created_at': -1}"),
         @CompoundIndex(name = "audit_event_type_created_at_idx", def = "{'event_type': 1, 'created_at': -1}"),
-        @CompoundIndex(name = "audit_resource_created_at_idx", def = "{'resource_type': 1, 'resource_id': 1, 'created_at': -1}")
+        @CompoundIndex(name = "audit_resource_created_at_idx", def = "{'resource_type': 1, 'resource_id': 1, 'created_at': -1}"),
+        @CompoundIndex(name = "audit_source_service_created_at_idx", def = "{'source_service': 1, 'created_at': -1}")
 })
 public record AuditEventDocument(
         @Id
@@ -33,6 +34,9 @@ public record AuditEventDocument(
 
         @Field("actor_roles")
         List<String> actorRoles,
+
+        @Field("actor_type")
+        String actorType,
 
         @Field("actor_authorities")
         List<String> actorAuthorities,
@@ -68,20 +72,50 @@ public record AuditEventDocument(
         @Field("failure_reason")
         String failureReason,
 
+        @Field("metadata_summary")
+        AuditEventMetadataSummary metadataSummary,
+
+        @Field("previous_event_hash")
+        String previousEventHash,
+
+        @Field("event_hash")
+        String eventHash,
+
+        @Field("hash_algorithm")
+        String hashAlgorithm,
+
         @Field("schema_version")
         String schemaVersion
 ) {
     private static final String SCHEMA_VERSION = "1.0";
     private static final String SOURCE_SERVICE = "alert-service";
+    static final String HASH_ALGORITHM = "SHA-256";
     private static final int MAX_REQUEST_ID_LENGTH = 120;
 
-    static AuditEventDocument from(String auditId, AuditEvent event) {
+    static AuditEventDocument from(String auditId, AuditEvent event, String previousEventHash) {
+        AuditFailureCategory failureCategory = event.failureCategory() == null
+                ? AuditEvent.failureCategory(event.outcome(), event.failureReason())
+                : event.failureCategory();
+        AuditEventMetadataSummary metadataSummary = event.metadataSummary() != null
+                ? event.metadataSummary()
+                : new AuditEventMetadataSummary(
+                event.correlationId(),
+                bounded(event.requestId(), MAX_REQUEST_ID_LENGTH),
+                SOURCE_SERVICE,
+                SCHEMA_VERSION,
+                failureCategory.name(),
+                event.failureReason(),
+                null,
+                null,
+                null
+        );
         return new AuditEventDocument(
                 auditId,
                 event.action(),
                 event.actor().userId(),
                 event.actor().userId(),
                 sorted(event.actor().roles()),
+                "HUMAN",
                 sorted(event.actor().authorities()),
                 event.action(),
                 event.resourceType(),
@@ -91,8 +125,82 @@ public record AuditEventDocument(
                 bounded(event.requestId(), MAX_REQUEST_ID_LENGTH),
                 SOURCE_SERVICE,
                 event.outcome(),
-                event.failureCategory(),
+                failureCategory,
                 event.failureReason(),
+                metadataSummary,
+                previousEventHash,
+                null,
+                HASH_ALGORITHM,
+                SCHEMA_VERSION
+        ).withEventHash(AuditEventHasher.hash(thisWithoutHashPlaceholder(
+                auditId,
+                event,
+                previousEventHash,
+                metadataSummary
+        )));
+    }
+
+    static AuditEventDocument from(String auditId, AuditEvent event) {
+        return from(auditId, event, null);
+    }
+
+    AuditEventDocument withEventHash(String eventHash) {
+        return new AuditEventDocument(
+                auditId,
+                eventType,
+                actorId,
+                actorDisplayName,
+                actorRoles,
+                actorType,
+                actorAuthorities,
+                action,
+                resourceType,
+                resourceId,
+                createdAt,
+                correlationId,
+                requestId,
+                sourceService,
+                outcome,
+                failureCategory,
+                failureReason,
+                metadataSummary,
+                previousEventHash,
+                eventHash,
+                hashAlgorithm,
+                schemaVersion
+        );
+    }
+
+    private static AuditEventDocument thisWithoutHashPlaceholder(
+            String auditId,
+            AuditEvent event,
+            String previousEventHash,
+            AuditEventMetadataSummary metadataSummary
+    ) {
+        return new AuditEventDocument(
+                auditId,
+                event.action(),
+                event.actor().userId(),
+                event.actor().userId(),
+                sorted(event.actor().roles()),
+                "HUMAN",
+                sorted(event.actor().authorities()),
+                event.action(),
+                event.resourceType(),
+                event.resourceId(),
+                event.timestamp(),
+                event.correlationId(),
+                bounded(event.requestId(), MAX_REQUEST_ID_LENGTH),
+                SOURCE_SERVICE,
+                event.outcome(),
+                event.failureCategory() == null
+                        ? AuditEvent.failureCategory(event.outcome(), event.failureReason())
+                        : event.failureCategory(),
+                event.failureReason(),
+                metadataSummary,
+                previousEventHash,
+                null,
+                HASH_ALGORITHM,
                 SCHEMA_VERSION
         );
     }

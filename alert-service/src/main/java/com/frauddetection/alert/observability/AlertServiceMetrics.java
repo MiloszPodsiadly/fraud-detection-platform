@@ -68,6 +68,20 @@ public class AlertServiceMetrics {
         ).increment();
     }
 
+    public void recordAuditIntegrityCheck(String status) {
+        counter(
+                "fraud_platform_audit_integrity_checks_total",
+                "status", normalizeIntegrityStatus(status)
+        ).increment();
+    }
+
+    public void recordAuditIntegrityViolation(String violationType) {
+        counter(
+                "fraud_platform_audit_integrity_violations_total",
+                "violation_type", normalizeIntegrityViolationType(violationType)
+        ).increment();
+    }
+
     public void recordReadAccessAuditPersisted(ReadAccessEndpointCategory endpointCategory, ReadAccessAuditOutcome outcome) {
         counter(
                 "fraud_platform_read_access_audit_events_persisted_total",
@@ -205,5 +219,22 @@ public class AlertServiceMetrics {
             return status;
         }
         return "UNAVAILABLE";
+    }
+
+    private String normalizeIntegrityStatus(String status) {
+        if ("VALID".equals(status) || "INVALID".equals(status) || "PARTIAL".equals(status) || "UNAVAILABLE".equals(status)) {
+            return status;
+        }
+        return "UNAVAILABLE";
+    }
+
+    private String normalizeIntegrityViolationType(String violationType) {
+        return switch (violationType) {
+            case "EVENT_HASH_MISMATCH",
+                 "PREVIOUS_HASH_MISMATCH",
+                 "INVALID_SCHEMA_VERSION",
+                 "UNSUPPORTED_HASH_ALGORITHM" -> violationType;
+            default -> "UNKNOWN";
+        };
     }
 }
