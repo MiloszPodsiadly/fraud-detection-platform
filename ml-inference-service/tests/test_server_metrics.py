@@ -125,6 +125,19 @@ class MlMetricsEndpointTest(unittest.TestCase):
         self.assertIn("text/plain", headers["Content-Type"])
         return payload.decode("utf-8")
 
+    def mtls_certificate(self, san_uri: str) -> dict:
+        return {
+            "subjectAltName": (("URI", san_uri),),
+            "notAfter": "Apr 27 12:00:00 2030 GMT",
+        }
+
+    def restore_env(self, saved: dict[str, str | None]) -> None:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
     def test_metrics_endpoint_returns_prometheus_payload(self):
         metrics = self.metrics_text()
         self.assertIn("fraud_ml_inference_requests_total", metrics)
@@ -214,10 +227,12 @@ class MlMetricsEndpointTest(unittest.TestCase):
             self.assertGreater(
                 parse_metric_value(after, "fraud_internal_auth_failure_total", {
                     "target_service": "ml-inference-service",
+                    "mode": "TOKEN_VALIDATOR",
                     "reason": "missing_internal_credentials",
                 }),
                 parse_metric_value(before, "fraud_internal_auth_failure_total", {
                     "target_service": "ml-inference-service",
+                    "mode": "TOKEN_VALIDATOR",
                     "reason": "missing_internal_credentials",
                 }),
             )
@@ -311,10 +326,12 @@ class MlMetricsEndpointTest(unittest.TestCase):
                 parse_metric_value(after, "fraud_internal_auth_success_total", {
                     "source_service": "known-service",
                     "target_service": "ml-inference-service",
+                    "mode": "TOKEN_VALIDATOR",
                 }),
                 parse_metric_value(before, "fraud_internal_auth_success_total", {
                     "source_service": "known-service",
                     "target_service": "ml-inference-service",
+                    "mode": "TOKEN_VALIDATOR",
                 }),
             )
         finally:
@@ -557,10 +574,12 @@ class MlMetricsEndpointTest(unittest.TestCase):
                 parse_metric_value(after, "fraud_internal_auth_success_total", {
                     "source_service": "fraud-scoring-service",
                     "target_service": "ml-inference-service",
+                    "mode": "JWT_SERVICE_IDENTITY",
                 }),
                 parse_metric_value(before, "fraud_internal_auth_success_total", {
                     "source_service": "fraud-scoring-service",
                     "target_service": "ml-inference-service",
+                    "mode": "JWT_SERVICE_IDENTITY",
                 }),
             )
         finally:
@@ -569,6 +588,103 @@ class MlMetricsEndpointTest(unittest.TestCase):
                     os.environ.pop(key, None)
                 else:
                     os.environ[key] = value
+
+    def test_mtls_service_identity_accepts_san_uri_for_scoring_service(self):
+        saved = {key: os.environ.get(key) for key in (
+            "INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES",
+            "INTERNAL_AUTH_MTLS_SPIFFE_TRUST_DOMAIN",
+        )}
+        try:
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES"] = "fraud-scoring-service:ml-score,alert-service:governance-read"
+            os.environ["INTERNAL_AUTH_MTLS_SPIFFE_TRUST_DOMAIN"] = "fraud-platform"
+
+            principal, status, reason = server._mtls_service_principal_from_certificate(
+                self.mtls_certificate("spiffe://fraud-platform/fraud-scoring-service"),
+                "ml-score",
+            )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(reason, "allowed")
+            self.assertIsNotNone(principal)
+            self.assertEqual(principal.service_name, "fraud-scoring-service")
+            self.assertEqual(principal.auth_mode, "MTLS_SERVICE_IDENTITY")
+        finally:
+            self.restore_env(saved)
+
+    def test_mtls_service_identity_rejects_unknown_cn_only_and_wrong_authority(self):
+        saved = {key: os.environ.get(key) for key in (
+            "INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES",
+            "INTERNAL_AUTH_MTLS_SPIFFE_TRUST_DOMAIN",
+        )}
+        try:
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES"] = "fraud-scoring-service:ml-score,alert-service:governance-read"
+            os.environ["INTERNAL_AUTH_MTLS_SPIFFE_TRUST_DOMAIN"] = "fraud-platform"
+
+            unknown = server._mtls_service_principal_from_certificate(
+                self.mtls_certificate("spiffe://fraud-platform/unknown-service"),
+                "ml-score",
+            )
+            cn_only = server._mtls_service_principal_from_certificate(
+                {"subject": ((("commonName", "fraud-scoring-service"),),), "notAfter": "Apr 27 12:00:00 2030 GMT"},
+                "ml-score",
+            )
+            alert_cannot_score = server._mtls_service_principal_from_certificate(
+                self.mtls_certificate("spiffe://fraud-platform/alert-service"),
+                "ml-score",
+            )
+            scoring_cannot_governance = server._mtls_service_principal_from_certificate(
+                self.mtls_certificate("spiffe://fraud-platform/fraud-scoring-service"),
+                "governance-read",
+            )
+
+            self.assertEqual(unknown[1:], (403, "unknown_internal_service"))
+            self.assertEqual(cn_only[1:], (403, "unknown_internal_service"))
+            self.assertEqual(alert_cannot_score[1:], (403, "missing_internal_authority"))
+            self.assertEqual(scoring_cannot_governance[1:], (403, "missing_internal_authority"))
+        finally:
+            self.restore_env(saved)
+
+    def test_mtls_mode_does_not_accept_header_based_identity(self):
+        saved = {key: os.environ.get(key) for key in (
+            "INTERNAL_AUTH_MODE",
+            "INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES",
+        )}
+        try:
+            os.environ["INTERNAL_AUTH_MODE"] = "MTLS_SERVICE_IDENTITY"
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES"] = "fraud-scoring-service:ml-score"
+
+            status, _, payload = self.request(
+                "POST",
+                "/v1/fraud/score",
+                body=b'{"features":{"amount":42}}',
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Internal-Service-Name": "fraud-scoring-service",
+                    "X-Internal-Service-Token": "secret",
+                    "Authorization": f"Bearer {jwt_service_token()}",
+                },
+            )
+
+            self.assertEqual(status, 401)
+            self.assertIn(b"Internal service authentication is required.", payload)
+        finally:
+            self.restore_env(saved)
+
+    def test_mtls_service_identity_startup_requires_complete_configuration(self):
+        saved = {key: os.environ.get(key) for key in (
+            "INTERNAL_AUTH_MTLS_SERVER_CERTFILE",
+            "INTERNAL_AUTH_MTLS_SERVER_KEYFILE",
+            "INTERNAL_AUTH_MTLS_CA_FILE",
+            "INTERNAL_AUTH_MTLS_CA_FILES",
+            "INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES",
+        )}
+        try:
+            for key in saved:
+                os.environ.pop(key, None)
+            with self.assertRaises(RuntimeError):
+                server._validate_internal_auth_startup(mode="MTLS_SERVICE_IDENTITY", profile="prod")
+        finally:
+            self.restore_env(saved)
 
     def test_jwt_service_identity_rejects_missing_expired_invalid_and_wrong_audience_tokens(self):
         saved = {key: os.environ.get(key) for key in (

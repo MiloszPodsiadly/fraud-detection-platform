@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import os
 import re
+import ssl
 import threading
 import time
 from collections import OrderedDict
@@ -118,12 +119,17 @@ ERROR_COUNTER = Counter(
 INTERNAL_AUTH_SUCCESSES = Counter(
     "fraud_internal_auth_success_total",
     "Accepted internal service authentication attempts.",
-    ("source_service", "target_service"),
+    ("source_service", "target_service", "mode"),
 )
 INTERNAL_AUTH_FAILURES = Counter(
     "fraud_internal_auth_failure_total",
     "Rejected internal service authentication attempts.",
-    ("target_service", "reason"),
+    ("target_service", "mode", "reason"),
+)
+INTERNAL_MTLS_CERTIFICATE_EXPIRY = Gauge(
+    "fraud_internal_mtls_certificate_expiry_seconds",
+    "Seconds until the accepted internal mTLS client certificate expires.",
+    ("source_service", "target_service"),
 )
 INTERNAL_AUTH_REPLAY_REJECTIONS = Counter(
     "fraud_internal_auth_replay_rejected_total",
@@ -256,6 +262,7 @@ class InternalServicePrincipal:
     authorities: frozenset[str]
     authenticated_at: datetime
     auth_mode: str
+    certificate_expires_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -268,7 +275,14 @@ INTERNAL_AUTH_TARGET_SERVICE = "ml-inference-service"
 LOCAL_INTERNAL_AUTH_MODES = {"LOCALDEV", "DISABLED_LOCAL_ONLY"}
 TOKEN_INTERNAL_AUTH_MODES = {"REQUIRED", "TOKEN_VALIDATOR"}
 JWT_INTERNAL_AUTH_MODES = {"JWT_SERVICE_IDENTITY"}
-SUPPORTED_INTERNAL_AUTH_MODES = LOCAL_INTERNAL_AUTH_MODES | TOKEN_INTERNAL_AUTH_MODES | JWT_INTERNAL_AUTH_MODES | {"MTLS_READY"}
+MTLS_INTERNAL_AUTH_MODES = {"MTLS_SERVICE_IDENTITY"}
+SUPPORTED_INTERNAL_AUTH_MODES = (
+    LOCAL_INTERNAL_AUTH_MODES
+    | TOKEN_INTERNAL_AUTH_MODES
+    | JWT_INTERNAL_AUTH_MODES
+    | MTLS_INTERNAL_AUTH_MODES
+    | {"MTLS_READY"}
+)
 PROD_LIKE_PROFILES = {"prod", "production", "staging"}
 INTERNAL_AUTH_FAILURE_REASONS = {
     "missing_internal_credentials",
@@ -280,6 +294,8 @@ INTERNAL_AUTH_FAILURE_REASONS = {
     "unknown_internal_service",
     "missing_internal_authority",
     "mtls_not_configured",
+    "missing_client_certificate",
+    "invalid_client_certificate",
 }
 REPLAY_REASON_EXPIRED = "EXPIRED"
 REPLAY_REASON_TOO_OLD = "TOO_OLD"
@@ -466,6 +482,10 @@ def _allowed_jwt_service_authorities() -> dict[str, frozenset[str]]:
     return services
 
 
+def _allowed_internal_service_authorities() -> dict[str, frozenset[str]]:
+    return _allowed_jwt_service_authorities()
+
+
 def _allowed_jwt_service_keys() -> dict[str, frozenset[str]]:
     raw = os.getenv("INTERNAL_AUTH_ALLOWED_SERVICE_KEYS", "")
     services: dict[str, frozenset[str]] = {}
@@ -505,6 +525,40 @@ def _jwt_configured() -> bool:
             and _allowed_jwt_service_authorities()
         )
     return False
+
+
+def _mtls_server_certfile() -> str:
+    return os.getenv("INTERNAL_AUTH_MTLS_SERVER_CERTFILE", "").strip()
+
+
+def _mtls_server_keyfile() -> str:
+    return os.getenv("INTERNAL_AUTH_MTLS_SERVER_KEYFILE", "").strip()
+
+
+def _mtls_ca_files() -> list[str]:
+    raw = (
+        os.getenv("INTERNAL_AUTH_MTLS_CA_FILES")
+        or os.getenv("INTERNAL_AUTH_MTLS_CA_FILE")
+        or ""
+    )
+    return [part.strip() for part in re.split(r"[,;]", raw) if part.strip()]
+
+
+def _mtls_spiffe_trust_domain() -> str:
+    return os.getenv("INTERNAL_AUTH_MTLS_SPIFFE_TRUST_DOMAIN", "fraud-platform").strip() or "fraud-platform"
+
+
+def _mtls_configured() -> bool:
+    return bool(
+        _mtls_server_certfile()
+        and _mtls_server_keyfile()
+        and _mtls_ca_files()
+        and _allowed_internal_service_authorities()
+    )
+
+
+def _spiffe_uri_for_service(service_name: str) -> str:
+    return f"spiffe://{_mtls_spiffe_trust_domain()}/{service_name}"
 
 
 def _load_jwks() -> dict[str, Any]:
@@ -676,6 +730,45 @@ def _validate_jwt_service_token(token: str, required_authority: str) -> tuple[In
     ), 200, "allowed"
 
 
+def _mtls_service_principal_from_certificate(
+        peer_certificate: dict[str, Any] | None,
+        required_authority: str,
+) -> tuple[InternalServicePrincipal | None, int, str]:
+    if not peer_certificate:
+        return None, 401, "missing_client_certificate"
+    allowed_authorities = _allowed_internal_service_authorities()
+    san_entries = peer_certificate.get("subjectAltName", ())
+    san_uris = {
+        value.strip()
+        for kind, value in san_entries
+        if kind == "URI" and isinstance(value, str) and value.strip()
+    }
+    matched_service_name: str | None = None
+    for service_name in sorted(allowed_authorities):
+        if _spiffe_uri_for_service(service_name) in san_uris:
+            matched_service_name = service_name
+            break
+    if matched_service_name is None:
+        return None, 403, "unknown_internal_service"
+    authorities = allowed_authorities[matched_service_name]
+    if required_authority not in authorities:
+        return None, 403, "missing_internal_authority"
+    certificate_expires_at: datetime | None = None
+    not_after = peer_certificate.get("notAfter")
+    if isinstance(not_after, str) and not_after.strip():
+        try:
+            certificate_expires_at = datetime.fromtimestamp(ssl.cert_time_to_seconds(not_after), timezone.utc)
+        except (OSError, ValueError):
+            return None, 403, "invalid_client_certificate"
+    return InternalServicePrincipal(
+        service_name=matched_service_name,
+        authorities=authorities,
+        authenticated_at=datetime.now(timezone.utc),
+        auth_mode="MTLS_SERVICE_IDENTITY",
+        certificate_expires_at=certificate_expires_at,
+    ), 200, "allowed"
+
+
 def _validate_internal_auth_startup(
         mode: str | None = None,
         profile: str | None = None,
@@ -698,6 +791,8 @@ def _validate_internal_auth_startup(
         raise RuntimeError("HS256 JWT service identity is local compatibility only and is forbidden in prod-like profiles.")
     if normalized_mode == "MTLS_READY" and _prod_like_profile(profile):
         raise RuntimeError("MTLS_READY internal auth mode is a fail-closed placeholder until mTLS is configured.")
+    if normalized_mode == "MTLS_SERVICE_IDENTITY" and not _mtls_configured():
+        raise RuntimeError("MTLS_SERVICE_IDENTITY internal auth mode requires server certificate, server private key, CA trust material, and service authorities.")
 
 
 _validate_internal_auth_startup()
@@ -1062,6 +1157,12 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             ), 200, "allowed_localdev"
         if mode == "MTLS_READY":
             return None, 401, "mtls_not_configured"
+        if mode == "MTLS_SERVICE_IDENTITY":
+            try:
+                peer_certificate = self.connection.getpeercert()
+            except AttributeError:
+                return None, 401, "missing_client_certificate"
+            return _mtls_service_principal_from_certificate(peer_certificate, required_authority)
         if mode == "JWT_SERVICE_IDENTITY":
             authorization = self.headers.get("Authorization", "").strip()
             if not authorization:
@@ -1090,19 +1191,23 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
         return hmac.compare_digest(configured_token, presented_token)
 
     def _record_internal_auth_success(self, principal: InternalServicePrincipal) -> None:
-        if principal.auth_mode == "JWT_SERVICE_IDENTITY":
-            allowed_services = _allowed_jwt_service_authorities()
+        if principal.auth_mode in {"JWT_SERVICE_IDENTITY", "MTLS_SERVICE_IDENTITY"}:
+            allowed_services = _allowed_internal_service_authorities()
             source_service = principal.service_name if principal.service_name in allowed_services else "unknown"
         else:
             source_service = principal.service_name if principal.service_name in INTERNAL_SERVICE_CREDENTIALS else "localdev"
-        INTERNAL_AUTH_SUCCESSES.labels(source_service, INTERNAL_AUTH_TARGET_SERVICE).inc()
+        INTERNAL_AUTH_SUCCESSES.labels(source_service, INTERNAL_AUTH_TARGET_SERVICE, principal.auth_mode).inc()
+        if principal.auth_mode == "MTLS_SERVICE_IDENTITY" and principal.certificate_expires_at is not None:
+            expires_in = max((principal.certificate_expires_at - datetime.now(timezone.utc)).total_seconds(), 0.0)
+            INTERNAL_MTLS_CERTIFICATE_EXPIRY.labels(source_service, INTERNAL_AUTH_TARGET_SERVICE).set(expires_in)
 
     def _record_internal_auth_failure(self, endpoint: str, reason: str) -> None:
         normalized_reason = reason if reason in INTERNAL_AUTH_FAILURE_REASONS else "invalid_internal_token"
-        INTERNAL_AUTH_FAILURES.labels(INTERNAL_AUTH_TARGET_SERVICE, normalized_reason).inc()
+        INTERNAL_AUTH_FAILURES.labels(INTERNAL_AUTH_TARGET_SERVICE, _internal_auth_mode(), normalized_reason).inc()
         self._log_event(
             "internal_auth_rejected",
             targetService=INTERNAL_AUTH_TARGET_SERVICE,
+            authMode=_internal_auth_mode(),
             reason=normalized_reason,
         )
 
@@ -1310,12 +1415,21 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
 
 def main() -> None:
     server = ThreadingHTTPServer((HOST, PORT), FraudInferenceHandler)
+    if _internal_auth_mode() == "MTLS_SERVICE_IDENTITY":
+        context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.load_cert_chain(certfile=_mtls_server_certfile(), keyfile=_mtls_server_keyfile())
+        for ca_file in _mtls_ca_files():
+            context.load_verify_locations(cafile=ca_file)
+        context.verify_mode = ssl.CERT_OPTIONAL
+        server.socket = context.wrap_socket(server.socket, server_side=True)
     print(json.dumps({
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
         "service": "ml-inference-service",
         "event": "service_started",
         "host": HOST,
         "port": PORT,
+        "internalAuthMode": _internal_auth_mode(),
         "modelName": MODEL_NAME,
         "modelVersion": MODEL_VERSION,
     }, separators=(",", ":"), sort_keys=True), flush=True)
