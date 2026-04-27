@@ -22,6 +22,20 @@ class AuditTrustAttestationConfigurationTest {
     }
 
     @Test
+    void shouldAllowDisabledSignerInProdLikeProfiles() {
+        MockEnvironment environment = new MockEnvironment();
+        environment.setActiveProfiles("production");
+
+        AuditTrustAttestationSigner signer = configuration.auditTrustAttestationSigner(
+                new AuditTrustAttestationProperties(),
+                environment
+        );
+
+        assertThat(signer.signingEnabled()).isFalse();
+        assertThat(signer.mode()).isEqualTo("disabled");
+    }
+
+    @Test
     void shouldAllowLocalDevSignerOutsideProdLikeProfiles() {
         AuditTrustAttestationProperties properties = new AuditTrustAttestationProperties();
         properties.getSigning().setMode("local-dev");
@@ -56,6 +70,18 @@ class AuditTrustAttestationConfigurationTest {
         properties.getSigning().setMode("kms-ready");
 
         assertThatThrownBy(() -> configuration.auditTrustAttestationSigner(properties, new MockEnvironment()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("kms-enabled=true");
+    }
+
+    @Test
+    void shouldFailClosedForKmsReadyEvenWhenFlagEnabledUntilAdapterExists() {
+        AuditTrustAttestationProperties properties = new AuditTrustAttestationProperties();
+        properties.getSigning().setMode("kms-ready");
+        MockEnvironment environment = new MockEnvironment()
+                .withProperty("app.audit.trust.signing.kms-enabled", "true");
+
+        assertThatThrownBy(() -> configuration.auditTrustAttestationSigner(properties, environment))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("requires a real KMS/HSM adapter");
     }

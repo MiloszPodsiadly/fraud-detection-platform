@@ -15,6 +15,11 @@ public class DisabledAuditTrustAttestationSigner implements AuditTrustAttestatio
     }
 
     @Override
+    public String signatureStrength() {
+        return "NONE";
+    }
+
+    @Override
     public Optional<AuditTrustAttestationSignature> sign(byte[] canonicalPayload) {
         return Optional.empty();
     }

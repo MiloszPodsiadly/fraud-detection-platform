@@ -174,7 +174,7 @@ public class AuditTrustAttestationService {
         );
     }
 
-    private void validateExternalConsistency(ExternalAuditIntegrityResponse external, String externalAnchorStatus) {
+    void validateExternalConsistency(ExternalAuditIntegrityResponse external, String externalAnchorStatus) {
         if ("VALID".equals(externalAnchorStatus) && !"VALID".equals(external.status())) {
             throw new AuditTrustAttestationUnavailableException();
         }

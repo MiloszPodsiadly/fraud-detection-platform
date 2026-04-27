@@ -6,9 +6,7 @@ public interface AuditTrustAttestationSigner {
 
     String mode();
 
-    default String signatureStrength() {
-        return signingEnabled() ? "PRODUCTION_READY" : "NONE";
-    }
+    String signatureStrength();
 
     default String keyId() {
         return null;

@@ -4,6 +4,8 @@ import com.frauddetection.alert.audit.external.ExternalAuditAnchorSink;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorSummary;
 import com.frauddetection.alert.audit.external.ExternalAuditIntegrityResponse;
 import com.frauddetection.alert.audit.external.ExternalAuditIntegrityService;
+import com.frauddetection.alert.audit.trust.AuditTrustAttestationSignature;
+import com.frauddetection.alert.audit.trust.AuditTrustAttestationSigner;
 import com.frauddetection.alert.audit.trust.DisabledAuditTrustAttestationSigner;
 import com.frauddetection.alert.audit.trust.LocalDevAuditTrustAttestationSigner;
 import org.junit.jupiter.api.Test;
@@ -12,8 +14,10 @@ import org.mockito.ArgumentCaptor;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -108,6 +112,24 @@ class AuditTrustAttestationServiceTest {
     }
 
     @Test
+    void shouldUpgradeTrustLevelOnlyForProductionReadySigning() {
+        when(externalAnchorSink.sinkType()).thenReturn("local-file");
+        when(internalIntegrityService.verify(null, null, "alert-service", "HEAD", 100))
+                .thenReturn(internal("VALID"));
+        when(externalIntegrityService.verify("alert-service", 100))
+                .thenReturn(validExternal());
+
+        AuditTrustAttestationResponse response = service(new ProductionReadyAuditTrustAttestationSigner())
+                .attest("alert-service", 100, null);
+
+        assertThat(response.trustLevel()).isEqualTo(AuditTrustLevel.SIGNED_ATTESTATION);
+        assertThat(response.attestationSignature()).isEqualTo("production-signature");
+        assertThat(response.signerMode()).isEqualTo("kms-ready");
+        assertThat(response.attestationSignatureStrength()).isEqualTo("PRODUCTION_READY");
+        assertThat(response.externalTrustDependency()).isEqualTo("REQUIRED");
+    }
+
+    @Test
     void shouldReturnUnavailableWhenInternalIntegrityIsUnavailable() {
         when(externalAnchorSink.sinkType()).thenReturn("local-file");
         when(internalIntegrityService.verify(null, null, "alert-service", "HEAD", 100))
@@ -183,6 +205,32 @@ class AuditTrustAttestationServiceTest {
     }
 
     @Test
+    void shouldChangeFingerprintWhenSignerModeChanges() {
+        when(externalAnchorSink.sinkType()).thenReturn("local-file");
+        when(internalIntegrityService.verify(null, null, "alert-service", "HEAD", 100))
+                .thenReturn(internal("VALID"));
+        when(externalIntegrityService.verify("alert-service", 100))
+                .thenReturn(validExternal());
+
+        AuditTrustAttestationResponse disabled = service(new DisabledAuditTrustAttestationSigner())
+                .attest("alert-service", 100, "HEAD");
+        AuditTrustAttestationResponse localDev = service(localDevSigner())
+                .attest("alert-service", 100, "HEAD");
+
+        assertThat(localDev.attestationFingerprint()).isNotEqualTo(disabled.attestationFingerprint());
+    }
+
+    @Test
+    void shouldFailClosedWhenExternalAnchorStatusOverclaimsExternalIntegrity() {
+        AuditTrustAttestationService service = service(new DisabledAuditTrustAttestationSigner());
+
+        assertThatThrownBy(() -> service.validateExternalConsistency(
+                partialExternal("STALE_EXTERNAL_ANCHOR", externalAnchor()),
+                "VALID"
+        )).isInstanceOf(AuditTrustAttestationUnavailableException.class);
+    }
+
+    @Test
     void shouldAuditAttestationEndpointAccess() {
         when(externalAnchorSink.sinkType()).thenReturn("local-file");
         when(internalIntegrityService.verify(null, null, "alert-service", "HEAD", 100))
@@ -213,7 +261,7 @@ class AuditTrustAttestationServiceTest {
         assertThat(metadata.getValue().attestationFingerprint()).isEqualTo(response.attestationFingerprint());
     }
 
-    private AuditTrustAttestationService service(com.frauddetection.alert.audit.trust.AuditTrustAttestationSigner signer) {
+    private AuditTrustAttestationService service(AuditTrustAttestationSigner signer) {
         return new AuditTrustAttestationService(internalIntegrityService, externalIntegrityService, externalAnchorSink, signer, auditService);
     }
 
@@ -318,5 +366,38 @@ class AuditTrustAttestationServiceTest {
                 "local-file",
                 "PUBLISHED"
         );
+    }
+
+    private static class ProductionReadyAuditTrustAttestationSigner implements AuditTrustAttestationSigner {
+
+        @Override
+        public String mode() {
+            return "kms-ready";
+        }
+
+        @Override
+        public String signatureStrength() {
+            return "PRODUCTION_READY";
+        }
+
+        @Override
+        public String keyId() {
+            return "kms-key-1";
+        }
+
+        @Override
+        public boolean signingEnabled() {
+            return true;
+        }
+
+        @Override
+        public Optional<AuditTrustAttestationSignature> sign(byte[] canonicalPayload) {
+            return Optional.of(new AuditTrustAttestationSignature("production-signature", "kms-key-1", "KMS-HSM"));
+        }
+
+        @Override
+        public boolean verify(byte[] canonicalPayload, String signature, String keyId) {
+            return "production-signature".equals(signature) && "kms-key-1".equals(keyId);
+        }
     }
 }

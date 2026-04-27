@@ -72,11 +72,16 @@ class AuditTrustAttestationControllerTest {
                 .andExpect(jsonPath("$.internal_integrity_status").value("VALID"))
                 .andExpect(jsonPath("$.external_integrity_status").value("PARTIAL"))
                 .andExpect(jsonPath("$.external_anchor_status").value("DISABLED"))
+                .andExpect(jsonPath("$.anchor_coverage.total_anchors_checked").value(0))
+                .andExpect(jsonPath("$.latest_chain_position").value(7))
+                .andExpect(jsonPath("$.latest_event_hash").value("hash-1"))
                 .andExpect(jsonPath("$.attestation_fingerprint").value("fingerprint"))
                 .andExpect(jsonPath("$.attestation_signature").doesNotExist())
                 .andExpect(jsonPath("$.signer_mode").value("disabled"))
                 .andExpect(jsonPath("$.attestation_signature_strength").value("NONE"))
                 .andExpect(jsonPath("$.external_trust_dependency").value("OPTIONAL"))
+                .andExpect(jsonPath("$.source_service").value("alert-service"))
+                .andExpect(jsonPath("$.limit").value(100))
                 .andExpect(jsonPath("$.limitations[0]").value("not_legal_notarization"));
     }
 }
