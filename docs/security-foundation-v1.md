@@ -343,6 +343,8 @@ Operational audit metrics:
 - `fraud_platform_read_access_audit_events_persisted_total{endpoint_category,outcome}`
 - `fraud_platform_read_access_audit_persistence_failures_total{endpoint_category}`
 - `fraud_read_access_audit_actor_missing_total{endpoint_category}`
+- `lifecycle_status_total{status}`
+- `lifecycle_degraded_total{reason}`
 
 These metrics are health signals, not compliance reports, and intentionally exclude actor IDs, resource IDs, audit IDs, exception messages, and other high-cardinality values.
 
@@ -378,6 +380,8 @@ Future sinks can be added behind `AuditEventPublisher`; they are not implemented
 Governance advisory audit entries are stored separately in `ml_governance_audit_events` through the existing MongoDB infrastructure. They are append-only human-review records, not fraud decisions. The frontend may submit only `decision` and optional bounded `note`; `actor_id`, actor roles, display name, and advisory model metadata are derived server-side. Audit writes fail clearly if persistence or advisory lookup is unavailable and are never silently dropped.
 
 Advisory lifecycle status is derived from the latest audit entry at read time. It is not persisted as an authoritative status, not trusted from the frontend, and not used to drive scoring, alerting, model lifecycle actions, or workflow automation.
+
+Failure semantics are fail-safe: `OPEN` means audit lookup succeeded and no audit events exist for the advisory; `UNKNOWN` means lifecycle cannot be determined because audit lookup failed or audit truth is unavailable. The system never maps audit-source failure to `OPEN`. Advisory list responses use `status=PARTIAL` with `reason_code=AUDIT_UNAVAILABLE` when lifecycle enrichment is degraded, and analytics expose unknown lifecycle as `UNKNOWN` rather than merging it into `OPEN`.
 
 ## Frontend Security UX
 

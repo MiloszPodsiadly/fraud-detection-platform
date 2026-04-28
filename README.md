@@ -314,11 +314,15 @@ FDP-21 relies on FDP-19/FDP-20 source-of-truth services. It does not mutate audi
 
 Governance advisory audit entries are separate from fraud workflow audit logs. They are persisted append-only as human review history, derive actor identity from the backend-authenticated principal, and do not affect scoring, model behavior, retraining, rollback, or fraud decisioning. Advisory lifecycle status is a read-time projection from the latest audit entry, not a persisted workflow state or automation trigger.
 
+### Failure Semantics
+
+Lifecycle depends on audit availability. `OPEN` means the audit source was readable and no audit events exist for the advisory. `UNKNOWN` means the system cannot determine lifecycle because audit lookup failed or audit truth is unavailable. The system never assumes `OPEN` when audit is unavailable. Advisory list responses return `status=PARTIAL` with `reason_code=AUDIT_UNAVAILABLE` when lifecycle enrichment is degraded; analytics responses expose `reason_code` for `PARTIAL` or `UNAVAILABLE` responses.
+
 Filtering by `lifecycle_status` applies to the bounded advisory result set. It does not guarantee global completeness.
 
-Audit analytics are derived from advisory and audit history through `GET /governance/advisories/analytics`. `advisories` means distinct `advisory_event_id` values in the bounded advisory projection window; `reviewed`, `open`, decision distribution, and lifecycle distribution all use that same population. Time-to-first-review uses valid non-negative first audit durations only and reports `LOW_CONFIDENCE` below five samples. Analytics are read-only, bounded by `window_days` and `GOVERNANCE_AUDIT_ANALYTICS_MAX_AUDIT_EVENTS`, not persisted as aggregates, not an SLA, and do not trigger actions or influence scoring/model behavior.
+Audit analytics are derived from advisory and audit history through `GET /governance/advisories/analytics`. `advisories` means distinct `advisory_event_id` values in the bounded advisory projection window; `reviewed`, `open`, `resolved`, `unknown`, decision distribution, and lifecycle distribution all use that same population. `open` excludes `UNKNOWN`; audit degradation is counted separately in `unknown`. Time-to-first-review uses valid non-negative first audit durations only and reports `LOW_CONFIDENCE` below five samples. Analytics are read-only, bounded by `window_days` and `GOVERNANCE_AUDIT_ANALYTICS_MAX_AUDIT_EVENTS`, not persisted as aggregates, not an SLA, and do not trigger actions or influence scoring/model behavior.
 
-The analytics API is stable. Breaking changes require a version bump. `PARTIAL` or `UNAVAILABLE` responses may include a bounded `reason`: `AUDIT_LIMIT_EXCEEDED`, `AUDIT_UNAVAILABLE`, or `ADVISORY_UNAVAILABLE`.
+The analytics API is stable. Breaking changes require a version bump. `PARTIAL` or `UNAVAILABLE` responses may include a bounded `reason_code`: `AUDIT_LIMIT_EXCEEDED`, `AUDIT_UNAVAILABLE`, or `ADVISORY_UNAVAILABLE`.
 
 ## Analytics Red Lines
 

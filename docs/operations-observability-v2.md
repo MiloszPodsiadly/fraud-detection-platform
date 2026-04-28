@@ -155,6 +155,14 @@ Prometheus metric contract:
   - Type: counter
   - Meaning: read-time advisory lifecycle projection observations. Lifecycle metrics represent distribution of advisory states, not operational decisions.
   - Labels: `lifecycle_status`, `model_name`, `model_version`
+- `lifecycle_status_total`
+  - Type: counter
+  - Meaning: low-cardinality lifecycle projection bucket observations. `UNKNOWN` indicates audit truth was unavailable and must not be interpreted as open.
+  - Labels: `status`
+- `lifecycle_degraded_total`
+  - Type: counter
+  - Meaning: lifecycle enrichment degradation observations.
+  - Labels: `reason`
 - `fraud_ml_governance_analytics_requests_total`
   - Type: counter
   - Meaning: bounded audit analytics requests served by `alert-service`. Metrics represent observational distribution only; they do not represent system decisions or actions.

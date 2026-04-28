@@ -375,7 +375,7 @@ paths:
   /governance/advisories:
     get:
       summary: List governance advisories with derived lifecycle status
-      description: Returns ML advisory events enriched with lifecycle_status derived at read time from latest audit event. Lifecycle is not persisted as source of truth and does not trigger workflow actions. Filtering by lifecycle_status applies to the bounded advisory result set. It does not guarantee global completeness. Alert-service records a best-effort sensitive read-access audit event with a hashed query shape and bounded metadata only; audit persistence failure does not block the read response.
+      description: Returns ML advisory events enriched with lifecycle_status derived at read time from latest audit event. Lifecycle is not persisted as source of truth and does not trigger workflow actions. OPEN means audit lookup succeeded and no audit events exist; UNKNOWN means lifecycle cannot be determined because audit lookup failed or audit truth is unavailable. Filtering by lifecycle_status applies to the bounded advisory result set. It does not guarantee global completeness. If lifecycle enrichment is degraded the response status is PARTIAL with reason_code=AUDIT_UNAVAILABLE. Alert-service records a best-effort sensitive read-access audit event with a hashed query shape and bounded metadata only; audit persistence failure does not block the read response.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -425,7 +425,7 @@ paths:
   /governance/advisories/analytics:
     get:
       summary: Get bounded governance advisory audit analytics
-      description: Returns read-only analytics for the bounded advisory projection window. The advisory population is the distinct advisory_event_id values returned by the advisory projection in the requested window; audit events are used only to classify that population. Analytics are for visibility only; they are not SLA enforcement, do not trigger actions, and are not persisted as source of truth. Alert-service records a best-effort sensitive read-access audit event with bounded metadata only; audit persistence failure does not block the read response.
+      description: Returns read-only analytics for the bounded advisory projection window. The advisory population is the distinct advisory_event_id values returned by the advisory projection in the requested window; audit events are used only to classify that population. UNKNOWN lifecycle is separate and is never counted as OPEN. Analytics are for visibility only; they are not SLA enforcement, do not trigger actions, and are not persisted as source of truth. Alert-service records a best-effort sensitive read-access audit event with bounded metadata only; audit persistence failure does not block the read response.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -455,7 +455,7 @@ paths:
   /governance/advisories/{event_id}:
     get:
       summary: Get one governance advisory with derived lifecycle status
-      description: Returns one bounded-history advisory event enriched with lifecycle_status derived at read time from latest audit event. Alert-service records a best-effort sensitive read-access audit event with backend-derived actor identity and bounded metadata only; audit persistence failure does not block the read response.
+      description: Returns one bounded-history advisory event enriched with lifecycle_status derived at read time from latest audit event. OPEN means audit lookup succeeded and no audit events exist; UNKNOWN means lifecycle cannot be determined. Alert-service records a best-effort sensitive read-access audit event with backend-derived actor identity and bounded metadata only; audit persistence failure does not block the read response.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1283,9 +1283,10 @@ components:
       enum: [NONE, CONFIGURED, ENFORCED]
     GovernanceAdvisoryLifecycleStatus:
       type: string
-      description: Read-time projection from latest audit decision. OPEN means no audit event exists.
+      description: Read-time projection from latest audit decision. OPEN means audit lookup succeeded and no audit event exists. UNKNOWN means lifecycle cannot be determined because audit lookup failed or audit truth is unavailable.
       enum:
         - OPEN
+        - UNKNOWN
         - ACKNOWLEDGED
         - NEEDS_FOLLOW_UP
         - DISMISSED_AS_NOISE
@@ -1299,6 +1300,12 @@ components:
       properties:
         status:
           type: string
+          enum: [AVAILABLE, PARTIAL, UNAVAILABLE]
+        reason_code:
+          type: string
+          nullable: true
+          description: Present when lifecycle enrichment is degraded. AUDIT_UNAVAILABLE means lifecycle_status may be UNKNOWN and clients must not interpret missing audit history as OPEN.
+          enum: [AUDIT_UNAVAILABLE]
         count:
           type: integer
         retention_limit:
@@ -1322,7 +1329,7 @@ components:
           type: string
           description: AVAILABLE when advisory and audit sources are both readable, PARTIAL when one source is degraded or the audit scan limit is exceeded, and UNAVAILABLE when both sources are unavailable.
           enum: [AVAILABLE, PARTIAL, UNAVAILABLE]
-        reason:
+        reason_code:
           type: string
           nullable: true
           description: Optional degradation reason returned only for PARTIAL or UNAVAILABLE analytics responses.
@@ -1345,8 +1352,8 @@ components:
         totals:
           type: object
           additionalProperties: false
-          description: Counts distinct advisory_event_id values from the bounded advisory projection window. reviewed means at least one matching audit event exists; open means zero matching audit events exist.
-          required: [advisories, reviewed, open]
+          description: Counts distinct advisory_event_id values from the bounded advisory projection window. reviewed means at least one matching audit event exists; open means zero matching audit events exist only when audit source is readable; resolved groups reviewed lifecycle states; unknown means audit truth was unavailable for lifecycle classification.
+          required: [advisories, reviewed, open, resolved, unknown]
           properties:
             advisories:
               type: integer
@@ -1355,6 +1362,12 @@ components:
               type: integer
               minimum: 0
             open:
+              type: integer
+              minimum: 0
+            resolved:
+              type: integer
+              minimum: 0
+            unknown:
               type: integer
               minimum: 0
         decision_distribution:
@@ -1375,12 +1388,15 @@ components:
               minimum: 0
         lifecycle_distribution:
           type: object
-          description: Lifecycle distribution of the bounded advisory projection after read-time lifecycle enrichment. Counts sum to totals.advisories.
+          description: Lifecycle distribution of the bounded advisory projection after read-time lifecycle enrichment. Counts sum to totals.advisories. UNKNOWN is separate and must not be interpreted as OPEN.
           additionalProperties:
             type: integer
             minimum: 0
           properties:
             OPEN:
+              type: integer
+              minimum: 0
+            UNKNOWN:
               type: integer
               minimum: 0
             ACKNOWLEDGED:

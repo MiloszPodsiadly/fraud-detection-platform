@@ -255,14 +255,22 @@ Only the latest audit event matters. Lifecycle status is not persisted independe
 
 Filtering by `lifecycle_status` applies to the bounded advisory result set. It does not guarantee global completeness.
 
+Failure semantics:
+
+- Lifecycle is a derived read-time projection and depends on audit availability.
+- `OPEN` means no audit events exist and the audit source was readable.
+- `UNKNOWN` means lifecycle cannot be determined because audit lookup failed or audit truth is unavailable.
+- The system never assumes `OPEN` when audit is unavailable.
+- `GET /governance/advisories` returns `status=PARTIAL` with `reason_code=AUDIT_UNAVAILABLE` when lifecycle enrichment is degraded.
+
 Audit analytics are read-only and derived:
 
 - `GET /governance/advisories/analytics?window_days=7`
 - `window_days` defaults to `7` and is capped at `30`.
 - `totals.advisories` is the number of distinct `advisory_event_id` values in the bounded advisory projection window.
-- `totals.reviewed` means those advisories with at least one matching audit event; `totals.open` means zero matching audit events.
+- `totals.reviewed` means those advisories with at least one matching audit event; `totals.open` means zero matching audit events with audit available; `totals.resolved` groups reviewed lifecycle states; `totals.unknown` means audit truth was unavailable for lifecycle classification.
 - `decision_distribution` uses the latest audit decision for reviewed advisories in that same projection window.
-- `lifecycle_distribution` uses read-time lifecycle enrichment of that same projection and sums to `totals.advisories`.
+- `lifecycle_distribution` uses read-time lifecycle enrichment of that same projection and sums to `totals.advisories`; `UNKNOWN` is separate and never counted as `OPEN`.
 - `review_timeliness` samples only valid non-negative first-review durations and reports `LOW_CONFIDENCE` when fewer than five samples exist.
 - Status is `AVAILABLE` when advisory and audit sources are both readable, `PARTIAL` when one source is degraded or the audit scan limit is exceeded, and `UNAVAILABLE` when both sources are unavailable.
 - Analytics operate on bounded time windows, cap audit scans with `GOVERNANCE_AUDIT_ANALYTICS_MAX_AUDIT_EVENTS`, and do not guarantee global completeness.
@@ -270,7 +278,7 @@ Audit analytics are read-only and derived:
 
 ### API Stability
 
-`GET /governance/advisories/analytics` is considered stable. Breaking changes to existing fields, enums, or meanings require a version bump. The optional `reason` field may appear only for `PARTIAL` or `UNAVAILABLE` responses and is limited to `AUDIT_LIMIT_EXCEEDED`, `AUDIT_UNAVAILABLE`, or `ADVISORY_UNAVAILABLE`.
+`GET /governance/advisories/analytics` is considered stable. Breaking changes to existing fields, enums, or meanings require a version bump. The optional `reason_code` field may appear only for `PARTIAL` or `UNAVAILABLE` responses and is limited to `AUDIT_LIMIT_EXCEEDED`, `AUDIT_UNAVAILABLE`, or `ADVISORY_UNAVAILABLE`.
 
 Advisory list filters:
 
