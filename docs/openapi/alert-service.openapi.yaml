@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: Alert Service API
   version: FDP-21
-  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, external anchor verification, bounded evidence export, derived audit trust attestation, governance advisory lifecycle projection, and human-review audit. FDP-20 extends tamper evidence outside the primary database boundary. FDP-22 adds a pluggable object-store external anchor sink boundary; it provides external anchor persistence outside MongoDB but does not guarantee WORM immutability unless the underlying object store is configured with immutable retention controls such as Object Lock, versioning, retention policy, or equivalent infrastructure controls. FDP-21 derives a trust attestation from FDP-19/FDP-20 source-of-truth signals and optional local-dev integrity signing. Audit integrity and trust attestation do not imply certified WORM archive storage, legal notarization, SIEM integration, unbounded export, KMS/HSM signing unless explicitly integrated, or final compliance archive.
+  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, external anchor verification, bounded evidence export, derived audit trust attestation, governance advisory lifecycle projection, and human-review audit. FDP-20 extends tamper evidence outside the primary database boundary. FDP-22 adds a pluggable object-store external anchor sink boundary, verified external anchor references, and explicit external_immutability_level=NONE|CONFIGURED|ENFORCED; no WORM or full immutability claim is valid unless the adapter verifies infrastructure controls and reports ENFORCED. FDP-21 derives a trust attestation from FDP-19/FDP-20 source-of-truth signals and optional local-dev integrity signing. Audit integrity and trust attestation do not imply certified WORM archive storage, legal notarization, SIEM integration, unbounded export, KMS/HSM signing unless explicitly integrated, or final compliance archive.
 servers:
   - url: http://localhost:8085
 paths:
@@ -138,7 +138,7 @@ paths:
   /api/v1/audit/integrity/external:
     get:
       summary: Verify external audit anchor consistency
-      description: Performs bounded read-only comparison between the local audit chain anchor and the external anchor. Requires audit:verify. Returns VALID, INVALID, PARTIAL, or UNAVAILABLE. Object-store sinks can verify by exact partition_key + chain_position lookup using the deterministic encoded object key before falling back to latest-anchor comparison. Detects missing, stale, ahead, mismatched hash, mismatched local anchor id, mismatched object key binding, mismatched payload hash binding, mismatched hash algorithm, and unsupported external schema version. This endpoint does not repair data, mutate audit records, export full history, or provide WORM/legal notarization.
+      description: Performs bounded read-only comparison between the local audit chain anchor and the external anchor. Requires audit:verify. Returns VALID, INVALID, PARTIAL, or UNAVAILABLE. Object-store sinks can verify by exact partition_key + chain_position lookup using the deterministic encoded object key before falling back to latest-anchor comparison. Detects missing, stale, ahead, mismatched hash, mismatched local anchor id, mismatched object key binding, mismatched payload hash binding, mismatched hash algorithm, unsupported external schema version, and external payload tampering. Response includes external_immutability_level; NONE or CONFIGURED is not WORM proof. This endpoint does not repair data, mutate audit records, export full history, or provide WORM/legal notarization.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -240,7 +240,7 @@ paths:
   /api/v1/audit/trust/attestation:
     get:
       summary: Get derived audit trust attestation
-      description: Returns a bounded derived trust assessment over FDP-19 internal integrity and FDP-20 external anchor verification signals. Requires audit:verify and records READ_AUDIT_TRUST_ATTESTATION with bounded metadata. The attestation fingerprint includes source_service, limit, mode, signer_mode, signature_key_id when present, trust status fields, anchor coverage, latest chain fields, external anchor reference, and limitations so it can be reproduced externally. Clients must interpret trust_level together with attestation_signature_strength. SIGNED_ATTESTATION represents stronger trust only when attestation_signature_strength=PRODUCTION_READY and signer_mode is backed by externally managed KMS/HSM signing material. This endpoint does not implement a second external verification stack, a second evidence export, an external anchor sink, legal notarization, legal non-repudiation, regulator-certified archive, WORM storage, SIEM integration, or KMS/HSM signing unless explicitly integrated. Local-dev signing provides integrity metadata only and never upgrades trust level.
+      description: Returns a bounded derived trust assessment over FDP-19 internal integrity and FDP-20 external anchor verification signals. Requires audit:verify and records READ_AUDIT_TRUST_ATTESTATION with bounded metadata. The attestation fingerprint includes source_service, limit, mode, signer_mode, signature_key_id when present, trust status fields, external_immutability_level, anchor coverage, latest chain fields, external anchor reference, and limitations so it can be reproduced externally. Clients must interpret trust_level together with attestation_signature_strength and external_immutability_level. SIGNED_ATTESTATION represents stronger trust only when attestation_signature_strength=PRODUCTION_READY, signer_mode is backed by externally managed KMS/HSM signing material, and external_immutability_level=ENFORCED. This endpoint does not implement a second external verification stack, a second evidence export, an external anchor sink, legal notarization, legal non-repudiation, regulator-certified archive, WORM storage, SIEM integration, or KMS/HSM signing unless explicitly integrated. Local-dev signing provides integrity metadata only and never upgrades trust level.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -906,7 +906,7 @@ components:
     ExternalAuditIntegrityResponse:
       type: object
       additionalProperties: false
-      required: [status, checked, limit, source_service, partition_key, violations]
+      required: [status, checked, limit, source_service, partition_key, external_immutability_level, violations]
       properties:
         status:
           type: string
@@ -938,6 +938,8 @@ components:
         external_anchor:
           nullable: true
           $ref: "#/components/schemas/AuditAnchorSummary"
+        external_immutability_level:
+          $ref: "#/components/schemas/ExternalImmutabilityLevel"
         violations:
           type: array
           items:
@@ -1095,7 +1097,7 @@ components:
         sink_type:
           type: string
           nullable: true
-          enum: [local-file]
+          enum: [local-file, object-store]
         publication_status:
           type: string
           nullable: true
@@ -1133,11 +1135,16 @@ components:
         sink_type:
           type: string
           nullable: true
-          enum: [local-file, disabled]
+          enum: [local-file, object-store, disabled]
         publication_status:
           type: string
           nullable: true
           enum: [PUBLISHED, PENDING, FAILED]
+        external_reference:
+          nullable: true
+          $ref: "#/components/schemas/ExternalAnchorReference"
+        external_immutability_level:
+          $ref: "#/components/schemas/ExternalImmutabilityLevel"
     AuditTrustAttestationResponse:
       type: object
       additionalProperties: false
@@ -1147,6 +1154,7 @@ components:
         - internal_integrity_status
         - external_integrity_status
         - external_anchor_status
+        - external_immutability_level
         - anchor_coverage
         - attestation_fingerprint
         - signer_mode
@@ -1162,7 +1170,7 @@ components:
         trust_level:
           type: string
           enum: [INTERNAL_ONLY, PARTIAL_EXTERNAL, EXTERNALLY_ANCHORED, SIGNED_ATTESTATION, UNAVAILABLE]
-          description: Derived trust assessment. SIGNED_ATTESTATION requires valid external anchoring plus PRODUCTION_READY attestation signing backed by externally managed KMS/HSM signing material; local-dev signing never upgrades trust level.
+          description: Derived trust assessment. SIGNED_ATTESTATION requires valid external anchoring, external_immutability_level=ENFORCED, and PRODUCTION_READY attestation signing backed by externally managed KMS/HSM signing material; local-dev signing never upgrades trust level.
         internal_integrity_status:
           type: string
           enum: [VALID, INVALID, PARTIAL, UNAVAILABLE]
@@ -1172,6 +1180,8 @@ components:
         external_anchor_status:
           type: string
           enum: [VALID, DISABLED, MISSING, STALE, PARTIAL, INVALID, UNAVAILABLE]
+        external_immutability_level:
+          $ref: "#/components/schemas/ExternalImmutabilityLevel"
         anchor_coverage:
           $ref: "#/components/schemas/AuditTrustAttestationAnchorCoverage"
         latest_chain_position:
@@ -1220,7 +1230,7 @@ components:
           type: array
           items:
             type: string
-          description: Explicit limitations such as not_legal_notarization, not_worm_storage, not_siem_integration, not_kms_hsm_signing_unless_explicitly_integrated, local_signature_not_external_trust, external_trust_incomplete, and derived_from_fdp19_fdp20_source_of_truth.
+          description: Explicit limitations such as not_legal_notarization, not_worm_storage, not_siem_integration, not_kms_hsm_signing_unless_explicitly_integrated, local_signature_not_external_trust, external_immutability_not_enforced, no_worm_claim_without_infrastructure_enforcement, external_trust_incomplete, and derived_from_fdp19_fdp20_source_of_truth.
     AuditTrustAttestationAnchorCoverage:
       type: object
       additionalProperties: false
@@ -1245,22 +1255,32 @@ components:
           minimum: 0
           maximum: 1
     AuditTrustAttestationExternalAnchorReference:
+      $ref: "#/components/schemas/ExternalAnchorReference"
+    ExternalAnchorReference:
       type: object
       additionalProperties: false
-      required: [external_anchor_id, chain_position, sink_type, publication_status]
+      required: [anchor_id, external_key, anchor_hash, external_hash, verified_at]
       properties:
-        external_anchor_id:
+        anchor_id:
           type: string
-        chain_position:
-          type: integer
-          format: int64
-          minimum: 1
-        sink_type:
+        external_key:
           type: string
-          enum: [local-file]
-        publication_status:
+          description: Deterministic external object key or local external anchor identifier. It is bounded anchor metadata, not credentials or raw payload.
+        anchor_hash:
           type: string
-          enum: [PUBLISHED, PENDING, FAILED]
+          minLength: 64
+          maxLength: 64
+        external_hash:
+          type: string
+          minLength: 64
+          maxLength: 64
+        verified_at:
+          type: string
+          format: date-time
+    ExternalImmutabilityLevel:
+      type: string
+      description: NONE is the default and means no verified external immutability. CONFIGURED means controls may be configured but are not verified as enforced by this response. ENFORCED means the external adapter verified infrastructure immutability controls. Only ENFORCED can support a WORM interpretation, and even then this is not legal notarization or compliance certification.
+      enum: [NONE, CONFIGURED, ENFORCED]
     GovernanceAdvisoryLifecycleStatus:
       type: string
       description: Read-time projection from latest audit decision. OPEN means no audit event exists.
