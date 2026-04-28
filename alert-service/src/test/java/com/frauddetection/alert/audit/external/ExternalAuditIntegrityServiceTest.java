@@ -99,11 +99,16 @@ class ExternalAuditIntegrityServiceTest {
         client.putRaw("audit-bucket", key, tampered);
         when(repository.findLatestByPartitionKey("source_service:alert-service")).thenReturn(Optional.of(local));
 
-        ExternalAuditIntegrityResponse response = objectStoreIntegrityService(repository, objectStoreSink)
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        ExternalAuditIntegrityResponse response = objectStoreIntegrityService(repository, objectStoreSink, registry)
                 .verify("alert-service", 100);
 
         assertThat(response.status()).isEqualTo("INVALID");
         assertThat(response.reasonCode()).isEqualTo("EXTERNAL_PAYLOAD_HASH_MISMATCH");
+        assertThat(registry.get("fraud_platform_audit_external_tampering_detected_total")
+                .tag("reason", "EXTERNAL_PAYLOAD_HASH_MISMATCH")
+                .counter()
+                .count()).isEqualTo(1.0d);
     }
 
     @Test
@@ -333,11 +338,19 @@ class ExternalAuditIntegrityServiceTest {
             AuditAnchorRepository repository,
             ExternalAuditAnchorSink objectStoreSink
     ) {
+        return objectStoreIntegrityService(repository, objectStoreSink, new SimpleMeterRegistry());
+    }
+
+    private ExternalAuditIntegrityService objectStoreIntegrityService(
+            AuditAnchorRepository repository,
+            ExternalAuditAnchorSink objectStoreSink,
+            SimpleMeterRegistry registry
+    ) {
         return new ExternalAuditIntegrityService(
                 repository,
                 objectStoreSink,
                 new ExternalAuditIntegrityQueryParser(),
-                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                new AlertServiceMetrics(registry),
                 mock(AuditService.class)
         );
     }

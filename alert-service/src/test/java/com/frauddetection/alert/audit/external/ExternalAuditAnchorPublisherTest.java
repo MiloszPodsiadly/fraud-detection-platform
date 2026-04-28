@@ -75,7 +75,13 @@ class ExternalAuditAnchorPublisherTest {
         verify(anchorRepository)
                 .findByPartitionKeyAndChainPositionGreaterThan("source_service:alert-service", 1L, 100);
         verify(publicationStatusRepository)
-                .recordSuccess(next, Instant.parse("2026-04-27T10:01:00Z"), "local-file");
+                .recordSuccess(
+                        org.mockito.ArgumentMatchers.eq(next),
+                        org.mockito.ArgumentMatchers.eq(Instant.parse("2026-04-27T10:01:00Z")),
+                        org.mockito.ArgumentMatchers.eq("local-file"),
+                        org.mockito.ArgumentMatchers.isNull(),
+                        org.mockito.ArgumentMatchers.eq(ExternalImmutabilityLevel.NONE)
+                );
     }
 
     @Test
@@ -104,7 +110,13 @@ class ExternalAuditAnchorPublisherTest {
         assertThat(result.failed()).isEqualTo(1);
         assertThat(result.published()).isEqualTo(1);
         verify(publicationStatusRepository).recordFailure(first, Instant.parse("2026-04-27T10:01:00Z"), "CONFLICT");
-        verify(publicationStatusRepository).recordSuccess(second, Instant.parse("2026-04-27T10:01:00Z"), "local-file");
+        verify(publicationStatusRepository).recordSuccess(
+                org.mockito.ArgumentMatchers.eq(second),
+                org.mockito.ArgumentMatchers.eq(Instant.parse("2026-04-27T10:01:00Z")),
+                org.mockito.ArgumentMatchers.eq("local-file"),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.eq(ExternalImmutabilityLevel.NONE)
+        );
         assertThat(meterRegistry.get("fraud_platform_audit_external_anchor_publish_failed_total")
                 .tag("sink", "local-file")
                 .tag("reason", "CONFLICT")

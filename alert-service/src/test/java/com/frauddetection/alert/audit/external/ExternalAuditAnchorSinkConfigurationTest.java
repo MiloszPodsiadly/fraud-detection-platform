@@ -1,11 +1,14 @@
 package com.frauddetection.alert.audit.external;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.core.env.StandardEnvironment;
 import org.springframework.mock.env.MockEnvironment;
 
+import java.time.Duration;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -25,6 +28,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
         ExternalAuditAnchorSink sink = configuration.externalAuditAnchorSink(
                 new ObjectMapper(),
                 emptyObjectStoreClient(),
+                metrics(),
                 environment,
                 "local-file",
                 "./target/test-audit-external-anchors.jsonl",
@@ -37,6 +41,9 @@ class ExternalAuditAnchorSinkConfigurationTest {
                 "",
                 true,
                 false,
+                Duration.ofSeconds(2),
+                Duration.ZERO,
+                2,
                 "test-instance"
         );
 
@@ -51,6 +58,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
         assertThatThrownBy(() -> configuration.externalAuditAnchorSink(
                 new ObjectMapper(),
                 emptyObjectStoreClient(),
+                metrics(),
                 environment,
                 "local-file",
                 "./target/test-audit-external-anchors.jsonl",
@@ -63,6 +71,9 @@ class ExternalAuditAnchorSinkConfigurationTest {
                 "",
                 true,
                 false,
+                Duration.ofSeconds(2),
+                Duration.ZERO,
+                2,
                 "test-instance"
         )).isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Local-file external audit anchor sink is not allowed");
@@ -76,6 +87,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
         assertThatThrownBy(() -> configuration.externalAuditAnchorSink(
                 new ObjectMapper(),
                 emptyObjectStoreClient(),
+                metrics(),
                 environment,
                 "local-file",
                 "./target/test-audit-external-anchors.jsonl",
@@ -88,6 +100,9 @@ class ExternalAuditAnchorSinkConfigurationTest {
                 "",
                 true,
                 false,
+                Duration.ofSeconds(2),
+                Duration.ZERO,
+                2,
                 "test-instance"
         )).isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Local-file external audit anchor sink is not allowed");
@@ -98,6 +113,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
         assertThatThrownBy(() -> configuration.externalAuditAnchorSink(
                 new ObjectMapper(),
                 emptyObjectStoreClient(),
+                metrics(),
                 new StandardEnvironment(),
                 "external-object-store",
                 "./target/test-audit-external-anchors.jsonl",
@@ -110,6 +126,9 @@ class ExternalAuditAnchorSinkConfigurationTest {
                 "",
                 true,
                 false,
+                Duration.ofSeconds(2),
+                Duration.ZERO,
+                2,
                 "test-instance"
         )).isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("sink=object-store");
@@ -120,6 +139,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
         assertThatThrownBy(() -> configuration.externalAuditAnchorSink(
                 new ObjectMapper(),
                 emptyObjectStoreClient(),
+                metrics(),
                 new StandardEnvironment(),
                 "object-store",
                 "./target/test-audit-external-anchors.jsonl",
@@ -132,6 +152,9 @@ class ExternalAuditAnchorSinkConfigurationTest {
                 "secret-key",
                 true,
                 false,
+                Duration.ofSeconds(2),
+                Duration.ZERO,
+                2,
                 "test-instance"
         )).isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("requires bucket");
@@ -142,6 +165,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
         assertThatThrownBy(() -> configuration.externalAuditAnchorSink(
                 new ObjectMapper(),
                 emptyObjectStoreClient(),
+                metrics(),
                 new StandardEnvironment(),
                 "object-store",
                 "./target/test-audit-external-anchors.jsonl",
@@ -154,6 +178,9 @@ class ExternalAuditAnchorSinkConfigurationTest {
                 "",
                 true,
                 false,
+                Duration.ofSeconds(2),
+                Duration.ZERO,
+                2,
                 "test-instance"
         )).isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("requires credentials");
@@ -167,6 +194,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
         ExternalAuditAnchorSink sink = configuration.externalAuditAnchorSink(
                 new ObjectMapper().findAndRegisterModules(),
                 objectStoreClient(client),
+                metrics(),
                 new StandardEnvironment(),
                 "object-store",
                 "./target/test-audit-external-anchors.jsonl",
@@ -179,6 +207,9 @@ class ExternalAuditAnchorSinkConfigurationTest {
                 "secret-key",
                 true,
                 false,
+                Duration.ofSeconds(2),
+                Duration.ZERO,
+                2,
                 "test-instance"
         );
 
@@ -193,6 +224,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
         assertThatThrownBy(() -> configuration.externalAuditAnchorSink(
                 new ObjectMapper().findAndRegisterModules(),
                 objectStoreClient(client),
+                metrics(),
                 new StandardEnvironment(),
                 "object-store",
                 "./target/test-audit-external-anchors.jsonl",
@@ -205,9 +237,75 @@ class ExternalAuditAnchorSinkConfigurationTest {
                 "secret-key",
                 true,
                 false,
+                Duration.ofSeconds(2),
+                Duration.ZERO,
+                2,
                 "test-instance"
         )).isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("startup check failed");
+    }
+
+    @Test
+    void shouldNotLeakObjectStoreCredentialsWhenStartupCheckFails() {
+        ObjectStoreAuditAnchorClient client = mock(ObjectStoreAuditAnchorClient.class);
+        when(client.listKeys("audit-bucket", "audit-anchors", 1))
+                .thenThrow(new IllegalStateException("secret-key credential failed"));
+
+        assertThatThrownBy(() -> configuration.externalAuditAnchorSink(
+                new ObjectMapper().findAndRegisterModules(),
+                objectStoreClient(client),
+                metrics(),
+                new StandardEnvironment(),
+                "object-store",
+                "./target/test-audit-external-anchors.jsonl",
+                false,
+                "audit-bucket",
+                "audit-anchors",
+                "eu-central-1",
+                "",
+                "access-key",
+                "secret-key",
+                true,
+                false,
+                Duration.ofSeconds(2),
+                Duration.ZERO,
+                2,
+                "test-instance"
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("startup check failed")
+                .hasMessageNotContaining("secret-key")
+                .hasMessageNotContaining("access-key");
+    }
+
+    @Test
+    void shouldSurfaceVerifiedImmutabilityLevelFromObjectStoreClient() {
+        ObjectStoreAuditAnchorClient client = mock(ObjectStoreAuditAnchorClient.class);
+        when(client.listKeys("audit-bucket", "audit-anchors", 1)).thenReturn(List.of());
+        when(client.immutabilityLevel("audit-bucket", "audit-anchors")).thenReturn(ExternalImmutabilityLevel.ENFORCED);
+
+        ExternalAuditAnchorSink sink = configuration.externalAuditAnchorSink(
+                new ObjectMapper().findAndRegisterModules(),
+                objectStoreClient(client),
+                metrics(),
+                new StandardEnvironment(),
+                "object-store",
+                "./target/test-audit-external-anchors.jsonl",
+                false,
+                "audit-bucket",
+                "audit-anchors",
+                "eu-central-1",
+                "",
+                "access-key",
+                "secret-key",
+                true,
+                false,
+                Duration.ofSeconds(2),
+                Duration.ZERO,
+                2,
+                "test-instance"
+        );
+
+        assertThat(sink.immutabilityLevel()).isEqualTo(ExternalImmutabilityLevel.ENFORCED);
     }
 
     @Test
@@ -218,6 +316,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
         configuration.externalAuditAnchorSink(
                 new ObjectMapper().findAndRegisterModules(),
                 objectStoreClient(client),
+                metrics(),
                 new StandardEnvironment(),
                 "object-store",
                 "./target/test-audit-external-anchors.jsonl",
@@ -230,6 +329,9 @@ class ExternalAuditAnchorSinkConfigurationTest {
                 "secret-key",
                 true,
                 false,
+                Duration.ofSeconds(2),
+                Duration.ZERO,
+                2,
                 "test-instance"
         );
 
@@ -242,6 +344,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
         assertThatThrownBy(() -> configuration.externalAuditAnchorSink(
                 new ObjectMapper(),
                 emptyObjectStoreClient(),
+                metrics(),
                 new StandardEnvironment(),
                 "object-store",
                 "./target/test-audit-external-anchors.jsonl",
@@ -254,6 +357,9 @@ class ExternalAuditAnchorSinkConfigurationTest {
                 "secret-key",
                 true,
                 false,
+                Duration.ofSeconds(2),
+                Duration.ZERO,
+                2,
                 "test-instance"
         )).isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("client is not configured");
@@ -261,6 +367,10 @@ class ExternalAuditAnchorSinkConfigurationTest {
 
     private ObjectProvider<ObjectStoreAuditAnchorClient> emptyObjectStoreClient() {
         return objectStoreClient(null);
+    }
+
+    private AlertServiceMetrics metrics() {
+        return new AlertServiceMetrics(new SimpleMeterRegistry());
     }
 
     private ObjectProvider<ObjectStoreAuditAnchorClient> objectStoreClient(ObjectStoreAuditAnchorClient client) {

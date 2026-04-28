@@ -2,9 +2,12 @@ package com.frauddetection.alert.audit.external;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.audit.AuditAnchorDocument;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -174,6 +177,58 @@ class ObjectStoreExternalAuditAnchorSinkTest {
                 .isEqualTo("EXTERNAL_OBJECT_KEY_MISMATCH");
     }
 
+    @Test
+    void shouldRetryBoundedTransientExternalStoreFailure() {
+        InMemoryObjectStoreAuditAnchorClient retryingClient = new InMemoryObjectStoreAuditAnchorClient();
+        retryingClient.failNextListCalls = 1;
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        ObjectStoreExternalAuditAnchorSink retryingSink = new ObjectStoreExternalAuditAnchorSink(
+                "audit-bucket",
+                "audit-anchors",
+                retryingClient,
+                objectMapper,
+                new AlertServiceMetrics(meterRegistry),
+                Duration.ofSeconds(2),
+                Duration.ZERO,
+                2,
+                ExternalImmutabilityLevel.CONFIGURED
+        );
+
+        retryingSink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), retryingSink.sinkType()));
+
+        assertThat(meterRegistry.get("fraud_platform_audit_external_anchor_retry_total")
+                .tag("operation", "list")
+                .counter()
+                .count()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void shouldFailAfterBoundedTimeout() {
+        InMemoryObjectStoreAuditAnchorClient slowClient = new InMemoryObjectStoreAuditAnchorClient();
+        slowClient.getDelay = Duration.ofMillis(200);
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        ObjectStoreExternalAuditAnchorSink slowSink = new ObjectStoreExternalAuditAnchorSink(
+                "audit-bucket",
+                "audit-anchors",
+                slowClient,
+                objectMapper,
+                new AlertServiceMetrics(meterRegistry),
+                Duration.ofMillis(10),
+                Duration.ZERO,
+                1,
+                ExternalImmutabilityLevel.CONFIGURED
+        );
+
+        assertThatThrownBy(() -> slowSink.findByChainPosition("source_service:alert-service", 1L))
+                .isInstanceOf(ExternalAuditAnchorSinkException.class)
+                .extracting("reason")
+                .isEqualTo("TIMEOUT");
+        assertThat(meterRegistry.get("fraud_platform_audit_external_anchor_timeout_total")
+                .tag("operation", "get")
+                .counter()
+                .count()).isEqualTo(1.0d);
+    }
+
     private AuditAnchorDocument localAnchor(String anchorId, long chainPosition, String hash) {
         return new AuditAnchorDocument(
                 anchorId,
@@ -190,9 +245,12 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         private final Map<String, byte[]> objects = new LinkedHashMap<>();
         boolean hideWritesAfterPut;
         boolean tamperAfterPut;
+        int failNextListCalls;
+        Duration getDelay = Duration.ZERO;
 
         @Override
         public Optional<byte[]> getObject(String bucket, String key) {
+            delay(getDelay);
             return Optional.ofNullable(objects.get(bucket + "/" + key));
         }
 
@@ -215,6 +273,10 @@ class ObjectStoreExternalAuditAnchorSinkTest {
 
         @Override
         public List<String> listKeys(String bucket, String keyPrefix, int limit) {
+            if (failNextListCalls > 0) {
+                failNextListCalls--;
+                throw new IllegalStateException("transient list failure");
+            }
             String bucketPrefix = bucket + "/" + keyPrefix;
             return objects.keySet().stream()
                     .filter(key -> key.startsWith(bucketPrefix))
@@ -230,6 +292,17 @@ class ObjectStoreExternalAuditAnchorSinkTest {
 
         void putRaw(String bucket, String key, byte[] content) {
             objects.put(bucket + "/" + key, Arrays.copyOf(content, content.length));
+        }
+
+        private void delay(Duration duration) {
+            if (duration.isZero()) {
+                return;
+            }
+            try {
+                Thread.sleep(duration.toMillis());
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 }
