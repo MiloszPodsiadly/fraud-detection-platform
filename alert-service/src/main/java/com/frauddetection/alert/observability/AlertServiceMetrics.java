@@ -6,6 +6,7 @@ import com.frauddetection.alert.audit.read.ReadAccessAuditOutcome;
 import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
 import com.frauddetection.alert.security.error.SecurityFailureClassifier;
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -180,6 +181,12 @@ public class AlertServiceMetrics {
                 "fraud_platform_audit_external_anchor_operation_failure_total",
                 "operation", normalizeExternalAnchorOperation(operation)
         ).increment();
+    }
+
+    public void recordExternalAnchorHeadScanDepth(int scannedKeys) {
+        DistributionSummary.builder("fraud_platform_audit_external_anchor_head_scan_depth")
+                .register(meterRegistry)
+                .record(Math.max(0, scannedKeys));
     }
 
     public void recordExternalTamperingDetected(String reason) {

@@ -32,6 +32,8 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
 
     private static final Logger log = LoggerFactory.getLogger(ObjectStoreExternalAuditAnchorSink.class);
     private static final int LIST_LIMIT = 500;
+    private static final int HEAD_SCAN_LIMIT_CAP = 16_000;
+    private static final int CHAIN_POSITION_WIDTH = 20;
     private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(2);
     private static final Duration DEFAULT_BACKOFF = Duration.ofMillis(100);
     private static final int DEFAULT_MAX_ATTEMPTS = 2;
@@ -97,7 +99,10 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
         ObjectStoreExternalAuditAnchorPayload candidate = payload(anchor, key);
         byte[] payload = serialize(candidate);
         try {
-            detectDuplicateAnchorConflict(anchor, key);
+            Optional<ExternalAuditAnchor> existingDuplicate = findDuplicateAnchor(anchor, key);
+            if (existingDuplicate.isPresent()) {
+                return existingDuplicate.get();
+            }
             Optional<byte[]> existing = getObject(key);
             if (existing.isPresent()) {
                 return idempotentExisting(key, existing.get(), payload, candidate);
@@ -142,11 +147,12 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
     public Optional<ExternalAuditAnchor> latest(String partitionKey) {
         String keyPrefix = objectKeyPrefix(partitionKey);
         try {
-            return listKeys(keyPrefix, LIST_LIMIT).stream()
-                    .map(key -> read(key).orElse(null))
-                    .filter(Objects::nonNull)
-                    .max(Comparator.comparingLong(ExternalAuditAnchor::chainPosition)
-                            .thenComparing(ExternalAuditAnchor::createdAt));
+            List<String> keys = scanAnchorKeys(keyPrefix);
+            recordHeadScanDepth(keys.size());
+            return keys.stream()
+                    .max(Comparator.comparingLong(this::parseChainPosition)
+                            .thenComparing(key -> key))
+                    .flatMap(this::read);
         } catch (ExternalAuditAnchorSinkException exception) {
             throw exception;
         } catch (RuntimeException exception) {
@@ -157,7 +163,11 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
     @Override
     public Optional<ExternalAuditAnchor> findByChainPosition(String partitionKey, long chainPosition) {
         try {
-            return read(objectKey(partitionKey, chainPosition));
+            Optional<ExternalAuditAnchor> padded = read(objectKey(partitionKey, chainPosition));
+            if (padded.isPresent()) {
+                return padded;
+            }
+            return read(legacyObjectKey(partitionKey, chainPosition));
         } catch (ExternalAuditAnchorSinkException exception) {
             throw exception;
         } catch (RuntimeException exception) {
@@ -186,6 +196,43 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
     }
 
     String objectKey(String partitionKey, long chainPosition) {
+        if (!StringUtils.hasText(partitionKey)) {
+            throw new ExternalAuditAnchorSinkException("INVALID_ANCHOR", "External anchor partition key is invalid.");
+        }
+        if (chainPosition < 0) {
+            throw new ExternalAuditAnchorSinkException("INVALID_ANCHOR", "External anchor chain position is invalid.");
+        }
+        return objectKeyPrefix(partitionKey) + "/" + formatChainPosition(chainPosition) + ".json";
+    }
+
+    String formatChainPosition(long position) {
+        if (position < 0) {
+            throw new ExternalAuditAnchorSinkException("INVALID_ANCHOR", "External anchor chain position is invalid.");
+        }
+        return String.format("%0" + CHAIN_POSITION_WIDTH + "d", position);
+    }
+
+    long parseChainPosition(String key) {
+        String filename = key.substring(key.lastIndexOf('/') + 1);
+        if (!filename.endsWith(".json")) {
+            throw new ExternalAuditAnchorSinkException("INVALID_ANCHOR", "External anchor object key is invalid.");
+        }
+        String value = filename.substring(0, filename.length() - ".json".length());
+        if (value.isBlank() || value.chars().anyMatch(character -> character < '0' || character > '9')) {
+            throw new ExternalAuditAnchorSinkException("INVALID_ANCHOR", "External anchor object key is invalid.");
+        }
+        try {
+            long parsed = Long.parseLong(value);
+            if (parsed < 0) {
+                throw new ExternalAuditAnchorSinkException("INVALID_ANCHOR", "External anchor chain position is invalid.");
+            }
+            return parsed;
+        } catch (NumberFormatException exception) {
+            throw new ExternalAuditAnchorSinkException("INVALID_ANCHOR", "External anchor chain position is invalid.");
+        }
+    }
+
+    private String legacyObjectKey(String partitionKey, long chainPosition) {
         if (!StringUtils.hasText(partitionKey)) {
             throw new ExternalAuditAnchorSinkException("INVALID_ANCHOR", "External anchor partition key is invalid.");
         }
@@ -289,19 +336,28 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
         }
     }
 
-    private void detectDuplicateAnchorConflict(ExternalAuditAnchor anchor, String targetKey) {
-        for (String key : listKeys(objectKeyPrefix(anchor.partitionKey()), LIST_LIMIT)) {
+    private Optional<ExternalAuditAnchor> findDuplicateAnchor(ExternalAuditAnchor anchor, String targetKey) {
+        for (String key : scanAnchorKeys(objectKeyPrefix(anchor.partitionKey()))) {
             if (targetKey.equals(key)) {
                 continue;
             }
             Optional<ExternalAuditAnchor> existing = read(key);
-            if (existing.isPresent()
-                    && anchor.localAnchorId().equals(existing.get().localAnchorId())
-                    && (anchor.chainPosition() != existing.get().chainPosition()
-                    || !anchor.lastEventHash().equals(existing.get().lastEventHash()))) {
-                throw new ExternalAuditAnchorSinkException("MISMATCH", "External anchor local anchor id conflict.");
+            if (existing.isEmpty()) {
+                continue;
+            }
+            ExternalAuditAnchor current = existing.get();
+            if (anchor.localAnchorId().equals(current.localAnchorId())) {
+                if (anchor.chainPosition() != current.chainPosition()
+                        || !anchor.lastEventHash().equals(current.lastEventHash())) {
+                    throw new ExternalAuditAnchorSinkException("MISMATCH", "External anchor local anchor id conflict.");
+                }
+                return Optional.of(current);
+            }
+            if (anchor.chainPosition() == current.chainPosition()) {
+                throw new ExternalAuditAnchorSinkException("MISMATCH", "External anchor chain position conflict.");
             }
         }
+        return Optional.empty();
     }
 
     private Optional<byte[]> getObject(String key) {
@@ -317,6 +373,34 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
 
     private List<String> listKeys(String keyPrefix, int limit) {
         return callWithRetry("list", () -> client.listKeys(bucket, keyPrefix, limit));
+    }
+
+    private List<String> scanAnchorKeys(String keyPrefix) {
+        int limit = LIST_LIMIT;
+        List<String> keys = List.of();
+        while (limit <= HEAD_SCAN_LIMIT_CAP) {
+            keys = listKeys(keyPrefix, limit).stream()
+                    .filter(key -> {
+                        try {
+                            parseChainPosition(key);
+                            return true;
+                        } catch (ExternalAuditAnchorSinkException exception) {
+                            return false;
+                        }
+                    })
+                    .toList();
+            /*
+             * The object-store client does not expose pagination yet. New padded keys sort by
+             * chain position, but legacy keys do not, so HEAD detection must consider both
+             * formats. This bounded progressive scan avoids the old "first 500 keys" trap while
+             * keeping latency finite until a paginated client is available.
+             */
+            if (keys.size() < limit || limit == HEAD_SCAN_LIMIT_CAP) {
+                return keys;
+            }
+            limit = Math.min(limit * 2, HEAD_SCAN_LIMIT_CAP);
+        }
+        return keys;
     }
 
     private <T> T callWithRetry(String operation, Supplier<T> operationCall) {
@@ -387,6 +471,12 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
     private void recordFailure(String operation) {
         if (metrics != null) {
             metrics.recordExternalAnchorOperationFailure(operation);
+        }
+    }
+
+    private void recordHeadScanDepth(int scannedKeys) {
+        if (metrics != null) {
+            metrics.recordExternalAnchorHeadScanDepth(scannedKeys);
         }
     }
 
