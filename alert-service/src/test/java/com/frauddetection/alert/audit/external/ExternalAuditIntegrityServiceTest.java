@@ -283,7 +283,6 @@ class ExternalAuditIntegrityServiceTest {
         AuditAnchorRepository repository = mock(AuditAnchorRepository.class);
         ObjectStoreExternalAuditAnchorSinkTest.InMemoryObjectStoreAuditAnchorClient client =
                 new ObjectStoreExternalAuditAnchorSinkTest.InMemoryObjectStoreAuditAnchorClient();
-        client.paginationSupported = false;
         ObjectStoreExternalAuditAnchorSink objectStoreSink = objectStoreSink(client);
         for (long chainPosition = 1L; chainPosition <= 500L; chainPosition++) {
             objectStoreSink.publish(ExternalAuditAnchor.from(
@@ -291,6 +290,8 @@ class ExternalAuditIntegrityServiceTest {
                     objectStoreSink.sinkType()
             ));
         }
+        client.removeRaw("audit-bucket", "audit-anchors/c291cmNlX3NlcnZpY2U6YWxlcnQtc2VydmljZQ/head.json");
+        client.paginationSupported = false;
         when(repository.findLatestByPartitionKey("source_service:alert-service"))
                 .thenReturn(Optional.of(localAnchor("local-anchor-501", 501L, "hash-501")));
 

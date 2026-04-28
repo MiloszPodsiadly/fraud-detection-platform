@@ -18,7 +18,6 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HexFormat;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -87,7 +86,7 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         assertThat(duplicate.localAnchorId()).isEqualTo("local-anchor-1");
         assertThat(duplicate.chainPosition()).isEqualTo(1L);
         assertThat(duplicate.lastEventHash()).isEqualTo("hash-1");
-        assertThat(client.keys()).hasSize(1);
+        assertThat(client.anchorKeys()).hasSize(1);
     }
 
     @Test
@@ -100,7 +99,7 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         assertThat(duplicate.localAnchorId()).isEqualTo("local-anchor-1");
         assertThat(duplicate.chainPosition()).isEqualTo(1L);
         assertThat(duplicate.lastEventHash()).isEqualTo("hash-1");
-        assertThat(client.keys()).hasSize(1);
+        assertThat(client.anchorKeys()).hasSize(1);
         assertThat(client.getObject("audit-bucket", sink.objectKey("source_service:alert-service", 1L))).isEmpty();
     }
 
@@ -211,6 +210,134 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         assertThat(meterRegistry.get("fraud_platform_audit_external_anchor_head_scan_depth")
                 .summary()
                 .max()).isEqualTo(20_000.0d);
+    }
+
+    @Test
+    void shouldUseManifestForLatestWithoutFullScan() {
+        for (long chainPosition = 1L; chainPosition < 10_000L; chainPosition++) {
+            putPaddedAnchor("local-anchor-" + chainPosition, chainPosition, "hash-" + chainPosition);
+        }
+        sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-10000", 10_000L, "hash-10000"), sink.sinkType()));
+        client.listPageCalls = 0;
+
+        Optional<ExternalAuditAnchor> latest = sink.latest("source_service:alert-service");
+
+        assertThat(latest).get()
+                .extracting(ExternalAuditAnchor::chainPosition)
+                .isEqualTo(10_000L);
+        assertThat(client.listPageCalls).isZero();
+    }
+
+    @Test
+    void shouldFallbackToScanWhenManifestMissing() {
+        putPaddedAnchor("local-anchor-1", 1L, "hash-1");
+        putPaddedAnchor("local-anchor-2", 2L, "hash-2");
+
+        Optional<ExternalAuditAnchor> latest = sink.latest("source_service:alert-service");
+
+        assertThat(latest).get()
+                .extracting(ExternalAuditAnchor::chainPosition)
+                .isEqualTo(2L);
+        assertThat(client.listPageCalls).isGreaterThan(0);
+    }
+
+    @Test
+    void shouldFallbackToScanWhenManifestTampered() {
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        ObjectStoreExternalAuditAnchorSink manifestSink = sinkWithMetrics(meterRegistry);
+        manifestSink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), manifestSink.sinkType()));
+        manifestSink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-2", 2L, "hash-2"), manifestSink.sinkType()));
+        client.putRaw("audit-bucket", headManifestKey(), new String(client.getObject("audit-bucket", headManifestKey()).orElseThrow(), StandardCharsets.UTF_8)
+                .replace("\"latest_event_hash\":\"hash-2\"", "\"latest_event_hash\":\"hash-X\"")
+                .getBytes(StandardCharsets.UTF_8));
+
+        Optional<ExternalAuditAnchor> latest = manifestSink.latest("source_service:alert-service");
+
+        assertThat(latest).get()
+                .extracting(ExternalAuditAnchor::chainPosition)
+                .isEqualTo(2L);
+        assertThat(meterRegistry.get("external_manifest_read_total").tag("status", "INVALID").counter().count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.get("external_manifest_fallback_scan_total").counter().count()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void shouldDetectManifestHashMismatch() {
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        ObjectStoreExternalAuditAnchorSink manifestSink = sinkWithMetrics(meterRegistry);
+        manifestSink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), manifestSink.sinkType()));
+        client.putRaw("audit-bucket", headManifestKey(), new String(client.getObject("audit-bucket", headManifestKey()).orElseThrow(), StandardCharsets.UTF_8)
+                .replace("\"manifest_hash\":\"", "\"manifest_hash\":\"tampered-")
+                .getBytes(StandardCharsets.UTF_8));
+
+        Optional<ExternalAuditAnchor> latest = manifestSink.latest("source_service:alert-service");
+
+        assertThat(latest).get()
+                .extracting(ExternalAuditAnchor::chainPosition)
+                .isEqualTo(1L);
+        assertThat(meterRegistry.get("external_manifest_invalid_total").counter().count()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void shouldDetectManifestAnchorMissing() {
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        ObjectStoreExternalAuditAnchorSink manifestSink = sinkWithMetrics(meterRegistry);
+        manifestSink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), manifestSink.sinkType()));
+        client.removeRaw("audit-bucket", sink.objectKey("source_service:alert-service", 1L));
+
+        Optional<ExternalAuditAnchor> latest = manifestSink.latest("source_service:alert-service");
+
+        assertThat(latest).isEmpty();
+        assertThat(meterRegistry.get("external_manifest_mismatch_total").counter().count()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void shouldNotRegressManifestOnLowerPositionWrite() {
+        sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-10", 10L, "hash-10"), sink.sinkType()));
+        sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-5", 5L, "hash-5"), sink.sinkType()));
+
+        Optional<ExternalAuditAnchor> latest = sink.latest("source_service:alert-service");
+
+        assertThat(latest).get()
+                .extracting(ExternalAuditAnchor::chainPosition)
+                .isEqualTo(10L);
+    }
+
+    @Test
+    void shouldHandleConcurrentWritesSafely() throws Exception {
+        java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(4);
+        try {
+            List<java.util.concurrent.Callable<Void>> tasks = java.util.stream.LongStream.rangeClosed(1L, 100L)
+                    .mapToObj(chainPosition -> (java.util.concurrent.Callable<Void>) () -> {
+                        sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-" + chainPosition, chainPosition, "hash-" + chainPosition), sink.sinkType()));
+                        return null;
+                    })
+                    .toList();
+            for (java.util.concurrent.Future<Void> future : executor.invokeAll(tasks)) {
+                future.get();
+            }
+        } finally {
+            executor.shutdownNow();
+        }
+
+        assertThat(sink.latest("source_service:alert-service"))
+                .get()
+                .extracting(ExternalAuditAnchor::chainPosition)
+                .isEqualTo(100L);
+    }
+
+    @Test
+    void shouldNotReturnManifestIfInvalid() {
+        sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), sink.sinkType()));
+        putPaddedAnchor("local-anchor-2", 2L, "hash-2");
+        client.putRaw("audit-bucket", headManifestKey(), new String(client.getObject("audit-bucket", headManifestKey()).orElseThrow(), StandardCharsets.UTF_8)
+                .replace("\"latest_chain_position\":1", "\"latest_chain_position\":2")
+                .getBytes(StandardCharsets.UTF_8));
+
+        Optional<ExternalAuditAnchor> latest = sink.latest("source_service:alert-service");
+
+        assertThat(latest).get()
+                .extracting(ExternalAuditAnchor::chainPosition)
+                .isEqualTo(2L);
     }
 
     @Test
@@ -357,6 +484,24 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         putAnchorObject(key, ExternalAuditAnchor.from(localAnchor(anchorId, chainPosition, hash), sink.sinkType()));
     }
 
+    private ObjectStoreExternalAuditAnchorSink sinkWithMetrics(SimpleMeterRegistry meterRegistry) {
+        return new ObjectStoreExternalAuditAnchorSink(
+                "audit-bucket",
+                "audit-anchors",
+                client,
+                objectMapper,
+                new AlertServiceMetrics(meterRegistry),
+                Duration.ofSeconds(2),
+                Duration.ZERO,
+                1,
+                ExternalImmutabilityLevel.CONFIGURED
+        );
+    }
+
+    private String headManifestKey() {
+        return "audit-anchors/" + ENCODED_PARTITION + "/head.json";
+    }
+
     private void putAnchorObject(String key, ExternalAuditAnchor anchor) {
         putAnchorObject(client, key, anchor);
     }
@@ -389,12 +534,13 @@ class ObjectStoreExternalAuditAnchorSinkTest {
 
     static class InMemoryObjectStoreAuditAnchorClient implements ObjectStoreAuditAnchorClient {
 
-        private final Map<String, byte[]> objects = new LinkedHashMap<>();
+        private final Map<String, byte[]> objects = new java.util.concurrent.ConcurrentHashMap<>();
         boolean hideWritesAfterPut;
         boolean tamperAfterPut;
         int failNextListCalls;
         Duration getDelay = Duration.ZERO;
         boolean paginationSupported = true;
+        int listPageCalls;
 
         @Override
         public Optional<byte[]> getObject(String bucket, String key) {
@@ -420,6 +566,11 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         }
 
         @Override
+        public void putObject(String bucket, String key, byte[] content) {
+            objects.put(bucket + "/" + key, Arrays.copyOf(content, content.length));
+        }
+
+        @Override
         public List<String> listKeys(String bucket, String keyPrefix, int limit) {
             if (failNextListCalls > 0) {
                 failNextListCalls--;
@@ -436,6 +587,7 @@ class ObjectStoreExternalAuditAnchorSinkTest {
 
         @Override
         public ObjectStoreAuditAnchorKeyPage listKeysPage(String bucket, String keyPrefix, int limit, String continuationToken) {
+            listPageCalls++;
             if (!paginationSupported) {
                 return ObjectStoreAuditAnchorClient.super.listKeysPage(bucket, keyPrefix, limit, continuationToken);
             }
@@ -459,8 +611,18 @@ class ObjectStoreExternalAuditAnchorSinkTest {
             return List.copyOf(objects.keySet());
         }
 
+        List<String> anchorKeys() {
+            return objects.keySet().stream()
+                    .filter(key -> !key.endsWith("/head.json"))
+                    .toList();
+        }
+
         void putRaw(String bucket, String key, byte[] content) {
             objects.put(bucket + "/" + key, Arrays.copyOf(content, content.length));
+        }
+
+        void removeRaw(String bucket, String key) {
+            objects.remove(bucket + "/" + key);
         }
 
         private void delay(Duration duration) {

@@ -101,6 +101,11 @@ class AlertServiceMetricsTest {
         metrics.recordExternalAnchorPublished("local-file", "PUBLISHED");
         metrics.recordExternalAnchorPublishFailed("local-file", "IO_ERROR");
         metrics.recordExternalAnchorLag(Duration.ofSeconds(3));
+        metrics.recordExternalManifestRead("HIT");
+        metrics.recordExternalManifestUpdate("SUCCESS");
+        metrics.recordExternalManifestFallbackScan();
+        metrics.recordExternalManifestInvalid();
+        metrics.recordExternalManifestMismatch();
         metrics.recordExternalIntegrityCheck("PARTIAL");
         metrics.recordEvidenceExport("PARTIAL");
         metrics.recordEvidenceExportRateLimited();
@@ -114,6 +119,11 @@ class AlertServiceMetricsTest {
         Meter externalAnchorPublished = meterRegistry.get("fraud_platform_audit_external_anchor_published_total").meter();
         Meter externalAnchorFailures = meterRegistry.get("fraud_platform_audit_external_anchor_publish_failed_total").meter();
         Meter externalAnchorLag = meterRegistry.get("fraud_platform_audit_external_anchor_lag_seconds").meter();
+        Meter manifestRead = meterRegistry.get("external_manifest_read_total").meter();
+        Meter manifestUpdate = meterRegistry.get("external_manifest_update_total").meter();
+        Meter manifestFallback = meterRegistry.get("external_manifest_fallback_scan_total").meter();
+        Meter manifestInvalid = meterRegistry.get("external_manifest_invalid_total").meter();
+        Meter manifestMismatch = meterRegistry.get("external_manifest_mismatch_total").meter();
         Meter externalIntegrityChecks = meterRegistry.get("fraud_platform_audit_external_integrity_checks_total").meter();
         Meter evidenceExports = meterRegistry.get("fraud_platform_audit_evidence_exports_total").meter();
         Meter evidenceExportRateLimited = meterRegistry.get("fraud_platform_audit_evidence_export_rate_limited_total").meter();
@@ -141,6 +151,21 @@ class AlertServiceMetricsTest {
                 .extracting(Tag::getKey)
                 .containsExactlyInAnyOrder("sink", "reason");
         assertThat(externalAnchorLag.getId().getTags()).isEmpty();
+        assertThat(manifestRead.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactly("status");
+        assertThat(manifestRead.getId().getTags())
+                .extracting(Tag::getValue)
+                .containsExactly("HIT");
+        assertThat(manifestUpdate.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactly("status");
+        assertThat(manifestUpdate.getId().getTags())
+                .extracting(Tag::getValue)
+                .containsExactly("SUCCESS");
+        assertThat(manifestFallback.getId().getTags()).isEmpty();
+        assertThat(manifestInvalid.getId().getTags()).isEmpty();
+        assertThat(manifestMismatch.getId().getTags()).isEmpty();
         assertThat(externalIntegrityChecks.getId().getTags())
                 .extracting(Tag::getKey)
                 .containsExactly("status");
