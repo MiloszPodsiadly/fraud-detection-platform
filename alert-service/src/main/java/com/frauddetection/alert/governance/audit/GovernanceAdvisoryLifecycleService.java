@@ -16,12 +16,25 @@ public class GovernanceAdvisoryLifecycleService {
         // Lifecycle status is a derived projection from audit events.
         // It MUST NOT be persisted or used as a source of truth.
         try {
-            return repository.findFirstByAdvisoryEventIdOrderByCreatedAtDesc(advisoryEventId)
+            GovernanceAdvisoryLifecycleStatus status = repository.findFirstByAdvisoryEventIdOrderByCreatedAtDesc(advisoryEventId)
                     .map(GovernanceAuditEventDocument::getDecision)
                     .map(GovernanceAdvisoryLifecycleStatus::fromLatestDecision)
                     .orElse(GovernanceAdvisoryLifecycleStatus.OPEN);
+            assertAuditUnavailableNeverReturnsOpen(true, status);
+            return status;
         } catch (DataAccessException exception) {
-            return GovernanceAdvisoryLifecycleStatus.OPEN;
+            GovernanceAdvisoryLifecycleStatus status = GovernanceAdvisoryLifecycleStatus.UNKNOWN;
+            assertAuditUnavailableNeverReturnsOpen(false, status);
+            return status;
+        }
+    }
+
+    private void assertAuditUnavailableNeverReturnsOpen(
+            boolean auditAvailable,
+            GovernanceAdvisoryLifecycleStatus status
+    ) {
+        if (!auditAvailable && status == GovernanceAdvisoryLifecycleStatus.OPEN) {
+            throw new IllegalStateException("Lifecycle status OPEN requires available audit source.");
         }
     }
 }

@@ -261,6 +261,20 @@ public class AlertServiceMetrics {
         ).increment();
     }
 
+    public void recordGovernanceLifecycleStatus(String status) {
+        counter(
+                "lifecycle_status_total",
+                "status", normalizeLifecycleStatus(status)
+        ).increment();
+    }
+
+    public void recordGovernanceLifecycleDegraded(String reason) {
+        counter(
+                "lifecycle_degraded_total",
+                "reason", normalizeLifecycleDegradationReason(reason)
+        ).increment();
+    }
+
     public void recordGovernanceAnalyticsRequest(int windowDays) {
         governanceAnalyticsWindowDays.set(windowDays);
         counter("fraud_ml_governance_analytics_requests_total").increment();
@@ -334,6 +348,23 @@ public class AlertServiceMetrics {
             return status;
         }
         return "UNAVAILABLE";
+    }
+
+    private String normalizeLifecycleStatus(String status) {
+        if ("OPEN".equals(status) || "RESOLVED".equals(status) || "UNKNOWN".equals(status)) {
+            return status;
+        }
+        if ("ACKNOWLEDGED".equals(status) || "NEEDS_FOLLOW_UP".equals(status) || "DISMISSED_AS_NOISE".equals(status)) {
+            return "RESOLVED";
+        }
+        return "UNKNOWN";
+    }
+
+    private String normalizeLifecycleDegradationReason(String reason) {
+        if ("AUDIT_UNAVAILABLE".equals(reason)) {
+            return reason;
+        }
+        return "AUDIT_UNAVAILABLE";
     }
 
     private String normalizeAvailabilityStatus(String status) {

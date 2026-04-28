@@ -72,6 +72,7 @@ public class GovernanceAdvisoryAnalyticsService {
         AuditRead auditRead = readAuditEvents(from, to);
         AdvisoryRead advisoryRead = readAdvisories(from, to);
         if (!auditRead.available() && !advisoryRead.available()) {
+            metrics.recordGovernanceLifecycleDegraded(degradationReason(auditRead, advisoryRead));
             return recordOutcome(
                     GovernanceAdvisoryAnalyticsResponse.empty("UNAVAILABLE", from, to, windowDays)
                             .withReason(degradationReason(auditRead, advisoryRead)),
@@ -97,17 +98,22 @@ public class GovernanceAdvisoryAnalyticsService {
                 ));
 
         Map<GovernanceAuditDecision, Integer> decisionDistribution = decisionDistribution(advisoryIds, auditByAdvisory);
-        Map<GovernanceAdvisoryLifecycleStatus, Integer> lifecycleDistribution = lifecycleDistribution(advisoriesById.values());
+        Map<GovernanceAdvisoryLifecycleStatus, Integer> lifecycleDistribution = lifecycleDistribution(advisoriesById.values(), auditRead.available());
         int reviewed = (int) advisoryIds.stream().filter(id -> auditByAdvisory.containsKey(id)).count();
-        int open = Math.max(0, advisoryIds.size() - reviewed);
+        int open = lifecycleDistribution.getOrDefault(GovernanceAdvisoryLifecycleStatus.OPEN, 0);
+        int unknown = lifecycleDistribution.getOrDefault(GovernanceAdvisoryLifecycleStatus.UNKNOWN, 0);
+        int resolved = Math.max(0, advisoryIds.size() - open - unknown);
         List<Double> timeToFirstReviewMinutes = timeToFirstReviewMinutes(advisoriesById, auditByAdvisory);
 
         String status = auditRead.available() && advisoryRead.available() ? "AVAILABLE" : "PARTIAL";
+        if (!auditRead.available()) {
+            metrics.recordGovernanceLifecycleDegraded(degradationReason(auditRead, advisoryRead));
+        }
         GovernanceAdvisoryAnalyticsResponse response = new GovernanceAdvisoryAnalyticsResponse(
                 status,
                 "PARTIAL".equals(status) ? degradationReason(auditRead, advisoryRead) : null,
                 new GovernanceAdvisoryAnalyticsResponse.Window(from, to, windowDays),
-                new GovernanceAdvisoryAnalyticsResponse.Totals(advisoryIds.size(), reviewed, open),
+                new GovernanceAdvisoryAnalyticsResponse.Totals(advisoryIds.size(), reviewed, open, resolved, unknown),
                 decisionDistribution,
                 lifecycleDistribution,
                 reviewTimeliness(timeToFirstReviewMinutes)
@@ -160,15 +166,22 @@ public class GovernanceAdvisoryAnalyticsService {
     }
 
     private Map<GovernanceAdvisoryLifecycleStatus, Integer> lifecycleDistribution(
-            Iterable<GovernanceAdvisoryEvent> advisories
+            Iterable<GovernanceAdvisoryEvent> advisories,
+            boolean auditAvailable
     ) {
         EnumMap<GovernanceAdvisoryLifecycleStatus, Integer> distribution =
                 new EnumMap<>(GovernanceAdvisoryAnalyticsResponse.emptyLifecycleDistribution());
         for (GovernanceAdvisoryEvent advisory : advisories) {
-            GovernanceAdvisoryLifecycleStatus status = lifecycleService.lifecycleStatus(advisory.eventId());
+            GovernanceAdvisoryLifecycleStatus status = auditAvailable
+                    ? lifecycleService.lifecycleStatus(advisory.eventId())
+                    : GovernanceAdvisoryLifecycleStatus.UNKNOWN;
             if (status == null) {
-                status = GovernanceAdvisoryLifecycleStatus.OPEN;
+                status = GovernanceAdvisoryLifecycleStatus.UNKNOWN;
             }
+            if (!auditAvailable && status == GovernanceAdvisoryLifecycleStatus.OPEN) {
+                throw new IllegalStateException("Lifecycle status OPEN requires available audit source.");
+            }
+            metrics.recordGovernanceLifecycleStatus(status.name());
             distribution.computeIfPresent(status, (ignored, count) -> count + 1);
         }
         return distribution;
