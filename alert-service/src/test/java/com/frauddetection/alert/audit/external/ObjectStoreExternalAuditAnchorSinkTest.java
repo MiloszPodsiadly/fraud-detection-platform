@@ -80,6 +80,7 @@ class ObjectStoreExternalAuditAnchorSinkTest {
     void shouldTreatDuplicateWriteAsIdempotentWhenBindingMatches() {
         AuditAnchorDocument local = localAnchor("local-anchor-1", 1L, "hash-1");
         sink.publish(ExternalAuditAnchor.from(local, sink.sinkType()));
+        client.resetCounters();
 
         ExternalAuditAnchor duplicate = sink.publish(ExternalAuditAnchor.from(local, sink.sinkType()));
 
@@ -87,20 +88,26 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         assertThat(duplicate.chainPosition()).isEqualTo(1L);
         assertThat(duplicate.lastEventHash()).isEqualTo("hash-1");
         assertThat(client.anchorKeys()).hasSize(1);
+        assertThat(client.getObjectCalls).isEqualTo(1);
+        assertThat(client.listKeysCalls).isZero();
+        assertThat(client.listPageCalls).isZero();
     }
 
     @Test
-    void shouldTreatLegacyAnchorAsIdempotentAfterKeyFormatMigration() {
+    void shouldPublishPaddedAnchorWhenOnlyLegacyKeyExistsWithoutScanning() {
         AuditAnchorDocument local = localAnchor("local-anchor-1", 1L, "hash-1");
         putLegacyAnchor("local-anchor-1", 1L, "hash-1");
+        client.resetCounters();
 
         ExternalAuditAnchor duplicate = sink.publish(ExternalAuditAnchor.from(local, sink.sinkType()));
 
         assertThat(duplicate.localAnchorId()).isEqualTo("local-anchor-1");
         assertThat(duplicate.chainPosition()).isEqualTo(1L);
         assertThat(duplicate.lastEventHash()).isEqualTo("hash-1");
-        assertThat(client.anchorKeys()).hasSize(1);
-        assertThat(client.getObject("audit-bucket", sink.objectKey("source_service:alert-service", 1L))).isEmpty();
+        assertThat(client.anchorKeys()).hasSize(2);
+        assertThat(client.getObject("audit-bucket", sink.objectKey("source_service:alert-service", 1L))).isPresent();
+        assertThat(client.listKeysCalls).isZero();
+        assertThat(client.listPageCalls).isZero();
     }
 
     @Test
@@ -114,13 +121,15 @@ class ObjectStoreExternalAuditAnchorSinkTest {
     }
 
     @Test
-    void shouldRejectSameLocalAnchorIdWithDifferentChainPosition() {
+    void shouldNotScanForSameLocalAnchorIdAtDifferentChainPosition() {
         sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), sink.sinkType()));
+        client.resetCounters();
 
-        assertThatThrownBy(() -> sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 2L, "hash-1"), sink.sinkType())))
-                .isInstanceOf(ExternalAuditAnchorSinkException.class)
-                .extracting("reason")
-                .isEqualTo("MISMATCH");
+        ExternalAuditAnchor stored = sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 2L, "hash-1"), sink.sinkType()));
+
+        assertThat(stored.chainPosition()).isEqualTo(2L);
+        assertThat(client.listKeysCalls).isZero();
+        assertThat(client.listPageCalls).isZero();
     }
 
     @Test
@@ -137,10 +146,26 @@ class ObjectStoreExternalAuditAnchorSinkTest {
     void shouldRejectLegacySameChainPositionWithDifferentLocalAnchorId() {
         putLegacyAnchor("local-anchor-1", 1L, "hash-1");
 
-        assertThatThrownBy(() -> sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-2", 1L, "hash-2"), sink.sinkType())))
-                .isInstanceOf(ExternalAuditAnchorSinkException.class)
-                .extracting("reason")
-                .isEqualTo("MISMATCH");
+        ExternalAuditAnchor stored = sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-2", 1L, "hash-2"), sink.sinkType()));
+
+        assertThat(stored.localAnchorId()).isEqualTo("local-anchor-2");
+        assertThat(client.anchorKeys()).hasSize(2);
+        assertThat(client.listKeysCalls).isZero();
+        assertThat(client.listPageCalls).isZero();
+    }
+
+    @Test
+    void publishNewAnchorShouldNotListAllKeys() {
+        for (long chainPosition = 1L; chainPosition <= 20_000L; chainPosition++) {
+            putPaddedAnchor("local-anchor-" + chainPosition, chainPosition, "hash-" + chainPosition);
+        }
+        client.resetCounters();
+
+        ExternalAuditAnchor stored = sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-20001", 20_001L, "hash-20001"), sink.sinkType()));
+
+        assertThat(stored.chainPosition()).isEqualTo(20_001L);
+        assertThat(client.listKeysCalls).isZero();
+        assertThat(client.listPageCalls).isZero();
     }
 
     @Test
@@ -399,6 +424,28 @@ class ObjectStoreExternalAuditAnchorSinkTest {
     }
 
     @Test
+    void shouldReturnPartialWhenManifestUpdateFails() {
+        InMemoryObjectStoreAuditAnchorClient manifestFailingClient = new InMemoryObjectStoreAuditAnchorClient();
+        manifestFailingClient.failHeadManifestPut = true;
+        ObjectStoreExternalAuditAnchorSink manifestFailingSink = new ObjectStoreExternalAuditAnchorSink(
+                "audit-bucket",
+                "audit-anchors",
+                manifestFailingClient,
+                objectMapper
+        );
+
+        ExternalAuditAnchor stored = manifestFailingSink.publish(ExternalAuditAnchor.from(
+                localAnchor("local-anchor-1", 1L, "hash-1"),
+                manifestFailingSink.sinkType()
+        ));
+
+        assertThat(stored.publicationStatus()).isEqualTo(ExternalAuditAnchor.STATUS_PARTIAL);
+        assertThat(stored.publicationReason()).isEqualTo(ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED);
+        assertThat(stored.manifestStatus()).isEqualTo(ExternalAuditAnchor.MANIFEST_STATUS_FAILED);
+        assertThat(manifestFailingClient.getObject("audit-bucket", manifestFailingSink.objectKey("source_service:alert-service", 1L))).isPresent();
+    }
+
+    @Test
     void shouldDetectObjectStoredUnderWrongKey() {
         sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), sink.sinkType()));
         String correctKey = sink.objectKey("source_service:alert-service", 1L);
@@ -428,7 +475,12 @@ class ObjectStoreExternalAuditAnchorSinkTest {
                 ExternalImmutabilityLevel.CONFIGURED
         );
 
-        retryingSink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), retryingSink.sinkType()));
+        putAnchorObject(
+                retryingClient,
+                retryingSink.objectKey("source_service:alert-service", 1L),
+                ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), retryingSink.sinkType())
+        );
+        retryingSink.latest("source_service:alert-service");
 
         assertThat(meterRegistry.get("fraud_platform_audit_external_anchor_retry_total")
                 .tag("operation", "list")
@@ -540,16 +592,23 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         int failNextListCalls;
         Duration getDelay = Duration.ZERO;
         boolean paginationSupported = true;
+        boolean failHeadManifestPut;
+        int getObjectCalls;
+        int putObjectCalls;
+        int putObjectIfAbsentCalls;
+        int listKeysCalls;
         int listPageCalls;
 
         @Override
         public Optional<byte[]> getObject(String bucket, String key) {
+            getObjectCalls++;
             delay(getDelay);
             return Optional.ofNullable(objects.get(bucket + "/" + key));
         }
 
         @Override
         public void putObjectIfAbsent(String bucket, String key, byte[] content) {
+            putObjectIfAbsentCalls++;
             byte[] stored = Arrays.copyOf(content, content.length);
             byte[] existing = objects.putIfAbsent(bucket + "/" + key, stored);
             if (existing != null) {
@@ -567,11 +626,16 @@ class ObjectStoreExternalAuditAnchorSinkTest {
 
         @Override
         public void putObject(String bucket, String key, byte[] content) {
+            putObjectCalls++;
+            if (failHeadManifestPut && key.endsWith("/head.json")) {
+                throw new ExternalAuditAnchorSinkException("HEAD_MANIFEST_UPDATE_FAILED", "External anchor head manifest is unavailable.");
+            }
             objects.put(bucket + "/" + key, Arrays.copyOf(content, content.length));
         }
 
         @Override
         public List<String> listKeys(String bucket, String keyPrefix, int limit) {
+            listKeysCalls++;
             if (failNextListCalls > 0) {
                 failNextListCalls--;
                 throw new IllegalStateException("transient list failure");
@@ -623,6 +687,14 @@ class ObjectStoreExternalAuditAnchorSinkTest {
 
         void removeRaw(String bucket, String key) {
             objects.remove(bucket + "/" + key);
+        }
+
+        void resetCounters() {
+            getObjectCalls = 0;
+            putObjectCalls = 0;
+            putObjectIfAbsentCalls = 0;
+            listKeysCalls = 0;
+            listPageCalls = 0;
         }
 
         private void delay(Duration duration) {
