@@ -181,7 +181,7 @@ class ObjectStoreExternalAuditAnchorSinkTest {
     }
 
     @Test
-    void shouldReturnCorrectHeadBeyondListingLimit() {
+    void shouldReturnCorrectHeadWithPaginatedListingBeyond16000() {
         SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
         ObjectStoreExternalAuditAnchorSink scanningSink = new ObjectStoreExternalAuditAnchorSink(
                 "audit-bucket",
@@ -194,10 +194,10 @@ class ObjectStoreExternalAuditAnchorSinkTest {
                 1,
                 ExternalImmutabilityLevel.CONFIGURED
         );
-        for (long chainPosition = 1L; chainPosition <= 500L; chainPosition++) {
+        for (long chainPosition = 1L; chainPosition <= 10_000L; chainPosition++) {
             putPaddedAnchor("local-anchor-" + chainPosition, chainPosition, "hash-" + chainPosition);
         }
-        for (long chainPosition = 501L; chainPosition <= 1000L; chainPosition++) {
+        for (long chainPosition = 10_001L; chainPosition <= 20_000L; chainPosition++) {
             putLegacyAnchor("local-anchor-" + chainPosition, chainPosition, "hash-" + chainPosition);
         }
 
@@ -205,12 +205,36 @@ class ObjectStoreExternalAuditAnchorSinkTest {
 
         assertThat(latest).get()
                 .extracting(ExternalAuditAnchor::chainPosition)
-                .isEqualTo(1000L);
+                .isEqualTo(20_000L);
         assertThat(scanningSink.findByChainPosition("source_service:alert-service", 1L)).isPresent();
-        assertThat(scanningSink.findByChainPosition("source_service:alert-service", 1000L)).isPresent();
+        assertThat(scanningSink.findByChainPosition("source_service:alert-service", 20_000L)).isPresent();
         assertThat(meterRegistry.get("fraud_platform_audit_external_anchor_head_scan_depth")
                 .summary()
-                .max()).isEqualTo(1000.0d);
+                .max()).isEqualTo(20_000.0d);
+    }
+
+    @Test
+    void shouldRejectNonPaginatedFullPageInsteadOfReturningBestEffortHead() {
+        InMemoryObjectStoreAuditAnchorClient nonPaginatedClient = new InMemoryObjectStoreAuditAnchorClient();
+        nonPaginatedClient.paginationSupported = false;
+        ObjectStoreExternalAuditAnchorSink nonPaginatedSink = new ObjectStoreExternalAuditAnchorSink(
+                "audit-bucket",
+                "audit-anchors",
+                nonPaginatedClient,
+                objectMapper
+        );
+        for (long chainPosition = 1L; chainPosition <= 500L; chainPosition++) {
+            putAnchorObject(
+                    nonPaginatedClient,
+                    nonPaginatedSink.objectKey("source_service:alert-service", chainPosition),
+                    ExternalAuditAnchor.from(localAnchor("local-anchor-" + chainPosition, chainPosition, "hash-" + chainPosition), nonPaginatedSink.sinkType())
+            );
+        }
+
+        assertThatThrownBy(() -> nonPaginatedSink.latest("source_service:alert-service"))
+                .isInstanceOf(ExternalAuditAnchorSinkException.class)
+                .extracting("reason")
+                .isEqualTo("HEAD_SCAN_PAGINATION_UNSUPPORTED");
     }
 
     @Test
@@ -334,13 +358,17 @@ class ObjectStoreExternalAuditAnchorSinkTest {
     }
 
     private void putAnchorObject(String key, ExternalAuditAnchor anchor) {
+        putAnchorObject(client, key, anchor);
+    }
+
+    private void putAnchorObject(InMemoryObjectStoreAuditAnchorClient targetClient, String key, ExternalAuditAnchor anchor) {
         ObjectStoreExternalAuditAnchorPayload unsigned = ObjectStoreExternalAuditAnchorPayload.from(anchor, key, null);
         ObjectStoreExternalAuditAnchorPayload signed = ObjectStoreExternalAuditAnchorPayload.from(
                 anchor,
                 key,
                 sha256Hex(serialize(unsigned))
         );
-        client.putRaw("audit-bucket", key, serialize(signed));
+        targetClient.putRaw("audit-bucket", key, serialize(signed));
     }
 
     private byte[] serialize(ObjectStoreExternalAuditAnchorPayload payload) {
@@ -366,6 +394,7 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         boolean tamperAfterPut;
         int failNextListCalls;
         Duration getDelay = Duration.ZERO;
+        boolean paginationSupported = true;
 
         @Override
         public Optional<byte[]> getObject(String bucket, String key) {
@@ -403,6 +432,27 @@ class ObjectStoreExternalAuditAnchorSinkTest {
                     .sorted(Comparator.naturalOrder())
                     .limit(limit)
                     .toList();
+        }
+
+        @Override
+        public ObjectStoreAuditAnchorKeyPage listKeysPage(String bucket, String keyPrefix, int limit, String continuationToken) {
+            if (!paginationSupported) {
+                return ObjectStoreAuditAnchorClient.super.listKeysPage(bucket, keyPrefix, limit, continuationToken);
+            }
+            if (failNextListCalls > 0) {
+                failNextListCalls--;
+                throw new IllegalStateException("transient list failure");
+            }
+            String bucketPrefix = bucket + "/" + keyPrefix;
+            List<String> keys = objects.keySet().stream()
+                    .filter(key -> key.startsWith(bucketPrefix))
+                    .map(key -> key.substring(bucket.length() + 1))
+                    .sorted(Comparator.naturalOrder())
+                    .toList();
+            int offset = continuationToken == null ? 0 : Integer.parseInt(continuationToken);
+            int nextOffset = Math.min(offset + limit, keys.size());
+            String nextToken = nextOffset < keys.size() ? String.valueOf(nextOffset) : null;
+            return new ObjectStoreAuditAnchorKeyPage(keys.subList(offset, nextOffset), nextToken);
         }
 
         List<String> keys() {

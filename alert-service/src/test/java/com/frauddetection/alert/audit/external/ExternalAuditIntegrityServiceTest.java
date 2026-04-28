@@ -279,6 +279,31 @@ class ExternalAuditIntegrityServiceTest {
     }
 
     @Test
+    void shouldReturnUnavailableWhenObjectStoreHeadCannotBeProvenByPagination() {
+        AuditAnchorRepository repository = mock(AuditAnchorRepository.class);
+        ObjectStoreExternalAuditAnchorSinkTest.InMemoryObjectStoreAuditAnchorClient client =
+                new ObjectStoreExternalAuditAnchorSinkTest.InMemoryObjectStoreAuditAnchorClient();
+        client.paginationSupported = false;
+        ObjectStoreExternalAuditAnchorSink objectStoreSink = objectStoreSink(client);
+        for (long chainPosition = 1L; chainPosition <= 500L; chainPosition++) {
+            objectStoreSink.publish(ExternalAuditAnchor.from(
+                    localAnchor("local-anchor-" + chainPosition, chainPosition, "hash-" + chainPosition),
+                    objectStoreSink.sinkType()
+            ));
+        }
+        when(repository.findLatestByPartitionKey("source_service:alert-service"))
+                .thenReturn(Optional.of(localAnchor("local-anchor-501", 501L, "hash-501")));
+
+        ExternalAuditIntegrityResponse response = objectStoreIntegrityService(repository, objectStoreSink)
+                .verify("alert-service", 100);
+
+        assertThat(response.status()).isEqualTo("UNAVAILABLE");
+        assertThat(response.status()).isNotEqualTo("VALID");
+        assertThat(response.reasonCode()).isEqualTo("HEAD_SCAN_PAGINATION_UNSUPPORTED");
+        assertThat(response.message()).doesNotContain("audit-bucket", "audit-anchors");
+    }
+
+    @Test
     void shouldReturnUnavailableWhenLocalAnchorStoreFails() {
         when(anchorRepository.findLatestByPartitionKey("source_service:alert-service"))
                 .thenThrow(new DataAccessResourceFailureException("mongo internal timeout"));
