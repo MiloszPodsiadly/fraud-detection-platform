@@ -62,6 +62,7 @@ public class ExternalAuditAnchorPublisher {
     public ExternalAuditAnchorPublishResult publishHeadWindow(int limit) {
         int boundedLimit = Math.max(1, Math.min(limit, 500));
         int published = 0;
+        int partial = 0;
         int duplicates = 0;
         int failed = 0;
         try {
@@ -79,32 +80,35 @@ public class ExternalAuditAnchorPublisher {
                     ExternalAuditAnchor stored = sink.publish(candidate);
                     if (ExternalAuditAnchor.STATUS_PARTIAL.equals(stored.publicationStatus())) {
                         metrics.recordExternalAnchorPublished(sink.sinkType(), "PARTIAL");
-                        published++;
+                        partial++;
+                        recordPublicationPartial(localAnchor, stored);
                     } else if (candidate.externalAnchorId().equals(stored.externalAnchorId())) {
                         metrics.recordExternalAnchorPublished(sink.sinkType(), "PUBLISHED");
                         published++;
+                        recordPublicationSuccess(localAnchor, stored);
                     } else {
                         metrics.recordExternalAnchorPublished(sink.sinkType(), "DUPLICATE");
                         duplicates++;
+                        recordPublicationSuccess(localAnchor, stored);
                     }
-                    recordPublicationSuccess(localAnchor, stored);
                     recordLag(localAnchor.createdAt());
                 } catch (ExternalAuditAnchorSinkException exception) {
+                    metrics.recordExternalAnchorPublished(sink.sinkType(), "FAILED");
                     metrics.recordExternalAnchorPublishFailed(sink.sinkType(), exception.reason());
                     failed++;
                     recordPublicationFailure(localAnchor, exception.reason());
                     log.warn("External audit anchor publication failed: reason={}", exception.reason());
                 }
             }
-            return new ExternalAuditAnchorPublishResult(published, duplicates, failed, boundedLimit);
+            return new ExternalAuditAnchorPublishResult(published, partial, duplicates, failed, boundedLimit);
         } catch (DataAccessException exception) {
             metrics.recordExternalAnchorPublishFailed(sink.sinkType(), "UNAVAILABLE");
             log.warn("Local audit anchor lookup failed for external publication.");
-            return new ExternalAuditAnchorPublishResult(0, 0, 1, boundedLimit);
+            return new ExternalAuditAnchorPublishResult(0, 0, 0, 1, boundedLimit);
         } catch (ExternalAuditAnchorSinkException exception) {
             metrics.recordExternalAnchorPublishFailed(sink.sinkType(), exception.reason());
             log.warn("External audit anchor lookup failed before publication: reason={}", exception.reason());
-            return new ExternalAuditAnchorPublishResult(0, 0, 1, boundedLimit);
+            return new ExternalAuditAnchorPublishResult(0, 0, 0, 1, boundedLimit);
         }
     }
 
@@ -121,6 +125,30 @@ public class ExternalAuditAnchorPublisher {
             metrics.recordExternalAnchorPublishFailed(sink.sinkType(), exception.reason());
             recordPublicationFailure(localAnchor, exception.reason());
             log.warn("External audit anchor reference verification failed after publish: reason={}", exception.reason());
+        }
+    }
+
+    private void recordPublicationPartial(AuditAnchorDocument localAnchor, ExternalAuditAnchor stored) {
+        try {
+            ExternalAnchorReference reference = sink.externalReference(stored).orElse(null);
+            ExternalImmutabilityLevel immutabilityLevel = sink.immutabilityLevel() == null
+                    ? ExternalImmutabilityLevel.NONE
+                    : sink.immutabilityLevel();
+            publicationStatusRepository.recordPartial(
+                    localAnchor,
+                    clock.instant(),
+                    sink.sinkType(),
+                    reference,
+                    immutabilityLevel,
+                    stored.publicationReason(),
+                    stored.manifestStatus()
+            );
+        } catch (DataAccessException exception) {
+            log.warn("External audit anchor partial publication status update failed.");
+        } catch (ExternalAuditAnchorSinkException exception) {
+            metrics.recordExternalAnchorPublishFailed(sink.sinkType(), exception.reason());
+            recordPublicationFailure(localAnchor, exception.reason());
+            log.warn("External audit anchor reference verification failed after partial publish: reason={}", exception.reason());
         }
     }
 

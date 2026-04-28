@@ -23,6 +23,9 @@ record ExternalAuditAnchorPublicationStatusDocument(
         @Field("external_published")
         boolean externalPublished,
 
+        @Field("external_publication_status")
+        String externalPublicationStatus,
+
         @Field("external_published_at")
         Instant externalPublishedAt,
 
@@ -43,6 +46,9 @@ record ExternalAuditAnchorPublicationStatusDocument(
 
         @Field("external_immutability_level")
         String externalImmutabilityLevel,
+
+        @Field("manifest_status")
+        String manifestStatus,
 
         @Field("external_publish_attempts")
         int externalPublishAttempts,

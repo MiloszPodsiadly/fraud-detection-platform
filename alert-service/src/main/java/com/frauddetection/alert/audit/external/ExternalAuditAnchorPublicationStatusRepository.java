@@ -32,6 +32,7 @@ class ExternalAuditAnchorPublicationStatusRepository {
         Query query = query(anchor.anchorId());
         Update status = base(anchor, publishedAt)
                 .set("external_published", true)
+                .set("external_publication_status", ExternalAuditAnchor.STATUS_PUBLISHED)
                 .set("external_published_at", publishedAt)
                 .set("external_sink_type", safe(sinkType))
                 .set("external_key", reference == null ? null : safe(reference.externalKey(), 300))
@@ -40,7 +41,34 @@ class ExternalAuditAnchorPublicationStatusRepository {
                 .set("external_reference_verified_at", reference == null ? null : reference.verifiedAt())
                 .set("external_immutability_level", immutabilityLevel == null ? ExternalImmutabilityLevel.NONE.name() : immutabilityLevel.name())
                 .inc("external_publish_attempts", 1)
+                .unset("manifest_status")
                 .unset("last_external_publish_failure_reason");
+        mongoTemplate.upsert(query, status, ExternalAuditAnchorPublicationStatusDocument.class);
+    }
+
+    void recordPartial(
+            AuditAnchorDocument anchor,
+            Instant attemptedAt,
+            String sinkType,
+            ExternalAnchorReference reference,
+            ExternalImmutabilityLevel immutabilityLevel,
+            String reason,
+            String manifestStatus
+    ) throws DataAccessException {
+        Query query = query(anchor.anchorId());
+        Update status = base(anchor, attemptedAt)
+                .set("external_published", false)
+                .set("external_publication_status", ExternalAuditAnchor.STATUS_PARTIAL)
+                .set("external_sink_type", safe(sinkType))
+                .set("external_key", reference == null ? null : safe(reference.externalKey(), 300))
+                .set("anchor_hash", reference == null ? null : safe(reference.anchorHash(), 128))
+                .set("external_hash", reference == null ? null : safe(reference.externalHash(), 128))
+                .set("external_reference_verified_at", reference == null ? null : reference.verifiedAt())
+                .set("external_immutability_level", immutabilityLevel == null ? ExternalImmutabilityLevel.NONE.name() : immutabilityLevel.name())
+                .set("manifest_status", safe(manifestStatus))
+                .set("last_external_publish_failure_reason", safe(reason))
+                .inc("external_publish_attempts", 1)
+                .unset("external_published_at");
         mongoTemplate.upsert(query, status, ExternalAuditAnchorPublicationStatusDocument.class);
     }
 
@@ -48,6 +76,7 @@ class ExternalAuditAnchorPublicationStatusRepository {
         Query query = query(anchor.anchorId());
         Update status = base(anchor, attemptedAt)
                 .set("external_published", false)
+                .set("external_publication_status", "FAILED")
                 .inc("external_publish_attempts", 1)
                 .unset("external_published_at")
                 .unset("external_sink_type")
@@ -56,6 +85,7 @@ class ExternalAuditAnchorPublicationStatusRepository {
                 .unset("external_hash")
                 .unset("external_reference_verified_at")
                 .unset("external_immutability_level")
+                .unset("manifest_status")
                 .set("last_external_publish_failure_reason", safe(reason));
         mongoTemplate.upsert(query, status, ExternalAuditAnchorPublicationStatusDocument.class);
     }

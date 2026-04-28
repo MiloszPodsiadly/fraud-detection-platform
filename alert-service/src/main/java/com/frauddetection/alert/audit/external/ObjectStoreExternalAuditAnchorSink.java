@@ -100,10 +100,6 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
         ObjectStoreExternalAuditAnchorPayload candidate = payload(anchor, key);
         byte[] payload = serialize(candidate);
         try {
-            Optional<ExternalAuditAnchor> existingDuplicate = findDuplicateAnchor(anchor, key);
-            if (existingDuplicate.isPresent()) {
-                return existingDuplicate.get();
-            }
             Optional<byte[]> existing = getObject(key);
             if (existing.isPresent()) {
                 return idempotentExisting(key, existing.get(), payload, candidate);
@@ -295,7 +291,7 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
         } catch (ExternalAuditAnchorSinkException exception) {
             recordManifestUpdate("FAILED");
             log.warn("External audit anchor head manifest update failed: reason={}", exception.reason());
-            return anchor.partial();
+            return anchor.partial(ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED, ExternalAuditAnchor.MANIFEST_STATUS_FAILED);
         }
     }
 
@@ -460,30 +456,6 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
                 || !stored.eventHash().equals(expected.eventHash())) {
             throw new ExternalAuditAnchorSinkException("MISMATCH", "External anchor local binding mismatch.");
         }
-    }
-
-    private Optional<ExternalAuditAnchor> findDuplicateAnchor(ExternalAuditAnchor anchor, String targetKey) {
-        for (String key : scanAnchorKeys(objectKeyPrefix(anchor.partitionKey()))) {
-            if (targetKey.equals(key)) {
-                continue;
-            }
-            Optional<ExternalAuditAnchor> existing = read(key);
-            if (existing.isEmpty()) {
-                continue;
-            }
-            ExternalAuditAnchor current = existing.get();
-            if (anchor.localAnchorId().equals(current.localAnchorId())) {
-                if (anchor.chainPosition() != current.chainPosition()
-                        || !anchor.lastEventHash().equals(current.lastEventHash())) {
-                    throw new ExternalAuditAnchorSinkException("MISMATCH", "External anchor local anchor id conflict.");
-                }
-                return Optional.of(current);
-            }
-            if (anchor.chainPosition() == current.chainPosition()) {
-                throw new ExternalAuditAnchorSinkException("MISMATCH", "External anchor chain position conflict.");
-            }
-        }
-        return Optional.empty();
     }
 
     private Optional<byte[]> getObject(String key) {

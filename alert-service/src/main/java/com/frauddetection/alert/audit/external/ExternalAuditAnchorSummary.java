@@ -43,6 +43,14 @@ public record ExternalAuditAnchorSummary(
         @JsonInclude(JsonInclude.Include.NON_NULL)
         String publicationStatus,
 
+        @JsonProperty("publication_reason")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        String publicationReason,
+
+        @JsonProperty("manifest_status")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        String manifestStatus,
+
         @JsonProperty("external_reference")
         @JsonInclude(JsonInclude.Include.NON_NULL)
         ExternalAnchorReference externalReference,
@@ -62,7 +70,7 @@ public record ExternalAuditAnchorSummary(
             String sinkType,
             String publicationStatus
     ) {
-        this(anchorId, externalAnchorId, localAnchorId, chainPosition, lastEventHash, hashAlgorithm, schemaVersion, createdAt, sinkType, publicationStatus, null, ExternalImmutabilityLevel.NONE);
+        this(anchorId, externalAnchorId, localAnchorId, chainPosition, lastEventHash, hashAlgorithm, schemaVersion, createdAt, sinkType, publicationStatus, null, null, null, ExternalImmutabilityLevel.NONE);
     }
 
     static ExternalAuditAnchorSummary fromLocal(AuditAnchorDocument document) {
@@ -75,6 +83,8 @@ public record ExternalAuditAnchorSummary(
                 document.hashAlgorithm(),
                 null,
                 document.createdAt(),
+                null,
+                null,
                 null,
                 null,
                 null,
@@ -102,6 +112,8 @@ public record ExternalAuditAnchorSummary(
                 anchor.createdAt(),
                 anchor.sinkType(),
                 anchor.publicationStatus(),
+                anchor.publicationReason(),
+                anchor.manifestStatus(),
                 reference,
                 immutabilityLevel == null ? ExternalImmutabilityLevel.NONE : immutabilityLevel
         );

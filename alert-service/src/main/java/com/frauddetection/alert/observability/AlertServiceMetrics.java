@@ -450,7 +450,7 @@ public class AlertServiceMetrics {
     }
 
     private String normalizeExternalAnchorPublishStatus(String status) {
-        if ("PUBLISHED".equals(status) || "DUPLICATE".equals(status) || "PARTIAL".equals(status)) {
+        if ("PUBLISHED".equals(status) || "DUPLICATE".equals(status) || "PARTIAL".equals(status) || "FAILED".equals(status)) {
             return status;
         }
         return "FAILED";

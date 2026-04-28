@@ -36,7 +36,13 @@ record ObjectStoreExternalAuditAnchorPayload(
         String sinkType,
 
         @JsonProperty("publication_status")
-        String publicationStatus
+        String publicationStatus,
+
+        @JsonProperty("publication_reason")
+        String publicationReason,
+
+        @JsonProperty("manifest_status")
+        String manifestStatus
 ) {
     static ObjectStoreExternalAuditAnchorPayload from(ExternalAuditAnchor anchor, String externalObjectKey, String payloadHash) {
         return new ObjectStoreExternalAuditAnchorPayload(
@@ -50,7 +56,9 @@ record ObjectStoreExternalAuditAnchorPayload(
                 anchor.schemaVersion(),
                 anchor.createdAt(),
                 anchor.sinkType(),
-                anchor.publicationStatus()
+                anchor.publicationStatus(),
+                anchor.publicationReason(),
+                anchor.manifestStatus()
         );
     }
 
@@ -65,7 +73,9 @@ record ObjectStoreExternalAuditAnchorPayload(
                 schemaVersion,
                 createdAt,
                 sinkType,
-                publicationStatus
+                publicationStatus,
+                publicationReason,
+                manifestStatus
         );
     }
 }
