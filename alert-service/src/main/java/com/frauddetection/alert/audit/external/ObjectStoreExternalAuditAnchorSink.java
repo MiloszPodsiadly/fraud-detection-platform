@@ -11,10 +11,15 @@ import org.springframework.util.StringUtils;
 
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.nio.charset.StandardCharsets;
 
 class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
 
@@ -46,21 +51,24 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
     @Override
     public ExternalAuditAnchor publish(ExternalAuditAnchor anchor) {
         String key = objectKey(anchor.partitionKey(), anchor.chainPosition());
-        byte[] payload = payload(anchor);
+        ObjectStoreExternalAuditAnchorPayload candidate = payload(anchor, key);
+        byte[] payload = serialize(candidate);
         try {
+            detectDuplicateAnchorConflict(anchor, key);
             Optional<byte[]> existing = client.getObject(bucket, key);
             if (existing.isPresent()) {
-                return idempotentExisting(existing.get(), payload);
+                return idempotentExisting(key, existing.get(), payload, candidate);
             }
             try {
                 client.putObjectIfAbsent(bucket, key, payload);
+                verifyStoredObject(key, candidate);
                 return anchor;
             } catch (ExternalAuditAnchorSinkException exception) {
                 if (!"CONFLICT".equals(exception.reason())) {
                     throw exception;
                 }
-                return idempotentExisting(client.getObject(bucket, key)
-                        .orElseThrow(() -> new ExternalAuditAnchorSinkException("IO_ERROR", "External anchor sink is unavailable.")), payload);
+                return idempotentExisting(key, client.getObject(bucket, key)
+                        .orElseThrow(() -> new ExternalAuditAnchorSinkException("IO_ERROR", "External anchor sink is unavailable.")), payload, candidate);
             }
         } catch (ExternalAuditAnchorSinkException exception) {
             throw exception;
@@ -118,10 +126,7 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
     }
 
     String objectKey(String partitionKey, long chainPosition) {
-        if (!StringUtils.hasText(partitionKey)
-                || partitionKey.contains("/")
-                || partitionKey.contains("\\")
-                || partitionKey.contains("..")) {
+        if (!StringUtils.hasText(partitionKey)) {
             throw new ExternalAuditAnchorSinkException("INVALID_ANCHOR", "External anchor partition key is invalid.");
         }
         if (chainPosition < 0) {
@@ -131,39 +136,125 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
     }
 
     private String objectKeyPrefix(String partitionKey) {
-        if (!StringUtils.hasText(partitionKey)
-                || partitionKey.contains("/")
-                || partitionKey.contains("\\")
-                || partitionKey.contains("..")) {
+        if (!StringUtils.hasText(partitionKey)) {
             throw new ExternalAuditAnchorSinkException("INVALID_ANCHOR", "External anchor partition key is invalid.");
         }
-        return prefix + "/" + partitionKey;
+        return prefix + "/" + encodePartitionKey(partitionKey);
     }
 
-    private ExternalAuditAnchor idempotentExisting(byte[] existing, byte[] candidate) {
+    private ExternalAuditAnchor idempotentExisting(
+            String key,
+            byte[] existing,
+            byte[] candidate,
+            ObjectStoreExternalAuditAnchorPayload expected
+    ) {
         if (!Arrays.equals(existing, candidate)) {
             throw new ExternalAuditAnchorSinkException("MISMATCH", "External anchor object content mismatch.");
         }
-        return read(existing);
+        ObjectStoreExternalAuditAnchorPayload payload = readPayload(key, existing);
+        verifyPayloadBinding(key, payload, expected);
+        return payload.toExternalAnchor();
     }
 
     private Optional<ExternalAuditAnchor> read(String key) {
-        return client.getObject(bucket, key).map(this::read);
+        return client.getObject(bucket, key).map(payload -> read(key, payload));
     }
 
-    private ExternalAuditAnchor read(byte[] payload) {
+    private ExternalAuditAnchor read(String key, byte[] payload) {
+        return readPayload(key, payload).toExternalAnchor();
+    }
+
+    private ObjectStoreExternalAuditAnchorPayload readPayload(String key, byte[] payload) {
         try {
-            return objectMapper.readValue(payload, ObjectStoreExternalAuditAnchorPayload.class).toExternalAnchor();
+            ObjectStoreExternalAuditAnchorPayload anchor = objectMapper.readValue(payload, ObjectStoreExternalAuditAnchorPayload.class);
+            verifyPayloadSelfBinding(key, anchor);
+            return anchor;
         } catch (Exception exception) {
+            if (exception instanceof ExternalAuditAnchorSinkException sinkException) {
+                throw sinkException;
+            }
             throw new ExternalAuditAnchorSinkException("IO_ERROR", "External anchor object is unreadable.");
         }
     }
 
-    private byte[] payload(ExternalAuditAnchor anchor) {
+    private ObjectStoreExternalAuditAnchorPayload payload(ExternalAuditAnchor anchor, String key) {
+        ObjectStoreExternalAuditAnchorPayload unsigned = ObjectStoreExternalAuditAnchorPayload.from(anchor, key, null);
+        return ObjectStoreExternalAuditAnchorPayload.from(anchor, key, sha256Hex(serialize(unsigned)));
+    }
+
+    private byte[] serialize(ObjectStoreExternalAuditAnchorPayload anchor) {
         try {
-            return objectMapper.writeValueAsBytes(ObjectStoreExternalAuditAnchorPayload.from(anchor));
+            return objectMapper.writeValueAsBytes(anchor);
         } catch (JsonProcessingException exception) {
             throw new ExternalAuditAnchorSinkException("IO_ERROR", "External anchor object could not be serialized.");
+        }
+    }
+
+    private void verifyStoredObject(String key, ObjectStoreExternalAuditAnchorPayload expected) {
+        ObjectStoreExternalAuditAnchorPayload stored = client.getObject(bucket, key)
+                .map(payload -> readPayload(key, payload))
+                .orElseThrow(() -> new ExternalAuditAnchorSinkException("WRITE_NOT_VERIFIED", "External anchor write could not be verified."));
+        verifyPayloadBinding(key, stored, expected);
+    }
+
+    private void verifyPayloadSelfBinding(String key, ObjectStoreExternalAuditAnchorPayload payload) {
+        if (!key.equals(payload.externalObjectKey())) {
+            throw new ExternalAuditAnchorSinkException("EXTERNAL_OBJECT_KEY_MISMATCH", "External anchor object key binding mismatch.");
+        }
+        String actualPayloadHash = sha256Hex(serialize(ObjectStoreExternalAuditAnchorPayload.from(
+                payload.toExternalAnchor(),
+                payload.externalObjectKey(),
+                null
+        )));
+        if (!actualPayloadHash.equals(payload.payloadHash())) {
+            throw new ExternalAuditAnchorSinkException("EXTERNAL_PAYLOAD_HASH_MISMATCH", "External anchor payload hash mismatch.");
+        }
+    }
+
+    private void verifyPayloadBinding(
+            String key,
+            ObjectStoreExternalAuditAnchorPayload stored,
+            ObjectStoreExternalAuditAnchorPayload expected
+    ) {
+        if (!key.equals(stored.externalObjectKey()) || !stored.externalObjectKey().equals(expected.externalObjectKey())) {
+            throw new ExternalAuditAnchorSinkException("EXTERNAL_OBJECT_KEY_MISMATCH", "External anchor object key binding mismatch.");
+        }
+        if (!stored.payloadHash().equals(expected.payloadHash())) {
+            throw new ExternalAuditAnchorSinkException("EXTERNAL_PAYLOAD_HASH_MISMATCH", "External anchor payload hash mismatch.");
+        }
+        if (!stored.localAnchorId().equals(expected.localAnchorId())
+                || stored.chainPosition() != expected.chainPosition()
+                || !stored.eventHash().equals(expected.eventHash())) {
+            throw new ExternalAuditAnchorSinkException("MISMATCH", "External anchor local binding mismatch.");
+        }
+    }
+
+    private void detectDuplicateAnchorConflict(ExternalAuditAnchor anchor, String targetKey) {
+        for (String key : client.listKeys(bucket, objectKeyPrefix(anchor.partitionKey()), LIST_LIMIT)) {
+            if (targetKey.equals(key)) {
+                continue;
+            }
+            Optional<ExternalAuditAnchor> existing = read(key);
+            if (existing.isPresent()
+                    && anchor.localAnchorId().equals(existing.get().localAnchorId())
+                    && (anchor.chainPosition() != existing.get().chainPosition()
+                    || !anchor.lastEventHash().equals(existing.get().lastEventHash()))) {
+                throw new ExternalAuditAnchorSinkException("MISMATCH", "External anchor local anchor id conflict.");
+            }
+        }
+    }
+
+    private String encodePartitionKey(String partitionKey) {
+        return Base64.getUrlEncoder()
+                .withoutPadding()
+                .encodeToString(partitionKey.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private String sha256Hex(byte[] payload) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(payload));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new ExternalAuditAnchorSinkException("IO_ERROR", "External anchor payload hash could not be computed.");
         }
     }
 

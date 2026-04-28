@@ -5,14 +5,14 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.Instant;
 
 record ObjectStoreExternalAuditAnchorPayload(
-        @JsonProperty("external_anchor_id")
-        String externalAnchorId,
-
         @JsonProperty("local_anchor_id")
         String localAnchorId,
 
         @JsonProperty("partition_key")
         String partitionKey,
+
+        @JsonProperty("external_object_key")
+        String externalObjectKey,
 
         @JsonProperty("chain_position")
         long chainPosition,
@@ -20,8 +20,8 @@ record ObjectStoreExternalAuditAnchorPayload(
         @JsonProperty("event_hash")
         String eventHash,
 
-        @JsonProperty("previous_event_hash")
-        String previousEventHash,
+        @JsonProperty("payload_hash")
+        String payloadHash,
 
         @JsonProperty("hash_algorithm")
         String hashAlgorithm,
@@ -38,14 +38,14 @@ record ObjectStoreExternalAuditAnchorPayload(
         @JsonProperty("publication_status")
         String publicationStatus
 ) {
-    static ObjectStoreExternalAuditAnchorPayload from(ExternalAuditAnchor anchor) {
+    static ObjectStoreExternalAuditAnchorPayload from(ExternalAuditAnchor anchor, String externalObjectKey, String payloadHash) {
         return new ObjectStoreExternalAuditAnchorPayload(
-                anchor.externalAnchorId(),
                 anchor.localAnchorId(),
                 anchor.partitionKey(),
+                externalObjectKey,
                 anchor.chainPosition(),
                 anchor.lastEventHash(),
-                null,
+                payloadHash,
                 anchor.hashAlgorithm(),
                 anchor.schemaVersion(),
                 anchor.createdAt(),
@@ -56,7 +56,7 @@ record ObjectStoreExternalAuditAnchorPayload(
 
     ExternalAuditAnchor toExternalAnchor() {
         return new ExternalAuditAnchor(
-                externalAnchorId,
+                "object-store:" + localAnchorId,
                 localAnchorId,
                 partitionKey,
                 chainPosition,

@@ -11,7 +11,9 @@ import org.springframework.core.env.Environment;
 import org.springframework.util.StringUtils;
 
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Set;
 
 @Configuration
@@ -34,7 +36,10 @@ class ExternalAuditAnchorSinkConfiguration {
             @Value("${app.audit.external-anchoring.object-store.region:}") String objectStoreRegion,
             @Value("${app.audit.external-anchoring.object-store.endpoint:}") String objectStoreEndpoint,
             @Value("${app.audit.external-anchoring.object-store.access-key-id:}") String objectStoreAccessKeyId,
-            @Value("${app.audit.external-anchoring.object-store.secret-access-key:}") String objectStoreSecretAccessKey
+            @Value("${app.audit.external-anchoring.object-store.secret-access-key:}") String objectStoreSecretAccessKey,
+            @Value("${app.audit.external-anchoring.object-store.startup-check-enabled:true}") boolean objectStoreStartupCheckEnabled,
+            @Value("${app.audit.external-anchoring.object-store.startup-test-write-enabled:false}") boolean objectStoreStartupTestWriteEnabled,
+            @Value("${HOSTNAME:alert-service}") String instanceId
     ) {
         if ("local-file".equals(sink)) {
             validateLocalFileSink(environment, allowLocalFileInProd);
@@ -54,6 +59,14 @@ class ExternalAuditAnchorSinkConfiguration {
             if (client == null) {
                 throw new IllegalStateException("Object-store external audit anchor client is not configured.");
             }
+            validateObjectStoreReadiness(
+                    client,
+                    objectStoreBucket,
+                    objectStorePrefix,
+                    objectStoreStartupCheckEnabled,
+                    objectStoreStartupTestWriteEnabled,
+                    instanceId
+            );
             log.info(
                     "External audit anchor sink configured: sink_type=object-store bucket={} prefix={} region_configured={} endpoint_configured={}",
                     objectStoreBucket,
@@ -103,5 +116,66 @@ class ExternalAuditAnchorSinkConfiguration {
         if (!StringUtils.hasText(accessKeyId) || !StringUtils.hasText(secretAccessKey)) {
             throw new IllegalStateException("Object-store external audit anchor sink requires credentials.");
         }
+    }
+
+    private void validateObjectStoreReadiness(
+            ObjectStoreAuditAnchorClient client,
+            String bucket,
+            String prefix,
+            boolean startupCheckEnabled,
+            boolean startupTestWriteEnabled,
+            String instanceId
+    ) {
+        if (!startupCheckEnabled) {
+            return;
+        }
+        try {
+            List<String> ignored = client.listKeys(bucket, trimSlashes(prefix), 1);
+            if (ignored == null) {
+                throw new IllegalStateException("Object-store external audit anchor startup check failed.");
+            }
+            if (startupTestWriteEnabled) {
+                verifyStartupProbeWrite(client, bucket, trimSlashes(prefix), instanceId);
+            }
+        } catch (RuntimeException exception) {
+            throw new IllegalStateException("Object-store external audit anchor startup check failed.");
+        }
+    }
+
+    private void verifyStartupProbeWrite(
+            ObjectStoreAuditAnchorClient client,
+            String bucket,
+            String prefix,
+            String instanceId
+    ) {
+        String safeInstanceId = StringUtils.hasText(instanceId)
+                ? instanceId.replaceAll("[^A-Za-z0-9._-]", "_")
+                : "alert-service";
+        String key = prefix + "/.healthcheck/" + safeInstanceId + ".json";
+        byte[] content = ("{\"kind\":\"audit-anchor-startup-check\",\"schema_version\":\"1.0\",\"instance_id\":\""
+                + safeInstanceId + "\"}").getBytes(StandardCharsets.UTF_8);
+        try {
+            client.putObjectIfAbsent(bucket, key, content);
+        } catch (ExternalAuditAnchorSinkException exception) {
+            if (!"CONFLICT".equals(exception.reason())) {
+                throw exception;
+            }
+        }
+        byte[] stored = client.getObject(bucket, key)
+                .orElseThrow(() -> new IllegalStateException("Object-store external audit anchor startup test write was not readable."));
+        if (!java.util.Arrays.equals(stored, content)) {
+            throw new IllegalStateException("Object-store external audit anchor startup test write mismatch.");
+        }
+    }
+
+    private String trimSlashes(String value) {
+        String trimmed = value.trim();
+        while (trimmed.startsWith("/")) {
+            trimmed = trimmed.substring(1);
+        }
+        while (trimmed.endsWith("/")) {
+            trimmed = trimmed.substring(0, trimmed.length() - 1);
+        }
+        return trimmed;
     }
 }

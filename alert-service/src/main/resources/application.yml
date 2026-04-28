@@ -50,6 +50,8 @@ app:
         endpoint: ${AUDIT_EXTERNAL_ANCHORING_OBJECT_STORE_ENDPOINT:}
         access-key-id: ${AUDIT_EXTERNAL_ANCHORING_OBJECT_STORE_ACCESS_KEY_ID:}
         secret-access-key: ${AUDIT_EXTERNAL_ANCHORING_OBJECT_STORE_SECRET_ACCESS_KEY:}
+        startup-check-enabled: ${AUDIT_EXTERNAL_ANCHORING_OBJECT_STORE_STARTUP_CHECK_ENABLED:true}
+        startup-test-write-enabled: ${AUDIT_EXTERNAL_ANCHORING_OBJECT_STORE_STARTUP_TEST_WRITE_ENABLED:false}
     trust-attestation:
       signing:
         mode: ${AUDIT_TRUST_ATTESTATION_SIGNING_MODE:disabled}

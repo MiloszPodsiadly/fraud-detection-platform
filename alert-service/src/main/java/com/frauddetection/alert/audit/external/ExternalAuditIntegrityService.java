@@ -89,13 +89,29 @@ public class ExternalAuditIntegrityService {
             );
         }
 
-        java.util.Optional<ExternalAuditAnchor> exactExternal = sink.findByChainPosition(query.partitionKey(), local.chainPosition());
-        if (exactExternal == null) {
-            exactExternal = java.util.Optional.empty();
+        ExternalAuditAnchor external;
+        try {
+            java.util.Optional<ExternalAuditAnchor> exactExternal = sink.findByChainPosition(query.partitionKey(), local.chainPosition());
+            if (exactExternal == null) {
+                exactExternal = java.util.Optional.empty();
+            }
+            external = exactExternal
+                    .or(() -> sink.latest(query.partitionKey()))
+                    .orElse(null);
+        } catch (ExternalAuditAnchorSinkException exception) {
+            if (!isExternalIntegrityMismatch(exception.reason())) {
+                throw exception;
+            }
+            return response(
+                    "INVALID",
+                    query,
+                    local,
+                    null,
+                    List.of(new AuditIntegrityViolation(exception.reason(), 1, exception.reason())),
+                    exception.reason(),
+                    "External anchor binding mismatch."
+            );
         }
-        ExternalAuditAnchor external = exactExternal
-                .or(() -> sink.latest(query.partitionKey()))
-                .orElse(null);
         if (external == null) {
             return partial(query, local, null, "EXTERNAL_ANCHOR_MISSING", "External anchor is missing for the local chain head.");
         }
@@ -204,5 +220,11 @@ public class ExternalAuditIntegrityService {
             return right == null;
         }
         return left.equals(right);
+    }
+
+    private boolean isExternalIntegrityMismatch(String reason) {
+        return "EXTERNAL_OBJECT_KEY_MISMATCH".equals(reason)
+                || "EXTERNAL_PAYLOAD_HASH_MISMATCH".equals(reason)
+                || "MISMATCH".equals(reason);
     }
 }

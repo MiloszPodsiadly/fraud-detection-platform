@@ -49,7 +49,7 @@ public record ExternalAuditAnchor(
                 localAnchor.lastEventHash(),
                 localAnchor.hashAlgorithm(),
                 SCHEMA_VERSION,
-                Instant.now(),
+                localAnchor.createdAt(),
                 sinkType,
                 STATUS_PUBLISHED
         );
