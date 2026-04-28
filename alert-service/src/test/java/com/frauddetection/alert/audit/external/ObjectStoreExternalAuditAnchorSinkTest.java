@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -17,6 +18,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ObjectStoreExternalAuditAnchorSinkTest {
 
+    private static final String ENCODED_PARTITION = "c291cmNlX3NlcnZpY2U6YWxlcnQtc2VydmljZQ";
+
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
     private final InMemoryObjectStoreAuditAnchorClient client = new InMemoryObjectStoreAuditAnchorClient();
     private final ObjectStoreExternalAuditAnchorSink sink = new ObjectStoreExternalAuditAnchorSink(
@@ -27,34 +30,45 @@ class ObjectStoreExternalAuditAnchorSinkTest {
     );
 
     @Test
-    void shouldStoreAnchorUnderDeterministicObjectKey() {
+    void shouldStoreAnchorUnderDeterministicEncodedObjectKey() {
         ExternalAuditAnchor anchor = ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), sink.sinkType());
 
-        ExternalAuditAnchor stored = sink.publish(anchor);
-        String storedJson = new String(client.getObject(
-                "audit-bucket",
-                "audit-anchors/source_service:alert-service/1.json"
-        ).orElseThrow(), StandardCharsets.UTF_8);
+        sink.publish(anchor);
+        String objectKey = "audit-anchors/" + ENCODED_PARTITION + "/1.json";
+        String storedJson = new String(client.getObject("audit-bucket", objectKey).orElseThrow(), StandardCharsets.UTF_8);
 
-        assertThat(stored).isEqualTo(anchor);
+        assertThat(sink.objectKey("source_service:alert-service", 1L)).isEqualTo(objectKey);
         assertThat(storedJson).contains(
                 "\"local_anchor_id\":\"local-anchor-1\"",
                 "\"partition_key\":\"source_service:alert-service\"",
+                "\"external_object_key\":\"" + objectKey + "\"",
                 "\"chain_position\":1",
                 "\"event_hash\":\"hash-1\"",
-                "\"previous_event_hash\":null",
+                "\"payload_hash\":\"",
                 "\"created_at\":\"" + anchor.createdAt() + "\""
         );
+        assertThat(storedJson).doesNotContain("previous_event_hash");
     }
 
     @Test
-    void shouldTreatDuplicateWriteAsIdempotentWhenContentMatches() {
-        ExternalAuditAnchor anchor = ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), sink.sinkType());
+    void shouldPreventUnsafePartitionKeyFromEscapingPrefix() {
+        String objectKey = sink.objectKey("source_service:alert-service/../../other", 1L);
 
-        ExternalAuditAnchor first = sink.publish(anchor);
-        ExternalAuditAnchor duplicate = sink.publish(anchor);
+        assertThat(objectKey).startsWith("audit-anchors/");
+        assertThat(objectKey).doesNotContain("../");
+        assertThat(objectKey).endsWith("/1.json");
+    }
 
-        assertThat(duplicate).isEqualTo(first);
+    @Test
+    void shouldTreatDuplicateWriteAsIdempotentWhenBindingMatches() {
+        AuditAnchorDocument local = localAnchor("local-anchor-1", 1L, "hash-1");
+        sink.publish(ExternalAuditAnchor.from(local, sink.sinkType()));
+
+        ExternalAuditAnchor duplicate = sink.publish(ExternalAuditAnchor.from(local, sink.sinkType()));
+
+        assertThat(duplicate.localAnchorId()).isEqualTo("local-anchor-1");
+        assertThat(duplicate.chainPosition()).isEqualTo(1L);
+        assertThat(duplicate.lastEventHash()).isEqualTo("hash-1");
         assertThat(client.keys()).hasSize(1);
     }
 
@@ -69,13 +83,34 @@ class ObjectStoreExternalAuditAnchorSinkTest {
     }
 
     @Test
+    void shouldRejectSameLocalAnchorIdWithDifferentChainPosition() {
+        sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), sink.sinkType()));
+
+        assertThatThrownBy(() -> sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 2L, "hash-1"), sink.sinkType())))
+                .isInstanceOf(ExternalAuditAnchorSinkException.class)
+                .extracting("reason")
+                .isEqualTo("MISMATCH");
+    }
+
+    @Test
+    void shouldRejectSameChainPositionWithDifferentLocalAnchorId() {
+        sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), sink.sinkType()));
+
+        assertThatThrownBy(() -> sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-2", 1L, "hash-1"), sink.sinkType())))
+                .isInstanceOf(ExternalAuditAnchorSinkException.class)
+                .extracting("reason")
+                .isEqualTo("MISMATCH");
+    }
+
+    @Test
     void shouldReadAnchorByExactChainPositionWithoutScanning() {
-        ExternalAuditAnchor anchor = ExternalAuditAnchor.from(localAnchor("local-anchor-1", 7L, "hash-7"), sink.sinkType());
-        sink.publish(anchor);
+        sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 7L, "hash-7"), sink.sinkType()));
 
         Optional<ExternalAuditAnchor> found = sink.findByChainPosition("source_service:alert-service", 7L);
 
-        assertThat(found).contains(anchor);
+        assertThat(found).get()
+                .extracting(ExternalAuditAnchor::localAnchorId, ExternalAuditAnchor::chainPosition, ExternalAuditAnchor::lastEventHash)
+                .containsExactly("local-anchor-1", 7L, "hash-7");
     }
 
     @Test
@@ -92,6 +127,53 @@ class ObjectStoreExternalAuditAnchorSinkTest {
                 .containsExactly(1L);
     }
 
+    @Test
+    void shouldFailWhenWriteCannotBeReadBack() {
+        InMemoryObjectStoreAuditAnchorClient unreadableClient = new InMemoryObjectStoreAuditAnchorClient();
+        unreadableClient.hideWritesAfterPut = true;
+        ObjectStoreExternalAuditAnchorSink unreadableSink = new ObjectStoreExternalAuditAnchorSink(
+                "audit-bucket",
+                "audit-anchors",
+                unreadableClient,
+                objectMapper
+        );
+
+        assertThatThrownBy(() -> unreadableSink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), unreadableSink.sinkType())))
+                .isInstanceOf(ExternalAuditAnchorSinkException.class)
+                .extracting("reason")
+                .isEqualTo("WRITE_NOT_VERIFIED");
+    }
+
+    @Test
+    void shouldFailWhenReadBackPayloadHashIsTampered() {
+        InMemoryObjectStoreAuditAnchorClient tamperingClient = new InMemoryObjectStoreAuditAnchorClient();
+        tamperingClient.tamperAfterPut = true;
+        ObjectStoreExternalAuditAnchorSink tamperingSink = new ObjectStoreExternalAuditAnchorSink(
+                "audit-bucket",
+                "audit-anchors",
+                tamperingClient,
+                objectMapper
+        );
+
+        assertThatThrownBy(() -> tamperingSink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), tamperingSink.sinkType())))
+                .isInstanceOf(ExternalAuditAnchorSinkException.class)
+                .extracting("reason")
+                .isEqualTo("EXTERNAL_PAYLOAD_HASH_MISMATCH");
+    }
+
+    @Test
+    void shouldDetectObjectStoredUnderWrongKey() {
+        sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), sink.sinkType()));
+        String correctKey = sink.objectKey("source_service:alert-service", 1L);
+        String wrongKey = sink.objectKey("source_service:alert-service", 2L);
+        client.putRaw("audit-bucket", wrongKey, client.getObject("audit-bucket", correctKey).orElseThrow());
+
+        assertThatThrownBy(() -> sink.findByChainPosition("source_service:alert-service", 2L))
+                .isInstanceOf(ExternalAuditAnchorSinkException.class)
+                .extracting("reason")
+                .isEqualTo("EXTERNAL_OBJECT_KEY_MISMATCH");
+    }
+
     private AuditAnchorDocument localAnchor(String anchorId, long chainPosition, String hash) {
         return new AuditAnchorDocument(
                 anchorId,
@@ -106,6 +188,8 @@ class ObjectStoreExternalAuditAnchorSinkTest {
     static class InMemoryObjectStoreAuditAnchorClient implements ObjectStoreAuditAnchorClient {
 
         private final Map<String, byte[]> objects = new LinkedHashMap<>();
+        boolean hideWritesAfterPut;
+        boolean tamperAfterPut;
 
         @Override
         public Optional<byte[]> getObject(String bucket, String key) {
@@ -114,9 +198,18 @@ class ObjectStoreExternalAuditAnchorSinkTest {
 
         @Override
         public void putObjectIfAbsent(String bucket, String key, byte[] content) {
-            byte[] existing = objects.putIfAbsent(bucket + "/" + key, content);
+            byte[] stored = Arrays.copyOf(content, content.length);
+            byte[] existing = objects.putIfAbsent(bucket + "/" + key, stored);
             if (existing != null) {
                 throw new ExternalAuditAnchorSinkException("CONFLICT", "Object already exists.");
+            }
+            if (hideWritesAfterPut) {
+                objects.remove(bucket + "/" + key);
+            }
+            if (tamperAfterPut) {
+                objects.put(bucket + "/" + key, new String(stored, StandardCharsets.UTF_8)
+                        .replace("\"event_hash\":\"hash-1\"", "\"event_hash\":\"hash-X\"")
+                        .getBytes(StandardCharsets.UTF_8));
             }
         }
 
@@ -133,6 +226,10 @@ class ObjectStoreExternalAuditAnchorSinkTest {
 
         List<String> keys() {
             return List.copyOf(objects.keySet());
+        }
+
+        void putRaw(String bucket, String key, byte[] content) {
+            objects.put(bucket + "/" + key, Arrays.copyOf(content, content.length));
         }
     }
 }

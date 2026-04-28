@@ -85,6 +85,48 @@ class ExternalAuditIntegrityServiceTest {
     }
 
     @Test
+    void shouldDetectObjectStorePayloadHashMismatchAsInvalid() {
+        AuditAnchorRepository repository = mock(AuditAnchorRepository.class);
+        AuditAnchorDocument local = localAnchor("local-anchor-1", 2L, "hash-2");
+        ObjectStoreExternalAuditAnchorSinkTest.InMemoryObjectStoreAuditAnchorClient client =
+                new ObjectStoreExternalAuditAnchorSinkTest.InMemoryObjectStoreAuditAnchorClient();
+        ObjectStoreExternalAuditAnchorSink objectStoreSink = objectStoreSink(client);
+        objectStoreSink.publish(ExternalAuditAnchor.from(local, objectStoreSink.sinkType()));
+        String key = objectStoreSink.objectKey("source_service:alert-service", 2L);
+        byte[] tampered = new String(client.getObject("audit-bucket", key).orElseThrow(), java.nio.charset.StandardCharsets.UTF_8)
+                .replace("\"event_hash\":\"hash-2\"", "\"event_hash\":\"hash-X\"")
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        client.putRaw("audit-bucket", key, tampered);
+        when(repository.findLatestByPartitionKey("source_service:alert-service")).thenReturn(Optional.of(local));
+
+        ExternalAuditIntegrityResponse response = objectStoreIntegrityService(repository, objectStoreSink)
+                .verify("alert-service", 100);
+
+        assertThat(response.status()).isEqualTo("INVALID");
+        assertThat(response.reasonCode()).isEqualTo("EXTERNAL_PAYLOAD_HASH_MISMATCH");
+    }
+
+    @Test
+    void shouldDetectObjectStoreObjectKeyMismatchAsInvalid() {
+        AuditAnchorRepository repository = mock(AuditAnchorRepository.class);
+        AuditAnchorDocument local = localAnchor("local-anchor-2", 2L, "hash-2");
+        ObjectStoreExternalAuditAnchorSinkTest.InMemoryObjectStoreAuditAnchorClient client =
+                new ObjectStoreExternalAuditAnchorSinkTest.InMemoryObjectStoreAuditAnchorClient();
+        ObjectStoreExternalAuditAnchorSink objectStoreSink = objectStoreSink(client);
+        objectStoreSink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), objectStoreSink.sinkType()));
+        String correctKey = objectStoreSink.objectKey("source_service:alert-service", 1L);
+        String wrongKey = objectStoreSink.objectKey("source_service:alert-service", 2L);
+        client.putRaw("audit-bucket", wrongKey, client.getObject("audit-bucket", correctKey).orElseThrow());
+        when(repository.findLatestByPartitionKey("source_service:alert-service")).thenReturn(Optional.of(local));
+
+        ExternalAuditIntegrityResponse response = objectStoreIntegrityService(repository, objectStoreSink)
+                .verify("alert-service", 100);
+
+        assertThat(response.status()).isEqualTo("INVALID");
+        assertThat(response.reasonCode()).isEqualTo("EXTERNAL_OBJECT_KEY_MISMATCH");
+    }
+
+    @Test
     void shouldDetectStaleExternalAnchorAsPartial() {
         AuditAnchorDocument local = localAnchor("local-anchor-2", 2L, "hash-2");
         AuditAnchorDocument stale = localAnchor("local-anchor-1", 1L, "hash-1");
@@ -301,10 +343,16 @@ class ExternalAuditIntegrityServiceTest {
     }
 
     private ExternalAuditAnchorSink objectStoreSink() {
+        return objectStoreSink(new ObjectStoreExternalAuditAnchorSinkTest.InMemoryObjectStoreAuditAnchorClient());
+    }
+
+    private ObjectStoreExternalAuditAnchorSink objectStoreSink(
+            ObjectStoreExternalAuditAnchorSinkTest.InMemoryObjectStoreAuditAnchorClient client
+    ) {
         return new ObjectStoreExternalAuditAnchorSink(
                 "audit-bucket",
                 "audit-anchors",
-                new ObjectStoreExternalAuditAnchorSinkTest.InMemoryObjectStoreAuditAnchorClient(),
+                client,
                 new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules()
         );
     }
