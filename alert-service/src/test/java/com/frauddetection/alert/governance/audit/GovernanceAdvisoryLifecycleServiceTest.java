@@ -15,13 +15,14 @@ class GovernanceAdvisoryLifecycleServiceTest {
     private final GovernanceAdvisoryLifecycleService service = new GovernanceAdvisoryLifecycleService(repository);
 
     @Test
-    void shouldReturnUnknownWhenAuditRepositoryThrows() {
+    void shouldReturnUnknownWhenAuditRepositoryUnavailable() {
         when(repository.findFirstByAdvisoryEventIdOrderByCreatedAtDesc("advisory-1"))
                 .thenThrow(new DataAccessResourceFailureException("mongo unavailable"));
 
         GovernanceAdvisoryLifecycleStatus status = service.lifecycleStatus("advisory-1");
 
         assertThat(status).isEqualTo(GovernanceAdvisoryLifecycleStatus.UNKNOWN);
+        assertThat(status).isNotEqualTo(GovernanceAdvisoryLifecycleStatus.OPEN);
     }
 
     @Test
