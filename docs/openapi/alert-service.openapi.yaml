@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: Alert Service API
   version: FDP-21
-  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, external anchor verification, bounded evidence export, derived audit trust attestation, governance advisory lifecycle projection, and human-review audit. FDP-20 extends tamper evidence outside the primary database boundary. FDP-21 derives a trust attestation from FDP-19/FDP-20 source-of-truth signals and optional local-dev integrity signing. Audit integrity and trust attestation do not imply certified WORM archive storage, legal notarization, SIEM integration, unbounded export, KMS/HSM signing unless explicitly integrated, or final compliance archive.
+  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, external anchor verification, bounded evidence export, derived audit trust attestation, governance advisory lifecycle projection, and human-review audit. FDP-20 extends tamper evidence outside the primary database boundary. FDP-22 adds a pluggable object-store external anchor sink boundary but does not provide WORM certification by itself. FDP-21 derives a trust attestation from FDP-19/FDP-20 source-of-truth signals and optional local-dev integrity signing. Audit integrity and trust attestation do not imply certified WORM archive storage, legal notarization, SIEM integration, unbounded export, KMS/HSM signing unless explicitly integrated, or final compliance archive.
 servers:
   - url: http://localhost:8085
 paths:
@@ -138,7 +138,7 @@ paths:
   /api/v1/audit/integrity/external:
     get:
       summary: Verify external audit anchor consistency
-      description: Performs bounded read-only comparison between the latest local audit chain anchor and the latest external anchor. Requires audit:verify. Returns VALID, INVALID, PARTIAL, or UNAVAILABLE. Detects missing, stale, ahead, mismatched hash, mismatched local anchor id, mismatched hash algorithm, and unsupported external schema version. This endpoint does not repair data, mutate audit records, export full history, or provide WORM/legal notarization.
+      description: Performs bounded read-only comparison between the local audit chain anchor and the external anchor. Requires audit:verify. Returns VALID, INVALID, PARTIAL, or UNAVAILABLE. Object-store sinks can verify by exact partition_key + chain_position object key before falling back to latest-anchor comparison. Detects missing, stale, ahead, mismatched hash, mismatched local anchor id, mismatched hash algorithm, and unsupported external schema version. This endpoint does not repair data, mutate audit records, export full history, or provide WORM/legal notarization.
       security:
         - bearerAuth: []
         - demoAuth: []
