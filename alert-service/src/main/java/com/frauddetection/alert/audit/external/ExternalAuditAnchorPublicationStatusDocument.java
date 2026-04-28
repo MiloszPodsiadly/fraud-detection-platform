@@ -29,6 +29,21 @@ record ExternalAuditAnchorPublicationStatusDocument(
         @Field("external_sink_type")
         String externalSinkType,
 
+        @Field("external_key")
+        String externalKey,
+
+        @Field("anchor_hash")
+        String anchorHash,
+
+        @Field("external_hash")
+        String externalHash,
+
+        @Field("external_reference_verified_at")
+        Instant externalReferenceVerifiedAt,
+
+        @Field("external_immutability_level")
+        String externalImmutabilityLevel,
+
         @Field("external_publish_attempts")
         int externalPublishAttempts,
 

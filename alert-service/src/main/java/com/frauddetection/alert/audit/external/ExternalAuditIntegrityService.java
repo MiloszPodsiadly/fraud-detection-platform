@@ -85,6 +85,7 @@ public class ExternalAuditIntegrityService {
                     null,
                     null,
                     null,
+                    sink.immutabilityLevel(),
                     List.of()
             );
         }
@@ -102,6 +103,7 @@ public class ExternalAuditIntegrityService {
             if (!isExternalIntegrityMismatch(exception.reason())) {
                 throw exception;
             }
+            metrics.recordExternalTamperingDetected(exception.reason());
             return response(
                     "INVALID",
                     query,
@@ -177,9 +179,25 @@ public class ExternalAuditIntegrityService {
                 reasonCode,
                 message,
                 ExternalAuditAnchorSummary.fromLocal(local),
-                external == null ? null : ExternalAuditAnchorSummary.fromExternal(external),
+                external == null ? null : ExternalAuditAnchorSummary.fromExternal(
+                        external,
+                        externalReference(external),
+                        sink.immutabilityLevel()
+                ),
+                sink.immutabilityLevel(),
                 violations
         );
+    }
+
+    private ExternalAnchorReference externalReference(ExternalAuditAnchor external) {
+        try {
+            return sink.externalReference(external).orElse(null);
+        } catch (ExternalAuditAnchorSinkException exception) {
+            if (isExternalIntegrityMismatch(exception.reason())) {
+                metrics.recordExternalTamperingDetected(exception.reason());
+            }
+            throw exception;
+        }
     }
 
     private void auditFailureBestEffort(ExternalAuditIntegrityQuery query, ExternalAuditIntegrityResponse response, String reason) {

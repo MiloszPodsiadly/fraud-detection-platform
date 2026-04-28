@@ -161,6 +161,34 @@ public class AlertServiceMetrics {
         ).increment();
     }
 
+    public void recordExternalAnchorOperationRetry(String operation) {
+        counter(
+                "fraud_platform_audit_external_anchor_retry_total",
+                "operation", normalizeExternalAnchorOperation(operation)
+        ).increment();
+    }
+
+    public void recordExternalAnchorOperationTimeout(String operation) {
+        counter(
+                "fraud_platform_audit_external_anchor_timeout_total",
+                "operation", normalizeExternalAnchorOperation(operation)
+        ).increment();
+    }
+
+    public void recordExternalAnchorOperationFailure(String operation) {
+        counter(
+                "fraud_platform_audit_external_anchor_operation_failure_total",
+                "operation", normalizeExternalAnchorOperation(operation)
+        ).increment();
+    }
+
+    public void recordExternalTamperingDetected(String reason) {
+        counter(
+                "fraud_platform_audit_external_tampering_detected_total",
+                "reason", normalizeExternalAnchorFailureReason(reason)
+        ).increment();
+    }
+
     public void recordEvidenceExport(String status) {
         counter(
                 "fraud_platform_audit_evidence_exports_total",
@@ -340,6 +368,8 @@ public class AlertServiceMetrics {
                  "STALE_EXTERNAL_ANCHOR",
                  "EXTERNAL_CHAIN_POSITION_AHEAD",
                  "EXTERNAL_HASH_MISMATCH",
+                 "EXTERNAL_PAYLOAD_HASH_MISMATCH",
+                 "EXTERNAL_OBJECT_KEY_MISMATCH",
                  "EXTERNAL_CHAIN_POSITION_MISMATCH",
                  "EXTERNAL_HASH_ALGORITHM_MISMATCH",
                  "EXTERNAL_SCHEMA_VERSION_UNSUPPORTED",
@@ -364,8 +394,16 @@ public class AlertServiceMetrics {
 
     private String normalizeExternalAnchorFailureReason(String reason) {
         return switch (reason) {
-            case "DISABLED", "UNAVAILABLE", "CONFLICT", "MISMATCH", "IO_ERROR", "INVALID_ANCHOR" -> reason;
+            case "DISABLED", "UNAVAILABLE", "CONFLICT", "MISMATCH", "IO_ERROR", "INVALID_ANCHOR",
+                 "WRITE_NOT_VERIFIED", "EXTERNAL_PAYLOAD_HASH_MISMATCH", "EXTERNAL_OBJECT_KEY_MISMATCH", "TIMEOUT" -> reason;
             default -> "UNKNOWN";
+        };
+    }
+
+    private String normalizeExternalAnchorOperation(String operation) {
+        return switch (operation) {
+            case "get", "put", "list", "immutability" -> operation;
+            default -> "unknown";
         };
     }
 

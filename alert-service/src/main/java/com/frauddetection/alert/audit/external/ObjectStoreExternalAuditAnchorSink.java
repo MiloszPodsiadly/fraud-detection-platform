@@ -5,10 +5,15 @@ import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.util.StringUtils;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Base64;
@@ -17,19 +22,29 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 
 class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
 
     private static final Logger log = LoggerFactory.getLogger(ObjectStoreExternalAuditAnchorSink.class);
     private static final int LIST_LIMIT = 500;
+    private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(2);
+    private static final Duration DEFAULT_BACKOFF = Duration.ofMillis(100);
+    private static final int DEFAULT_MAX_ATTEMPTS = 2;
 
     private final String bucket;
     private final String prefix;
     private final ObjectStoreAuditAnchorClient client;
     private final ObjectMapper objectMapper;
+    private final AlertServiceMetrics metrics;
+    private final Duration operationTimeout;
+    private final Duration retryBackoff;
+    private final int maxAttempts;
+    private final ExternalImmutabilityLevel immutabilityLevel;
 
     ObjectStoreExternalAuditAnchorSink(
             String bucket,
@@ -37,15 +52,43 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
             ObjectStoreAuditAnchorClient client,
             ObjectMapper objectMapper
     ) {
+        this(bucket, prefix, client, objectMapper, null, DEFAULT_TIMEOUT, DEFAULT_BACKOFF, DEFAULT_MAX_ATTEMPTS, ExternalImmutabilityLevel.NONE);
+    }
+
+    ObjectStoreExternalAuditAnchorSink(
+            String bucket,
+            String prefix,
+            ObjectStoreAuditAnchorClient client,
+            ObjectMapper objectMapper,
+            AlertServiceMetrics metrics,
+            Duration operationTimeout,
+            Duration retryBackoff,
+            int maxAttempts,
+            ExternalImmutabilityLevel immutabilityLevel
+    ) {
         this.bucket = requireText(bucket, "bucket");
         this.prefix = trimSlashes(requireText(prefix, "prefix"));
         this.client = Objects.requireNonNull(client, "client");
         this.objectMapper = canonicalMapper(objectMapper);
+        this.metrics = metrics;
+        this.operationTimeout = operationTimeout == null || operationTimeout.isNegative() || operationTimeout.isZero()
+                ? DEFAULT_TIMEOUT
+                : operationTimeout;
+        this.retryBackoff = retryBackoff == null || retryBackoff.isNegative()
+                ? DEFAULT_BACKOFF
+                : retryBackoff;
+        this.maxAttempts = Math.max(1, Math.min(maxAttempts, 3));
+        this.immutabilityLevel = immutabilityLevel == null ? ExternalImmutabilityLevel.NONE : immutabilityLevel;
     }
 
     @Override
     public String sinkType() {
         return "object-store";
+    }
+
+    @Override
+    public ExternalImmutabilityLevel immutabilityLevel() {
+        return immutabilityLevel;
     }
 
     @Override
@@ -55,19 +98,19 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
         byte[] payload = serialize(candidate);
         try {
             detectDuplicateAnchorConflict(anchor, key);
-            Optional<byte[]> existing = client.getObject(bucket, key);
+            Optional<byte[]> existing = getObject(key);
             if (existing.isPresent()) {
                 return idempotentExisting(key, existing.get(), payload, candidate);
             }
             try {
-                client.putObjectIfAbsent(bucket, key, payload);
+                putObjectIfAbsent(key, payload);
                 verifyStoredObject(key, candidate);
                 return anchor;
             } catch (ExternalAuditAnchorSinkException exception) {
                 if (!"CONFLICT".equals(exception.reason())) {
                     throw exception;
                 }
-                return idempotentExisting(key, client.getObject(bucket, key)
+                return idempotentExisting(key, getObject(key)
                         .orElseThrow(() -> new ExternalAuditAnchorSinkException("IO_ERROR", "External anchor sink is unavailable.")), payload, candidate);
             }
         } catch (ExternalAuditAnchorSinkException exception) {
@@ -79,10 +122,27 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
     }
 
     @Override
+    public Optional<ExternalAnchorReference> externalReference(ExternalAuditAnchor anchor) {
+        if (anchor == null) {
+            return Optional.empty();
+        }
+        String key = objectKey(anchor.partitionKey(), anchor.chainPosition());
+        ObjectStoreExternalAuditAnchorPayload payload = readPayload(key, getObject(key)
+                .orElseThrow(() -> new ExternalAuditAnchorSinkException("IO_ERROR", "External anchor object is unavailable.")));
+        return Optional.of(new ExternalAnchorReference(
+                anchor.localAnchorId(),
+                key,
+                anchor.lastEventHash(),
+                payload.eventHash(),
+                Instant.now()
+        ));
+    }
+
+    @Override
     public Optional<ExternalAuditAnchor> latest(String partitionKey) {
         String keyPrefix = objectKeyPrefix(partitionKey);
         try {
-            return client.listKeys(bucket, keyPrefix, LIST_LIMIT).stream()
+            return listKeys(keyPrefix, LIST_LIMIT).stream()
                     .map(key -> read(key).orElse(null))
                     .filter(Objects::nonNull)
                     .max(Comparator.comparingLong(ExternalAuditAnchor::chainPosition)
@@ -110,7 +170,7 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
         int boundedLimit = Math.max(1, Math.min(limit, LIST_LIMIT));
         String keyPrefix = objectKeyPrefix(partitionKey);
         try {
-            return client.listKeys(bucket, keyPrefix, boundedLimit).stream()
+            return listKeys(keyPrefix, boundedLimit).stream()
                     .map(key -> read(key).orElse(null))
                     .filter(Objects::nonNull)
                     .filter(anchor -> from == null || !anchor.createdAt().isBefore(from))
@@ -157,7 +217,7 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
     }
 
     private Optional<ExternalAuditAnchor> read(String key) {
-        return client.getObject(bucket, key).map(payload -> read(key, payload));
+        return getObject(key).map(payload -> read(key, payload));
     }
 
     private ExternalAuditAnchor read(String key, byte[] payload) {
@@ -191,7 +251,7 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
     }
 
     private void verifyStoredObject(String key, ObjectStoreExternalAuditAnchorPayload expected) {
-        ObjectStoreExternalAuditAnchorPayload stored = client.getObject(bucket, key)
+        ObjectStoreExternalAuditAnchorPayload stored = getObject(key)
                 .map(payload -> readPayload(key, payload))
                 .orElseThrow(() -> new ExternalAuditAnchorSinkException("WRITE_NOT_VERIFIED", "External anchor write could not be verified."));
         verifyPayloadBinding(key, stored, expected);
@@ -199,7 +259,7 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
 
     private void verifyPayloadSelfBinding(String key, ObjectStoreExternalAuditAnchorPayload payload) {
         if (!key.equals(payload.externalObjectKey())) {
-            throw new ExternalAuditAnchorSinkException("EXTERNAL_OBJECT_KEY_MISMATCH", "External anchor object key binding mismatch.");
+            throw tampering("EXTERNAL_OBJECT_KEY_MISMATCH", "External anchor object key binding mismatch.");
         }
         String actualPayloadHash = sha256Hex(serialize(ObjectStoreExternalAuditAnchorPayload.from(
                 payload.toExternalAnchor(),
@@ -207,7 +267,7 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
                 null
         )));
         if (!actualPayloadHash.equals(payload.payloadHash())) {
-            throw new ExternalAuditAnchorSinkException("EXTERNAL_PAYLOAD_HASH_MISMATCH", "External anchor payload hash mismatch.");
+            throw tampering("EXTERNAL_PAYLOAD_HASH_MISMATCH", "External anchor payload hash mismatch.");
         }
     }
 
@@ -217,10 +277,10 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
             ObjectStoreExternalAuditAnchorPayload expected
     ) {
         if (!key.equals(stored.externalObjectKey()) || !stored.externalObjectKey().equals(expected.externalObjectKey())) {
-            throw new ExternalAuditAnchorSinkException("EXTERNAL_OBJECT_KEY_MISMATCH", "External anchor object key binding mismatch.");
+            throw tampering("EXTERNAL_OBJECT_KEY_MISMATCH", "External anchor object key binding mismatch.");
         }
         if (!stored.payloadHash().equals(expected.payloadHash())) {
-            throw new ExternalAuditAnchorSinkException("EXTERNAL_PAYLOAD_HASH_MISMATCH", "External anchor payload hash mismatch.");
+            throw tampering("EXTERNAL_PAYLOAD_HASH_MISMATCH", "External anchor payload hash mismatch.");
         }
         if (!stored.localAnchorId().equals(expected.localAnchorId())
                 || stored.chainPosition() != expected.chainPosition()
@@ -230,7 +290,7 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
     }
 
     private void detectDuplicateAnchorConflict(ExternalAuditAnchor anchor, String targetKey) {
-        for (String key : client.listKeys(bucket, objectKeyPrefix(anchor.partitionKey()), LIST_LIMIT)) {
+        for (String key : listKeys(objectKeyPrefix(anchor.partitionKey()), LIST_LIMIT)) {
             if (targetKey.equals(key)) {
                 continue;
             }
@@ -241,6 +301,104 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
                     || !anchor.lastEventHash().equals(existing.get().lastEventHash()))) {
                 throw new ExternalAuditAnchorSinkException("MISMATCH", "External anchor local anchor id conflict.");
             }
+        }
+    }
+
+    private Optional<byte[]> getObject(String key) {
+        return callWithRetry("get", () -> client.getObject(bucket, key));
+    }
+
+    private void putObjectIfAbsent(String key, byte[] payload) {
+        callWithRetry("put", () -> {
+            client.putObjectIfAbsent(bucket, key, payload);
+            return null;
+        });
+    }
+
+    private List<String> listKeys(String keyPrefix, int limit) {
+        return callWithRetry("list", () -> client.listKeys(bucket, keyPrefix, limit));
+    }
+
+    private <T> T callWithRetry(String operation, Supplier<T> operationCall) {
+        RuntimeException last = null;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                return callWithTimeout(operation, operationCall);
+            } catch (ExternalAuditAnchorSinkException exception) {
+                last = exception;
+                if ("CONFLICT".equals(exception.reason()) || "MISMATCH".equals(exception.reason())) {
+                    throw exception;
+                }
+            } catch (RuntimeException exception) {
+                last = exception;
+            }
+            if (attempt < maxAttempts) {
+                recordRetry(operation);
+                backoff();
+            }
+        }
+        recordFailure(operation);
+        if (last instanceof ExternalAuditAnchorSinkException sinkException) {
+            throw sinkException;
+        }
+        throw new ExternalAuditAnchorSinkException("IO_ERROR", "External anchor sink is unavailable.");
+    }
+
+    private <T> T callWithTimeout(String operation, Supplier<T> operationCall) {
+        CompletableFuture<T> future = CompletableFuture.supplyAsync(operationCall);
+        try {
+            return future.get(operationTimeout.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException exception) {
+            future.cancel(true);
+            recordTimeout(operation);
+            throw new ExternalAuditAnchorSinkException("TIMEOUT", "External anchor sink operation timed out.");
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new ExternalAuditAnchorSinkException("IO_ERROR", "External anchor sink is unavailable.");
+        } catch (ExecutionException exception) {
+            Throwable cause = exception.getCause();
+            if (cause instanceof ExternalAuditAnchorSinkException sinkException) {
+                throw sinkException;
+            }
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            throw new ExternalAuditAnchorSinkException("IO_ERROR", "External anchor sink is unavailable.");
+        }
+    }
+
+    private ExternalAuditAnchorSinkException tampering(String reason, String message) {
+        recordFailure("get");
+        return new ExternalAuditAnchorSinkException(reason, message);
+    }
+
+    private void recordRetry(String operation) {
+        if (metrics != null) {
+            metrics.recordExternalAnchorOperationRetry(operation);
+        }
+    }
+
+    private void recordTimeout(String operation) {
+        if (metrics != null) {
+            metrics.recordExternalAnchorOperationTimeout(operation);
+        }
+    }
+
+    private void recordFailure(String operation) {
+        if (metrics != null) {
+            metrics.recordExternalAnchorOperationFailure(operation);
+        }
+    }
+
+    private void backoff() {
+        if (retryBackoff.isZero()) {
+            return;
+        }
+        try {
+            Thread.sleep(retryBackoff.toMillis());
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new ExternalAuditAnchorSinkException("IO_ERROR", "External anchor sink is unavailable.");
         }
     }
 

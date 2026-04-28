@@ -52,6 +52,9 @@ app:
         secret-access-key: ${AUDIT_EXTERNAL_ANCHORING_OBJECT_STORE_SECRET_ACCESS_KEY:}
         startup-check-enabled: ${AUDIT_EXTERNAL_ANCHORING_OBJECT_STORE_STARTUP_CHECK_ENABLED:true}
         startup-test-write-enabled: ${AUDIT_EXTERNAL_ANCHORING_OBJECT_STORE_STARTUP_TEST_WRITE_ENABLED:false}
+        operation-timeout: ${AUDIT_EXTERNAL_ANCHORING_OBJECT_STORE_OPERATION_TIMEOUT:2s}
+        retry-backoff: ${AUDIT_EXTERNAL_ANCHORING_OBJECT_STORE_RETRY_BACKOFF:100ms}
+        max-attempts: ${AUDIT_EXTERNAL_ANCHORING_OBJECT_STORE_MAX_ATTEMPTS:2}
     trust-attestation:
       signing:
         mode: ${AUDIT_TRUST_ATTESTATION_SIGNING_MODE:disabled}

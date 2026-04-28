@@ -41,8 +41,30 @@ public record ExternalAuditAnchorSummary(
 
         @JsonProperty("publication_status")
         @JsonInclude(JsonInclude.Include.NON_NULL)
-        String publicationStatus
+        String publicationStatus,
+
+        @JsonProperty("external_reference")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        ExternalAnchorReference externalReference,
+
+        @JsonProperty("external_immutability_level")
+        ExternalImmutabilityLevel externalImmutabilityLevel
 ) {
+    public ExternalAuditAnchorSummary(
+            String anchorId,
+            String externalAnchorId,
+            String localAnchorId,
+            long chainPosition,
+            String lastEventHash,
+            String hashAlgorithm,
+            String schemaVersion,
+            Instant createdAt,
+            String sinkType,
+            String publicationStatus
+    ) {
+        this(anchorId, externalAnchorId, localAnchorId, chainPosition, lastEventHash, hashAlgorithm, schemaVersion, createdAt, sinkType, publicationStatus, null, ExternalImmutabilityLevel.NONE);
+    }
+
     static ExternalAuditAnchorSummary fromLocal(AuditAnchorDocument document) {
         return new ExternalAuditAnchorSummary(
                 document.anchorId(),
@@ -54,11 +76,21 @@ public record ExternalAuditAnchorSummary(
                 null,
                 document.createdAt(),
                 null,
-                null
+                null,
+                null,
+                ExternalImmutabilityLevel.NONE
         );
     }
 
     static ExternalAuditAnchorSummary fromExternal(ExternalAuditAnchor anchor) {
+        return fromExternal(anchor, null, ExternalImmutabilityLevel.NONE);
+    }
+
+    static ExternalAuditAnchorSummary fromExternal(
+            ExternalAuditAnchor anchor,
+            ExternalAnchorReference reference,
+            ExternalImmutabilityLevel immutabilityLevel
+    ) {
         return new ExternalAuditAnchorSummary(
                 null,
                 anchor.externalAnchorId(),
@@ -69,7 +101,9 @@ public record ExternalAuditAnchorSummary(
                 anchor.schemaVersion(),
                 anchor.createdAt(),
                 anchor.sinkType(),
-                anchor.publicationStatus()
+                anchor.publicationStatus(),
+                reference,
+                immutabilityLevel == null ? ExternalImmutabilityLevel.NONE : immutabilityLevel
         );
     }
 }

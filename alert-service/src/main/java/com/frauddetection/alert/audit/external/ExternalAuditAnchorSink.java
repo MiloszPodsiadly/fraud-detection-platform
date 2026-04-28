@@ -14,7 +14,15 @@ public interface ExternalAuditAnchorSink {
 
     String sinkType();
 
+    default ExternalImmutabilityLevel immutabilityLevel() {
+        return ExternalImmutabilityLevel.NONE;
+    }
+
     ExternalAuditAnchor publish(ExternalAuditAnchor anchor);
+
+    default java.util.Optional<ExternalAnchorReference> externalReference(ExternalAuditAnchor anchor) {
+        return java.util.Optional.empty();
+    }
 
     Optional<ExternalAuditAnchor> latest(String partitionKey);
 

@@ -22,12 +22,23 @@ class ExternalAuditAnchorPublicationStatusRepository {
         this.mongoTemplate = mongoTemplate;
     }
 
-    void recordSuccess(AuditAnchorDocument anchor, Instant publishedAt, String sinkType) throws DataAccessException {
+    void recordSuccess(
+            AuditAnchorDocument anchor,
+            Instant publishedAt,
+            String sinkType,
+            ExternalAnchorReference reference,
+            ExternalImmutabilityLevel immutabilityLevel
+    ) throws DataAccessException {
         Query query = query(anchor.anchorId());
         Update status = base(anchor, publishedAt)
                 .set("external_published", true)
                 .set("external_published_at", publishedAt)
                 .set("external_sink_type", safe(sinkType))
+                .set("external_key", reference == null ? null : safe(reference.externalKey(), 300))
+                .set("anchor_hash", reference == null ? null : safe(reference.anchorHash(), 128))
+                .set("external_hash", reference == null ? null : safe(reference.externalHash(), 128))
+                .set("external_reference_verified_at", reference == null ? null : reference.verifiedAt())
+                .set("external_immutability_level", immutabilityLevel == null ? ExternalImmutabilityLevel.NONE.name() : immutabilityLevel.name())
                 .inc("external_publish_attempts", 1)
                 .unset("last_external_publish_failure_reason");
         mongoTemplate.upsert(query, status, ExternalAuditAnchorPublicationStatusDocument.class);
@@ -40,6 +51,11 @@ class ExternalAuditAnchorPublicationStatusRepository {
                 .inc("external_publish_attempts", 1)
                 .unset("external_published_at")
                 .unset("external_sink_type")
+                .unset("external_key")
+                .unset("anchor_hash")
+                .unset("external_hash")
+                .unset("external_reference_verified_at")
+                .unset("external_immutability_level")
                 .set("last_external_publish_failure_reason", safe(reason));
         mongoTemplate.upsert(query, status, ExternalAuditAnchorPublicationStatusDocument.class);
     }
@@ -66,10 +82,14 @@ class ExternalAuditAnchorPublicationStatusRepository {
     }
 
     private String safe(String value) {
+        return safe(value, 80);
+    }
+
+    private String safe(String value, int maxLength) {
         if (!StringUtils.hasText(value)) {
             return null;
         }
         String normalized = value.trim().replaceAll("[\\r\\n\\t]+", " ");
-        return normalized.length() <= 80 ? normalized : normalized.substring(0, 80);
+        return normalized.length() <= maxLength ? normalized : normalized.substring(0, maxLength);
     }
 }

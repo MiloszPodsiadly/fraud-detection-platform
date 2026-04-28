@@ -10,4 +10,8 @@ interface ObjectStoreAuditAnchorClient {
     void putObjectIfAbsent(String bucket, String key, byte[] content);
 
     List<String> listKeys(String bucket, String keyPrefix, int limit);
+
+    default ExternalImmutabilityLevel immutabilityLevel(String bucket, String keyPrefix) {
+        return ExternalImmutabilityLevel.NONE;
+    }
 }

@@ -1,6 +1,7 @@
 package com.frauddetection.alert.audit.external;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -12,6 +13,7 @@ import org.springframework.util.StringUtils;
 
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
@@ -27,6 +29,7 @@ class ExternalAuditAnchorSinkConfiguration {
     ExternalAuditAnchorSink externalAuditAnchorSink(
             ObjectMapper objectMapper,
             ObjectProvider<ObjectStoreAuditAnchorClient> objectStoreClient,
+            AlertServiceMetrics metrics,
             Environment environment,
             @Value("${app.audit.external-anchoring.sink:disabled}") String sink,
             @Value("${app.audit.external-anchoring.local-file.path:./target/audit-external-anchors.jsonl}") String localFilePath,
@@ -37,8 +40,11 @@ class ExternalAuditAnchorSinkConfiguration {
             @Value("${app.audit.external-anchoring.object-store.endpoint:}") String objectStoreEndpoint,
             @Value("${app.audit.external-anchoring.object-store.access-key-id:}") String objectStoreAccessKeyId,
             @Value("${app.audit.external-anchoring.object-store.secret-access-key:}") String objectStoreSecretAccessKey,
-            @Value("${app.audit.external-anchoring.object-store.startup-check-enabled:true}") boolean objectStoreStartupCheckEnabled,
+            @Value("${app.audit.external-store.startup-validation:${app.audit.external-anchoring.object-store.startup-check-enabled:true}}") boolean objectStoreStartupCheckEnabled,
             @Value("${app.audit.external-anchoring.object-store.startup-test-write-enabled:false}") boolean objectStoreStartupTestWriteEnabled,
+            @Value("${app.audit.external-anchoring.object-store.operation-timeout:2s}") Duration objectStoreOperationTimeout,
+            @Value("${app.audit.external-anchoring.object-store.retry-backoff:100ms}") Duration objectStoreRetryBackoff,
+            @Value("${app.audit.external-anchoring.object-store.max-attempts:2}") int objectStoreMaxAttempts,
             @Value("${HOSTNAME:alert-service}") String instanceId
     ) {
         if ("local-file".equals(sink)) {
@@ -59,7 +65,7 @@ class ExternalAuditAnchorSinkConfiguration {
             if (client == null) {
                 throw new IllegalStateException("Object-store external audit anchor client is not configured.");
             }
-            validateObjectStoreReadiness(
+            ExternalImmutabilityLevel immutabilityLevel = validateObjectStoreReadiness(
                     client,
                     objectStoreBucket,
                     objectStorePrefix,
@@ -68,13 +74,24 @@ class ExternalAuditAnchorSinkConfiguration {
                     instanceId
             );
             log.info(
-                    "External audit anchor sink configured: sink_type=object-store bucket={} prefix={} region_configured={} endpoint_configured={}",
+                    "External audit anchor sink configured: sink_type=object-store bucket={} prefix={} region_configured={} endpoint_configured={} immutability_level={}",
                     objectStoreBucket,
                     objectStorePrefix,
                     StringUtils.hasText(objectStoreRegion),
-                    StringUtils.hasText(objectStoreEndpoint)
+                    StringUtils.hasText(objectStoreEndpoint),
+                    immutabilityLevel
             );
-            return new ObjectStoreExternalAuditAnchorSink(objectStoreBucket, objectStorePrefix, client, objectMapper);
+            return new ObjectStoreExternalAuditAnchorSink(
+                    objectStoreBucket,
+                    objectStorePrefix,
+                    client,
+                    objectMapper,
+                    metrics,
+                    objectStoreOperationTimeout,
+                    objectStoreRetryBackoff,
+                    objectStoreMaxAttempts,
+                    immutabilityLevel
+            );
         }
         if ("external-object-store".equals(sink)) {
             throw new IllegalStateException("Use app.audit.external-anchoring.sink=object-store for FDP-22 object-store anchoring.");
@@ -118,7 +135,7 @@ class ExternalAuditAnchorSinkConfiguration {
         }
     }
 
-    private void validateObjectStoreReadiness(
+    private ExternalImmutabilityLevel validateObjectStoreReadiness(
             ObjectStoreAuditAnchorClient client,
             String bucket,
             String prefix,
@@ -126,8 +143,17 @@ class ExternalAuditAnchorSinkConfiguration {
             boolean startupTestWriteEnabled,
             String instanceId
     ) {
+        ExternalImmutabilityLevel immutabilityLevel;
+        try {
+            immutabilityLevel = client.immutabilityLevel(bucket, trimSlashes(prefix));
+        } catch (RuntimeException exception) {
+            throw new IllegalStateException("Object-store external audit anchor immutability check failed.");
+        }
+        if (immutabilityLevel == null) {
+            immutabilityLevel = ExternalImmutabilityLevel.NONE;
+        }
         if (!startupCheckEnabled) {
-            return;
+            return immutabilityLevel;
         }
         try {
             List<String> ignored = client.listKeys(bucket, trimSlashes(prefix), 1);
@@ -140,6 +166,7 @@ class ExternalAuditAnchorSinkConfiguration {
         } catch (RuntimeException exception) {
             throw new IllegalStateException("Object-store external audit anchor startup check failed.");
         }
+        return immutabilityLevel;
     }
 
     private void verifyStartupProbeWrite(

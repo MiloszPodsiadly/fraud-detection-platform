@@ -84,7 +84,7 @@ public class ExternalAuditAnchorPublisher {
                         metrics.recordExternalAnchorPublished(sink.sinkType(), "DUPLICATE");
                         duplicates++;
                     }
-                    recordPublicationSuccess(localAnchor);
+                    recordPublicationSuccess(localAnchor, stored);
                     recordLag(localAnchor.createdAt());
                 } catch (ExternalAuditAnchorSinkException exception) {
                     metrics.recordExternalAnchorPublishFailed(sink.sinkType(), exception.reason());
@@ -105,11 +105,19 @@ public class ExternalAuditAnchorPublisher {
         }
     }
 
-    private void recordPublicationSuccess(AuditAnchorDocument localAnchor) {
+    private void recordPublicationSuccess(AuditAnchorDocument localAnchor, ExternalAuditAnchor stored) {
         try {
-            publicationStatusRepository.recordSuccess(localAnchor, clock.instant(), sink.sinkType());
+            ExternalAnchorReference reference = sink.externalReference(stored).orElse(null);
+            ExternalImmutabilityLevel immutabilityLevel = sink.immutabilityLevel() == null
+                    ? ExternalImmutabilityLevel.NONE
+                    : sink.immutabilityLevel();
+            publicationStatusRepository.recordSuccess(localAnchor, clock.instant(), sink.sinkType(), reference, immutabilityLevel);
         } catch (DataAccessException exception) {
             log.warn("External audit anchor publication status update failed after publish.");
+        } catch (ExternalAuditAnchorSinkException exception) {
+            metrics.recordExternalAnchorPublishFailed(sink.sinkType(), exception.reason());
+            recordPublicationFailure(localAnchor, exception.reason());
+            log.warn("External audit anchor reference verification failed after publish: reason={}", exception.reason());
         }
     }
 
