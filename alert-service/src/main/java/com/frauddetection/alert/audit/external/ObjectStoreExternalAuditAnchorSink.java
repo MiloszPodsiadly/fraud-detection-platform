@@ -18,10 +18,12 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -32,7 +34,6 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
 
     private static final Logger log = LoggerFactory.getLogger(ObjectStoreExternalAuditAnchorSink.class);
     private static final int LIST_LIMIT = 500;
-    private static final int HEAD_SCAN_LIMIT_CAP = 16_000;
     private static final int CHAIN_POSITION_WIDTH = 20;
     private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(2);
     private static final Duration DEFAULT_BACKOFF = Duration.ofMillis(100);
@@ -375,11 +376,17 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
         return callWithRetry("list", () -> client.listKeys(bucket, keyPrefix, limit));
     }
 
+    private ObjectStoreAuditAnchorKeyPage listKeysPage(String keyPrefix, int limit, String continuationToken) {
+        return callWithRetry("list", () -> client.listKeysPage(bucket, keyPrefix, limit, continuationToken));
+    }
+
     private List<String> scanAnchorKeys(String keyPrefix) {
-        int limit = LIST_LIMIT;
-        List<String> keys = List.of();
-        while (limit <= HEAD_SCAN_LIMIT_CAP) {
-            keys = listKeys(keyPrefix, limit).stream()
+        java.util.ArrayList<String> keys = new java.util.ArrayList<>();
+        Set<String> seenContinuationTokens = new HashSet<>();
+        String continuationToken = null;
+        do {
+            ObjectStoreAuditAnchorKeyPage page = listKeysPage(keyPrefix, LIST_LIMIT, continuationToken);
+            keys.addAll(page.keys().stream()
                     .filter(key -> {
                         try {
                             parseChainPosition(key);
@@ -388,19 +395,21 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
                             return false;
                         }
                     })
-                    .toList();
+                    .toList());
             /*
-             * The object-store client does not expose pagination yet. New padded keys sort by
-             * chain position, but legacy keys do not, so HEAD detection must consider both
-             * formats. This bounded progressive scan avoids the old "first 500 keys" trap while
-             * keeping latency finite until a paginated client is available.
+             * HEAD detection must consume every page because legacy non-padded keys do not sort
+             * by numeric chain position. A client without continuation-token semantics must fail
+             * explicitly instead of returning a best-effort HEAD from a truncated listing.
              */
-            if (keys.size() < limit || limit == HEAD_SCAN_LIMIT_CAP) {
-                return keys;
+            continuationToken = page.nextContinuationToken();
+            if (continuationToken != null && !seenContinuationTokens.add(continuationToken)) {
+                throw new ExternalAuditAnchorSinkException(
+                        "HEAD_SCAN_LIMIT_EXCEEDED",
+                        "External anchor head scan pagination did not make progress."
+                );
             }
-            limit = Math.min(limit * 2, HEAD_SCAN_LIMIT_CAP);
-        }
-        return keys;
+        } while (continuationToken != null);
+        return List.copyOf(keys);
     }
 
     private <T> T callWithRetry(String operation, Supplier<T> operationCall) {

@@ -61,13 +61,14 @@ public class ExternalAuditIntegrityService {
             auditFailureBestEffort(query, response, "AUDIT_STORE_UNAVAILABLE");
             return response;
         } catch (ExternalAuditAnchorSinkException exception) {
+            String reasonCode = externalUnavailableReasonCode(exception);
             ExternalAuditIntegrityResponse response = ExternalAuditIntegrityResponse.unavailable(
                     query,
-                    "EXTERNAL_ANCHOR_STORE_UNAVAILABLE",
-                    "External audit anchor sink is currently unavailable."
+                    reasonCode,
+                    externalUnavailableMessage(reasonCode)
             );
             metrics.recordExternalIntegrityCheck(response.status());
-            auditFailureBestEffort(query, response, "EXTERNAL_ANCHOR_STORE_UNAVAILABLE");
+            auditFailureBestEffort(query, response, reasonCode);
             return response;
         }
     }
@@ -244,5 +245,20 @@ public class ExternalAuditIntegrityService {
         return "EXTERNAL_OBJECT_KEY_MISMATCH".equals(reason)
                 || "EXTERNAL_PAYLOAD_HASH_MISMATCH".equals(reason)
                 || "MISMATCH".equals(reason);
+    }
+
+    private String externalUnavailableReasonCode(ExternalAuditAnchorSinkException exception) {
+        return switch (exception.reason()) {
+            case "HEAD_SCAN_PAGINATION_UNSUPPORTED", "HEAD_SCAN_LIMIT_EXCEEDED" -> exception.reason();
+            default -> "EXTERNAL_ANCHOR_STORE_UNAVAILABLE";
+        };
+    }
+
+    private String externalUnavailableMessage(String reasonCode) {
+        return switch (reasonCode) {
+            case "HEAD_SCAN_PAGINATION_UNSUPPORTED", "HEAD_SCAN_LIMIT_EXCEEDED" ->
+                    "External audit anchor head cannot be proven from the object-store listing.";
+            default -> "External audit anchor sink is currently unavailable.";
+        };
     }
 }
