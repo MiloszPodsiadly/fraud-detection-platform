@@ -116,6 +116,7 @@ Platform External Audit Anchor Verification API:
 - Requires backend-enforced `audit:verify`.
 - Query parameters: optional bounded `source_service=alert-service` and `limit` default `100`, maximum `500`.
 - Compares local and external anchors for local anchor id, chain position, last event hash, hash algorithm, schema version, external reference, and external immutability level. FDP-22 object-store sinks can verify by exact `partition_key + chain_position` lookup using the deterministic encoded object key before falling back to latest-anchor comparison, and also validate `external_object_key`, `payload_hash`, `anchor_hash`, and `external_hash` binding.
+- Object-store latest HEAD detection requires continuation-token pagination and consumes every page. If listing may be truncated and pagination is unavailable, verification returns a degraded `UNAVAILABLE` state instead of reporting `VALID` from a best-effort HEAD.
 - Response status is `VALID`, `INVALID`, `PARTIAL`, or `UNAVAILABLE`; missing/stale external anchors are explicit and never reported as a valid empty result.
 - The endpoint is read-only and does not repair, mutate, delete, export, or resynchronize audit data.
 
@@ -123,7 +124,7 @@ Platform External Audit Anchor Sinks:
 
 - `disabled` is the default and publishes nothing.
 - `local-file` is development-only and blocked in prod-like profiles.
-- `object-store` writes `audit-anchors/{encoded_partition_key}/{chain_position}.json` through a configured object-store client adapter and requires bucket, prefix, region or endpoint, credentials, client configuration, and startup readiness validation.
+- `object-store` writes new anchors as `audit-anchors/{encoded_partition_key}/{chain_position_padded}.json` with 20-digit zero-padded chain positions, keeps legacy non-padded keys readable, and requires bucket, prefix, region or endpoint, credentials, client configuration, continuation-token listing for complete HEAD discovery, and startup readiness validation. Real S3/GCS/Azure adapters remain FDP-23.
 - The object-store payload contains original `partition_key`, `external_object_key`, `local_anchor_id`, `chain_position`, `event_hash`, `payload_hash`, and `created_at`; it does not include placeholder `previous_event_hash` evidence.
 - Object-store publication is append-only at the application boundary: identical local anchor/object-key/payload binding is idempotent, different content for the same key fails, conflicting local anchor binding fails, write-after-read verification is required, and there are no delete/update paths.
 - Successful publication persists a bounded `external_reference` with `anchor_id`, `external_key`, `anchor_hash`, `external_hash`, and `verified_at`. Object-store operations use bounded timeout/retry settings; timeout, retry, operation failure, and tampering metrics are low-cardinality.

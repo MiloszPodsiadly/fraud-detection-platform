@@ -138,7 +138,7 @@ paths:
   /api/v1/audit/integrity/external:
     get:
       summary: Verify external audit anchor consistency
-      description: Performs bounded read-only comparison between the local audit chain anchor and the external anchor. Requires audit:verify. Returns VALID, INVALID, PARTIAL, or UNAVAILABLE. Object-store sinks can verify by exact partition_key + chain_position lookup using the deterministic encoded object key before falling back to latest-anchor comparison. Detects missing, stale, ahead, mismatched hash, mismatched local anchor id, mismatched object key binding, mismatched payload hash binding, mismatched hash algorithm, unsupported external schema version, and external payload tampering. Response includes external_immutability_level; NONE or CONFIGURED is not WORM proof. This endpoint does not repair data, mutate audit records, export full history, or provide WORM/legal notarization.
+      description: Performs bounded read-only comparison between the local audit chain anchor and the external anchor. Requires audit:verify. Returns VALID, INVALID, PARTIAL, or UNAVAILABLE. Object-store sinks can verify by exact partition_key + chain_position lookup using the deterministic encoded object key before falling back to latest-anchor comparison. Latest object-store HEAD detection requires continuation-token pagination and consumes every page; if listing may be truncated and pagination is unavailable, verification returns a degraded UNAVAILABLE state rather than reporting VALID from a best-effort HEAD. Detects missing, stale, ahead, mismatched hash, mismatched local anchor id, mismatched object key binding, mismatched payload hash binding, mismatched hash algorithm, unsupported external schema version, and external payload tampering. Response includes external_immutability_level; NONE or CONFIGURED is not WORM proof. This endpoint does not repair data, mutate audit records, export full history, or provide WORM/legal notarization. Real S3/GCS/Azure object-store adapters remain FDP-23.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -927,7 +927,7 @@ components:
         reason_code:
           type: string
           nullable: true
-          enum: [AUDIT_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_MISSING, STALE_EXTERNAL_ANCHOR]
+          enum: [AUDIT_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_MISSING, STALE_EXTERNAL_ANCHOR, HEAD_SCAN_PAGINATION_UNSUPPORTED, HEAD_SCAN_LIMIT_EXCEEDED]
         message:
           type: string
           nullable: true

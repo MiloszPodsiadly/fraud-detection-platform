@@ -218,6 +218,11 @@ Prometheus metric contract:
   - Meaning: observed internal mTLS certificate lifecycle states during startup, health checks, and runtime monitoring
   - Labels: `state`
   - Bounded states: `UP`, `WARN`, `CRITICAL`, `DOWN`
+- `fraud_platform_audit_external_anchor_head_scan_depth`
+  - Type: distribution summary
+  - Meaning: number of object-store anchor keys examined while proving the latest external HEAD through continuation-token pagination
+  - Labels: none
+  - Notes: non-paginated or potentially truncated HEAD listing fails explicitly and must not be interpreted as a valid empty or best-effort result.
 - `fraud_internal_auth_replay_rejected_total`
   - Type: counter
   - Meaning: rejected internal service JWT freshness or soft replay attempts
