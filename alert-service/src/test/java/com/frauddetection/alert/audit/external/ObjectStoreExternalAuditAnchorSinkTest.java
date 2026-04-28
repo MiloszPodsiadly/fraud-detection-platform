@@ -1,16 +1,23 @@
 package com.frauddetection.alert.audit.external;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.frauddetection.alert.audit.AuditAnchorDocument;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -24,6 +31,12 @@ class ObjectStoreExternalAuditAnchorSinkTest {
     private static final String ENCODED_PARTITION = "c291cmNlX3NlcnZpY2U6YWxlcnQtc2VydmljZQ";
 
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+    private final ObjectMapper canonicalObjectMapper = JsonMapper.builder()
+            .configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true)
+            .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true)
+            .configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false)
+            .build()
+            .findAndRegisterModules();
     private final InMemoryObjectStoreAuditAnchorClient client = new InMemoryObjectStoreAuditAnchorClient();
     private final ObjectStoreExternalAuditAnchorSink sink = new ObjectStoreExternalAuditAnchorSink(
             "audit-bucket",
@@ -37,10 +50,12 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         ExternalAuditAnchor anchor = ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), sink.sinkType());
 
         sink.publish(anchor);
-        String objectKey = "audit-anchors/" + ENCODED_PARTITION + "/1.json";
+        String objectKey = "audit-anchors/" + ENCODED_PARTITION + "/00000000000000000001.json";
         String storedJson = new String(client.getObject("audit-bucket", objectKey).orElseThrow(), StandardCharsets.UTF_8);
 
         assertThat(sink.objectKey("source_service:alert-service", 1L)).isEqualTo(objectKey);
+        assertThat(sink.formatChainPosition(1L)).isEqualTo("00000000000000000001");
+        assertThat(sink.parseChainPosition(objectKey)).isEqualTo(1L);
         assertThat(storedJson).contains(
                 "\"local_anchor_id\":\"local-anchor-1\"",
                 "\"partition_key\":\"source_service:alert-service\"",
@@ -59,7 +74,7 @@ class ObjectStoreExternalAuditAnchorSinkTest {
 
         assertThat(objectKey).startsWith("audit-anchors/");
         assertThat(objectKey).doesNotContain("../");
-        assertThat(objectKey).endsWith("/1.json");
+        assertThat(objectKey).endsWith("/00000000000000000001.json");
     }
 
     @Test
@@ -73,6 +88,20 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         assertThat(duplicate.chainPosition()).isEqualTo(1L);
         assertThat(duplicate.lastEventHash()).isEqualTo("hash-1");
         assertThat(client.keys()).hasSize(1);
+    }
+
+    @Test
+    void shouldTreatLegacyAnchorAsIdempotentAfterKeyFormatMigration() {
+        AuditAnchorDocument local = localAnchor("local-anchor-1", 1L, "hash-1");
+        putLegacyAnchor("local-anchor-1", 1L, "hash-1");
+
+        ExternalAuditAnchor duplicate = sink.publish(ExternalAuditAnchor.from(local, sink.sinkType()));
+
+        assertThat(duplicate.localAnchorId()).isEqualTo("local-anchor-1");
+        assertThat(duplicate.chainPosition()).isEqualTo(1L);
+        assertThat(duplicate.lastEventHash()).isEqualTo("hash-1");
+        assertThat(client.keys()).hasSize(1);
+        assertThat(client.getObject("audit-bucket", sink.objectKey("source_service:alert-service", 1L))).isEmpty();
     }
 
     @Test
@@ -106,6 +135,16 @@ class ObjectStoreExternalAuditAnchorSinkTest {
     }
 
     @Test
+    void shouldRejectLegacySameChainPositionWithDifferentLocalAnchorId() {
+        putLegacyAnchor("local-anchor-1", 1L, "hash-1");
+
+        assertThatThrownBy(() -> sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-2", 1L, "hash-2"), sink.sinkType())))
+                .isInstanceOf(ExternalAuditAnchorSinkException.class)
+                .extracting("reason")
+                .isEqualTo("MISMATCH");
+    }
+
+    @Test
     void shouldReadAnchorByExactChainPositionWithoutScanning() {
         sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 7L, "hash-7"), sink.sinkType()));
 
@@ -114,6 +153,17 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         assertThat(found).get()
                 .extracting(ExternalAuditAnchor::localAnchorId, ExternalAuditAnchor::chainPosition, ExternalAuditAnchor::lastEventHash)
                 .containsExactly("local-anchor-1", 7L, "hash-7");
+    }
+
+    @Test
+    void shouldReadLegacyAnchorByExactChainPosition() {
+        putLegacyAnchor("local-anchor-7", 7L, "hash-7");
+
+        Optional<ExternalAuditAnchor> found = sink.findByChainPosition("source_service:alert-service", 7L);
+
+        assertThat(found).get()
+                .extracting(ExternalAuditAnchor::localAnchorId, ExternalAuditAnchor::chainPosition, ExternalAuditAnchor::lastEventHash)
+                .containsExactly("local-anchor-7", 7L, "hash-7");
     }
 
     @Test
@@ -128,6 +178,39 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         assertThat(sink.findByRange("source_service:alert-service", null, null, 1))
                 .extracting(ExternalAuditAnchor::chainPosition)
                 .containsExactly(1L);
+    }
+
+    @Test
+    void shouldReturnCorrectHeadBeyondListingLimit() {
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        ObjectStoreExternalAuditAnchorSink scanningSink = new ObjectStoreExternalAuditAnchorSink(
+                "audit-bucket",
+                "audit-anchors",
+                client,
+                objectMapper,
+                new AlertServiceMetrics(meterRegistry),
+                Duration.ofSeconds(2),
+                Duration.ZERO,
+                1,
+                ExternalImmutabilityLevel.CONFIGURED
+        );
+        for (long chainPosition = 1L; chainPosition <= 500L; chainPosition++) {
+            putPaddedAnchor("local-anchor-" + chainPosition, chainPosition, "hash-" + chainPosition);
+        }
+        for (long chainPosition = 501L; chainPosition <= 1000L; chainPosition++) {
+            putLegacyAnchor("local-anchor-" + chainPosition, chainPosition, "hash-" + chainPosition);
+        }
+
+        Optional<ExternalAuditAnchor> latest = scanningSink.latest("source_service:alert-service");
+
+        assertThat(latest).get()
+                .extracting(ExternalAuditAnchor::chainPosition)
+                .isEqualTo(1000L);
+        assertThat(scanningSink.findByChainPosition("source_service:alert-service", 1L)).isPresent();
+        assertThat(scanningSink.findByChainPosition("source_service:alert-service", 1000L)).isPresent();
+        assertThat(meterRegistry.get("fraud_platform_audit_external_anchor_head_scan_depth")
+                .summary()
+                .max()).isEqualTo(1000.0d);
     }
 
     @Test
@@ -238,6 +321,42 @@ class ObjectStoreExternalAuditAnchorSinkTest {
                 chainPosition,
                 "SHA-256"
         );
+    }
+
+    private void putPaddedAnchor(String anchorId, long chainPosition, String hash) {
+        String key = sink.objectKey("source_service:alert-service", chainPosition);
+        putAnchorObject(key, ExternalAuditAnchor.from(localAnchor(anchorId, chainPosition, hash), sink.sinkType()));
+    }
+
+    private void putLegacyAnchor(String anchorId, long chainPosition, String hash) {
+        String key = "audit-anchors/" + ENCODED_PARTITION + "/" + chainPosition + ".json";
+        putAnchorObject(key, ExternalAuditAnchor.from(localAnchor(anchorId, chainPosition, hash), sink.sinkType()));
+    }
+
+    private void putAnchorObject(String key, ExternalAuditAnchor anchor) {
+        ObjectStoreExternalAuditAnchorPayload unsigned = ObjectStoreExternalAuditAnchorPayload.from(anchor, key, null);
+        ObjectStoreExternalAuditAnchorPayload signed = ObjectStoreExternalAuditAnchorPayload.from(
+                anchor,
+                key,
+                sha256Hex(serialize(unsigned))
+        );
+        client.putRaw("audit-bucket", key, serialize(signed));
+    }
+
+    private byte[] serialize(ObjectStoreExternalAuditAnchorPayload payload) {
+        try {
+            return canonicalObjectMapper.writeValueAsBytes(payload);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    private String sha256Hex(byte[] payload) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(payload));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 
     static class InMemoryObjectStoreAuditAnchorClient implements ObjectStoreAuditAnchorClient {
