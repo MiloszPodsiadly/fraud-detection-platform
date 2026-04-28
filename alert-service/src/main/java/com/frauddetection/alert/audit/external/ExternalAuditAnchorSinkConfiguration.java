@@ -1,15 +1,21 @@
 package com.frauddetection.alert.audit.external;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
+import org.springframework.util.StringUtils;
 
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Set;
 
 @Configuration
@@ -22,18 +28,75 @@ class ExternalAuditAnchorSinkConfiguration {
     @Bean
     ExternalAuditAnchorSink externalAuditAnchorSink(
             ObjectMapper objectMapper,
+            ObjectProvider<ObjectStoreAuditAnchorClient> objectStoreClient,
+            AlertServiceMetrics metrics,
             Environment environment,
             @Value("${app.audit.external-anchoring.sink:disabled}") String sink,
             @Value("${app.audit.external-anchoring.local-file.path:./target/audit-external-anchors.jsonl}") String localFilePath,
-            @Value("${app.audit.external-anchoring.allow-local-file-in-prod:false}") boolean allowLocalFileInProd
+            @Value("${app.audit.external-anchoring.allow-local-file-in-prod:false}") boolean allowLocalFileInProd,
+            @Value("${app.audit.external-anchoring.object-store.bucket:}") String objectStoreBucket,
+            @Value("${app.audit.external-anchoring.object-store.prefix:}") String objectStorePrefix,
+            @Value("${app.audit.external-anchoring.object-store.region:}") String objectStoreRegion,
+            @Value("${app.audit.external-anchoring.object-store.endpoint:}") String objectStoreEndpoint,
+            @Value("${app.audit.external-anchoring.object-store.access-key-id:}") String objectStoreAccessKeyId,
+            @Value("${app.audit.external-anchoring.object-store.secret-access-key:}") String objectStoreSecretAccessKey,
+            @Value("${app.audit.external-store.startup-validation:${app.audit.external-anchoring.object-store.startup-check-enabled:true}}") boolean objectStoreStartupCheckEnabled,
+            @Value("${app.audit.external-anchoring.object-store.startup-test-write-enabled:false}") boolean objectStoreStartupTestWriteEnabled,
+            @Value("${app.audit.external-anchoring.object-store.operation-timeout:2s}") Duration objectStoreOperationTimeout,
+            @Value("${app.audit.external-anchoring.object-store.retry-backoff:100ms}") Duration objectStoreRetryBackoff,
+            @Value("${app.audit.external-anchoring.object-store.max-attempts:2}") int objectStoreMaxAttempts,
+            @Value("${HOSTNAME:alert-service}") String instanceId
     ) {
         if ("local-file".equals(sink)) {
             validateLocalFileSink(environment, allowLocalFileInProd);
+            log.info("External audit anchor sink configured: sink_type=local-file path={}", localFilePath);
             return new LocalFileExternalAuditAnchorSink(Path.of(localFilePath), objectMapper);
         }
-        if ("external-object-store".equals(sink)) {
-            throw new IllegalStateException("External object-store audit anchor sink is not implemented yet.");
+        if ("object-store".equals(sink)) {
+            validateObjectStoreSink(
+                    objectStoreBucket,
+                    objectStorePrefix,
+                    objectStoreRegion,
+                    objectStoreEndpoint,
+                    objectStoreAccessKeyId,
+                    objectStoreSecretAccessKey
+            );
+            ObjectStoreAuditAnchorClient client = objectStoreClient.getIfAvailable();
+            if (client == null) {
+                throw new IllegalStateException("Object-store external audit anchor client is not configured.");
+            }
+            ExternalImmutabilityLevel immutabilityLevel = validateObjectStoreReadiness(
+                    client,
+                    objectStoreBucket,
+                    objectStorePrefix,
+                    objectStoreStartupCheckEnabled,
+                    objectStoreStartupTestWriteEnabled,
+                    instanceId
+            );
+            log.info(
+                    "External audit anchor sink configured: sink_type=object-store bucket={} prefix={} region_configured={} endpoint_configured={} immutability_level={}",
+                    objectStoreBucket,
+                    objectStorePrefix,
+                    StringUtils.hasText(objectStoreRegion),
+                    StringUtils.hasText(objectStoreEndpoint),
+                    immutabilityLevel
+            );
+            return new ObjectStoreExternalAuditAnchorSink(
+                    objectStoreBucket,
+                    objectStorePrefix,
+                    client,
+                    objectMapper,
+                    metrics,
+                    objectStoreOperationTimeout,
+                    objectStoreRetryBackoff,
+                    objectStoreMaxAttempts,
+                    immutabilityLevel
+            );
         }
+        if ("external-object-store".equals(sink)) {
+            throw new IllegalStateException("Use app.audit.external-anchoring.sink=object-store for FDP-22 object-store anchoring.");
+        }
+        log.info("External audit anchor sink configured: sink_type=disabled");
         return new DisabledExternalAuditAnchorSink();
     }
 
@@ -48,5 +111,98 @@ class ExternalAuditAnchorSinkConfiguration {
         if (profiles.stream().noneMatch(LOCAL_PROFILES::contains)) {
             log.warn("Local-file external audit anchor sink is for development verification only and is not production WORM storage.");
         }
+    }
+
+    private void validateObjectStoreSink(
+            String bucket,
+            String prefix,
+            String region,
+            String endpoint,
+            String accessKeyId,
+            String secretAccessKey
+    ) {
+        if (!StringUtils.hasText(bucket)) {
+            throw new IllegalStateException("Object-store external audit anchor sink requires bucket.");
+        }
+        if (!StringUtils.hasText(prefix)) {
+            throw new IllegalStateException("Object-store external audit anchor sink requires prefix.");
+        }
+        if (!StringUtils.hasText(region) && !StringUtils.hasText(endpoint)) {
+            throw new IllegalStateException("Object-store external audit anchor sink requires region or endpoint.");
+        }
+        if (!StringUtils.hasText(accessKeyId) || !StringUtils.hasText(secretAccessKey)) {
+            throw new IllegalStateException("Object-store external audit anchor sink requires credentials.");
+        }
+    }
+
+    private ExternalImmutabilityLevel validateObjectStoreReadiness(
+            ObjectStoreAuditAnchorClient client,
+            String bucket,
+            String prefix,
+            boolean startupCheckEnabled,
+            boolean startupTestWriteEnabled,
+            String instanceId
+    ) {
+        ExternalImmutabilityLevel immutabilityLevel;
+        try {
+            immutabilityLevel = client.immutabilityLevel(bucket, trimSlashes(prefix));
+        } catch (RuntimeException exception) {
+            throw new IllegalStateException("Object-store external audit anchor immutability check failed.");
+        }
+        if (immutabilityLevel == null) {
+            immutabilityLevel = ExternalImmutabilityLevel.NONE;
+        }
+        if (!startupCheckEnabled) {
+            return immutabilityLevel;
+        }
+        try {
+            List<String> ignored = client.listKeys(bucket, trimSlashes(prefix), 1);
+            if (ignored == null) {
+                throw new IllegalStateException("Object-store external audit anchor startup check failed.");
+            }
+            if (startupTestWriteEnabled) {
+                verifyStartupProbeWrite(client, bucket, trimSlashes(prefix), instanceId);
+            }
+        } catch (RuntimeException exception) {
+            throw new IllegalStateException("Object-store external audit anchor startup check failed.");
+        }
+        return immutabilityLevel;
+    }
+
+    private void verifyStartupProbeWrite(
+            ObjectStoreAuditAnchorClient client,
+            String bucket,
+            String prefix,
+            String instanceId
+    ) {
+        String safeInstanceId = StringUtils.hasText(instanceId)
+                ? instanceId.replaceAll("[^A-Za-z0-9._-]", "_")
+                : "alert-service";
+        String key = prefix + "/.healthcheck/" + safeInstanceId + ".json";
+        byte[] content = ("{\"kind\":\"audit-anchor-startup-check\",\"schema_version\":\"1.0\",\"instance_id\":\""
+                + safeInstanceId + "\"}").getBytes(StandardCharsets.UTF_8);
+        try {
+            client.putObjectIfAbsent(bucket, key, content);
+        } catch (ExternalAuditAnchorSinkException exception) {
+            if (!"CONFLICT".equals(exception.reason())) {
+                throw exception;
+            }
+        }
+        byte[] stored = client.getObject(bucket, key)
+                .orElseThrow(() -> new IllegalStateException("Object-store external audit anchor startup test write was not readable."));
+        if (!java.util.Arrays.equals(stored, content)) {
+            throw new IllegalStateException("Object-store external audit anchor startup test write mismatch.");
+        }
+    }
+
+    private String trimSlashes(String value) {
+        String trimmed = value.trim();
+        while (trimmed.startsWith("/")) {
+            trimmed = trimmed.substring(1);
+        }
+        while (trimmed.endsWith("/")) {
+            trimmed = trimmed.substring(0, trimmed.length() - 1);
+        }
+        return trimmed;
     }
 }

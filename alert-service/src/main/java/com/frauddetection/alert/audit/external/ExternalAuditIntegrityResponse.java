@@ -38,9 +38,27 @@ public record ExternalAuditIntegrityResponse(
         @JsonInclude(JsonInclude.Include.NON_NULL)
         ExternalAuditAnchorSummary externalAnchor,
 
+        @JsonProperty("external_immutability_level")
+        ExternalImmutabilityLevel externalImmutabilityLevel,
+
         @JsonProperty("violations")
         List<AuditIntegrityViolation> violations
 ) {
+    public ExternalAuditIntegrityResponse(
+            String status,
+            int checked,
+            int limit,
+            String sourceService,
+            String partitionKey,
+            String reasonCode,
+            String message,
+            ExternalAuditAnchorSummary localAnchor,
+            ExternalAuditAnchorSummary externalAnchor,
+            List<AuditIntegrityViolation> violations
+    ) {
+        this(status, checked, limit, sourceService, partitionKey, reasonCode, message, localAnchor, externalAnchor, ExternalImmutabilityLevel.NONE, violations);
+    }
+
     static ExternalAuditIntegrityResponse unavailable(ExternalAuditIntegrityQuery query, String reasonCode, String message) {
         return new ExternalAuditIntegrityResponse(
                 "UNAVAILABLE",
@@ -52,6 +70,7 @@ public record ExternalAuditIntegrityResponse(
                 message,
                 null,
                 null,
+                ExternalImmutabilityLevel.NONE,
                 List.of()
         );
     }

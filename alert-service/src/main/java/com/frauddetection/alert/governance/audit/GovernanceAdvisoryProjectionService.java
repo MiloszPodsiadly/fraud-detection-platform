@@ -30,12 +30,21 @@ public class GovernanceAdvisoryProjectionService {
             GovernanceAdvisoryLifecycleStatus lifecycleStatus
     ) {
         GovernanceAdvisoryListResponse response = advisoryClient.listAdvisories(query);
-        List<GovernanceAdvisoryEvent> enriched = (response.advisoryEvents() == null ? List.<GovernanceAdvisoryEvent>of() : response.advisoryEvents())
+        List<GovernanceAdvisoryEvent> enrichedAll = (response.advisoryEvents() == null ? List.<GovernanceAdvisoryEvent>of() : response.advisoryEvents())
                 .stream()
                 .map(this::withLifecycleStatus)
+                .toList();
+        boolean degraded = enrichedAll.stream()
+                .anyMatch(event -> event.lifecycleStatus() == GovernanceAdvisoryLifecycleStatus.UNKNOWN);
+        List<GovernanceAdvisoryEvent> enriched = enrichedAll.stream()
                 .filter(event -> lifecycleStatus == null || event.lifecycleStatus() == lifecycleStatus)
                 .toList();
-        return new GovernanceAdvisoryListResponse(response.status(), enriched.size(), response.retentionLimit(), enriched);
+        String status = degraded && "AVAILABLE".equals(response.status()) ? "PARTIAL" : response.status();
+        String reasonCode = degraded ? "AUDIT_UNAVAILABLE" : response.reasonCode();
+        if (degraded) {
+            metrics.recordGovernanceLifecycleDegraded("AUDIT_UNAVAILABLE");
+        }
+        return new GovernanceAdvisoryListResponse(status, reasonCode, enriched.size(), response.retentionLimit(), enriched);
     }
 
     public GovernanceAdvisoryEvent getAdvisory(String eventId) {
@@ -50,6 +59,7 @@ public class GovernanceAdvisoryProjectionService {
         // Lifecycle is computed per read. It does not modify advisory events or system behavior.
         GovernanceAdvisoryLifecycleStatus status = lifecycleService.lifecycleStatus(event.eventId());
         metrics.recordGovernanceAdvisoryLifecycle(status.name(), event.modelName(), event.modelVersion());
+        metrics.recordGovernanceLifecycleStatus(status.name());
         return event.withLifecycleStatus(status);
     }
 }

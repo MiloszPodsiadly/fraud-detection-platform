@@ -36,7 +36,15 @@ public record AuditEvidenceExportAnchorReference(
 
         @JsonProperty("publication_status")
         @JsonInclude(JsonInclude.Include.NON_NULL)
-        String publicationStatus
+        String publicationStatus,
+
+        @JsonProperty("publication_reason")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        String publicationReason,
+
+        @JsonProperty("manifest_status")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        String manifestStatus
 ) {
     static AuditEvidenceExportAnchorReference local(AuditAnchorDocument document) {
         return new AuditEvidenceExportAnchorReference(
@@ -46,6 +54,8 @@ public record AuditEvidenceExportAnchorReference(
                 document.chainPosition(),
                 document.lastEventHash(),
                 document.hashAlgorithm(),
+                null,
+                null,
                 null,
                 null,
                 null
@@ -62,7 +72,9 @@ public record AuditEvidenceExportAnchorReference(
                 anchor.hashAlgorithm(),
                 anchor.schemaVersion(),
                 anchor.sinkType(),
-                anchor.publicationStatus()
+                anchor.publicationStatus(),
+                anchor.publicationReason(),
+                anchor.manifestStatus()
         );
     }
 }

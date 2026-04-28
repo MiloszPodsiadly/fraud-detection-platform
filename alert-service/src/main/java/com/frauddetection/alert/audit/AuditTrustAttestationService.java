@@ -7,6 +7,8 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorSink;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorSummary;
+import com.frauddetection.alert.audit.external.ExternalAnchorReference;
+import com.frauddetection.alert.audit.external.ExternalImmutabilityLevel;
 import com.frauddetection.alert.audit.external.ExternalAuditIntegrityResponse;
 import com.frauddetection.alert.audit.external.ExternalAuditIntegrityService;
 import com.frauddetection.alert.audit.trust.AuditTrustAttestationException;
@@ -97,14 +99,17 @@ public class AuditTrustAttestationService {
             ExternalAuditIntegrityResponse external
     ) {
         String externalAnchorStatus = externalAnchorStatus(external);
+        ExternalImmutabilityLevel immutabilityLevel = external.externalImmutabilityLevel() == null
+                ? ExternalImmutabilityLevel.NONE
+                : external.externalImmutabilityLevel();
         validateExternalConsistency(external, externalAnchorStatus);
         AuditTrustLevel trustLevel = trustLevel(internal, external, externalAnchorStatus);
         String status = "UNAVAILABLE".equals(internal.status()) ? "UNAVAILABLE" : "AVAILABLE";
         AuditTrustAttestationResponse.AnchorCoverage coverage = anchorCoverage(external, externalAnchorStatus);
         Long latestChainPosition = latestChainPosition(external);
         String latestEventHash = latestEventHash(internal, external);
-        AuditTrustAttestationResponse.ExternalAnchorReference latestExternalAnchor = latestExternalAnchor(external);
-        List<String> limitations = limitations(internal, external, externalAnchorStatus, trustLevel);
+        ExternalAnchorReference latestExternalAnchor = latestExternalAnchor(external);
+        List<String> limitations = limitations(internal, external, externalAnchorStatus, immutabilityLevel, trustLevel);
         String signatureKeyId = signer.signingEnabled() ? signer.keyId() : null;
         String signatureStrength = signer.signingEnabled() ? signer.signatureStrength() : "NONE";
         String externalTrustDependency = externalTrustDependency(trustLevel);
@@ -119,6 +124,7 @@ public class AuditTrustAttestationService {
                 internal.status(),
                 external.status(),
                 externalAnchorStatus,
+                immutabilityLevel,
                 coverage,
                 latestChainPosition,
                 latestEventHash,
@@ -127,7 +133,9 @@ public class AuditTrustAttestationService {
         );
         String fingerprint = sha256(canonicalBytes(canonical));
         AuditTrustAttestationSignature signature = signature(canonicalBytes(canonicalWithFingerprint(canonical, fingerprint)));
-        AuditTrustLevel finalTrustLevel = trustLevel == AuditTrustLevel.EXTERNALLY_ANCHORED && "PRODUCTION_READY".equals(signatureStrength)
+        AuditTrustLevel finalTrustLevel = trustLevel == AuditTrustLevel.EXTERNALLY_ANCHORED
+                && "PRODUCTION_READY".equals(signatureStrength)
+                && immutabilityLevel == ExternalImmutabilityLevel.ENFORCED
                 ? AuditTrustLevel.SIGNED_ATTESTATION
                 : trustLevel;
 
@@ -142,6 +150,7 @@ public class AuditTrustAttestationService {
                     internal.status(),
                     external.status(),
                     externalAnchorStatus,
+                    immutabilityLevel,
                     coverage,
                     latestChainPosition,
                     latestEventHash,
@@ -158,6 +167,7 @@ public class AuditTrustAttestationService {
                 internal.status(),
                 external.status(),
                 externalAnchorStatus,
+                immutabilityLevel,
                 coverage,
                 latestChainPosition,
                 latestEventHash,
@@ -251,16 +261,20 @@ public class AuditTrustAttestationService {
         return external.externalAnchor() == null ? null : external.externalAnchor().lastEventHash();
     }
 
-    private AuditTrustAttestationResponse.ExternalAnchorReference latestExternalAnchor(ExternalAuditIntegrityResponse external) {
+    private ExternalAnchorReference latestExternalAnchor(ExternalAuditIntegrityResponse external) {
         ExternalAuditAnchorSummary anchor = external.externalAnchor();
         if (anchor == null) {
             return null;
         }
-        return new AuditTrustAttestationResponse.ExternalAnchorReference(
+        if (anchor.externalReference() != null) {
+            return anchor.externalReference();
+        }
+        return new ExternalAnchorReference(
+                anchor.localAnchorId(),
                 anchor.externalAnchorId(),
-                anchor.chainPosition(),
-                anchor.sinkType(),
-                anchor.publicationStatus()
+                anchor.lastEventHash(),
+                anchor.lastEventHash(),
+                anchor.createdAt()
         );
     }
 
@@ -268,6 +282,7 @@ public class AuditTrustAttestationService {
             AuditIntegrityResponse internal,
             ExternalAuditIntegrityResponse external,
             String externalAnchorStatus,
+            ExternalImmutabilityLevel immutabilityLevel,
             AuditTrustLevel trustLevel
     ) {
         List<String> limitations = new ArrayList<>();
@@ -285,6 +300,10 @@ public class AuditTrustAttestationService {
         if (!"VALID".equals(externalAnchorStatus)) {
             limitations.add("external_anchor_not_valid");
             limitations.add("external_trust_incomplete");
+        }
+        if (immutabilityLevel != ExternalImmutabilityLevel.ENFORCED) {
+            limitations.add("external_immutability_not_enforced");
+            limitations.add("no_worm_claim_without_infrastructure_enforcement");
         }
         if ("LOCAL_DEV".equals(signer.signatureStrength())) {
             limitations.add("local_signature_not_external_trust");
@@ -312,10 +331,11 @@ public class AuditTrustAttestationService {
             String internalIntegrityStatus,
             String externalIntegrityStatus,
             String externalAnchorStatus,
+            ExternalImmutabilityLevel immutabilityLevel,
             AuditTrustAttestationResponse.AnchorCoverage anchorCoverage,
             Long latestChainPosition,
             String latestEventHash,
-            AuditTrustAttestationResponse.ExternalAnchorReference latestExternalAnchorReference,
+            ExternalAnchorReference latestExternalAnchorReference,
             List<String> limitations
     ) {
         Map<String, Object> canonical = new LinkedHashMap<>();
@@ -328,6 +348,7 @@ public class AuditTrustAttestationService {
         canonical.put("internal_integrity_status", internalIntegrityStatus);
         canonical.put("external_integrity_status", externalIntegrityStatus);
         canonical.put("external_anchor_status", externalAnchorStatus);
+        canonical.put("external_immutability_level", immutabilityLevel.name());
         canonical.put("anchor_coverage", Map.of(
                 "total_anchors_checked", anchorCoverage.totalAnchorsChecked(),
                 "external_anchors_matched", anchorCoverage.externalAnchorsMatched(),
@@ -344,13 +365,14 @@ public class AuditTrustAttestationService {
     }
 
     private Map<String, Object> externalAnchorReference(
-            AuditTrustAttestationResponse.ExternalAnchorReference latestExternalAnchorReference
+            ExternalAnchorReference latestExternalAnchorReference
     ) {
         Map<String, Object> reference = new LinkedHashMap<>();
-        reference.put("external_anchor_id", latestExternalAnchorReference.externalAnchorId());
-        reference.put("chain_position", latestExternalAnchorReference.chainPosition());
-        reference.put("sink_type", latestExternalAnchorReference.sinkType());
-        reference.put("publication_status", latestExternalAnchorReference.publicationStatus());
+        reference.put("anchor_id", latestExternalAnchorReference.anchorId());
+        reference.put("external_key", latestExternalAnchorReference.externalKey());
+        reference.put("anchor_hash", latestExternalAnchorReference.anchorHash());
+        reference.put("external_hash", latestExternalAnchorReference.externalHash());
+        reference.put("verified_at", latestExternalAnchorReference.verifiedAt() == null ? null : latestExternalAnchorReference.verifiedAt().toString());
         return reference;
     }
 

@@ -155,6 +155,14 @@ Prometheus metric contract:
   - Type: counter
   - Meaning: read-time advisory lifecycle projection observations. Lifecycle metrics represent distribution of advisory states, not operational decisions.
   - Labels: `lifecycle_status`, `model_name`, `model_version`
+- `lifecycle_status_total`
+  - Type: counter
+  - Meaning: low-cardinality lifecycle projection bucket observations. `UNKNOWN` indicates audit truth was unavailable and must not be interpreted as open.
+  - Labels: `status`
+- `lifecycle_degraded_total`
+  - Type: counter
+  - Meaning: lifecycle enrichment degradation observations.
+  - Labels: `reason`
 - `fraud_ml_governance_analytics_requests_total`
   - Type: counter
   - Meaning: bounded audit analytics requests served by `alert-service`. Metrics represent observational distribution only; they do not represent system decisions or actions.
@@ -210,6 +218,39 @@ Prometheus metric contract:
   - Meaning: observed internal mTLS certificate lifecycle states during startup, health checks, and runtime monitoring
   - Labels: `state`
   - Bounded states: `UP`, `WARN`, `CRITICAL`, `DOWN`
+- `fraud_platform_audit_external_anchor_head_scan_depth`
+  - Type: distribution summary
+  - Meaning: number of object-store anchor keys examined while proving the latest external HEAD through continuation-token pagination
+  - Labels: none
+  - Notes: normal object-store publish must not emit this metric because publish does not list the partition. Non-paginated or potentially truncated HEAD listing fails explicitly and must not be interpreted as a valid empty or best-effort result.
+- `fraud_platform_audit_external_anchor_published_total`
+  - Type: counter
+  - Meaning: external anchor publication outcomes
+  - Labels: `sink`, `status`
+  - Bounded statuses: `PUBLISHED`, `PARTIAL`, `DUPLICATE`, `FAILED`
+  - Notes: `PARTIAL` means the anchor object was stored and verified but manifest update or verification failed; it is not counted as `PUBLISHED`.
+- `external_manifest_read_total`
+  - Type: counter
+  - Meaning: External Head Manifest reads by outcome
+  - Labels: `status`
+  - Bounded statuses: `HIT`, `MISS`, `INVALID`
+- `external_manifest_update_total`
+  - Type: counter
+  - Meaning: External Head Manifest update attempts after verified anchor publication
+  - Labels: `status`
+  - Bounded statuses: `SUCCESS`, `FAILED`
+- `external_manifest_fallback_scan_total`
+  - Type: counter
+  - Meaning: latest external HEAD lookup fell back from manifest to full paginated scan
+  - Labels: none
+- `external_manifest_invalid_total`
+  - Type: counter
+  - Meaning: manifest hash/shape validation failed
+  - Labels: none
+- `external_manifest_mismatch_total`
+  - Type: counter
+  - Meaning: manifest referenced a missing or mismatched anchor
+  - Labels: none
 - `fraud_internal_auth_replay_rejected_total`
   - Type: counter
   - Meaning: rejected internal service JWT freshness or soft replay attempts

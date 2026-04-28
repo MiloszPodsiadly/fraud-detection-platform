@@ -25,7 +25,19 @@ class ExternalAuditAnchorPublicationStatusRepositoryTest {
     void shouldPersistConsistentSuccessStatus() {
         AuditAnchorDocument anchor = localAnchor("local-anchor-1", 1L);
 
-        repository.recordSuccess(anchor, Instant.parse("2026-04-27T10:01:00Z"), "local-file");
+        repository.recordSuccess(
+                anchor,
+                Instant.parse("2026-04-27T10:01:00Z"),
+                "object-store",
+                new ExternalAnchorReference(
+                        "local-anchor-1",
+                        "audit-anchors/partition/1.json",
+                        "hash-1",
+                        "hash-1",
+                        Instant.parse("2026-04-27T10:01:00Z")
+                ),
+                ExternalImmutabilityLevel.CONFIGURED
+        );
 
         ArgumentCaptor<Update> update = ArgumentCaptor.forClass(Update.class);
         verify(mongoTemplate).upsert(
@@ -35,8 +47,52 @@ class ExternalAuditAnchorPublicationStatusRepositoryTest {
         );
         Document set = update.getValue().getUpdateObject().get("$set", Document.class);
         assertThat(set.get("external_published")).isEqualTo(true);
+        assertThat(set.get("external_publication_status")).isEqualTo("PUBLISHED");
         assertThat(set.get("external_published_at")).isEqualTo(Instant.parse("2026-04-27T10:01:00Z"));
-        assertThat(set.get("external_sink_type")).isEqualTo("local-file");
+        assertThat(set.get("external_sink_type")).isEqualTo("object-store");
+        assertThat(set.get("external_key")).isEqualTo("audit-anchors/partition/1.json");
+        assertThat(set.get("anchor_hash")).isEqualTo("hash-1");
+        assertThat(set.get("external_hash")).isEqualTo("hash-1");
+        assertThat(set.get("external_reference_verified_at")).isEqualTo(Instant.parse("2026-04-27T10:01:00Z"));
+        assertThat(set.get("external_immutability_level")).isEqualTo("CONFIGURED");
+    }
+
+    @Test
+    void shouldPersistConsistentPartialStatus() {
+        AuditAnchorDocument anchor = localAnchor("local-anchor-1", 1L);
+
+        repository.recordPartial(
+                anchor,
+                Instant.parse("2026-04-27T10:01:00Z"),
+                "object-store",
+                new ExternalAnchorReference(
+                        "local-anchor-1",
+                        "audit-anchors/partition/1.json",
+                        "hash-1",
+                        "hash-1",
+                        Instant.parse("2026-04-27T10:01:00Z")
+                ),
+                ExternalImmutabilityLevel.CONFIGURED,
+                ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED,
+                ExternalAuditAnchor.MANIFEST_STATUS_FAILED
+        );
+
+        ArgumentCaptor<Update> update = ArgumentCaptor.forClass(Update.class);
+        verify(mongoTemplate).upsert(
+                org.mockito.ArgumentMatchers.any(Query.class),
+                update.capture(),
+                eq(ExternalAuditAnchorPublicationStatusDocument.class)
+        );
+        Document updateObject = update.getValue().getUpdateObject();
+        Document set = updateObject.get("$set", Document.class);
+        Document unset = updateObject.get("$unset", Document.class);
+        assertThat(set.get("external_published")).isEqualTo(false);
+        assertThat(set.get("external_publication_status")).isEqualTo("PARTIAL");
+        assertThat(set.get("external_sink_type")).isEqualTo("object-store");
+        assertThat(set.get("external_key")).isEqualTo("audit-anchors/partition/1.json");
+        assertThat(set.get("manifest_status")).isEqualTo("FAILED");
+        assertThat(set.get("last_external_publish_failure_reason")).isEqualTo("HEAD_MANIFEST_UPDATE_FAILED");
+        assertThat(unset).containsKey("external_published_at");
     }
 
     @Test
@@ -55,8 +111,17 @@ class ExternalAuditAnchorPublicationStatusRepositoryTest {
         Document set = updateObject.get("$set", Document.class);
         Document unset = updateObject.get("$unset", Document.class);
         assertThat(set.get("external_published")).isEqualTo(false);
+        assertThat(set.get("external_publication_status")).isEqualTo("FAILED");
         assertThat(set.get("last_external_publish_failure_reason")).isEqualTo("IO_ERROR");
-        assertThat(unset).containsKeys("external_published_at", "external_sink_type");
+        assertThat(unset).containsKeys(
+                "external_published_at",
+                "external_sink_type",
+                "external_key",
+                "anchor_hash",
+                "external_hash",
+                "external_reference_verified_at",
+                "external_immutability_level"
+        );
     }
 
     @Test

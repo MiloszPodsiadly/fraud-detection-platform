@@ -101,6 +101,7 @@ class GovernanceAdvisoryAnalyticsServiceTest {
                         advisory("old-advisory", "2026-04-01T00:00:00Z"),
                         advisory("current-advisory", "2026-04-25T00:00:00Z")
                 )));
+        when(lifecycleService.lifecycleStatus("current-advisory")).thenReturn(GovernanceAdvisoryLifecycleStatus.OPEN);
 
         GovernanceAdvisoryAnalyticsResponse response = service.analytics(7);
 
@@ -120,7 +121,10 @@ class GovernanceAdvisoryAnalyticsServiceTest {
 
         assertThat(response.status()).isEqualTo("PARTIAL");
         assertThat(response.reason()).isEqualTo("AUDIT_UNAVAILABLE");
-        assertThat(response.totals()).isEqualTo(new GovernanceAdvisoryAnalyticsResponse.Totals(1, 0, 1));
+        assertThat(response.totals()).isEqualTo(new GovernanceAdvisoryAnalyticsResponse.Totals(1, 0, 0, 0, 1));
+        assertThat(response.lifecycleDistribution())
+                .containsEntry(GovernanceAdvisoryLifecycleStatus.OPEN, 0)
+                .containsEntry(GovernanceAdvisoryLifecycleStatus.UNKNOWN, 1);
     }
 
     @Test
@@ -151,7 +155,9 @@ class GovernanceAdvisoryAnalyticsServiceTest {
         GovernanceAdvisoryAnalyticsResponse response = service.analytics(7);
 
         assertThat(response.decisionDistribution().values()).allMatch(count -> count == 0);
-        assertThat(response.lifecycleDistribution()).containsEntry(GovernanceAdvisoryLifecycleStatus.OPEN, 1);
+        assertThat(response.lifecycleDistribution())
+                .containsEntry(GovernanceAdvisoryLifecycleStatus.OPEN, 0)
+                .containsEntry(GovernanceAdvisoryLifecycleStatus.UNKNOWN, 1);
     }
 
     @Test
@@ -246,7 +252,8 @@ class GovernanceAdvisoryAnalyticsServiceTest {
 
         assertThat(response.status()).isEqualTo("PARTIAL");
         assertThat(response.reason()).isEqualTo("AUDIT_LIMIT_EXCEEDED");
-        assertThat(response.totals()).isEqualTo(new GovernanceAdvisoryAnalyticsResponse.Totals(1, 0, 1));
+        assertThat(response.totals()).isEqualTo(new GovernanceAdvisoryAnalyticsResponse.Totals(1, 0, 0, 0, 1));
+        assertThat(response.lifecycleDistribution()).containsEntry(GovernanceAdvisoryLifecycleStatus.UNKNOWN, 1);
     }
 
     @Test
@@ -256,18 +263,21 @@ class GovernanceAdvisoryAnalyticsServiceTest {
                 .thenReturn(new GovernanceAdvisoryListResponse("AVAILABLE", 1, 200, List.of(
                         advisory("advisory-1", "2026-04-26T00:00:00Z")
                 )));
+        when(lifecycleService.lifecycleStatus("advisory-1")).thenReturn(GovernanceAdvisoryLifecycleStatus.OPEN);
 
         GovernanceAdvisoryAnalyticsResponse response = service.analytics(7);
 
         assertThat(jsonPropertyNames(GovernanceAdvisoryAnalyticsResponse.class)).containsExactlyInAnyOrder(
                 "status",
-                "reason",
+                "reason_code",
                 "window",
                 "totals",
                 "decision_distribution",
                 "lifecycle_distribution",
                 "review_timeliness"
         );
+        assertThat(jsonPropertyNames(GovernanceAdvisoryAnalyticsResponse.Totals.class))
+                .containsExactlyInAnyOrder("advisories", "reviewed", "open", "resolved", "unknown");
         assertThat(jsonPropertyNames(GovernanceAdvisoryAnalyticsResponse.ReviewTimeliness.class))
                 .containsExactlyInAnyOrder(
                 "status",

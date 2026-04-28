@@ -2,6 +2,7 @@ package com.frauddetection.alert.governance.audit;
 
 public enum GovernanceAdvisoryLifecycleStatus {
     OPEN,
+    UNKNOWN,
     ACKNOWLEDGED,
     NEEDS_FOLLOW_UP,
     DISMISSED_AS_NOISE;

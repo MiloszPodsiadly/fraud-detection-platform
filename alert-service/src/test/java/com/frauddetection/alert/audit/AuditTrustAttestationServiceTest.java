@@ -2,6 +2,7 @@ package com.frauddetection.alert.audit;
 
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorSink;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorSummary;
+import com.frauddetection.alert.audit.external.ExternalImmutabilityLevel;
 import com.frauddetection.alert.audit.external.ExternalAuditIntegrityResponse;
 import com.frauddetection.alert.audit.external.ExternalAuditIntegrityService;
 import com.frauddetection.alert.audit.trust.AuditTrustAttestationSignature;
@@ -112,7 +113,7 @@ class AuditTrustAttestationServiceTest {
     }
 
     @Test
-    void shouldUpgradeTrustLevelOnlyForProductionReadySigning() {
+    void shouldNotUpgradeTrustLevelForProductionReadySigningWhenImmutabilityIsNotEnforced() {
         when(externalAnchorSink.sinkType()).thenReturn("local-file");
         when(internalIntegrityService.verify(null, null, "alert-service", "HEAD", 100))
                 .thenReturn(internal("VALID"));
@@ -122,10 +123,27 @@ class AuditTrustAttestationServiceTest {
         AuditTrustAttestationResponse response = service(new ProductionReadyAuditTrustAttestationSigner())
                 .attest("alert-service", 100, null);
 
-        assertThat(response.trustLevel()).isEqualTo(AuditTrustLevel.SIGNED_ATTESTATION);
+        assertThat(response.trustLevel()).isEqualTo(AuditTrustLevel.EXTERNALLY_ANCHORED);
         assertThat(response.attestationSignature()).isEqualTo("production-signature");
         assertThat(response.signerMode()).isEqualTo("kms-ready");
         assertThat(response.attestationSignatureStrength()).isEqualTo("PRODUCTION_READY");
+        assertThat(response.externalImmutabilityLevel()).isEqualTo(ExternalImmutabilityLevel.NONE);
+        assertThat(response.limitations()).contains("external_immutability_not_enforced");
+    }
+
+    @Test
+    void shouldUpgradeTrustLevelOnlyForProductionReadySigningAndEnforcedImmutability() {
+        when(externalAnchorSink.sinkType()).thenReturn("object-store");
+        when(internalIntegrityService.verify(null, null, "alert-service", "HEAD", 100))
+                .thenReturn(internal("VALID"));
+        when(externalIntegrityService.verify("alert-service", 100))
+                .thenReturn(validExternal("alert-service", "event-hash", "external-anchor-1", ExternalImmutabilityLevel.ENFORCED));
+
+        AuditTrustAttestationResponse response = service(new ProductionReadyAuditTrustAttestationSigner())
+                .attest("alert-service", 100, null);
+
+        assertThat(response.trustLevel()).isEqualTo(AuditTrustLevel.SIGNED_ATTESTATION);
+        assertThat(response.externalImmutabilityLevel()).isEqualTo(ExternalImmutabilityLevel.ENFORCED);
         assertThat(response.externalTrustDependency()).isEqualTo("REQUIRED");
     }
 
@@ -297,6 +315,15 @@ class AuditTrustAttestationServiceTest {
     }
 
     private ExternalAuditIntegrityResponse validExternal(String sourceService, String eventHash, String externalAnchorId) {
+        return validExternal(sourceService, eventHash, externalAnchorId, ExternalImmutabilityLevel.NONE);
+    }
+
+    private ExternalAuditIntegrityResponse validExternal(
+            String sourceService,
+            String eventHash,
+            String externalAnchorId,
+            ExternalImmutabilityLevel immutabilityLevel
+    ) {
         return new ExternalAuditIntegrityResponse(
                 "VALID",
                 1,
@@ -307,6 +334,7 @@ class AuditTrustAttestationServiceTest {
                 null,
                 localAnchor(eventHash),
                 externalAnchor(eventHash, externalAnchorId),
+                immutabilityLevel,
                 List.of()
         );
     }

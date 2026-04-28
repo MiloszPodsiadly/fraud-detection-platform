@@ -61,13 +61,14 @@ public class ExternalAuditIntegrityService {
             auditFailureBestEffort(query, response, "AUDIT_STORE_UNAVAILABLE");
             return response;
         } catch (ExternalAuditAnchorSinkException exception) {
+            String reasonCode = externalUnavailableReasonCode(exception);
             ExternalAuditIntegrityResponse response = ExternalAuditIntegrityResponse.unavailable(
                     query,
-                    "EXTERNAL_ANCHOR_STORE_UNAVAILABLE",
-                    "External audit anchor sink is currently unavailable."
+                    reasonCode,
+                    externalUnavailableMessage(reasonCode)
             );
             metrics.recordExternalIntegrityCheck(response.status());
-            auditFailureBestEffort(query, response, "EXTERNAL_ANCHOR_STORE_UNAVAILABLE");
+            auditFailureBestEffort(query, response, reasonCode);
             return response;
         }
     }
@@ -85,11 +86,35 @@ public class ExternalAuditIntegrityService {
                     null,
                     null,
                     null,
+                    sink.immutabilityLevel(),
                     List.of()
             );
         }
 
-        ExternalAuditAnchor external = sink.latest(query.partitionKey()).orElse(null);
+        ExternalAuditAnchor external;
+        try {
+            java.util.Optional<ExternalAuditAnchor> exactExternal = sink.findByChainPosition(query.partitionKey(), local.chainPosition());
+            if (exactExternal == null) {
+                exactExternal = java.util.Optional.empty();
+            }
+            external = exactExternal
+                    .or(() -> sink.latest(query.partitionKey()))
+                    .orElse(null);
+        } catch (ExternalAuditAnchorSinkException exception) {
+            if (!isExternalIntegrityMismatch(exception.reason())) {
+                throw exception;
+            }
+            metrics.recordExternalTamperingDetected(exception.reason());
+            return response(
+                    "INVALID",
+                    query,
+                    local,
+                    null,
+                    List.of(new AuditIntegrityViolation(exception.reason(), 1, exception.reason())),
+                    exception.reason(),
+                    "External anchor binding mismatch."
+            );
+        }
         if (external == null) {
             return partial(query, local, null, "EXTERNAL_ANCHOR_MISSING", "External anchor is missing for the local chain head.");
         }
@@ -155,9 +180,25 @@ public class ExternalAuditIntegrityService {
                 reasonCode,
                 message,
                 ExternalAuditAnchorSummary.fromLocal(local),
-                external == null ? null : ExternalAuditAnchorSummary.fromExternal(external),
+                external == null ? null : ExternalAuditAnchorSummary.fromExternal(
+                        external,
+                        externalReference(external),
+                        sink.immutabilityLevel()
+                ),
+                sink.immutabilityLevel(),
                 violations
         );
+    }
+
+    private ExternalAnchorReference externalReference(ExternalAuditAnchor external) {
+        try {
+            return sink.externalReference(external).orElse(null);
+        } catch (ExternalAuditAnchorSinkException exception) {
+            if (isExternalIntegrityMismatch(exception.reason())) {
+                metrics.recordExternalTamperingDetected(exception.reason());
+            }
+            throw exception;
+        }
     }
 
     private void auditFailureBestEffort(ExternalAuditIntegrityQuery query, ExternalAuditIntegrityResponse response, String reason) {
@@ -198,5 +239,26 @@ public class ExternalAuditIntegrityService {
             return right == null;
         }
         return left.equals(right);
+    }
+
+    private boolean isExternalIntegrityMismatch(String reason) {
+        return "EXTERNAL_OBJECT_KEY_MISMATCH".equals(reason)
+                || "EXTERNAL_PAYLOAD_HASH_MISMATCH".equals(reason)
+                || "MISMATCH".equals(reason);
+    }
+
+    private String externalUnavailableReasonCode(ExternalAuditAnchorSinkException exception) {
+        return switch (exception.reason()) {
+            case "HEAD_SCAN_PAGINATION_UNSUPPORTED", "HEAD_SCAN_LIMIT_EXCEEDED" -> exception.reason();
+            default -> "EXTERNAL_ANCHOR_STORE_UNAVAILABLE";
+        };
+    }
+
+    private String externalUnavailableMessage(String reasonCode) {
+        return switch (reasonCode) {
+            case "HEAD_SCAN_PAGINATION_UNSUPPORTED", "HEAD_SCAN_LIMIT_EXCEEDED" ->
+                    "External audit anchor head cannot be proven from the object-store listing.";
+            default -> "External audit anchor sink is currently unavailable.";
+        };
     }
 }

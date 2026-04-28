@@ -38,11 +38,17 @@ class AlertServiceMetricsTest {
     void shouldUseNoDynamicLabelsForAnalyticsMetrics() {
         metrics.recordGovernanceAnalyticsRequest(7);
         metrics.recordGovernanceAnalyticsOutcome("AVAILABLE", Duration.ofMillis(25));
+        metrics.recordGovernanceLifecycleStatus("OPEN");
+        metrics.recordGovernanceLifecycleStatus("ACKNOWLEDGED");
+        metrics.recordGovernanceLifecycleDegraded("AUDIT_UNAVAILABLE");
 
         Meter requestMeter = meterRegistry.get("fraud_ml_governance_analytics_requests_total").meter();
         Meter windowMeter = meterRegistry.get("fraud_ml_governance_analytics_window_days").meter();
         Meter statusMeter = meterRegistry.get("fraud_ml_governance_analytics_status_total").meter();
         Meter latencyMeter = meterRegistry.get("fraud_ml_governance_analytics_latency_seconds").meter();
+        Meter lifecycleStatusMeter = meterRegistry.get("lifecycle_status_total").tag("status", "OPEN").meter();
+        Meter lifecycleResolvedMeter = meterRegistry.get("lifecycle_status_total").tag("status", "RESOLVED").meter();
+        Meter lifecycleDegradedMeter = meterRegistry.get("lifecycle_degraded_total").meter();
 
         assertThat(requestMeter.getId().getTags()).isEmpty();
         assertThat(windowMeter.getId().getTags()).isEmpty();
@@ -53,6 +59,18 @@ class AlertServiceMetricsTest {
                 .extracting(Tag::getValue)
                 .containsExactly("AVAILABLE");
         assertThat(latencyMeter.getId().getTags()).isEmpty();
+        assertThat(lifecycleStatusMeter.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactly("status");
+        assertThat(lifecycleResolvedMeter.getId().getTags())
+                .extracting(Tag::getValue)
+                .containsExactly("RESOLVED");
+        assertThat(lifecycleDegradedMeter.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactly("reason");
+        assertThat(lifecycleDegradedMeter.getId().getTags())
+                .extracting(Tag::getValue)
+                .containsExactly("AUDIT_UNAVAILABLE");
         assertThat(meterRegistry.get("fraud_ml_governance_analytics_window_days").gauge().value()).isEqualTo(7.0);
         assertThat(meterRegistry.get("fraud_ml_governance_analytics_latency_seconds").timer().count()).isEqualTo(1);
         assertThat(meterRegistry.get("fraud_ml_governance_analytics_status_total").tag("status", "AVAILABLE").counter().count())
@@ -83,6 +101,11 @@ class AlertServiceMetricsTest {
         metrics.recordExternalAnchorPublished("local-file", "PUBLISHED");
         metrics.recordExternalAnchorPublishFailed("local-file", "IO_ERROR");
         metrics.recordExternalAnchorLag(Duration.ofSeconds(3));
+        metrics.recordExternalManifestRead("HIT");
+        metrics.recordExternalManifestUpdate("SUCCESS");
+        metrics.recordExternalManifestFallbackScan();
+        metrics.recordExternalManifestInvalid();
+        metrics.recordExternalManifestMismatch();
         metrics.recordExternalIntegrityCheck("PARTIAL");
         metrics.recordEvidenceExport("PARTIAL");
         metrics.recordEvidenceExportRateLimited();
@@ -96,6 +119,11 @@ class AlertServiceMetricsTest {
         Meter externalAnchorPublished = meterRegistry.get("fraud_platform_audit_external_anchor_published_total").meter();
         Meter externalAnchorFailures = meterRegistry.get("fraud_platform_audit_external_anchor_publish_failed_total").meter();
         Meter externalAnchorLag = meterRegistry.get("fraud_platform_audit_external_anchor_lag_seconds").meter();
+        Meter manifestRead = meterRegistry.get("external_manifest_read_total").meter();
+        Meter manifestUpdate = meterRegistry.get("external_manifest_update_total").meter();
+        Meter manifestFallback = meterRegistry.get("external_manifest_fallback_scan_total").meter();
+        Meter manifestInvalid = meterRegistry.get("external_manifest_invalid_total").meter();
+        Meter manifestMismatch = meterRegistry.get("external_manifest_mismatch_total").meter();
         Meter externalIntegrityChecks = meterRegistry.get("fraud_platform_audit_external_integrity_checks_total").meter();
         Meter evidenceExports = meterRegistry.get("fraud_platform_audit_evidence_exports_total").meter();
         Meter evidenceExportRateLimited = meterRegistry.get("fraud_platform_audit_evidence_export_rate_limited_total").meter();
@@ -123,6 +151,21 @@ class AlertServiceMetricsTest {
                 .extracting(Tag::getKey)
                 .containsExactlyInAnyOrder("sink", "reason");
         assertThat(externalAnchorLag.getId().getTags()).isEmpty();
+        assertThat(manifestRead.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactly("status");
+        assertThat(manifestRead.getId().getTags())
+                .extracting(Tag::getValue)
+                .containsExactly("HIT");
+        assertThat(manifestUpdate.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactly("status");
+        assertThat(manifestUpdate.getId().getTags())
+                .extracting(Tag::getValue)
+                .containsExactly("SUCCESS");
+        assertThat(manifestFallback.getId().getTags()).isEmpty();
+        assertThat(manifestInvalid.getId().getTags()).isEmpty();
+        assertThat(manifestMismatch.getId().getTags()).isEmpty();
         assertThat(externalIntegrityChecks.getId().getTags())
                 .extracting(Tag::getKey)
                 .containsExactly("status");

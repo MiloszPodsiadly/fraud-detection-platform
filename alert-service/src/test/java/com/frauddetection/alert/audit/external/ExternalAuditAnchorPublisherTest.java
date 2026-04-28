@@ -14,6 +14,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -42,6 +43,7 @@ class ExternalAuditAnchorPublisherTest {
         ExternalAuditAnchorPublishResult result = publisher.publishDefaultWindow();
 
         assertThat(result.failed()).isEqualTo(1);
+        assertThat(result.partial()).isZero();
         assertThat(meterRegistry.get("fraud_platform_audit_external_anchor_publish_failed_total")
                 .tag("sink", "disabled")
                 .tag("reason", "DISABLED")
@@ -72,10 +74,17 @@ class ExternalAuditAnchorPublisherTest {
         ExternalAuditAnchorPublishResult result = publisher.publishDefaultWindow();
 
         assertThat(result.published()).isEqualTo(1);
+        assertThat(result.partial()).isZero();
         verify(anchorRepository)
                 .findByPartitionKeyAndChainPositionGreaterThan("source_service:alert-service", 1L, 100);
         verify(publicationStatusRepository)
-                .recordSuccess(next, Instant.parse("2026-04-27T10:01:00Z"), "local-file");
+                .recordSuccess(
+                        org.mockito.ArgumentMatchers.eq(next),
+                        org.mockito.ArgumentMatchers.eq(Instant.parse("2026-04-27T10:01:00Z")),
+                        org.mockito.ArgumentMatchers.eq("local-file"),
+                        org.mockito.ArgumentMatchers.isNull(),
+                        org.mockito.ArgumentMatchers.eq(ExternalImmutabilityLevel.NONE)
+                );
     }
 
     @Test
@@ -103,11 +112,79 @@ class ExternalAuditAnchorPublisherTest {
 
         assertThat(result.failed()).isEqualTo(1);
         assertThat(result.published()).isEqualTo(1);
+        assertThat(result.partial()).isZero();
         verify(publicationStatusRepository).recordFailure(first, Instant.parse("2026-04-27T10:01:00Z"), "CONFLICT");
-        verify(publicationStatusRepository).recordSuccess(second, Instant.parse("2026-04-27T10:01:00Z"), "local-file");
+        verify(publicationStatusRepository).recordSuccess(
+                org.mockito.ArgumentMatchers.eq(second),
+                org.mockito.ArgumentMatchers.eq(Instant.parse("2026-04-27T10:01:00Z")),
+                org.mockito.ArgumentMatchers.eq("local-file"),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.eq(ExternalImmutabilityLevel.NONE)
+        );
         assertThat(meterRegistry.get("fraud_platform_audit_external_anchor_publish_failed_total")
                 .tag("sink", "local-file")
                 .tag("reason", "CONFLICT")
+                .counter()
+                .count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.get("fraud_platform_audit_external_anchor_published_total")
+                .tag("sink", "local-file")
+                .tag("status", "FAILED")
+                .counter()
+                .count()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void shouldRecordPartialPublicationSeparatelyFromSuccess() {
+        ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
+        AuditAnchorDocument anchor = localAnchor("local-anchor-1", 1L, "hash-1");
+        when(sink.sinkType()).thenReturn("object-store");
+        when(sink.latest("source_service:alert-service")).thenReturn(java.util.Optional.empty());
+        when(sink.immutabilityLevel()).thenReturn(ExternalImmutabilityLevel.CONFIGURED);
+        when(anchorRepository.findByPartitionKeyAndChainPositionGreaterThan("source_service:alert-service", 0L, 100))
+                .thenReturn(List.of(anchor));
+        when(sink.publish(any(ExternalAuditAnchor.class)))
+                .thenAnswer(invocation -> ((ExternalAuditAnchor) invocation.getArgument(0)).partial());
+        when(sink.externalReference(any(ExternalAuditAnchor.class)))
+                .thenReturn(java.util.Optional.of(new ExternalAnchorReference(
+                        "local-anchor-1",
+                        "audit-anchors/partition/00000000000000000001.json",
+                        "hash-1",
+                        "hash-1",
+                        Instant.parse("2026-04-27T10:01:00Z")
+                )));
+        ExternalAuditAnchorPublisher publisher = new ExternalAuditAnchorPublisher(
+                anchorRepository,
+                publicationStatusRepository,
+                sink,
+                metrics,
+                Clock.fixed(Instant.parse("2026-04-27T10:01:00Z"), ZoneOffset.UTC),
+                100
+        );
+
+        ExternalAuditAnchorPublishResult result = publisher.publishDefaultWindow();
+
+        assertThat(result.published()).isZero();
+        assertThat(result.partial()).isEqualTo(1);
+        assertThat(result.failed()).isZero();
+        verify(publicationStatusRepository, never()).recordSuccess(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()
+        );
+        verify(publicationStatusRepository).recordPartial(
+                org.mockito.ArgumentMatchers.eq(anchor),
+                org.mockito.ArgumentMatchers.eq(Instant.parse("2026-04-27T10:01:00Z")),
+                org.mockito.ArgumentMatchers.eq("object-store"),
+                org.mockito.ArgumentMatchers.any(ExternalAnchorReference.class),
+                org.mockito.ArgumentMatchers.eq(ExternalImmutabilityLevel.CONFIGURED),
+                org.mockito.ArgumentMatchers.eq(ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED),
+                org.mockito.ArgumentMatchers.eq(ExternalAuditAnchor.MANIFEST_STATUS_FAILED)
+        );
+        assertThat(meterRegistry.get("fraud_platform_audit_external_anchor_published_total")
+                .tag("sink", "object-store")
+                .tag("status", "PARTIAL")
                 .counter()
                 .count()).isEqualTo(1.0d);
     }

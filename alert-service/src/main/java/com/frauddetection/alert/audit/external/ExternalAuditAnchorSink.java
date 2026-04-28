@@ -14,9 +14,21 @@ public interface ExternalAuditAnchorSink {
 
     String sinkType();
 
+    default ExternalImmutabilityLevel immutabilityLevel() {
+        return ExternalImmutabilityLevel.NONE;
+    }
+
     ExternalAuditAnchor publish(ExternalAuditAnchor anchor);
 
+    default java.util.Optional<ExternalAnchorReference> externalReference(ExternalAuditAnchor anchor) {
+        return java.util.Optional.empty();
+    }
+
     Optional<ExternalAuditAnchor> latest(String partitionKey);
+
+    default Optional<ExternalAuditAnchor> findByChainPosition(String partitionKey, long chainPosition) {
+        return Optional.empty();
+    }
 
     List<ExternalAuditAnchor> findByRange(String partitionKey, Instant from, Instant to, int limit);
 }

@@ -6,6 +6,7 @@ import com.frauddetection.alert.audit.read.ReadAccessAuditOutcome;
 import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
 import com.frauddetection.alert.security.error.SecurityFailureClassifier;
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -161,6 +162,66 @@ public class AlertServiceMetrics {
         ).increment();
     }
 
+    public void recordExternalAnchorOperationRetry(String operation) {
+        counter(
+                "fraud_platform_audit_external_anchor_retry_total",
+                "operation", normalizeExternalAnchorOperation(operation)
+        ).increment();
+    }
+
+    public void recordExternalAnchorOperationTimeout(String operation) {
+        counter(
+                "fraud_platform_audit_external_anchor_timeout_total",
+                "operation", normalizeExternalAnchorOperation(operation)
+        ).increment();
+    }
+
+    public void recordExternalAnchorOperationFailure(String operation) {
+        counter(
+                "fraud_platform_audit_external_anchor_operation_failure_total",
+                "operation", normalizeExternalAnchorOperation(operation)
+        ).increment();
+    }
+
+    public void recordExternalAnchorHeadScanDepth(int scannedKeys) {
+        DistributionSummary.builder("fraud_platform_audit_external_anchor_head_scan_depth")
+                .register(meterRegistry)
+                .record(Math.max(0, scannedKeys));
+    }
+
+    public void recordExternalManifestRead(String status) {
+        counter(
+                "external_manifest_read_total",
+                "status", normalizeExternalManifestReadStatus(status)
+        ).increment();
+    }
+
+    public void recordExternalManifestUpdate(String status) {
+        counter(
+                "external_manifest_update_total",
+                "status", normalizeExternalManifestUpdateStatus(status)
+        ).increment();
+    }
+
+    public void recordExternalManifestFallbackScan() {
+        counter("external_manifest_fallback_scan_total").increment();
+    }
+
+    public void recordExternalManifestInvalid() {
+        counter("external_manifest_invalid_total").increment();
+    }
+
+    public void recordExternalManifestMismatch() {
+        counter("external_manifest_mismatch_total").increment();
+    }
+
+    public void recordExternalTamperingDetected(String reason) {
+        counter(
+                "fraud_platform_audit_external_tampering_detected_total",
+                "reason", normalizeExternalAnchorFailureReason(reason)
+        ).increment();
+    }
+
     public void recordEvidenceExport(String status) {
         counter(
                 "fraud_platform_audit_evidence_exports_total",
@@ -230,6 +291,20 @@ public class AlertServiceMetrics {
                 "lifecycle_status", normalizeLabel(lifecycleStatus),
                 "model_name", normalizeLabel(modelName),
                 "model_version", normalizeLabel(modelVersion)
+        ).increment();
+    }
+
+    public void recordGovernanceLifecycleStatus(String status) {
+        counter(
+                "lifecycle_status_total",
+                "status", normalizeLifecycleStatus(status)
+        ).increment();
+    }
+
+    public void recordGovernanceLifecycleDegraded(String reason) {
+        counter(
+                "lifecycle_degraded_total",
+                "reason", normalizeLifecycleDegradationReason(reason)
         ).increment();
     }
 
@@ -308,6 +383,23 @@ public class AlertServiceMetrics {
         return "UNAVAILABLE";
     }
 
+    private String normalizeLifecycleStatus(String status) {
+        if ("OPEN".equals(status) || "RESOLVED".equals(status) || "UNKNOWN".equals(status)) {
+            return status;
+        }
+        if ("ACKNOWLEDGED".equals(status) || "NEEDS_FOLLOW_UP".equals(status) || "DISMISSED_AS_NOISE".equals(status)) {
+            return "RESOLVED";
+        }
+        return "UNKNOWN";
+    }
+
+    private String normalizeLifecycleDegradationReason(String reason) {
+        if ("AUDIT_UNAVAILABLE".equals(reason)) {
+            return reason;
+        }
+        return "AUDIT_UNAVAILABLE";
+    }
+
     private String normalizeAvailabilityStatus(String status) {
         if ("AVAILABLE".equals(status) || "PARTIAL".equals(status) || "UNAVAILABLE".equals(status)) {
             return status;
@@ -340,6 +432,8 @@ public class AlertServiceMetrics {
                  "STALE_EXTERNAL_ANCHOR",
                  "EXTERNAL_CHAIN_POSITION_AHEAD",
                  "EXTERNAL_HASH_MISMATCH",
+                 "EXTERNAL_PAYLOAD_HASH_MISMATCH",
+                 "EXTERNAL_OBJECT_KEY_MISMATCH",
                  "EXTERNAL_CHAIN_POSITION_MISMATCH",
                  "EXTERNAL_HASH_ALGORITHM_MISMATCH",
                  "EXTERNAL_SCHEMA_VERSION_UNSUPPORTED",
@@ -349,23 +443,47 @@ public class AlertServiceMetrics {
     }
 
     private String normalizeExternalSink(String sink) {
-        if ("local-file".equals(sink) || "disabled".equals(sink)) {
+        if ("local-file".equals(sink) || "object-store".equals(sink) || "disabled".equals(sink)) {
             return sink;
         }
         return "unknown";
     }
 
     private String normalizeExternalAnchorPublishStatus(String status) {
-        if ("PUBLISHED".equals(status) || "DUPLICATE".equals(status)) {
+        if ("PUBLISHED".equals(status) || "DUPLICATE".equals(status) || "PARTIAL".equals(status) || "FAILED".equals(status)) {
             return status;
         }
         return "FAILED";
     }
 
+    private String normalizeExternalManifestReadStatus(String status) {
+        return switch (status) {
+            case "HIT", "MISS", "INVALID" -> status;
+            default -> "INVALID";
+        };
+    }
+
+    private String normalizeExternalManifestUpdateStatus(String status) {
+        return switch (status) {
+            case "SUCCESS", "FAILED" -> status;
+            default -> "FAILED";
+        };
+    }
+
     private String normalizeExternalAnchorFailureReason(String reason) {
         return switch (reason) {
-            case "DISABLED", "UNAVAILABLE", "CONFLICT", "IO_ERROR" -> reason;
+            case "DISABLED", "UNAVAILABLE", "CONFLICT", "MISMATCH", "IO_ERROR", "INVALID_ANCHOR",
+                 "WRITE_NOT_VERIFIED", "EXTERNAL_PAYLOAD_HASH_MISMATCH", "EXTERNAL_OBJECT_KEY_MISMATCH", "TIMEOUT",
+                 "HEAD_SCAN_PAGINATION_UNSUPPORTED", "HEAD_SCAN_LIMIT_EXCEEDED", "HEAD_MANIFEST_INVALID",
+                 "HEAD_MANIFEST_UPDATE_FAILED" -> reason;
             default -> "UNKNOWN";
+        };
+    }
+
+    private String normalizeExternalAnchorOperation(String operation) {
+        return switch (operation) {
+            case "get", "put", "list", "immutability" -> operation;
+            default -> "unknown";
         };
     }
 

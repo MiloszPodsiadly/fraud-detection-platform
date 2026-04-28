@@ -115,9 +115,22 @@ Platform External Audit Anchor Verification API:
 - `GET /api/v1/audit/integrity/external`
 - Requires backend-enforced `audit:verify`.
 - Query parameters: optional bounded `source_service=alert-service` and `limit` default `100`, maximum `500`.
-- Compares latest local and external anchors for local anchor id, chain position, last event hash, hash algorithm, and schema version.
+- Compares local and external anchors for local anchor id, chain position, last event hash, hash algorithm, schema version, external reference, and external immutability level. FDP-22 object-store sinks can verify by exact `partition_key + chain_position` lookup using the deterministic encoded object key before falling back to latest-anchor comparison, and also validate `external_object_key`, `payload_hash`, `anchor_hash`, and `external_hash` binding.
+- Object-store latest HEAD detection requires continuation-token pagination and consumes every page. If listing may be truncated and pagination is unavailable, verification returns a degraded `UNAVAILABLE` state instead of reporting `VALID` from a best-effort HEAD.
+- Object-store sinks may use `<partition_prefix>/head.json` as an External Head Manifest optimization. The manifest is verified by hash and by reading the referenced anchor; invalid or missing manifests are not trusted and fall back to full paginated scan.
 - Response status is `VALID`, `INVALID`, `PARTIAL`, or `UNAVAILABLE`; missing/stale external anchors are explicit and never reported as a valid empty result.
 - The endpoint is read-only and does not repair, mutate, delete, export, or resynchronize audit data.
+
+Platform External Audit Anchor Sinks:
+
+- `disabled` is the default and publishes nothing.
+- `local-file` is development-only and blocked in prod-like profiles.
+- `object-store` writes new anchors as `audit-anchors/{encoded_partition_key}/{chain_position_padded}.json` with 20-digit zero-padded chain positions, keeps legacy non-padded keys readable, and requires bucket, prefix, region or endpoint, credentials, client configuration, continuation-token listing for complete HEAD discovery, and startup readiness validation. Normal publish is bounded and does not list the partition; idempotency and same-position conflict detection use the deterministic object key. Real S3/GCS/Azure adapters remain FDP-23.
+- The object-store payload contains original `partition_key`, `external_object_key`, `local_anchor_id`, `chain_position`, `event_hash`, `payload_hash`, and `created_at`; it does not include placeholder `previous_event_hash` evidence.
+- Object-store publication is append-only at the application boundary: identical local anchor/object-key/payload binding is idempotent, different content for the same key fails, conflicting local anchor binding fails, write-after-read verification is required, and there are no delete/update paths.
+- The External Head Manifest is an optimization only. It is updated after anchor verification, can be recomputed from anchors, and does not change audit payload correctness. If manifest update fails after anchor verification, publication is reported as `PARTIAL` with `HEAD_MANIFEST_UPDATE_FAILED` and is not counted as `PUBLISHED`.
+- Successful publication persists a bounded `external_reference` with `anchor_id`, `external_key`, `anchor_hash`, `external_hash`, and `verified_at`. Object-store operations use bounded timeout/retry settings; timeout, retry, operation failure, and tampering metrics are low-cardinality.
+- FDP-22 exposes `external_immutability_level=NONE|CONFIGURED|ENFORCED`. The default is `NONE`; application configuration alone does not prove immutability, and no WORM claim is valid unless the adapter verifies infrastructure controls and reports `ENFORCED`. Object-store anchoring is not legal notarization, WORM certification, compliance certification, or legal non-repudiation.
 
 Platform Audit Evidence Export API:
 
@@ -141,14 +154,14 @@ Platform Audit Trust Attestation API:
 - Requires backend-enforced `audit:verify`; the local role model grants it through `FRAUD_OPS_ADMIN`.
 - Query parameters are bounded to optional `source_service=alert-service`, `limit` default `100`, maximum `500`, and optional `mode=HEAD`.
 - Access is audited with `READ_AUDIT_TRUST_ATTESTATION`; metadata is bounded to source service, limit, trust level, integrity statuses, external anchor status, and fingerprint.
-- Returns bounded status fields only: `status`, `trust_level`, internal integrity status, external integrity status, external anchor status, single-head anchor coverage, latest chain head fields, latest external anchor reference when present, `attestation_fingerprint`, optional `attestation_signature`, `signing_key_id`, `signer_mode`, `attestation_signature_strength`, `external_trust_dependency`, and explicit limitations.
+- Returns bounded status fields only: `status`, `trust_level`, internal integrity status, external integrity status, external anchor status, `external_immutability_level`, single-head anchor coverage, latest chain head fields, latest external anchor reference when present, `attestation_fingerprint`, optional `attestation_signature`, `signing_key_id`, `signer_mode`, `attestation_signature_strength`, `external_trust_dependency`, and explicit limitations.
 - Trust levels are `INTERNAL_ONLY`, `PARTIAL_EXTERNAL`, `EXTERNALLY_ANCHORED`, `SIGNED_ATTESTATION`, and `UNAVAILABLE`.
-- `attestation_signature_strength` is mandatory for interpreting FDP-21 trust. `SIGNED_ATTESTATION` represents stronger trust only when `attestation_signature_strength=PRODUCTION_READY` and `signer_mode` is backed by externally managed KMS/HSM signing material. Otherwise a signature is integrity metadata only and does not increase external trust.
-- `INTERNAL_ONLY` means local application-level integrity is the only available signal. `PARTIAL_EXTERNAL` means an external boundary is configured or visible but not fully valid. `EXTERNALLY_ANCHORED` requires FDP-20 external anchor verification to be valid. `SIGNED_ATTESTATION` requires valid external anchoring plus production-ready attestation signing; local-dev signing never upgrades trust. `UNAVAILABLE` means internal audit integrity could not be read.
-- The attestation fingerprint is canonical over the full attestation context, including `source_service`, `limit`, `mode`, `signer_mode`, `signature_key_id` when present, trust status fields, anchor coverage, latest chain fields, external anchor reference, and limitations.
+- `attestation_signature_strength` and `external_immutability_level` are mandatory for interpreting FDP-21 trust. `SIGNED_ATTESTATION` represents stronger trust only when `attestation_signature_strength=PRODUCTION_READY`, `signer_mode` is backed by externally managed KMS/HSM signing material, and `external_immutability_level=ENFORCED`. Otherwise a signature is integrity metadata only and does not increase external trust.
+- `INTERNAL_ONLY` means local application-level integrity is the only available signal. `PARTIAL_EXTERNAL` means an external boundary is configured or visible but not fully valid. `EXTERNALLY_ANCHORED` requires FDP-20 external anchor verification to be valid. `SIGNED_ATTESTATION` requires valid external anchoring, `external_immutability_level=ENFORCED`, and production-ready attestation signing; local-dev signing and mutable external storage never upgrade trust. `UNAVAILABLE` means internal audit integrity could not be read.
+- The attestation fingerprint is canonical over the full attestation context, including `source_service`, `limit`, `mode`, `signer_mode`, `signature_key_id` when present, trust status fields, `external_immutability_level`, anchor coverage, latest chain fields, external anchor reference, and limitations.
 - `app.audit.trust-attestation.signing.mode=disabled|local-dev|kms-ready`. `local-dev` is for local development and verification only, provides integrity metadata only, does not provide external trust, and is rejected in prod-like profiles. `kms-ready` requires `app.audit.trust.signing.kms-enabled=true` and still fails startup until a real KMS/HSM adapter is supplied.
 - Consumers must not treat a signed attestation as legal proof unless it is backed by production signing and matching operational controls outside this repository. FDP-21 is not legal notarization, not legal non-repudiation, not WORM storage, not a regulator-certified archive, and not SIEM evidence.
-- Examples: local-dev signer returns `EXTERNALLY_ANCHORED` with `LOCAL_DEV`; disabled signer returns `EXTERNALLY_ANCHORED` with `NONE`; a future real KMS/HSM signer can return `SIGNED_ATTESTATION` with `PRODUCTION_READY`.
+- Examples: local-dev signer returns `EXTERNALLY_ANCHORED` with `LOCAL_DEV`; disabled signer returns `EXTERNALLY_ANCHORED` with `NONE`; a future real KMS/HSM signer can return `SIGNED_ATTESTATION` with `PRODUCTION_READY` only when external immutability is verified as `ENFORCED`.
 - Verification relies on FDP-19/FDP-20 source-of-truth services; FDP-21 does not implement a second external verification stack, a second evidence export, or an object-store sink.
 - This endpoint does not expose raw audit events, response bodies, raw payloads, Mongo internals, secrets, stack traces, full URLs, unbounded export, delete, update, WORM proof, SIEM evidence, legal non-repudiation, or compliance archive.
 
@@ -245,14 +258,22 @@ Only the latest audit event matters. Lifecycle status is not persisted independe
 
 Filtering by `lifecycle_status` applies to the bounded advisory result set. It does not guarantee global completeness.
 
+Failure semantics:
+
+- Lifecycle is a derived read-time projection and depends on audit availability.
+- `OPEN` means no audit events exist and the audit source was readable.
+- `UNKNOWN` means lifecycle cannot be determined because audit lookup failed or audit truth is unavailable.
+- The system never assumes `OPEN` when audit is unavailable.
+- `GET /governance/advisories` returns `status=PARTIAL` with `reason_code=AUDIT_UNAVAILABLE` when lifecycle enrichment is degraded.
+
 Audit analytics are read-only and derived:
 
 - `GET /governance/advisories/analytics?window_days=7`
 - `window_days` defaults to `7` and is capped at `30`.
 - `totals.advisories` is the number of distinct `advisory_event_id` values in the bounded advisory projection window.
-- `totals.reviewed` means those advisories with at least one matching audit event; `totals.open` means zero matching audit events.
+- `totals.reviewed` means those advisories with at least one matching audit event; `totals.open` means zero matching audit events with audit available; `totals.resolved` groups reviewed lifecycle states; `totals.unknown` means audit truth was unavailable for lifecycle classification.
 - `decision_distribution` uses the latest audit decision for reviewed advisories in that same projection window.
-- `lifecycle_distribution` uses read-time lifecycle enrichment of that same projection and sums to `totals.advisories`.
+- `lifecycle_distribution` uses read-time lifecycle enrichment of that same projection and sums to `totals.advisories`; `UNKNOWN` is separate and never counted as `OPEN`.
 - `review_timeliness` samples only valid non-negative first-review durations and reports `LOW_CONFIDENCE` when fewer than five samples exist.
 - Status is `AVAILABLE` when advisory and audit sources are both readable, `PARTIAL` when one source is degraded or the audit scan limit is exceeded, and `UNAVAILABLE` when both sources are unavailable.
 - Analytics operate on bounded time windows, cap audit scans with `GOVERNANCE_AUDIT_ANALYTICS_MAX_AUDIT_EVENTS`, and do not guarantee global completeness.
@@ -260,7 +281,7 @@ Audit analytics are read-only and derived:
 
 ### API Stability
 
-`GET /governance/advisories/analytics` is considered stable. Breaking changes to existing fields, enums, or meanings require a version bump. The optional `reason` field may appear only for `PARTIAL` or `UNAVAILABLE` responses and is limited to `AUDIT_LIMIT_EXCEEDED`, `AUDIT_UNAVAILABLE`, or `ADVISORY_UNAVAILABLE`.
+`GET /governance/advisories/analytics` is considered stable. Breaking changes to existing fields, enums, or meanings require a version bump. The optional `reason_code` field may appear only for `PARTIAL` or `UNAVAILABLE` responses and is limited to `AUDIT_LIMIT_EXCEEDED`, `AUDIT_UNAVAILABLE`, or `ADVISORY_UNAVAILABLE`.
 
 Advisory list filters:
 

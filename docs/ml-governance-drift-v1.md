@@ -492,12 +492,17 @@ GET /governance/advisories/{event_id}
 
 Lifecycle status is a derived projection from audit history:
 
-- `OPEN`: no audit events exist.
+- `OPEN`: no audit events exist and the audit source was readable.
+- `UNKNOWN`: lifecycle cannot be determined because audit lookup failed or audit truth is unavailable.
 - `ACKNOWLEDGED`: latest audit decision is `ACKNOWLEDGED`.
 - `NEEDS_FOLLOW_UP`: latest audit decision is `NEEDS_FOLLOW_UP`.
 - `DISMISSED_AS_NOISE`: latest audit decision is `DISMISSED_AS_NOISE`.
 
 Only the latest audit event is considered. The audit trail remains the source of truth. Lifecycle status is computed at read time, is not stored as authoritative state, and is not a workflow engine.
+
+### Failure Semantics
+
+Lifecycle depends on audit availability. The system never assumes `OPEN` when audit is unavailable. Advisory list responses are `PARTIAL` with `reason_code=AUDIT_UNAVAILABLE` when lifecycle enrichment is degraded. Analytics expose degraded audit truth as `UNKNOWN`, not as `OPEN`.
 
 Filtering by `lifecycle_status` applies to the bounded advisory result set. It does not guarantee global completeness.
 
@@ -536,15 +541,17 @@ Definitions:
 - `advisory_event_id`: unique identifier of an advisory from the ML governance system.
 - `totals.advisories`: number of distinct `advisory_event_id` values in the bounded advisory projection window.
 - `totals.reviewed`: advisories in that same projection window with at least one matching audit event.
-- `totals.open`: advisories in that same projection window with zero matching audit events.
+- `totals.open`: advisories in that same projection window with zero matching audit events and readable audit source.
+- `totals.resolved`: advisories in that same projection window classified into a reviewed lifecycle state.
+- `totals.unknown`: advisories whose lifecycle cannot be determined because audit truth is unavailable.
 - `decision_distribution`: latest audit decision distribution for reviewed advisories in that same projection window.
-- `lifecycle_distribution`: lifecycle distribution after read-time lifecycle enrichment of that same advisory projection; counts sum to `totals.advisories`.
+- `lifecycle_distribution`: lifecycle distribution after read-time lifecycle enrichment of that same advisory projection; counts sum to `totals.advisories`. `UNKNOWN` is separate and is never merged into `OPEN`.
 
 Audit-only advisory IDs outside the bounded advisory projection are not counted in totals or distributions.
 
 Returned analytics include:
 
-- total advisories, reviewed advisories, and open advisories
+- total advisories, reviewed advisories, open advisories, resolved advisories, and unknown advisories
 - latest audit decision distribution
 - read-time lifecycle distribution
 - time-to-first-review p50 and p95 in minutes
@@ -557,7 +564,7 @@ Analytics status:
 - `PARTIAL`: one source is degraded, or the bounded audit scan limit is exceeded.
 - `UNAVAILABLE`: both sources are unavailable or a critical dependency is missing.
 
-When analytics are `PARTIAL` or `UNAVAILABLE`, the optional `reason` field explains the safe bounded degradation without exposing sensitive internals:
+When analytics are `PARTIAL` or `UNAVAILABLE`, the optional `reason_code` field explains the safe bounded degradation without exposing sensitive internals:
 
 - `AUDIT_LIMIT_EXCEEDED`
 - `AUDIT_UNAVAILABLE`
@@ -642,6 +649,8 @@ Governance metrics:
 - `fraud_ml_model_lifecycle_events_total{event_type,model_name,model_version,status}`
 - `fraud_ml_model_lifecycle_history_available{model_name,model_version,status}`
 - `fraud_ml_governance_advisory_lifecycle_total{lifecycle_status,model_name,model_version}`
+- `lifecycle_status_total{status}`
+- `lifecycle_degraded_total{reason}`
 - `fraud_ml_governance_analytics_requests_total`
 - `fraud_ml_governance_analytics_window_days`
 - `fraud_ml_governance_advisory_events_emitted_total{severity,model_name,model_version,status}`

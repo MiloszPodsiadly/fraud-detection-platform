@@ -48,6 +48,7 @@ class GovernanceAdvisoryProjectionServiceTest {
                 "python-logistic-fraud-model",
                 "2026-04-21.trained.v1"
         );
+        verify(metrics).recordGovernanceLifecycleStatus("NEEDS_FOLLOW_UP");
     }
 
     @Test
@@ -69,6 +70,50 @@ class GovernanceAdvisoryProjectionServiceTest {
 
         assertThat(response.count()).isEqualTo(1);
         assertThat(response.advisoryEvents()).extracting(GovernanceAdvisoryEvent::eventId).containsExactly("advisory-2");
+    }
+
+    @Test
+    void shouldReturnPartialWhenLifecycleAuditSourceIsUnavailable() {
+        when(advisoryClient.listAdvisories(new GovernanceAdvisoryQuery(null, null, 25)))
+                .thenReturn(new GovernanceAdvisoryListResponse(
+                        "AVAILABLE",
+                        1,
+                        200,
+                        List.of(advisoryEvent("advisory-1"))
+                ));
+        when(lifecycleService.lifecycleStatus("advisory-1")).thenReturn(GovernanceAdvisoryLifecycleStatus.UNKNOWN);
+
+        GovernanceAdvisoryListResponse response = service.listAdvisories(
+                new GovernanceAdvisoryQuery(null, null, 25),
+                null
+        );
+
+        assertThat(response.status()).isEqualTo("PARTIAL");
+        assertThat(response.reasonCode()).isEqualTo("AUDIT_UNAVAILABLE");
+        assertThat(response.advisoryEvents()).extracting(GovernanceAdvisoryEvent::lifecycleStatus)
+                .containsExactly(GovernanceAdvisoryLifecycleStatus.UNKNOWN);
+        verify(metrics).recordGovernanceLifecycleDegraded("AUDIT_UNAVAILABLE");
+    }
+
+    @Test
+    void shouldRemainPartialWhenLifecycleFilterRemovesUnknownEvents() {
+        when(advisoryClient.listAdvisories(new GovernanceAdvisoryQuery(null, null, 25)))
+                .thenReturn(new GovernanceAdvisoryListResponse(
+                        "AVAILABLE",
+                        1,
+                        200,
+                        List.of(advisoryEvent("advisory-1"))
+                ));
+        when(lifecycleService.lifecycleStatus("advisory-1")).thenReturn(GovernanceAdvisoryLifecycleStatus.UNKNOWN);
+
+        GovernanceAdvisoryListResponse response = service.listAdvisories(
+                new GovernanceAdvisoryQuery(null, null, 25),
+                GovernanceAdvisoryLifecycleStatus.OPEN
+        );
+
+        assertThat(response.status()).isEqualTo("PARTIAL");
+        assertThat(response.reasonCode()).isEqualTo("AUDIT_UNAVAILABLE");
+        assertThat(response.advisoryEvents()).isEmpty();
     }
 
     @Test

@@ -23,11 +23,32 @@ record ExternalAuditAnchorPublicationStatusDocument(
         @Field("external_published")
         boolean externalPublished,
 
+        @Field("external_publication_status")
+        String externalPublicationStatus,
+
         @Field("external_published_at")
         Instant externalPublishedAt,
 
         @Field("external_sink_type")
         String externalSinkType,
+
+        @Field("external_key")
+        String externalKey,
+
+        @Field("anchor_hash")
+        String anchorHash,
+
+        @Field("external_hash")
+        String externalHash,
+
+        @Field("external_reference_verified_at")
+        Instant externalReferenceVerifiedAt,
+
+        @Field("external_immutability_level")
+        String externalImmutabilityLevel,
+
+        @Field("manifest_status")
+        String manifestStatus,
 
         @Field("external_publish_attempts")
         int externalPublishAttempts,

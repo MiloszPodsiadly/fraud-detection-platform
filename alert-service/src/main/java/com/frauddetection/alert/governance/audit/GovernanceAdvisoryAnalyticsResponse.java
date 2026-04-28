@@ -12,7 +12,7 @@ public record GovernanceAdvisoryAnalyticsResponse(
         String status,
 
         @JsonInclude(JsonInclude.Include.NON_NULL)
-        @JsonProperty("reason")
+        @JsonProperty("reason_code")
         String reason,
 
         @JsonProperty("window")
@@ -90,8 +90,17 @@ public record GovernanceAdvisoryAnalyticsResponse(
             int reviewed,
 
             @JsonProperty("open")
-            int open
+            int open,
+
+            @JsonProperty("resolved")
+            int resolved,
+
+            @JsonProperty("unknown")
+            int unknown
     ) {
+        public Totals(int advisories, int reviewed, int open) {
+            this(advisories, reviewed, open, reviewed, 0);
+        }
     }
 
     public record ReviewTimeliness(

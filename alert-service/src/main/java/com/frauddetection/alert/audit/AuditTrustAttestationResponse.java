@@ -2,6 +2,8 @@ package com.frauddetection.alert.audit;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.frauddetection.alert.audit.external.ExternalAnchorReference;
+import com.frauddetection.alert.audit.external.ExternalImmutabilityLevel;
 
 import java.util.List;
 
@@ -20,6 +22,9 @@ public record AuditTrustAttestationResponse(
 
         @JsonProperty("external_anchor_status")
         String externalAnchorStatus,
+
+        @JsonProperty("external_immutability_level")
+        ExternalImmutabilityLevel externalImmutabilityLevel,
 
         @JsonProperty("anchor_coverage")
         AnchorCoverage anchorCoverage,
@@ -65,6 +70,32 @@ public record AuditTrustAttestationResponse(
         @JsonProperty("limitations")
         List<String> limitations
 ) {
+    public AuditTrustAttestationResponse(
+            String status,
+            AuditTrustLevel trustLevel,
+            String internalIntegrityStatus,
+            String externalIntegrityStatus,
+            String externalAnchorStatus,
+            AnchorCoverage anchorCoverage,
+            Long latestChainPosition,
+            String latestEventHash,
+            ExternalAnchorReference latestExternalAnchorReference,
+            String attestationFingerprint,
+            String attestationSignature,
+            String signingKeyId,
+            String signerMode,
+            String attestationSignatureStrength,
+            String externalTrustDependency,
+            String sourceService,
+            int limit,
+            List<String> limitations
+    ) {
+        this(status, trustLevel, internalIntegrityStatus, externalIntegrityStatus, externalAnchorStatus,
+                ExternalImmutabilityLevel.NONE, anchorCoverage, latestChainPosition, latestEventHash,
+                latestExternalAnchorReference, attestationFingerprint, attestationSignature, signingKeyId,
+                signerMode, attestationSignatureStrength, externalTrustDependency, sourceService, limit, limitations);
+    }
+
     public record AnchorCoverage(
             @JsonProperty("total_anchors_checked")
             int totalAnchorsChecked,
@@ -83,18 +114,4 @@ public record AuditTrustAttestationResponse(
         }
     }
 
-    public record ExternalAnchorReference(
-            @JsonProperty("external_anchor_id")
-            String externalAnchorId,
-
-            @JsonProperty("chain_position")
-            long chainPosition,
-
-            @JsonProperty("sink_type")
-            String sinkType,
-
-            @JsonProperty("publication_status")
-            String publicationStatus
-    ) {
-    }
 }
