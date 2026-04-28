@@ -222,7 +222,13 @@ Prometheus metric contract:
   - Type: distribution summary
   - Meaning: number of object-store anchor keys examined while proving the latest external HEAD through continuation-token pagination
   - Labels: none
-  - Notes: non-paginated or potentially truncated HEAD listing fails explicitly and must not be interpreted as a valid empty or best-effort result.
+  - Notes: normal object-store publish must not emit this metric because publish does not list the partition. Non-paginated or potentially truncated HEAD listing fails explicitly and must not be interpreted as a valid empty or best-effort result.
+- `fraud_platform_audit_external_anchor_published_total`
+  - Type: counter
+  - Meaning: external anchor publication outcomes
+  - Labels: `sink`, `status`
+  - Bounded statuses: `PUBLISHED`, `PARTIAL`, `DUPLICATE`, `FAILED`
+  - Notes: `PARTIAL` means the anchor object was stored and verified but manifest update or verification failed; it is not counted as `PUBLISHED`.
 - `external_manifest_read_total`
   - Type: counter
   - Meaning: External Head Manifest reads by outcome

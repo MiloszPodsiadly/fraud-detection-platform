@@ -1102,6 +1102,14 @@ components:
           type: string
           nullable: true
           enum: [PUBLISHED, PARTIAL, PENDING, FAILED]
+        publication_reason:
+          type: string
+          nullable: true
+          enum: [HEAD_MANIFEST_UPDATE_FAILED]
+        manifest_status:
+          type: string
+          nullable: true
+          enum: [FAILED]
     AuditAnchorSummary:
       type: object
       additionalProperties: false
@@ -1140,6 +1148,14 @@ components:
           type: string
           nullable: true
           enum: [PUBLISHED, PARTIAL, PENDING, FAILED]
+        publication_reason:
+          type: string
+          nullable: true
+          enum: [HEAD_MANIFEST_UPDATE_FAILED]
+        manifest_status:
+          type: string
+          nullable: true
+          enum: [FAILED]
         external_reference:
           nullable: true
           $ref: "#/components/schemas/ExternalAnchorReference"
