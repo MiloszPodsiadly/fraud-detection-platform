@@ -39,6 +39,7 @@ public record ExternalAuditAnchor(
 ) {
     public static final String SCHEMA_VERSION = "1.0";
     public static final String STATUS_PUBLISHED = "PUBLISHED";
+    public static final String STATUS_PARTIAL = "PARTIAL";
 
     public static ExternalAuditAnchor from(AuditAnchorDocument localAnchor, String sinkType) {
         return new ExternalAuditAnchor(
@@ -52,6 +53,21 @@ public record ExternalAuditAnchor(
                 localAnchor.createdAt(),
                 sinkType,
                 STATUS_PUBLISHED
+        );
+    }
+
+    ExternalAuditAnchor partial() {
+        return new ExternalAuditAnchor(
+                externalAnchorId,
+                localAnchorId,
+                partitionKey,
+                chainPosition,
+                lastEventHash,
+                hashAlgorithm,
+                schemaVersion,
+                createdAt,
+                sinkType,
+                STATUS_PARTIAL
         );
     }
 }

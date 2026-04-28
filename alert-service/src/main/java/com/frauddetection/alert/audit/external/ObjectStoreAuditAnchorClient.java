@@ -9,6 +9,13 @@ interface ObjectStoreAuditAnchorClient {
 
     void putObjectIfAbsent(String bucket, String key, byte[] content);
 
+    default void putObject(String bucket, String key, byte[] content) {
+        throw new ExternalAuditAnchorSinkException(
+                "UNAVAILABLE",
+                "Object-store put operation is not configured."
+        );
+    }
+
     List<String> listKeys(String bucket, String keyPrefix, int limit);
 
     default ObjectStoreAuditAnchorKeyPage listKeysPage(

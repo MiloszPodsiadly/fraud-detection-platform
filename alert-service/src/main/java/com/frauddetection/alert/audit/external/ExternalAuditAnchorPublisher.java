@@ -77,7 +77,10 @@ public class ExternalAuditAnchorPublisher {
                 try {
                     ExternalAuditAnchor candidate = ExternalAuditAnchor.from(localAnchor, sink.sinkType());
                     ExternalAuditAnchor stored = sink.publish(candidate);
-                    if (candidate.externalAnchorId().equals(stored.externalAnchorId())) {
+                    if (ExternalAuditAnchor.STATUS_PARTIAL.equals(stored.publicationStatus())) {
+                        metrics.recordExternalAnchorPublished(sink.sinkType(), "PARTIAL");
+                        published++;
+                    } else if (candidate.externalAnchorId().equals(stored.externalAnchorId())) {
                         metrics.recordExternalAnchorPublished(sink.sinkType(), "PUBLISHED");
                         published++;
                     } else {

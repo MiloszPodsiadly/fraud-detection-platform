@@ -189,6 +189,32 @@ public class AlertServiceMetrics {
                 .record(Math.max(0, scannedKeys));
     }
 
+    public void recordExternalManifestRead(String status) {
+        counter(
+                "external_manifest_read_total",
+                "status", normalizeExternalManifestReadStatus(status)
+        ).increment();
+    }
+
+    public void recordExternalManifestUpdate(String status) {
+        counter(
+                "external_manifest_update_total",
+                "status", normalizeExternalManifestUpdateStatus(status)
+        ).increment();
+    }
+
+    public void recordExternalManifestFallbackScan() {
+        counter("external_manifest_fallback_scan_total").increment();
+    }
+
+    public void recordExternalManifestInvalid() {
+        counter("external_manifest_invalid_total").increment();
+    }
+
+    public void recordExternalManifestMismatch() {
+        counter("external_manifest_mismatch_total").increment();
+    }
+
     public void recordExternalTamperingDetected(String reason) {
         counter(
                 "fraud_platform_audit_external_tampering_detected_total",
@@ -424,17 +450,32 @@ public class AlertServiceMetrics {
     }
 
     private String normalizeExternalAnchorPublishStatus(String status) {
-        if ("PUBLISHED".equals(status) || "DUPLICATE".equals(status)) {
+        if ("PUBLISHED".equals(status) || "DUPLICATE".equals(status) || "PARTIAL".equals(status)) {
             return status;
         }
         return "FAILED";
+    }
+
+    private String normalizeExternalManifestReadStatus(String status) {
+        return switch (status) {
+            case "HIT", "MISS", "INVALID" -> status;
+            default -> "INVALID";
+        };
+    }
+
+    private String normalizeExternalManifestUpdateStatus(String status) {
+        return switch (status) {
+            case "SUCCESS", "FAILED" -> status;
+            default -> "FAILED";
+        };
     }
 
     private String normalizeExternalAnchorFailureReason(String reason) {
         return switch (reason) {
             case "DISABLED", "UNAVAILABLE", "CONFLICT", "MISMATCH", "IO_ERROR", "INVALID_ANCHOR",
                  "WRITE_NOT_VERIFIED", "EXTERNAL_PAYLOAD_HASH_MISMATCH", "EXTERNAL_OBJECT_KEY_MISMATCH", "TIMEOUT",
-                 "HEAD_SCAN_PAGINATION_UNSUPPORTED", "HEAD_SCAN_LIMIT_EXCEEDED" -> reason;
+                 "HEAD_SCAN_PAGINATION_UNSUPPORTED", "HEAD_SCAN_LIMIT_EXCEEDED", "HEAD_MANIFEST_INVALID",
+                 "HEAD_MANIFEST_UPDATE_FAILED" -> reason;
             default -> "UNKNOWN";
         };
     }
