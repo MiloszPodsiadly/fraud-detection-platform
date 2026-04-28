@@ -223,6 +223,28 @@ Prometheus metric contract:
   - Meaning: number of object-store anchor keys examined while proving the latest external HEAD through continuation-token pagination
   - Labels: none
   - Notes: non-paginated or potentially truncated HEAD listing fails explicitly and must not be interpreted as a valid empty or best-effort result.
+- `external_manifest_read_total`
+  - Type: counter
+  - Meaning: External Head Manifest reads by outcome
+  - Labels: `status`
+  - Bounded statuses: `HIT`, `MISS`, `INVALID`
+- `external_manifest_update_total`
+  - Type: counter
+  - Meaning: External Head Manifest update attempts after verified anchor publication
+  - Labels: `status`
+  - Bounded statuses: `SUCCESS`, `FAILED`
+- `external_manifest_fallback_scan_total`
+  - Type: counter
+  - Meaning: latest external HEAD lookup fell back from manifest to full paginated scan
+  - Labels: none
+- `external_manifest_invalid_total`
+  - Type: counter
+  - Meaning: manifest hash/shape validation failed
+  - Labels: none
+- `external_manifest_mismatch_total`
+  - Type: counter
+  - Meaning: manifest referenced a missing or mismatched anchor
+  - Labels: none
 - `fraud_internal_auth_replay_rejected_total`
   - Type: counter
   - Meaning: rejected internal service JWT freshness or soft replay attempts
