@@ -115,7 +115,7 @@ Platform External Audit Anchor Verification API:
 - `GET /api/v1/audit/integrity/external`
 - Requires backend-enforced `audit:verify`.
 - Query parameters: optional bounded `source_service=alert-service` and `limit` default `100`, maximum `500`.
-- Compares local and external anchors for local anchor id, chain position, last event hash, hash algorithm, and schema version. FDP-22 object-store sinks can verify by exact `partition_key + chain_position` object key before falling back to latest-anchor comparison.
+- Compares local and external anchors for local anchor id, chain position, last event hash, hash algorithm, and schema version. FDP-22 object-store sinks can verify by exact `partition_key + chain_position` lookup using the deterministic encoded object key before falling back to latest-anchor comparison, and also validate `external_object_key` and `payload_hash` binding.
 - Response status is `VALID`, `INVALID`, `PARTIAL`, or `UNAVAILABLE`; missing/stale external anchors are explicit and never reported as a valid empty result.
 - The endpoint is read-only and does not repair, mutate, delete, export, or resynchronize audit data.
 
@@ -123,9 +123,10 @@ Platform External Audit Anchor Sinks:
 
 - `disabled` is the default and publishes nothing.
 - `local-file` is development-only and blocked in prod-like profiles.
-- `object-store` writes `audit-anchors/{partition_key}/{chain_position}.json` through a configured object-store client adapter and requires bucket, prefix, region or endpoint, and credentials at startup.
-- Object-store publication is append-only at the application boundary: identical existing content is idempotent, different content for the same key fails, and there are no delete/update paths.
-- Object-store immutability depends on infrastructure controls such as object lock, retention policy, bucket policy, or versioning. It is not legal notarization, WORM certification, compliance certification, or legal non-repudiation.
+- `object-store` writes `audit-anchors/{encoded_partition_key}/{chain_position}.json` through a configured object-store client adapter and requires bucket, prefix, region or endpoint, credentials, client configuration, and startup readiness validation.
+- The object-store payload contains original `partition_key`, `external_object_key`, `local_anchor_id`, `chain_position`, `event_hash`, `payload_hash`, and `created_at`; it does not include placeholder `previous_event_hash` evidence.
+- Object-store publication is append-only at the application boundary: identical local anchor/object-key/payload binding is idempotent, different content for the same key fails, conflicting local anchor binding fails, write-after-read verification is required, and there are no delete/update paths.
+- FDP-22 provides external anchor persistence outside MongoDB but does not guarantee WORM immutability unless the underlying object store is configured with immutable retention controls such as Object Lock, versioning, retention policy, or equivalent infrastructure controls. Application code guarantees no overwrite/delete intent; actual immutability is infrastructure-enforced. Object-store anchoring is not legal notarization, WORM certification, compliance certification, or legal non-repudiation.
 
 Platform Audit Evidence Export API:
 
