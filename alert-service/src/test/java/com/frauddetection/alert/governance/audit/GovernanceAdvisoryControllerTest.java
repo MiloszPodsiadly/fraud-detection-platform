@@ -75,7 +75,7 @@ class GovernanceAdvisoryControllerTest {
                         .queryParam("window_days", "7"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("AVAILABLE"))
-                .andExpect(jsonPath("$.reason").doesNotExist())
+                .andExpect(jsonPath("$.reason_code").doesNotExist())
                 .andExpect(jsonPath("$.window.days").value(7))
                 .andExpect(jsonPath("$.totals.advisories").value(2))
                 .andExpect(jsonPath("$.decision_distribution.ACKNOWLEDGED").value(1))
@@ -90,7 +90,9 @@ class GovernanceAdvisoryControllerTest {
                           "totals": {
                             "advisories": 2,
                             "reviewed": 1,
-                            "open": 1
+                            "open": 1,
+                            "resolved": 1,
+                            "unknown": 0
                           },
                           "decision_distribution": {
                             "ACKNOWLEDGED": 1,
@@ -99,6 +101,7 @@ class GovernanceAdvisoryControllerTest {
                           },
                           "lifecycle_distribution": {
                             "OPEN": 1,
+                            "UNKNOWN": 0,
                             "ACKNOWLEDGED": 1,
                             "NEEDS_FOLLOW_UP": 0,
                             "DISMISSED_AS_NOISE": 0

@@ -38,11 +38,17 @@ class AlertServiceMetricsTest {
     void shouldUseNoDynamicLabelsForAnalyticsMetrics() {
         metrics.recordGovernanceAnalyticsRequest(7);
         metrics.recordGovernanceAnalyticsOutcome("AVAILABLE", Duration.ofMillis(25));
+        metrics.recordGovernanceLifecycleStatus("OPEN");
+        metrics.recordGovernanceLifecycleStatus("ACKNOWLEDGED");
+        metrics.recordGovernanceLifecycleDegraded("AUDIT_UNAVAILABLE");
 
         Meter requestMeter = meterRegistry.get("fraud_ml_governance_analytics_requests_total").meter();
         Meter windowMeter = meterRegistry.get("fraud_ml_governance_analytics_window_days").meter();
         Meter statusMeter = meterRegistry.get("fraud_ml_governance_analytics_status_total").meter();
         Meter latencyMeter = meterRegistry.get("fraud_ml_governance_analytics_latency_seconds").meter();
+        Meter lifecycleStatusMeter = meterRegistry.get("lifecycle_status_total").tag("status", "OPEN").meter();
+        Meter lifecycleResolvedMeter = meterRegistry.get("lifecycle_status_total").tag("status", "RESOLVED").meter();
+        Meter lifecycleDegradedMeter = meterRegistry.get("lifecycle_degraded_total").meter();
 
         assertThat(requestMeter.getId().getTags()).isEmpty();
         assertThat(windowMeter.getId().getTags()).isEmpty();
@@ -53,6 +59,18 @@ class AlertServiceMetricsTest {
                 .extracting(Tag::getValue)
                 .containsExactly("AVAILABLE");
         assertThat(latencyMeter.getId().getTags()).isEmpty();
+        assertThat(lifecycleStatusMeter.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactly("status");
+        assertThat(lifecycleResolvedMeter.getId().getTags())
+                .extracting(Tag::getValue)
+                .containsExactly("RESOLVED");
+        assertThat(lifecycleDegradedMeter.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactly("reason");
+        assertThat(lifecycleDegradedMeter.getId().getTags())
+                .extracting(Tag::getValue)
+                .containsExactly("AUDIT_UNAVAILABLE");
         assertThat(meterRegistry.get("fraud_ml_governance_analytics_window_days").gauge().value()).isEqualTo(7.0);
         assertThat(meterRegistry.get("fraud_ml_governance_analytics_latency_seconds").timer().count()).isEqualTo(1);
         assertThat(meterRegistry.get("fraud_ml_governance_analytics_status_total").tag("status", "AVAILABLE").counter().count())
