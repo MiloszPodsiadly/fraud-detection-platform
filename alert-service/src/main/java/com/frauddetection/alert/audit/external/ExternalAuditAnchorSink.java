@@ -18,5 +18,9 @@ public interface ExternalAuditAnchorSink {
 
     Optional<ExternalAuditAnchor> latest(String partitionKey);
 
+    default Optional<ExternalAuditAnchor> findByChainPosition(String partitionKey, long chainPosition) {
+        return Optional.empty();
+    }
+
     List<ExternalAuditAnchor> findByRange(String partitionKey, Instant from, Instant to, int limit);
 }

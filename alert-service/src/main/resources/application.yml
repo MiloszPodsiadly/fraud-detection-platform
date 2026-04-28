@@ -37,6 +37,19 @@ management:
 
 app:
   audit:
+    external-anchoring:
+      enabled: ${AUDIT_EXTERNAL_ANCHORING_ENABLED:false}
+      sink: ${AUDIT_EXTERNAL_ANCHORING_SINK:disabled}
+      publish-limit: ${AUDIT_EXTERNAL_ANCHORING_PUBLISH_LIMIT:100}
+      local-file:
+        path: ${AUDIT_EXTERNAL_ANCHORING_LOCAL_FILE_PATH:./target/audit-external-anchors.jsonl}
+      object-store:
+        bucket: ${AUDIT_EXTERNAL_ANCHORING_OBJECT_STORE_BUCKET:}
+        prefix: ${AUDIT_EXTERNAL_ANCHORING_OBJECT_STORE_PREFIX:}
+        region: ${AUDIT_EXTERNAL_ANCHORING_OBJECT_STORE_REGION:}
+        endpoint: ${AUDIT_EXTERNAL_ANCHORING_OBJECT_STORE_ENDPOINT:}
+        access-key-id: ${AUDIT_EXTERNAL_ANCHORING_OBJECT_STORE_ACCESS_KEY_ID:}
+        secret-access-key: ${AUDIT_EXTERNAL_ANCHORING_OBJECT_STORE_SECRET_ACCESS_KEY:}
     trust-attestation:
       signing:
         mode: ${AUDIT_TRUST_ATTESTATION_SIGNING_MODE:disabled}

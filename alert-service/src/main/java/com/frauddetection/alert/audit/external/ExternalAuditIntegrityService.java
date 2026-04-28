@@ -89,7 +89,13 @@ public class ExternalAuditIntegrityService {
             );
         }
 
-        ExternalAuditAnchor external = sink.latest(query.partitionKey()).orElse(null);
+        java.util.Optional<ExternalAuditAnchor> exactExternal = sink.findByChainPosition(query.partitionKey(), local.chainPosition());
+        if (exactExternal == null) {
+            exactExternal = java.util.Optional.empty();
+        }
+        ExternalAuditAnchor external = exactExternal
+                .or(() -> sink.latest(query.partitionKey()))
+                .orElse(null);
         if (external == null) {
             return partial(query, local, null, "EXTERNAL_ANCHOR_MISSING", "External anchor is missing for the local chain head.");
         }

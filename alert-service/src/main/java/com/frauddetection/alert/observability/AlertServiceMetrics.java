@@ -349,7 +349,7 @@ public class AlertServiceMetrics {
     }
 
     private String normalizeExternalSink(String sink) {
-        if ("local-file".equals(sink) || "disabled".equals(sink)) {
+        if ("local-file".equals(sink) || "object-store".equals(sink) || "disabled".equals(sink)) {
             return sink;
         }
         return "unknown";
@@ -364,7 +364,7 @@ public class AlertServiceMetrics {
 
     private String normalizeExternalAnchorFailureReason(String reason) {
         return switch (reason) {
-            case "DISABLED", "UNAVAILABLE", "CONFLICT", "IO_ERROR" -> reason;
+            case "DISABLED", "UNAVAILABLE", "CONFLICT", "MISMATCH", "IO_ERROR", "INVALID_ANCHOR" -> reason;
             default -> "UNKNOWN";
         };
     }
