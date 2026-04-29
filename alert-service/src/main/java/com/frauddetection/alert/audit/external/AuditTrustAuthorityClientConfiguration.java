@@ -9,6 +9,8 @@ import org.springframework.core.env.Environment;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Arrays;
 
 @Configuration
@@ -26,7 +28,7 @@ class AuditTrustAuthorityClientConfiguration {
         if (!StringUtils.hasText(properties.getUrl())) {
             throw new IllegalStateException("Audit trust authority URL is required when enabled.");
         }
-        if (!StringUtils.hasText(properties.getHmacSecret())) {
+        if (!jwtServiceIdentity(properties) && !StringUtils.hasText(properties.getHmacSecret())) {
             throw new IllegalStateException("Audit trust authority HMAC secret is required when enabled.");
         }
         return new HttpAuditTrustAuthorityClient(
@@ -44,12 +46,36 @@ class AuditTrustAuthorityClientConfiguration {
                     if (!properties.isSigningRequired()) {
                         throw new IllegalStateException("Prod-like alert-service requires audit trust authority signing-required=true when trust authority is enabled.");
                     }
-                    if (!StringUtils.hasText(properties.getHmacSecret())) {
-                        throw new IllegalStateException("Prod-like alert-service requires audit trust authority HMAC credentials when enabled.");
+                    if (!jwtServiceIdentity(properties)) {
+                        throw new IllegalStateException("Prod-like alert-service requires audit trust authority JWT service identity; HMAC local mode is not permitted.");
                     }
+                    validateJwtPrivateKey(properties.getJwtIdentity());
                 }
             }
         };
+    }
+
+    private boolean jwtServiceIdentity(AuditTrustAuthorityProperties properties) {
+        return "JWT_SERVICE_IDENTITY".equals(normalizedIdentityMode(properties));
+    }
+
+    private String normalizedIdentityMode(AuditTrustAuthorityProperties properties) {
+        return properties.getIdentityMode() == null
+                ? "HMAC_LOCAL"
+                : properties.getIdentityMode().trim().replace('-', '_').toUpperCase();
+    }
+
+    private void validateJwtPrivateKey(AuditTrustAuthorityProperties.JwtIdentity jwt) {
+        if (StringUtils.hasText(jwt.getPrivateKey())) {
+            throw new IllegalStateException("Prod-like alert-service forbids inline audit trust authority JWT private key material.");
+        }
+        if (!StringUtils.hasText(jwt.getPrivateKeyPath())) {
+            throw new IllegalStateException("Prod-like alert-service requires audit trust authority JWT private key path.");
+        }
+        Path keyPath = Path.of(jwt.getPrivateKeyPath());
+        if (!Files.exists(keyPath) || !Files.isReadable(keyPath)) {
+            throw new IllegalStateException("Prod-like alert-service audit trust authority JWT private key must exist and be readable.");
+        }
     }
 
     private boolean prodLikeProfile(Environment environment) {
