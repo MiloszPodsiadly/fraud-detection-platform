@@ -3,8 +3,11 @@ package com.frauddetection.alert.audit.external;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.frauddetection.alert.audit.AuditAnchorDocument;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
-import java.util.UUID;
+import java.util.HexFormat;
 
 public record ExternalAuditAnchor(
         @JsonProperty("external_anchor_id")
@@ -21,6 +24,9 @@ public record ExternalAuditAnchor(
 
         @JsonProperty("last_event_hash")
         String lastEventHash,
+
+        @JsonProperty("previous_event_hash")
+        String previousEventHash,
 
         @JsonProperty("hash_algorithm")
         String hashAlgorithm,
@@ -67,6 +73,7 @@ public record ExternalAuditAnchor(
                 partitionKey,
                 chainPosition,
                 lastEventHash,
+                null,
                 hashAlgorithm,
                 schemaVersion,
                 createdAt,
@@ -78,14 +85,16 @@ public record ExternalAuditAnchor(
     }
 
     public static ExternalAuditAnchor from(AuditAnchorDocument localAnchor, String sinkType) {
+        String schemaVersion = SCHEMA_VERSION;
         return new ExternalAuditAnchor(
-                UUID.randomUUID().toString(),
+                deterministicAnchorId(sinkType, schemaVersion, localAnchor.partitionKey(), localAnchor.chainPosition(), localAnchor.lastEventHash()),
                 localAnchor.anchorId(),
                 localAnchor.partitionKey(),
                 localAnchor.chainPosition(),
                 localAnchor.lastEventHash(),
+                localAnchor.previousEventHash(),
                 localAnchor.hashAlgorithm(),
-                SCHEMA_VERSION,
+                schemaVersion,
                 localAnchor.createdAt(),
                 sinkType,
                 STATUS_PUBLISHED,
@@ -105,6 +114,7 @@ public record ExternalAuditAnchor(
                 partitionKey,
                 chainPosition,
                 lastEventHash,
+                previousEventHash,
                 hashAlgorithm,
                 schemaVersion,
                 createdAt,
@@ -113,5 +123,23 @@ public record ExternalAuditAnchor(
                 reason,
                 manifestStatus
         );
+    }
+
+    private static String deterministicAnchorId(String source, String schemaVersion, String partitionKey, long chainPosition, String eventHash) {
+        String canonical = nullToEmpty(source)
+                + ":" + nullToEmpty(schemaVersion)
+                + ":" + nullToEmpty(partitionKey)
+                + ":" + chainPosition
+                + ":" + nullToEmpty(eventHash);
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(canonical.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("External anchor id could not be computed.", exception);
+        }
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
     }
 }

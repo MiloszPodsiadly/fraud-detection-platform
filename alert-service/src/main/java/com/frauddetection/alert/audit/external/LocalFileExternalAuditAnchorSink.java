@@ -34,6 +34,11 @@ class LocalFileExternalAuditAnchorSink implements ExternalAuditAnchorSink {
     }
 
     @Override
+    public ExternalWitnessCapabilities capabilities() {
+        return ExternalWitnessCapabilities.localFile();
+    }
+
+    @Override
     public synchronized ExternalAuditAnchor publish(ExternalAuditAnchor anchor) {
         try {
             Optional<ExternalAuditAnchor> existing = findByLocalAnchorId(anchor.localAnchorId());

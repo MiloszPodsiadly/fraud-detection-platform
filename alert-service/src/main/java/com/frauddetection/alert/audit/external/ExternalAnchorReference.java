@@ -20,6 +20,12 @@ public record ExternalAnchorReference(
         @JsonProperty("verified_at")
         Instant verifiedAt,
 
+        @JsonProperty("timestamp_type")
+        ExternalWitnessTimestampType timestampType,
+
+        @JsonProperty("timestamp_trust_level")
+        String timestampTrustLevel,
+
         @JsonProperty("signature_status")
         String signatureStatus,
 
@@ -48,7 +54,37 @@ public record ExternalAnchorReference(
             String externalHash,
             Instant verifiedAt
     ) {
-        this(anchorId, externalKey, anchorHash, externalHash, verifiedAt, null, null, null, null, null, null, null);
+        this(anchorId, externalKey, anchorHash, externalHash, verifiedAt, ExternalWitnessTimestampType.APP_OBSERVED, "APP_OBSERVED", null, null, null, null, null, null, null);
+    }
+
+    public ExternalAnchorReference(
+            String anchorId,
+            String externalKey,
+            String anchorHash,
+            String externalHash,
+            Instant verifiedAt,
+            String signatureStatus,
+            String signature,
+            String signingKeyId,
+            String signingAlgorithm,
+            Instant signedAt,
+            String signingAuthority,
+            String signedPayloadHash
+    ) {
+        this(anchorId, externalKey, anchorHash, externalHash, verifiedAt, ExternalWitnessTimestampType.APP_OBSERVED, "APP_OBSERVED",
+                signatureStatus, signature, signingKeyId, signingAlgorithm, signedAt, signingAuthority, signedPayloadHash);
+    }
+
+    public ExternalAnchorReference(
+            String anchorId,
+            String externalKey,
+            String anchorHash,
+            String externalHash,
+            Instant verifiedAt,
+            ExternalWitnessTimestampType timestampType,
+            String timestampTrustLevel
+    ) {
+        this(anchorId, externalKey, anchorHash, externalHash, verifiedAt, timestampType, timestampTrustLevel, null, null, null, null, null, null, null);
     }
 
     ExternalAnchorReference withSignature(SignedAuditAnchorPayload signature) {
@@ -61,6 +97,8 @@ public record ExternalAnchorReference(
                 anchorHash,
                 externalHash,
                 verifiedAt,
+                timestampType,
+                timestampTrustLevel,
                 signature.signatureStatus(),
                 signature.signature(),
                 signature.keyId(),

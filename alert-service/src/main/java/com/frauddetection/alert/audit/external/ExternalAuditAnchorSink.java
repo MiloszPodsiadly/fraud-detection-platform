@@ -18,6 +18,10 @@ public interface ExternalAuditAnchorSink {
         return ExternalImmutabilityLevel.NONE;
     }
 
+    default ExternalWitnessCapabilities capabilities() {
+        return ExternalWitnessCapabilities.disabled();
+    }
+
     ExternalAuditAnchor publish(ExternalAuditAnchor anchor);
 
     default java.util.Optional<ExternalAnchorReference> externalReference(ExternalAuditAnchor anchor) {

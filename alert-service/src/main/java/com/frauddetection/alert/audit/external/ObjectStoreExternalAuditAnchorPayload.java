@@ -5,6 +5,12 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.Instant;
 
 record ObjectStoreExternalAuditAnchorPayload(
+        @JsonProperty("anchor_id")
+        String anchorId,
+
+        @JsonProperty("source")
+        String source,
+
         @JsonProperty("local_anchor_id")
         String localAnchorId,
 
@@ -20,6 +26,9 @@ record ObjectStoreExternalAuditAnchorPayload(
         @JsonProperty("event_hash")
         String eventHash,
 
+        @JsonProperty("previous_event_hash")
+        String previousEventHash,
+
         @JsonProperty("payload_hash")
         String payloadHash,
 
@@ -31,6 +40,9 @@ record ObjectStoreExternalAuditAnchorPayload(
 
         @JsonProperty("created_at")
         Instant createdAt,
+
+        @JsonProperty("published_at_local")
+        Instant publishedAtLocal,
 
         @JsonProperty("sink_type")
         String sinkType,
@@ -46,14 +58,18 @@ record ObjectStoreExternalAuditAnchorPayload(
 ) {
     static ObjectStoreExternalAuditAnchorPayload from(ExternalAuditAnchor anchor, String externalObjectKey, String payloadHash) {
         return new ObjectStoreExternalAuditAnchorPayload(
+                anchor.externalAnchorId(),
+                anchor.sinkType(),
                 anchor.localAnchorId(),
                 anchor.partitionKey(),
                 externalObjectKey,
                 anchor.chainPosition(),
                 anchor.lastEventHash(),
+                anchor.previousEventHash(),
                 payloadHash,
                 anchor.hashAlgorithm(),
                 anchor.schemaVersion(),
+                anchor.createdAt(),
                 anchor.createdAt(),
                 anchor.sinkType(),
                 anchor.publicationStatus(),
@@ -64,14 +80,15 @@ record ObjectStoreExternalAuditAnchorPayload(
 
     ExternalAuditAnchor toExternalAnchor() {
         return new ExternalAuditAnchor(
-                "object-store:" + localAnchorId,
+                anchorId,
                 localAnchorId,
                 partitionKey,
                 chainPosition,
                 eventHash,
+                previousEventHash,
                 hashAlgorithm,
                 schemaVersion,
-                createdAt,
+                publishedAtLocal == null ? createdAt : publishedAtLocal,
                 sinkType,
                 publicationStatus,
                 publicationReason,
