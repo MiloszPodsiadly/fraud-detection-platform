@@ -66,6 +66,7 @@ Alert service:
 | `GET` | `/api/v1/audit/events` | Returns bounded newest-first durable platform audit events; requires `audit:read`. |
 | `GET` | `/api/v1/audit/integrity` | Performs bounded read-only hash-chain integrity verification; requires `audit:read`. |
 | `GET` | `/api/v1/audit/integrity/external` | Performs bounded read-only external anchor verification; requires `audit:verify`. |
+| `GET` | `/api/v1/audit/integrity/external/coverage` | Returns bounded external anchor coverage and visible missing ranges; requires `audit:verify`. |
 | `GET` | `/api/v1/audit/evidence/export` | Returns required-window bounded audit evidence export; requires `audit:export`. |
 | `GET` | `/api/v1/audit/trust/attestation` | Returns a bounded derived trust attestation over FDP-19/FDP-20 signals; requires `audit:verify`. |
 | `GET` | `/api/v1/audit/trust/keys` | Returns bounded public verification keys for the local trust authority; requires `audit:verify`. |
@@ -119,7 +120,7 @@ Platform External Audit Anchor Verification API:
 - Compares local and external anchors for local anchor id, chain position, last event hash, hash algorithm, schema version, external reference, and external immutability level. FDP-22 object-store sinks can verify by exact `partition_key + chain_position` lookup using the deterministic encoded object key before falling back to latest-anchor comparison, and also validate `external_object_key`, `payload_hash`, `anchor_hash`, and `external_hash` binding.
 - Object-store latest HEAD detection requires continuation-token pagination and consumes every page. If listing may be truncated and pagination is unavailable, verification returns a degraded `UNAVAILABLE` state instead of reporting `VALID` from a best-effort HEAD.
 - Object-store sinks may use `<partition_prefix>/head.json` as an External Head Manifest optimization. The manifest is verified by hash and by reading the referenced anchor; invalid or missing manifests are not trusted and fall back to full paginated scan.
-- Response status is `VALID`, `INVALID`, `PARTIAL`, or `UNAVAILABLE`; missing/stale external anchors are explicit and never reported as a valid empty result.
+- Response status is `VALID`, `INVALID`, `PARTIAL`, `UNAVAILABLE`, or `CONFLICT`; missing/stale external anchors and incompatible same-position witness records are explicit and never reported as a valid empty result.
 - The endpoint is read-only and does not repair, mutate, delete, export, or resynchronize audit data.
 
 Platform External Audit Anchor Sinks:
@@ -127,7 +128,7 @@ Platform External Audit Anchor Sinks:
 - `disabled` is the default and publishes nothing.
 - `local-file` is development-only and blocked in prod-like profiles.
 - `object-store` writes new anchors as `audit-anchors/{encoded_partition_key}/{chain_position_padded}.json` with 20-digit zero-padded chain positions, keeps legacy non-padded keys readable, and requires bucket, prefix, region or endpoint, credentials, client configuration, continuation-token listing for complete HEAD discovery, and startup readiness validation. Normal publish is bounded and does not list the partition; idempotency and same-position conflict detection use the deterministic object key. Real S3/GCS/Azure adapters remain future deployment work.
-- The object-store payload contains original `partition_key`, `external_object_key`, `local_anchor_id`, `chain_position`, `event_hash`, `payload_hash`, and `created_at`; it does not include placeholder `previous_event_hash` evidence.
+- The object-store payload contains original `partition_key`, `external_object_key`, `local_anchor_id`, `chain_position`, `event_hash`, `previous_event_hash`, `payload_hash`, and `created_at`; `previous_event_hash` is explicit and may be null for legacy/local anchors.
 - Object-store publication is append-only at the application boundary: identical local anchor/object-key/payload binding is idempotent, different content for the same key fails, conflicting local anchor binding fails, write-after-read verification is required, and there are no delete/update paths.
 - The External Head Manifest is an optimization only. It is updated after anchor verification, can be recomputed from anchors, and does not change audit payload correctness. If manifest update fails after anchor verification, publication is reported as `PARTIAL` with `HEAD_MANIFEST_UPDATE_FAILED` and is not counted as `PUBLISHED`.
 - Successful publication persists a bounded `external_reference` with `anchor_id`, `external_key`, `anchor_hash`, `external_hash`, and `verified_at`. Object-store operations use bounded timeout/retry settings; timeout, retry, operation failure, and tampering metrics are low-cardinality.

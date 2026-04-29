@@ -138,7 +138,7 @@ paths:
   /api/v1/audit/integrity/external:
     get:
       summary: Verify external audit anchor consistency
-      description: Performs bounded read-only comparison between the local audit chain anchor and the external anchor. Requires audit:verify. Returns VALID, INVALID, PARTIAL, or UNAVAILABLE. Object-store sinks can verify by exact partition_key + chain_position lookup using the deterministic encoded object key before falling back to latest-anchor comparison. Latest object-store HEAD detection first verifies the optional External Head Manifest at head.json by manifest_hash and by reading the referenced anchor; invalid or missing manifests are not trusted and fall back to full paginated scan. Full scan requires continuation-token pagination and consumes every page; if listing may be truncated and pagination is unavailable, verification returns a degraded UNAVAILABLE state rather than reporting VALID from a best-effort HEAD. Detects missing, stale, ahead, mismatched hash, mismatched local anchor id, mismatched object key binding, mismatched payload hash binding, mismatched hash algorithm, unsupported external schema version, and external payload tampering. Response includes external_immutability_level; NONE or CONFIGURED is not WORM proof. This endpoint does not repair data, mutate audit records, export full history, or provide WORM/legal notarization. Real S3/GCS/Azure object-store adapters remain future deployment work.
+      description: Performs bounded read-only comparison between the local audit chain anchor and the external anchor. Requires audit:verify. Returns VALID, INVALID, PARTIAL, UNAVAILABLE, or CONFLICT. Object-store sinks can verify by exact partition_key + chain_position lookup using the deterministic encoded object key before falling back to latest-anchor comparison. Latest object-store HEAD detection first verifies the optional External Head Manifest at head.json by manifest_hash and by reading the referenced anchor; invalid or missing manifests are not trusted and fall back to full paginated scan. Full scan requires continuation-token pagination and consumes every page; if listing may be truncated and pagination is unavailable, verification returns a degraded UNAVAILABLE state rather than reporting VALID from a best-effort HEAD. Detects missing, stale, ahead, mismatched hash, mismatched local anchor id, mismatched object key binding, mismatched payload hash binding, mismatched hash algorithm, unsupported external schema version, incompatible same-position witness records, and external payload tampering. Response includes external_immutability_level; NONE or CONFIGURED is not WORM proof. This endpoint does not repair data, mutate audit records, export full history, or provide WORM/legal notarization. Real S3/GCS/Azure object-store adapters remain future deployment work.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -165,6 +165,41 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ExternalAuditIntegrityResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/audit/integrity/external/coverage:
+    get:
+      summary: Inspect bounded external anchor coverage
+      description: Returns bounded external anchor coverage for the local audit chain head. Clients must treat missing_ranges and truncated as operational evidence gaps. This endpoint is read-only, bounded, and does not export audit events or repair anchors.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: source_service
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [alert-service]
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        "200":
+          description: Bounded external anchor coverage result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExternalAuditAnchorCoverageResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -917,21 +952,21 @@ components:
       properties:
         violation_type:
           type: string
-          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, INVALID_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, MISSING_PREDECESSOR, CHAIN_FORK_DETECTED, CHAIN_POSITION_INVALID, CHAIN_POSITION_DUPLICATE, CHAIN_POSITION_GAP, EXTERNAL_ANCHOR_MISSING, STALE_EXTERNAL_ANCHOR, EXTERNAL_CHAIN_POSITION_AHEAD, EXTERNAL_HASH_MISMATCH, EXTERNAL_CHAIN_POSITION_MISMATCH, EXTERNAL_HASH_ALGORITHM_MISMATCH, EXTERNAL_SCHEMA_VERSION_UNSUPPORTED, EXTERNAL_LOCAL_ANCHOR_ID_MISMATCH, SIGNATURE_INVALID, SIGNATURE_UNKNOWN_KEY, SIGNATURE_KEY_REVOKED, SIGNATURE_UNSIGNED, SIGNATURE_UNSIGNED_REQUIRED, SIGNATURE_UNAVAILABLE, SIGNATURE_UNAVAILABLE_REQUIRED]
+          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, INVALID_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, MISSING_PREDECESSOR, CHAIN_FORK_DETECTED, CHAIN_POSITION_INVALID, CHAIN_POSITION_DUPLICATE, CHAIN_POSITION_GAP, EXTERNAL_ANCHOR_MISSING, STALE_EXTERNAL_ANCHOR, EXTERNAL_CHAIN_POSITION_AHEAD, EXTERNAL_HASH_MISMATCH, EXTERNAL_CHAIN_POSITION_MISMATCH, EXTERNAL_HASH_ALGORITHM_MISMATCH, EXTERNAL_SCHEMA_VERSION_UNSUPPORTED, EXTERNAL_LOCAL_ANCHOR_ID_MISMATCH, EXTERNAL_ANCHOR_CONFLICT, SIGNATURE_INVALID, SIGNATURE_UNKNOWN_KEY, SIGNATURE_KEY_REVOKED, SIGNATURE_UNSIGNED, SIGNATURE_UNSIGNED_REQUIRED, SIGNATURE_UNAVAILABLE, SIGNATURE_UNAVAILABLE_REQUIRED]
         position:
           type: integer
           minimum: 1
         reason_code:
           type: string
-          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, UNSUPPORTED_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, MISSING_PREDECESSOR, CHAIN_FORK_DETECTED, CHAIN_POSITION_INVALID, CHAIN_POSITION_DUPLICATE, CHAIN_POSITION_GAP, EXTERNAL_ANCHOR_MISSING, STALE_EXTERNAL_ANCHOR, EXTERNAL_CHAIN_POSITION_AHEAD, EXTERNAL_HASH_MISMATCH, EXTERNAL_CHAIN_POSITION_MISMATCH, EXTERNAL_HASH_ALGORITHM_MISMATCH, EXTERNAL_SCHEMA_VERSION_UNSUPPORTED, EXTERNAL_LOCAL_ANCHOR_ID_MISMATCH, SIGNATURE_INVALID, SIGNATURE_UNKNOWN_KEY, SIGNATURE_KEY_REVOKED, SIGNATURE_UNSIGNED, SIGNATURE_UNSIGNED_REQUIRED, SIGNATURE_UNAVAILABLE, SIGNATURE_UNAVAILABLE_REQUIRED]
+          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, UNSUPPORTED_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, MISSING_PREDECESSOR, CHAIN_FORK_DETECTED, CHAIN_POSITION_INVALID, CHAIN_POSITION_DUPLICATE, CHAIN_POSITION_GAP, EXTERNAL_ANCHOR_MISSING, STALE_EXTERNAL_ANCHOR, EXTERNAL_CHAIN_POSITION_AHEAD, EXTERNAL_HASH_MISMATCH, EXTERNAL_CHAIN_POSITION_MISMATCH, EXTERNAL_HASH_ALGORITHM_MISMATCH, EXTERNAL_SCHEMA_VERSION_UNSUPPORTED, EXTERNAL_LOCAL_ANCHOR_ID_MISMATCH, EXTERNAL_ANCHOR_CONFLICT, SIGNATURE_INVALID, SIGNATURE_UNKNOWN_KEY, SIGNATURE_KEY_REVOKED, SIGNATURE_UNSIGNED, SIGNATURE_UNSIGNED_REQUIRED, SIGNATURE_UNAVAILABLE, SIGNATURE_UNAVAILABLE_REQUIRED]
     ExternalAuditIntegrityResponse:
       type: object
       additionalProperties: false
-      required: [status, checked, limit, source_service, partition_key, external_immutability_level, signature_verification_status, violations]
+      required: [status, checked, limit, source_service, partition_key, external_immutability_level, timestamp_trust_level, signature_verification_status, violations]
       properties:
         status:
           type: string
-          enum: [VALID, INVALID, PARTIAL, UNAVAILABLE]
+          enum: [VALID, INVALID, PARTIAL, UNAVAILABLE, CONFLICT]
         checked:
           type: integer
           minimum: 0
@@ -948,7 +983,7 @@ components:
         reason_code:
           type: string
           nullable: true
-          enum: [AUDIT_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_MISSING, STALE_EXTERNAL_ANCHOR, HEAD_SCAN_PAGINATION_UNSUPPORTED, HEAD_SCAN_LIMIT_EXCEEDED, SIGNATURE_INVALID, SIGNATURE_UNKNOWN_KEY, SIGNATURE_KEY_REVOKED, SIGNATURE_UNSIGNED, SIGNATURE_UNSIGNED_REQUIRED, SIGNATURE_UNAVAILABLE, SIGNATURE_UNAVAILABLE_REQUIRED]
+          enum: [AUDIT_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_MISSING, STALE_EXTERNAL_ANCHOR, HEAD_SCAN_PAGINATION_UNSUPPORTED, HEAD_SCAN_LIMIT_EXCEEDED, CONFLICT, SIGNATURE_INVALID, SIGNATURE_UNKNOWN_KEY, SIGNATURE_KEY_REVOKED, SIGNATURE_UNSIGNED, SIGNATURE_UNSIGNED_REQUIRED, SIGNATURE_UNAVAILABLE, SIGNATURE_UNAVAILABLE_REQUIRED]
         message:
           type: string
           nullable: true
@@ -961,6 +996,10 @@ components:
           $ref: "#/components/schemas/AuditAnchorSummary"
         external_immutability_level:
           $ref: "#/components/schemas/ExternalImmutabilityLevel"
+        timestamp_trust_level:
+          type: string
+          enum: [NONE, APP_OBSERVED, STORAGE_OBSERVED, SIGNED_TIMESTAMP, LEDGER_TIMESTAMP]
+          description: Timestamp interpretation for external references. APP_OBSERVED is not proof; storage/signed/ledger timestamps are progressively stronger signals when backed by the witness capabilities.
         signature_verification_status:
           type: string
           enum: [VALID, INVALID, UNAVAILABLE, UNKNOWN_KEY, KEY_REVOKED, UNSIGNED]
@@ -979,11 +1018,79 @@ components:
         signature_reason_code:
           type: string
           nullable: true
-          enum: [SIGNATURE_INVALID, SIGNATURE_UNKNOWN_KEY, SIGNATURE_KEY_REVOKED, SIGNATURE_UNAVAILABLE, SIGNATURE_UNSIGNED, SIGNATURE_UNSIGNED_REQUIRED, SIGNATURE_UNAVAILABLE_REQUIRED, AUDIT_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_STORE_UNAVAILABLE]
+          enum: [SIGNATURE_INVALID, SIGNATURE_UNKNOWN_KEY, SIGNATURE_KEY_REVOKED, SIGNATURE_UNAVAILABLE, SIGNATURE_UNSIGNED, SIGNATURE_UNSIGNED_REQUIRED, SIGNATURE_UNAVAILABLE_REQUIRED, AUDIT_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_STORE_UNAVAILABLE, CONFLICT]
+        conflicting_hashes:
+          type: array
+          items:
+            type: string
+          description: Present only when status=CONFLICT. Contains bounded incompatible event hashes observed for the same chain position.
+        witness_sources:
+          type: array
+          items:
+            type: string
+          description: Present only when status=CONFLICT. Contains bounded witness/source labels for incompatible anchors.
         violations:
           type: array
           items:
             $ref: "#/components/schemas/AuditIntegrityViolation"
+    ExternalAuditAnchorCoverageResponse:
+      type: object
+      additionalProperties: false
+      required: [status, latest_local_position, latest_external_position, position_lag, missing_ranges, truncated, limit]
+      properties:
+        status:
+          type: string
+          enum: [AVAILABLE, UNAVAILABLE]
+        latest_local_position:
+          type: integer
+          format: int64
+          minimum: 0
+        latest_external_position:
+          type: integer
+          format: int64
+          minimum: 0
+        position_lag:
+          type: integer
+          format: int64
+          minimum: 0
+        time_lag_seconds:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        missing_ranges:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/ExternalAuditAnchorMissingRange"
+        truncated:
+          type: boolean
+          description: True when the bounded coverage window cannot represent all local positions or all missing ranges.
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 500
+        reason_code:
+          type: string
+          nullable: true
+          enum: [AUDIT_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_STORE_UNAVAILABLE, HEAD_SCAN_PAGINATION_UNSUPPORTED, HEAD_SCAN_LIMIT_EXCEEDED, CONFLICT]
+        message:
+          type: string
+          nullable: true
+          maxLength: 160
+    ExternalAuditAnchorMissingRange:
+      type: object
+      additionalProperties: false
+      required: [from_chain_position, to_chain_position]
+      properties:
+        from_chain_position:
+          type: integer
+          format: int64
+          minimum: 1
+        to_chain_position:
+          type: integer
+          format: int64
+          minimum: 1
     AuditEvidenceExportResponse:
       type: object
       additionalProperties: false
@@ -1378,7 +1485,7 @@ components:
     ExternalAnchorReference:
       type: object
       additionalProperties: false
-      required: [anchor_id, external_key, anchor_hash, external_hash, verified_at]
+      required: [anchor_id, external_key, anchor_hash, external_hash, verified_at, timestamp_type, timestamp_trust_level]
       properties:
         anchor_id:
           type: string
@@ -1396,6 +1503,13 @@ components:
         verified_at:
           type: string
           format: date-time
+        timestamp_type:
+          type: string
+          enum: [APP_OBSERVED, STORAGE_OBSERVED, SIGNED_TIMESTAMP, LEDGER_TIMESTAMP]
+        timestamp_trust_level:
+          type: string
+          enum: [APP_OBSERVED, STORAGE_OBSERVED, SIGNED_TIMESTAMP, LEDGER_TIMESTAMP]
+          description: APP_OBSERVED is not proof of external time. Stronger values require verified witness support.
         signature_status:
           type: string
           nullable: true
