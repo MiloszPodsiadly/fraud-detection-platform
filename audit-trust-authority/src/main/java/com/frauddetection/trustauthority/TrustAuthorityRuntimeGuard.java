@@ -3,6 +3,8 @@ package com.frauddetection.trustauthority;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.env.Environment;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -16,6 +18,8 @@ import java.util.Set;
 @Component
 public class TrustAuthorityRuntimeGuard implements ApplicationRunner {
 
+    private static final Logger log = LoggerFactory.getLogger(TrustAuthorityRuntimeGuard.class);
+
     private final TrustAuthorityProperties properties;
     private final Environment environment;
 
@@ -27,10 +31,17 @@ public class TrustAuthorityRuntimeGuard implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         TrustAuthorityIdentityMode identityMode = properties.identityModeEnum();
+        boolean prodLike = prodLikeProfile();
+        log.info(
+                "Trust Authority started in {} mode ({}, fail-closed guard {})",
+                identityMode == null ? "UNSPECIFIED" : identityMode.name(),
+                prodLike ? "prod-like" : "local/dev",
+                prodLike ? "active" : "inactive"
+        );
         if (identityMode == TrustAuthorityIdentityMode.MTLS_READY || identityMode == TrustAuthorityIdentityMode.JWT_READY) {
             throw new IllegalStateException("Trust authority identity mode " + identityMode.configValue() + " is not implemented and fails closed.");
         }
-        if (!prodLikeProfile()) {
+        if (!prodLike) {
             return;
         }
         if (properties.isEnabled() && !properties.isSigningRequired()) {

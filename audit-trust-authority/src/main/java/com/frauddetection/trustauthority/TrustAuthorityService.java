@@ -76,7 +76,7 @@ public class TrustAuthorityService {
         this.rateLimiter = rateLimiter;
         this.replayGuard = replayGuard;
         this.metrics = metrics;
-        this.jwtIdentityVerifier = new TrustAuthorityJwtIdentityVerifier(properties);
+        this.jwtIdentityVerifier = new TrustAuthorityJwtIdentityVerifier(properties, metrics);
         this.localKeyGenerationAllowed = localKeyGenerationAllowed(environment);
         this.keys = loadKeys(properties);
         this.activeKey = keys.stream()
@@ -94,7 +94,7 @@ public class TrustAuthorityService {
         this.rateLimiter = rateLimiter;
         this.replayGuard = new TrustAuthorityRequestReplayGuard();
         this.metrics = new TrustAuthorityMetrics(Metrics.globalRegistry);
-        this.jwtIdentityVerifier = new TrustAuthorityJwtIdentityVerifier(properties);
+        this.jwtIdentityVerifier = new TrustAuthorityJwtIdentityVerifier(properties, metrics);
         this.localKeyGenerationAllowed = true;
         this.keys = loadKeys(properties);
         this.activeKey = keys.stream()
@@ -235,6 +235,7 @@ public class TrustAuthorityService {
             throw new TrustAuthorityRequestException(HttpStatus.CONFLICT, "Trust authority request replay detected.");
         }
         TrustAuthorityAuditIntegrityResponse response = auditSink.integrity(limit, mode);
+        metrics.recordAuditIntegrityResult(response.status());
         audit("VERIFY", caller, "AUDIT_INTEGRITY", "trust-authority-audit-integrity", null,
                 "VALID".equals(response.status()) ? "SUCCESS" : "FAILURE", response.reasonCode());
         return response;

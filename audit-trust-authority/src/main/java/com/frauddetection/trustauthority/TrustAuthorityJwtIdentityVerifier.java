@@ -25,92 +25,106 @@ import java.util.Map;
 final class TrustAuthorityJwtIdentityVerifier {
 
     private final TrustAuthorityProperties properties;
+    private final TrustAuthorityMetrics metrics;
     private final Map<String, RSAPublicKey> keys;
 
-    TrustAuthorityJwtIdentityVerifier(TrustAuthorityProperties properties) {
+    TrustAuthorityJwtIdentityVerifier(TrustAuthorityProperties properties, TrustAuthorityMetrics metrics) {
         this.properties = properties;
+        this.metrics = metrics;
         this.keys = loadKeys(properties.getJwtIdentity().getKeys());
     }
 
     CallerAuthorization authorize(TrustAuthorityRequestCredentials credentials, String purpose) {
         if (credentials == null || !StringUtils.hasText(credentials.bearerToken())) {
-            return CallerAuthorization.failure(HttpStatus.UNAUTHORIZED, "JWT_MISSING");
+            return failure(HttpStatus.UNAUTHORIZED, "JWT_MISSING", "INVALID_CLAIM");
         }
         try {
             SignedJWT jwt = SignedJWT.parse(credentials.bearerToken());
             String kid = jwt.getHeader().getKeyID();
             if (!JWSAlgorithm.RS256.equals(jwt.getHeader().getAlgorithm())) {
-                return CallerAuthorization.failure(HttpStatus.UNAUTHORIZED, "JWT_ALGORITHM_UNSUPPORTED");
+                return failure(HttpStatus.UNAUTHORIZED, "JWT_ALGORITHM_UNSUPPORTED", "INVALID_CLAIM");
             }
             if (!StringUtils.hasText(kid)) {
-                return CallerAuthorization.failure(HttpStatus.UNAUTHORIZED, "JWT_KID_MISSING");
+                return failure(HttpStatus.UNAUTHORIZED, "JWT_KID_MISSING", "KID_MISMATCH");
             }
             RSAPublicKey key = keys.get(kid);
             if (key == null) {
-                return CallerAuthorization.failure(HttpStatus.FORBIDDEN, "JWT_KID_UNKNOWN");
+                return failure(HttpStatus.FORBIDDEN, "JWT_KID_UNKNOWN", "KID_MISMATCH");
             }
             if (!jwt.verify(new RSASSAVerifier(key))) {
-                return CallerAuthorization.failure(HttpStatus.UNAUTHORIZED, "JWT_SIGNATURE_INVALID");
+                return failure(HttpStatus.UNAUTHORIZED, "JWT_SIGNATURE_INVALID", "INVALID_SIGNATURE");
             }
             TrustAuthorityProperties.JwtIdentityProperties jwtProperties = properties.getJwtIdentity();
             if (!safeEquals(jwtProperties.getIssuer(), jwt.getJWTClaimsSet().getIssuer())) {
-                return CallerAuthorization.failure(HttpStatus.UNAUTHORIZED, "JWT_ISSUER_INVALID");
+                return failure(HttpStatus.UNAUTHORIZED, "JWT_ISSUER_INVALID", "INVALID_CLAIM");
             }
             if (!jwt.getJWTClaimsSet().getAudience().contains(jwtProperties.getAudience())) {
-                return CallerAuthorization.failure(HttpStatus.UNAUTHORIZED, "JWT_AUDIENCE_INVALID");
+                return failure(HttpStatus.UNAUTHORIZED, "JWT_AUDIENCE_INVALID", "INVALID_CLAIM");
             }
             Date issuedAt = jwt.getJWTClaimsSet().getIssueTime();
             Date expiresAt = jwt.getJWTClaimsSet().getExpirationTime();
             if (issuedAt == null || expiresAt == null) {
-                return CallerAuthorization.failure(HttpStatus.UNAUTHORIZED, "JWT_TIME_CLAIMS_MISSING");
+                return failure(HttpStatus.UNAUTHORIZED, "JWT_TIME_CLAIMS_MISSING", "INVALID_CLAIM");
             }
             Instant now = Instant.now();
             Instant iat = issuedAt.toInstant();
             Instant exp = expiresAt.toInstant();
             Duration skew = nonNegative(jwtProperties.getClockSkew(), Duration.ofSeconds(30));
             if (exp.isBefore(now.minus(skew))) {
-                return CallerAuthorization.failure(HttpStatus.UNAUTHORIZED, "JWT_EXPIRED");
+                return failure(HttpStatus.UNAUTHORIZED, "JWT_EXPIRED", "EXPIRED");
             }
             if (iat.isAfter(now.plus(skew))) {
-                return CallerAuthorization.failure(HttpStatus.UNAUTHORIZED, "JWT_IAT_FUTURE");
+                return failure(HttpStatus.UNAUTHORIZED, "JWT_IAT_FUTURE", "INVALID_CLAIM");
             }
             if (iat.isBefore(now.minus(nonNegative(jwtProperties.getMaxTokenAge(), Duration.ofMinutes(5)).plus(skew)))) {
-                return CallerAuthorization.failure(HttpStatus.UNAUTHORIZED, "JWT_TOO_OLD");
+                return failure(HttpStatus.UNAUTHORIZED, "JWT_TOO_OLD", "INVALID_CLAIM");
             }
             if (!exp.isAfter(iat)) {
-                return CallerAuthorization.failure(HttpStatus.UNAUTHORIZED, "JWT_TTL_INVALID");
+                return failure(HttpStatus.UNAUTHORIZED, "JWT_TTL_INVALID", "INVALID_CLAIM");
             }
             if (Duration.between(iat, exp).compareTo(nonNegative(jwtProperties.getMaxTtl(), Duration.ofMinutes(5))) > 0) {
-                return CallerAuthorization.failure(HttpStatus.UNAUTHORIZED, "JWT_TTL_TOO_LONG");
+                return failure(HttpStatus.UNAUTHORIZED, "JWT_TTL_TOO_LONG", "INVALID_CLAIM");
             }
             String serviceName = jwt.getJWTClaimsSet().getStringClaim(jwtProperties.getServiceNameClaim());
             if (!StringUtils.hasText(serviceName)) {
-                return CallerAuthorization.failure(HttpStatus.UNAUTHORIZED, "JWT_SERVICE_MISSING");
+                return failure(HttpStatus.UNAUTHORIZED, "JWT_SERVICE_MISSING", "INVALID_CLAIM");
             }
             TrustAuthorityProperties.CallerEntry caller = properties.getCallers().stream()
                     .filter(candidate -> serviceName.equals(candidate.getServiceName()))
                     .findFirst()
                     .orElse(null);
             if (caller == null) {
-                return CallerAuthorization.failure(HttpStatus.FORBIDDEN, "CALLER_UNKNOWN");
+                return failure(HttpStatus.FORBIDDEN, "CALLER_UNKNOWN", "UNAUTHORIZED_SERVICE");
             }
             if (!caller.getAllowedJwtKeyIds().contains(kid)) {
-                return CallerAuthorization.failure(HttpStatus.FORBIDDEN, "JWT_KEY_SERVICE_MISMATCH");
+                metrics.recordJwtServiceMismatch();
+                return failure(HttpStatus.FORBIDDEN, "JWT_KEY_SERVICE_MISMATCH", "KID_MISMATCH");
             }
             if (!caller.getAllowedPurposes().contains(purpose)) {
-                return CallerAuthorization.failure(HttpStatus.FORBIDDEN, "PURPOSE_UNAUTHORIZED");
+                return failure(HttpStatus.FORBIDDEN, "PURPOSE_UNAUTHORIZED", "UNAUTHORIZED_SERVICE");
             }
             List<String> authorities = authorities(jwt.getJWTClaimsSet().getClaim(jwtProperties.getAuthoritiesClaim()));
             if (!authorities.contains(purpose)) {
-                return CallerAuthorization.failure(HttpStatus.FORBIDDEN, "JWT_AUTHORITY_MISSING");
+                metrics.recordJwtAuthorityMissing();
+                return failure(HttpStatus.FORBIDDEN, "JWT_AUTHORITY_MISSING", "AUTHORITY_MISSING");
             }
             return CallerAuthorization.success(
                     caller.getSignRateLimitPerMinute(),
                     TrustAuthorityCallerIdentity.of(serviceName, "jwt", jwt.getJWTClaimsSet().getSubject())
             );
         } catch (Exception exception) {
-            return CallerAuthorization.failure(HttpStatus.UNAUTHORIZED, "JWT_INVALID");
+            return failure(HttpStatus.UNAUTHORIZED, "JWT_INVALID", "INVALID_CLAIM");
         }
+    }
+
+    private CallerAuthorization failure(HttpStatus status, String reasonCode, String metricReason) {
+        metrics.recordJwtInvalid(metricReason);
+        if ("EXPIRED".equals(metricReason)) {
+            metrics.recordJwtExpired();
+        } else if ("KID_MISMATCH".equals(metricReason)) {
+            metrics.recordJwtKidMismatch();
+        }
+        return CallerAuthorization.failure(status, reasonCode);
     }
 
     private Map<String, RSAPublicKey> loadKeys(List<TrustAuthorityProperties.JwtKeyEntry> entries) {

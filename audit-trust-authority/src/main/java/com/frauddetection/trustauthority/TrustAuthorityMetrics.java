@@ -58,6 +58,29 @@ class TrustAuthorityMetrics {
         Counter.builder("trust_replay_detected_total").register(registry).increment();
     }
 
+    void recordJwtInvalid(String reason) {
+        Counter.builder("trust_jwt_invalid_total")
+                .tag("reason", boundedJwtReason(reason))
+                .register(registry)
+                .increment();
+    }
+
+    void recordJwtExpired() {
+        Counter.builder("trust_jwt_expired_total").register(registry).increment();
+    }
+
+    void recordJwtKidMismatch() {
+        Counter.builder("trust_jwt_kid_mismatch_total").register(registry).increment();
+    }
+
+    void recordJwtServiceMismatch() {
+        Counter.builder("trust_jwt_service_mismatch_total").register(registry).increment();
+    }
+
+    void recordJwtAuthorityMissing() {
+        Counter.builder("trust_jwt_authority_missing_total").register(registry).increment();
+    }
+
     void recordAuditWrite(String status) {
         Counter.builder("trust_authority_audit_write_total")
                 .tag("status", boundedStatus(status))
@@ -71,6 +94,15 @@ class TrustAuthorityMetrics {
 
     void recordAuditAppendConflict() {
         Counter.builder("audit_append_conflict_total").register(registry).increment();
+        Counter.builder("trust_audit_append_conflict_total").register(registry).increment();
+    }
+
+    void recordAuditIntegrityResult(String status) {
+        if ("PARTIAL".equals(status)) {
+            Counter.builder("trust_audit_integrity_partial_total").register(registry).increment();
+        } else if ("INVALID".equals(status)) {
+            Counter.builder("trust_audit_integrity_invalid_total").register(registry).increment();
+        }
     }
 
     private String boundedStatus(String status) {
@@ -78,5 +110,20 @@ class TrustAuthorityMetrics {
             return status;
         }
         return "FAILURE";
+    }
+
+    private String boundedJwtReason(String reason) {
+        if (reason == null) {
+            return "invalid_claim";
+        }
+        return switch (reason) {
+            case "INVALID_SIGNATURE" -> "invalid_signature";
+            case "INVALID_CLAIM" -> "invalid_claim";
+            case "UNAUTHORIZED_SERVICE" -> "unauthorized_service";
+            case "EXPIRED" -> "expired";
+            case "KID_MISMATCH" -> "kid_mismatch";
+            case "AUTHORITY_MISSING" -> "authority_missing";
+            default -> "invalid_claim";
+        };
     }
 }

@@ -54,6 +54,7 @@ class DurableTrustAuthorityAuditSinkTest {
                 .containsExactly(1L, 2L);
         assertThat(captor.getAllValues().getLast().previousEventHash()).isEqualTo(existing.eventHash());
         assertThat(registry.get("audit_append_conflict_total").counter().count()).isEqualTo(1.0d);
+        assertThat(registry.get("trust_audit_append_conflict_total").counter().count()).isEqualTo(1.0d);
         assertThat(registry.get("audit_append_retry_total").counter().count()).isEqualTo(1.0d);
         assertThat(registry.get("trust_authority_audit_write_total").tag("status", "SUCCESS").counter().count()).isEqualTo(1.0d);
     }

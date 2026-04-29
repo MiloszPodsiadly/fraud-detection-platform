@@ -8,6 +8,7 @@ import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.mock.env.MockEnvironment;
@@ -26,6 +27,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -499,6 +501,110 @@ class TrustAuthorityServiceTest {
     }
 
     @Test
+    void shouldEnforceJwtKeyRotationWithoutFallbackToAnyKnownKey() throws Exception {
+        KeyPair oldKey = rsaKeyPair();
+        KeyPair newKey = rsaKeyPair();
+        TrustSignRequest request = request("hash-1", "anchor-1");
+
+        TrustAuthorityService oldRemoved = service(jwtProperties(
+                List.of(jwtKey("new-key", newKey)),
+                caller("alert-service", "", List.of("AUDIT_ANCHOR"), List.of("new-key"))
+        ));
+        assertThatThrownBy(() -> oldRemoved.sign(jwtCredentials(oldKey, "alert-service", "trust-authority", List.of("AUDIT_ANCHOR"), Instant.now(), Instant.now().plusSeconds(120), "old-key"), request))
+                .isInstanceOf(TrustAuthorityRequestException.class);
+
+        TrustAuthorityService newAdded = service(jwtProperties(
+                List.of(jwtKey("new-key", newKey)),
+                caller("alert-service", "", List.of("AUDIT_ANCHOR"), List.of("new-key"))
+        ));
+        assertThat(newAdded.sign(jwtCredentials(newKey, "alert-service", "trust-authority", List.of("AUDIT_ANCHOR"), Instant.now(), Instant.now().plusSeconds(120), "new-key"), request).keyId())
+                .isEqualTo("local-ed25519-key-1");
+
+        TrustAuthorityService overlap = service(jwtProperties(
+                List.of(jwtKey("old-key", oldKey), jwtKey("new-key", newKey)),
+                caller("alert-service", "", List.of("AUDIT_ANCHOR"), List.of("old-key", "new-key"))
+        ));
+        assertThat(overlap.sign(jwtCredentials(oldKey, "alert-service", "trust-authority", List.of("AUDIT_ANCHOR"), Instant.now(), Instant.now().plusSeconds(120), "old-key"), request).keyId())
+                .isEqualTo("local-ed25519-key-1");
+        assertThat(overlap.sign(jwtCredentials(newKey, "alert-service", "trust-authority", List.of("AUDIT_ANCHOR"), Instant.now(), Instant.now().plusSeconds(120), "new-key"), request("hash-2", "anchor-2")).keyId())
+                .isEqualTo("local-ed25519-key-1");
+    }
+
+    @Test
+    void shouldRejectJwtMisuseAcrossServiceKeyAndAuthorityBoundaries() throws Exception {
+        KeyPair alertKey = rsaKeyPair();
+        KeyPair scoringKey = rsaKeyPair();
+        TrustAuthorityProperties properties = jwtProperties(
+                List.of(jwtKey("alert-key", alertKey), jwtKey("scoring-key", scoringKey)),
+                caller("alert-service", "", List.of("AUDIT_ANCHOR"), List.of("alert-key")),
+                caller("fraud-scoring-service", "", List.of("AUDIT_INTEGRITY"), List.of("scoring-key"))
+        );
+        TrustAuthorityService service = service(properties, new RecordingAuditSink());
+        TrustSignRequest request = request("hash-1", "anchor-1");
+
+        assertThatThrownBy(() -> service.sign(jwtCredentials(scoringKey, "alert-service", "trust-authority", List.of("AUDIT_ANCHOR"), Instant.now(), Instant.now().plusSeconds(120), "scoring-key"), request))
+                .isInstanceOf(TrustAuthorityRequestException.class);
+        assertThatThrownBy(() -> service.sign(jwtCredentials(alertKey, "fraud-scoring-service", "trust-authority", List.of("AUDIT_ANCHOR"), Instant.now(), Instant.now().plusSeconds(120), "alert-key"), request))
+                .isInstanceOf(TrustAuthorityRequestException.class);
+        assertThatThrownBy(() -> service.sign(jwtCredentials(alertKey, "alert-service", "trust-authority", List.of(), Instant.now(), Instant.now().plusSeconds(120), "alert-key"), request))
+                .isInstanceOf(TrustAuthorityRequestException.class);
+    }
+
+    @Test
+    void shouldRecordBoundedJwtMisuseMetrics() throws Exception {
+        KeyPair jwtKey = rsaKeyPair();
+        KeyPair wrongSigningKey = rsaKeyPair();
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        TrustAuthorityService service = service(jwtProperties(jwtKey), new RecordingAuditSink(), new TrustAuthorityMetrics(registry));
+        TrustSignRequest request = request("hash-1", "anchor-1");
+
+        assertThatThrownBy(() -> service.sign(jwtCredentials(wrongSigningKey, "alert-service", "trust-authority", List.of("AUDIT_ANCHOR"), Instant.now(), Instant.now().plusSeconds(120), "jwt-key-1"), request))
+                .isInstanceOf(TrustAuthorityRequestException.class);
+        assertThatThrownBy(() -> service.sign(jwtCredentials(jwtKey, "alert-service", "trust-authority", List.of("AUDIT_ANCHOR"), Instant.now().minusSeconds(700), Instant.now().minusSeconds(100), "jwt-key-1"), request))
+                .isInstanceOf(TrustAuthorityRequestException.class);
+        assertThatThrownBy(() -> service.sign(jwtCredentials(jwtKey, "unknown-service", "trust-authority", List.of("AUDIT_ANCHOR")), request))
+                .isInstanceOf(TrustAuthorityRequestException.class);
+        assertThatThrownBy(() -> service.sign(jwtCredentials(jwtKey, "alert-service", "trust-authority", List.of()), request))
+                .isInstanceOf(TrustAuthorityRequestException.class);
+        assertThatThrownBy(() -> service.sign(jwtCredentials(jwtKey, "alert-service", "trust-authority", List.of("AUDIT_ANCHOR"), Instant.now(), Instant.now().plusSeconds(120), "jwt-key-1", "wrong-issuer"), request))
+                .isInstanceOf(TrustAuthorityRequestException.class);
+        TrustAuthorityProperties serviceMismatchProperties = jwtProperties(jwtKey);
+        serviceMismatchProperties.getCallers().getFirst().setAllowedJwtKeyIds(List.of("other-key"));
+        TrustAuthorityService serviceMismatchService = service(serviceMismatchProperties, new RecordingAuditSink(), new TrustAuthorityMetrics(registry));
+        assertThatThrownBy(() -> serviceMismatchService.sign(jwtCredentials(jwtKey, "alert-service", "trust-authority", List.of("AUDIT_ANCHOR")), request))
+                .isInstanceOf(TrustAuthorityRequestException.class);
+
+        assertThat(registry.get("trust_jwt_invalid_total").tag("reason", "invalid_signature").counter().count()).isEqualTo(1.0d);
+        assertThat(registry.get("trust_jwt_invalid_total").tag("reason", "expired").counter().count()).isEqualTo(1.0d);
+        assertThat(registry.get("trust_jwt_invalid_total").tag("reason", "unauthorized_service").counter().count()).isEqualTo(1.0d);
+        assertThat(registry.get("trust_jwt_invalid_total").tag("reason", "authority_missing").counter().count()).isEqualTo(1.0d);
+        assertThat(registry.get("trust_jwt_invalid_total").tag("reason", "invalid_claim").counter().count()).isEqualTo(1.0d);
+        assertThat(registry.get("trust_jwt_invalid_total").tag("reason", "kid_mismatch").counter().count()).isEqualTo(1.0d);
+        assertThat(registry.get("trust_jwt_expired_total").counter().count()).isEqualTo(1.0d);
+        assertThat(registry.get("trust_jwt_authority_missing_total").counter().count()).isEqualTo(1.0d);
+        assertThat(registry.get("trust_jwt_kid_mismatch_total").counter().count()).isEqualTo(1.0d);
+        assertThat(registry.get("trust_jwt_service_mismatch_total").counter().count()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void shouldRejectAdversarialJwtClaims() throws Exception {
+        KeyPair jwtKey = rsaKeyPair();
+        TrustAuthorityService service = service(jwtProperties(jwtKey), new RecordingAuditSink());
+        TrustSignRequest request = request("hash-1", "anchor-1");
+
+        assertThatThrownBy(() -> service.sign(jwtCredentials(jwtKey, "alert-service", "trust-authority", List.of("AUDIT_ANCHOR"), Instant.now(), Instant.now().plusSeconds(120), "jwt-key-1", "wrong-issuer"), request))
+                .isInstanceOf(TrustAuthorityRequestException.class);
+        assertThatThrownBy(() -> service.sign(jwtCredentials(jwtKey, "alert-service", "wrong-audience", List.of("AUDIT_ANCHOR")), request))
+                .isInstanceOf(TrustAuthorityRequestException.class);
+        assertThatThrownBy(() -> service.sign(jwtCredentials(jwtKey, "alert-service", "trust-authority", List.of("AUDIT_ANCHOR"), Instant.now().minusSeconds(700), Instant.now().minusSeconds(100), "jwt-key-1"), request))
+                .isInstanceOf(TrustAuthorityRequestException.class);
+        assertThatThrownBy(() -> service.sign(jwtCredentials(jwtKey, "alert-service", "trust-authority", List.of("AUDIT_ANCHOR"), Instant.now().plusSeconds(120), Instant.now().plusSeconds(180), "jwt-key-1"), request))
+                .isInstanceOf(TrustAuthorityRequestException.class);
+        assertThatThrownBy(() -> service.sign(jwtCredentials(jwtKey, "alert-service", "trust-authority", List.of("AUDIT_ANCHOR"), Instant.now(), Instant.now().plusSeconds(600), "jwt-key-1"), request))
+                .isInstanceOf(TrustAuthorityRequestException.class);
+    }
+
+    @Test
     void shouldEnforceKeyValidityWindowDuringVerification() throws Exception {
         KeyPair keyPair = keyPair();
         TrustAuthorityProperties.KeyEntry key = key("key-v1", "ACTIVE", keyPair);
@@ -557,9 +663,57 @@ class TrustAuthorityServiceTest {
         assertThat(head.status()).isEqualTo("AVAILABLE");
         assertThat(head.source()).isEqualTo("trust-authority-audit");
         assertThat(head.proofType()).isEqualTo("LOCAL_HASH_CHAIN_HEAD");
+        assertThat(head.integrityHint()).isEqualTo("LOCAL_CHAIN_ONLY");
         assertThat(head.occurredAt()).isNotNull();
         assertThat(auditSink.events()).extracting(TrustAuthorityAuditEvent::payloadHash)
                 .contains("trust-authority-audit-head");
+    }
+
+    @Test
+    void shouldExposeExplicitEmptyAuditHead() {
+        TrustAuthorityAuditHeadResponse head = TrustAuthorityAuditHeadResponse.empty();
+
+        assertThat(head.status()).isEqualTo("EMPTY");
+        assertThat(head.chainPosition()).isNull();
+        assertThat(head.eventHash()).isNull();
+        assertThat(head.occurredAt()).isNull();
+        assertThat(head.integrityHint()).isEqualTo("LOCAL_CHAIN_ONLY");
+    }
+
+    @Test
+    void shouldRecordAuditIntegrityAnomalyMetrics() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AtomicInteger calls = new AtomicInteger();
+        TrustAuthorityAuditSink sink = new TrustAuthorityAuditSink() {
+            @Override
+            public void append(TrustAuthorityAuditEvent event) {
+            }
+
+            @Override
+            public TrustAuthorityAuditIntegrityResponse integrity(int limit) {
+                return integrity(limit, "WINDOW");
+            }
+
+            @Override
+            public TrustAuthorityAuditIntegrityResponse integrity(int limit, String mode) {
+                if (calls.getAndIncrement() == 0) {
+                    return new TrustAuthorityAuditIntegrityResponse("PARTIAL", 1, "WINDOW", 2L, "hash-2", 2L, 2L, "hash-1", "BOUNDARY_PREDECESSOR_OUTSIDE_WINDOW", List.of());
+                }
+                return new TrustAuthorityAuditIntegrityResponse("INVALID", 1, "WINDOW", 2L, "hash-2", 2L, 2L, "hash-1", "AUDIT_CHAIN_INVALID", List.of());
+            }
+
+            @Override
+            public TrustAuthorityAuditHeadResponse head() {
+                return TrustAuthorityAuditHeadResponse.empty();
+            }
+        };
+        TrustAuthorityService service = service(new TrustAuthorityProperties(), sink, new TrustAuthorityMetrics(registry));
+
+        service.auditIntegrity(credentials("alert-service", "local", "local-dev-trust-hmac-secret", "AUDIT_INTEGRITY", "trust-authority-audit-integrity"), 100, "WINDOW");
+        service.auditIntegrity(credentials("alert-service", "local", "local-dev-trust-hmac-secret", "AUDIT_INTEGRITY", "trust-authority-audit-integrity"), 100, "WINDOW");
+
+        assertThat(registry.get("trust_audit_integrity_partial_total").counter().count()).isEqualTo(1.0d);
+        assertThat(registry.get("trust_audit_integrity_invalid_total").counter().count()).isEqualTo(1.0d);
     }
 
     private TrustAuthorityService service(String keyId) {
@@ -571,6 +725,17 @@ class TrustAuthorityServiceTest {
 
     private TrustAuthorityService service(TrustAuthorityProperties properties, TrustAuthorityAuditSink auditSink) {
         return new TrustAuthorityService(properties, auditSink, new TrustAuthorityRateLimiter());
+    }
+
+    private TrustAuthorityService service(TrustAuthorityProperties properties, TrustAuthorityAuditSink auditSink, TrustAuthorityMetrics metrics) {
+        return new TrustAuthorityService(
+                properties,
+                auditSink,
+                new TrustAuthorityRateLimiter(),
+                new TrustAuthorityRequestReplayGuard(),
+                metrics,
+                environment("test")
+        );
     }
 
     private TrustAuthorityService service(TrustAuthorityProperties properties) {
@@ -598,6 +763,12 @@ class TrustAuthorityServiceTest {
         caller.setServiceName(serviceName);
         caller.setHmacSecret(token);
         caller.setAllowedPurposes(purposes);
+        return caller;
+    }
+
+    private TrustAuthorityProperties.CallerEntry caller(String serviceName, String token, List<String> purposes, List<String> jwtKeyIds) {
+        TrustAuthorityProperties.CallerEntry caller = caller(serviceName, token, purposes);
+        caller.setAllowedJwtKeyIds(jwtKeyIds);
         return caller;
     }
 
@@ -702,18 +873,27 @@ class TrustAuthorityServiceTest {
     }
 
     private TrustAuthorityProperties jwtProperties(KeyPair jwtKey) {
+        return jwtProperties(
+                List.of(jwtKey("jwt-key-1", jwtKey)),
+                caller("alert-service", "", List.of("AUDIT_ANCHOR", "AUDIT_INTEGRITY"), List.of("jwt-key-1"))
+        );
+    }
+
+    private TrustAuthorityProperties jwtProperties(List<TrustAuthorityProperties.JwtKeyEntry> keys, TrustAuthorityProperties.CallerEntry... callers) {
         TrustAuthorityProperties properties = new TrustAuthorityProperties();
         properties.setIdentityMode("jwt-service-identity");
-        TrustAuthorityProperties.JwtKeyEntry key = new TrustAuthorityProperties.JwtKeyEntry();
-        key.setKeyId("jwt-key-1");
-        key.setPublicKey(Base64.getEncoder().encodeToString(jwtKey.getPublic().getEncoded()));
         properties.getJwtIdentity().setIssuer("issuer-1");
         properties.getJwtIdentity().setAudience("trust-authority");
-        properties.getJwtIdentity().setKeys(List.of(key));
-        TrustAuthorityProperties.CallerEntry caller = caller("alert-service", "", List.of("AUDIT_ANCHOR", "AUDIT_INTEGRITY"));
-        caller.setAllowedJwtKeyIds(List.of("jwt-key-1"));
-        properties.setCallers(List.of(caller));
+        properties.getJwtIdentity().setKeys(keys);
+        properties.setCallers(List.of(callers));
         return properties;
+    }
+
+    private TrustAuthorityProperties.JwtKeyEntry jwtKey(String keyId, KeyPair jwtKey) {
+        TrustAuthorityProperties.JwtKeyEntry key = new TrustAuthorityProperties.JwtKeyEntry();
+        key.setKeyId(keyId);
+        key.setPublicKey(Base64.getEncoder().encodeToString(jwtKey.getPublic().getEncoded()));
+        return key;
     }
 
     private void configurePersistentSigningKeys(TrustAuthorityProperties properties) throws Exception {

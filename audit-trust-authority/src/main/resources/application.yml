@@ -41,3 +41,7 @@ app:
       jwks-path: ${TRUST_AUTHORITY_JWT_JWKS_PATH:}
     audit:
       sink: ${TRUST_AUTHORITY_AUDIT_SINK:local-file}
+    external-anchoring:
+      enabled: ${TRUST_AUTHORITY_EXTERNAL_ANCHORING_ENABLED:false}
+      fixed-delay: ${TRUST_AUTHORITY_EXTERNAL_ANCHORING_FIXED_DELAY:15m}
+      fixed-delay-ms: ${TRUST_AUTHORITY_EXTERNAL_ANCHORING_FIXED_DELAY_MS:900000}
