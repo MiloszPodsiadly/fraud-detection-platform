@@ -73,6 +73,57 @@
         "offline_access",
         "microprofile-jwt"
       ]
+    },
+    {
+      "clientId": "analyst-console-e2e",
+      "name": "analyst-console-e2e",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": false,
+      "protocolMappers": [
+        {
+          "name": "sub",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "access.token.claim": "true",
+            "id.token.claim": "true",
+            "userinfo.token.claim": "false",
+            "claim.name": "sub",
+            "jsonType.label": "String",
+            "user.attribute": "id"
+          }
+        },
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "full.path": "false",
+            "access.token.claim": "true",
+            "id.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "claim.name": "groups"
+          }
+        }
+      ],
+      "defaultClientScopes": [
+        "web-origins",
+        "profile",
+        "email",
+        "roles"
+      ],
+      "optionalClientScopes": [
+        "offline_access",
+        "microprofile-jwt"
+      ]
     }
   ],
   "groups": [
@@ -93,7 +144,11 @@
     {
       "username": "readonly",
       "enabled": true,
+      "firstName": "Read Only",
+      "lastName": "Analyst",
+      "email": "readonly@example.local",
       "emailVerified": true,
+      "requiredActions": [],
       "credentials": [
         {
           "type": "password",
@@ -108,7 +163,11 @@
     {
       "username": "analyst",
       "enabled": true,
+      "firstName": "Fraud",
+      "lastName": "Analyst",
+      "email": "analyst@example.local",
       "emailVerified": true,
+      "requiredActions": [],
       "credentials": [
         {
           "type": "password",
@@ -123,7 +182,11 @@
     {
       "username": "reviewer",
       "enabled": true,
+      "firstName": "Fraud",
+      "lastName": "Reviewer",
+      "email": "reviewer@example.local",
       "emailVerified": true,
+      "requiredActions": [],
       "credentials": [
         {
           "type": "password",
@@ -138,7 +201,11 @@
     {
       "username": "opsadmin",
       "enabled": true,
+      "firstName": "Fraud Ops",
+      "lastName": "Admin",
+      "email": "opsadmin@example.local",
       "emailVerified": true,
+      "requiredActions": [],
       "credentials": [
         {
           "type": "password",

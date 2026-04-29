@@ -83,6 +83,24 @@ services:
       timeout: 10s
       retries: 10
 
+  audit-trust-authority:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.backend
+      args:
+        MODULE_NAME: audit-trust-authority
+    container_name: audit-trust-authority
+    restart: unless-stopped
+    environment:
+      SERVER_PORT: 8080
+      TRUST_AUTHORITY_NAME: local-trust-authority
+      TRUST_AUTHORITY_KEY_ID: local-ed25519-key-1
+      TRUST_AUTHORITY_INTERNAL_TOKEN: local-dev-trust-token
+      TRUST_AUTHORITY_PRIVATE_KEY_PATH: /tmp/audit-trust-authority/ed25519-private.key
+      TRUST_AUTHORITY_PUBLIC_KEY_PATH: /tmp/audit-trust-authority/ed25519-public.key
+    ports:
+      - "127.0.0.1:8095:8080"
+
   prometheus:
     image: prom/prometheus:v3.3.0
     container_name: fraud-prometheus
@@ -273,6 +291,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      audit-trust-authority:
+        condition: service_started
       ollama-model-init:
         condition: service_completed_successfully
     environment:
@@ -285,6 +305,15 @@ services:
       INTERNAL_AUTH_CLIENT_ENABLED: "true"
       INTERNAL_AUTH_SERVICE_NAME: alert-service
       INTERNAL_AUTH_TOKEN: local-dev-internal-token
+      AUDIT_EXTERNAL_ANCHORING_ENABLED: "true"
+      AUDIT_EXTERNAL_ANCHORING_SINK: local-file
+      AUDIT_EXTERNAL_ANCHORING_LOCAL_FILE_PATH: /tmp/audit-external-anchors.jsonl
+      AUDIT_EXTERNAL_ANCHORING_INITIAL_DELAY_MS: "5000"
+      AUDIT_EXTERNAL_ANCHORING_PUBLISH_DELAY_MS: "10000"
+      AUDIT_TRUST_AUTHORITY_ENABLED: "true"
+      AUDIT_TRUST_AUTHORITY_URL: http://audit-trust-authority:8080
+      AUDIT_TRUST_AUTHORITY_INTERNAL_TOKEN: local-dev-trust-token
+      AUDIT_TRUST_AUTHORITY_SIGNING_REQUIRED: "false"
       ASSISTANT_MODE: OLLAMA
       OLLAMA_BASE_URL: http://ollama:11434
       OLLAMA_MODEL: llama3.2:3b
