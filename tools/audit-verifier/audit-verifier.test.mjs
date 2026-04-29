@@ -147,6 +147,18 @@ function runVerifier(input, keys) {
   }));
 }
 
+function runStrictVerifier(input, keys) {
+  const dir = mkdtempSync(join(tmpdir(), "audit-verifier-"));
+  const bundlePath = join(dir, "bundle.json");
+  const keysPath = join(dir, "keys.json");
+  writeFileSync(bundlePath, JSON.stringify(input), "utf8");
+  writeFileSync(keysPath, JSON.stringify(keys), "utf8");
+  return JSON.parse(execFileSync("node", ["tools/audit-verifier/audit-verifier.mjs", "--mode", "STRICT", bundlePath, keysPath], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  }));
+}
+
 test("valid continuous signed chain is independently verifiable", () => {
   const keyPair = generateKeyPairSync("ed25519");
   const keys = [{ key_id: "key-1", public_key: keyPair.publicKey.export({ format: "der", type: "spki" }).toString("base64") }];
@@ -158,7 +170,7 @@ test("valid continuous signed chain is independently verifiable", () => {
   ]), keys);
 
   assert.equal(result.status, "VALID");
-  assert.equal(result.verified_trust_level, "INDEPENDENTLY_VERIFIABLE");
+  assert.equal(result.verified_trust_level, "INTERNAL_FULL");
 });
 
 test("chain gap is invalid", () => {
@@ -205,7 +217,7 @@ test("partial range without boundary proof is not independently verifiable", () 
 
   assert.equal(result.status, "PARTIAL");
   assert.equal(result.reason_code, "BOUNDARY_PROOF_MISSING");
-  assert.notEqual(result.verified_trust_level, "INDEPENDENTLY_VERIFIABLE");
+  assert.equal(result.verified_trust_level, "INTERNAL_PARTIAL");
 });
 
 test("partial range with boundary proof is downgraded to signed anchors verified", () => {
@@ -219,7 +231,7 @@ test("partial range with boundary proof is downgraded to signed anchors verified
 
   assert.equal(result.status, "PARTIAL");
   assert.equal(result.reason_code, "PARTIAL_CHAIN");
-  assert.equal(result.verified_trust_level, "SIGNED_ANCHORS_VERIFIED");
+  assert.equal(result.verified_trust_level, "INTERNAL_PARTIAL");
 });
 
 test("expected total larger than bundle downgrades full prefix to partial chain", () => {
@@ -235,7 +247,22 @@ test("expected total larger than bundle downgrades full prefix to partial chain"
 
   assert.equal(result.status, "PARTIAL");
   assert.equal(result.reason_code, "PARTIAL_CHAIN");
-  assert.notEqual(result.verified_trust_level, "INDEPENDENTLY_VERIFIABLE");
+  assert.equal(result.verified_trust_level, "INTERNAL_PARTIAL");
+});
+
+test("strict mode rejects partial chain evidence", () => {
+  const keyPair = generateKeyPairSync("ed25519");
+  const keys = [{ key_id: "key-1", public_key: keyPair.publicKey.export({ format: "der", type: "spki" }).toString("base64") }];
+  const input = bundle([
+    event(2, "hash-2", "hash-1", signedAnchor(keyPair, 2, "hash-2")),
+    event(3, "hash-3", "hash-2", signedAnchor(keyPair, 3, "hash-3")),
+  ]);
+  const result = runStrictVerifier(input, keys);
+
+  assert.equal(result.mode, "STRICT");
+  assert.equal(result.status, "INVALID");
+  assert.equal(result.reason_code, "STRICT_REQUIRES_FULL_CHAIN");
+  assert.equal(result.verified_trust_level, "INVALID");
 });
 
 

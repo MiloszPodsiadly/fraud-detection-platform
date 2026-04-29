@@ -223,9 +223,59 @@ function anchors(bundle) {
   return [...fromEvents, ...latest];
 }
 
-const [bundlePath, keyFile] = process.argv.slice(2);
+function parseArgs(argv) {
+  const args = [...argv];
+  let mode = "STANDARD";
+  const strictIndex = args.indexOf("--strict");
+  if (strictIndex >= 0) {
+    mode = "STRICT";
+    args.splice(strictIndex, 1);
+  }
+  const modeIndex = args.indexOf("--mode");
+  if (modeIndex >= 0) {
+    mode = String(args[modeIndex + 1] ?? "").toUpperCase();
+    args.splice(modeIndex, 2);
+  }
+  if (!["STANDARD", "STRICT"].includes(mode)) {
+    throw new Error("mode must be STANDARD or STRICT");
+  }
+  return { mode, bundlePath: args[0], keyFile: args[1] };
+}
+
+function applyMode(status, reason, checked, mode) {
+  if (mode !== "STRICT") {
+    return { status, reason_code: reason };
+  }
+  if (status === "VALID") {
+    return { status, reason_code: reason };
+  }
+  const partial = checked.find((result) => result.status === "PARTIAL");
+  return {
+    status: "INVALID",
+    reason_code: partial?.reason_code === "PARTIAL_CHAIN"
+      ? "STRICT_REQUIRES_FULL_CHAIN"
+      : partial?.reason_code === "BOUNDARY_PROOF_MISSING"
+        ? "STRICT_REJECTS_BOUNDARY_ONLY_PROOF"
+        : reason,
+  };
+}
+
+function verifiedTrustLevel(status, reason, mode) {
+  if (status === "INVALID") {
+    return "INVALID";
+  }
+  if (status === "VALID") {
+    return "INTERNAL_FULL";
+  }
+  if (reason === "BOUNDARY_PROOF_MISSING" || reason === "PARTIAL_CHAIN") {
+    return mode === "STRICT" ? "INVALID" : "INTERNAL_PARTIAL";
+  }
+  return "INTERNAL_PARTIAL";
+}
+
+const { mode, bundlePath, keyFile } = parseArgs(process.argv.slice(2));
 if (!bundlePath) {
-  console.error("usage: node tools/audit-verifier/audit-verifier.mjs audit-evidence-bundle-v1.json [public-keys.json]");
+  console.error("usage: node tools/audit-verifier/audit-verifier.mjs [--mode STANDARD|STRICT|--strict] audit-evidence-bundle-v1.json [public-keys.json]");
   process.exit(2);
 }
 
@@ -244,15 +294,13 @@ const invalid = checked.find((result) => result.status === "INVALID");
 const partial = checked.find((result) => result.status === "PARTIAL");
 const status = checked.length === 0 ? "PARTIAL" : invalid ? "INVALID" : partial ? "PARTIAL" : "VALID";
 const reason = checked.length === 0 ? "NO_ANCHORS" : invalid?.reason_code ?? partial?.reason_code ?? null;
+const finalResult = applyMode(status, reason, checked, mode);
 
 console.log(JSON.stringify({
-  status,
-  reason_code: reason,
-  verified_trust_level: status === "VALID"
-    ? "INDEPENDENTLY_VERIFIABLE"
-    : (partial?.reason_code === "BOUNDARY_PROOF_MISSING" || partial?.reason_code === "PARTIAL_CHAIN"
-      ? "SIGNED_ANCHORS_VERIFIED"
-      : "PARTIAL_EXTERNAL"),
+  mode,
+  status: finalResult.status,
+  reason_code: finalResult.reason_code,
+  verified_trust_level: verifiedTrustLevel(finalResult.status, finalResult.reason_code, mode),
   checked_counts: {
     anchors: checked.length,
     keys: keys.size,
