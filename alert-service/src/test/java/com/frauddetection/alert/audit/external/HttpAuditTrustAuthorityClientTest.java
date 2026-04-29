@@ -5,6 +5,10 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.util.Base64;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.client.ExpectedCount.once;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
@@ -53,5 +57,53 @@ class HttpAuditTrustAuthorityClientTest {
         assertThat(result.signatureStatus()).isEqualTo("SIGNED");
         assertThat(result.keyId()).isEqualTo("key-1");
         server.verify();
+    }
+
+    @Test
+    void shouldUseBearerJwtWithoutHmacHeadersWhenJwtIdentityEnabled() throws Exception {
+        RestClient.Builder builder = RestClient.builder().baseUrl("http://trust-authority");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        AuditTrustAuthorityProperties properties = new AuditTrustAuthorityProperties();
+        properties.setIdentityMode("jwt-service-identity");
+        properties.setCallerServiceName("alert-service");
+        properties.getJwtIdentity().setIssuer("issuer-1");
+        properties.getJwtIdentity().setAudience("trust-authority");
+        properties.getJwtIdentity().setKeyId("alert-key-1");
+        properties.getJwtIdentity().setPrivateKey(privateKey());
+        HttpAuditTrustAuthorityClient client = new HttpAuditTrustAuthorityClient(builder.build(), properties);
+        server.expect(once(), requestTo("http://trust-authority/api/v1/trust/sign"))
+                .andExpect(request -> assertThat(request.getHeaders().getFirst("Authorization")).startsWith("Bearer "))
+                .andExpect(request -> assertThat(request.getHeaders().getFirst("X-Internal-Trust-Request-Id")).isNotBlank())
+                .andExpect(headerDoesNotExist("X-Internal-Trust-Signature"))
+                .andExpect(headerDoesNotExist("X-Internal-Trust-Signed-At"))
+                .andRespond(withSuccess("""
+                        {
+                          "signature": "sig",
+                          "key_id": "key-1",
+                          "algorithm": "Ed25519",
+                          "signed_at": "2026-04-29T10:00:00Z",
+                          "authority": "local-trust-authority"
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        SignedAuditAnchorPayload result = client.sign(new AuditAnchorSigningPayload(
+                "source_service:alert-service",
+                "anchor-1",
+                1L,
+                "last-hash",
+                "external-key",
+                "external-hash",
+                ExternalImmutabilityLevel.CONFIGURED
+        ));
+
+        assertThat(result.signatureStatus()).isEqualTo("SIGNED");
+        server.verify();
+    }
+
+    private String privateKey() throws Exception {
+        KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+        generator.initialize(2048);
+        KeyPair keyPair = generator.generateKeyPair();
+        return Base64.getEncoder().encodeToString(keyPair.getPrivate().getEncoded());
     }
 }

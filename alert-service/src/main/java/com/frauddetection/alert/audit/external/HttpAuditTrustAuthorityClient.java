@@ -6,6 +6,12 @@ import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.nimbusds.jose.JOSEObjectType;
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.JWSHeader;
+import com.nimbusds.jose.crypto.RSASSASigner;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.SignedJWT;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
@@ -13,12 +19,19 @@ import org.springframework.web.client.RestClientException;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.GeneralSecurityException;
+import java.security.KeyFactory;
 import java.security.NoSuchAlgorithmException;
+import java.security.interfaces.RSAPrivateKey;
+import java.security.spec.PKCS8EncodedKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.Arrays;
+import java.util.Date;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -153,16 +166,74 @@ class HttpAuditTrustAuthorityClient implements AuditTrustAuthorityClient {
     }
 
     private void internalHeaders(org.springframework.http.HttpHeaders headers, String action, String payload) {
-        String signedAt = Instant.now().toString();
         String requestId = UUID.randomUUID().toString();
+        headers.set("X-Internal-Trust-Request-Id", requestId);
+        if ("JWT_SERVICE_IDENTITY".equals(normalizedIdentityMode())) {
+            headers.setBearerAuth(jwtToken());
+            return;
+        }
+        String signedAt = Instant.now().toString();
         headers.set("X-Internal-Service-Name", properties.getCallerServiceName());
         headers.set("X-Internal-Service-Environment", properties.getCallerEnvironment());
-        headers.set("X-Internal-Trust-Request-Id", requestId);
         headers.set("X-Internal-Trust-Signed-At", signedAt);
         headers.set("X-Internal-Trust-Signature", hmac(properties.getHmacSecret(), credentialPayload(action, requestId, signedAt, payload)));
         if (StringUtils.hasText(properties.getCallerInstanceId())) {
             headers.set("X-Internal-Service-Instance-Id", properties.getCallerInstanceId());
         }
+    }
+
+    private String normalizedIdentityMode() {
+        return properties.getIdentityMode() == null ? "HMAC_LOCAL" : properties.getIdentityMode().trim().replace('-', '_').toUpperCase();
+    }
+
+    private String jwtToken() {
+        try {
+            AuditTrustAuthorityProperties.JwtIdentity jwt = properties.getJwtIdentity();
+            Instant now = Instant.now();
+            JWTClaimsSet claims = new JWTClaimsSet.Builder()
+                    .issuer(jwt.getIssuer())
+                    .audience(jwt.getAudience())
+                    .subject(properties.getCallerServiceName())
+                    .issueTime(Date.from(now))
+                    .expirationTime(Date.from(now.plus(jwt.getTtl())))
+                    .claim("service_name", properties.getCallerServiceName())
+                    .claim("authorities", authorities(jwt.getAuthorities()))
+                    .build();
+            SignedJWT signedJWT = new SignedJWT(
+                    new JWSHeader.Builder(JWSAlgorithm.RS256)
+                            .type(JOSEObjectType.JWT)
+                            .keyID(jwt.getKeyId())
+                            .build(),
+                    claims
+            );
+            signedJWT.sign(new RSASSASigner(loadPrivateKey(jwt)));
+            return signedJWT.serialize();
+        } catch (Exception exception) {
+            throw new IllegalStateException("Audit trust authority JWT credentials could not be created.");
+        }
+    }
+
+    private RSAPrivateKey loadPrivateKey(AuditTrustAuthorityProperties.JwtIdentity jwt) throws Exception {
+        String material = jwt.getPrivateKey();
+        if (!StringUtils.hasText(material) && StringUtils.hasText(jwt.getPrivateKeyPath())) {
+            material = Files.readString(Path.of(jwt.getPrivateKeyPath()));
+        }
+        String normalized = material
+                .replace("-----BEGIN PRIVATE KEY-----", "")
+                .replace("-----END PRIVATE KEY-----", "")
+                .replaceAll("\\s+", "");
+        byte[] der = Base64.getDecoder().decode(normalized);
+        return (RSAPrivateKey) KeyFactory.getInstance("RSA").generatePrivate(new PKCS8EncodedKeySpec(der));
+    }
+
+    private List<String> authorities(String value) {
+        if (!StringUtils.hasText(value)) {
+            return List.of();
+        }
+        return Arrays.stream(value.split("[,\\s]+"))
+                .filter(StringUtils::hasText)
+                .distinct()
+                .toList();
     }
 
     private String signCredentialPayload(TrustSignRequest request) {

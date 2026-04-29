@@ -68,9 +68,18 @@ app:
       url: ${AUDIT_TRUST_AUTHORITY_URL:http://localhost:8095}
       hmac-secret: ${AUDIT_TRUST_AUTHORITY_HMAC_SECRET:}
       signing-required: ${AUDIT_TRUST_AUTHORITY_SIGNING_REQUIRED:false}
+      identity-mode: ${AUDIT_TRUST_AUTHORITY_IDENTITY_MODE:hmac-local}
       caller-service-name: ${AUDIT_TRUST_AUTHORITY_CALLER_SERVICE_NAME:alert-service}
       caller-environment: ${AUDIT_TRUST_AUTHORITY_CALLER_ENVIRONMENT:local}
       caller-instance-id: ${AUDIT_TRUST_AUTHORITY_CALLER_INSTANCE_ID:}
+      jwt-identity:
+        issuer: ${AUDIT_TRUST_AUTHORITY_JWT_ISSUER:}
+        audience: ${AUDIT_TRUST_AUTHORITY_JWT_AUDIENCE:}
+        key-id: ${AUDIT_TRUST_AUTHORITY_JWT_KEY_ID:}
+        private-key: ${AUDIT_TRUST_AUTHORITY_JWT_PRIVATE_KEY:}
+        private-key-path: ${AUDIT_TRUST_AUTHORITY_JWT_PRIVATE_KEY_PATH:}
+        ttl: ${AUDIT_TRUST_AUTHORITY_JWT_TTL:5m}
+        authorities: ${AUDIT_TRUST_AUTHORITY_JWT_AUTHORITIES:AUDIT_ANCHOR AUDIT_INTEGRITY}
   security:
     demo-auth:
       enabled: ${APP_SECURITY_DEMO_AUTH_ENABLED:false}
