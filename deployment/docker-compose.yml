@@ -98,6 +98,7 @@ services:
       TRUST_AUTHORITY_INTERNAL_TOKEN: local-dev-trust-token
       TRUST_AUTHORITY_PRIVATE_KEY_PATH: /tmp/audit-trust-authority/ed25519-private.key
       TRUST_AUTHORITY_PUBLIC_KEY_PATH: /tmp/audit-trust-authority/ed25519-public.key
+      TRUST_AUTHORITY_AUDIT_PATH: /tmp/audit-trust-authority/trust-authority-audit.jsonl
     ports:
       - "127.0.0.1:8095:8080"
 
@@ -314,6 +315,8 @@ services:
       AUDIT_TRUST_AUTHORITY_URL: http://audit-trust-authority:8080
       AUDIT_TRUST_AUTHORITY_INTERNAL_TOKEN: local-dev-trust-token
       AUDIT_TRUST_AUTHORITY_SIGNING_REQUIRED: "false"
+      AUDIT_TRUST_AUTHORITY_CALLER_SERVICE_NAME: alert-service
+      AUDIT_TRUST_AUTHORITY_CALLER_ENVIRONMENT: docker-local
       ASSISTANT_MODE: OLLAMA
       OLLAMA_BASE_URL: http://ollama:11434
       OLLAMA_MODEL: llama3.2:3b
