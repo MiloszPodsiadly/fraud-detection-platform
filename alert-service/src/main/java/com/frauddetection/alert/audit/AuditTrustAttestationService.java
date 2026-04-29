@@ -113,6 +113,7 @@ public class AuditTrustAttestationService {
         String signatureKeyId = signer.signingEnabled() ? signer.keyId() : null;
         String signatureStrength = signer.signingEnabled() ? signer.signatureStrength() : "NONE";
         String externalTrustDependency = externalTrustDependency(trustLevel);
+        AuditTrustAttestationResponse.TrustDecisionTrace trace = decisionTrace(internal, external, trustLevel, signatureStrength);
 
         Map<String, Object> canonical = canonical(
                 sourceService,
@@ -129,6 +130,7 @@ public class AuditTrustAttestationService {
                 latestChainPosition,
                 latestEventHash,
                 latestExternalAnchor,
+                trace,
                 limitations
         );
         String fingerprint = sha256(canonicalBytes(canonical));
@@ -144,6 +146,7 @@ public class AuditTrustAttestationService {
                 : finalTrustLevel;
 
         if (finalTrustLevel != trustLevel) {
+            trace = decisionTrace(internal, external, finalTrustLevel, signatureStrength);
             canonical = canonical(
                     sourceService,
                     limit,
@@ -159,6 +162,7 @@ public class AuditTrustAttestationService {
                     latestChainPosition,
                     latestEventHash,
                     latestExternalAnchor,
+                    trace,
                     limitations
             );
             fingerprint = sha256(canonicalBytes(canonical));
@@ -182,6 +186,7 @@ public class AuditTrustAttestationService {
                 signer.mode(),
                 signatureStrength,
                 externalTrustDependency,
+                trace,
                 sourceService,
                 limit,
                 limitations
@@ -330,6 +335,28 @@ public class AuditTrustAttestationService {
         return "OPTIONAL";
     }
 
+    private AuditTrustAttestationResponse.TrustDecisionTrace decisionTrace(
+            AuditIntegrityResponse internal,
+            ExternalAuditIntegrityResponse external,
+            AuditTrustLevel finalTrustLevel,
+            String signatureStrength
+    ) {
+        return new AuditTrustAttestationResponse.TrustDecisionTrace(
+                true,
+                "VALID".equals(external.signatureVerificationStatus()) || !"NONE".equals(signatureStrength),
+                chainTrace(internal, external),
+                "signingRequired=" + !"NONE".equals(signatureStrength),
+                "UNAVAILABLE".equals(internal.status()) ? "UNAVAILABLE" : finalTrustLevel.name()
+        );
+    }
+
+    private String chainTrace(AuditIntegrityResponse internal, ExternalAuditIntegrityResponse external) {
+        if (!"VALID".equals(internal.status()) || !"VALID".equals(external.status())) {
+            return "PARTIAL";
+        }
+        return "FULL";
+    }
+
     private boolean signedByLocalAuthority(ExternalAuditIntegrityResponse external, ExternalAnchorReference latestExternalAnchor) {
         return latestExternalAnchor != null
                 && "VALID".equals(external.signatureVerificationStatus())
@@ -357,6 +384,7 @@ public class AuditTrustAttestationService {
             Long latestChainPosition,
             String latestEventHash,
             ExternalAnchorReference latestExternalAnchorReference,
+            AuditTrustAttestationResponse.TrustDecisionTrace trustDecisionTrace,
             List<String> limitations
     ) {
         Map<String, Object> canonical = new LinkedHashMap<>();
@@ -381,6 +409,13 @@ public class AuditTrustAttestationService {
         canonical.put("latest_external_anchor_reference", latestExternalAnchorReference == null
                 ? null
                 : externalAnchorReference(latestExternalAnchorReference));
+        canonical.put("trust_decision_trace", Map.of(
+                "identity_verified", trustDecisionTrace.identityVerified(),
+                "signature_verified", trustDecisionTrace.signatureVerified(),
+                "chain_verified", trustDecisionTrace.chainVerified(),
+                "policy_applied", trustDecisionTrace.policyApplied(),
+                "final_status", trustDecisionTrace.finalStatus()
+        ));
         canonical.put("limitations", limitations);
         return canonical;
     }

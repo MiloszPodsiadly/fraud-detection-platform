@@ -47,6 +47,10 @@ class AuditTrustAttestationServiceTest {
 
         assertThat(response.status()).isEqualTo("AVAILABLE");
         assertThat(response.trustLevel()).isEqualTo(AuditTrustLevel.INTERNAL_ONLY);
+        assertThat(response.trustDecisionTrace()).isNotNull();
+        assertThat(response.trustDecisionTrace().identityVerified()).isTrue();
+        assertThat(response.trustDecisionTrace().chainVerified()).isEqualTo("PARTIAL");
+        assertThat(response.trustDecisionTrace().finalStatus()).isEqualTo("INTERNAL_ONLY");
         assertThat(response.externalAnchorStatus()).isEqualTo("DISABLED");
         assertThat(response.attestationSignature()).isNull();
         assertThat(response.attestationSignatureStrength()).isEqualTo("NONE");
