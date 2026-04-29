@@ -31,6 +31,7 @@ class ExternalAuditAnchorSinkConfiguration {
             ObjectProvider<ObjectStoreAuditAnchorClient> objectStoreClient,
             AlertServiceMetrics metrics,
             Environment environment,
+            @Value("${app.audit.external-anchoring.enabled:false}") boolean externalAnchoringEnabled,
             @Value("${app.audit.external-anchoring.sink:disabled}") String sink,
             @Value("${app.audit.external-anchoring.local-file.path:./target/audit-external-anchors.jsonl}") String localFilePath,
             @Value("${app.audit.external-anchoring.allow-local-file-in-prod:false}") boolean allowLocalFileInProd,
@@ -47,7 +48,11 @@ class ExternalAuditAnchorSinkConfiguration {
             @Value("${app.audit.external-anchoring.object-store.max-attempts:2}") int objectStoreMaxAttempts,
             @Value("${HOSTNAME:alert-service}") String instanceId
     ) {
+        validateForbiddenPublisher(sink, externalAnchoringEnabled);
         if ("local-file".equals(sink)) {
+            if (externalAnchoringEnabled) {
+                throw new IllegalStateException("External anchoring requires a verified external witness; local-file is forbidden.");
+            }
             validateLocalFileSink(environment, allowLocalFileInProd);
             log.info("External audit anchor sink configured: sink_type=local-file path={}", localFilePath);
             return new LocalFileExternalAuditAnchorSink(Path.of(localFilePath), objectMapper);
@@ -70,9 +75,10 @@ class ExternalAuditAnchorSinkConfiguration {
                     objectStoreBucket,
                     objectStorePrefix,
                     objectStoreStartupCheckEnabled,
-                    objectStoreStartupTestWriteEnabled,
+                    externalAnchoringEnabled || objectStoreStartupTestWriteEnabled,
                     instanceId
             );
+            validateExternalWitnessCapabilities(ExternalWitnessCapabilities.objectStore(immutabilityLevel), externalAnchoringEnabled);
             log.info(
                     "External audit anchor sink configured: sink_type=object-store bucket={} prefix={} region_configured={} endpoint_configured={} immutability_level={}",
                     objectStoreBucket,
@@ -96,8 +102,24 @@ class ExternalAuditAnchorSinkConfiguration {
         if ("external-object-store".equals(sink)) {
             throw new IllegalStateException("Use app.audit.external-anchoring.sink=object-store for FDP-22 object-store anchoring.");
         }
+        if (externalAnchoringEnabled) {
+            throw new IllegalStateException("External anchoring is enabled but no verified external witness publisher is configured.");
+        }
         log.info("External audit anchor sink configured: sink_type=disabled");
         return new DisabledExternalAuditAnchorSink();
+    }
+
+    private void validateForbiddenPublisher(String sink, boolean externalAnchoringEnabled) {
+        if (!externalAnchoringEnabled) {
+            return;
+        }
+        if ("disabled".equals(sink)
+                || "noop".equals(sink)
+                || "local-file".equals(sink)
+                || "in-memory".equals(sink)
+                || "same-database".equals(sink)) {
+            throw new IllegalStateException("External anchoring forbids fake publishers: " + sink + ".");
+        }
     }
 
     private void validateLocalFileSink(Environment environment, boolean allowLocalFileInProd) {
@@ -167,6 +189,25 @@ class ExternalAuditAnchorSinkConfiguration {
             throw new IllegalStateException("Object-store external audit anchor startup check failed.");
         }
         return immutabilityLevel;
+    }
+
+    private void validateExternalWitnessCapabilities(
+            ExternalWitnessCapabilities capabilities,
+            boolean externalAnchoringEnabled
+    ) {
+        if (!externalAnchoringEnabled) {
+            return;
+        }
+        if (capabilities == null
+                || !"object-store".equals(capabilities.witnessType())
+                || capabilities.immutabilityLevel() != ExternalImmutabilityLevel.ENFORCED
+                || capabilities.timestampType() == ExternalWitnessTimestampType.APP_OBSERVED
+                || !capabilities.supportsReadAfterWrite()
+                || !capabilities.supportsStableReference()
+                || !capabilities.supportsWriteOnce()
+                || !capabilities.supportsDeleteDenialOrRetention()) {
+            throw new IllegalStateException("External anchoring witness capabilities are not verified.");
+        }
     }
 
     private void verifyStartupProbeWrite(

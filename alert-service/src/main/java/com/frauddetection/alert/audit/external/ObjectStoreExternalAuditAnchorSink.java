@@ -1,6 +1,7 @@
 package com.frauddetection.alert.audit.external;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -95,6 +96,11 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
     }
 
     @Override
+    public ExternalWitnessCapabilities capabilities() {
+        return ExternalWitnessCapabilities.objectStore(immutabilityLevel);
+    }
+
+    @Override
     public ExternalAuditAnchor publish(ExternalAuditAnchor anchor) {
         String key = objectKey(anchor.partitionKey(), anchor.chainPosition());
         ObjectStoreExternalAuditAnchorPayload candidate = payload(anchor, key);
@@ -137,7 +143,9 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
                 key,
                 anchor.lastEventHash(),
                 payload.eventHash(),
-                Instant.now()
+                Instant.now(),
+                capabilities().timestampType(),
+                capabilities().timestampTrustLevel()
         ));
     }
 
@@ -167,10 +175,11 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
     public Optional<ExternalAuditAnchor> findByChainPosition(String partitionKey, long chainPosition) {
         try {
             Optional<ExternalAuditAnchor> padded = read(objectKey(partitionKey, chainPosition));
-            if (padded.isPresent()) {
-                return padded;
+            Optional<ExternalAuditAnchor> legacy = read(legacyObjectKey(partitionKey, chainPosition));
+            if (padded.isPresent() && legacy.isPresent() && !sameImmutableAnchor(padded.get(), legacy.get())) {
+                throw conflict(padded.get(), legacy.get());
             }
-            return read(legacyObjectKey(partitionKey, chainPosition));
+            return padded.or(() -> legacy);
         } catch (ExternalAuditAnchorSinkException exception) {
             throw exception;
         } catch (RuntimeException exception) {
@@ -486,6 +495,7 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
 
     private List<String> scanAnchorKeys(String keyPrefix) {
         java.util.ArrayList<String> keys = new java.util.ArrayList<>();
+        java.util.Map<Long, ExternalAuditAnchor> anchorsByPosition = new java.util.HashMap<>();
         Set<String> seenContinuationTokens = new HashSet<>();
         String continuationToken = null;
         do {
@@ -500,6 +510,22 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
                         }
                     })
                     .toList());
+            for (String key : page.keys()) {
+                try {
+                    long chainPosition = parseChainPosition(key);
+                    Optional<ExternalAuditAnchor> anchor = read(key);
+                    if (anchor.isPresent()) {
+                        ExternalAuditAnchor previous = anchorsByPosition.putIfAbsent(chainPosition, anchor.get());
+                        if (previous != null && !sameImmutableAnchor(previous, anchor.get())) {
+                            throw conflict(previous, anchor.get());
+                        }
+                    }
+                } catch (ExternalAuditAnchorSinkException exception) {
+                    if (!"INVALID_ANCHOR".equals(exception.reason())) {
+                        throw exception;
+                    }
+                }
+            }
             /*
              * HEAD detection must consume every page because legacy non-padded keys do not sort
              * by numeric chain position. A client without continuation-token semantics must fail
@@ -514,6 +540,23 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
             }
         } while (continuationToken != null);
         return List.copyOf(keys);
+    }
+
+    private boolean sameImmutableAnchor(ExternalAuditAnchor left, ExternalAuditAnchor right) {
+        return Objects.equals(left.localAnchorId(), right.localAnchorId())
+                && Objects.equals(left.partitionKey(), right.partitionKey())
+                && left.chainPosition() == right.chainPosition()
+                && Objects.equals(left.lastEventHash(), right.lastEventHash())
+                && Objects.equals(left.previousEventHash(), right.previousEventHash())
+                && Objects.equals(left.hashAlgorithm(), right.hashAlgorithm())
+                && Objects.equals(left.schemaVersion(), right.schemaVersion());
+    }
+
+    private ExternalAuditAnchorConflictException conflict(ExternalAuditAnchor left, ExternalAuditAnchor right) {
+        return new ExternalAuditAnchorConflictException(
+                List.of(left.lastEventHash(), right.lastEventHash()),
+                List.of(left.sinkType(), right.sinkType())
+        );
     }
 
     private <T> T callWithRetry(String operation, Supplier<T> operationCall) {
@@ -658,6 +701,7 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
         mapper.configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true);
         mapper.configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
         mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        mapper.setSerializationInclusion(JsonInclude.Include.ALWAYS);
         return mapper;
     }
 

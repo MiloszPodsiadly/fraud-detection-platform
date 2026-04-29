@@ -56,15 +56,18 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         assertThat(sink.formatChainPosition(1L)).isEqualTo("00000000000000000001");
         assertThat(sink.parseChainPosition(objectKey)).isEqualTo(1L);
         assertThat(storedJson).contains(
+                "\"anchor_id\":\"" + anchor.externalAnchorId() + "\"",
+                "\"source\":\"object-store\"",
                 "\"local_anchor_id\":\"local-anchor-1\"",
                 "\"partition_key\":\"source_service:alert-service\"",
                 "\"external_object_key\":\"" + objectKey + "\"",
                 "\"chain_position\":1",
                 "\"event_hash\":\"hash-1\"",
+                "\"previous_event_hash\":null",
                 "\"payload_hash\":\"",
-                "\"created_at\":\"" + anchor.createdAt() + "\""
+                "\"created_at\":\"" + anchor.createdAt() + "\"",
+                "\"published_at_local\":\"" + anchor.createdAt() + "\""
         );
-        assertThat(storedJson).doesNotContain("previous_event_hash");
     }
 
     @Test
@@ -264,6 +267,21 @@ class ObjectStoreExternalAuditAnchorSinkTest {
                 .extracting(ExternalAuditAnchor::chainPosition)
                 .isEqualTo(2L);
         assertThat(client.listPageCalls).isGreaterThan(0);
+    }
+
+    @Test
+    void shouldNotReturnBestEffortHeadWhenScannedAnchorPayloadIsTampered() {
+        putPaddedAnchor("local-anchor-1", 1L, "hash-1");
+        putPaddedAnchor("local-anchor-2", 2L, "hash-2");
+        String secondKey = sink.objectKey("source_service:alert-service", 2L);
+        client.putRaw("audit-bucket", secondKey, new String(client.getObject("audit-bucket", secondKey).orElseThrow(), StandardCharsets.UTF_8)
+                .replace("\"event_hash\":\"hash-2\"", "\"event_hash\":\"hash-X\"")
+                .getBytes(StandardCharsets.UTF_8));
+
+        assertThatThrownBy(() -> sink.latest("source_service:alert-service"))
+                .isInstanceOf(ExternalAuditAnchorSinkException.class)
+                .extracting("reason")
+                .isEqualTo("EXTERNAL_PAYLOAD_HASH_MISMATCH");
     }
 
     @Test
