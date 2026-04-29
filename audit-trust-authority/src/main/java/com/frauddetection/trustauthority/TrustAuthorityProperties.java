@@ -24,7 +24,6 @@ public class TrustAuthorityProperties {
     private String identityMode = "hmac-local";
     private JwtIdentityProperties jwtIdentity = new JwtIdentityProperties();
     private AuditProperties audit = new AuditProperties();
-    private ExternalAnchoringProperties externalAnchoring = new ExternalAnchoringProperties();
     private List<CallerEntry> callers = new ArrayList<>();
 
     public String getAuthorityName() {
@@ -125,14 +124,6 @@ public class TrustAuthorityProperties {
 
     public void setAudit(AuditProperties audit) {
         this.audit = audit == null ? new AuditProperties() : audit;
-    }
-
-    public ExternalAnchoringProperties getExternalAnchoring() {
-        return externalAnchoring;
-    }
-
-    public void setExternalAnchoring(ExternalAnchoringProperties externalAnchoring) {
-        this.externalAnchoring = externalAnchoring == null ? new ExternalAnchoringProperties() : externalAnchoring;
     }
 
     public List<CallerEntry> getCallers() {
@@ -236,27 +227,6 @@ public class TrustAuthorityProperties {
 
         public void setSink(String sink) {
             this.sink = sink;
-        }
-    }
-
-    public static class ExternalAnchoringProperties {
-        private boolean enabled;
-        private Duration fixedDelay = Duration.ofMinutes(15);
-
-        public boolean isEnabled() {
-            return enabled;
-        }
-
-        public void setEnabled(boolean enabled) {
-            this.enabled = enabled;
-        }
-
-        public Duration getFixedDelay() {
-            return fixedDelay;
-        }
-
-        public void setFixedDelay(Duration fixedDelay) {
-            this.fixedDelay = fixedDelay == null ? Duration.ofMinutes(15) : fixedDelay;
         }
     }
 
