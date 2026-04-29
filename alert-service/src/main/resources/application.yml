@@ -68,6 +68,9 @@ app:
       url: ${AUDIT_TRUST_AUTHORITY_URL:http://localhost:8095}
       internal-token: ${AUDIT_TRUST_AUTHORITY_INTERNAL_TOKEN:}
       signing-required: ${AUDIT_TRUST_AUTHORITY_SIGNING_REQUIRED:false}
+      caller-service-name: ${AUDIT_TRUST_AUTHORITY_CALLER_SERVICE_NAME:alert-service}
+      caller-environment: ${AUDIT_TRUST_AUTHORITY_CALLER_ENVIRONMENT:local}
+      caller-instance-id: ${AUDIT_TRUST_AUTHORITY_CALLER_INSTANCE_ID:}
   security:
     demo-auth:
       enabled: ${APP_SECURITY_DEMO_AUTH_ENABLED:false}

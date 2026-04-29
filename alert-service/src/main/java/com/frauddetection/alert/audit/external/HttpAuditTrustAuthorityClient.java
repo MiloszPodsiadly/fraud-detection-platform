@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -26,11 +27,11 @@ class HttpAuditTrustAuthorityClient implements AuditTrustAuthorityClient {
             .build();
 
     private final RestClient restClient;
-    private final String internalToken;
+    private final AuditTrustAuthorityProperties properties;
 
-    HttpAuditTrustAuthorityClient(RestClient restClient, String internalToken) {
+    HttpAuditTrustAuthorityClient(RestClient restClient, AuditTrustAuthorityProperties properties) {
         this.restClient = restClient;
-        this.internalToken = internalToken;
+        this.properties = properties;
     }
 
     @Override
@@ -39,7 +40,7 @@ class HttpAuditTrustAuthorityClient implements AuditTrustAuthorityClient {
         try {
             TrustSignResponse response = restClient.post()
                     .uri("/api/v1/trust/sign")
-                    .header("X-Internal-Trust-Token", internalToken)
+                    .headers(this::internalHeaders)
                     .body(new TrustSignRequest(
                             "AUDIT_ANCHOR",
                             payloadHash,
@@ -89,7 +90,7 @@ class HttpAuditTrustAuthorityClient implements AuditTrustAuthorityClient {
         try {
             TrustVerifyResponse response = restClient.post()
                     .uri("/api/v1/trust/verify")
-                    .header("X-Internal-Trust-Token", internalToken)
+                    .headers(this::internalHeaders)
                     .body(new TrustVerifyRequest(
                             "AUDIT_ANCHOR",
                             payloadHash,
@@ -97,7 +98,8 @@ class HttpAuditTrustAuthorityClient implements AuditTrustAuthorityClient {
                             payload.chainPosition(),
                             payload.localAnchorId(),
                             signature.signature(),
-                            signature.keyId()
+                            signature.keyId(),
+                            signature.signedAt()
                     ))
                     .retrieve()
                     .body(TrustVerifyResponse.class);
@@ -138,6 +140,15 @@ class HttpAuditTrustAuthorityClient implements AuditTrustAuthorityClient {
         }
     }
 
+    private void internalHeaders(org.springframework.http.HttpHeaders headers) {
+        headers.set("X-Internal-Trust-Token", properties.getInternalToken());
+        headers.set("X-Internal-Service-Name", properties.getCallerServiceName());
+        headers.set("X-Internal-Service-Environment", properties.getCallerEnvironment());
+        if (StringUtils.hasText(properties.getCallerInstanceId())) {
+            headers.set("X-Internal-Service-Instance-Id", properties.getCallerInstanceId());
+        }
+    }
+
     private record TrustSignRequest(
             @JsonProperty("purpose") String purpose,
             @JsonProperty("payload_hash") String payloadHash,
@@ -163,7 +174,8 @@ class HttpAuditTrustAuthorityClient implements AuditTrustAuthorityClient {
             @JsonProperty("chain_position") long chainPosition,
             @JsonProperty("anchor_id") String anchorId,
             @JsonProperty("signature") String signature,
-            @JsonProperty("key_id") String keyId
+            @JsonProperty("key_id") String keyId,
+            @JsonProperty("signed_at") Instant signedAt
     ) {
     }
 

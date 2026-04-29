@@ -9,6 +9,9 @@ public class AuditTrustAuthorityProperties {
     private String url = "http://localhost:8095";
     private String internalToken;
     private boolean signingRequired;
+    private String callerServiceName = "alert-service";
+    private String callerEnvironment = "local";
+    private String callerInstanceId;
 
     public boolean isEnabled() {
         return enabled;
@@ -40,5 +43,29 @@ public class AuditTrustAuthorityProperties {
 
     public void setSigningRequired(boolean signingRequired) {
         this.signingRequired = signingRequired;
+    }
+
+    public String getCallerServiceName() {
+        return callerServiceName;
+    }
+
+    public void setCallerServiceName(String callerServiceName) {
+        this.callerServiceName = callerServiceName;
+    }
+
+    public String getCallerEnvironment() {
+        return callerEnvironment;
+    }
+
+    public void setCallerEnvironment(String callerEnvironment) {
+        this.callerEnvironment = callerEnvironment;
+    }
+
+    public String getCallerInstanceId() {
+        return callerInstanceId;
+    }
+
+    public void setCallerInstanceId(String callerInstanceId) {
+        this.callerInstanceId = callerInstanceId;
     }
 }
