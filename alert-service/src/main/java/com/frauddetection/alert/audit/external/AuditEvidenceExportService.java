@@ -21,6 +21,7 @@ import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import org.springframework.http.HttpStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
@@ -52,11 +53,12 @@ public class AuditEvidenceExportService {
     private final CurrentAnalystUser currentAnalystUser;
     private final AuditEvidenceExportRateLimiterStrategy rateLimiter;
     private final AuditEvidenceExportAbuseDetector abuseDetector;
+    private final ExternalAuditAnchorPublicationStatusRepository publicationStatusRepository;
 
     private record ExternalAnchorLookup(String status, Map<Long, ExternalAuditAnchor> anchors) {
     }
 
-    public AuditEvidenceExportService(
+    AuditEvidenceExportService(
             AuditEventRepository eventRepository,
             AuditAnchorRepository anchorRepository,
             ExternalAuditAnchorSink sink,
@@ -67,6 +69,33 @@ public class AuditEvidenceExportService {
             AuditEvidenceExportRateLimiterStrategy rateLimiter,
             AuditEvidenceExportAbuseDetector abuseDetector
     ) {
+        this(
+                eventRepository,
+                anchorRepository,
+                sink,
+                queryParser,
+                metrics,
+                auditService,
+                currentAnalystUser,
+                rateLimiter,
+                abuseDetector,
+                null
+        );
+    }
+
+    @Autowired
+    public AuditEvidenceExportService(
+            AuditEventRepository eventRepository,
+            AuditAnchorRepository anchorRepository,
+            ExternalAuditAnchorSink sink,
+            AuditEvidenceExportQueryParser queryParser,
+            AlertServiceMetrics metrics,
+            AuditService auditService,
+            CurrentAnalystUser currentAnalystUser,
+            AuditEvidenceExportRateLimiterStrategy rateLimiter,
+            AuditEvidenceExportAbuseDetector abuseDetector,
+            ExternalAuditAnchorPublicationStatusRepository publicationStatusRepository
+    ) {
         this.eventRepository = eventRepository;
         this.anchorRepository = anchorRepository;
         this.sink = sink;
@@ -76,6 +105,7 @@ public class AuditEvidenceExportService {
         this.currentAnalystUser = currentAnalystUser;
         this.rateLimiter = rateLimiter;
         this.abuseDetector = abuseDetector;
+        this.publicationStatusRepository = publicationStatusRepository;
     }
 
     public AuditEvidenceExportResponse export(String from, String to, String sourceService, Integer limit) {
@@ -168,7 +198,7 @@ public class AuditEvidenceExportService {
                     return AuditEvidenceExportEvent.from(
                             document,
                             local == null ? null : AuditEvidenceExportAnchorReference.local(local),
-                            external == null ? null : AuditEvidenceExportAnchorReference.external(external)
+                            external == null ? null : externalEvidenceReference(external)
                     );
                 })
                 .toList();
@@ -217,6 +247,38 @@ public class AuditEvidenceExportService {
         } catch (ExternalAuditAnchorSinkException exception) {
             log.warn("External audit anchors unavailable during evidence export: reason={}", exception.reason());
             return new ExternalAnchorLookup("UNAVAILABLE", Map.of());
+        }
+    }
+
+    private AuditEvidenceExportAnchorReference externalEvidenceReference(ExternalAuditAnchor external) {
+        ExternalAnchorReference reference = null;
+        try {
+            reference = sink.externalReference(external).orElse(null);
+            reference = enrichSignature(reference);
+        } catch (ExternalAuditAnchorSinkException exception) {
+            log.warn("External audit anchor reference unavailable during evidence export: reason={}", exception.reason());
+        }
+        return AuditEvidenceExportAnchorReference.external(external, reference, sink.immutabilityLevel());
+    }
+
+    private ExternalAnchorReference enrichSignature(ExternalAnchorReference reference) {
+        if (reference == null || publicationStatusRepository == null || reference.anchorId() == null) {
+            return reference;
+        }
+        try {
+            return publicationStatusRepository.findByLocalAnchorId(reference.anchorId())
+                    .map(status -> reference.withSignature(new SignedAuditAnchorPayload(
+                            status.signatureStatus(),
+                            status.signingAlgorithm(),
+                            status.signature(),
+                            status.signingKeyId(),
+                            status.signedAt(),
+                            status.signingAuthority(),
+                            status.signedPayloadHash()
+                    )))
+                    .orElse(reference);
+        } catch (DataAccessException exception) {
+            return reference;
         }
     }
 
