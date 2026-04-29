@@ -37,7 +37,7 @@ public class TrustAuthorityController {
 
     @GetMapping("/keys")
     public List<TrustKeyResponse> keys() {
-        return List.of(service.key());
+        return service.keys();
     }
 
     @PostMapping("/verify")
