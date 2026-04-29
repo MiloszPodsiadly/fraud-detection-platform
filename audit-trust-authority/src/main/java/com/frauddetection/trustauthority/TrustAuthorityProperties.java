@@ -21,7 +21,6 @@ public class TrustAuthorityProperties {
     private boolean signingRequired = true;
     private String auditPath = "./target/trust-authority-audit.jsonl";
     private String identityMode = "hmac-local";
-    private boolean allowLocalHmacInProd;
     private AuditProperties audit = new AuditProperties();
     private List<CallerEntry> callers = new ArrayList<>();
 
@@ -103,14 +102,6 @@ public class TrustAuthorityProperties {
 
     public void setIdentityMode(String identityMode) {
         this.identityMode = identityMode;
-    }
-
-    public boolean isAllowLocalHmacInProd() {
-        return allowLocalHmacInProd;
-    }
-
-    public void setAllowLocalHmacInProd(boolean allowLocalHmacInProd) {
-        this.allowLocalHmacInProd = allowLocalHmacInProd;
     }
 
     public AuditProperties getAudit() {

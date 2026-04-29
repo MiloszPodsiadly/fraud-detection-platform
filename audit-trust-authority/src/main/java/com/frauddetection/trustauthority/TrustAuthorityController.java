@@ -62,4 +62,16 @@ public class TrustAuthorityController {
     ) {
         return service.auditIntegrity(TrustAuthorityRequestCredentials.of(serviceName, environment, instanceId, requestId, signedAt, signature), 10_000);
     }
+
+    @GetMapping("/audit/head")
+    public TrustAuthorityAuditHeadResponse auditHead(
+            @RequestHeader(name = "X-Internal-Service-Name", required = false) String serviceName,
+            @RequestHeader(name = "X-Internal-Service-Environment", required = false) String environment,
+            @RequestHeader(name = "X-Internal-Service-Instance-Id", required = false) String instanceId,
+            @RequestHeader(name = "X-Internal-Trust-Request-Id", required = false) String requestId,
+            @RequestHeader(name = "X-Internal-Trust-Signed-At", required = false) String signedAt,
+            @RequestHeader(name = "X-Internal-Trust-Signature", required = false) String signature
+    ) {
+        return service.auditHead(TrustAuthorityRequestCredentials.of(serviceName, environment, instanceId, requestId, signedAt, signature));
+    }
 }

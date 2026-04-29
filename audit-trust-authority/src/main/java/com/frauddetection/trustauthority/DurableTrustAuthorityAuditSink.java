@@ -2,6 +2,7 @@ package com.frauddetection.trustauthority;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.index.Index;
@@ -12,7 +13,7 @@ import java.util.Comparator;
 import java.util.List;
 
 @Component
-@ConditionalOnProperty(prefix = "app.trust-authority.audit", name = "sink", havingValue = "durable-append-only")
+@ConditionalOnProperty(prefix = "app.trust-authority.audit", name = "sink", havingValue = "durable-hash-chain")
 class DurableTrustAuthorityAuditSink implements TrustAuthorityAuditSink {
 
     private static final String COLLECTION = "trust_authority_audit_events";
@@ -30,16 +31,22 @@ class DurableTrustAuthorityAuditSink implements TrustAuthorityAuditSink {
     @Override
     public synchronized void append(TrustAuthorityAuditEvent event) {
         try {
-            TrustAuthorityAuditEvent latest = latestEvent();
-            long nextPosition = latest == null || latest.chainPosition() == null ? 1L : latest.chainPosition() + 1L;
-            String previousHash = latest == null ? null : latest.eventHash();
-            TrustAuthorityAuditEvent chained = event.withChain(
-                    previousHash,
-                    TrustAuthorityAuditHasher.hash(event, previousHash, nextPosition),
-                    nextPosition
-            );
-            mongoTemplate.insert(chained, COLLECTION);
+            insertChained(event);
             metrics.recordAuditWrite("SUCCESS");
+        } catch (DuplicateKeyException conflict) {
+            metrics.recordAuditAppendConflict();
+            metrics.recordAuditAppendRetry();
+            try {
+                insertChained(event);
+                metrics.recordAuditWrite("SUCCESS");
+            } catch (DuplicateKeyException retryConflict) {
+                metrics.recordAuditAppendConflict();
+                metrics.recordAuditWrite("FAILURE");
+                throw new TrustAuthorityAuditException("Trust authority audit event could not be persisted after append conflict.", retryConflict);
+            } catch (DataAccessException exception) {
+                metrics.recordAuditWrite("FAILURE");
+                throw new TrustAuthorityAuditException("Trust authority audit event could not be persisted.", exception);
+            }
         } catch (DataAccessException exception) {
             metrics.recordAuditWrite("FAILURE");
             throw new TrustAuthorityAuditException("Trust authority audit event could not be persisted.", exception);
@@ -59,6 +66,27 @@ class DurableTrustAuthorityAuditSink implements TrustAuthorityAuditSink {
         } catch (DataAccessException exception) {
             return TrustAuthorityAuditIntegrityResponse.unavailable("AUDIT_STORE_UNAVAILABLE");
         }
+    }
+
+    @Override
+    public TrustAuthorityAuditHeadResponse head() {
+        try {
+            return TrustAuthorityAuditHeadResponse.from(latestEvent());
+        } catch (DataAccessException exception) {
+            throw new TrustAuthorityAuditException("Trust authority audit head could not be read.", exception);
+        }
+    }
+
+    private void insertChained(TrustAuthorityAuditEvent event) {
+        TrustAuthorityAuditEvent latest = latestEvent();
+        long nextPosition = latest == null || latest.chainPosition() == null ? 1L : latest.chainPosition() + 1L;
+        String previousHash = latest == null ? null : latest.eventHash();
+        TrustAuthorityAuditEvent chained = event.withChain(
+                previousHash,
+                TrustAuthorityAuditHasher.hash(event, previousHash, nextPosition),
+                nextPosition
+        );
+        mongoTemplate.insert(chained, COLLECTION);
     }
 
     private TrustAuthorityAuditEvent latestEvent() {

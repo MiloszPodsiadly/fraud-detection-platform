@@ -65,6 +65,14 @@ class TrustAuthorityMetrics {
                 .increment();
     }
 
+    void recordAuditAppendRetry() {
+        Counter.builder("audit_append_retry_total").register(registry).increment();
+    }
+
+    void recordAuditAppendConflict() {
+        Counter.builder("audit_append_conflict_total").register(registry).increment();
+    }
+
     private String boundedStatus(String status) {
         if ("SUCCESS".equals(status) || "FAILURE".equals(status)) {
             return status;

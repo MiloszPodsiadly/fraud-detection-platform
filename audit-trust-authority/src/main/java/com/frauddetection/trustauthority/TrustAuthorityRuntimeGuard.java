@@ -33,14 +33,20 @@ public class TrustAuthorityRuntimeGuard implements ApplicationRunner {
             throw new IllegalStateException("Prod-like trust authority requires signing-required=true when enabled.");
         }
         String identityMode = properties.getIdentityMode() == null ? "" : properties.getIdentityMode();
-        if ("hmac-local".equals(identityMode) && !properties.isAllowLocalHmacInProd()) {
-            throw new IllegalStateException("Prod-like trust authority requires enterprise identity mode or explicit allow-local-hmac-in-prod=true.");
+        if ("hmac-local".equals(identityMode)) {
+            throw new IllegalStateException("Prod-like trust authority requires enterprise identity (mTLS/JWT). HMAC local mode is not permitted.");
         }
         if ("mtls-ready".equals(identityMode) || "jwt-ready".equals(identityMode)) {
             throw new IllegalStateException("Trust authority identity mode " + identityMode + " is not implemented and fails closed.");
         }
-        if (!"durable-append-only".equals(properties.getAudit().getSink())) {
-            throw new IllegalStateException("Prod-like trust authority requires durable-append-only audit sink.");
+        if (!StringUtils.hasText(identityMode)) {
+            throw new IllegalStateException("Prod-like trust authority requires explicit enterprise identity mode.");
+        }
+        if (!Set.of("mtls-ready", "jwt-ready").contains(identityMode)) {
+            throw new IllegalStateException("Prod-like trust authority identity mode is not supported.");
+        }
+        if (!"durable-hash-chain".equals(properties.getAudit().getSink())) {
+            throw new IllegalStateException("Prod-like trust authority requires durable-hash-chain audit sink.");
         }
         if (!StringUtils.hasText(properties.getHmacSecret())
                 || TrustAuthorityProperties.DEFAULT_LOCAL_HMAC_SECRET.equals(properties.getHmacSecret())) {

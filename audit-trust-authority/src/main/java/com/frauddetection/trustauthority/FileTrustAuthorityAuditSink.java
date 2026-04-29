@@ -78,4 +78,27 @@ class FileTrustAuthorityAuditSink implements TrustAuthorityAuditSink {
             return TrustAuthorityAuditIntegrityResponse.unavailable("AUDIT_STORE_UNAVAILABLE");
         }
     }
+
+    @Override
+    public synchronized TrustAuthorityAuditHeadResponse head() {
+        if (!StringUtils.hasText(properties.getAuditPath())) {
+            throw new TrustAuthorityAuditException("Trust authority audit path is required.", null);
+        }
+        Path path = Path.of(properties.getAuditPath());
+        if (!Files.exists(path)) {
+            return TrustAuthorityAuditHeadResponse.empty();
+        }
+        try {
+            List<String> lines = Files.readAllLines(path, StandardCharsets.UTF_8);
+            for (int index = lines.size() - 1; index >= 0; index--) {
+                String line = lines.get(index);
+                if (StringUtils.hasText(line)) {
+                    return TrustAuthorityAuditHeadResponse.from(objectMapper.readValue(line, TrustAuthorityAuditEvent.class));
+                }
+            }
+            return TrustAuthorityAuditHeadResponse.empty();
+        } catch (IOException exception) {
+            throw new TrustAuthorityAuditException("Trust authority audit head could not be read.", exception);
+        }
+    }
 }

@@ -11,7 +11,7 @@
 
     <artifactId>audit-trust-authority</artifactId>
     <name>audit-trust-authority</name>
-    <description>Local-first independent audit trust authority for signing audit anchors.</description>
+    <description>Separate local audit trust authority for signing audit anchors.</description>
 
     <dependencies>
         <dependency>

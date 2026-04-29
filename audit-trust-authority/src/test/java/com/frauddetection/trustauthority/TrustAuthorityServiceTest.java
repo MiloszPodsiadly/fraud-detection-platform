@@ -167,68 +167,63 @@ class TrustAuthorityServiceTest {
     @Test
     void shouldRejectDefaultTokenInProdLikeProfile() {
         TrustAuthorityProperties properties = new TrustAuthorityProperties();
-        properties.setAllowLocalHmacInProd(true);
-        properties.getAudit().setSink("durable-append-only");
+        properties.getAudit().setSink("durable-hash-chain");
         TrustAuthorityRuntimeGuard guard = new TrustAuthorityRuntimeGuard(properties, environment("prod"));
 
         assertThatThrownBy(() -> guard.run(null))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("non-default HMAC secret");
+                .hasMessageContaining("HMAC local mode is not permitted");
     }
 
     @Test
     void shouldRejectMissingHmacSecretInProdLikeProfile() {
         TrustAuthorityProperties properties = new TrustAuthorityProperties();
         properties.setHmacSecret("");
-        properties.setAllowLocalHmacInProd(true);
-        properties.getAudit().setSink("durable-append-only");
+        properties.getAudit().setSink("durable-hash-chain");
         TrustAuthorityRuntimeGuard guard = new TrustAuthorityRuntimeGuard(properties, environment("staging"));
 
         assertThatThrownBy(() -> guard.run(null))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("non-default HMAC secret");
+                .hasMessageContaining("HMAC local mode is not permitted");
     }
 
     @Test
     void shouldRejectEphemeralGeneratedKeysInProdLikeProfile() {
         TrustAuthorityProperties properties = new TrustAuthorityProperties();
         properties.setHmacSecret("prod-secret");
-        properties.setAllowLocalHmacInProd(true);
-        properties.getAudit().setSink("durable-append-only");
+        properties.getAudit().setSink("durable-hash-chain");
         properties.setCallers(List.of(caller("alert-service", "alert-secret", List.of("AUDIT_ANCHOR"))));
         TrustAuthorityRuntimeGuard guard = new TrustAuthorityRuntimeGuard(properties, environment("production"));
 
         assertThatThrownBy(() -> guard.run(null))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("persistent private key path");
+                .hasMessageContaining("HMAC local mode is not permitted");
     }
 
     @Test
     void shouldRejectImplicitCallerAllowlistInProdLikeProfile() {
         TrustAuthorityProperties properties = new TrustAuthorityProperties();
         properties.setHmacSecret("prod-secret");
-        properties.setAllowLocalHmacInProd(true);
-        properties.getAudit().setSink("durable-append-only");
+        properties.getAudit().setSink("durable-hash-chain");
         properties.setPrivateKeyPath("private.key");
         properties.setPublicKeyPath("public.key");
         TrustAuthorityRuntimeGuard guard = new TrustAuthorityRuntimeGuard(properties, environment("prod"));
 
         assertThatThrownBy(() -> guard.run(null))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("explicit caller allowlist");
+                .hasMessageContaining("HMAC local mode is not permitted");
     }
 
     @Test
     void shouldRejectLocalFileAuditSinkInProdLikeProfile() {
         TrustAuthorityProperties properties = new TrustAuthorityProperties();
         properties.setHmacSecret("prod-secret");
-        properties.setAllowLocalHmacInProd(true);
         properties.getAudit().setSink("local-file");
         TrustAuthorityRuntimeGuard guard = new TrustAuthorityRuntimeGuard(properties, environment("prod"));
 
         assertThatThrownBy(() -> guard.run(null))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("durable-append-only audit sink");
+                .hasMessageContaining("HMAC local mode is not permitted");
     }
 
     @Test
@@ -252,14 +247,13 @@ class TrustAuthorityServiceTest {
     void shouldRejectInlinePrivateKeyMaterialInProdLikeProfile() throws Exception {
         TrustAuthorityProperties properties = propertiesWithKeys(key("key-v1", "ACTIVE", keyPair()));
         properties.setHmacSecret("prod-secret");
-        properties.setAllowLocalHmacInProd(true);
-        properties.getAudit().setSink("durable-append-only");
+        properties.getAudit().setSink("durable-hash-chain");
         properties.setCallers(List.of(caller("alert-service", "alert-secret", List.of("AUDIT_ANCHOR"))));
         TrustAuthorityRuntimeGuard guard = new TrustAuthorityRuntimeGuard(properties, environment("prod"));
 
         assertThatThrownBy(() -> guard.run(null))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("forbids inline private key material");
+                .hasMessageContaining("HMAC local mode is not permitted");
     }
 
     @Test
@@ -315,6 +309,11 @@ class TrustAuthorityServiceTest {
             @Override
             public TrustAuthorityAuditIntegrityResponse integrity(int limit) {
                 return TrustAuthorityAuditIntegrityResponse.unavailable("failed");
+            }
+
+            @Override
+            public TrustAuthorityAuditHeadResponse head() {
+                return TrustAuthorityAuditHeadResponse.empty();
             }
         });
 
@@ -427,6 +426,28 @@ class TrustAuthorityServiceTest {
         assertThatThrownBy(() -> guard.run(null))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("signing-required=true");
+    }
+
+    @Test
+    void shouldExposeAuditHeadForExternalAnchoring() {
+        RecordingAuditSink auditSink = new RecordingAuditSink();
+        TrustAuthorityService service = service(new TrustAuthorityProperties(), auditSink);
+        TrustSignRequest request = request("hash-1", "anchor-1");
+
+        sign(service, request);
+        TrustAuthorityAuditHeadResponse head = service.auditHead(credentials(
+                "alert-service",
+                "local",
+                "local-dev-trust-hmac-secret",
+                "AUDIT_INTEGRITY",
+                "trust-authority-audit-head"
+        ));
+
+        assertThat(head.chainPosition()).isEqualTo(1L);
+        assertThat(head.eventHash()).isNotBlank();
+        assertThat(head.timestamp()).isNotNull();
+        assertThat(auditSink.events()).extracting(TrustAuthorityAuditEvent::payloadHash)
+                .contains("trust-authority-audit-head");
     }
 
     private TrustAuthorityService service(String keyId) {
@@ -542,12 +563,27 @@ class TrustAuthorityServiceTest {
 
         @Override
         public void append(TrustAuthorityAuditEvent event) {
-            events.add(event);
+            TrustAuthorityAuditEvent latest = events.isEmpty() ? null : events.getLast();
+            long nextPosition = latest == null ? 1L : latest.chainPosition() + 1L;
+            String previousHash = latest == null ? null : latest.eventHash();
+            events.add(event.withChain(
+                    previousHash,
+                    TrustAuthorityAuditHasher.hash(event, previousHash, nextPosition),
+                    nextPosition
+            ));
         }
 
         @Override
         public TrustAuthorityAuditIntegrityResponse integrity(int limit) {
             return TrustAuthorityAuditIntegrityVerifier.verify(events);
+        }
+
+        @Override
+        public TrustAuthorityAuditHeadResponse head() {
+            if (events.isEmpty()) {
+                return TrustAuthorityAuditHeadResponse.empty();
+            }
+            return TrustAuthorityAuditHeadResponse.from(events.getLast());
         }
 
         List<TrustAuthorityAuditEvent> events() {

@@ -30,6 +30,5 @@ app:
     enabled: ${TRUST_AUTHORITY_ENABLED:true}
     signing-required: ${TRUST_AUTHORITY_SIGNING_REQUIRED:true}
     identity-mode: ${TRUST_AUTHORITY_IDENTITY_MODE:hmac-local}
-    allow-local-hmac-in-prod: ${TRUST_AUTHORITY_ALLOW_LOCAL_HMAC_IN_PROD:false}
     audit:
       sink: ${TRUST_AUTHORITY_AUDIT_SINK:local-file}

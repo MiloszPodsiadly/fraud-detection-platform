@@ -233,6 +233,23 @@ public class TrustAuthorityService {
         return response;
     }
 
+    TrustAuthorityAuditHeadResponse auditHead(TrustAuthorityRequestCredentials credentials) {
+        CallerAuthorization authorization = authorize(credentials, "AUDIT_INTEGRITY", "trust-authority-audit-head", "AUDIT_INTEGRITY");
+        TrustAuthorityCallerIdentity caller = safeCaller(credentials);
+        if (!authorization.tokenValid()) {
+            audit("VERIFY", caller, "AUDIT_INTEGRITY", "trust-authority-audit-head", null, "FAILURE", authorization.reasonCode());
+            throw new TrustAuthorityRequestException(authorization.status(), "Trust authority audit head caller is not authenticated.");
+        }
+        if (!replayGuard.allow(caller.serviceName(), credentials.requestId())) {
+            audit("VERIFY", caller, "AUDIT_INTEGRITY", "trust-authority-audit-head", null, "FAILURE", "REPLAY_DETECTED");
+            metrics.recordReplayDetected();
+            throw new TrustAuthorityRequestException(HttpStatus.CONFLICT, "Trust authority request replay detected.");
+        }
+        TrustAuthorityAuditHeadResponse response = auditSink.head();
+        audit("VERIFY", caller, "AUDIT_INTEGRITY", "trust-authority-audit-head", null, "SUCCESS", null);
+        return response;
+    }
+
     private List<RegisteredKey> loadKeys(TrustAuthorityProperties properties) {
         if (!properties.getKeys().isEmpty()) {
             return properties.getKeys().stream()
