@@ -42,6 +42,7 @@ function signedAnchor(keyPair, chainPosition, eventHash) {
     signing_key_id: "key-1",
     signing_algorithm: "Ed25519",
     signing_authority: "local-trust-authority",
+    signed_at: "2026-04-29T12:00:00Z",
   };
   const payloadHash = sha256Hex(canonical({
     chain_position: anchor.chain_position,
@@ -205,4 +206,50 @@ test("partial range without boundary proof is not independently verifiable", () 
   assert.equal(result.status, "PARTIAL");
   assert.equal(result.reason_code, "BOUNDARY_PROOF_MISSING");
   assert.notEqual(result.verified_trust_level, "INDEPENDENTLY_VERIFIABLE");
+});
+
+test("partial range with boundary proof is downgraded to signed anchors verified", () => {
+  const keyPair = generateKeyPairSync("ed25519");
+  const keys = [{ key_id: "key-1", public_key: keyPair.publicKey.export({ format: "der", type: "spki" }).toString("base64") }];
+  const input = bundle([
+    event(2, "hash-2", "hash-1", signedAnchor(keyPair, 2, "hash-2")),
+    event(3, "hash-3", "hash-2", signedAnchor(keyPair, 3, "hash-3")),
+  ]);
+  const result = runVerifier(input, keys);
+
+  assert.equal(result.status, "PARTIAL");
+  assert.equal(result.reason_code, "PARTIAL_CHAIN");
+  assert.equal(result.verified_trust_level, "SIGNED_ANCHORS_VERIFIED");
+});
+
+test("expected total larger than bundle downgrades full prefix to partial chain", () => {
+  const keyPair = generateKeyPairSync("ed25519");
+  const keys = [{ key_id: "key-1", public_key: keyPair.publicKey.export({ format: "der", type: "spki" }).toString("base64") }];
+  const input = {
+    ...bundle([
+      event(1, "hash-1", null, signedAnchor(keyPair, 1, "hash-1")),
+    ]),
+    expected_total_events: 2,
+  };
+  const result = runVerifier(input, keys);
+
+  assert.equal(result.status, "PARTIAL");
+  assert.equal(result.reason_code, "PARTIAL_CHAIN");
+  assert.notEqual(result.verified_trust_level, "INDEPENDENTLY_VERIFIABLE");
+});
+
+
+test("expired signing key invalidates anchor", () => {
+  const keyPair = generateKeyPairSync("ed25519");
+  const keys = [{
+    key_id: "key-1",
+    public_key: keyPair.publicKey.export({ format: "der", type: "spki" }).toString("base64"),
+    valid_until: "2026-04-01T00:00:00Z",
+  }];
+  const result = runVerifier(bundle([
+    event(1, "hash-1", null, signedAnchor(keyPair, 1, "hash-1")),
+  ]), keys);
+
+  assert.equal(result.status, "INVALID");
+  assert.equal(result.reason_code, "KEY_EXPIRED");
 });

@@ -31,14 +31,14 @@ function keyMap(bundle, keyFile) {
   const keys = new Map();
   for (const key of bundle.public_keys ?? bundle.keys ?? []) {
     if (key.key_id && key.public_key) {
-      keys.set(key.key_id, key.public_key);
+      keys.set(key.key_id, key);
     }
   }
   if (keyFile) {
     const external = JSON.parse(readFileSync(keyFile, "utf8"));
     for (const key of Array.isArray(external) ? external : [external]) {
       if (key.key_id && key.public_key) {
-        keys.set(key.key_id, key.public_key);
+        keys.set(key.key_id, key);
       }
     }
   }
@@ -77,12 +77,29 @@ function verifyAnchor(anchor, keys) {
   if (!anchor.signing_key_id || !keys.has(anchor.signing_key_id)) {
     return { status: "INVALID", reason_code: "UNKNOWN_KEY" };
   }
+  const key = keys.get(anchor.signing_key_id);
+  if (key.status === "REVOKED") {
+    return { status: "INVALID", reason_code: "KEY_REVOKED" };
+  }
+  if (!anchor.signed_at) {
+    return { status: "INVALID", reason_code: "SIGNED_AT_MISSING" };
+  }
+  const signedAt = Date.parse(anchor.signed_at);
+  if (!Number.isFinite(signedAt)) {
+    return { status: "INVALID", reason_code: "SIGNED_AT_INVALID" };
+  }
+  if (key.valid_from && signedAt < Date.parse(key.valid_from)) {
+    return { status: "INVALID", reason_code: "KEY_NOT_YET_VALID" };
+  }
+  if (key.valid_until && signedAt > Date.parse(key.valid_until)) {
+    return { status: "INVALID", reason_code: "KEY_EXPIRED" };
+  }
   const payloadHash = sha256Hex(canonical(signingPayload(anchor)));
   if (anchor.signed_payload_hash && anchor.signed_payload_hash !== payloadHash) {
     return { status: "INVALID", reason_code: "SIGNED_PAYLOAD_HASH_MISMATCH" };
   }
   const publicKey = createPublicKey({
-    key: Buffer.from(keys.get(anchor.signing_key_id), "base64"),
+    key: Buffer.from(key.public_key, "base64"),
     format: "der",
     type: "spki",
   });
@@ -184,12 +201,16 @@ function verifyChainContinuity(bundle) {
   }
   const first = events[0];
   if (first.chain_position === 1) {
-    return first.previous_event_hash
-      ? { status: "INVALID", reason_code: "GENESIS_PREDECESSOR_UNEXPECTED" }
-      : { status: "VALID", reason_code: null };
+    if (first.previous_event_hash) {
+      return { status: "INVALID", reason_code: "GENESIS_PREDECESSOR_UNEXPECTED" };
+    }
+    if (Number.isInteger(bundle.expected_total_events) && events.length < bundle.expected_total_events) {
+      return { status: "PARTIAL", reason_code: "PARTIAL_CHAIN" };
+    }
+    return { status: "VALID", reason_code: null };
   }
   if (bundle.partial_chain_range === true && bundle.predecessor_hash && first.previous_event_hash === bundle.predecessor_hash) {
-    return { status: "VALID", reason_code: null };
+    return { status: "PARTIAL", reason_code: "PARTIAL_CHAIN" };
   }
   return { status: "PARTIAL", reason_code: "BOUNDARY_PROOF_MISSING" };
 }
@@ -229,7 +250,9 @@ console.log(JSON.stringify({
   reason_code: reason,
   verified_trust_level: status === "VALID"
     ? "INDEPENDENTLY_VERIFIABLE"
-    : (partial?.reason_code === "BOUNDARY_PROOF_MISSING" ? "SIGNED_ANCHORS_VERIFIED" : "PARTIAL_EXTERNAL"),
+    : (partial?.reason_code === "BOUNDARY_PROOF_MISSING" || partial?.reason_code === "PARTIAL_CHAIN"
+      ? "SIGNED_ANCHORS_VERIFIED"
+      : "PARTIAL_EXTERNAL"),
   checked_counts: {
     anchors: checked.length,
     keys: keys.size,
