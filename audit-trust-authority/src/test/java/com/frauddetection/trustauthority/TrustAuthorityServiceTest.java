@@ -18,6 +18,7 @@ import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.MessageDigest;
@@ -29,6 +30,7 @@ import java.util.Base64;
 import java.util.Date;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -1014,9 +1016,21 @@ class TrustAuthorityServiceTest {
         Path privateKey = tempDir.resolve("ed25519-private.key");
         Path publicKey = tempDir.resolve("ed25519-public.key");
         Files.writeString(privateKey, Base64.getEncoder().encodeToString(signingKey.getPrivate().getEncoded()));
+        restrictPrivateKeyPermissions(privateKey);
         Files.writeString(publicKey, Base64.getEncoder().encodeToString(signingKey.getPublic().getEncoded()));
         properties.setPrivateKeyPath(privateKey.toString());
         properties.setPublicKeyPath(publicKey.toString());
+    }
+
+    private void restrictPrivateKeyPermissions(Path privateKey) throws Exception {
+        try {
+            Files.setPosixFilePermissions(privateKey, Set.of(
+                    PosixFilePermission.OWNER_READ,
+                    PosixFilePermission.OWNER_WRITE
+            ));
+        } catch (UnsupportedOperationException ignored) {
+            // Windows test filesystems do not expose POSIX permissions.
+        }
     }
 
     private String signCredentialPayload(TrustSignRequest request) {
