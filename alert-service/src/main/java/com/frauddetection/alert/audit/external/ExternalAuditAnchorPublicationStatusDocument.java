@@ -50,6 +50,27 @@ record ExternalAuditAnchorPublicationStatusDocument(
         @Field("manifest_status")
         String manifestStatus,
 
+        @Field("signature_status")
+        String signatureStatus,
+
+        @Field("signature")
+        String signature,
+
+        @Field("signing_key_id")
+        String signingKeyId,
+
+        @Field("signing_algorithm")
+        String signingAlgorithm,
+
+        @Field("signed_at")
+        Instant signedAt,
+
+        @Field("signing_authority")
+        String signingAuthority,
+
+        @Field("signed_payload_hash")
+        String signedPayloadHash,
+
         @Field("external_publish_attempts")
         int externalPublishAttempts,
 

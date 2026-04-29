@@ -10,6 +10,7 @@ import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
@@ -29,19 +30,51 @@ public class ExternalAuditIntegrityService {
     private final ExternalAuditIntegrityQueryParser queryParser;
     private final AlertServiceMetrics metrics;
     private final AuditService auditService;
+    private final ExternalAuditAnchorPublicationStatusRepository publicationStatusRepository;
+    private final AuditTrustAuthorityClient trustAuthorityClient;
+    private final AuditTrustAuthorityProperties trustAuthorityProperties;
 
-    public ExternalAuditIntegrityService(
+    ExternalAuditIntegrityService(
             AuditAnchorRepository anchorRepository,
             ExternalAuditAnchorSink sink,
             ExternalAuditIntegrityQueryParser queryParser,
             AlertServiceMetrics metrics,
             AuditService auditService
     ) {
+        this(anchorRepository, sink, queryParser, metrics, auditService, null, null, new AuditTrustAuthorityProperties());
+    }
+
+    @Autowired
+    public ExternalAuditIntegrityService(
+            AuditAnchorRepository anchorRepository,
+            ExternalAuditAnchorSink sink,
+            ExternalAuditIntegrityQueryParser queryParser,
+            AlertServiceMetrics metrics,
+            AuditService auditService,
+            ExternalAuditAnchorPublicationStatusRepository publicationStatusRepository,
+            AuditTrustAuthorityClient trustAuthorityClient,
+            AuditTrustAuthorityProperties trustAuthorityProperties
+    ) {
         this.anchorRepository = anchorRepository;
         this.sink = sink;
         this.queryParser = queryParser;
         this.metrics = metrics;
         this.auditService = auditService;
+        this.publicationStatusRepository = publicationStatusRepository;
+        this.trustAuthorityClient = trustAuthorityClient == null ? new DisabledAuditTrustAuthorityClient() : trustAuthorityClient;
+        this.trustAuthorityProperties = trustAuthorityProperties == null ? new AuditTrustAuthorityProperties() : trustAuthorityProperties;
+    }
+
+    ExternalAuditIntegrityService(
+            AuditAnchorRepository anchorRepository,
+            ExternalAuditAnchorSink sink,
+            ExternalAuditIntegrityQueryParser queryParser,
+            AlertServiceMetrics metrics,
+            AuditService auditService,
+            ExternalAuditAnchorPublicationStatusRepository publicationStatusRepository,
+            AuditTrustAuthorityClient trustAuthorityClient
+    ) {
+        this(anchorRepository, sink, queryParser, metrics, auditService, publicationStatusRepository, trustAuthorityClient, new AuditTrustAuthorityProperties());
     }
 
     public ExternalAuditIntegrityResponse verify(String sourceService, Integer limit) {
@@ -76,19 +109,7 @@ public class ExternalAuditIntegrityService {
     private ExternalAuditIntegrityResponse verify(ExternalAuditIntegrityQuery query) {
         AuditAnchorDocument local = anchorRepository.findLatestByPartitionKey(query.partitionKey()).orElse(null);
         if (local == null) {
-            return new ExternalAuditIntegrityResponse(
-                    "VALID",
-                    0,
-                    query.limit(),
-                    query.sourceService(),
-                    query.partitionKey(),
-                    null,
-                    null,
-                    null,
-                    null,
-                    sink.immutabilityLevel(),
-                    List.of()
-            );
+            return noLocalAnchorResponse(query);
         }
 
         ExternalAuditAnchor external;
@@ -140,8 +161,26 @@ public class ExternalAuditIntegrityService {
             violations.add(new AuditIntegrityViolation("EXTERNAL_SCHEMA_VERSION_UNSUPPORTED", 1, "EXTERNAL_SCHEMA_VERSION_UNSUPPORTED"));
         }
 
-        String status = violations.isEmpty() ? "VALID" : "INVALID";
-        return response(status, query, local, external, violations, null, null);
+        SignatureEnrichment signature = signatureEnrichment(external);
+        SignaturePolicyResult signaturePolicy = signaturePolicy(signature.verification());
+        metrics.recordAuditSignatureVerification(signature.verification().status());
+        metrics.recordAuditSignaturePolicyResult(signaturePolicy.status());
+        boolean integrityViolationsPresent = !violations.isEmpty();
+        if (!"VALID".equals(signaturePolicy.status())) {
+            violations.add(new AuditIntegrityViolation(
+                    signaturePolicy.reasonCode(),
+                    1,
+                    signaturePolicy.reasonCode()
+            ));
+        }
+        String status = violations.isEmpty() ? "VALID" : (integrityViolationsPresent ? "INVALID" : signaturePolicy.status());
+        String reasonCode = signaturePolicy.reasonCode();
+        String message = signaturePolicy.message();
+        if (integrityViolationsPresent) {
+            reasonCode = violations.getFirst().violationType();
+            message = "External audit anchor integrity mismatch.";
+        }
+        return response(status, query, local, external, signature, violations, reasonCode, message);
     }
 
     private ExternalAuditIntegrityResponse partial(
@@ -171,6 +210,7 @@ public class ExternalAuditIntegrityService {
             String reasonCode,
             String message
     ) {
+        SignatureEnrichment signature = external == null ? SignatureEnrichment.unsigned(null) : signatureEnrichment(external);
         return new ExternalAuditIntegrityResponse(
                 status,
                 1,
@@ -182,22 +222,192 @@ public class ExternalAuditIntegrityService {
                 ExternalAuditAnchorSummary.fromLocal(local),
                 external == null ? null : ExternalAuditAnchorSummary.fromExternal(
                         external,
-                        externalReference(external),
+                        signature.reference(),
                         sink.immutabilityLevel()
                 ),
                 sink.immutabilityLevel(),
+                signature.verification().status(),
+                signature.signingKeyId(),
+                signature.signingAlgorithm(),
+                signature.signingAuthority(),
+                signature.verification().reasonCode(),
                 violations
         );
     }
 
-    private ExternalAnchorReference externalReference(ExternalAuditAnchor external) {
+    private ExternalAuditIntegrityResponse noLocalAnchorResponse(ExternalAuditIntegrityQuery query) {
+        SignatureEnrichment signature = SignatureEnrichment.unsigned(null);
+        SignaturePolicyResult signaturePolicy = signaturePolicy(signature.verification());
+        metrics.recordAuditSignatureVerification(signature.verification().status());
+        metrics.recordAuditSignaturePolicyResult(signaturePolicy.status());
+        List<AuditIntegrityViolation> violations = "VALID".equals(signaturePolicy.status())
+                ? List.of()
+                : List.of(new AuditIntegrityViolation(signaturePolicy.reasonCode(), 1, signaturePolicy.reasonCode()));
+        return new ExternalAuditIntegrityResponse(
+                signaturePolicy.status(),
+                0,
+                query.limit(),
+                query.sourceService(),
+                query.partitionKey(),
+                signaturePolicy.reasonCode(),
+                signaturePolicy.message(),
+                null,
+                null,
+                sink.immutabilityLevel(),
+                signature.verification().status(),
+                null,
+                null,
+                null,
+                signature.verification().reasonCode(),
+                violations
+        );
+    }
+
+    private ExternalAuditIntegrityResponse response(
+            String status,
+            ExternalAuditIntegrityQuery query,
+            AuditAnchorDocument local,
+            ExternalAuditAnchor external,
+            SignatureEnrichment signature,
+            List<AuditIntegrityViolation> violations,
+            String reasonCode,
+            String message
+    ) {
+        return new ExternalAuditIntegrityResponse(
+                status,
+                1,
+                query.limit(),
+                query.sourceService(),
+                query.partitionKey(),
+                reasonCode,
+                message,
+                ExternalAuditAnchorSummary.fromLocal(local),
+                external == null ? null : ExternalAuditAnchorSummary.fromExternal(
+                        external,
+                        signature.reference(),
+                        sink.immutabilityLevel()
+                ),
+                sink.immutabilityLevel(),
+                signature.verification().status(),
+                signature.signingKeyId(),
+                signature.signingAlgorithm(),
+                signature.signingAuthority(),
+                signature.verification().reasonCode(),
+                violations
+        );
+    }
+
+    private SignatureEnrichment signatureEnrichment(ExternalAuditAnchor external) {
         try {
-            return sink.externalReference(external).orElse(null);
+            ExternalAnchorReference reference = sink.externalReference(external).orElse(null);
+            return enrichSignature(external, reference);
         } catch (ExternalAuditAnchorSinkException exception) {
             if (isExternalIntegrityMismatch(exception.reason())) {
                 metrics.recordExternalTamperingDetected(exception.reason());
             }
             throw exception;
+        }
+    }
+
+    private SignatureEnrichment enrichSignature(ExternalAuditAnchor external, ExternalAnchorReference reference) {
+        if (reference == null || publicationStatusRepository == null || reference.anchorId() == null) {
+            return SignatureEnrichment.unsigned(reference);
+        }
+        try {
+            return publicationStatusRepository.findByLocalAnchorId(reference.anchorId())
+                    .map(status -> verifiedSignatureReference(external, reference, status))
+                    .orElseGet(() -> SignatureEnrichment.unsigned(reference));
+        } catch (DataAccessException exception) {
+            return new SignatureEnrichment(reference, AuditTrustSignatureVerificationResult.unavailable(), null, null, null);
+        }
+    }
+
+    private SignatureEnrichment verifiedSignatureReference(
+            ExternalAuditAnchor external,
+            ExternalAnchorReference reference,
+            ExternalAuditAnchorPublicationStatusDocument status
+    ) {
+        SignedAuditAnchorPayload signature = new SignedAuditAnchorPayload(
+                status.signatureStatus(),
+                status.signingAlgorithm(),
+                status.signature(),
+                status.signingKeyId(),
+                status.signedAt(),
+                status.signingAuthority(),
+                status.signedPayloadHash()
+        );
+        ExternalAnchorReference signedReference = reference.withSignature(signature);
+        if (!"SIGNED".equals(signature.signatureStatus())
+                || signature.signature() == null
+                || signature.keyId() == null) {
+            return SignatureEnrichment.unsigned(signedReference);
+        }
+        AuditAnchorSigningPayload payload = new AuditAnchorSigningPayload(
+                external.partitionKey(),
+                external.localAnchorId(),
+                external.chainPosition(),
+                external.lastEventHash(),
+                reference.externalKey(),
+                reference.externalHash(),
+                sink.immutabilityLevel()
+        );
+        AuditTrustSignatureVerificationResult verification = trustAuthorityClient.verify(payload, signature);
+        return new SignatureEnrichment(
+                signedReference,
+                verification,
+                signature.keyId(),
+                signature.signatureAlgorithm(),
+                signature.signingAuthority()
+        );
+    }
+
+    private SignaturePolicyResult signaturePolicy(AuditTrustSignatureVerificationResult verification) {
+        String verificationStatus = verification == null ? "UNAVAILABLE" : verification.status();
+        if (!trustAuthorityProperties.isEnabled()) {
+            if ("INVALID".equals(verificationStatus)
+                    || "UNKNOWN_KEY".equals(verificationStatus)
+                    || "KEY_REVOKED".equals(verificationStatus)) {
+                return new SignaturePolicyResult("INVALID", "SIGNATURE_" + verificationStatus, "Signature verification failed.");
+            }
+            return SignaturePolicyResult.valid();
+        }
+        boolean required = trustAuthorityProperties.isSigningRequired();
+        return switch (verificationStatus) {
+            case "VALID" -> SignaturePolicyResult.valid();
+            case "UNSIGNED" -> new SignaturePolicyResult(
+                    required ? "INVALID" : "PARTIAL",
+                    required ? "SIGNATURE_UNSIGNED_REQUIRED" : "SIGNATURE_UNSIGNED",
+                    "External anchor signature is missing."
+            );
+            case "UNAVAILABLE" -> new SignaturePolicyResult(
+                    required ? "INVALID" : "PARTIAL",
+                    required ? "SIGNATURE_UNAVAILABLE_REQUIRED" : "SIGNATURE_UNAVAILABLE",
+                    "Trust authority signature verification is unavailable."
+            );
+            case "UNKNOWN_KEY", "KEY_REVOKED", "INVALID" -> new SignaturePolicyResult(
+                    "INVALID",
+                    "SIGNATURE_" + verificationStatus,
+                    "Signature verification failed."
+            );
+            default -> new SignaturePolicyResult("INVALID", "SIGNATURE_INVALID", "Signature verification failed.");
+        };
+    }
+
+    private record SignatureEnrichment(
+            ExternalAnchorReference reference,
+            AuditTrustSignatureVerificationResult verification,
+            String signingKeyId,
+            String signingAlgorithm,
+            String signingAuthority
+    ) {
+        static SignatureEnrichment unsigned(ExternalAnchorReference reference) {
+            return new SignatureEnrichment(reference, AuditTrustSignatureVerificationResult.unsigned(), null, null, null);
+        }
+    }
+
+    private record SignaturePolicyResult(String status, String reasonCode, String message) {
+        static SignaturePolicyResult valid() {
+            return new SignaturePolicyResult("VALID", null, null);
         }
     }
 

@@ -61,6 +61,9 @@ public record AuditTrustAttestationResponse(
         @JsonProperty("external_trust_dependency")
         String externalTrustDependency,
 
+        @JsonProperty("trust_decision_trace")
+        TrustDecisionTrace trustDecisionTrace,
+
         @JsonProperty("source_service")
         String sourceService,
 
@@ -93,7 +96,7 @@ public record AuditTrustAttestationResponse(
         this(status, trustLevel, internalIntegrityStatus, externalIntegrityStatus, externalAnchorStatus,
                 ExternalImmutabilityLevel.NONE, anchorCoverage, latestChainPosition, latestEventHash,
                 latestExternalAnchorReference, attestationFingerprint, attestationSignature, signingKeyId,
-                signerMode, attestationSignatureStrength, externalTrustDependency, sourceService, limit, limitations);
+                signerMode, attestationSignatureStrength, externalTrustDependency, null, sourceService, limit, limitations);
     }
 
     public record AnchorCoverage(
@@ -112,6 +115,24 @@ public record AuditTrustAttestationResponse(
         public static AnchorCoverage empty() {
             return new AnchorCoverage(0, 0, 0, 1.0d);
         }
+    }
+
+    public record TrustDecisionTrace(
+            @JsonProperty("identity_verified")
+            boolean identityVerified,
+
+            @JsonProperty("signature_verified")
+            boolean signatureVerified,
+
+            @JsonProperty("chain_verified")
+            String chainVerified,
+
+            @JsonProperty("policy_applied")
+            String policyApplied,
+
+            @JsonProperty("final_status")
+            String finalStatus
+    ) {
     }
 
 }

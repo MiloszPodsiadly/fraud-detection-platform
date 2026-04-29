@@ -1,0 +1,27 @@
+services:
+  audit-trust-authority:
+    environment:
+      TRUST_AUTHORITY_IDENTITY_MODE: jwt-service-identity
+      TRUST_AUTHORITY_AUDIT_SINK: durable-hash-chain
+      TRUST_AUTHORITY_JWT_ISSUER: fraud-platform-local
+      TRUST_AUTHORITY_JWT_AUDIENCE: audit-trust-authority
+      TRUST_AUTHORITY_JWT_JWKS_PATH: /run/service-identity/jwks.json
+      APP_TRUST_AUTHORITY_CALLERS_0_SERVICE_NAME: alert-service
+      APP_TRUST_AUTHORITY_CALLERS_0_ALLOWED_PURPOSES_0: AUDIT_ANCHOR
+      APP_TRUST_AUTHORITY_CALLERS_0_ALLOWED_PURPOSES_1: AUDIT_INTEGRITY
+      APP_TRUST_AUTHORITY_CALLERS_0_ALLOWED_JWT_KEY_IDS_0: alert-key-1
+      APP_TRUST_AUTHORITY_CALLERS_0_SIGN_RATE_LIMIT_PER_MINUTE: "1000"
+    volumes:
+      - ./service-identity/jwks.json:/run/service-identity/jwks.json:ro
+
+  alert-service:
+    environment:
+      AUDIT_TRUST_AUTHORITY_IDENTITY_MODE: jwt-service-identity
+      AUDIT_TRUST_AUTHORITY_JWT_ISSUER: fraud-platform-local
+      AUDIT_TRUST_AUTHORITY_JWT_AUDIENCE: audit-trust-authority
+      AUDIT_TRUST_AUTHORITY_JWT_KEY_ID: alert-key-1
+      AUDIT_TRUST_AUTHORITY_JWT_PRIVATE_KEY_PATH: /run/service-identity/alert-service-private.pem
+      AUDIT_TRUST_AUTHORITY_JWT_AUTHORITIES: AUDIT_ANCHOR AUDIT_INTEGRITY
+      AUDIT_TRUST_AUTHORITY_JWT_TTL: 5m
+    volumes:
+      - ./service-identity/alert-service-private.pem:/run/service-identity/alert-service-private.pem:ro

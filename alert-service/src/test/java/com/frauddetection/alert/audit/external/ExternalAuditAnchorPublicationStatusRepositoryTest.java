@@ -36,7 +36,8 @@ class ExternalAuditAnchorPublicationStatusRepositoryTest {
                         "hash-1",
                         Instant.parse("2026-04-27T10:01:00Z")
                 ),
-                ExternalImmutabilityLevel.CONFIGURED
+                ExternalImmutabilityLevel.CONFIGURED,
+                SignedAuditAnchorPayload.unsigned()
         );
 
         ArgumentCaptor<Update> update = ArgumentCaptor.forClass(Update.class);
@@ -74,7 +75,8 @@ class ExternalAuditAnchorPublicationStatusRepositoryTest {
                 ),
                 ExternalImmutabilityLevel.CONFIGURED,
                 ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED,
-                ExternalAuditAnchor.MANIFEST_STATUS_FAILED
+                ExternalAuditAnchor.MANIFEST_STATUS_FAILED,
+                SignedAuditAnchorPayload.failed()
         );
 
         ArgumentCaptor<Update> update = ArgumentCaptor.forClass(Update.class);
@@ -91,6 +93,7 @@ class ExternalAuditAnchorPublicationStatusRepositoryTest {
         assertThat(set.get("external_sink_type")).isEqualTo("object-store");
         assertThat(set.get("external_key")).isEqualTo("audit-anchors/partition/1.json");
         assertThat(set.get("manifest_status")).isEqualTo("FAILED");
+        assertThat(set.get("signature_status")).isEqualTo("SIGNATURE_FAILED");
         assertThat(set.get("last_external_publish_failure_reason")).isEqualTo("HEAD_MANIFEST_UPDATE_FAILED");
         assertThat(unset).containsKey("external_published_at");
     }

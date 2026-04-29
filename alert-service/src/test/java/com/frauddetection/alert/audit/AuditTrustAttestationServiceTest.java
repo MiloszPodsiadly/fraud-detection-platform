@@ -2,6 +2,7 @@ package com.frauddetection.alert.audit;
 
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorSink;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorSummary;
+import com.frauddetection.alert.audit.external.ExternalAnchorReference;
 import com.frauddetection.alert.audit.external.ExternalImmutabilityLevel;
 import com.frauddetection.alert.audit.external.ExternalAuditIntegrityResponse;
 import com.frauddetection.alert.audit.external.ExternalAuditIntegrityService;
@@ -36,7 +37,7 @@ class AuditTrustAttestationServiceTest {
     @Test
     void shouldReportInternalOnlyWhenExternalAnchorsAreDisabled() {
         when(externalAnchorSink.sinkType()).thenReturn("disabled");
-        when(internalIntegrityService.verify(null, null, "alert-service", "HEAD", 100))
+        when(internalIntegrityService.verifyScheduled("alert-service", 100))
                 .thenReturn(internal("VALID"));
         when(externalIntegrityService.verify("alert-service", 100))
                 .thenReturn(partialExternal("EXTERNAL_ANCHOR_MISSING", null));
@@ -46,6 +47,10 @@ class AuditTrustAttestationServiceTest {
 
         assertThat(response.status()).isEqualTo("AVAILABLE");
         assertThat(response.trustLevel()).isEqualTo(AuditTrustLevel.INTERNAL_ONLY);
+        assertThat(response.trustDecisionTrace()).isNotNull();
+        assertThat(response.trustDecisionTrace().identityVerified()).isTrue();
+        assertThat(response.trustDecisionTrace().chainVerified()).isEqualTo("PARTIAL");
+        assertThat(response.trustDecisionTrace().finalStatus()).isEqualTo("INTERNAL_ONLY");
         assertThat(response.externalAnchorStatus()).isEqualTo("DISABLED");
         assertThat(response.attestationSignature()).isNull();
         assertThat(response.attestationSignatureStrength()).isEqualTo("NONE");
@@ -60,7 +65,7 @@ class AuditTrustAttestationServiceTest {
     @Test
     void shouldReportPartialExternalWhenConfiguredExternalAnchorIsPartial() {
         when(externalAnchorSink.sinkType()).thenReturn("local-file");
-        when(internalIntegrityService.verify(null, null, "alert-service", "HEAD", 100))
+        when(internalIntegrityService.verifyScheduled("alert-service", 100))
                 .thenReturn(internal("VALID"));
         when(externalIntegrityService.verify("alert-service", 100))
                 .thenReturn(partialExternal("STALE_EXTERNAL_ANCHOR", externalAnchor()));
@@ -76,7 +81,7 @@ class AuditTrustAttestationServiceTest {
     @Test
     void shouldReportExternallyAnchoredOnlyWhenExternalIntegrityIsValid() {
         when(externalAnchorSink.sinkType()).thenReturn("local-file");
-        when(internalIntegrityService.verify(null, null, "alert-service", "HEAD", 100))
+        when(internalIntegrityService.verifyScheduled("alert-service", 100))
                 .thenReturn(internal("VALID"));
         when(externalIntegrityService.verify("alert-service", 100))
                 .thenReturn(validExternal());
@@ -94,9 +99,62 @@ class AuditTrustAttestationServiceTest {
     }
 
     @Test
+    void shouldUpgradeToSignedByLocalAuthorityOnlyWhenVerifiedSignatureMetadataIsPresent() {
+        when(externalAnchorSink.sinkType()).thenReturn("local-file");
+        when(internalIntegrityService.verifyScheduled("alert-service", 100))
+                .thenReturn(internal("VALID"));
+        when(externalIntegrityService.verify("alert-service", 100))
+                .thenReturn(validExternalWithReference(signedExternalReference("SIGNED", "local-trust-authority"), "VALID"));
+
+        AuditTrustAttestationResponse response = service(new DisabledAuditTrustAttestationSigner())
+                .attest("alert-service", 100, null);
+
+        assertThat(response.trustLevel()).isEqualTo(AuditTrustLevel.SIGNED_BY_LOCAL_AUTHORITY);
+        assertThat(response.latestExternalAnchorReference().signingAuthority()).isEqualTo("local-trust-authority");
+        assertThat(response.externalTrustDependency()).isEqualTo("REQUIRED");
+    }
+
+    @Test
+    void shouldNotUpgradeToSignedByLocalAuthorityWhenSignatureIsUnavailableOrFromAlertService() {
+        when(externalAnchorSink.sinkType()).thenReturn("local-file");
+        when(internalIntegrityService.verifyScheduled("alert-service", 100))
+                .thenReturn(internal("VALID"));
+        when(externalIntegrityService.verify("alert-service", 100))
+                .thenReturn(validExternalWithReference(signedExternalReference("SIGNATURE_UNAVAILABLE", "local-trust-authority"), "UNSIGNED"))
+                .thenReturn(validExternalWithReference(signedExternalReference("SIGNED", "alert-service"), "VALID"));
+
+        AuditTrustAttestationService service = service(new DisabledAuditTrustAttestationSigner());
+
+        assertThat(service.attest("alert-service", 100, null).trustLevel())
+                .isEqualTo(AuditTrustLevel.EXTERNALLY_ANCHORED);
+        assertThat(service.attest("alert-service", 100, null).trustLevel())
+                .isEqualTo(AuditTrustLevel.EXTERNALLY_ANCHORED);
+    }
+
+    @Test
+    void shouldNotUpgradeToSignedByLocalAuthorityWithoutValidSignatureVerification() {
+        when(externalAnchorSink.sinkType()).thenReturn("local-file");
+        when(internalIntegrityService.verifyScheduled("alert-service", 100))
+                .thenReturn(internal("VALID"));
+        when(externalIntegrityService.verify("alert-service", 100))
+                .thenReturn(validExternalWithReference(signedExternalReference("SIGNED", "local-trust-authority"), "UNAVAILABLE"))
+                .thenReturn(validExternalWithReference(signedExternalReference("SIGNED", "local-trust-authority"), "INVALID"))
+                .thenReturn(validExternalWithReference(signedExternalReference("SIGNED", "local-trust-authority"), "UNKNOWN_KEY"));
+
+        AuditTrustAttestationService service = service(new DisabledAuditTrustAttestationSigner());
+
+        assertThat(service.attest("alert-service", 100, null).trustLevel())
+                .isEqualTo(AuditTrustLevel.EXTERNALLY_ANCHORED);
+        assertThat(service.attest("alert-service", 100, null).trustLevel())
+                .isEqualTo(AuditTrustLevel.EXTERNALLY_ANCHORED);
+        assertThat(service.attest("alert-service", 100, null).trustLevel())
+                .isEqualTo(AuditTrustLevel.EXTERNALLY_ANCHORED);
+    }
+
+    @Test
     void shouldNotUpgradeTrustLevelWhenLocalDevSigningIsEnabled() {
         when(externalAnchorSink.sinkType()).thenReturn("local-file");
-        when(internalIntegrityService.verify(null, null, "alert-service", "HEAD", 100))
+        when(internalIntegrityService.verifyScheduled("alert-service", 100))
                 .thenReturn(internal("VALID"));
         when(externalIntegrityService.verify("alert-service", 100))
                 .thenReturn(validExternal());
@@ -115,7 +173,7 @@ class AuditTrustAttestationServiceTest {
     @Test
     void shouldNotUpgradeTrustLevelForProductionReadySigningWhenImmutabilityIsNotEnforced() {
         when(externalAnchorSink.sinkType()).thenReturn("local-file");
-        when(internalIntegrityService.verify(null, null, "alert-service", "HEAD", 100))
+        when(internalIntegrityService.verifyScheduled("alert-service", 100))
                 .thenReturn(internal("VALID"));
         when(externalIntegrityService.verify("alert-service", 100))
                 .thenReturn(validExternal());
@@ -134,7 +192,7 @@ class AuditTrustAttestationServiceTest {
     @Test
     void shouldUpgradeTrustLevelOnlyForProductionReadySigningAndEnforcedImmutability() {
         when(externalAnchorSink.sinkType()).thenReturn("object-store");
-        when(internalIntegrityService.verify(null, null, "alert-service", "HEAD", 100))
+        when(internalIntegrityService.verifyScheduled("alert-service", 100))
                 .thenReturn(internal("VALID"));
         when(externalIntegrityService.verify("alert-service", 100))
                 .thenReturn(validExternal("alert-service", "event-hash", "external-anchor-1", ExternalImmutabilityLevel.ENFORCED));
@@ -150,7 +208,7 @@ class AuditTrustAttestationServiceTest {
     @Test
     void shouldReturnUnavailableWhenInternalIntegrityIsUnavailable() {
         when(externalAnchorSink.sinkType()).thenReturn("local-file");
-        when(internalIntegrityService.verify(null, null, "alert-service", "HEAD", 100))
+        when(internalIntegrityService.verifyScheduled("alert-service", 100))
                 .thenReturn(new AuditIntegrityResponse(
                         "UNAVAILABLE",
                         0,
@@ -180,15 +238,15 @@ class AuditTrustAttestationServiceTest {
     @Test
     void shouldIncludeAttestationContextInFingerprint() {
         when(externalAnchorSink.sinkType()).thenReturn("local-file");
-        when(internalIntegrityService.verify(null, null, "alert-service", "HEAD", 100))
+        when(internalIntegrityService.verifyScheduled("alert-service", 100))
                 .thenReturn(internal("VALID"));
         when(externalIntegrityService.verify("alert-service", 100))
                 .thenReturn(validExternal());
-        when(internalIntegrityService.verify(null, null, "alert-service", "HEAD", 101))
+        when(internalIntegrityService.verifyScheduled("alert-service", 101))
                 .thenReturn(internal("VALID"));
         when(externalIntegrityService.verify("alert-service", 101))
                 .thenReturn(validExternal());
-        when(internalIntegrityService.verify(null, null, "other-service", "HEAD", 100))
+        when(internalIntegrityService.verifyScheduled("other-service", 100))
                 .thenReturn(internal("VALID"));
         when(externalIntegrityService.verify("other-service", 100))
                 .thenReturn(validExternal("other-service", "other-event-hash"));
@@ -208,7 +266,7 @@ class AuditTrustAttestationServiceTest {
     @Test
     void shouldChangeFingerprintWhenExternalAnchorChanges() {
         when(externalAnchorSink.sinkType()).thenReturn("local-file");
-        when(internalIntegrityService.verify(null, null, "alert-service", "HEAD", 100))
+        when(internalIntegrityService.verifyScheduled("alert-service", 100))
                 .thenReturn(internal("VALID"));
         when(externalIntegrityService.verify("alert-service", 100))
                 .thenReturn(validExternal("alert-service", "event-hash", "external-anchor-1"))
@@ -225,7 +283,7 @@ class AuditTrustAttestationServiceTest {
     @Test
     void shouldChangeFingerprintWhenSignerModeChanges() {
         when(externalAnchorSink.sinkType()).thenReturn("local-file");
-        when(internalIntegrityService.verify(null, null, "alert-service", "HEAD", 100))
+        when(internalIntegrityService.verifyScheduled("alert-service", 100))
                 .thenReturn(internal("VALID"));
         when(externalIntegrityService.verify("alert-service", 100))
                 .thenReturn(validExternal());
@@ -251,7 +309,7 @@ class AuditTrustAttestationServiceTest {
     @Test
     void shouldAuditAttestationEndpointAccess() {
         when(externalAnchorSink.sinkType()).thenReturn("local-file");
-        when(internalIntegrityService.verify(null, null, "alert-service", "HEAD", 100))
+        when(internalIntegrityService.verifyScheduled("alert-service", 100))
                 .thenReturn(internal("VALID"));
         when(externalIntegrityService.verify("alert-service", 100))
                 .thenReturn(validExternal());
@@ -339,6 +397,46 @@ class AuditTrustAttestationServiceTest {
         );
     }
 
+    private ExternalAuditIntegrityResponse validExternalWithReference(ExternalAnchorReference reference) {
+        return validExternalWithReference(reference, "UNSIGNED");
+    }
+
+    private ExternalAuditIntegrityResponse validExternalWithReference(ExternalAnchorReference reference, String signatureVerificationStatus) {
+        return new ExternalAuditIntegrityResponse(
+                "VALID",
+                1,
+                100,
+                "alert-service",
+                "source_service:alert-service",
+                null,
+                null,
+                localAnchor("event-hash"),
+                new ExternalAuditAnchorSummary(
+                        null,
+                        "external-anchor-1",
+                        "anchor-1",
+                        7,
+                        "event-hash",
+                        "SHA-256",
+                        "1.0",
+                        Instant.parse("2026-04-27T00:00:00Z"),
+                        "local-file",
+                        "PUBLISHED",
+                        null,
+                        null,
+                        reference,
+                        ExternalImmutabilityLevel.NONE
+                ),
+                ExternalImmutabilityLevel.NONE,
+                signatureVerificationStatus,
+                reference.signingKeyId(),
+                reference.signingAlgorithm(),
+                reference.signingAuthority(),
+                "VALID".equals(signatureVerificationStatus) ? null : signatureVerificationStatus,
+                List.of()
+        );
+    }
+
     private ExternalAuditIntegrityResponse partialExternal(String reasonCode, ExternalAuditAnchorSummary externalAnchor) {
         return new ExternalAuditIntegrityResponse(
                 "PARTIAL",
@@ -393,6 +491,23 @@ class AuditTrustAttestationServiceTest {
                 Instant.parse("2026-04-27T00:00:00Z"),
                 "local-file",
                 "PUBLISHED"
+        );
+    }
+
+    private ExternalAnchorReference signedExternalReference(String signatureStatus, String signingAuthority) {
+        return new ExternalAnchorReference(
+                "anchor-1",
+                "audit-anchors/source_service-alert-service/00000000000000000007.json",
+                "event-hash",
+                "event-hash",
+                Instant.parse("2026-04-27T00:00:00Z"),
+                signatureStatus,
+                "signature",
+                "local-ed25519-key-1",
+                "Ed25519",
+                Instant.parse("2026-04-27T00:00:01Z"),
+                signingAuthority,
+                "payload-hash"
         );
     }
 

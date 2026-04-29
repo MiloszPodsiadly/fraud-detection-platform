@@ -70,6 +70,7 @@ Component responsibilities:
 | `fraud-scoring-service` | Rule-based scoring plus ML integration modes. |
 | `ml-inference-service` | Python model runtime used by scoring in SHADOW/ML/COMPARE modes. |
 | `alert-service` | Scored transaction projection, alert queue, fraud cases, analyst decisions, security, audit. |
+| `audit-trust-authority` | Separate local audit anchor signing authority for FDP-23; owns demo Ed25519 private key material outside alert-service. |
 | `analyst-console-ui` | React analyst console for monitoring, alert review, case updates, and security UX. |
 | `common-events` | Shared Kafka event contracts, enums, and value objects. |
 | `common-test-support` | Shared fixtures and Testcontainers helpers. |
@@ -167,6 +168,7 @@ Representative endpoint matrix:
 | `GET /api/v1/audit/integrity/external` | `audit:verify` |
 | `GET /api/v1/audit/evidence/export` | `audit:export` |
 | `GET /api/v1/audit/trust/attestation` | `audit:verify` |
+| `GET /api/v1/audit/trust/keys` | `audit:verify` |
 | `GET /governance/advisories` | `transaction-monitor:read` |
 | `GET /governance/advisories/analytics` | `transaction-monitor:read` |
 | `GET /governance/advisories/{event_id}` | `transaction-monitor:read` |
@@ -185,6 +187,7 @@ FDP-16 is split into explicit production-hardening steps:
 - FDP-19 Audit Integrity Foundation: application-level append-only audit hash chain, bounded integrity verification, and audit-read tracking.
 - FDP-20 External Anchoring & Evidence Export: local-file external anchor publication, bounded external anchor verification, and bounded evidence export.
 - FDP-21 Audit Trust Attestation Layer: derived trust assessment built on FDP-19 internal integrity and FDP-20 external anchor/export source-of-truth signals.
+- FDP-23 Local-First Trust Authority: a separate local service signs external audit anchor payload hashes with asymmetric key material not held by alert-service, exports public verification keys, and supports offline verification bundles.
 
 Audit Logging v1 records security-relevant analyst write operations in `alert-service`.
 
@@ -254,7 +257,7 @@ They are not production WORM storage and are not suitable for high-volume produc
 
 FDP-22 provides an object-store external anchor sink for external anchor persistence outside MongoDB. New anchor objects are written under `audit-anchors/{encoded_partition_key}/{chain_position_padded}.json`, where `chain_position_padded` is a 20-digit zero-padded number and `encoded_partition_key` is deterministic base64url without padding. Legacy non-padded keys remain readable; no migration job rewrites existing objects. The bounded payload contains `local_anchor_id`, `partition_key`, `external_object_key`, `chain_position`, `event_hash`, `payload_hash`, and `created_at`; it does not include placeholder `previous_event_hash` evidence. `payload_hash` binds the canonical anchor payload to the object key and local anchor fields. The application never exposes delete/update paths for external anchors and enforces logical immutability by reading an existing object before write: identical binding is treated as idempotent, different content for the same key or conflicting local anchor binding fails with an explicit mismatch.
 
-Object-store mode is strict. `app.audit.external-anchoring.sink=object-store` requires `bucket`, `prefix`, `region` or `endpoint`, credentials, and a configured object-store client adapter. Missing configuration fails startup; there is no silent fallback to local-file. Startup readiness checking is enabled by default with `app.audit.external-anchoring.object-store.startup-check-enabled=true`; optional probe writes require `startup-test-write-enabled=true` and write a clearly marked healthcheck object without deleting it. Publication verifies writes by reading the object back and comparing `local_anchor_id`, `chain_position`, `event_hash`, `payload_hash`, and `external_object_key`. Verification uses exact `partition_key + chain_position` lookup when available. When latest external HEAD must be discovered, object-store listing must provide continuation-token pagination and all pages must be consumed. If listing pagination is unavailable and a listing may be truncated, HEAD is treated as unknown and the sink fails explicitly with `HEAD_SCAN_PAGINATION_UNSUPPORTED` or `HEAD_SCAN_LIMIT_EXCEEDED`; it does not return a best-effort HEAD. Real S3/GCS/Azure adapters remain FDP-23.
+Object-store mode is strict. `app.audit.external-anchoring.sink=object-store` requires `bucket`, `prefix`, `region` or `endpoint`, credentials, and a configured object-store client adapter. Missing configuration fails startup; there is no silent fallback to local-file. Startup readiness checking is enabled by default with `app.audit.external-anchoring.object-store.startup-check-enabled=true`; optional probe writes require `startup-test-write-enabled=true` and write a clearly marked healthcheck object without deleting it. Publication verifies writes by reading the object back and comparing `local_anchor_id`, `chain_position`, `event_hash`, `payload_hash`, and `external_object_key`. Verification uses exact `partition_key + chain_position` lookup when available. When latest external HEAD must be discovered, object-store listing must provide continuation-token pagination and all pages must be consumed. If listing pagination is unavailable and a listing may be truncated, HEAD is treated as unknown and the sink fails explicitly with `HEAD_SCAN_PAGINATION_UNSUPPORTED` or `HEAD_SCAN_LIMIT_EXCEEDED`; it does not return a best-effort HEAD. Real S3/GCS/Azure adapters remain future deployment work.
 
 ### External Head Manifest
 
@@ -268,7 +271,7 @@ Successful object-store publication records a bounded `external_reference` conta
 
 External anchor verification is available through `GET /api/v1/audit/integrity/external` and requires `audit:verify`. It is bounded (`limit` default 100, max 500), read-only, and checks latest local/external anchor consistency for bounded `source_service=alert-service`: local anchor existence, external anchor existence, `last_event_hash`, `chain_position`, `hash_algorithm`, `schema_version`, `local_anchor_id`, external key binding, payload hash binding, and verified immutability level. Missing or stale external anchors return `PARTIAL`; unavailable stores return `UNAVAILABLE`; mismatches return `INVALID`; external payload tampering is counted as `fraud_platform_audit_external_tampering_detected_total`. Verification access is audited with `VERIFY_EXTERNAL_AUDIT_INTEGRITY`.
 
-Bounded evidence export is available through `GET /api/v1/audit/evidence/export` and requires `audit:export`; `audit:read` alone is insufficient. The request requires `from`, `to`, and `source_service`, uses inclusive timestamps, defaults `limit` to 100, and caps it at 500. The response includes safe audit event summaries, event hash, previous hash, chain position, local anchor references, external anchor references when available, `external_anchor_status`, `export_fingerprint`, and an `anchor_coverage` summary with `total_events`, `events_with_local_anchor`, `events_with_external_anchor`, `events_missing_external_anchor`, and `coverage_ratio`. `status=AVAILABLE` means local audit events, local anchors, and external anchors were available for the exported events. `status=PARTIAL` means the export is incomplete as an evidence package: local audit integrity may hold, but external verification is not fully possible. `status=UNAVAILABLE` means local audit events could not be read. `strict=true` rejects partial evidence packages with `409` instead of returning partial event summaries and records `export_status=REJECTED_STRICT_MODE` in the audit metadata. The endpoint applies a soft per-actor in-memory limit of five exports per minute per service instance; exceeding it returns `429`, audits the failed attempt, and increments a low-cardinality metric. In multi-instance deployments, effective evidence export rate limiting must be enforced at API gateway or shared infrastructure level. It does not provide unbounded export, full-text search, cursor pagination, aggregation, delete, or update. Export access is audited with `EXPORT_AUDIT_EVIDENCE`.
+Bounded evidence export is available through `GET /api/v1/audit/evidence/export` and requires `audit:export`; `audit:read` alone is insufficient. The request requires `from`, `to`, and `source_service`, uses inclusive timestamps, defaults `limit` to 100, and caps it at 500. The response includes safe audit event summaries, event hash, previous hash, chain position, local anchor references, external anchor references when available, signature metadata when available, `external_anchor_status`, `export_fingerprint`, explicit chain range fields (`chain_range_start`, `chain_range_end`, `partial_chain_range`, and `predecessor_hash` for partial ranges), and an `anchor_coverage` summary with `total_events`, `events_with_local_anchor`, `events_with_external_anchor`, `events_missing_external_anchor`, and `coverage_ratio`. `status=AVAILABLE` means local audit events, local anchors, and external anchors were available for the exported events. `status=PARTIAL` means the export is incomplete as an evidence package: local audit integrity may hold, but external verification is not fully possible. `status=UNAVAILABLE` means local audit events could not be read. `strict=true` rejects partial evidence packages with `409` instead of returning partial event summaries and records `export_status=REJECTED_STRICT_MODE` in the audit metadata. The endpoint applies a soft per-actor in-memory limit of five exports per minute per service instance; exceeding it returns `429`, audits the failed attempt, and increments a low-cardinality metric. In multi-instance deployments, effective evidence export rate limiting must be enforced at API gateway or shared infrastructure level. It does not provide unbounded export, full-text search, cursor pagination, aggregation, delete, or update. Export access is audited with `EXPORT_AUDIT_EVIDENCE`.
 
 ### Sensitive Evidence Surface
 
@@ -286,7 +289,7 @@ FDP-20 guarantees append-only durable audit events, local chain anchors, externa
 
 FDP-20/FDP-22 do not guarantee certified WORM storage, legal notarization, legal non-repudiation, HSM/KMS-backed signatures, SIEM integration, a regulator-ready archive, zero data exfiltration risk, or cross-instance rate limiting. Local-file sink is development-only and blocked in prod-like profiles. Object-store immutability depends on external bucket/object-store controls and must be interpreted through `external_immutability_level`; `NONE` and `CONFIGURED` are not WORM proof. Evidence export rate limiting is enforced per service instance; in multi-instance deployments, effective rate limiting must be enforced at API gateway or shared infrastructure level. FDP-20/FDP-22 provide external tamper-evidence, not external trust enforcement.
 
-Metrics such as `fraud_platform_audit_events_persisted_total`, `fraud_platform_audit_persistence_failures_total`, `fraud_platform_audit_anchor_write_failures_total`, `fraud_platform_audit_chain_conflicts_total`, `fraud_platform_audit_read_requests_total`, `fraud_platform_audit_integrity_check_total`, `fraud_platform_audit_integrity_checks_total`, `fraud_platform_audit_integrity_violations_total`, `fraud_platform_audit_external_anchor_published_total`, `fraud_platform_audit_external_anchor_publish_failed_total`, `fraud_platform_audit_external_anchor_retry_total`, `fraud_platform_audit_external_anchor_timeout_total`, `fraud_platform_audit_external_anchor_operation_failure_total`, `fraud_platform_audit_external_tampering_detected_total`, `fraud_platform_audit_external_anchor_lag_seconds`, `fraud_platform_audit_external_integrity_checks_total`, `fraud_platform_audit_evidence_exports_total`, `fraud_platform_audit_evidence_export_rate_limited_total`, `fraud_platform_audit_evidence_export_repeated_fingerprint_total`, `fraud_audit_integrity_check_total`, `fraud_audit_integrity_violation_total`, `fraud_audit_chain_head_hash`, `fraud_audit_last_anchor_hash`, `fraud_audit_integrity_status`, `fraud_platform_read_access_audit_events_persisted_total`, `fraud_platform_read_access_audit_persistence_failures_total`, `fraud_read_access_audit_actor_missing_total`, `fraud_internal_auth_success_total`, and `fraud_internal_auth_failure_total` are operational health signals only. The hash gauges are numeric fingerprints and are not compliance evidence.
+Metrics such as `fraud_platform_audit_events_persisted_total`, `fraud_platform_audit_persistence_failures_total`, `fraud_platform_audit_anchor_write_failures_total`, `fraud_platform_audit_chain_conflicts_total`, `fraud_platform_audit_read_requests_total`, `fraud_platform_audit_integrity_check_total`, `fraud_platform_audit_integrity_checks_total`, `fraud_platform_audit_integrity_violations_total`, `fraud_platform_audit_external_anchor_published_total`, `fraud_platform_audit_external_anchor_publish_failed_total`, `fraud_platform_audit_external_anchor_retry_total`, `fraud_platform_audit_external_anchor_timeout_total`, `fraud_platform_audit_external_anchor_operation_failure_total`, `fraud_platform_audit_external_tampering_detected_total`, `fraud_platform_audit_external_anchor_lag_seconds`, `fraud_platform_audit_external_anchor_head_scan_depth`, `fraud_platform_audit_external_integrity_checks_total`, `audit_signature_verification_total`, `audit_signature_policy_result_total`, `trust_authority_audit_write_total`, `trust_jwt_invalid_total`, `trust_jwt_expired_total`, `trust_jwt_kid_mismatch_total`, `trust_jwt_service_mismatch_total`, `trust_jwt_authority_missing_total`, `trust_audit_append_conflict_total`, `trust_audit_integrity_partial_total`, `trust_audit_integrity_invalid_total`, `fraud_platform_audit_evidence_exports_total`, `fraud_platform_audit_evidence_export_rate_limited_total`, `fraud_platform_audit_evidence_export_repeated_fingerprint_total`, `fraud_audit_integrity_check_total`, `fraud_audit_integrity_violation_total`, `fraud_audit_chain_head_hash`, `fraud_audit_last_anchor_hash`, `fraud_audit_integrity_status`, `fraud_platform_read_access_audit_events_persisted_total`, `fraud_platform_read_access_audit_persistence_failures_total`, `fraud_read_access_audit_actor_missing_total`, `fraud_internal_auth_success_total`, and `fraud_internal_auth_failure_total` are operational health signals only. The hash gauges are numeric fingerprints and are not compliance evidence.
 
 ### FDP-21 Trust Attestation
 
@@ -294,13 +297,15 @@ FDP-21 adds `GET /api/v1/audit/trust/attestation`, protected by `audit:verify`, 
 
 #### FDP-21 Trust Semantics
 
-`attestation_signature_strength` and `external_immutability_level` are mandatory for interpreting FDP-21 trust. `SIGNED_ATTESTATION` represents stronger trust only when `attestation_signature_strength=PRODUCTION_READY`, `signer_mode` is backed by externally managed KMS/HSM signing material, and `external_immutability_level=ENFORCED`. Otherwise a signature is integrity metadata only and does not increase external trust.
+`attestation_signature_strength`, external anchor `signature_status`, external integrity `signature_verification_status`, and `external_immutability_level` are mandatory for interpreting FDP-21/FDP-23 trust. `SIGNED_BY_LOCAL_AUTHORITY` requires valid internal integrity, valid external anchor verification, `signature_verification_status=VALID`, verified Ed25519 external-anchor signature metadata, a known public key, and a signing authority other than `alert-service`. Stored signature metadata alone never upgrades trust. `SIGNED_ATTESTATION` represents stronger trust only when `attestation_signature_strength=PRODUCTION_READY`, `signer_mode` is backed by externally managed KMS/HSM signing material, and `external_immutability_level=ENFORCED`. Otherwise a signature is integrity metadata only and does not increase legal or compliance trust.
 
 Trust levels:
 
 - `INTERNAL_ONLY`: local application-level integrity is the only available signal.
 - `PARTIAL_EXTERNAL`: an external boundary is configured or visible, but full external anchor consistency is not proven.
 - `EXTERNALLY_ANCHORED`: FDP-20 external anchor verification is valid for the local head.
+- `SIGNED_BY_LOCAL_AUTHORITY`: external anchor verification is valid and the external anchor payload hash has `signature_verification_status=VALID` from the separate local trust authority.
+- `INDEPENDENTLY_VERIFIABLE`: reserved for offline evidence bundles that verify without alert-service, MongoDB, or an object store.
 - `SIGNED_ATTESTATION`: external anchor verification is valid, `external_immutability_level=ENFORCED`, and attestation signing is production-ready.
 - `UNAVAILABLE`: internal audit integrity cannot be read.
 
@@ -317,6 +322,66 @@ Examples:
 The FDP-21 local-dev signer provides integrity metadata only. It does not increase `trust_level`, does not provide external trust, and is not legal signing, not legal notarization, not WORM storage, not SIEM, and not KMS/HSM signing unless a real KMS/HSM adapter is explicitly integrated. `local-dev` signing is rejected in prod-like profiles; `kms-ready` requires `app.audit.trust.signing.kms-enabled=true` and still fails startup until a real adapter exists. FDP-21 does not add a second object-store, external verification implementation, or trust source.
 
 FDP-21 relies on FDP-19/FDP-20 source-of-truth services. It does not mutate audit events, publish external anchors, export evidence, trigger alerts, enforce workflow, alter scoring, change Kafka contracts, switch models, retrain, rollback, or provide a compliance archive.
+
+### FDP-23 Local Trust Authority
+
+FDP-23 adds `audit-trust-authority`, a separate local-first service for signing external audit anchor payload hashes. The private signing key is owned by `audit-trust-authority`, not `alert-service`. Alert-service sends only a canonical audit anchor payload hash and bounded anchor metadata to the trust authority after external anchor persistence/verification.
+
+The trust authority uses asymmetric Ed25519 signatures for anchor signing. It exposes `POST /api/v1/trust/sign`, `POST /api/v1/trust/verify`, `GET /api/v1/trust/keys`, `GET /api/v1/trust/audit/integrity`, `GET /api/v1/trust/audit/head`, and actuator health. The alert-service public key proxy is `GET /api/v1/audit/trust/keys`, protected by `audit:verify`; it returns public key metadata, including `key_fingerprint_sha256`, and never returns private keys.
+
+Signed external anchor metadata includes `signature_status`, `signature`, `signing_key_id`, `signing_algorithm`, `signed_at`, `signing_authority`, and `signed_payload_hash`. External integrity responses additionally expose `signature_verification_status`, `signature_reason_code`, and bounded signing metadata so clients can distinguish stored signature metadata from a verified signature. `SIGNED_BY_LOCAL_AUTHORITY` requires valid internal integrity, valid external anchor verification, `signature_verification_status=VALID`, a verified Ed25519 signature, a known public key, and a signing authority other than `alert-service`. If trust authority verification is disabled, `UNSIGNED` remains valid local/external integrity but never upgrades trust beyond `EXTERNALLY_ANCHORED`. If trust authority verification is enabled and signing is not required, `UNSIGNED` or `UNAVAILABLE` downgrades external integrity to `PARTIAL`. If signing is required, `UNSIGNED` or `UNAVAILABLE` makes external integrity `INVALID`. Invalid, unknown-key, or revoked-key signatures are always `INVALID`.
+
+Every trust-authority `/sign`, `/verify`, audit-integrity, and audit-head call is synchronously audited before the response is returned. Audit write failure fails the request; signing is not best-effort and is not fire-and-forget. `local-file` audit is local/dev/test verification only. The durable sink is named `durable-hash-chain`: it persists a bounded Mongo-backed hash chain with `event_schema_version=1`, `request_id`, `previous_event_hash`, `event_hash`, and monotonic `chain_position`. Trust-authority audit storage labels are `LOCAL_FILE`, `DURABLE_HASH_CHAIN`, and future `EXTERNAL_WORM`; only externally enforced storage controls can justify `EXTERNAL_WORM`. The durable hash chain is tamper-evident but not immutable; a privileged database operator could rewrite history if hashes are recomputed. Concurrent append conflicts are resolved by one fresh-head retry, prioritizing correctness over availability. Audit events store bounded fields only: action, caller identity/service, request id, purpose, payload hash, key id, result, reason code, timestamp, schema version, and hash-chain metadata. They do not store raw payloads, tokens, private keys, or secrets. `GET /api/v1/trust/audit/integrity` supports `mode=WINDOW` and `mode=FULL_CHAIN`; it returns `capability_level=INTERNAL_CRYPTOGRAPHIC_TRUST`, `tamper_detected`, `integrity_confidence`, and `trust_decision_trace`. `WINDOW` verifies internal continuity of a bounded suffix and returns `PARTIAL` with `reason_code=BOUNDARY_PREDECESSOR_OUTSIDE_WINDOW` when the predecessor is outside the window instead of falsely reporting `INVALID`. Hash mismatch, unknown event schema version, or chain gaps inside the checked window remain `INVALID`. `GET /api/v1/trust/audit/head` returns `status`, `source=trust-authority-audit`, `proof_type=LOCAL_HASH_CHAIN_HEAD`, `integrity_hint=LOCAL_CHAIN_ONLY`, `capability_level=INTERNAL_CRYPTOGRAPHIC_TRUST`, `chain_position`, `event_hash`, and `occurred_at` for future external anchoring; an empty chain returns `status=EMPTY`, not a fake zero proof. The head hash is not proof by itself; independent verification requires external anchoring outside the platform and the response does not provide WORM/notarization.
+
+The `/sign` endpoint is caller-bound and purpose-bound. Local/dev HMAC mode signs each trust-authority request with a per-service HMAC secret; service identity headers and `X-Internal-Trust-Request-Id` are bound into the signature and are not trusted by themselves. `JWT_SERVICE_IDENTITY` is the production identity path: the trust authority validates RS256 bearer JWT signature, `kid`, issuer, audience, `iat`, `exp`, maximum token age/TTL, `service_name`, authorities, service allowlist, and service-to-key binding. In JWT mode caller identity is taken only from the verified token, not mutable headers. Unknown callers, invalid credentials, repeated request ids within the bounded TTL cache, or unauthorized purposes are rejected and audited. Signing is rate-limited per verified service identity per minute and emits low-cardinality metrics.
+
+The trust authority supports a minimal local key registry with `ACTIVE`, `RETIRED`, and `REVOKED` keys. Only an `ACTIVE` key signs new anchors; `RETIRED` keys verify historical signatures; `REVOKED` or unknown keys fail verification. Verification enforces `signed_at` against `valid_from` and `valid_until`. Prod-like profiles reject `identity-mode=hmac-local` unconditionally, require `signing-required=true`, reject generated ephemeral signing keys, forbid inline private-key material, require persistent signing key paths, require `identity-mode=jwt-service-identity`, and require explicit JWT issuer/audience/public verification keys/caller allowlist/service-to-key binding. Optional `trusted-key-fingerprints` pin SHA-256 fingerprints of JWT public keys; mismatches fail startup and increment `trust_jwt_key_fingerprint_mismatch_total`. `mtls-ready`, `jwt-ready`, and `mtls-service-identity` fail closed for trust-authority until implemented. Per-service HMAC is local/dev/test only; it is not mTLS, not channel binding, not enterprise IAM, and not a zero-replay guarantee.
+
+Docker local runs enable local-file external anchoring for alert-service audit anchors and the local trust authority so the end-to-end audit anchor signing path can be exercised without cloud services. The OIDC Docker realm also includes a separate `analyst-console-e2e` public client with direct password grants enabled for shell smoke tests only; the browser client remains PKCE/browser-oriented. This e2e client is local Docker automation, not a production authentication pattern. FDP-23 exposes audit head material for FDP-24. It does not publish or anchor it externally.
+
+`tools/audit-verifier/audit-verifier.mjs` is a local offline verifier for exported evidence material and public keys. It verifies the export fingerprint, signed anchor material, key validity windows, revoked-key status, and chain continuity. It supports `STANDARD` and `STRICT` modes. Strict mode requires full-chain evidence and rejects partial ranges, missing anchors, and boundary-only proofs. The verifier reports `verified_trust_level=INTERNAL_FULL|INTERNAL_PARTIAL|INVALID`. It does not call alert-service, MongoDB, or an object store.
+
+FDP-23 remains an internal platform trust authority, not an enterprise trust service. Production-target deployments must use `JWT_SERVICE_IDENTITY` with externally managed JWT private keys on clients and public verification material on trust-authority, plus externally managed Ed25519 trust-authority signing key paths. FDP-23 is not mTLS service identity for trust-authority yet, not KMS/HSM signing, not legal notarization, not certified WORM storage, not SIEM integration, and not a regulator-certified archive. Full independent production trust still requires real object-store adapters, externally managed keys or KMS/HSM, operational key rotation, immutable infrastructure controls, and external retention policy.
+
+What FDP-23 does not provide: legal notarization, WORM storage, external timestamping, independent third-party verification, certified compliance archival, or external anchoring of the trust-authority audit head. FDP-23 exposes audit head material for FDP-24. It does not publish or anchor it externally.
+
+### FDP-23 Scope Guard
+
+This system provides INTERNAL cryptographic trust only. External trust requires FDP-24.
+
+This module is NOT:
+
+- external notarization
+- WORM storage
+- KMS/HSM-backed signing
+- independent third-party trust
+
+This module guarantees:
+
+- no silent trust escalation
+- cryptographic integrity over signed audit anchor payload hashes
+- authenticated signing authority for configured internal callers
+- tamper-evident trust-authority audit chain
+
+To reach full bank-grade external trust:
+
+- FDP-24 external anchoring of trust-authority audit heads
+- KMS/HSM-backed signing material
+- mTLS identity for trust-authority callers
+
+FDP-24 scope is real external anchoring of the trust-authority audit head. It must publish `chain_position`, `event_hash`, `occurred_at`, and `proof_type=LOCAL_HASH_CHAIN_HEAD` to a real external sink, verify the write by reading it back, bind the external reference to the local head, persist publication status as `PUBLISHED`, `PARTIAL`, or `FAILED`, and fail fast if no real publisher is configured. No noop publisher, logs-only anchoring, fake notarization, or enabled config without an external write is acceptable.
+
+### Regulator Questions
+
+Is this WORM? No.
+
+Is this notarized? No.
+
+Is this KMS/HSM-backed? No.
+
+Is this externally verifiable? Not yet (FDP-24).
+
+What does it guarantee? Internal cryptographic integrity and non-repudiation within system boundary.
 
 Governance advisory audit entries are separate from fraud workflow audit logs. They are persisted append-only as human review history, derive actor identity from the backend-authenticated principal, and do not affect scoring, model behavior, retraining, rollback, or fraud decisioning. Advisory lifecycle status is a read-time projection from the latest audit entry, not a persisted workflow state or automation trigger.
 
@@ -638,6 +703,14 @@ curl -s http://localhost:8090/metrics | grep fraud_internal_auth
 
 Expected results: anonymous direct ML calls return `401`, invalid bearer calls return `403`, configured Java clients attach RS256 signed JWT service identity through `InternalServiceAuthHeaders`, `ml-inference-service` validates public JWKS material only, `kid` is required, service-to-key binding is enforced, strict `iat`/`exp` freshness checks bound replay risk, and internal auth metrics remain low-cardinality. See `docs/service-identity-fdp17.md` for the full contract. This is a JWT service-auth foundation, not enterprise mTLS or enterprise IAM.
 
+To verify the FDP-23 trust-authority JWT client path together with OIDC and the FDP-18 mTLS ML/governance path:
+
+```bash
+docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml -f deployment/docker-compose.service-identity-mtls.yml -f deployment/docker-compose.trust-authority-jwt.yml up --build -d
+```
+
+Expected results: browser/user APIs use OIDC, Java service calls into ML/governance use mTLS, and alert-service calls into `audit-trust-authority` use RS256 bearer JWTs signed by `alert-key-1`. The trust authority validates the local JWKS, `kid`, issuer, audience, token freshness, authorities, caller allowlist, and service-to-key binding. The local fixture private key is mounted only into alert-service; trust-authority receives public verification material only. This is still local Docker verification, not trust-authority mTLS, not enterprise IAM, not KMS/HSM, and not legal notarization.
+
 ## FDP-18 mTLS Service Identity
 
 FDP-18 adds internal mTLS service identity for configured service-to-service calls into `ml-inference-service`.
@@ -693,6 +766,7 @@ FDP-17 reduces this risk by:
 - maximum token age enforcement
 - bounded clock skew tolerance
 - optional in-memory replay detection
+- trust-authority distributed-hint replay checks against the local audit chain when explicitly configured
 
 This does NOT provide:
 
@@ -704,6 +778,8 @@ Full replay protection requires:
 
 - `jti` with a distributed store, OR
 - mTLS with channel binding
+
+Distributed replay protection for trust-authority still requires an external store in FDP-24+; `DISTRIBUTED_HINT` is an audit-chain hint, not a cross-cluster nonce system.
 
 ## Local Keys
 
@@ -828,6 +904,7 @@ Migration notes: [Security Foundation v1](docs/security-foundation-v1.md).
 | `feature-enricher-service` | `8083` |
 | `fraud-scoring-service` | `8084` |
 | `alert-service` | `8085` |
+| `audit-trust-authority` | `8095` |
 | `ml-inference-service` | `8090` |
 | `ollama` | `11434` |
 | `analyst-console-ui` | `4173` |
@@ -842,6 +919,7 @@ Health endpoints:
 - `http://localhost:8083/actuator/health`
 - `http://localhost:8084/actuator/health`
 - `http://localhost:8085/actuator/health`
+- `http://localhost:8095/actuator/health`
 - `http://localhost:8090/health`
 - `http://localhost:11434`
 
@@ -876,6 +954,7 @@ Main local endpoints:
 - `GET http://localhost:8085/api/v1/alerts/{alertId}`: alert details.
 - `GET http://localhost:8085/api/v1/alerts/{alertId}/assistant-summary`: assistant case summary.
 - `POST http://localhost:8085/api/v1/alerts/{alertId}/decision`: submit analyst decision.
+- `GET http://localhost:8085/api/v1/audit/trust/keys`: audit trust public verification keys, protected by `audit:verify`.
 - `GET http://localhost:8085/api/v1/fraud-cases`: fraud case queue.
 - `GET http://localhost:8085/api/v1/fraud-cases/{caseId}`: fraud case details.
 - `PATCH http://localhost:8085/api/v1/fraud-cases/{caseId}`: update fraud case.
@@ -1222,7 +1301,7 @@ Known production gaps:
 
 - Service-to-service authentication is an internal service-auth foundation with RS256 JWT service identity, JWKS public-key validation, per-service private-key signing, `kid` validation, service-to-key binding, FDP-18 internal mTLS service identity, a compatibility token-validator path, and prod-like fail-closed guards; it is not enterprise IAM, automated certificate lifecycle management, or bank-grade certification.
 - mTLS is implemented only for declared internal ML scoring/governance service calls; browser/OIDC traffic, automated rotation, cert-manager, Vault/KMS, external PKI automation, and enterprise certificate lifecycle management remain out of scope.
-- Durable audit storage is not WORM/immutable archive storage, legal non-repudiation, SIEM integration, long-term archival policy, regulator-ready evidence package, full HSM/KMS signing, or a final compliance archive. FDP-21 adds a derived trust attestation over FDP-19/FDP-20 signals with optional local-dev integrity signing; real external object-store, WORM, SIEM, and KMS/HSM integrations remain future deployment work.
+- Durable audit storage is not WORM/immutable archive storage, legal non-repudiation, SIEM integration, long-term archival policy, regulator-ready evidence package, full HSM/KMS signing, or a final compliance archive. FDP-21 adds a derived trust attestation over FDP-19/FDP-20 signals; FDP-23 adds a separate local signing authority for external anchor hashes. Real cloud object-store adapters, certified WORM, SIEM, KMS/HSM, operational key rotation, and legal notarization remain future deployment work.
 - DLT inspection/replay tooling is not implemented yet.
 - The frontend defaults to demo auth in quickstart mode and supports local OIDC through the Keycloak override, but it is not a production-ready SSO setup.
 - ML governance uses a synthetic/local reference profile and aggregate MongoDB snapshots; the synthetic reference is not suitable for production drift decisions and FDP-7 does not implement automatic retraining, rollback, approval UI, or production alert routing.

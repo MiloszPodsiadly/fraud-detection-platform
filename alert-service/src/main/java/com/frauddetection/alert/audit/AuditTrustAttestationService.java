@@ -66,7 +66,7 @@ public class AuditTrustAttestationService {
                 ? sourceService.trim()
                 : DEFAULT_SOURCE_SERVICE;
         try {
-            AuditIntegrityResponse internal = internalIntegrityService.verify(null, null, normalizedSourceService, "HEAD", normalizedLimit);
+            AuditIntegrityResponse internal = internalIntegrityService.verifyScheduled(normalizedSourceService, normalizedLimit);
             ExternalAuditIntegrityResponse external = externalIntegrityService.verify(normalizedSourceService, normalizedLimit);
             AuditTrustAttestationResponse response = response(normalizedSourceService, normalizedLimit, "HEAD", internal, external);
             auditAttestationRead(response);
@@ -113,6 +113,7 @@ public class AuditTrustAttestationService {
         String signatureKeyId = signer.signingEnabled() ? signer.keyId() : null;
         String signatureStrength = signer.signingEnabled() ? signer.signatureStrength() : "NONE";
         String externalTrustDependency = externalTrustDependency(trustLevel);
+        AuditTrustAttestationResponse.TrustDecisionTrace trace = decisionTrace(internal, external, trustLevel, signatureStrength);
 
         Map<String, Object> canonical = canonical(
                 sourceService,
@@ -129,17 +130,23 @@ public class AuditTrustAttestationService {
                 latestChainPosition,
                 latestEventHash,
                 latestExternalAnchor,
+                trace,
                 limitations
         );
         String fingerprint = sha256(canonicalBytes(canonical));
         AuditTrustAttestationSignature signature = signature(canonicalBytes(canonicalWithFingerprint(canonical, fingerprint)));
         AuditTrustLevel finalTrustLevel = trustLevel == AuditTrustLevel.EXTERNALLY_ANCHORED
+                && signedByLocalAuthority(external, latestExternalAnchor)
+                ? AuditTrustLevel.SIGNED_BY_LOCAL_AUTHORITY
+                : trustLevel;
+        finalTrustLevel = finalTrustLevel == AuditTrustLevel.EXTERNALLY_ANCHORED
                 && "PRODUCTION_READY".equals(signatureStrength)
                 && immutabilityLevel == ExternalImmutabilityLevel.ENFORCED
                 ? AuditTrustLevel.SIGNED_ATTESTATION
-                : trustLevel;
+                : finalTrustLevel;
 
         if (finalTrustLevel != trustLevel) {
+            trace = decisionTrace(internal, external, finalTrustLevel, signatureStrength);
             canonical = canonical(
                     sourceService,
                     limit,
@@ -155,6 +162,7 @@ public class AuditTrustAttestationService {
                     latestChainPosition,
                     latestEventHash,
                     latestExternalAnchor,
+                    trace,
                     limitations
             );
             fingerprint = sha256(canonicalBytes(canonical));
@@ -178,6 +186,7 @@ public class AuditTrustAttestationService {
                 signer.mode(),
                 signatureStrength,
                 externalTrustDependency,
+                trace,
                 sourceService,
                 limit,
                 limitations
@@ -311,14 +320,53 @@ public class AuditTrustAttestationService {
         if (trustLevel == AuditTrustLevel.INTERNAL_ONLY && signer.signingEnabled()) {
             limitations.add("local_signature_does_not_add_external_trust");
         }
+        limitations.add("local_trust_authority_not_kms_hsm");
+        limitations.add("local_trust_authority_not_legal_notarization");
         return List.copyOf(limitations);
     }
 
     private String externalTrustDependency(AuditTrustLevel trustLevel) {
-        if (trustLevel == AuditTrustLevel.EXTERNALLY_ANCHORED || trustLevel == AuditTrustLevel.SIGNED_ATTESTATION) {
+        if (trustLevel == AuditTrustLevel.EXTERNALLY_ANCHORED
+                || trustLevel == AuditTrustLevel.SIGNED_BY_LOCAL_AUTHORITY
+                || trustLevel == AuditTrustLevel.INDEPENDENTLY_VERIFIABLE
+                || trustLevel == AuditTrustLevel.SIGNED_ATTESTATION) {
             return "REQUIRED";
         }
         return "OPTIONAL";
+    }
+
+    private AuditTrustAttestationResponse.TrustDecisionTrace decisionTrace(
+            AuditIntegrityResponse internal,
+            ExternalAuditIntegrityResponse external,
+            AuditTrustLevel finalTrustLevel,
+            String signatureStrength
+    ) {
+        return new AuditTrustAttestationResponse.TrustDecisionTrace(
+                true,
+                "VALID".equals(external.signatureVerificationStatus()) || !"NONE".equals(signatureStrength),
+                chainTrace(internal, external),
+                "signingRequired=" + !"NONE".equals(signatureStrength),
+                "UNAVAILABLE".equals(internal.status()) ? "UNAVAILABLE" : finalTrustLevel.name()
+        );
+    }
+
+    private String chainTrace(AuditIntegrityResponse internal, ExternalAuditIntegrityResponse external) {
+        if (!"VALID".equals(internal.status()) || !"VALID".equals(external.status())) {
+            return "PARTIAL";
+        }
+        return "FULL";
+    }
+
+    private boolean signedByLocalAuthority(ExternalAuditIntegrityResponse external, ExternalAnchorReference latestExternalAnchor) {
+        return latestExternalAnchor != null
+                && "VALID".equals(external.signatureVerificationStatus())
+                && "SIGNED".equals(latestExternalAnchor.signatureStatus())
+                && latestExternalAnchor.signingKeyId() != null
+                && latestExternalAnchor.signature() != null
+                && "Ed25519".equals(latestExternalAnchor.signingAlgorithm())
+                && latestExternalAnchor.signedPayloadHash() != null
+                && latestExternalAnchor.signingAuthority() != null
+                && !"alert-service".equals(latestExternalAnchor.signingAuthority());
     }
 
     private Map<String, Object> canonical(
@@ -336,6 +384,7 @@ public class AuditTrustAttestationService {
             Long latestChainPosition,
             String latestEventHash,
             ExternalAnchorReference latestExternalAnchorReference,
+            AuditTrustAttestationResponse.TrustDecisionTrace trustDecisionTrace,
             List<String> limitations
     ) {
         Map<String, Object> canonical = new LinkedHashMap<>();
@@ -360,6 +409,13 @@ public class AuditTrustAttestationService {
         canonical.put("latest_external_anchor_reference", latestExternalAnchorReference == null
                 ? null
                 : externalAnchorReference(latestExternalAnchorReference));
+        canonical.put("trust_decision_trace", Map.of(
+                "identity_verified", trustDecisionTrace.identityVerified(),
+                "signature_verified", trustDecisionTrace.signatureVerified(),
+                "chain_verified", trustDecisionTrace.chainVerified(),
+                "policy_applied", trustDecisionTrace.policyApplied(),
+                "final_status", trustDecisionTrace.finalStatus()
+        ));
         canonical.put("limitations", limitations);
         return canonical;
     }
@@ -373,6 +429,12 @@ public class AuditTrustAttestationService {
         reference.put("anchor_hash", latestExternalAnchorReference.anchorHash());
         reference.put("external_hash", latestExternalAnchorReference.externalHash());
         reference.put("verified_at", latestExternalAnchorReference.verifiedAt() == null ? null : latestExternalAnchorReference.verifiedAt().toString());
+        reference.put("signature_status", latestExternalAnchorReference.signatureStatus());
+        reference.put("signing_key_id", latestExternalAnchorReference.signingKeyId());
+        reference.put("signing_algorithm", latestExternalAnchorReference.signingAlgorithm());
+        reference.put("signed_at", latestExternalAnchorReference.signedAt() == null ? null : latestExternalAnchorReference.signedAt().toString());
+        reference.put("signing_authority", latestExternalAnchorReference.signingAuthority());
+        reference.put("signed_payload_hash", latestExternalAnchorReference.signedPayloadHash());
         return reference;
     }
 

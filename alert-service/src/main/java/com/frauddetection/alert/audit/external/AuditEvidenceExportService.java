@@ -21,6 +21,7 @@ import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import org.springframework.http.HttpStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
@@ -52,11 +53,12 @@ public class AuditEvidenceExportService {
     private final CurrentAnalystUser currentAnalystUser;
     private final AuditEvidenceExportRateLimiterStrategy rateLimiter;
     private final AuditEvidenceExportAbuseDetector abuseDetector;
+    private final ExternalAuditAnchorPublicationStatusRepository publicationStatusRepository;
 
     private record ExternalAnchorLookup(String status, Map<Long, ExternalAuditAnchor> anchors) {
     }
 
-    public AuditEvidenceExportService(
+    AuditEvidenceExportService(
             AuditEventRepository eventRepository,
             AuditAnchorRepository anchorRepository,
             ExternalAuditAnchorSink sink,
@@ -67,6 +69,33 @@ public class AuditEvidenceExportService {
             AuditEvidenceExportRateLimiterStrategy rateLimiter,
             AuditEvidenceExportAbuseDetector abuseDetector
     ) {
+        this(
+                eventRepository,
+                anchorRepository,
+                sink,
+                queryParser,
+                metrics,
+                auditService,
+                currentAnalystUser,
+                rateLimiter,
+                abuseDetector,
+                null
+        );
+    }
+
+    @Autowired
+    public AuditEvidenceExportService(
+            AuditEventRepository eventRepository,
+            AuditAnchorRepository anchorRepository,
+            ExternalAuditAnchorSink sink,
+            AuditEvidenceExportQueryParser queryParser,
+            AlertServiceMetrics metrics,
+            AuditService auditService,
+            CurrentAnalystUser currentAnalystUser,
+            AuditEvidenceExportRateLimiterStrategy rateLimiter,
+            AuditEvidenceExportAbuseDetector abuseDetector,
+            ExternalAuditAnchorPublicationStatusRepository publicationStatusRepository
+    ) {
         this.eventRepository = eventRepository;
         this.anchorRepository = anchorRepository;
         this.sink = sink;
@@ -76,6 +105,7 @@ public class AuditEvidenceExportService {
         this.currentAnalystUser = currentAnalystUser;
         this.rateLimiter = rateLimiter;
         this.abuseDetector = abuseDetector;
+        this.publicationStatusRepository = publicationStatusRepository;
     }
 
     public AuditEvidenceExportResponse export(String from, String to, String sourceService, Integer limit) {
@@ -142,7 +172,11 @@ public class AuditEvidenceExportService {
                     null,
                     "AVAILABLE",
                     AuditEvidenceExportResponse.AnchorCoverage.empty(),
-                    fingerprint(query, AuditEvidenceExportResponse.AnchorCoverage.empty(), List.of()),
+                    fingerprint(query, AuditEvidenceExportResponse.AnchorCoverage.empty(), new ChainRange(null, null, null, false), List.of()),
+                    null,
+                    null,
+                    null,
+                    false,
                     List.of()
             );
         }
@@ -168,7 +202,7 @@ public class AuditEvidenceExportService {
                     return AuditEvidenceExportEvent.from(
                             document,
                             local == null ? null : AuditEvidenceExportAnchorReference.local(local),
-                            external == null ? null : AuditEvidenceExportAnchorReference.external(external)
+                            external == null ? null : externalEvidenceReference(external)
                     );
                 })
                 .toList();
@@ -176,7 +210,8 @@ public class AuditEvidenceExportService {
         String externalAnchorStatus = externalAnchorStatus(coverage, externalAnchorLookup.status());
         String reasonCode = reasonCode(coverage, externalAnchorStatus);
         String status = reasonCode == null ? "AVAILABLE" : "PARTIAL";
-        String fingerprint = fingerprint(query, coverage, events);
+        ChainRange chainRange = chainRange(events);
+        String fingerprint = fingerprint(query, coverage, chainRange, events);
         return new AuditEvidenceExportResponse(
                 status,
                 events.size(),
@@ -189,8 +224,24 @@ public class AuditEvidenceExportService {
                 externalAnchorStatus,
                 coverage,
                 fingerprint,
+                chainRange.start(),
+                chainRange.end(),
+                chainRange.predecessorHash(),
+                chainRange.partial(),
                 events
         );
+    }
+
+    private ChainRange chainRange(List<AuditEvidenceExportEvent> events) {
+        if (events.isEmpty()) {
+            return new ChainRange(null, null, null, false);
+        }
+        AuditEvidenceExportEvent first = events.getFirst();
+        AuditEvidenceExportEvent last = events.getLast();
+        Long start = first.chainPosition();
+        Long end = last.chainPosition();
+        boolean partial = start != null && start > 1;
+        return new ChainRange(start, end, partial ? first.previousEventHash() : null, partial);
     }
 
     private Map<Long, AuditAnchorDocument> localAnchors(AuditEvidenceExportQuery query, long minPosition, long maxPosition) {
@@ -217,6 +268,38 @@ public class AuditEvidenceExportService {
         } catch (ExternalAuditAnchorSinkException exception) {
             log.warn("External audit anchors unavailable during evidence export: reason={}", exception.reason());
             return new ExternalAnchorLookup("UNAVAILABLE", Map.of());
+        }
+    }
+
+    private AuditEvidenceExportAnchorReference externalEvidenceReference(ExternalAuditAnchor external) {
+        ExternalAnchorReference reference = null;
+        try {
+            reference = sink.externalReference(external).orElse(null);
+            reference = enrichSignature(reference);
+        } catch (ExternalAuditAnchorSinkException exception) {
+            log.warn("External audit anchor reference unavailable during evidence export: reason={}", exception.reason());
+        }
+        return AuditEvidenceExportAnchorReference.external(external, reference, sink.immutabilityLevel());
+    }
+
+    private ExternalAnchorReference enrichSignature(ExternalAnchorReference reference) {
+        if (reference == null || publicationStatusRepository == null || reference.anchorId() == null) {
+            return reference;
+        }
+        try {
+            return publicationStatusRepository.findByLocalAnchorId(reference.anchorId())
+                    .map(status -> reference.withSignature(new SignedAuditAnchorPayload(
+                            status.signatureStatus(),
+                            status.signingAlgorithm(),
+                            status.signature(),
+                            status.signingKeyId(),
+                            status.signedAt(),
+                            status.signingAuthority(),
+                            status.signedPayloadHash()
+                    )))
+                    .orElse(reference);
+        } catch (DataAccessException exception) {
+            return reference;
         }
     }
 
@@ -289,6 +372,7 @@ public class AuditEvidenceExportService {
     private String fingerprint(
             AuditEvidenceExportQuery query,
             AuditEvidenceExportResponse.AnchorCoverage coverage,
+            ChainRange chainRange,
             List<AuditEvidenceExportEvent> events
     ) {
         Map<String, Object> canonical = new LinkedHashMap<>();
@@ -315,6 +399,12 @@ public class AuditEvidenceExportService {
                 "events_with_local_anchor", coverage.eventsWithLocalAnchor(),
                 "total_events", coverage.totalEvents()
         ));
+        Map<String, Object> chain = new LinkedHashMap<>();
+        chain.put("chain_range_start", chainRange.start());
+        chain.put("chain_range_end", chainRange.end());
+        chain.put("partial_chain_range", chainRange.partial());
+        chain.put("predecessor_hash", chainRange.predecessorHash());
+        canonical.put("chain_range", chain);
         try {
             byte[] canonicalJson = CANONICAL_JSON.writeValueAsBytes(canonical);
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -362,5 +452,13 @@ public class AuditEvidenceExportService {
                         exportFingerprint
                 )
         );
+    }
+
+    private record ChainRange(
+            Long start,
+            Long end,
+            String predecessorHash,
+            boolean partial
+    ) {
     }
 }

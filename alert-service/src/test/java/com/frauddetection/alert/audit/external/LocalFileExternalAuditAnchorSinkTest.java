@@ -45,6 +45,22 @@ class LocalFileExternalAuditAnchorSinkTest {
                 .isEqualTo("CONFLICT");
     }
 
+    @Test
+    void shouldProvideBoundedExternalReferenceForPublishedLocalFileAnchor() {
+        Path path = tempDir.resolve("anchors.jsonl");
+        LocalFileExternalAuditAnchorSink sink = new LocalFileExternalAuditAnchorSink(path, objectMapper);
+        ExternalAuditAnchor anchor = sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), sink.sinkType()));
+
+        ExternalAnchorReference reference = sink.externalReference(anchor).orElseThrow();
+
+        assertThat(reference.anchorId()).isEqualTo("local-anchor-1");
+        assertThat(reference.externalKey()).isEqualTo("local-file:anchors.jsonl#1");
+        assertThat(reference.anchorHash()).isEqualTo("hash-1");
+        assertThat(reference.externalHash()).isEqualTo("hash-1");
+        assertThat(reference.verifiedAt()).isNotNull();
+        assertThat(reference.signatureStatus()).isNull();
+    }
+
     private AuditAnchorDocument localAnchor(String anchorId, long chainPosition, String hash) {
         return new AuditAnchorDocument(
                 anchorId,

@@ -162,6 +162,20 @@ public class AlertServiceMetrics {
         ).increment();
     }
 
+    public void recordAuditSignatureVerification(String status) {
+        counter(
+                "audit_signature_verification_total",
+                "status", normalizeSignatureVerificationStatus(status)
+        ).increment();
+    }
+
+    public void recordAuditSignaturePolicyResult(String result) {
+        counter(
+                "audit_signature_policy_result_total",
+                "result", normalizeSignaturePolicyResult(result)
+        ).increment();
+    }
+
     public void recordExternalAnchorOperationRetry(String operation) {
         counter(
                 "fraud_platform_audit_external_anchor_retry_total",
@@ -414,6 +428,20 @@ public class AlertServiceMetrics {
         return "UNAVAILABLE";
     }
 
+    private String normalizeSignatureVerificationStatus(String status) {
+        return switch (status) {
+            case "VALID", "INVALID", "UNSIGNED", "UNAVAILABLE", "UNKNOWN_KEY", "KEY_REVOKED" -> status;
+            default -> "INVALID";
+        };
+    }
+
+    private String normalizeSignaturePolicyResult(String result) {
+        return switch (result) {
+            case "VALID", "PARTIAL", "INVALID" -> result;
+            default -> "INVALID";
+        };
+    }
+
     private String normalizeIntegrityViolationType(String violationType) {
         return switch (violationType) {
             case "EVENT_HASH_MISMATCH",
@@ -437,7 +465,14 @@ public class AlertServiceMetrics {
                  "EXTERNAL_CHAIN_POSITION_MISMATCH",
                  "EXTERNAL_HASH_ALGORITHM_MISMATCH",
                  "EXTERNAL_SCHEMA_VERSION_UNSUPPORTED",
-                 "EXTERNAL_LOCAL_ANCHOR_ID_MISMATCH" -> violationType;
+                 "EXTERNAL_LOCAL_ANCHOR_ID_MISMATCH",
+                 "SIGNATURE_UNSIGNED",
+                 "SIGNATURE_UNSIGNED_REQUIRED",
+                 "SIGNATURE_UNAVAILABLE",
+                 "SIGNATURE_UNAVAILABLE_REQUIRED",
+                 "SIGNATURE_INVALID",
+                 "SIGNATURE_UNKNOWN_KEY",
+                 "SIGNATURE_KEY_REVOKED" -> violationType;
             default -> "UNKNOWN";
         };
     }
@@ -475,7 +510,7 @@ public class AlertServiceMetrics {
             case "DISABLED", "UNAVAILABLE", "CONFLICT", "MISMATCH", "IO_ERROR", "INVALID_ANCHOR",
                  "WRITE_NOT_VERIFIED", "EXTERNAL_PAYLOAD_HASH_MISMATCH", "EXTERNAL_OBJECT_KEY_MISMATCH", "TIMEOUT",
                  "HEAD_SCAN_PAGINATION_UNSUPPORTED", "HEAD_SCAN_LIMIT_EXCEEDED", "HEAD_MANIFEST_INVALID",
-                 "HEAD_MANIFEST_UPDATE_FAILED" -> reason;
+                 "HEAD_MANIFEST_UPDATE_FAILED", "SIGNATURE_FAILED" -> reason;
             default -> "UNKNOWN";
         };
     }

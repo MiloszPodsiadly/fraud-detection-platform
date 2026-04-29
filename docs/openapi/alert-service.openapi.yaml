@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: Alert Service API
-  version: FDP-21
-  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, external anchor verification, bounded evidence export, derived audit trust attestation, governance advisory lifecycle projection, and human-review audit. FDP-20 extends tamper evidence outside the primary database boundary. FDP-22 adds a pluggable object-store external anchor sink boundary, verified external anchor references, and explicit external_immutability_level=NONE|CONFIGURED|ENFORCED; no WORM or full immutability claim is valid unless the adapter verifies infrastructure controls and reports ENFORCED. FDP-21 derives a trust attestation from FDP-19/FDP-20 source-of-truth signals and optional local-dev integrity signing. Audit integrity and trust attestation do not imply certified WORM archive storage, legal notarization, SIEM integration, unbounded export, KMS/HSM signing unless explicitly integrated, or final compliance archive.
+  version: FDP-23
+  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, external anchor verification, bounded evidence export, derived audit trust attestation, public trust key export, governance advisory lifecycle projection, and human-review audit. FDP-20 extends tamper evidence outside the primary database boundary. FDP-22 adds a pluggable object-store external anchor sink boundary, verified external anchor references, and explicit external_immutability_level=NONE|CONFIGURED|ENFORCED; no WORM or full immutability claim is valid unless the adapter verifies infrastructure controls and reports ENFORCED. FDP-23 adds a separate local-first audit trust authority for Ed25519 external anchor hash signatures and public verification key export; the alert-service does not hold the trust authority private key. Audit integrity, trust authority signatures, and trust attestation do not imply certified WORM archive storage, legal notarization, SIEM integration, unbounded export, KMS/HSM signing unless explicitly integrated, or final compliance archive.
 servers:
   - url: http://localhost:8085
 paths:
@@ -138,7 +138,7 @@ paths:
   /api/v1/audit/integrity/external:
     get:
       summary: Verify external audit anchor consistency
-      description: Performs bounded read-only comparison between the local audit chain anchor and the external anchor. Requires audit:verify. Returns VALID, INVALID, PARTIAL, or UNAVAILABLE. Object-store sinks can verify by exact partition_key + chain_position lookup using the deterministic encoded object key before falling back to latest-anchor comparison. Latest object-store HEAD detection first verifies the optional External Head Manifest at head.json by manifest_hash and by reading the referenced anchor; invalid or missing manifests are not trusted and fall back to full paginated scan. Full scan requires continuation-token pagination and consumes every page; if listing may be truncated and pagination is unavailable, verification returns a degraded UNAVAILABLE state rather than reporting VALID from a best-effort HEAD. Detects missing, stale, ahead, mismatched hash, mismatched local anchor id, mismatched object key binding, mismatched payload hash binding, mismatched hash algorithm, unsupported external schema version, and external payload tampering. Response includes external_immutability_level; NONE or CONFIGURED is not WORM proof. This endpoint does not repair data, mutate audit records, export full history, or provide WORM/legal notarization. Real S3/GCS/Azure object-store adapters remain FDP-23.
+      description: Performs bounded read-only comparison between the local audit chain anchor and the external anchor. Requires audit:verify. Returns VALID, INVALID, PARTIAL, or UNAVAILABLE. Object-store sinks can verify by exact partition_key + chain_position lookup using the deterministic encoded object key before falling back to latest-anchor comparison. Latest object-store HEAD detection first verifies the optional External Head Manifest at head.json by manifest_hash and by reading the referenced anchor; invalid or missing manifests are not trusted and fall back to full paginated scan. Full scan requires continuation-token pagination and consumes every page; if listing may be truncated and pagination is unavailable, verification returns a degraded UNAVAILABLE state rather than reporting VALID from a best-effort HEAD. Detects missing, stale, ahead, mismatched hash, mismatched local anchor id, mismatched object key binding, mismatched payload hash binding, mismatched hash algorithm, unsupported external schema version, and external payload tampering. Response includes external_immutability_level; NONE or CONFIGURED is not WORM proof. This endpoint does not repair data, mutate audit records, export full history, or provide WORM/legal notarization. Real S3/GCS/Azure object-store adapters remain future deployment work.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -174,7 +174,7 @@ paths:
   /api/v1/audit/evidence/export:
     get:
       summary: Export bounded audit evidence
-      description: Returns a bounded JSON evidence package for a required source_service and inclusive from/to window. Requires audit:export. Includes safe audit event summaries, event hashes, previous hashes, chain positions, local anchor references, external anchor references when available, external_anchor_status, anchor_coverage, and export_fingerprint. Clients must treat status=PARTIAL as an incomplete evidence package. strict=true rejects partial packages with 409 and does not return event data. Repeated export attempts are softly rate-limited per authenticated actor per service instance and return 429 on exceed. Multi-instance deployments require API gateway or shared infrastructure rate limiting. It never returns raw payloads, tokens, stack traces, transaction payloads, customer/account/card identifiers, or advisory note bodies. No unbounded export, full-text search, delete, update, cursor pagination, or aggregation is provided.
+      description: Returns a bounded JSON evidence package for a required source_service and inclusive from/to window. Requires audit:export. Includes safe audit event summaries, event hashes, previous hashes, chain positions, local anchor references, external anchor references when available, signature metadata when available, external_anchor_status, anchor_coverage, and export_fingerprint. Clients must treat status=PARTIAL as an incomplete evidence package. strict=true rejects partial packages with 409 and does not return event data. Repeated export attempts are softly rate-limited per authenticated actor per service instance and return 429 on exceed. Multi-instance deployments require API gateway or shared infrastructure rate limiting. It never returns raw payloads, tokens, stack traces, transaction payloads, customer/account/card identifiers, or advisory note bodies. No unbounded export, full-text search, delete, update, cursor pagination, or aggregation is provided.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -240,7 +240,7 @@ paths:
   /api/v1/audit/trust/attestation:
     get:
       summary: Get derived audit trust attestation
-      description: Returns a bounded derived trust assessment over FDP-19 internal integrity and FDP-20 external anchor verification signals. Requires audit:verify and records READ_AUDIT_TRUST_ATTESTATION with bounded metadata. The attestation fingerprint includes source_service, limit, mode, signer_mode, signature_key_id when present, trust status fields, external_immutability_level, anchor coverage, latest chain fields, external anchor reference, and limitations so it can be reproduced externally. Clients must interpret trust_level together with attestation_signature_strength and external_immutability_level. SIGNED_ATTESTATION represents stronger trust only when attestation_signature_strength=PRODUCTION_READY, signer_mode is backed by externally managed KMS/HSM signing material, and external_immutability_level=ENFORCED. This endpoint does not implement a second external verification stack, a second evidence export, an external anchor sink, legal notarization, legal non-repudiation, regulator-certified archive, WORM storage, SIEM integration, or KMS/HSM signing unless explicitly integrated. Local-dev signing provides integrity metadata only and never upgrades trust level.
+      description: Returns a bounded derived trust assessment over FDP-19 internal integrity and FDP-20 external anchor verification signals. Requires audit:verify and records READ_AUDIT_TRUST_ATTESTATION with bounded metadata. The attestation fingerprint includes source_service, limit, mode, signer_mode, signature_key_id when present, trust status fields, external_immutability_level, anchor coverage, latest chain fields, external anchor reference, and limitations so it can be reproduced externally. Clients must interpret trust_level together with attestation_signature_strength, external anchor signature_status, external integrity signature_verification_status, and external_immutability_level. SIGNED_BY_LOCAL_AUTHORITY requires signature_verification_status=VALID for external-anchor signature metadata from a separate local authority; stored signature fields alone never upgrade trust. SIGNED_ATTESTATION represents stronger trust only when attestation_signature_strength=PRODUCTION_READY, signer_mode is backed by externally managed KMS/HSM signing material, and external_immutability_level=ENFORCED. This endpoint does not implement a second external verification stack, a second evidence export, an external anchor sink, legal notarization, legal non-repudiation, regulator-certified archive, WORM storage, SIEM integration, or KMS/HSM signing unless explicitly integrated. Local-dev signing provides integrity metadata only and never upgrades trust level.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -282,6 +282,27 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/audit/trust/keys:
+    get:
+      summary: Export audit trust public verification keys
+      description: Returns bounded public verification key metadata from the configured audit trust authority. Requires audit:verify. This endpoint never returns private keys and does not claim KMS/HSM, legal notarization, WORM, SIEM, or certified archive trust. Clients use these keys for local/offline signature verification only.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      responses:
+        "200":
+          description: Bounded public verification keys returned.
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 20
+                items:
+                  $ref: "#/components/schemas/AuditTrustAuthorityKey"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /api/v1/alerts/{alertId}:
     get:
       summary: Get one alert
@@ -896,17 +917,17 @@ components:
       properties:
         violation_type:
           type: string
-          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, INVALID_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, MISSING_PREDECESSOR, CHAIN_FORK_DETECTED, CHAIN_POSITION_INVALID, CHAIN_POSITION_DUPLICATE, CHAIN_POSITION_GAP, EXTERNAL_ANCHOR_MISSING, STALE_EXTERNAL_ANCHOR, EXTERNAL_CHAIN_POSITION_AHEAD, EXTERNAL_HASH_MISMATCH, EXTERNAL_CHAIN_POSITION_MISMATCH, EXTERNAL_HASH_ALGORITHM_MISMATCH, EXTERNAL_SCHEMA_VERSION_UNSUPPORTED, EXTERNAL_LOCAL_ANCHOR_ID_MISMATCH]
+          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, INVALID_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, MISSING_PREDECESSOR, CHAIN_FORK_DETECTED, CHAIN_POSITION_INVALID, CHAIN_POSITION_DUPLICATE, CHAIN_POSITION_GAP, EXTERNAL_ANCHOR_MISSING, STALE_EXTERNAL_ANCHOR, EXTERNAL_CHAIN_POSITION_AHEAD, EXTERNAL_HASH_MISMATCH, EXTERNAL_CHAIN_POSITION_MISMATCH, EXTERNAL_HASH_ALGORITHM_MISMATCH, EXTERNAL_SCHEMA_VERSION_UNSUPPORTED, EXTERNAL_LOCAL_ANCHOR_ID_MISMATCH, SIGNATURE_INVALID, SIGNATURE_UNKNOWN_KEY, SIGNATURE_KEY_REVOKED, SIGNATURE_UNSIGNED, SIGNATURE_UNSIGNED_REQUIRED, SIGNATURE_UNAVAILABLE, SIGNATURE_UNAVAILABLE_REQUIRED]
         position:
           type: integer
           minimum: 1
         reason_code:
           type: string
-          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, UNSUPPORTED_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, MISSING_PREDECESSOR, CHAIN_FORK_DETECTED, CHAIN_POSITION_INVALID, CHAIN_POSITION_DUPLICATE, CHAIN_POSITION_GAP, EXTERNAL_ANCHOR_MISSING, STALE_EXTERNAL_ANCHOR, EXTERNAL_CHAIN_POSITION_AHEAD, EXTERNAL_HASH_MISMATCH, EXTERNAL_CHAIN_POSITION_MISMATCH, EXTERNAL_HASH_ALGORITHM_MISMATCH, EXTERNAL_SCHEMA_VERSION_UNSUPPORTED, EXTERNAL_LOCAL_ANCHOR_ID_MISMATCH]
+          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, UNSUPPORTED_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, MISSING_PREDECESSOR, CHAIN_FORK_DETECTED, CHAIN_POSITION_INVALID, CHAIN_POSITION_DUPLICATE, CHAIN_POSITION_GAP, EXTERNAL_ANCHOR_MISSING, STALE_EXTERNAL_ANCHOR, EXTERNAL_CHAIN_POSITION_AHEAD, EXTERNAL_HASH_MISMATCH, EXTERNAL_CHAIN_POSITION_MISMATCH, EXTERNAL_HASH_ALGORITHM_MISMATCH, EXTERNAL_SCHEMA_VERSION_UNSUPPORTED, EXTERNAL_LOCAL_ANCHOR_ID_MISMATCH, SIGNATURE_INVALID, SIGNATURE_UNKNOWN_KEY, SIGNATURE_KEY_REVOKED, SIGNATURE_UNSIGNED, SIGNATURE_UNSIGNED_REQUIRED, SIGNATURE_UNAVAILABLE, SIGNATURE_UNAVAILABLE_REQUIRED]
     ExternalAuditIntegrityResponse:
       type: object
       additionalProperties: false
-      required: [status, checked, limit, source_service, partition_key, external_immutability_level, violations]
+      required: [status, checked, limit, source_service, partition_key, external_immutability_level, signature_verification_status, violations]
       properties:
         status:
           type: string
@@ -927,7 +948,7 @@ components:
         reason_code:
           type: string
           nullable: true
-          enum: [AUDIT_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_MISSING, STALE_EXTERNAL_ANCHOR, HEAD_SCAN_PAGINATION_UNSUPPORTED, HEAD_SCAN_LIMIT_EXCEEDED]
+          enum: [AUDIT_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_MISSING, STALE_EXTERNAL_ANCHOR, HEAD_SCAN_PAGINATION_UNSUPPORTED, HEAD_SCAN_LIMIT_EXCEEDED, SIGNATURE_INVALID, SIGNATURE_UNKNOWN_KEY, SIGNATURE_KEY_REVOKED, SIGNATURE_UNSIGNED, SIGNATURE_UNSIGNED_REQUIRED, SIGNATURE_UNAVAILABLE, SIGNATURE_UNAVAILABLE_REQUIRED]
         message:
           type: string
           nullable: true
@@ -940,6 +961,25 @@ components:
           $ref: "#/components/schemas/AuditAnchorSummary"
         external_immutability_level:
           $ref: "#/components/schemas/ExternalImmutabilityLevel"
+        signature_verification_status:
+          type: string
+          enum: [VALID, INVALID, UNAVAILABLE, UNKNOWN_KEY, KEY_REVOKED, UNSIGNED]
+          description: Verification status produced by the trust authority over stored signature metadata. If trust authority verification is enabled, UNSIGNED or UNAVAILABLE cannot report VALID external integrity; they downgrade to PARTIAL unless signing is required, where they become INVALID. SIGNED_BY_LOCAL_AUTHORITY requires VALID; stored signature fields alone do not upgrade trust.
+        signing_key_id:
+          type: string
+          nullable: true
+          description: Bounded signing key identifier from verified signature metadata when present.
+        signing_algorithm:
+          type: string
+          nullable: true
+          enum: [Ed25519]
+        signing_authority:
+          type: string
+          nullable: true
+        signature_reason_code:
+          type: string
+          nullable: true
+          enum: [SIGNATURE_INVALID, SIGNATURE_UNKNOWN_KEY, SIGNATURE_KEY_REVOKED, SIGNATURE_UNAVAILABLE, SIGNATURE_UNSIGNED, SIGNATURE_UNSIGNED_REQUIRED, SIGNATURE_UNAVAILABLE_REQUIRED, AUDIT_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_STORE_UNAVAILABLE]
         violations:
           type: array
           items:
@@ -947,7 +987,7 @@ components:
     AuditEvidenceExportResponse:
       type: object
       additionalProperties: false
-      required: [status, count, limit, source_service, from, to, external_anchor_status, anchor_coverage, events]
+      required: [status, count, limit, source_service, from, to, external_anchor_status, anchor_coverage, partial_chain_range, events]
       properties:
         status:
           type: string
@@ -990,7 +1030,28 @@ components:
           nullable: true
           minLength: 64
           maxLength: 64
-          description: SHA-256 over canonical export query/result identifiers and anchor coverage. Unavailable local store responses may omit it.
+          description: SHA-256 over canonical export query/result identifiers, anchor coverage, and exported chain-range boundary fields. Unavailable local store responses may omit it.
+        chain_range_start:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 1
+          description: First exported chain position when events are present.
+        chain_range_end:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 1
+          description: Last exported chain position when events are present.
+        predecessor_hash:
+          type: string
+          nullable: true
+          minLength: 64
+          maxLength: 64
+          description: Previous event hash for partial chain ranges that start after position 1. Offline verifiers must require this boundary proof for partial ranges.
+        partial_chain_range:
+          type: boolean
+          description: True when the exported event range does not start at the genesis chain position and must be interpreted with predecessor_hash boundary proof.
         events:
           type: array
           items:
@@ -1081,6 +1142,9 @@ components:
         local_anchor_id:
           type: string
           nullable: true
+        partition_key:
+          type: string
+          nullable: true
         chain_position:
           type: integer
           format: int64
@@ -1098,6 +1162,18 @@ components:
           type: string
           nullable: true
           enum: [local-file, object-store]
+        external_immutability_level:
+          nullable: true
+          $ref: "#/components/schemas/ExternalImmutabilityLevel"
+        external_key:
+          type: string
+          nullable: true
+          description: Deterministic external object key or local external anchor identifier. It is bounded anchor metadata, not credentials or raw payload.
+        external_hash:
+          type: string
+          nullable: true
+          minLength: 64
+          maxLength: 64
         publication_status:
           type: string
           nullable: true
@@ -1110,6 +1186,33 @@ components:
           type: string
           nullable: true
           enum: [FAILED]
+        signature_status:
+          type: string
+          nullable: true
+          enum: [SIGNED, UNSIGNED, SIGNATURE_UNAVAILABLE, SIGNATURE_FAILED]
+        signature:
+          type: string
+          nullable: true
+          description: Bounded asymmetric signature metadata; no private key material.
+        signing_key_id:
+          type: string
+          nullable: true
+        signing_algorithm:
+          type: string
+          nullable: true
+          enum: [Ed25519]
+        signed_at:
+          type: string
+          format: date-time
+          nullable: true
+        signing_authority:
+          type: string
+          nullable: true
+        signed_payload_hash:
+          type: string
+          nullable: true
+          minLength: 64
+          maxLength: 64
     AuditAnchorSummary:
       type: object
       additionalProperties: false
@@ -1185,8 +1288,8 @@ components:
           enum: [AVAILABLE, UNAVAILABLE]
         trust_level:
           type: string
-          enum: [INTERNAL_ONLY, PARTIAL_EXTERNAL, EXTERNALLY_ANCHORED, SIGNED_ATTESTATION, UNAVAILABLE]
-          description: Derived trust assessment. SIGNED_ATTESTATION requires valid external anchoring, external_immutability_level=ENFORCED, and PRODUCTION_READY attestation signing backed by externally managed KMS/HSM signing material; local-dev signing never upgrades trust level.
+          enum: [INTERNAL_ONLY, PARTIAL_EXTERNAL, EXTERNALLY_ANCHORED, SIGNED_BY_LOCAL_AUTHORITY, INDEPENDENTLY_VERIFIABLE, SIGNED_ATTESTATION, UNAVAILABLE]
+          description: Derived trust assessment. SIGNED_BY_LOCAL_AUTHORITY requires valid internal integrity, valid external anchor verification, signature_verification_status=VALID for Ed25519 external-anchor signature metadata, a known public key, and signing_authority other than alert-service. Stored signature fields alone never upgrade trust. INDEPENDENTLY_VERIFIABLE is reserved for offline evidence bundles that verify without alert-service, MongoDB, or object-store access. SIGNED_ATTESTATION requires valid external anchoring, external_immutability_level=ENFORCED, and PRODUCTION_READY attestation signing backed by externally managed KMS/HSM signing material; local-dev signing never upgrades trust level.
         internal_integrity_status:
           type: string
           enum: [VALID, INVALID, PARTIAL, UNAVAILABLE]
@@ -1293,6 +1396,62 @@ components:
         verified_at:
           type: string
           format: date-time
+        signature_status:
+          type: string
+          nullable: true
+          enum: [SIGNED, UNSIGNED, SIGNATURE_UNAVAILABLE, SIGNATURE_FAILED]
+        signature:
+          type: string
+          nullable: true
+          description: Asymmetric signature over the canonical audit anchor payload hash; no private key material.
+        signing_key_id:
+          type: string
+          nullable: true
+        signing_algorithm:
+          type: string
+          nullable: true
+          enum: [Ed25519]
+        signed_at:
+          type: string
+          format: date-time
+          nullable: true
+        signing_authority:
+          type: string
+          nullable: true
+          description: Signing authority name. SIGNED_BY_LOCAL_AUTHORITY requires a value other than alert-service.
+        signed_payload_hash:
+          type: string
+          nullable: true
+          minLength: 64
+          maxLength: 64
+    AuditTrustAuthorityKey:
+      type: object
+      additionalProperties: false
+      required: [key_id, algorithm, public_key, key_fingerprint_sha256, valid_from, status]
+      properties:
+        key_id:
+          type: string
+        algorithm:
+          type: string
+          enum: [Ed25519]
+        public_key:
+          type: string
+          description: Base64 DER/SPKI public key material. Private keys are never returned.
+        key_fingerprint_sha256:
+          type: string
+          minLength: 64
+          maxLength: 64
+          description: Hex SHA-256 fingerprint of the DER/SPKI public key.
+        valid_from:
+          type: string
+          format: date-time
+        valid_until:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          type: string
+          enum: [ACTIVE, RETIRED, REVOKED]
     ExternalImmutabilityLevel:
       type: string
       description: NONE is the default and means no verified external immutability. CONFIGURED means controls may be configured but are not verified as enforced by this response. ENFORCED means the external adapter verified infrastructure immutability controls. Only ENFORCED can support a WORM interpretation, and even then this is not legal notarization or compliance certification.

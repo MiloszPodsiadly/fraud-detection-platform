@@ -24,6 +24,8 @@ public class ExternalAuditAnchorPublisher {
     private final AuditAnchorRepository anchorRepository;
     private final ExternalAuditAnchorPublicationStatusRepository publicationStatusRepository;
     private final ExternalAuditAnchorSink sink;
+    private final AuditTrustAuthorityClient trustAuthorityClient;
+    private final AuditTrustAuthorityProperties trustAuthorityProperties;
     private final AlertServiceMetrics metrics;
     private final Clock clock;
     private final int defaultLimit;
@@ -33,10 +35,12 @@ public class ExternalAuditAnchorPublisher {
             AuditAnchorRepository anchorRepository,
             ExternalAuditAnchorPublicationStatusRepository publicationStatusRepository,
             ExternalAuditAnchorSink sink,
+            AuditTrustAuthorityClient trustAuthorityClient,
+            AuditTrustAuthorityProperties trustAuthorityProperties,
             AlertServiceMetrics metrics,
             @Value("${app.audit.external-anchoring.publish-limit:100}") int defaultLimit
     ) {
-        this(anchorRepository, publicationStatusRepository, sink, metrics, Clock.systemUTC(), defaultLimit);
+        this(anchorRepository, publicationStatusRepository, sink, trustAuthorityClient, trustAuthorityProperties, metrics, Clock.systemUTC(), defaultLimit);
     }
 
     ExternalAuditAnchorPublisher(
@@ -47,9 +51,33 @@ public class ExternalAuditAnchorPublisher {
             Clock clock,
             int defaultLimit
     ) {
+        this(
+                anchorRepository,
+                publicationStatusRepository,
+                sink,
+                new DisabledAuditTrustAuthorityClient(),
+                new AuditTrustAuthorityProperties(),
+                metrics,
+                clock,
+                defaultLimit
+        );
+    }
+
+    ExternalAuditAnchorPublisher(
+            AuditAnchorRepository anchorRepository,
+            ExternalAuditAnchorPublicationStatusRepository publicationStatusRepository,
+            ExternalAuditAnchorSink sink,
+            AuditTrustAuthorityClient trustAuthorityClient,
+            AuditTrustAuthorityProperties trustAuthorityProperties,
+            AlertServiceMetrics metrics,
+            Clock clock,
+            int defaultLimit
+    ) {
         this.anchorRepository = anchorRepository;
         this.publicationStatusRepository = publicationStatusRepository;
         this.sink = sink;
+        this.trustAuthorityClient = trustAuthorityClient == null ? new DisabledAuditTrustAuthorityClient() : trustAuthorityClient;
+        this.trustAuthorityProperties = trustAuthorityProperties == null ? new AuditTrustAuthorityProperties() : trustAuthorityProperties;
         this.metrics = metrics;
         this.clock = clock;
         this.defaultLimit = defaultLimit > 0 ? Math.min(defaultLimit, 500) : 100;
@@ -83,13 +111,21 @@ public class ExternalAuditAnchorPublisher {
                         partial++;
                         recordPublicationPartial(localAnchor, stored);
                     } else if (candidate.externalAnchorId().equals(stored.externalAnchorId())) {
-                        metrics.recordExternalAnchorPublished(sink.sinkType(), "PUBLISHED");
-                        published++;
-                        recordPublicationSuccess(localAnchor, stored);
+                        if (recordPublicationSuccess(localAnchor, stored)) {
+                            metrics.recordExternalAnchorPublished(sink.sinkType(), "PUBLISHED");
+                            published++;
+                        } else {
+                            metrics.recordExternalAnchorPublished(sink.sinkType(), "PARTIAL");
+                            partial++;
+                        }
                     } else {
-                        metrics.recordExternalAnchorPublished(sink.sinkType(), "DUPLICATE");
-                        duplicates++;
-                        recordPublicationSuccess(localAnchor, stored);
+                        if (recordPublicationSuccess(localAnchor, stored)) {
+                            metrics.recordExternalAnchorPublished(sink.sinkType(), "DUPLICATE");
+                            duplicates++;
+                        } else {
+                            metrics.recordExternalAnchorPublished(sink.sinkType(), "PARTIAL");
+                            partial++;
+                        }
                     }
                     recordLag(localAnchor.createdAt());
                 } catch (ExternalAuditAnchorSinkException exception) {
@@ -112,19 +148,36 @@ public class ExternalAuditAnchorPublisher {
         }
     }
 
-    private void recordPublicationSuccess(AuditAnchorDocument localAnchor, ExternalAuditAnchor stored) {
+    private boolean recordPublicationSuccess(AuditAnchorDocument localAnchor, ExternalAuditAnchor stored) {
         try {
             ExternalAnchorReference reference = sink.externalReference(stored).orElse(null);
             ExternalImmutabilityLevel immutabilityLevel = sink.immutabilityLevel() == null
                     ? ExternalImmutabilityLevel.NONE
                     : sink.immutabilityLevel();
-            publicationStatusRepository.recordSuccess(localAnchor, clock.instant(), sink.sinkType(), reference, immutabilityLevel);
+            SignedAuditAnchorPayload signature = sign(localAnchor, stored, reference, immutabilityLevel);
+            if ("SIGNATURE_FAILED".equals(signature.signatureStatus())) {
+                publicationStatusRepository.recordPartial(
+                        localAnchor,
+                        clock.instant(),
+                        sink.sinkType(),
+                        reference,
+                        immutabilityLevel,
+                        "SIGNATURE_FAILED",
+                        null,
+                        signature
+                );
+                return false;
+            }
+            publicationStatusRepository.recordSuccess(localAnchor, clock.instant(), sink.sinkType(), reference, immutabilityLevel, signature);
+            return true;
         } catch (DataAccessException exception) {
             log.warn("External audit anchor publication status update failed after publish.");
+            return true;
         } catch (ExternalAuditAnchorSinkException exception) {
             metrics.recordExternalAnchorPublishFailed(sink.sinkType(), exception.reason());
             recordPublicationFailure(localAnchor, exception.reason());
             log.warn("External audit anchor reference verification failed after publish: reason={}", exception.reason());
+            return true;
         }
     }
 
@@ -141,7 +194,8 @@ public class ExternalAuditAnchorPublisher {
                     reference,
                     immutabilityLevel,
                     stored.publicationReason(),
-                    stored.manifestStatus()
+                    stored.manifestStatus(),
+                    SignedAuditAnchorPayload.failed()
             );
         } catch (DataAccessException exception) {
             log.warn("External audit anchor partial publication status update failed.");
@@ -150,6 +204,33 @@ public class ExternalAuditAnchorPublisher {
             recordPublicationFailure(localAnchor, exception.reason());
             log.warn("External audit anchor reference verification failed after partial publish: reason={}", exception.reason());
         }
+    }
+
+    private SignedAuditAnchorPayload sign(
+            AuditAnchorDocument localAnchor,
+            ExternalAuditAnchor stored,
+            ExternalAnchorReference reference,
+            ExternalImmutabilityLevel immutabilityLevel
+    ) {
+        if (!trustAuthorityClient.enabled()) {
+            return SignedAuditAnchorPayload.unsigned();
+        }
+        if (reference == null) {
+            return trustAuthorityProperties.isSigningRequired() ? SignedAuditAnchorPayload.failed() : SignedAuditAnchorPayload.unavailable();
+        }
+        SignedAuditAnchorPayload signature = trustAuthorityClient.sign(new AuditAnchorSigningPayload(
+                stored.partitionKey(),
+                localAnchor.anchorId(),
+                localAnchor.chainPosition(),
+                localAnchor.lastEventHash(),
+                reference.externalKey(),
+                reference.externalHash(),
+                immutabilityLevel
+        ));
+        if ("SIGNATURE_UNAVAILABLE".equals(signature.signatureStatus()) && trustAuthorityProperties.isSigningRequired()) {
+            return SignedAuditAnchorPayload.failed();
+        }
+        return signature;
     }
 
     private void recordPublicationFailure(AuditAnchorDocument localAnchor, String reason) {
