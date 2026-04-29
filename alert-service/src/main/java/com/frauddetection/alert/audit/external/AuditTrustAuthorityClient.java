@@ -6,7 +6,7 @@ public interface AuditTrustAuthorityClient {
 
     SignedAuditAnchorPayload sign(AuditAnchorSigningPayload payload);
 
-    boolean verify(AuditAnchorSigningPayload payload, SignedAuditAnchorPayload signature);
+    AuditTrustSignatureVerificationResult verify(AuditAnchorSigningPayload payload, SignedAuditAnchorPayload signature);
 
     List<AuditTrustAuthorityKey> keys();
 

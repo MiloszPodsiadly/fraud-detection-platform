@@ -100,7 +100,7 @@ class AuditTrustAttestationServiceTest {
         when(internalIntegrityService.verifyScheduled("alert-service", 100))
                 .thenReturn(internal("VALID"));
         when(externalIntegrityService.verify("alert-service", 100))
-                .thenReturn(validExternalWithReference(signedExternalReference("SIGNED", "local-trust-authority")));
+                .thenReturn(validExternalWithReference(signedExternalReference("SIGNED", "local-trust-authority"), "VALID"));
 
         AuditTrustAttestationResponse response = service(new DisabledAuditTrustAttestationSigner())
                 .attest("alert-service", 100, null);
@@ -116,11 +116,31 @@ class AuditTrustAttestationServiceTest {
         when(internalIntegrityService.verifyScheduled("alert-service", 100))
                 .thenReturn(internal("VALID"));
         when(externalIntegrityService.verify("alert-service", 100))
-                .thenReturn(validExternalWithReference(signedExternalReference("SIGNATURE_UNAVAILABLE", "local-trust-authority")))
-                .thenReturn(validExternalWithReference(signedExternalReference("SIGNED", "alert-service")));
+                .thenReturn(validExternalWithReference(signedExternalReference("SIGNATURE_UNAVAILABLE", "local-trust-authority"), "UNSIGNED"))
+                .thenReturn(validExternalWithReference(signedExternalReference("SIGNED", "alert-service"), "VALID"));
 
         AuditTrustAttestationService service = service(new DisabledAuditTrustAttestationSigner());
 
+        assertThat(service.attest("alert-service", 100, null).trustLevel())
+                .isEqualTo(AuditTrustLevel.EXTERNALLY_ANCHORED);
+        assertThat(service.attest("alert-service", 100, null).trustLevel())
+                .isEqualTo(AuditTrustLevel.EXTERNALLY_ANCHORED);
+    }
+
+    @Test
+    void shouldNotUpgradeToSignedByLocalAuthorityWithoutValidSignatureVerification() {
+        when(externalAnchorSink.sinkType()).thenReturn("local-file");
+        when(internalIntegrityService.verifyScheduled("alert-service", 100))
+                .thenReturn(internal("VALID"));
+        when(externalIntegrityService.verify("alert-service", 100))
+                .thenReturn(validExternalWithReference(signedExternalReference("SIGNED", "local-trust-authority"), "UNAVAILABLE"))
+                .thenReturn(validExternalWithReference(signedExternalReference("SIGNED", "local-trust-authority"), "INVALID"))
+                .thenReturn(validExternalWithReference(signedExternalReference("SIGNED", "local-trust-authority"), "UNKNOWN_KEY"));
+
+        AuditTrustAttestationService service = service(new DisabledAuditTrustAttestationSigner());
+
+        assertThat(service.attest("alert-service", 100, null).trustLevel())
+                .isEqualTo(AuditTrustLevel.EXTERNALLY_ANCHORED);
         assertThat(service.attest("alert-service", 100, null).trustLevel())
                 .isEqualTo(AuditTrustLevel.EXTERNALLY_ANCHORED);
         assertThat(service.attest("alert-service", 100, null).trustLevel())
@@ -374,6 +394,10 @@ class AuditTrustAttestationServiceTest {
     }
 
     private ExternalAuditIntegrityResponse validExternalWithReference(ExternalAnchorReference reference) {
+        return validExternalWithReference(reference, "UNSIGNED");
+    }
+
+    private ExternalAuditIntegrityResponse validExternalWithReference(ExternalAnchorReference reference, String signatureVerificationStatus) {
         return new ExternalAuditIntegrityResponse(
                 "VALID",
                 1,
@@ -400,6 +424,11 @@ class AuditTrustAttestationServiceTest {
                         ExternalImmutabilityLevel.NONE
                 ),
                 ExternalImmutabilityLevel.NONE,
+                signatureVerificationStatus,
+                reference.signingKeyId(),
+                reference.signingAlgorithm(),
+                reference.signingAuthority(),
+                "VALID".equals(signatureVerificationStatus) ? null : signatureVerificationStatus,
                 List.of()
         );
     }

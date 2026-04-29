@@ -134,7 +134,7 @@ public class AuditTrustAttestationService {
         String fingerprint = sha256(canonicalBytes(canonical));
         AuditTrustAttestationSignature signature = signature(canonicalBytes(canonicalWithFingerprint(canonical, fingerprint)));
         AuditTrustLevel finalTrustLevel = trustLevel == AuditTrustLevel.EXTERNALLY_ANCHORED
-                && signedByLocalAuthority(latestExternalAnchor)
+                && signedByLocalAuthority(external, latestExternalAnchor)
                 ? AuditTrustLevel.SIGNED_BY_LOCAL_AUTHORITY
                 : trustLevel;
         finalTrustLevel = finalTrustLevel == AuditTrustLevel.EXTERNALLY_ANCHORED
@@ -330,8 +330,9 @@ public class AuditTrustAttestationService {
         return "OPTIONAL";
     }
 
-    private boolean signedByLocalAuthority(ExternalAnchorReference latestExternalAnchor) {
+    private boolean signedByLocalAuthority(ExternalAuditIntegrityResponse external, ExternalAnchorReference latestExternalAnchor) {
         return latestExternalAnchor != null
+                && "VALID".equals(external.signatureVerificationStatus())
                 && "SIGNED".equals(latestExternalAnchor.signatureStatus())
                 && latestExternalAnchor.signingKeyId() != null
                 && latestExternalAnchor.signature() != null

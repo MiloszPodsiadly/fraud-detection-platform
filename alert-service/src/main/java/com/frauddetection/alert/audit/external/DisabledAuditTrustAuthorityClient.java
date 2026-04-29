@@ -10,8 +10,8 @@ class DisabledAuditTrustAuthorityClient implements AuditTrustAuthorityClient {
     }
 
     @Override
-    public boolean verify(AuditAnchorSigningPayload payload, SignedAuditAnchorPayload signature) {
-        return false;
+    public AuditTrustSignatureVerificationResult verify(AuditAnchorSigningPayload payload, SignedAuditAnchorPayload signature) {
+        return AuditTrustSignatureVerificationResult.unavailable();
     }
 
     @Override

@@ -81,9 +81,9 @@ class HttpAuditTrustAuthorityClient implements AuditTrustAuthorityClient {
     }
 
     @Override
-    public boolean verify(AuditAnchorSigningPayload payload, SignedAuditAnchorPayload signature) {
+    public AuditTrustSignatureVerificationResult verify(AuditAnchorSigningPayload payload, SignedAuditAnchorPayload signature) {
         if (signature == null || signature.signature() == null || signature.keyId() == null) {
-            return false;
+            return AuditTrustSignatureVerificationResult.unsigned();
         }
         String payloadHash = payloadHash(payload);
         try {
@@ -101,9 +101,18 @@ class HttpAuditTrustAuthorityClient implements AuditTrustAuthorityClient {
                     ))
                     .retrieve()
                     .body(TrustVerifyResponse.class);
-            return response != null && "VALID".equals(response.status());
+            if (response == null) {
+                return AuditTrustSignatureVerificationResult.unavailable();
+            }
+            if ("VALID".equals(response.status())) {
+                return AuditTrustSignatureVerificationResult.valid();
+            }
+            if ("UNKNOWN_KEY".equals(response.reasonCode())) {
+                return AuditTrustSignatureVerificationResult.unknownKey();
+            }
+            return AuditTrustSignatureVerificationResult.invalid(response.reasonCode());
         } catch (RestClientException exception) {
-            return false;
+            return AuditTrustSignatureVerificationResult.unavailable();
         }
     }
 

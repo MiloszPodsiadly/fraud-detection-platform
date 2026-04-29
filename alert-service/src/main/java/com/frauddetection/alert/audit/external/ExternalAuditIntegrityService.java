@@ -105,6 +105,11 @@ public class ExternalAuditIntegrityService {
                     null,
                     null,
                     sink.immutabilityLevel(),
+                    "UNSIGNED",
+                    null,
+                    null,
+                    null,
+                    null,
                     List.of()
             );
         }
@@ -158,8 +163,17 @@ public class ExternalAuditIntegrityService {
             violations.add(new AuditIntegrityViolation("EXTERNAL_SCHEMA_VERSION_UNSUPPORTED", 1, "EXTERNAL_SCHEMA_VERSION_UNSUPPORTED"));
         }
 
+        SignatureEnrichment signature = signatureEnrichment(external);
+        if ("INVALID".equals(signature.verification().status())
+                || "UNKNOWN_KEY".equals(signature.verification().status())) {
+            violations.add(new AuditIntegrityViolation(
+                    "SIGNATURE_" + signature.verification().status(),
+                    1,
+                    signature.verification().reasonCode()
+            ));
+        }
         String status = violations.isEmpty() ? "VALID" : "INVALID";
-        return response(status, query, local, external, violations, null, null);
+        return response(status, query, local, external, signature, violations, null, null);
     }
 
     private ExternalAuditIntegrityResponse partial(
@@ -189,6 +203,7 @@ public class ExternalAuditIntegrityService {
             String reasonCode,
             String message
     ) {
+        SignatureEnrichment signature = external == null ? SignatureEnrichment.unsigned(null) : signatureEnrichment(external);
         return new ExternalAuditIntegrityResponse(
                 status,
                 1,
@@ -200,15 +215,54 @@ public class ExternalAuditIntegrityService {
                 ExternalAuditAnchorSummary.fromLocal(local),
                 external == null ? null : ExternalAuditAnchorSummary.fromExternal(
                         external,
-                        externalReference(external),
+                        signature.reference(),
                         sink.immutabilityLevel()
                 ),
                 sink.immutabilityLevel(),
+                signature.verification().status(),
+                signature.signingKeyId(),
+                signature.signingAlgorithm(),
+                signature.signingAuthority(),
+                signature.verification().reasonCode(),
                 violations
         );
     }
 
-    private ExternalAnchorReference externalReference(ExternalAuditAnchor external) {
+    private ExternalAuditIntegrityResponse response(
+            String status,
+            ExternalAuditIntegrityQuery query,
+            AuditAnchorDocument local,
+            ExternalAuditAnchor external,
+            SignatureEnrichment signature,
+            List<AuditIntegrityViolation> violations,
+            String reasonCode,
+            String message
+    ) {
+        return new ExternalAuditIntegrityResponse(
+                status,
+                1,
+                query.limit(),
+                query.sourceService(),
+                query.partitionKey(),
+                reasonCode,
+                message,
+                ExternalAuditAnchorSummary.fromLocal(local),
+                external == null ? null : ExternalAuditAnchorSummary.fromExternal(
+                        external,
+                        signature.reference(),
+                        sink.immutabilityLevel()
+                ),
+                sink.immutabilityLevel(),
+                signature.verification().status(),
+                signature.signingKeyId(),
+                signature.signingAlgorithm(),
+                signature.signingAuthority(),
+                signature.verification().reasonCode(),
+                violations
+        );
+    }
+
+    private SignatureEnrichment signatureEnrichment(ExternalAuditAnchor external) {
         try {
             ExternalAnchorReference reference = sink.externalReference(external).orElse(null);
             return enrichSignature(external, reference);
@@ -220,20 +274,20 @@ public class ExternalAuditIntegrityService {
         }
     }
 
-    private ExternalAnchorReference enrichSignature(ExternalAuditAnchor external, ExternalAnchorReference reference) {
+    private SignatureEnrichment enrichSignature(ExternalAuditAnchor external, ExternalAnchorReference reference) {
         if (reference == null || publicationStatusRepository == null || reference.anchorId() == null) {
-            return reference;
+            return SignatureEnrichment.unsigned(reference);
         }
         try {
             return publicationStatusRepository.findByLocalAnchorId(reference.anchorId())
                     .map(status -> verifiedSignatureReference(external, reference, status))
-                    .orElse(reference);
+                    .orElseGet(() -> SignatureEnrichment.unsigned(reference));
         } catch (DataAccessException exception) {
-            return reference;
+            return new SignatureEnrichment(reference, AuditTrustSignatureVerificationResult.unavailable(), null, null, null);
         }
     }
 
-    private ExternalAnchorReference verifiedSignatureReference(
+    private SignatureEnrichment verifiedSignatureReference(
             ExternalAuditAnchor external,
             ExternalAnchorReference reference,
             ExternalAuditAnchorPublicationStatusDocument status
@@ -247,8 +301,11 @@ public class ExternalAuditIntegrityService {
                 status.signingAuthority(),
                 status.signedPayloadHash()
         );
-        if (!"SIGNED".equals(signature.signatureStatus())) {
-            return reference.withSignature(signature);
+        ExternalAnchorReference signedReference = reference.withSignature(signature);
+        if (!"SIGNED".equals(signature.signatureStatus())
+                || signature.signature() == null
+                || signature.keyId() == null) {
+            return SignatureEnrichment.unsigned(signedReference);
         }
         AuditAnchorSigningPayload payload = new AuditAnchorSigningPayload(
                 external.partitionKey(),
@@ -259,9 +316,26 @@ public class ExternalAuditIntegrityService {
                 reference.externalHash(),
                 sink.immutabilityLevel()
         );
-        return trustAuthorityClient.verify(payload, signature)
-                ? reference.withSignature(signature)
-                : reference.withSignature(SignedAuditAnchorPayload.unavailable());
+        AuditTrustSignatureVerificationResult verification = trustAuthorityClient.verify(payload, signature);
+        return new SignatureEnrichment(
+                signedReference,
+                verification,
+                signature.keyId(),
+                signature.signatureAlgorithm(),
+                signature.signingAuthority()
+        );
+    }
+
+    private record SignatureEnrichment(
+            ExternalAnchorReference reference,
+            AuditTrustSignatureVerificationResult verification,
+            String signingKeyId,
+            String signingAlgorithm,
+            String signingAuthority
+    ) {
+        static SignatureEnrichment unsigned(ExternalAnchorReference reference) {
+            return new SignatureEnrichment(reference, AuditTrustSignatureVerificationResult.unsigned(), null, null, null);
+        }
     }
 
     private void auditFailureBestEffort(ExternalAuditIntegrityQuery query, ExternalAuditIntegrityResponse response, String reason) {

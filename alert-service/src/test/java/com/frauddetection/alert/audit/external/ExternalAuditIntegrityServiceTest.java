@@ -155,8 +155,8 @@ class ExternalAuditIntegrityServiceTest {
         when(publicationRepository.findByLocalAnchorId("local-anchor-1"))
                 .thenReturn(Optional.of(publicationStatus("SIGNED")));
         when(trustAuthorityClient.verify(any(AuditAnchorSigningPayload.class), any(SignedAuditAnchorPayload.class)))
-                .thenReturn(false)
-                .thenReturn(true);
+                .thenReturn(AuditTrustSignatureVerificationResult.invalid("SIGNATURE_INVALID"))
+                .thenReturn(AuditTrustSignatureVerificationResult.valid());
         ExternalAuditIntegrityService signedService = new ExternalAuditIntegrityService(
                 repository,
                 signedSink,
@@ -170,10 +170,60 @@ class ExternalAuditIntegrityServiceTest {
         ExternalAuditIntegrityResponse rejected = signedService.verify("alert-service", 100);
         ExternalAuditIntegrityResponse accepted = signedService.verify("alert-service", 100);
 
-        assertThat(rejected.externalAnchor().externalReference().signatureStatus())
-                .isEqualTo("SIGNATURE_UNAVAILABLE");
+        assertThat(rejected.status()).isEqualTo("INVALID");
+        assertThat(rejected.signatureVerificationStatus()).isEqualTo("INVALID");
         assertThat(accepted.externalAnchor().externalReference().signatureStatus())
                 .isEqualTo("SIGNED");
+        assertThat(accepted.signatureVerificationStatus()).isEqualTo("VALID");
+    }
+
+    @Test
+    void shouldExposeUnavailableUnknownKeyAndUnsignedSignatureVerificationStates() {
+        AuditAnchorRepository repository = mock(AuditAnchorRepository.class);
+        ExternalAuditAnchorSink signedSink = mock(ExternalAuditAnchorSink.class);
+        ExternalAuditAnchorPublicationStatusRepository publicationRepository =
+                mock(ExternalAuditAnchorPublicationStatusRepository.class);
+        AuditTrustAuthorityClient trustAuthorityClient = mock(AuditTrustAuthorityClient.class);
+        AuditAnchorDocument local = localAnchor("local-anchor-1", 2L, "hash-2");
+        ExternalAuditAnchor external = external(local);
+        ExternalAnchorReference reference = new ExternalAnchorReference(
+                "local-anchor-1",
+                "audit-anchors/source_service-alert-service/00000000000000000002.json",
+                "hash-2",
+                "hash-2",
+                Instant.parse("2026-04-27T10:01:00Z")
+        );
+        when(repository.findLatestByPartitionKey("source_service:alert-service")).thenReturn(Optional.of(local));
+        when(signedSink.findByChainPosition("source_service:alert-service", 2L)).thenReturn(Optional.of(external));
+        when(signedSink.externalReference(external)).thenReturn(Optional.of(reference));
+        when(signedSink.immutabilityLevel()).thenReturn(ExternalImmutabilityLevel.NONE);
+        when(publicationRepository.findByLocalAnchorId("local-anchor-1"))
+                .thenReturn(Optional.of(publicationStatus("SIGNED")))
+                .thenReturn(Optional.of(publicationStatus("SIGNED")))
+                .thenReturn(Optional.of(publicationStatus("UNSIGNED")));
+        when(trustAuthorityClient.verify(any(AuditAnchorSigningPayload.class), any(SignedAuditAnchorPayload.class)))
+                .thenReturn(AuditTrustSignatureVerificationResult.unavailable())
+                .thenReturn(AuditTrustSignatureVerificationResult.unknownKey());
+        ExternalAuditIntegrityService signedService = new ExternalAuditIntegrityService(
+                repository,
+                signedSink,
+                new ExternalAuditIntegrityQueryParser(),
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                mock(AuditService.class),
+                publicationRepository,
+                trustAuthorityClient
+        );
+
+        ExternalAuditIntegrityResponse unavailable = signedService.verify("alert-service", 100);
+        ExternalAuditIntegrityResponse unknownKey = signedService.verify("alert-service", 100);
+        ExternalAuditIntegrityResponse unsigned = signedService.verify("alert-service", 100);
+
+        assertThat(unavailable.status()).isEqualTo("VALID");
+        assertThat(unavailable.signatureVerificationStatus()).isEqualTo("UNAVAILABLE");
+        assertThat(unknownKey.status()).isEqualTo("INVALID");
+        assertThat(unknownKey.signatureVerificationStatus()).isEqualTo("UNKNOWN_KEY");
+        assertThat(unsigned.status()).isEqualTo("VALID");
+        assertThat(unsigned.signatureVerificationStatus()).isEqualTo("UNSIGNED");
     }
 
     @Test
