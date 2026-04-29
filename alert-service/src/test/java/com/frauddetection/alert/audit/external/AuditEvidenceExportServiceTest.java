@@ -306,8 +306,12 @@ class AuditEvidenceExportServiceTest {
                 "external_anchor_status",
                 "anchor_coverage",
                 "export_fingerprint",
+                "chain_range_start",
+                "chain_range_end",
+                "partial_chain_range",
                 "events"
         );
+        assertThat(json).containsEntry("partial_chain_range", false);
         String serialized = objectMapper.writeValueAsString(response);
         assertThat(serialized).doesNotContain("raw_request", "request_payload", "token", "private_key", "stack_trace", "exception_message", "secret");
     }

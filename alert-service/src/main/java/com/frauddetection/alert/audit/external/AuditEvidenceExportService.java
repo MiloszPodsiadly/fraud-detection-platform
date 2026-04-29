@@ -172,7 +172,11 @@ public class AuditEvidenceExportService {
                     null,
                     "AVAILABLE",
                     AuditEvidenceExportResponse.AnchorCoverage.empty(),
-                    fingerprint(query, AuditEvidenceExportResponse.AnchorCoverage.empty(), List.of()),
+                    fingerprint(query, AuditEvidenceExportResponse.AnchorCoverage.empty(), new ChainRange(null, null, null, false), List.of()),
+                    null,
+                    null,
+                    null,
+                    false,
                     List.of()
             );
         }
@@ -206,7 +210,8 @@ public class AuditEvidenceExportService {
         String externalAnchorStatus = externalAnchorStatus(coverage, externalAnchorLookup.status());
         String reasonCode = reasonCode(coverage, externalAnchorStatus);
         String status = reasonCode == null ? "AVAILABLE" : "PARTIAL";
-        String fingerprint = fingerprint(query, coverage, events);
+        ChainRange chainRange = chainRange(events);
+        String fingerprint = fingerprint(query, coverage, chainRange, events);
         return new AuditEvidenceExportResponse(
                 status,
                 events.size(),
@@ -219,8 +224,24 @@ public class AuditEvidenceExportService {
                 externalAnchorStatus,
                 coverage,
                 fingerprint,
+                chainRange.start(),
+                chainRange.end(),
+                chainRange.predecessorHash(),
+                chainRange.partial(),
                 events
         );
+    }
+
+    private ChainRange chainRange(List<AuditEvidenceExportEvent> events) {
+        if (events.isEmpty()) {
+            return new ChainRange(null, null, null, false);
+        }
+        AuditEvidenceExportEvent first = events.getFirst();
+        AuditEvidenceExportEvent last = events.getLast();
+        Long start = first.chainPosition();
+        Long end = last.chainPosition();
+        boolean partial = start != null && start > 1;
+        return new ChainRange(start, end, partial ? first.previousEventHash() : null, partial);
     }
 
     private Map<Long, AuditAnchorDocument> localAnchors(AuditEvidenceExportQuery query, long minPosition, long maxPosition) {
@@ -351,6 +372,7 @@ public class AuditEvidenceExportService {
     private String fingerprint(
             AuditEvidenceExportQuery query,
             AuditEvidenceExportResponse.AnchorCoverage coverage,
+            ChainRange chainRange,
             List<AuditEvidenceExportEvent> events
     ) {
         Map<String, Object> canonical = new LinkedHashMap<>();
@@ -377,6 +399,12 @@ public class AuditEvidenceExportService {
                 "events_with_local_anchor", coverage.eventsWithLocalAnchor(),
                 "total_events", coverage.totalEvents()
         ));
+        Map<String, Object> chain = new LinkedHashMap<>();
+        chain.put("chain_range_start", chainRange.start());
+        chain.put("chain_range_end", chainRange.end());
+        chain.put("partial_chain_range", chainRange.partial());
+        chain.put("predecessor_hash", chainRange.predecessorHash());
+        canonical.put("chain_range", chain);
         try {
             byte[] canonicalJson = CANONICAL_JSON.writeValueAsBytes(canonical);
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -424,5 +452,13 @@ public class AuditEvidenceExportService {
                         exportFingerprint
                 )
         );
+    }
+
+    private record ChainRange(
+            Long start,
+            Long end,
+            String predecessorHash,
+            boolean partial
+    ) {
     }
 }

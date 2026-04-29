@@ -109,6 +109,12 @@ function verifyBundleFingerprint(bundle) {
       events_with_local_anchor: anchorCoverage.events_with_local_anchor,
       total_events: anchorCoverage.total_events,
     },
+    chain_range: {
+      chain_range_end: bundle.chain_range_end ?? null,
+      chain_range_start: bundle.chain_range_start ?? null,
+      partial_chain_range: bundle.partial_chain_range ?? false,
+      predecessor_hash: bundle.predecessor_hash ?? null,
+    },
     audit_event_ids: events.map((event) => event.audit_event_id),
     event_hashes: events.map((event) => event.event_hash),
     external_anchor_ids: events.map((event) => event.external_anchor?.external_anchor_id ?? null),
@@ -144,6 +150,50 @@ function verifyAnchorBindings(bundle) {
   return { status: "VALID", reason_code: null };
 }
 
+function verifyChainContinuity(bundle) {
+  const events = bundle.events ?? [];
+  if (events.length === 0) {
+    return { status: "PARTIAL", reason_code: "NO_EVENTS" };
+  }
+  const positions = new Set();
+  const hashes = new Map();
+  for (let i = 0; i < events.length; i += 1) {
+    const event = events[i];
+    if (!Number.isInteger(event.chain_position) || !event.event_hash) {
+      return { status: "INVALID", reason_code: "CHAIN_FIELDS_MISSING" };
+    }
+    if (positions.has(event.chain_position)) {
+      return { status: "INVALID", reason_code: "DUPLICATE_CHAIN_POSITION" };
+    }
+    positions.add(event.chain_position);
+    const existingEventId = hashes.get(event.event_hash);
+    if (existingEventId && existingEventId !== event.audit_event_id) {
+      return { status: "INVALID", reason_code: "DUPLICATE_EVENT_HASH_CONFLICT" };
+    }
+    hashes.set(event.event_hash, event.audit_event_id);
+    if (i > 0 && event.chain_position !== events[i - 1].chain_position + 1) {
+      return { status: "INVALID", reason_code: "CHAIN_GAP" };
+    }
+    if (i > 0 && event.previous_event_hash !== events[i - 1].event_hash) {
+      return { status: "INVALID", reason_code: "PREVIOUS_HASH_MISMATCH" };
+    }
+  }
+  const sorted = events.every((event, index) => index === 0 || event.chain_position > events[index - 1].chain_position);
+  if (!sorted) {
+    return { status: "INVALID", reason_code: "EVENTS_NOT_SORTED" };
+  }
+  const first = events[0];
+  if (first.chain_position === 1) {
+    return first.previous_event_hash
+      ? { status: "INVALID", reason_code: "GENESIS_PREDECESSOR_UNEXPECTED" }
+      : { status: "VALID", reason_code: null };
+  }
+  if (bundle.partial_chain_range === true && bundle.predecessor_hash && first.previous_event_hash === bundle.predecessor_hash) {
+    return { status: "VALID", reason_code: null };
+  }
+  return { status: "PARTIAL", reason_code: "BOUNDARY_PROOF_MISSING" };
+}
+
 function anchors(bundle) {
   const fromEvents = (bundle.events ?? [])
     .map((event) => event.external_anchor)
@@ -160,10 +210,14 @@ if (!bundlePath) {
 
 const bundle = JSON.parse(readFileSync(bundlePath, "utf8"));
 const keys = keyMap(bundle, keyFile);
+const bundleAnchors = anchors(bundle);
 const checked = [
   verifyBundleFingerprint(bundle),
+  verifyChainContinuity(bundle),
   verifyAnchorBindings(bundle),
-  ...anchors(bundle).map((anchor) => verifyAnchor(anchor, keys)),
+  ...(bundleAnchors.length === 0
+    ? [{ status: "PARTIAL", reason_code: "NO_SIGNED_ANCHORS" }]
+    : bundleAnchors.map((anchor) => verifyAnchor(anchor, keys))),
 ];
 const invalid = checked.find((result) => result.status === "INVALID");
 const partial = checked.find((result) => result.status === "PARTIAL");
@@ -173,7 +227,9 @@ const reason = checked.length === 0 ? "NO_ANCHORS" : invalid?.reason_code ?? par
 console.log(JSON.stringify({
   status,
   reason_code: reason,
-  verified_trust_level: status === "VALID" ? "INDEPENDENTLY_VERIFIABLE" : "PARTIAL_EXTERNAL",
+  verified_trust_level: status === "VALID"
+    ? "INDEPENDENTLY_VERIFIABLE"
+    : (partial?.reason_code === "BOUNDARY_PROOF_MISSING" ? "SIGNED_ANCHORS_VERIFIED" : "PARTIAL_EXTERNAL"),
   checked_counts: {
     anchors: checked.length,
     keys: keys.size,

@@ -43,6 +43,21 @@ public record AuditEvidenceExportResponse(
         @JsonInclude(JsonInclude.Include.NON_NULL)
         String exportFingerprint,
 
+        @JsonProperty("chain_range_start")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        Long chainRangeStart,
+
+        @JsonProperty("chain_range_end")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        Long chainRangeEnd,
+
+        @JsonProperty("predecessor_hash")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        String predecessorHash,
+
+        @JsonProperty("partial_chain_range")
+        boolean partialChainRange,
+
         @JsonProperty("events")
         List<AuditEvidenceExportEvent> events
 ) {
@@ -59,7 +74,7 @@ public record AuditEvidenceExportResponse(
             AnchorCoverage anchorCoverage,
             List<AuditEvidenceExportEvent> events
     ) {
-        this(status, count, limit, sourceService, from, to, reasonCode, message, externalAnchorStatus, anchorCoverage, null, events);
+        this(status, count, limit, sourceService, from, to, reasonCode, message, externalAnchorStatus, anchorCoverage, null, null, null, null, false, events);
     }
 
     static AuditEvidenceExportResponse unavailable(AuditEvidenceExportQuery query) {
@@ -75,6 +90,10 @@ public record AuditEvidenceExportResponse(
                 "UNAVAILABLE",
                 AnchorCoverage.empty(),
                 null,
+                null,
+                null,
+                null,
+                false,
                 List.of()
         );
     }
