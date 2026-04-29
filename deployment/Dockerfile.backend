@@ -12,6 +12,7 @@ COPY transaction-simulator-service/pom.xml transaction-simulator-service/pom.xml
 COPY feature-enricher-service/pom.xml feature-enricher-service/pom.xml
 COPY fraud-scoring-service/pom.xml fraud-scoring-service/pom.xml
 COPY alert-service/pom.xml alert-service/pom.xml
+COPY audit-trust-authority/pom.xml audit-trust-authority/pom.xml
 
 COPY common-events/src common-events/src
 COPY common-test-support/src common-test-support/src
@@ -20,6 +21,7 @@ COPY transaction-simulator-service/src transaction-simulator-service/src
 COPY feature-enricher-service/src feature-enricher-service/src
 COPY fraud-scoring-service/src fraud-scoring-service/src
 COPY alert-service/src alert-service/src
+COPY audit-trust-authority/src audit-trust-authority/src
 
 RUN mvn -q -pl ${MODULE_NAME} -am -Dmaven.test.skip=true package
 

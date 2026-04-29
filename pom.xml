@@ -25,6 +25,7 @@
         <module>feature-enricher-service</module>
         <module>fraud-scoring-service</module>
         <module>alert-service</module>
+        <module>audit-trust-authority</module>
     </modules>
 
     <properties>

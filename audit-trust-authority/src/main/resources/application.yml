@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: audit-trust-authority
+
+server:
+  port: ${SERVER_PORT:8095}
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+app:
+  trust-authority:
+    authority-name: ${TRUST_AUTHORITY_NAME:local-trust-authority}
+    key-id: ${TRUST_AUTHORITY_KEY_ID:local-ed25519-key-1}
+    internal-token: ${TRUST_AUTHORITY_INTERNAL_TOKEN:local-dev-trust-token}
+    private-key-path: ${TRUST_AUTHORITY_PRIVATE_KEY_PATH:}
+    public-key-path: ${TRUST_AUTHORITY_PUBLIC_KEY_PATH:}
