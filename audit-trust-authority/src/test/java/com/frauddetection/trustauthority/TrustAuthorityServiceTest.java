@@ -3,6 +3,9 @@ package com.frauddetection.trustauthority;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.time.Instant;
@@ -168,25 +171,25 @@ class TrustAuthorityServiceTest {
 
         assertThatThrownBy(() -> guard.run(null))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("non-default internal token");
+                .hasMessageContaining("non-default HMAC secret");
     }
 
     @Test
-    void shouldRejectMissingTokenInProdLikeProfile() {
+    void shouldRejectMissingHmacSecretInProdLikeProfile() {
         TrustAuthorityProperties properties = new TrustAuthorityProperties();
-        properties.setInternalToken("");
+        properties.setHmacSecret("");
         TrustAuthorityRuntimeGuard guard = new TrustAuthorityRuntimeGuard(properties, environment("staging"));
 
         assertThatThrownBy(() -> guard.run(null))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("non-default internal token");
+                .hasMessageContaining("non-default HMAC secret");
     }
 
     @Test
     void shouldRejectEphemeralGeneratedKeysInProdLikeProfile() {
         TrustAuthorityProperties properties = new TrustAuthorityProperties();
-        properties.setInternalToken("prod-token");
-        properties.setCallers(List.of(caller("alert-service", "alert-token", List.of("AUDIT_ANCHOR"))));
+        properties.setHmacSecret("prod-secret");
+        properties.setCallers(List.of(caller("alert-service", "alert-secret", List.of("AUDIT_ANCHOR"))));
         TrustAuthorityRuntimeGuard guard = new TrustAuthorityRuntimeGuard(properties, environment("production"));
 
         assertThatThrownBy(() -> guard.run(null))
@@ -197,7 +200,7 @@ class TrustAuthorityServiceTest {
     @Test
     void shouldRejectImplicitCallerAllowlistInProdLikeProfile() {
         TrustAuthorityProperties properties = new TrustAuthorityProperties();
-        properties.setInternalToken("prod-token");
+        properties.setHmacSecret("prod-secret");
         properties.setPrivateKeyPath("private.key");
         properties.setPublicKeyPath("public.key");
         TrustAuthorityRuntimeGuard guard = new TrustAuthorityRuntimeGuard(properties, environment("prod"));
@@ -242,11 +245,11 @@ class TrustAuthorityServiceTest {
     void shouldRejectUnauthorizedPurposeForScoringCallerAndAuditFailure() {
         RecordingAuditSink auditSink = new RecordingAuditSink();
         TrustAuthorityService service = service(new TrustAuthorityProperties(), auditSink);
+        TrustSignRequest request = request("hash-1", "anchor-1");
 
         assertThatThrownBy(() -> service.sign(
-                "local-dev-trust-token",
-                TrustAuthorityCallerIdentity.of("fraud-scoring-service", "local", "score-1"),
-                request("hash-1", "anchor-1")
+                credentials("fraud-scoring-service", "local", "local-dev-scoring-trust-hmac-secret", "SIGN", signCredentialPayload(request)),
+                request
         )).isInstanceOf(TrustAuthorityRequestException.class);
 
         assertThat(auditSink.events()).hasSize(1);
@@ -260,18 +263,49 @@ class TrustAuthorityServiceTest {
         TrustAuthorityProperties properties = new TrustAuthorityProperties();
         TrustAuthorityProperties.CallerEntry caller = new TrustAuthorityProperties.CallerEntry();
         caller.setServiceName("alert-service");
-        caller.setInternalToken("token-1");
+        caller.setHmacSecret("secret-1");
         caller.setAllowedPurposes(List.of("AUDIT_ANCHOR"));
         caller.setSignRateLimitPerMinute(1);
         properties.setCallers(List.of(caller));
         TrustAuthorityService service = service(properties, auditSink);
+        TrustSignRequest first = request("hash-1", "anchor-1");
+        TrustSignRequest second = request("hash-2", "anchor-2");
 
-        service.sign("token-1", TrustAuthorityCallerIdentity.of("alert-service", "local", "a"), request("hash-1", "anchor-1"));
+        service.sign(credentials("alert-service", "local", "secret-1", "SIGN", signCredentialPayload(first)), first);
 
-        assertThatThrownBy(() -> service.sign("token-1", TrustAuthorityCallerIdentity.of("alert-service", "local", "a"), request("hash-2", "anchor-2")))
+        assertThatThrownBy(() -> service.sign(credentials("alert-service", "local", "secret-1", "SIGN", signCredentialPayload(second)), second))
                 .isInstanceOf(TrustAuthorityRequestException.class);
         assertThat(auditSink.events()).extracting(TrustAuthorityAuditEvent::reasonCode)
                 .containsExactly(null, "RATE_LIMIT_EXCEEDED");
+    }
+
+    @Test
+    void shouldRejectHeaderOnlyIdentityWithoutHmacSignature() {
+        RecordingAuditSink auditSink = new RecordingAuditSink();
+        TrustAuthorityService service = service(new TrustAuthorityProperties(), auditSink);
+
+        assertThatThrownBy(() -> service.sign(
+                new TrustAuthorityRequestCredentials(TrustAuthorityCallerIdentity.of("alert-service", "local", "rotated"), Instant.now().toString(), null),
+                request("hash-1", "anchor-1")
+        )).isInstanceOf(TrustAuthorityRequestException.class);
+
+        assertThat(auditSink.events()).extracting(TrustAuthorityAuditEvent::reasonCode)
+                .containsExactly("HMAC_CREDENTIALS_MISSING");
+    }
+
+    @Test
+    void shouldRejectReplayWhenPayloadHashIsReusedWithDifferentContext() {
+        RecordingAuditSink auditSink = new RecordingAuditSink();
+        TrustAuthorityService service = service(new TrustAuthorityProperties(), auditSink);
+        TrustSignRequest first = request("hash-1", "anchor-1");
+        TrustSignRequest replay = request("hash-1", "anchor-2");
+
+        service.sign(first);
+
+        assertThatThrownBy(() -> service.sign(replay))
+                .isInstanceOf(TrustAuthorityRequestException.class);
+        assertThat(auditSink.events()).extracting(TrustAuthorityAuditEvent::reasonCode)
+                .containsExactly(null, "REPLAY_DETECTED");
     }
 
     @Test
@@ -301,11 +335,11 @@ class TrustAuthorityServiceTest {
     @Test
     void shouldRejectDisabledSigningRequiredInProdLikeProfile() {
         TrustAuthorityProperties properties = new TrustAuthorityProperties();
-        properties.setInternalToken("prod-token");
+        properties.setHmacSecret("prod-secret");
         properties.setPrivateKeyPath("private.key");
         properties.setPublicKeyPath("public.key");
         properties.setSigningRequired(false);
-        properties.setCallers(List.of(caller("alert-service", "alert-token", List.of("AUDIT_ANCHOR"))));
+        properties.setCallers(List.of(caller("alert-service", "alert-secret", List.of("AUDIT_ANCHOR"))));
         TrustAuthorityRuntimeGuard guard = new TrustAuthorityRuntimeGuard(properties, environment("prod"));
 
         assertThatThrownBy(() -> guard.run(null))
@@ -347,7 +381,7 @@ class TrustAuthorityServiceTest {
     private TrustAuthorityProperties.CallerEntry caller(String serviceName, String token, List<String> purposes) {
         TrustAuthorityProperties.CallerEntry caller = new TrustAuthorityProperties.CallerEntry();
         caller.setServiceName(serviceName);
-        caller.setInternalToken(token);
+        caller.setHmacSecret(token);
         caller.setAllowedPurposes(purposes);
         return caller;
     }
@@ -364,6 +398,36 @@ class TrustAuthorityServiceTest {
 
     private TrustSignRequest request(String payloadHash, String anchorId) {
         return new TrustSignRequest("AUDIT_ANCHOR", payloadHash, "source_service:alert-service", 1L, anchorId);
+    }
+
+    private TrustAuthorityRequestCredentials credentials(String serviceName, String environment, String secret, String action, String payload) {
+        String signedAt = Instant.now().toString();
+        TrustAuthorityCallerIdentity caller = TrustAuthorityCallerIdentity.of(serviceName, environment, "test-instance");
+        return new TrustAuthorityRequestCredentials(caller, signedAt, hmac(secret, String.join("\n",
+                action,
+                serviceName,
+                environment,
+                signedAt,
+                payload)));
+    }
+
+    private String signCredentialPayload(TrustSignRequest request) {
+        return String.join("\n",
+                request.purpose(),
+                request.payloadHash(),
+                request.partitionKey(),
+                Long.toString(request.chainPosition()),
+                request.anchorId());
+    }
+
+    private String hmac(String secret, String payload) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            return Base64.getEncoder().encodeToString(mac.doFinal(payload.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 
     private static class RecordingAuditSink implements TrustAuthorityAuditSink {

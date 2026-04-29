@@ -27,9 +27,9 @@ public class TrustAuthorityRuntimeGuard implements ApplicationRunner {
         if (properties.isEnabled() && !properties.isSigningRequired()) {
             throw new IllegalStateException("Prod-like trust authority requires signing-required=true when enabled.");
         }
-        if (!StringUtils.hasText(properties.getInternalToken())
-                || TrustAuthorityProperties.DEFAULT_LOCAL_TOKEN.equals(properties.getInternalToken())) {
-            throw new IllegalStateException("Prod-like trust authority requires an explicit non-default internal token.");
+        if (!StringUtils.hasText(properties.getHmacSecret())
+                || TrustAuthorityProperties.DEFAULT_LOCAL_HMAC_SECRET.equals(properties.getHmacSecret())) {
+            throw new IllegalStateException("Prod-like trust authority requires an explicit non-default HMAC secret.");
         }
         if (properties.getCallers().isEmpty()) {
             throw new IllegalStateException("Prod-like trust authority requires an explicit caller allowlist.");
@@ -38,9 +38,9 @@ public class TrustAuthorityRuntimeGuard implements ApplicationRunner {
             if (!StringUtils.hasText(caller.getServiceName())) {
                 throw new IllegalStateException("Prod-like trust authority caller allowlist requires service names.");
             }
-            if (!StringUtils.hasText(caller.getInternalToken())
-                    || TrustAuthorityProperties.DEFAULT_LOCAL_TOKEN.equals(caller.getInternalToken())) {
-                throw new IllegalStateException("Prod-like trust authority caller allowlist requires per-caller non-default tokens.");
+            if (!StringUtils.hasText(caller.getHmacSecret())
+                    || TrustAuthorityProperties.DEFAULT_LOCAL_HMAC_SECRET.equals(caller.getHmacSecret())) {
+                throw new IllegalStateException("Prod-like trust authority caller allowlist requires per-caller non-default HMAC secrets.");
             }
         });
         if (properties.getKeys().isEmpty()) {

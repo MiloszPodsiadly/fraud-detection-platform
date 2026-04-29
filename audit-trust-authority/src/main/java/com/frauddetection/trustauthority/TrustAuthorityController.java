@@ -22,13 +22,14 @@ public class TrustAuthorityController {
 
     @PostMapping("/sign")
     public TrustSignResponse sign(
-            @RequestHeader(name = "X-Internal-Trust-Token", required = false) String token,
             @RequestHeader(name = "X-Internal-Service-Name", required = false) String serviceName,
             @RequestHeader(name = "X-Internal-Service-Environment", required = false) String environment,
             @RequestHeader(name = "X-Internal-Service-Instance-Id", required = false) String instanceId,
+            @RequestHeader(name = "X-Internal-Trust-Signed-At", required = false) String signedAt,
+            @RequestHeader(name = "X-Internal-Trust-Signature", required = false) String signature,
             @Valid @RequestBody TrustSignRequest request
     ) {
-        return service.sign(token, TrustAuthorityCallerIdentity.of(serviceName, environment, instanceId), request);
+        return service.sign(TrustAuthorityRequestCredentials.of(serviceName, environment, instanceId, signedAt, signature), request);
     }
 
     @GetMapping("/keys")
@@ -38,12 +39,13 @@ public class TrustAuthorityController {
 
     @PostMapping("/verify")
     public TrustVerifyResponse verify(
-            @RequestHeader(name = "X-Internal-Trust-Token", required = false) String token,
             @RequestHeader(name = "X-Internal-Service-Name", required = false) String serviceName,
             @RequestHeader(name = "X-Internal-Service-Environment", required = false) String environment,
             @RequestHeader(name = "X-Internal-Service-Instance-Id", required = false) String instanceId,
+            @RequestHeader(name = "X-Internal-Trust-Signed-At", required = false) String signedAt,
+            @RequestHeader(name = "X-Internal-Trust-Signature", required = false) String signature,
             @Valid @RequestBody TrustVerifyRequest request
     ) {
-        return service.verify(token, TrustAuthorityCallerIdentity.of(serviceName, environment, instanceId), request);
+        return service.verify(TrustAuthorityRequestCredentials.of(serviceName, environment, instanceId, signedAt, signature), request);
     }
 }

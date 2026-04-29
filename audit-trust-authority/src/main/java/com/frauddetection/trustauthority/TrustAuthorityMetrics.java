@@ -18,6 +18,10 @@ class TrustAuthorityMetrics {
                 .tag("status", boundedStatus(status))
                 .register(registry)
                 .increment();
+        Counter.builder("trust_sign_requests_total")
+                .tag("status", boundedStatus(status))
+                .register(registry)
+                .increment();
     }
 
     void recordVerify(String status) {
@@ -25,14 +29,20 @@ class TrustAuthorityMetrics {
                 .tag("status", boundedStatus(status))
                 .register(registry)
                 .increment();
+        Counter.builder("trust_verify_requests_total")
+                .tag("status", boundedStatus(status))
+                .register(registry)
+                .increment();
     }
 
     void recordInvalidSignature() {
         Counter.builder("trust_authority_invalid_signature_total").register(registry).increment();
+        Counter.builder("trust_invalid_signature_total").register(registry).increment();
     }
 
     void recordUnknownKey() {
         Counter.builder("trust_authority_unknown_key_total").register(registry).increment();
+        Counter.builder("trust_unknown_key_total").register(registry).increment();
     }
 
     void recordRevokedKey() {
@@ -41,6 +51,11 @@ class TrustAuthorityMetrics {
 
     void recordRateLimit() {
         Counter.builder("trust_authority_rate_limit_total").register(registry).increment();
+        Counter.builder("trust_rate_limit_exceeded_total").register(registry).increment();
+    }
+
+    void recordReplayDetected() {
+        Counter.builder("trust_replay_detected_total").register(registry).increment();
     }
 
     private String boundedStatus(String status) {

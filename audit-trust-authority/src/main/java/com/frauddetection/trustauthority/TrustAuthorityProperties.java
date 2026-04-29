@@ -9,11 +9,11 @@ import java.util.List;
 @ConfigurationProperties(prefix = "app.trust-authority")
 public class TrustAuthorityProperties {
 
-    static final String DEFAULT_LOCAL_TOKEN = "local-dev-trust-token";
+    static final String DEFAULT_LOCAL_HMAC_SECRET = "local-dev-trust-hmac-secret";
 
     private String authorityName = "local-trust-authority";
     private String keyId = "local-ed25519-key-1";
-    private String internalToken = DEFAULT_LOCAL_TOKEN;
+    private String hmacSecret = DEFAULT_LOCAL_HMAC_SECRET;
     private String privateKeyPath;
     private String publicKeyPath;
     private List<KeyEntry> keys = new ArrayList<>();
@@ -38,12 +38,12 @@ public class TrustAuthorityProperties {
         this.keyId = keyId;
     }
 
-    public String getInternalToken() {
-        return internalToken;
+    public String getHmacSecret() {
+        return hmacSecret;
     }
 
-    public void setInternalToken(String internalToken) {
-        this.internalToken = internalToken;
+    public void setHmacSecret(String hmacSecret) {
+        this.hmacSecret = hmacSecret;
     }
 
     public String getPrivateKeyPath() {
@@ -188,7 +188,7 @@ public class TrustAuthorityProperties {
 
     public static class CallerEntry {
         private String serviceName;
-        private String internalToken;
+        private String hmacSecret;
         private List<String> allowedPurposes = new ArrayList<>();
         private int signRateLimitPerMinute = 1000;
 
@@ -200,12 +200,12 @@ public class TrustAuthorityProperties {
             this.serviceName = serviceName;
         }
 
-        public String getInternalToken() {
-            return internalToken;
+        public String getHmacSecret() {
+            return hmacSecret;
         }
 
-        public void setInternalToken(String internalToken) {
-            this.internalToken = internalToken;
+        public void setHmacSecret(String hmacSecret) {
+            this.hmacSecret = hmacSecret;
         }
 
         public List<String> getAllowedPurposes() {
