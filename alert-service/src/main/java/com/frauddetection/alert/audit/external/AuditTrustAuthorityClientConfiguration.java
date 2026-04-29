@@ -26,8 +26,8 @@ class AuditTrustAuthorityClientConfiguration {
         if (!StringUtils.hasText(properties.getUrl())) {
             throw new IllegalStateException("Audit trust authority URL is required when enabled.");
         }
-        if (!StringUtils.hasText(properties.getInternalToken())) {
-            throw new IllegalStateException("Audit trust authority internal token is required when enabled.");
+        if (!StringUtils.hasText(properties.getHmacSecret())) {
+            throw new IllegalStateException("Audit trust authority HMAC secret is required when enabled.");
         }
         return new HttpAuditTrustAuthorityClient(
                 restClientBuilder.baseUrl(properties.getUrl()).build(),
@@ -40,8 +40,13 @@ class AuditTrustAuthorityClientConfiguration {
         return new ApplicationRunner() {
             @Override
             public void run(ApplicationArguments args) {
-                if (properties.isEnabled() && prodLikeProfile(environment) && !properties.isSigningRequired()) {
-                    throw new IllegalStateException("Prod-like alert-service requires audit trust authority signing-required=true when trust authority is enabled.");
+                if (properties.isEnabled() && prodLikeProfile(environment)) {
+                    if (!properties.isSigningRequired()) {
+                        throw new IllegalStateException("Prod-like alert-service requires audit trust authority signing-required=true when trust authority is enabled.");
+                    }
+                    if (!StringUtils.hasText(properties.getHmacSecret())) {
+                        throw new IllegalStateException("Prod-like alert-service requires audit trust authority HMAC credentials when enabled.");
+                    }
                 }
             }
         };

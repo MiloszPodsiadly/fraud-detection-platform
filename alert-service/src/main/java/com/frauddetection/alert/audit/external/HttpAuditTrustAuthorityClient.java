@@ -11,9 +11,14 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import java.security.MessageDigest;
+import java.security.GeneralSecurityException;
 import java.security.NoSuchAlgorithmException;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -21,6 +26,7 @@ import java.util.Map;
 
 class HttpAuditTrustAuthorityClient implements AuditTrustAuthorityClient {
 
+    private static final String HMAC_ALGORITHM = "HmacSHA256";
     private static final ObjectMapper CANONICAL_JSON = JsonMapper.builder()
             .configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true)
             .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true)
@@ -37,17 +43,18 @@ class HttpAuditTrustAuthorityClient implements AuditTrustAuthorityClient {
     @Override
     public SignedAuditAnchorPayload sign(AuditAnchorSigningPayload payload) {
         String payloadHash = payloadHash(payload);
+        TrustSignRequest request = new TrustSignRequest(
+                "AUDIT_ANCHOR",
+                payloadHash,
+                payload.partitionKey(),
+                payload.chainPosition(),
+                payload.localAnchorId()
+        );
         try {
             TrustSignResponse response = restClient.post()
                     .uri("/api/v1/trust/sign")
-                    .headers(this::internalHeaders)
-                    .body(new TrustSignRequest(
-                            "AUDIT_ANCHOR",
-                            payloadHash,
-                            payload.partitionKey(),
-                            payload.chainPosition(),
-                            payload.localAnchorId()
-                    ))
+                    .headers(headers -> internalHeaders(headers, "SIGN", signCredentialPayload(request)))
+                    .body(request)
                     .retrieve()
                     .body(TrustSignResponse.class);
             if (response == null) {
@@ -87,20 +94,21 @@ class HttpAuditTrustAuthorityClient implements AuditTrustAuthorityClient {
             return AuditTrustSignatureVerificationResult.unsigned();
         }
         String payloadHash = payloadHash(payload);
+        TrustVerifyRequest request = new TrustVerifyRequest(
+                "AUDIT_ANCHOR",
+                payloadHash,
+                payload.partitionKey(),
+                payload.chainPosition(),
+                payload.localAnchorId(),
+                signature.signature(),
+                signature.keyId(),
+                signature.signedAt()
+        );
         try {
             TrustVerifyResponse response = restClient.post()
                     .uri("/api/v1/trust/verify")
-                    .headers(this::internalHeaders)
-                    .body(new TrustVerifyRequest(
-                            "AUDIT_ANCHOR",
-                            payloadHash,
-                            payload.partitionKey(),
-                            payload.chainPosition(),
-                            payload.localAnchorId(),
-                            signature.signature(),
-                            signature.keyId(),
-                            signature.signedAt()
-                    ))
+                    .headers(headers -> internalHeaders(headers, "VERIFY", verifyCredentialPayload(request)))
+                    .body(request)
                     .retrieve()
                     .body(TrustVerifyResponse.class);
             if (response == null) {
@@ -140,13 +148,59 @@ class HttpAuditTrustAuthorityClient implements AuditTrustAuthorityClient {
         }
     }
 
-    private void internalHeaders(org.springframework.http.HttpHeaders headers) {
-        headers.set("X-Internal-Trust-Token", properties.getInternalToken());
+    private void internalHeaders(org.springframework.http.HttpHeaders headers, String action, String payload) {
+        String signedAt = Instant.now().toString();
         headers.set("X-Internal-Service-Name", properties.getCallerServiceName());
         headers.set("X-Internal-Service-Environment", properties.getCallerEnvironment());
+        headers.set("X-Internal-Trust-Signed-At", signedAt);
+        headers.set("X-Internal-Trust-Signature", hmac(properties.getHmacSecret(), credentialPayload(action, signedAt, payload)));
         if (StringUtils.hasText(properties.getCallerInstanceId())) {
             headers.set("X-Internal-Service-Instance-Id", properties.getCallerInstanceId());
         }
+    }
+
+    private String signCredentialPayload(TrustSignRequest request) {
+        return String.join("\n",
+                nullSafe(request.purpose()),
+                nullSafe(request.payloadHash()),
+                nullSafe(request.partitionKey()),
+                Long.toString(request.chainPosition()),
+                nullSafe(request.anchorId()));
+    }
+
+    private String verifyCredentialPayload(TrustVerifyRequest request) {
+        return String.join("\n",
+                nullSafe(request.purpose()),
+                nullSafe(request.payloadHash()),
+                nullSafe(request.partitionKey()),
+                Long.toString(request.chainPosition()),
+                nullSafe(request.anchorId()),
+                nullSafe(request.signature()),
+                nullSafe(request.keyId()),
+                request.signedAt() == null ? "" : request.signedAt().toString());
+    }
+
+    private String credentialPayload(String action, String signedAt, String payload) {
+        return String.join("\n",
+                action,
+                nullSafe(properties.getCallerServiceName()),
+                nullSafe(properties.getCallerEnvironment()),
+                nullSafe(signedAt),
+                payload);
+    }
+
+    private String hmac(String secret, String payload) {
+        try {
+            Mac mac = Mac.getInstance(HMAC_ALGORITHM);
+            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), HMAC_ALGORITHM));
+            return Base64.getEncoder().encodeToString(mac.doFinal(payload.getBytes(StandardCharsets.UTF_8)));
+        } catch (GeneralSecurityException exception) {
+            throw new IllegalStateException("Audit trust authority request credentials could not be created.");
+        }
+    }
+
+    private String nullSafe(String value) {
+        return value == null ? "" : value;
     }
 
     private record TrustSignRequest(

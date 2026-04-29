@@ -7,7 +7,7 @@ public class AuditTrustAuthorityProperties {
 
     private boolean enabled;
     private String url = "http://localhost:8095";
-    private String internalToken;
+    private String hmacSecret;
     private boolean signingRequired;
     private String callerServiceName = "alert-service";
     private String callerEnvironment = "local";
@@ -29,12 +29,12 @@ public class AuditTrustAuthorityProperties {
         this.url = url;
     }
 
-    public String getInternalToken() {
-        return internalToken;
+    public String getHmacSecret() {
+        return hmacSecret;
     }
 
-    public void setInternalToken(String internalToken) {
-        this.internalToken = internalToken;
+    public void setHmacSecret(String hmacSecret) {
+        this.hmacSecret = hmacSecret;
     }
 
     public boolean isSigningRequired() {
