@@ -17,10 +17,46 @@ class TrustAuthorityAuditIntegrityVerifierTest {
         TrustAuthorityAuditIntegrityResponse response = TrustAuthorityAuditIntegrityVerifier.verify(List.of(second, first));
 
         assertThat(response.status()).isEqualTo("VALID");
+        assertThat(response.mode()).isEqualTo("FULL_CHAIN");
         assertThat(response.checked()).isEqualTo(2);
         assertThat(response.latestChainPosition()).isEqualTo(2L);
         assertThat(response.latestEventHash()).isEqualTo(second.eventHash());
         assertThat(response.violations()).isEmpty();
+    }
+
+    @Test
+    void shouldReportPartialForValidBoundedWindowWithExternalPredecessor() {
+        TrustAuthorityAuditEvent first = chained(event("event-1", "SIGN"), null, 1L);
+        TrustAuthorityAuditEvent second = chained(event("event-2", "VERIFY"), first.eventHash(), 2L);
+        TrustAuthorityAuditEvent third = chained(event("event-3", "VERIFY"), second.eventHash(), 3L);
+
+        TrustAuthorityAuditIntegrityResponse response = TrustAuthorityAuditIntegrityVerifier.verify(
+                List.of(third, second),
+                TrustAuthorityAuditIntegrityMode.WINDOW
+        );
+
+        assertThat(response.status()).isEqualTo("PARTIAL");
+        assertThat(response.reasonCode()).isEqualTo("BOUNDARY_PREDECESSOR_OUTSIDE_WINDOW");
+        assertThat(response.windowStartChainPosition()).isEqualTo(2L);
+        assertThat(response.windowEndChainPosition()).isEqualTo(3L);
+        assertThat(response.boundaryPreviousEventHash()).isEqualTo(first.eventHash());
+        assertThat(response.violations()).isEmpty();
+    }
+
+    @Test
+    void shouldDetectInternalPreviousHashMismatchInsideWindow() {
+        TrustAuthorityAuditEvent first = chained(event("event-1", "SIGN"), null, 1L);
+        TrustAuthorityAuditEvent second = chained(event("event-2", "VERIFY"), first.eventHash(), 2L);
+        TrustAuthorityAuditEvent tamperedThird = chained(event("event-3", "VERIFY"), "wrong", 3L);
+
+        TrustAuthorityAuditIntegrityResponse response = TrustAuthorityAuditIntegrityVerifier.verify(
+                List.of(second, tamperedThird),
+                TrustAuthorityAuditIntegrityMode.WINDOW
+        );
+
+        assertThat(response.status()).isEqualTo("INVALID");
+        assertThat(response.violations()).extracting(TrustAuthorityAuditIntegrityViolation::reasonCode)
+                .contains("PREVIOUS_EVENT_HASH_MISMATCH");
     }
 
     @Test

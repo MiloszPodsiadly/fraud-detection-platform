@@ -10,6 +10,10 @@ final class TrustAuthorityAuditIntegrityVerifier {
     }
 
     static TrustAuthorityAuditIntegrityResponse verify(List<TrustAuthorityAuditEvent> events) {
+        return verify(events, TrustAuthorityAuditIntegrityMode.FULL_CHAIN);
+    }
+
+    static TrustAuthorityAuditIntegrityResponse verify(List<TrustAuthorityAuditEvent> events, TrustAuthorityAuditIntegrityMode mode) {
         List<TrustAuthorityAuditEvent> ordered = events.stream()
                 .sorted(Comparator.comparing(event -> event.chainPosition() == null ? Long.MAX_VALUE : event.chainPosition()))
                 .toList();
@@ -17,16 +21,37 @@ final class TrustAuthorityAuditIntegrityVerifier {
         Long previousPosition = null;
         String previousHash = null;
         TrustAuthorityAuditEvent latest = null;
+        TrustAuthorityAuditEvent first = ordered.isEmpty() ? null : ordered.getFirst();
+        boolean boundaryOutsideWindow = mode == TrustAuthorityAuditIntegrityMode.WINDOW
+                && first != null
+                && first.chainPosition() != null
+                && first.chainPosition() > 1
+                && first.previousEventHash() != null;
+        String boundaryPreviousHash = boundaryOutsideWindow ? first.previousEventHash() : null;
         for (TrustAuthorityAuditEvent event : ordered) {
             latest = event;
             if (event.chainPosition() == null) {
                 violations.add(new TrustAuthorityAuditIntegrityViolation("CHAIN_POSITION_MISSING", null, "Audit event chain position is missing."));
                 continue;
             }
+            if (previousPosition == null
+                    && mode == TrustAuthorityAuditIntegrityMode.FULL_CHAIN
+                    && event.chainPosition() != 1L) {
+                violations.add(new TrustAuthorityAuditIntegrityViolation("CHAIN_POSITION_GAP", event.chainPosition(), "Full chain verification did not start at genesis."));
+            }
+            if (previousPosition == null
+                    && mode == TrustAuthorityAuditIntegrityMode.WINDOW
+                    && event.chainPosition() > 1L
+                    && event.previousEventHash() == null) {
+                violations.add(new TrustAuthorityAuditIntegrityViolation("PREVIOUS_EVENT_HASH_MISMATCH", event.chainPosition(), "Window boundary predecessor hash is missing."));
+            }
             if (previousPosition != null && event.chainPosition() != previousPosition + 1) {
                 violations.add(new TrustAuthorityAuditIntegrityViolation("CHAIN_POSITION_GAP", event.chainPosition(), "Audit chain position is not contiguous."));
             }
-            if (!same(previousHash, event.previousEventHash())) {
+            boolean firstWindowEventWithExternalPredecessor = mode == TrustAuthorityAuditIntegrityMode.WINDOW
+                    && previousPosition == null
+                    && boundaryOutsideWindow;
+            if (!firstWindowEventWithExternalPredecessor && !same(previousHash, event.previousEventHash())) {
                 violations.add(new TrustAuthorityAuditIntegrityViolation("PREVIOUS_EVENT_HASH_MISMATCH", event.chainPosition(), "Audit previous hash does not match predecessor."));
             }
             String expectedHash = TrustAuthorityAuditHasher.hash(event, event.previousEventHash(), event.chainPosition());
@@ -36,12 +61,24 @@ final class TrustAuthorityAuditIntegrityVerifier {
             previousPosition = event.chainPosition();
             previousHash = event.eventHash();
         }
+        Long start = ordered.isEmpty() ? null : ordered.getFirst().chainPosition();
+        Long end = latest == null ? null : latest.chainPosition();
+        String status = violations.isEmpty()
+                ? (boundaryOutsideWindow ? "PARTIAL" : "VALID")
+                : "INVALID";
+        String reasonCode = violations.isEmpty()
+                ? (boundaryOutsideWindow ? "BOUNDARY_PREDECESSOR_OUTSIDE_WINDOW" : null)
+                : "AUDIT_CHAIN_INVALID";
         return new TrustAuthorityAuditIntegrityResponse(
-                violations.isEmpty() ? "VALID" : "INVALID",
+                status,
                 ordered.size(),
-                latest == null ? null : latest.chainPosition(),
+                mode.name(),
+                end,
                 latest == null ? null : latest.eventHash(),
-                violations.isEmpty() ? null : "AUDIT_CHAIN_INVALID",
+                start,
+                end,
+                boundaryPreviousHash,
+                reasonCode,
                 violations
         );
     }

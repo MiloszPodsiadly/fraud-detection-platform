@@ -6,5 +6,9 @@ public interface TrustAuthorityAuditSink {
 
     TrustAuthorityAuditIntegrityResponse integrity(int limit);
 
+    default TrustAuthorityAuditIntegrityResponse integrity(int limit, String mode) {
+        return integrity(limit);
+    }
+
     TrustAuthorityAuditHeadResponse head();
 }

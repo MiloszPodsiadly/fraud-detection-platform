@@ -55,16 +55,26 @@ class DurableTrustAuthorityAuditSink implements TrustAuthorityAuditSink {
 
     @Override
     public TrustAuthorityAuditIntegrityResponse integrity(int limit) {
+        return integrity(limit, "WINDOW");
+    }
+
+    @Override
+    public TrustAuthorityAuditIntegrityResponse integrity(int limit, String modeValue) {
+        TrustAuthorityAuditIntegrityMode mode = TrustAuthorityAuditIntegrityMode.from(modeValue);
         try {
             Query query = new Query()
-                    .with(Sort.by(Sort.Direction.DESC, "chain_position"))
                     .limit(Math.max(1, Math.min(10_000, limit)));
+            if (mode == TrustAuthorityAuditIntegrityMode.FULL_CHAIN) {
+                query.with(Sort.by(Sort.Direction.ASC, "chain_position"));
+            } else {
+                query.with(Sort.by(Sort.Direction.DESC, "chain_position"));
+            }
             List<TrustAuthorityAuditEvent> events = mongoTemplate.find(query, TrustAuthorityAuditEvent.class, COLLECTION).stream()
                     .sorted(Comparator.comparing(event -> event.chainPosition() == null ? Long.MAX_VALUE : event.chainPosition()))
                     .toList();
-            return TrustAuthorityAuditIntegrityVerifier.verify(events);
+            return TrustAuthorityAuditIntegrityVerifier.verify(events, mode);
         } catch (DataAccessException exception) {
-            return TrustAuthorityAuditIntegrityResponse.unavailable("AUDIT_STORE_UNAVAILABLE");
+            return TrustAuthorityAuditIntegrityResponse.unavailable("AUDIT_STORE_UNAVAILABLE", mode);
         }
     }
 

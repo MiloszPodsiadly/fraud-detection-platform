@@ -58,24 +58,33 @@ class FileTrustAuthorityAuditSink implements TrustAuthorityAuditSink {
 
     @Override
     public synchronized TrustAuthorityAuditIntegrityResponse integrity(int limit) {
+        return integrity(limit, "WINDOW");
+    }
+
+    @Override
+    public synchronized TrustAuthorityAuditIntegrityResponse integrity(int limit, String modeValue) {
+        TrustAuthorityAuditIntegrityMode mode = TrustAuthorityAuditIntegrityMode.from(modeValue);
         if (!StringUtils.hasText(properties.getAuditPath())) {
-            return TrustAuthorityAuditIntegrityResponse.unavailable("AUDIT_PATH_MISSING");
+            return TrustAuthorityAuditIntegrityResponse.unavailable("AUDIT_PATH_MISSING", mode);
         }
         Path path = Path.of(properties.getAuditPath());
         if (!Files.exists(path)) {
-            return new TrustAuthorityAuditIntegrityResponse("VALID", 0, null, null, null, List.of());
+            return new TrustAuthorityAuditIntegrityResponse("VALID", 0, mode.name(), null, null, null, null, null, null, List.of());
         }
         try {
             List<String> lines = Files.readAllLines(path, StandardCharsets.UTF_8);
             List<TrustAuthorityAuditEvent> events = new ArrayList<>();
-            for (String line : lines.stream().skip(Math.max(0, lines.size() - Math.max(1, limit))).toList()) {
+            List<String> selected = mode == TrustAuthorityAuditIntegrityMode.FULL_CHAIN
+                    ? lines
+                    : lines.stream().skip(Math.max(0, lines.size() - Math.max(1, limit))).toList();
+            for (String line : selected) {
                 if (StringUtils.hasText(line)) {
                     events.add(objectMapper.readValue(line, TrustAuthorityAuditEvent.class));
                 }
             }
-            return TrustAuthorityAuditIntegrityVerifier.verify(events);
+            return TrustAuthorityAuditIntegrityVerifier.verify(events, mode);
         } catch (IOException exception) {
-            return TrustAuthorityAuditIntegrityResponse.unavailable("AUDIT_STORE_UNAVAILABLE");
+            return TrustAuthorityAuditIntegrityResponse.unavailable("AUDIT_STORE_UNAVAILABLE", mode);
         }
     }
 

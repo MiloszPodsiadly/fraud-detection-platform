@@ -1,22 +1,39 @@
 package com.frauddetection.trustauthority;
 
+import com.nimbusds.jose.JOSEObjectType;
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.JWSHeader;
+import com.nimbusds.jose.crypto.RSASSASigner;
+import com.nimbusds.jose.jwk.JWKSet;
+import com.nimbusds.jose.jwk.RSAKey;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.SignedJWT;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.mock.env.MockEnvironment;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
+import java.security.interfaces.RSAPrivateKey;
+import java.security.interfaces.RSAPublicKey;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Date;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class TrustAuthorityServiceTest {
+
+    @TempDir
+    Path tempDir;
 
     @Test
     void shouldSignAndVerifyAuditAnchorPayloadHash() {
@@ -244,6 +261,41 @@ class TrustAuthorityServiceTest {
     }
 
     @Test
+    void shouldFailClosedForReadyIdentityModesInLocalProfile() {
+        TrustAuthorityProperties mtlsProperties = new TrustAuthorityProperties();
+        mtlsProperties.setIdentityMode("mtls-ready");
+        TrustAuthorityProperties jwtProperties = new TrustAuthorityProperties();
+        jwtProperties.setIdentityMode("jwt-ready");
+
+        assertThatThrownBy(() -> new TrustAuthorityRuntimeGuard(mtlsProperties, environment("local")).run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("not implemented and fails closed");
+        assertThatThrownBy(() -> new TrustAuthorityRuntimeGuard(jwtProperties, environment("test")).run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("not implemented and fails closed");
+    }
+
+    @Test
+    void shouldRejectMissingIdentityModeInProdLikeProfile() {
+        TrustAuthorityProperties properties = new TrustAuthorityProperties();
+        properties.setIdentityMode("");
+
+        assertThatThrownBy(() -> new TrustAuthorityRuntimeGuard(properties, environment("prod")).run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("explicit enterprise identity mode");
+    }
+
+    @Test
+    void shouldAllowJwtServiceIdentityInProdLikeProfileWithCompleteConfig() throws Exception {
+        KeyPair jwtKey = rsaKeyPair();
+        TrustAuthorityProperties properties = jwtProperties(jwtKey);
+        properties.getAudit().setSink("durable-hash-chain");
+        configurePersistentSigningKeys(properties);
+
+        new TrustAuthorityRuntimeGuard(properties, environment("prod")).run(null);
+    }
+
+    @Test
     void shouldRejectInlinePrivateKeyMaterialInProdLikeProfile() throws Exception {
         TrustAuthorityProperties properties = propertiesWithKeys(key("key-v1", "ACTIVE", keyPair()));
         properties.setHmacSecret("prod-secret");
@@ -366,7 +418,7 @@ class TrustAuthorityServiceTest {
         TrustAuthorityService service = service(new TrustAuthorityProperties(), auditSink);
 
         assertThatThrownBy(() -> service.sign(
-                new TrustAuthorityRequestCredentials(TrustAuthorityCallerIdentity.of("alert-service", "local", "rotated"), "request-1", Instant.now().toString(), null),
+                new TrustAuthorityRequestCredentials(TrustAuthorityCallerIdentity.of("alert-service", "local", "rotated"), "request-1", Instant.now().toString(), null, null),
                 request("hash-1", "anchor-1")
         )).isInstanceOf(TrustAuthorityRequestException.class);
 
@@ -387,6 +439,63 @@ class TrustAuthorityServiceTest {
                 .isInstanceOf(TrustAuthorityRequestException.class);
         assertThat(auditSink.events()).extracting(TrustAuthorityAuditEvent::reasonCode)
                 .containsExactly(null, "REPLAY_DETECTED");
+    }
+
+    @Test
+    void shouldAuthorizeSignWithJwtServiceIdentity() throws Exception {
+        KeyPair jwtKey = rsaKeyPair();
+        TrustAuthorityService service = service(jwtProperties(jwtKey), new RecordingAuditSink());
+        TrustSignRequest request = request("hash-1", "anchor-1");
+
+        TrustSignResponse response = service.sign(jwtCredentials(jwtKey, "alert-service", "trust-authority", List.of("AUDIT_ANCHOR")), request);
+
+        assertThat(response.keyId()).isEqualTo("local-ed25519-key-1");
+    }
+
+    @Test
+    void shouldAuthorizeSignWithJwtServiceIdentityFromJwksPath() throws Exception {
+        KeyPair jwtKey = rsaKeyPair();
+        Path jwksPath = tempDir.resolve("jwks.json");
+        RSAKey jwk = new RSAKey.Builder((RSAPublicKey) jwtKey.getPublic())
+                .keyID("jwt-key-1")
+                .algorithm(JWSAlgorithm.RS256)
+                .build();
+        Files.writeString(jwksPath, new JWKSet(jwk).toString());
+        TrustAuthorityProperties properties = jwtProperties(jwtKey);
+        properties.getJwtIdentity().setKeys(List.of());
+        properties.getJwtIdentity().setJwksPath(jwksPath.toString());
+        TrustAuthorityService service = service(properties, new RecordingAuditSink());
+
+        TrustSignResponse response = service.sign(jwtCredentials(jwtKey, "alert-service", "trust-authority", List.of("AUDIT_ANCHOR")), request("hash-1", "anchor-1"));
+
+        assertThat(response.keyId()).isEqualTo("local-ed25519-key-1");
+    }
+
+    @Test
+    void shouldRejectJwtInvalidAudienceExpiredAndUnauthorizedPurpose() throws Exception {
+        KeyPair jwtKey = rsaKeyPair();
+        TrustAuthorityService service = service(jwtProperties(jwtKey), new RecordingAuditSink());
+        TrustSignRequest request = request("hash-1", "anchor-1");
+
+        assertThatThrownBy(() -> service.sign(jwtCredentials(jwtKey, "alert-service", "wrong-audience", List.of("AUDIT_ANCHOR")), request))
+                .isInstanceOf(TrustAuthorityRequestException.class);
+        assertThatThrownBy(() -> service.sign(jwtCredentials(jwtKey, "alert-service", "trust-authority", List.of("AUDIT_ANCHOR"), Instant.now(), Instant.now().plusSeconds(120), "jwt-key-1", "wrong-issuer"), request))
+                .isInstanceOf(TrustAuthorityRequestException.class);
+        assertThatThrownBy(() -> service.sign(jwtCredentials(jwtKey, "alert-service", "trust-authority", List.of("AUDIT_ANCHOR"), Instant.now().minusSeconds(700), Instant.now().minusSeconds(100), "jwt-key-1"), request))
+                .isInstanceOf(TrustAuthorityRequestException.class);
+        assertThatThrownBy(() -> service.sign(jwtCredentials(jwtKey, "fraud-scoring-service", "trust-authority", List.of("AUDIT_ANCHOR")), request))
+                .isInstanceOf(TrustAuthorityRequestException.class);
+    }
+
+    @Test
+    void shouldRejectJwtServiceKeyMismatch() throws Exception {
+        KeyPair jwtKey = rsaKeyPair();
+        TrustAuthorityProperties properties = jwtProperties(jwtKey);
+        properties.getCallers().getFirst().setAllowedJwtKeyIds(List.of("different-key"));
+        TrustAuthorityService service = service(properties, new RecordingAuditSink());
+
+        assertThatThrownBy(() -> service.sign(jwtCredentials(jwtKey, "alert-service", "trust-authority", List.of("AUDIT_ANCHOR")), request("hash-1", "anchor-1")))
+                .isInstanceOf(TrustAuthorityRequestException.class);
     }
 
     @Test
@@ -445,7 +554,10 @@ class TrustAuthorityServiceTest {
 
         assertThat(head.chainPosition()).isEqualTo(1L);
         assertThat(head.eventHash()).isNotBlank();
-        assertThat(head.timestamp()).isNotNull();
+        assertThat(head.status()).isEqualTo("AVAILABLE");
+        assertThat(head.source()).isEqualTo("trust-authority-audit");
+        assertThat(head.proofType()).isEqualTo("LOCAL_HASH_CHAIN_HEAD");
+        assertThat(head.occurredAt()).isNotNull();
         assertThat(auditSink.events()).extracting(TrustAuthorityAuditEvent::payloadHash)
                 .contains("trust-authority-audit-head");
     }
@@ -493,6 +605,12 @@ class TrustAuthorityServiceTest {
         return KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
     }
 
+    private KeyPair rsaKeyPair() throws Exception {
+        KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+        generator.initialize(2048);
+        return generator.generateKeyPair();
+    }
+
     private MockEnvironment environment(String profile) {
         MockEnvironment environment = new MockEnvironment();
         environment.setActiveProfiles(profile);
@@ -524,7 +642,88 @@ class TrustAuthorityServiceTest {
                 environment,
                 requestId,
                 signedAt,
-                payload)));
+                payload)), null);
+    }
+
+    private TrustAuthorityRequestCredentials jwtCredentials(KeyPair keyPair, String serviceName, String audience, List<String> authorities) {
+        return jwtCredentials(keyPair, serviceName, audience, authorities, Instant.now(), Instant.now().plusSeconds(120), "jwt-key-1");
+    }
+
+    private TrustAuthorityRequestCredentials jwtCredentials(
+            KeyPair keyPair,
+            String serviceName,
+            String audience,
+            List<String> authorities,
+            Instant issuedAt,
+            Instant expiresAt,
+            String keyId
+    ) {
+        return jwtCredentials(keyPair, serviceName, audience, authorities, issuedAt, expiresAt, keyId, "issuer-1");
+    }
+
+    private TrustAuthorityRequestCredentials jwtCredentials(
+            KeyPair keyPair,
+            String serviceName,
+            String audience,
+            List<String> authorities,
+            Instant issuedAt,
+            Instant expiresAt,
+            String keyId,
+            String issuer
+    ) {
+        try {
+            JWTClaimsSet claims = new JWTClaimsSet.Builder()
+                    .issuer(issuer)
+                    .audience(audience)
+                    .subject(serviceName)
+                    .issueTime(Date.from(issuedAt))
+                    .expirationTime(Date.from(expiresAt))
+                    .claim("service_name", serviceName)
+                    .claim("authorities", authorities)
+                    .build();
+            SignedJWT jwt = new SignedJWT(
+                    new JWSHeader.Builder(JWSAlgorithm.RS256)
+                            .type(JOSEObjectType.JWT)
+                            .keyID(keyId)
+                            .build(),
+                    claims
+            );
+            jwt.sign(new RSASSASigner((RSAPrivateKey) keyPair.getPrivate()));
+            return new TrustAuthorityRequestCredentials(
+                    TrustAuthorityCallerIdentity.of(null, null, null),
+                    java.util.UUID.randomUUID().toString(),
+                    null,
+                    null,
+                    jwt.serialize()
+            );
+        } catch (Exception exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    private TrustAuthorityProperties jwtProperties(KeyPair jwtKey) {
+        TrustAuthorityProperties properties = new TrustAuthorityProperties();
+        properties.setIdentityMode("jwt-service-identity");
+        TrustAuthorityProperties.JwtKeyEntry key = new TrustAuthorityProperties.JwtKeyEntry();
+        key.setKeyId("jwt-key-1");
+        key.setPublicKey(Base64.getEncoder().encodeToString(jwtKey.getPublic().getEncoded()));
+        properties.getJwtIdentity().setIssuer("issuer-1");
+        properties.getJwtIdentity().setAudience("trust-authority");
+        properties.getJwtIdentity().setKeys(List.of(key));
+        TrustAuthorityProperties.CallerEntry caller = caller("alert-service", "", List.of("AUDIT_ANCHOR", "AUDIT_INTEGRITY"));
+        caller.setAllowedJwtKeyIds(List.of("jwt-key-1"));
+        properties.setCallers(List.of(caller));
+        return properties;
+    }
+
+    private void configurePersistentSigningKeys(TrustAuthorityProperties properties) throws Exception {
+        KeyPair signingKey = keyPair();
+        Path privateKey = tempDir.resolve("ed25519-private.key");
+        Path publicKey = tempDir.resolve("ed25519-public.key");
+        Files.writeString(privateKey, Base64.getEncoder().encodeToString(signingKey.getPrivate().getEncoded()));
+        Files.writeString(publicKey, Base64.getEncoder().encodeToString(signingKey.getPublic().getEncoded()));
+        properties.setPrivateKeyPath(privateKey.toString());
+        properties.setPublicKeyPath(publicKey.toString());
     }
 
     private String signCredentialPayload(TrustSignRequest request) {
