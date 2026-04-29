@@ -14,6 +14,9 @@ public record AuditTrustAuthorityKey(
         @JsonProperty("public_key")
         String publicKey,
 
+        @JsonProperty("key_fingerprint_sha256")
+        String keyFingerprintSha256,
+
         @JsonProperty("valid_from")
         Instant validFrom,
 

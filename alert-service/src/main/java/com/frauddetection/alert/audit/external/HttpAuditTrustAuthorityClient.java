@@ -23,6 +23,7 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 class HttpAuditTrustAuthorityClient implements AuditTrustAuthorityClient {
 
@@ -120,6 +121,9 @@ class HttpAuditTrustAuthorityClient implements AuditTrustAuthorityClient {
             if ("UNKNOWN_KEY".equals(response.reasonCode())) {
                 return AuditTrustSignatureVerificationResult.unknownKey();
             }
+            if ("KEY_REVOKED".equals(response.reasonCode())) {
+                return AuditTrustSignatureVerificationResult.keyRevoked();
+            }
             return AuditTrustSignatureVerificationResult.invalid(response.reasonCode());
         } catch (RestClientException exception) {
             return AuditTrustSignatureVerificationResult.unavailable();
@@ -150,10 +154,12 @@ class HttpAuditTrustAuthorityClient implements AuditTrustAuthorityClient {
 
     private void internalHeaders(org.springframework.http.HttpHeaders headers, String action, String payload) {
         String signedAt = Instant.now().toString();
+        String requestId = UUID.randomUUID().toString();
         headers.set("X-Internal-Service-Name", properties.getCallerServiceName());
         headers.set("X-Internal-Service-Environment", properties.getCallerEnvironment());
+        headers.set("X-Internal-Trust-Request-Id", requestId);
         headers.set("X-Internal-Trust-Signed-At", signedAt);
-        headers.set("X-Internal-Trust-Signature", hmac(properties.getHmacSecret(), credentialPayload(action, signedAt, payload)));
+        headers.set("X-Internal-Trust-Signature", hmac(properties.getHmacSecret(), credentialPayload(action, requestId, signedAt, payload)));
         if (StringUtils.hasText(properties.getCallerInstanceId())) {
             headers.set("X-Internal-Service-Instance-Id", properties.getCallerInstanceId());
         }
@@ -180,11 +186,12 @@ class HttpAuditTrustAuthorityClient implements AuditTrustAuthorityClient {
                 request.signedAt() == null ? "" : request.signedAt().toString());
     }
 
-    private String credentialPayload(String action, String signedAt, String payload) {
+    private String credentialPayload(String action, String requestId, String signedAt, String payload) {
         return String.join("\n",
                 action,
                 nullSafe(properties.getCallerServiceName()),
                 nullSafe(properties.getCallerEnvironment()),
+                nullSafe(requestId),
                 nullSafe(signedAt),
                 payload);
     }

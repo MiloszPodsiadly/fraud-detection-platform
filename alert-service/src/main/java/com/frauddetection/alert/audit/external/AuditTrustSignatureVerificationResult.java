@@ -20,6 +20,10 @@ public record AuditTrustSignatureVerificationResult(
         return new AuditTrustSignatureVerificationResult("UNKNOWN_KEY", "UNKNOWN_KEY");
     }
 
+    public static AuditTrustSignatureVerificationResult keyRevoked() {
+        return new AuditTrustSignatureVerificationResult("KEY_REVOKED", "KEY_REVOKED");
+    }
+
     public static AuditTrustSignatureVerificationResult unsigned() {
         return new AuditTrustSignatureVerificationResult("UNSIGNED", null);
     }

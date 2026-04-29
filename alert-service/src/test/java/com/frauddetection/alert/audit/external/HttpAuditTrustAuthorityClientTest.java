@@ -27,6 +27,7 @@ class HttpAuditTrustAuthorityClientTest {
                 .andExpect(headerDoesNotExist("X-Internal-Trust-Token"))
                 .andExpect(header("X-Internal-Service-Name", "alert-service"))
                 .andExpect(header("X-Internal-Service-Environment", "test"))
+                .andExpect(request -> assertThat(request.getHeaders().getFirst("X-Internal-Trust-Request-Id")).isNotBlank())
                 .andExpect(request -> assertThat(request.getHeaders().getFirst("X-Internal-Trust-Signed-At")).isNotBlank())
                 .andExpect(request -> assertThat(request.getHeaders().getFirst("X-Internal-Trust-Signature")).isNotBlank())
                 .andRespond(withSuccess("""

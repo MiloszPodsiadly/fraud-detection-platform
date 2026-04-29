@@ -227,6 +227,90 @@ class ExternalAuditIntegrityServiceTest {
     }
 
     @Test
+    void shouldDowngradeUnsignedAndUnavailableSignaturesWhenTrustAuthorityEnabled() {
+        AuditAnchorRepository repository = mock(AuditAnchorRepository.class);
+        ExternalAuditAnchorSink signedSink = mock(ExternalAuditAnchorSink.class);
+        ExternalAuditAnchorPublicationStatusRepository publicationRepository =
+                mock(ExternalAuditAnchorPublicationStatusRepository.class);
+        AuditAnchorDocument local = localAnchor("local-anchor-1", 2L, "hash-2");
+        ExternalAuditAnchor external = external(local);
+        ExternalAnchorReference reference = externalReference();
+        when(repository.findLatestByPartitionKey("source_service:alert-service")).thenReturn(Optional.of(local));
+        when(signedSink.findByChainPosition("source_service:alert-service", 2L)).thenReturn(Optional.of(external));
+        when(signedSink.externalReference(external)).thenReturn(Optional.of(reference));
+        when(signedSink.immutabilityLevel()).thenReturn(ExternalImmutabilityLevel.NONE);
+        when(publicationRepository.findByLocalAnchorId("local-anchor-1"))
+                .thenReturn(Optional.of(publicationStatus("UNSIGNED")))
+                .thenThrow(new DataAccessResourceFailureException("mongo unavailable"));
+        AuditTrustAuthorityProperties properties = new AuditTrustAuthorityProperties();
+        properties.setEnabled(true);
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        ExternalAuditIntegrityService signedService = new ExternalAuditIntegrityService(
+                repository,
+                signedSink,
+                new ExternalAuditIntegrityQueryParser(),
+                new AlertServiceMetrics(registry),
+                mock(AuditService.class),
+                publicationRepository,
+                mock(AuditTrustAuthorityClient.class),
+                properties
+        );
+
+        ExternalAuditIntegrityResponse unsigned = signedService.verify("alert-service", 100);
+        ExternalAuditIntegrityResponse unavailable = signedService.verify("alert-service", 100);
+
+        assertThat(unsigned.status()).isEqualTo("PARTIAL");
+        assertThat(unsigned.reasonCode()).isEqualTo("SIGNATURE_UNSIGNED");
+        assertThat(unsigned.status()).isNotEqualTo("VALID");
+        assertThat(unavailable.status()).isEqualTo("PARTIAL");
+        assertThat(unavailable.reasonCode()).isEqualTo("SIGNATURE_UNAVAILABLE");
+        assertThat(unavailable.status()).isNotEqualTo("VALID");
+        assertThat(registry.get("audit_signature_policy_result_total")
+                .tag("result", "PARTIAL")
+                .counter()
+                .count()).isEqualTo(2.0d);
+    }
+
+    @Test
+    void shouldInvalidateUnsignedAndUnavailableSignaturesWhenTrustAuthoritySigningRequired() {
+        AuditAnchorRepository repository = mock(AuditAnchorRepository.class);
+        ExternalAuditAnchorSink signedSink = mock(ExternalAuditAnchorSink.class);
+        ExternalAuditAnchorPublicationStatusRepository publicationRepository =
+                mock(ExternalAuditAnchorPublicationStatusRepository.class);
+        AuditAnchorDocument local = localAnchor("local-anchor-1", 2L, "hash-2");
+        ExternalAuditAnchor external = external(local);
+        ExternalAnchorReference reference = externalReference();
+        when(repository.findLatestByPartitionKey("source_service:alert-service")).thenReturn(Optional.of(local));
+        when(signedSink.findByChainPosition("source_service:alert-service", 2L)).thenReturn(Optional.of(external));
+        when(signedSink.externalReference(external)).thenReturn(Optional.of(reference));
+        when(signedSink.immutabilityLevel()).thenReturn(ExternalImmutabilityLevel.NONE);
+        when(publicationRepository.findByLocalAnchorId("local-anchor-1"))
+                .thenReturn(Optional.of(publicationStatus("UNSIGNED")))
+                .thenThrow(new DataAccessResourceFailureException("mongo unavailable"));
+        AuditTrustAuthorityProperties properties = new AuditTrustAuthorityProperties();
+        properties.setEnabled(true);
+        properties.setSigningRequired(true);
+        ExternalAuditIntegrityService signedService = new ExternalAuditIntegrityService(
+                repository,
+                signedSink,
+                new ExternalAuditIntegrityQueryParser(),
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                mock(AuditService.class),
+                publicationRepository,
+                mock(AuditTrustAuthorityClient.class),
+                properties
+        );
+
+        ExternalAuditIntegrityResponse unsigned = signedService.verify("alert-service", 100);
+        ExternalAuditIntegrityResponse unavailable = signedService.verify("alert-service", 100);
+
+        assertThat(unsigned.status()).isEqualTo("INVALID");
+        assertThat(unsigned.reasonCode()).isEqualTo("SIGNATURE_UNSIGNED_REQUIRED");
+        assertThat(unavailable.status()).isEqualTo("INVALID");
+        assertThat(unavailable.reasonCode()).isEqualTo("SIGNATURE_UNAVAILABLE_REQUIRED");
+    }
+
+    @Test
     void shouldDetectStaleExternalAnchorAsPartial() {
         AuditAnchorDocument local = localAnchor("local-anchor-2", 2L, "hash-2");
         AuditAnchorDocument stale = localAnchor("local-anchor-1", 1L, "hash-1");
@@ -452,6 +536,16 @@ class ExternalAuditIntegrityServiceTest {
                 Instant.parse("2026-04-27T10:01:00Z"),
                 "local-file",
                 "PUBLISHED"
+        );
+    }
+
+    private ExternalAnchorReference externalReference() {
+        return new ExternalAnchorReference(
+                "local-anchor-1",
+                "audit-anchors/source_service-alert-service/00000000000000000002.json",
+                "hash-2",
+                "hash-2",
+                Instant.parse("2026-04-27T10:01:00Z")
         );
     }
 

@@ -422,6 +422,7 @@ class AlertSecurityConfigTest {
                         "local-ed25519-key-1",
                         "Ed25519",
                         "public-key",
+                        "96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b",
                         Instant.parse("2026-04-27T00:00:00Z"),
                         null,
                         "ACTIVE"
