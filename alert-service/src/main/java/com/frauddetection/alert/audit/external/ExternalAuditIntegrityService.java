@@ -109,24 +109,7 @@ public class ExternalAuditIntegrityService {
     private ExternalAuditIntegrityResponse verify(ExternalAuditIntegrityQuery query) {
         AuditAnchorDocument local = anchorRepository.findLatestByPartitionKey(query.partitionKey()).orElse(null);
         if (local == null) {
-            return new ExternalAuditIntegrityResponse(
-                    "VALID",
-                    0,
-                    query.limit(),
-                    query.sourceService(),
-                    query.partitionKey(),
-                    null,
-                    null,
-                    null,
-                    null,
-                    sink.immutabilityLevel(),
-                    "UNSIGNED",
-                    null,
-                    null,
-                    null,
-                    null,
-                    List.of()
-            );
+            return noLocalAnchorResponse(query);
         }
 
         ExternalAuditAnchor external;
@@ -247,6 +230,34 @@ public class ExternalAuditIntegrityService {
                 signature.signingKeyId(),
                 signature.signingAlgorithm(),
                 signature.signingAuthority(),
+                signature.verification().reasonCode(),
+                violations
+        );
+    }
+
+    private ExternalAuditIntegrityResponse noLocalAnchorResponse(ExternalAuditIntegrityQuery query) {
+        SignatureEnrichment signature = SignatureEnrichment.unsigned(null);
+        SignaturePolicyResult signaturePolicy = signaturePolicy(signature.verification());
+        metrics.recordAuditSignatureVerification(signature.verification().status());
+        metrics.recordAuditSignaturePolicyResult(signaturePolicy.status());
+        List<AuditIntegrityViolation> violations = "VALID".equals(signaturePolicy.status())
+                ? List.of()
+                : List.of(new AuditIntegrityViolation(signaturePolicy.reasonCode(), 1, signaturePolicy.reasonCode()));
+        return new ExternalAuditIntegrityResponse(
+                signaturePolicy.status(),
+                0,
+                query.limit(),
+                query.sourceService(),
+                query.partitionKey(),
+                signaturePolicy.reasonCode(),
+                signaturePolicy.message(),
+                null,
+                null,
+                sink.immutabilityLevel(),
+                signature.verification().status(),
+                null,
+                null,
+                null,
                 signature.verification().reasonCode(),
                 violations
         );

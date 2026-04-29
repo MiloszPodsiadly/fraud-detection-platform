@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataAccessResourceFailureException;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -308,6 +309,79 @@ class ExternalAuditIntegrityServiceTest {
         assertThat(unsigned.reasonCode()).isEqualTo("SIGNATURE_UNSIGNED_REQUIRED");
         assertThat(unavailable.status()).isEqualTo("INVALID");
         assertThat(unavailable.reasonCode()).isEqualTo("SIGNATURE_UNAVAILABLE_REQUIRED");
+    }
+
+    @Test
+    void shouldNotReportValidForUnsignedEmptyChainWhenSigningRequired() {
+        AuditTrustAuthorityProperties properties = new AuditTrustAuthorityProperties();
+        properties.setEnabled(true);
+        properties.setSigningRequired(true);
+        when(anchorRepository.findLatestByPartitionKey("source_service:alert-service")).thenReturn(Optional.empty());
+        ExternalAuditIntegrityService signedService = new ExternalAuditIntegrityService(
+                anchorRepository,
+                sink,
+                new ExternalAuditIntegrityQueryParser(),
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                mock(AuditService.class),
+                null,
+                mock(AuditTrustAuthorityClient.class),
+                properties
+        );
+
+        ExternalAuditIntegrityResponse response = signedService.verify("alert-service", 100);
+
+        assertThat(response.status()).isEqualTo("INVALID");
+        assertThat(response.reasonCode()).isEqualTo("SIGNATURE_UNSIGNED_REQUIRED");
+        assertThat(response.signatureVerificationStatus()).isEqualTo("UNSIGNED");
+        assertThat(response.violations()).extracting("violationType")
+                .containsExactly("SIGNATURE_UNSIGNED_REQUIRED");
+    }
+
+    @Test
+    void shouldFailClosedForRegulatorSignatureScenariosWhenSigningRequired() {
+        AuditAnchorRepository repository = mock(AuditAnchorRepository.class);
+        ExternalAuditAnchorSink signedSink = mock(ExternalAuditAnchorSink.class);
+        ExternalAuditAnchorPublicationStatusRepository publicationRepository =
+                mock(ExternalAuditAnchorPublicationStatusRepository.class);
+        AuditTrustAuthorityClient trustAuthorityClient = mock(AuditTrustAuthorityClient.class);
+        AuditAnchorDocument local = localAnchor("local-anchor-1", 2L, "hash-2");
+        ExternalAuditAnchor external = external(local);
+        when(repository.findLatestByPartitionKey("source_service:alert-service")).thenReturn(Optional.of(local));
+        when(signedSink.findByChainPosition("source_service:alert-service", 2L)).thenReturn(Optional.of(external));
+        when(signedSink.externalReference(external)).thenReturn(Optional.of(externalReference()));
+        when(signedSink.immutabilityLevel()).thenReturn(ExternalImmutabilityLevel.NONE);
+        when(publicationRepository.findByLocalAnchorId("local-anchor-1"))
+                .thenThrow(new DataAccessResourceFailureException("mongo unavailable"))
+                .thenReturn(Optional.of(publicationStatus("UNSIGNED")))
+                .thenReturn(Optional.of(publicationStatus("SIGNED")));
+        when(trustAuthorityClient.verify(any(AuditAnchorSigningPayload.class), any(SignedAuditAnchorPayload.class)))
+                .thenReturn(AuditTrustSignatureVerificationResult.invalid("SIGNATURE_INVALID"));
+        AuditTrustAuthorityProperties properties = new AuditTrustAuthorityProperties();
+        properties.setEnabled(true);
+        properties.setSigningRequired(true);
+        ExternalAuditIntegrityService signedService = new ExternalAuditIntegrityService(
+                repository,
+                signedSink,
+                new ExternalAuditIntegrityQueryParser(),
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                mock(AuditService.class),
+                publicationRepository,
+                trustAuthorityClient,
+                properties
+        );
+
+        ExternalAuditIntegrityResponse unavailable = signedService.verify("alert-service", 100);
+        ExternalAuditIntegrityResponse unsigned = signedService.verify("alert-service", 100);
+        ExternalAuditIntegrityResponse invalid = signedService.verify("alert-service", 100);
+
+        assertThat(unavailable.status()).isEqualTo("INVALID");
+        assertThat(unavailable.reasonCode()).isEqualTo("SIGNATURE_UNAVAILABLE_REQUIRED");
+        assertThat(unsigned.status()).isEqualTo("INVALID");
+        assertThat(unsigned.reasonCode()).isEqualTo("SIGNATURE_UNSIGNED_REQUIRED");
+        assertThat(invalid.status()).isEqualTo("INVALID");
+        assertThat(invalid.reasonCode()).isEqualTo("SIGNATURE_INVALID");
+        assertThat(List.of(unavailable.status(), unsigned.status(), invalid.status()))
+                .doesNotContain("VALID");
     }
 
     @Test
