@@ -63,6 +63,11 @@ app:
     trust:
       signing:
         kms-enabled: ${AUDIT_TRUST_SIGNING_KMS_ENABLED:false}
+    trust-authority:
+      enabled: ${AUDIT_TRUST_AUTHORITY_ENABLED:false}
+      url: ${AUDIT_TRUST_AUTHORITY_URL:http://localhost:8095}
+      internal-token: ${AUDIT_TRUST_AUTHORITY_INTERNAL_TOKEN:}
+      signing-required: ${AUDIT_TRUST_AUTHORITY_SIGNING_REQUIRED:false}
   security:
     demo-auth:
       enabled: ${APP_SECURITY_DEMO_AUTH_ENABLED:false}

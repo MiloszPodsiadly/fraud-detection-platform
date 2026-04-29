@@ -65,6 +65,26 @@ class LocalFileExternalAuditAnchorSink implements ExternalAuditAnchorSink {
     }
 
     @Override
+    public Optional<ExternalAnchorReference> externalReference(ExternalAuditAnchor anchor) {
+        if (anchor == null) {
+            return Optional.empty();
+        }
+        ExternalAuditAnchor stored = findByLocalAnchorId(anchor.localAnchorId())
+                .orElseThrow(() -> new ExternalAuditAnchorSinkException("IO_ERROR", "External anchor is unavailable."));
+        if (!sameImmutableAnchor(stored, anchor)) {
+            throw new ExternalAuditAnchorSinkException("CONFLICT", "External anchor idempotency conflict.");
+        }
+        String externalKey = "local-file:" + path.toAbsolutePath().getFileName() + "#" + stored.chainPosition();
+        return Optional.of(new ExternalAnchorReference(
+                stored.localAnchorId(),
+                externalKey,
+                stored.lastEventHash(),
+                stored.lastEventHash(),
+                Instant.now()
+        ));
+    }
+
+    @Override
     public Optional<ExternalAuditAnchor> latest(String partitionKey) {
         return readAll().stream()
                 .filter(anchor -> Objects.equals(anchor.partitionKey(), partitionKey))

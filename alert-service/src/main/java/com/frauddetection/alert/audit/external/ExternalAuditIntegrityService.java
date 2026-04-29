@@ -10,6 +10,7 @@ import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
@@ -29,19 +30,36 @@ public class ExternalAuditIntegrityService {
     private final ExternalAuditIntegrityQueryParser queryParser;
     private final AlertServiceMetrics metrics;
     private final AuditService auditService;
+    private final ExternalAuditAnchorPublicationStatusRepository publicationStatusRepository;
+    private final AuditTrustAuthorityClient trustAuthorityClient;
 
-    public ExternalAuditIntegrityService(
+    ExternalAuditIntegrityService(
             AuditAnchorRepository anchorRepository,
             ExternalAuditAnchorSink sink,
             ExternalAuditIntegrityQueryParser queryParser,
             AlertServiceMetrics metrics,
             AuditService auditService
     ) {
+        this(anchorRepository, sink, queryParser, metrics, auditService, null, null);
+    }
+
+    @Autowired
+    public ExternalAuditIntegrityService(
+            AuditAnchorRepository anchorRepository,
+            ExternalAuditAnchorSink sink,
+            ExternalAuditIntegrityQueryParser queryParser,
+            AlertServiceMetrics metrics,
+            AuditService auditService,
+            ExternalAuditAnchorPublicationStatusRepository publicationStatusRepository,
+            AuditTrustAuthorityClient trustAuthorityClient
+    ) {
         this.anchorRepository = anchorRepository;
         this.sink = sink;
         this.queryParser = queryParser;
         this.metrics = metrics;
         this.auditService = auditService;
+        this.publicationStatusRepository = publicationStatusRepository;
+        this.trustAuthorityClient = trustAuthorityClient == null ? new DisabledAuditTrustAuthorityClient() : trustAuthorityClient;
     }
 
     public ExternalAuditIntegrityResponse verify(String sourceService, Integer limit) {
@@ -192,13 +210,58 @@ public class ExternalAuditIntegrityService {
 
     private ExternalAnchorReference externalReference(ExternalAuditAnchor external) {
         try {
-            return sink.externalReference(external).orElse(null);
+            ExternalAnchorReference reference = sink.externalReference(external).orElse(null);
+            return enrichSignature(external, reference);
         } catch (ExternalAuditAnchorSinkException exception) {
             if (isExternalIntegrityMismatch(exception.reason())) {
                 metrics.recordExternalTamperingDetected(exception.reason());
             }
             throw exception;
         }
+    }
+
+    private ExternalAnchorReference enrichSignature(ExternalAuditAnchor external, ExternalAnchorReference reference) {
+        if (reference == null || publicationStatusRepository == null || reference.anchorId() == null) {
+            return reference;
+        }
+        try {
+            return publicationStatusRepository.findByLocalAnchorId(reference.anchorId())
+                    .map(status -> verifiedSignatureReference(external, reference, status))
+                    .orElse(reference);
+        } catch (DataAccessException exception) {
+            return reference;
+        }
+    }
+
+    private ExternalAnchorReference verifiedSignatureReference(
+            ExternalAuditAnchor external,
+            ExternalAnchorReference reference,
+            ExternalAuditAnchorPublicationStatusDocument status
+    ) {
+        SignedAuditAnchorPayload signature = new SignedAuditAnchorPayload(
+                status.signatureStatus(),
+                status.signingAlgorithm(),
+                status.signature(),
+                status.signingKeyId(),
+                status.signedAt(),
+                status.signingAuthority(),
+                status.signedPayloadHash()
+        );
+        if (!"SIGNED".equals(signature.signatureStatus())) {
+            return reference.withSignature(signature);
+        }
+        AuditAnchorSigningPayload payload = new AuditAnchorSigningPayload(
+                external.partitionKey(),
+                external.localAnchorId(),
+                external.chainPosition(),
+                external.lastEventHash(),
+                reference.externalKey(),
+                reference.externalHash(),
+                sink.immutabilityLevel()
+        );
+        return trustAuthorityClient.verify(payload, signature)
+                ? reference.withSignature(signature)
+                : reference.withSignature(SignedAuditAnchorPayload.unavailable());
     }
 
     private void auditFailureBestEffort(ExternalAuditIntegrityQuery query, ExternalAuditIntegrityResponse response, String reason) {

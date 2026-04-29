@@ -475,7 +475,7 @@ public class AlertServiceMetrics {
             case "DISABLED", "UNAVAILABLE", "CONFLICT", "MISMATCH", "IO_ERROR", "INVALID_ANCHOR",
                  "WRITE_NOT_VERIFIED", "EXTERNAL_PAYLOAD_HASH_MISMATCH", "EXTERNAL_OBJECT_KEY_MISMATCH", "TIMEOUT",
                  "HEAD_SCAN_PAGINATION_UNSUPPORTED", "HEAD_SCAN_LIMIT_EXCEEDED", "HEAD_MANIFEST_INVALID",
-                 "HEAD_MANIFEST_UPDATE_FAILED" -> reason;
+                 "HEAD_MANIFEST_UPDATE_FAILED", "SIGNATURE_FAILED" -> reason;
             default -> "UNKNOWN";
         };
     }

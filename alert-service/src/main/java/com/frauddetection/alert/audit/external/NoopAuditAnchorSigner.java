@@ -7,6 +7,6 @@ class NoopAuditAnchorSigner implements AuditAnchorSigner {
 
     @Override
     public SignedAuditAnchorPayload sign(String canonicalPayload) {
-        return new SignedAuditAnchorPayload("none", null, null);
+        return SignedAuditAnchorPayload.unsigned();
     }
 }

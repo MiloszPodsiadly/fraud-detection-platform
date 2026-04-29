@@ -83,7 +83,8 @@ class ExternalAuditAnchorPublisherTest {
                         org.mockito.ArgumentMatchers.eq(Instant.parse("2026-04-27T10:01:00Z")),
                         org.mockito.ArgumentMatchers.eq("local-file"),
                         org.mockito.ArgumentMatchers.isNull(),
-                        org.mockito.ArgumentMatchers.eq(ExternalImmutabilityLevel.NONE)
+                        org.mockito.ArgumentMatchers.eq(ExternalImmutabilityLevel.NONE),
+                        org.mockito.ArgumentMatchers.any(SignedAuditAnchorPayload.class)
                 );
     }
 
@@ -119,7 +120,8 @@ class ExternalAuditAnchorPublisherTest {
                 org.mockito.ArgumentMatchers.eq(Instant.parse("2026-04-27T10:01:00Z")),
                 org.mockito.ArgumentMatchers.eq("local-file"),
                 org.mockito.ArgumentMatchers.isNull(),
-                org.mockito.ArgumentMatchers.eq(ExternalImmutabilityLevel.NONE)
+                org.mockito.ArgumentMatchers.eq(ExternalImmutabilityLevel.NONE),
+                org.mockito.ArgumentMatchers.any(SignedAuditAnchorPayload.class)
         );
         assertThat(meterRegistry.get("fraud_platform_audit_external_anchor_publish_failed_total")
                 .tag("sink", "local-file")
@@ -171,6 +173,7 @@ class ExternalAuditAnchorPublisherTest {
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any()
         );
         verify(publicationStatusRepository).recordPartial(
@@ -180,13 +183,71 @@ class ExternalAuditAnchorPublisherTest {
                 org.mockito.ArgumentMatchers.any(ExternalAnchorReference.class),
                 org.mockito.ArgumentMatchers.eq(ExternalImmutabilityLevel.CONFIGURED),
                 org.mockito.ArgumentMatchers.eq(ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED),
-                org.mockito.ArgumentMatchers.eq(ExternalAuditAnchor.MANIFEST_STATUS_FAILED)
+                org.mockito.ArgumentMatchers.eq(ExternalAuditAnchor.MANIFEST_STATUS_FAILED),
+                org.mockito.ArgumentMatchers.any(SignedAuditAnchorPayload.class)
         );
         assertThat(meterRegistry.get("fraud_platform_audit_external_anchor_published_total")
                 .tag("sink", "object-store")
                 .tag("status", "PARTIAL")
                 .counter()
                 .count()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void shouldRecordPartialWhenSigningIsRequiredAndTrustAuthorityIsUnavailable() {
+        ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
+        AuditAnchorDocument anchor = localAnchor("local-anchor-1", 1L, "hash-1");
+        AuditTrustAuthorityProperties properties = new AuditTrustAuthorityProperties();
+        properties.setEnabled(true);
+        properties.setSigningRequired(true);
+        when(sink.sinkType()).thenReturn("object-store");
+        when(sink.latest("source_service:alert-service")).thenReturn(java.util.Optional.empty());
+        when(sink.immutabilityLevel()).thenReturn(ExternalImmutabilityLevel.CONFIGURED);
+        when(anchorRepository.findByPartitionKeyAndChainPositionGreaterThan("source_service:alert-service", 0L, 100))
+                .thenReturn(List.of(anchor));
+        when(sink.publish(any(ExternalAuditAnchor.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(sink.externalReference(any(ExternalAuditAnchor.class)))
+                .thenReturn(java.util.Optional.of(new ExternalAnchorReference(
+                        "local-anchor-1",
+                        "audit-anchors/partition/00000000000000000001.json",
+                        "hash-1",
+                        "hash-1",
+                        Instant.parse("2026-04-27T10:01:00Z")
+                )));
+        ExternalAuditAnchorPublisher publisher = new ExternalAuditAnchorPublisher(
+                anchorRepository,
+                publicationStatusRepository,
+                sink,
+                new UnavailableTrustAuthorityClient(),
+                properties,
+                metrics,
+                Clock.fixed(Instant.parse("2026-04-27T10:01:00Z"), ZoneOffset.UTC),
+                100
+        );
+
+        ExternalAuditAnchorPublishResult result = publisher.publishDefaultWindow();
+
+        assertThat(result.published()).isZero();
+        assertThat(result.partial()).isEqualTo(1);
+        verify(publicationStatusRepository, never()).recordSuccess(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()
+        );
+        verify(publicationStatusRepository).recordPartial(
+                org.mockito.ArgumentMatchers.eq(anchor),
+                org.mockito.ArgumentMatchers.eq(Instant.parse("2026-04-27T10:01:00Z")),
+                org.mockito.ArgumentMatchers.eq("object-store"),
+                org.mockito.ArgumentMatchers.any(ExternalAnchorReference.class),
+                org.mockito.ArgumentMatchers.eq(ExternalImmutabilityLevel.CONFIGURED),
+                org.mockito.ArgumentMatchers.eq("SIGNATURE_FAILED"),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.argThat(signature -> "SIGNATURE_FAILED".equals(signature.signatureStatus()))
+        );
     }
 
     @Test
@@ -245,5 +306,28 @@ class ExternalAuditAnchorPublisherTest {
                 chainPosition,
                 "SHA-256"
         );
+    }
+
+    private static class UnavailableTrustAuthorityClient implements AuditTrustAuthorityClient {
+
+        @Override
+        public SignedAuditAnchorPayload sign(AuditAnchorSigningPayload payload) {
+            return SignedAuditAnchorPayload.unavailable();
+        }
+
+        @Override
+        public boolean verify(AuditAnchorSigningPayload payload, SignedAuditAnchorPayload signature) {
+            return false;
+        }
+
+        @Override
+        public List<AuditTrustAuthorityKey> keys() {
+            return List.of();
+        }
+
+        @Override
+        public boolean enabled() {
+            return true;
+        }
     }
 }

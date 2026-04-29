@@ -13,6 +13,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -129,6 +130,50 @@ class ExternalAuditIntegrityServiceTest {
 
         assertThat(response.status()).isEqualTo("INVALID");
         assertThat(response.reasonCode()).isEqualTo("EXTERNAL_OBJECT_KEY_MISMATCH");
+    }
+
+    @Test
+    void shouldExposeSignedMetadataOnlyAfterTrustAuthorityVerification() {
+        AuditAnchorRepository repository = mock(AuditAnchorRepository.class);
+        ExternalAuditAnchorSink signedSink = mock(ExternalAuditAnchorSink.class);
+        ExternalAuditAnchorPublicationStatusRepository publicationRepository =
+                mock(ExternalAuditAnchorPublicationStatusRepository.class);
+        AuditTrustAuthorityClient trustAuthorityClient = mock(AuditTrustAuthorityClient.class);
+        AuditAnchorDocument local = localAnchor("local-anchor-1", 2L, "hash-2");
+        ExternalAuditAnchor external = external(local);
+        ExternalAnchorReference reference = new ExternalAnchorReference(
+                "local-anchor-1",
+                "audit-anchors/source_service-alert-service/00000000000000000002.json",
+                "hash-2",
+                "hash-2",
+                Instant.parse("2026-04-27T10:01:00Z")
+        );
+        when(repository.findLatestByPartitionKey("source_service:alert-service")).thenReturn(Optional.of(local));
+        when(signedSink.findByChainPosition("source_service:alert-service", 2L)).thenReturn(Optional.of(external));
+        when(signedSink.externalReference(external)).thenReturn(Optional.of(reference));
+        when(signedSink.immutabilityLevel()).thenReturn(ExternalImmutabilityLevel.NONE);
+        when(publicationRepository.findByLocalAnchorId("local-anchor-1"))
+                .thenReturn(Optional.of(publicationStatus("SIGNED")));
+        when(trustAuthorityClient.verify(any(AuditAnchorSigningPayload.class), any(SignedAuditAnchorPayload.class)))
+                .thenReturn(false)
+                .thenReturn(true);
+        ExternalAuditIntegrityService signedService = new ExternalAuditIntegrityService(
+                repository,
+                signedSink,
+                new ExternalAuditIntegrityQueryParser(),
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                mock(AuditService.class),
+                publicationRepository,
+                trustAuthorityClient
+        );
+
+        ExternalAuditIntegrityResponse rejected = signedService.verify("alert-service", 100);
+        ExternalAuditIntegrityResponse accepted = signedService.verify("alert-service", 100);
+
+        assertThat(rejected.externalAnchor().externalReference().signatureStatus())
+                .isEqualTo("SIGNATURE_UNAVAILABLE");
+        assertThat(accepted.externalAnchor().externalReference().signatureStatus())
+                .isEqualTo("SIGNED");
     }
 
     @Test
@@ -357,6 +402,34 @@ class ExternalAuditIntegrityServiceTest {
                 Instant.parse("2026-04-27T10:01:00Z"),
                 "local-file",
                 "PUBLISHED"
+        );
+    }
+
+    private ExternalAuditAnchorPublicationStatusDocument publicationStatus(String signatureStatus) {
+        return new ExternalAuditAnchorPublicationStatusDocument(
+                "local-anchor-1",
+                "source_service:alert-service",
+                2L,
+                true,
+                "PUBLISHED",
+                Instant.parse("2026-04-27T10:01:00Z"),
+                "object-store",
+                "audit-anchors/source_service-alert-service/00000000000000000002.json",
+                "hash-2",
+                "hash-2",
+                Instant.parse("2026-04-27T10:01:00Z"),
+                "NONE",
+                null,
+                signatureStatus,
+                "signature",
+                "local-ed25519-key-1",
+                "Ed25519",
+                Instant.parse("2026-04-27T10:01:01Z"),
+                "local-trust-authority",
+                "payload-hash",
+                1,
+                null,
+                Instant.parse("2026-04-27T10:01:00Z")
         );
     }
 

@@ -27,7 +27,8 @@ class ExternalAuditAnchorPublicationStatusRepository {
             Instant publishedAt,
             String sinkType,
             ExternalAnchorReference reference,
-            ExternalImmutabilityLevel immutabilityLevel
+            ExternalImmutabilityLevel immutabilityLevel,
+            SignedAuditAnchorPayload signature
     ) throws DataAccessException {
         Query query = query(anchor.anchorId());
         Update status = base(anchor, publishedAt)
@@ -40,6 +41,13 @@ class ExternalAuditAnchorPublicationStatusRepository {
                 .set("external_hash", reference == null ? null : safe(reference.externalHash(), 128))
                 .set("external_reference_verified_at", reference == null ? null : reference.verifiedAt())
                 .set("external_immutability_level", immutabilityLevel == null ? ExternalImmutabilityLevel.NONE.name() : immutabilityLevel.name())
+                .set("signature_status", signature == null ? "UNSIGNED" : safe(signature.signatureStatus()))
+                .set("signature", signature == null ? null : safe(signature.signature(), 2048))
+                .set("signing_key_id", signature == null ? null : safe(signature.keyId()))
+                .set("signing_algorithm", signature == null ? null : safe(signature.signatureAlgorithm()))
+                .set("signed_at", signature == null ? null : signature.signedAt())
+                .set("signing_authority", signature == null ? null : safe(signature.signingAuthority()))
+                .set("signed_payload_hash", signature == null ? null : safe(signature.signedPayloadHash(), 128))
                 .inc("external_publish_attempts", 1)
                 .unset("manifest_status")
                 .unset("last_external_publish_failure_reason");
@@ -53,7 +61,8 @@ class ExternalAuditAnchorPublicationStatusRepository {
             ExternalAnchorReference reference,
             ExternalImmutabilityLevel immutabilityLevel,
             String reason,
-            String manifestStatus
+            String manifestStatus,
+            SignedAuditAnchorPayload signature
     ) throws DataAccessException {
         Query query = query(anchor.anchorId());
         Update status = base(anchor, attemptedAt)
@@ -66,6 +75,13 @@ class ExternalAuditAnchorPublicationStatusRepository {
                 .set("external_reference_verified_at", reference == null ? null : reference.verifiedAt())
                 .set("external_immutability_level", immutabilityLevel == null ? ExternalImmutabilityLevel.NONE.name() : immutabilityLevel.name())
                 .set("manifest_status", safe(manifestStatus))
+                .set("signature_status", signature == null ? "UNSIGNED" : safe(signature.signatureStatus()))
+                .set("signature", signature == null ? null : safe(signature.signature(), 2048))
+                .set("signing_key_id", signature == null ? null : safe(signature.keyId()))
+                .set("signing_algorithm", signature == null ? null : safe(signature.signatureAlgorithm()))
+                .set("signed_at", signature == null ? null : signature.signedAt())
+                .set("signing_authority", signature == null ? null : safe(signature.signingAuthority()))
+                .set("signed_payload_hash", signature == null ? null : safe(signature.signedPayloadHash(), 128))
                 .set("last_external_publish_failure_reason", safe(reason))
                 .inc("external_publish_attempts", 1)
                 .unset("external_published_at");
@@ -86,8 +102,19 @@ class ExternalAuditAnchorPublicationStatusRepository {
                 .unset("external_reference_verified_at")
                 .unset("external_immutability_level")
                 .unset("manifest_status")
+                .unset("signature_status")
+                .unset("signature")
+                .unset("signing_key_id")
+                .unset("signing_algorithm")
+                .unset("signed_at")
+                .unset("signing_authority")
+                .unset("signed_payload_hash")
                 .set("last_external_publish_failure_reason", safe(reason));
         mongoTemplate.upsert(query, status, ExternalAuditAnchorPublicationStatusDocument.class);
+    }
+
+    java.util.Optional<ExternalAuditAnchorPublicationStatusDocument> findByLocalAnchorId(String localAnchorId) throws DataAccessException {
+        return java.util.Optional.ofNullable(mongoTemplate.findOne(query(localAnchorId), ExternalAuditAnchorPublicationStatusDocument.class));
     }
 
     List<ExternalAuditAnchorPublicationStatusDocument> findNotPublished(String partitionKey, int limit) throws DataAccessException {
