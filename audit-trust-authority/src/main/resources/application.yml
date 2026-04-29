@@ -23,3 +23,6 @@ app:
     internal-token: ${TRUST_AUTHORITY_INTERNAL_TOKEN:local-dev-trust-token}
     private-key-path: ${TRUST_AUTHORITY_PRIVATE_KEY_PATH:}
     public-key-path: ${TRUST_AUTHORITY_PUBLIC_KEY_PATH:}
+    audit-path: ${TRUST_AUTHORITY_AUDIT_PATH:./target/trust-authority-audit.jsonl}
+    enabled: ${TRUST_AUTHORITY_ENABLED:true}
+    signing-required: ${TRUST_AUTHORITY_SIGNING_REQUIRED:true}

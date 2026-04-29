@@ -3,6 +3,8 @@ package com.frauddetection.trustauthority;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.NotBlank;
 
+import java.time.Instant;
+
 public record TrustVerifyRequest(
         @JsonProperty("purpose")
         @NotBlank
@@ -29,6 +31,9 @@ public record TrustVerifyRequest(
 
         @JsonProperty("key_id")
         @NotBlank
-        String keyId
+        String keyId,
+
+        @JsonProperty("signed_at")
+        Instant signedAt
 ) {
 }

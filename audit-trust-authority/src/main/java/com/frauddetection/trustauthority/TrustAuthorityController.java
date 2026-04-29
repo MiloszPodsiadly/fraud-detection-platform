@@ -1,16 +1,12 @@
 package com.frauddetection.trustauthority;
 
 import jakarta.validation.Valid;
-import org.springframework.http.HttpStatus;
-import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
@@ -19,20 +15,20 @@ import java.util.List;
 public class TrustAuthorityController {
 
     private final TrustAuthorityService service;
-    private final TrustAuthorityProperties properties;
 
-    public TrustAuthorityController(TrustAuthorityService service, TrustAuthorityProperties properties) {
+    public TrustAuthorityController(TrustAuthorityService service) {
         this.service = service;
-        this.properties = properties;
     }
 
     @PostMapping("/sign")
     public TrustSignResponse sign(
             @RequestHeader(name = "X-Internal-Trust-Token", required = false) String token,
+            @RequestHeader(name = "X-Internal-Service-Name", required = false) String serviceName,
+            @RequestHeader(name = "X-Internal-Service-Environment", required = false) String environment,
+            @RequestHeader(name = "X-Internal-Service-Instance-Id", required = false) String instanceId,
             @Valid @RequestBody TrustSignRequest request
     ) {
-        requireInternalToken(token);
-        return service.sign(request);
+        return service.sign(token, TrustAuthorityCallerIdentity.of(serviceName, environment, instanceId), request);
     }
 
     @GetMapping("/keys")
@@ -43,15 +39,11 @@ public class TrustAuthorityController {
     @PostMapping("/verify")
     public TrustVerifyResponse verify(
             @RequestHeader(name = "X-Internal-Trust-Token", required = false) String token,
+            @RequestHeader(name = "X-Internal-Service-Name", required = false) String serviceName,
+            @RequestHeader(name = "X-Internal-Service-Environment", required = false) String environment,
+            @RequestHeader(name = "X-Internal-Service-Instance-Id", required = false) String instanceId,
             @Valid @RequestBody TrustVerifyRequest request
     ) {
-        requireInternalToken(token);
-        return service.verify(request);
-    }
-
-    private void requireInternalToken(String token) {
-        if (!StringUtils.hasText(token) || !token.equals(properties.getInternalToken())) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Internal trust authority credentials are invalid.");
-        }
+        return service.verify(token, TrustAuthorityCallerIdentity.of(serviceName, environment, instanceId), request);
     }
 }

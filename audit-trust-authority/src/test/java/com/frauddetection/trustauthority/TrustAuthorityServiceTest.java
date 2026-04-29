@@ -5,6 +5,8 @@ import org.springframework.mock.env.MockEnvironment;
 
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 
@@ -26,7 +28,8 @@ class TrustAuthorityServiceTest {
                 request.chainPosition(),
                 request.anchorId(),
                 signature.signature(),
-                signature.keyId()
+                signature.keyId(),
+                signature.signedAt()
         ));
 
         assertThat(signature.algorithm()).isEqualTo("Ed25519");
@@ -45,7 +48,8 @@ class TrustAuthorityServiceTest {
                 1L,
                 "anchor-1",
                 signature.signature(),
-                signature.keyId()
+                signature.keyId(),
+                signature.signedAt()
         ));
 
         assertThat(verified.status()).isEqualTo("INVALID");
@@ -63,7 +67,8 @@ class TrustAuthorityServiceTest {
                 1L,
                 "anchor-1",
                 signature.signature(),
-                "unknown-key"
+                "unknown-key",
+                signature.signedAt()
         ));
 
         assertThat(verified.status()).isEqualTo("INVALID");
@@ -82,7 +87,8 @@ class TrustAuthorityServiceTest {
                 1L,
                 "anchor-1",
                 signature.signature(),
-                null
+                null,
+                signature.signedAt()
         ));
 
         assertThat(verified.status()).isEqualTo("INVALID");
@@ -110,7 +116,8 @@ class TrustAuthorityServiceTest {
                 request.chainPosition(),
                 request.anchorId(),
                 oldSignature.signature(),
-                oldSignature.keyId()
+                oldSignature.keyId(),
+                oldSignature.signedAt()
         ));
         TrustSignResponse newSignature = rotatedService.sign(request);
 
@@ -133,11 +140,11 @@ class TrustAuthorityServiceTest {
 
         TrustVerifyResponse revoked = revokedService.verify(new TrustVerifyRequest(
                 request.purpose(), request.payloadHash(), request.partitionKey(), request.chainPosition(),
-                request.anchorId(), signature.signature(), "key-v1"
+                request.anchorId(), signature.signature(), "key-v1", signature.signedAt()
         ));
         TrustVerifyResponse unknown = revokedService.verify(new TrustVerifyRequest(
                 request.purpose(), request.payloadHash(), request.partitionKey(), request.chainPosition(),
-                request.anchorId(), signature.signature(), "missing-key"
+                request.anchorId(), signature.signature(), "missing-key", signature.signedAt()
         ));
 
         assertThat(revoked.status()).isEqualTo("INVALID");
@@ -179,6 +186,7 @@ class TrustAuthorityServiceTest {
     void shouldRejectEphemeralGeneratedKeysInProdLikeProfile() {
         TrustAuthorityProperties properties = new TrustAuthorityProperties();
         properties.setInternalToken("prod-token");
+        properties.setCallers(List.of(caller("alert-service", "alert-token", List.of("AUDIT_ANCHOR"))));
         TrustAuthorityRuntimeGuard guard = new TrustAuthorityRuntimeGuard(properties, environment("production"));
 
         assertThatThrownBy(() -> guard.run(null))
@@ -186,15 +194,138 @@ class TrustAuthorityServiceTest {
                 .hasMessageContaining("persistent private key path");
     }
 
+    @Test
+    void shouldRejectImplicitCallerAllowlistInProdLikeProfile() {
+        TrustAuthorityProperties properties = new TrustAuthorityProperties();
+        properties.setInternalToken("prod-token");
+        properties.setPrivateKeyPath("private.key");
+        properties.setPublicKeyPath("public.key");
+        TrustAuthorityRuntimeGuard guard = new TrustAuthorityRuntimeGuard(properties, environment("prod"));
+
+        assertThatThrownBy(() -> guard.run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("explicit caller allowlist");
+    }
+
+    @Test
+    void shouldAuditSignAndVerifyBeforeReturning() {
+        RecordingAuditSink auditSink = new RecordingAuditSink();
+        TrustAuthorityService service = service(new TrustAuthorityProperties(), auditSink);
+        TrustSignRequest request = request("hash-1", "anchor-1");
+
+        TrustSignResponse signature = service.sign(request);
+        TrustVerifyResponse verified = service.verify(new TrustVerifyRequest(
+                request.purpose(), request.payloadHash(), request.partitionKey(), request.chainPosition(),
+                request.anchorId(), signature.signature(), signature.keyId(), signature.signedAt()
+        ));
+
+        assertThat(verified.status()).isEqualTo("VALID");
+        assertThat(auditSink.events()).extracting(TrustAuthorityAuditEvent::action)
+                .containsExactly("SIGN", "VERIFY");
+        assertThat(auditSink.events()).extracting(TrustAuthorityAuditEvent::result)
+                .containsExactly("SUCCESS", "SUCCESS");
+        assertThat(auditSink.events()).extracting(TrustAuthorityAuditEvent::payloadHash)
+                .containsExactly("hash-1", "hash-1");
+    }
+
+    @Test
+    void shouldFailRequestWhenAuditWriteFails() {
+        TrustAuthorityService service = service(new TrustAuthorityProperties(), event -> {
+            throw new TrustAuthorityAuditException("failed", null);
+        });
+
+        assertThatThrownBy(() -> service.sign(request("hash-1", "anchor-1")))
+                .isInstanceOf(TrustAuthorityAuditException.class);
+    }
+
+    @Test
+    void shouldRejectUnauthorizedPurposeForScoringCallerAndAuditFailure() {
+        RecordingAuditSink auditSink = new RecordingAuditSink();
+        TrustAuthorityService service = service(new TrustAuthorityProperties(), auditSink);
+
+        assertThatThrownBy(() -> service.sign(
+                "local-dev-trust-token",
+                TrustAuthorityCallerIdentity.of("fraud-scoring-service", "local", "score-1"),
+                request("hash-1", "anchor-1")
+        )).isInstanceOf(TrustAuthorityRequestException.class);
+
+        assertThat(auditSink.events()).hasSize(1);
+        assertThat(auditSink.events().getFirst().result()).isEqualTo("FAILURE");
+        assertThat(auditSink.events().getFirst().reasonCode()).isEqualTo("PURPOSE_UNAUTHORIZED");
+    }
+
+    @Test
+    void shouldRateLimitSignPerCallerAndAuditRejection() {
+        RecordingAuditSink auditSink = new RecordingAuditSink();
+        TrustAuthorityProperties properties = new TrustAuthorityProperties();
+        TrustAuthorityProperties.CallerEntry caller = new TrustAuthorityProperties.CallerEntry();
+        caller.setServiceName("alert-service");
+        caller.setInternalToken("token-1");
+        caller.setAllowedPurposes(List.of("AUDIT_ANCHOR"));
+        caller.setSignRateLimitPerMinute(1);
+        properties.setCallers(List.of(caller));
+        TrustAuthorityService service = service(properties, auditSink);
+
+        service.sign("token-1", TrustAuthorityCallerIdentity.of("alert-service", "local", "a"), request("hash-1", "anchor-1"));
+
+        assertThatThrownBy(() -> service.sign("token-1", TrustAuthorityCallerIdentity.of("alert-service", "local", "a"), request("hash-2", "anchor-2")))
+                .isInstanceOf(TrustAuthorityRequestException.class);
+        assertThat(auditSink.events()).extracting(TrustAuthorityAuditEvent::reasonCode)
+                .containsExactly(null, "RATE_LIMIT_EXCEEDED");
+    }
+
+    @Test
+    void shouldEnforceKeyValidityWindowDuringVerification() throws Exception {
+        KeyPair keyPair = keyPair();
+        TrustAuthorityProperties.KeyEntry key = key("key-v1", "ACTIVE", keyPair);
+        key.setValidFrom(Instant.parse("2026-04-01T00:00:00Z"));
+        key.setValidUntil(Instant.parse("2026-04-30T00:00:00Z"));
+        TrustAuthorityService service = service(propertiesWithKeys(key));
+        TrustSignRequest request = request("hash-1", "anchor-1");
+        TrustSignResponse signature = service.sign(request);
+
+        TrustVerifyResponse expired = service.verify(new TrustVerifyRequest(
+                request.purpose(), request.payloadHash(), request.partitionKey(), request.chainPosition(),
+                request.anchorId(), signature.signature(), signature.keyId(), Instant.parse("2026-05-01T00:00:00Z")
+        ));
+        TrustVerifyResponse valid = service.verify(new TrustVerifyRequest(
+                request.purpose(), request.payloadHash(), request.partitionKey(), request.chainPosition(),
+                request.anchorId(), signature.signature(), signature.keyId(), Instant.parse("2026-04-15T00:00:00Z")
+        ));
+
+        assertThat(expired.status()).isEqualTo("INVALID");
+        assertThat(expired.reasonCode()).isEqualTo("KEY_EXPIRED");
+        assertThat(valid.status()).isEqualTo("VALID");
+    }
+
+    @Test
+    void shouldRejectDisabledSigningRequiredInProdLikeProfile() {
+        TrustAuthorityProperties properties = new TrustAuthorityProperties();
+        properties.setInternalToken("prod-token");
+        properties.setPrivateKeyPath("private.key");
+        properties.setPublicKeyPath("public.key");
+        properties.setSigningRequired(false);
+        properties.setCallers(List.of(caller("alert-service", "alert-token", List.of("AUDIT_ANCHOR"))));
+        TrustAuthorityRuntimeGuard guard = new TrustAuthorityRuntimeGuard(properties, environment("prod"));
+
+        assertThatThrownBy(() -> guard.run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("signing-required=true");
+    }
+
     private TrustAuthorityService service(String keyId) {
         TrustAuthorityProperties properties = new TrustAuthorityProperties();
         properties.setKeyId(keyId);
         properties.setAuthorityName("local-trust-authority");
-        return new TrustAuthorityService(properties);
+        return service(properties, new RecordingAuditSink());
+    }
+
+    private TrustAuthorityService service(TrustAuthorityProperties properties, TrustAuthorityAuditSink auditSink) {
+        return new TrustAuthorityService(properties, auditSink, new TrustAuthorityRateLimiter());
     }
 
     private TrustAuthorityService service(TrustAuthorityProperties properties) {
-        return new TrustAuthorityService(properties);
+        return service(properties, new RecordingAuditSink());
     }
 
     private TrustAuthorityProperties propertiesWithKeys(TrustAuthorityProperties.KeyEntry... keys) {
@@ -213,6 +344,14 @@ class TrustAuthorityServiceTest {
         return entry;
     }
 
+    private TrustAuthorityProperties.CallerEntry caller(String serviceName, String token, List<String> purposes) {
+        TrustAuthorityProperties.CallerEntry caller = new TrustAuthorityProperties.CallerEntry();
+        caller.setServiceName(serviceName);
+        caller.setInternalToken(token);
+        caller.setAllowedPurposes(purposes);
+        return caller;
+    }
+
     private KeyPair keyPair() throws Exception {
         return KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
     }
@@ -225,5 +364,18 @@ class TrustAuthorityServiceTest {
 
     private TrustSignRequest request(String payloadHash, String anchorId) {
         return new TrustSignRequest("AUDIT_ANCHOR", payloadHash, "source_service:alert-service", 1L, anchorId);
+    }
+
+    private static class RecordingAuditSink implements TrustAuthorityAuditSink {
+        private final List<TrustAuthorityAuditEvent> events = new ArrayList<>();
+
+        @Override
+        public void append(TrustAuthorityAuditEvent event) {
+            events.add(event);
+        }
+
+        List<TrustAuthorityAuditEvent> events() {
+            return events;
+        }
     }
 }

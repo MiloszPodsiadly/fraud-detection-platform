@@ -17,6 +17,10 @@ public class TrustAuthorityProperties {
     private String privateKeyPath;
     private String publicKeyPath;
     private List<KeyEntry> keys = new ArrayList<>();
+    private boolean enabled = true;
+    private boolean signingRequired = true;
+    private String auditPath = "./target/trust-authority-audit.jsonl";
+    private List<CallerEntry> callers = new ArrayList<>();
 
     public String getAuthorityName() {
         return authorityName;
@@ -64,6 +68,38 @@ public class TrustAuthorityProperties {
 
     public void setKeys(List<KeyEntry> keys) {
         this.keys = keys == null ? new ArrayList<>() : keys;
+    }
+
+    public boolean isEnabled() {
+        return enabled;
+    }
+
+    public void setEnabled(boolean enabled) {
+        this.enabled = enabled;
+    }
+
+    public boolean isSigningRequired() {
+        return signingRequired;
+    }
+
+    public void setSigningRequired(boolean signingRequired) {
+        this.signingRequired = signingRequired;
+    }
+
+    public String getAuditPath() {
+        return auditPath;
+    }
+
+    public void setAuditPath(String auditPath) {
+        this.auditPath = auditPath;
+    }
+
+    public List<CallerEntry> getCallers() {
+        return callers;
+    }
+
+    public void setCallers(List<CallerEntry> callers) {
+        this.callers = callers == null ? new ArrayList<>() : callers;
     }
 
     public static class KeyEntry {
@@ -147,6 +183,45 @@ public class TrustAuthorityProperties {
 
         public void setValidUntil(Instant validUntil) {
             this.validUntil = validUntil;
+        }
+    }
+
+    public static class CallerEntry {
+        private String serviceName;
+        private String internalToken;
+        private List<String> allowedPurposes = new ArrayList<>();
+        private int signRateLimitPerMinute = 1000;
+
+        public String getServiceName() {
+            return serviceName;
+        }
+
+        public void setServiceName(String serviceName) {
+            this.serviceName = serviceName;
+        }
+
+        public String getInternalToken() {
+            return internalToken;
+        }
+
+        public void setInternalToken(String internalToken) {
+            this.internalToken = internalToken;
+        }
+
+        public List<String> getAllowedPurposes() {
+            return allowedPurposes;
+        }
+
+        public void setAllowedPurposes(List<String> allowedPurposes) {
+            this.allowedPurposes = allowedPurposes == null ? new ArrayList<>() : allowedPurposes;
+        }
+
+        public int getSignRateLimitPerMinute() {
+            return signRateLimitPerMinute;
+        }
+
+        public void setSignRateLimitPerMinute(int signRateLimitPerMinute) {
+            this.signRateLimitPerMinute = signRateLimitPerMinute;
         }
     }
 }

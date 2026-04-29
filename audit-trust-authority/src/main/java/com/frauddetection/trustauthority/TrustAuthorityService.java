@@ -5,6 +5,9 @@ import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import io.micrometer.core.instrument.Metrics;
+import org.springframework.core.env.Environment;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -26,6 +29,8 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 
 @Service
 public class TrustAuthorityService {
@@ -37,11 +42,25 @@ public class TrustAuthorityService {
             .build();
 
     private final TrustAuthorityProperties properties;
+    private final TrustAuthorityAuditSink auditSink;
+    private final TrustAuthorityRateLimiter rateLimiter;
+    private final TrustAuthorityMetrics metrics;
+    private final boolean localKeyGenerationAllowed;
     private final List<RegisteredKey> keys;
     private final RegisteredKey activeKey;
 
-    public TrustAuthorityService(TrustAuthorityProperties properties) {
+    public TrustAuthorityService(
+            TrustAuthorityProperties properties,
+            TrustAuthorityAuditSink auditSink,
+            TrustAuthorityRateLimiter rateLimiter,
+            TrustAuthorityMetrics metrics,
+            Environment environment
+    ) {
         this.properties = properties;
+        this.auditSink = auditSink;
+        this.rateLimiter = rateLimiter;
+        this.metrics = metrics;
+        this.localKeyGenerationAllowed = localKeyGenerationAllowed(environment);
         this.keys = loadKeys(properties);
         this.activeKey = keys.stream()
                 .filter(key -> "ACTIVE".equals(key.status()))
@@ -52,45 +71,110 @@ public class TrustAuthorityService {
         }
     }
 
-    TrustSignResponse sign(TrustSignRequest request) {
-        validatePurpose(request.purpose());
+    TrustAuthorityService(TrustAuthorityProperties properties, TrustAuthorityAuditSink auditSink, TrustAuthorityRateLimiter rateLimiter) {
+        this.properties = properties;
+        this.auditSink = auditSink;
+        this.rateLimiter = rateLimiter;
+        this.metrics = new TrustAuthorityMetrics(Metrics.globalRegistry);
+        this.localKeyGenerationAllowed = true;
+        this.keys = loadKeys(properties);
+        this.activeKey = keys.stream()
+                .filter(key -> "ACTIVE".equals(key.status()))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("Trust authority requires one active signing key."));
+        if (activeKey.privateKey() == null) {
+            throw new IllegalStateException("Active trust authority key requires private key material.");
+        }
+    }
+
+    TrustSignResponse sign(String token, TrustAuthorityCallerIdentity caller, TrustSignRequest request) {
+        CallerAuthorization authorization = authorize(token, caller, request.purpose());
+        if (!authorization.allowed()) {
+            audit("SIGN", caller, request.purpose(), request.payloadHash(), null, "FAILURE", authorization.reasonCode());
+            metrics.recordSign("FAILURE");
+            throw new TrustAuthorityRequestException(authorization.status(), "Trust authority signing caller is not authorized.");
+        }
+        if (!rateLimiter.allow(caller.auditIdentity(), authorization.signRateLimitPerMinute())) {
+            audit("SIGN", caller, request.purpose(), request.payloadHash(), null, "FAILURE", "RATE_LIMIT_EXCEEDED");
+            metrics.recordRateLimit();
+            metrics.recordSign("FAILURE");
+            throw new TrustAuthorityRequestException(HttpStatus.TOO_MANY_REQUESTS, "Trust authority signing rate limit exceeded.");
+        }
+        String failureReason = null;
         try {
             Signature signer = Signature.getInstance(ALGORITHM);
             signer.initSign(activeKey.privateKey());
             signer.update(canonicalBytes(request.purpose(), request.payloadHash(), request.partitionKey(), request.chainPosition(), request.anchorId()));
-            return new TrustSignResponse(
+            TrustSignResponse response = new TrustSignResponse(
                     Base64.getEncoder().encodeToString(signer.sign()),
                     activeKey.keyId(),
                     ALGORITHM,
                     Instant.now(),
                     properties.getAuthorityName()
             );
+            audit("SIGN", caller, request.purpose(), request.payloadHash(), response.keyId(), "SUCCESS", null);
+            metrics.recordSign("SUCCESS");
+            return response;
         } catch (GeneralSecurityException exception) {
+            failureReason = "SIGNATURE_FAILED";
             throw new IllegalStateException("Trust authority signing failed.");
+        } finally {
+            if (failureReason != null) {
+                audit("SIGN", caller, request.purpose(), request.payloadHash(), activeKey.keyId(), "FAILURE", failureReason);
+                metrics.recordSign("FAILURE");
+            }
         }
     }
 
-    TrustVerifyResponse verify(TrustVerifyRequest request) {
+    TrustVerifyResponse verify(String token, TrustAuthorityCallerIdentity caller, TrustVerifyRequest request) {
+        CallerAuthorization authorization = authorize(token, caller, request.purpose());
+        if (!authorization.tokenValid()) {
+            audit("VERIFY", caller, request.purpose(), request.payloadHash(), request.keyId(), "FAILURE", authorization.reasonCode());
+            metrics.recordVerify("FAILURE");
+            throw new TrustAuthorityRequestException(authorization.status(), "Trust authority verify caller is not authenticated.");
+        }
         validatePurpose(request.purpose());
         RegisteredKey key = keys.stream()
                 .filter(candidate -> candidate.keyId().equals(request.keyId()))
                 .findFirst()
                 .orElse(null);
         if (key == null) {
-            return new TrustVerifyResponse("INVALID", "UNKNOWN_KEY");
+            return verifyFailure(caller, request, "UNKNOWN_KEY");
         }
         if ("REVOKED".equals(key.status())) {
-            return new TrustVerifyResponse("INVALID", "KEY_REVOKED");
+            return verifyFailure(caller, request, "KEY_REVOKED");
+        }
+        if (request.signedAt() == null) {
+            return verifyFailure(caller, request, "SIGNED_AT_MISSING");
+        }
+        if (request.signedAt().isBefore(key.validFrom())) {
+            return verifyFailure(caller, request, "KEY_NOT_YET_VALID");
+        }
+        if (key.validUntil() != null && request.signedAt().isAfter(key.validUntil())) {
+            return verifyFailure(caller, request, "KEY_EXPIRED");
         }
         try {
             Signature verifier = Signature.getInstance(ALGORITHM);
             verifier.initVerify(key.publicKey());
             verifier.update(canonicalBytes(request.purpose(), request.payloadHash(), request.partitionKey(), request.chainPosition(), request.anchorId()));
             boolean valid = verifier.verify(Base64.getDecoder().decode(request.signature()));
-            return valid ? new TrustVerifyResponse("VALID", null) : new TrustVerifyResponse("INVALID", "SIGNATURE_INVALID");
+            if (valid) {
+                audit("VERIFY", caller, request.purpose(), request.payloadHash(), request.keyId(), "SUCCESS", null);
+                metrics.recordVerify("SUCCESS");
+                return new TrustVerifyResponse("VALID", null);
+            }
+            return verifyFailure(caller, request, "SIGNATURE_INVALID");
         } catch (IllegalArgumentException | GeneralSecurityException exception) {
-            return new TrustVerifyResponse("INVALID", "SIGNATURE_INVALID");
+            return verifyFailure(caller, request, "SIGNATURE_INVALID");
         }
+    }
+
+    TrustSignResponse sign(TrustSignRequest request) {
+        return sign(properties.getInternalToken(), TrustAuthorityCallerIdentity.of("alert-service", "local", null), request);
+    }
+
+    TrustVerifyResponse verify(TrustVerifyRequest request) {
+        return verify(properties.getInternalToken(), TrustAuthorityCallerIdentity.of("alert-service", "local", null), request);
     }
 
     List<TrustKeyResponse> keys() {
@@ -137,7 +221,7 @@ public class TrustAuthorityService {
                     publicKey,
                     privateKey,
                     normalizeStatus(entry.getStatus()),
-                    entry.getValidFrom() == null ? Instant.now() : entry.getValidFrom(),
+                    entry.getValidFrom() == null ? Instant.EPOCH : entry.getValidFrom(),
                     entry.getValidUntil()
             );
         } catch (IOException | GeneralSecurityException exception) {
@@ -153,7 +237,7 @@ public class TrustAuthorityService {
                     keyPair.getPublic(),
                     keyPair.getPrivate(),
                     "ACTIVE",
-                    Instant.now(),
+                    Instant.EPOCH,
                     null
             );
         } catch (IOException | GeneralSecurityException exception) {
@@ -177,7 +261,7 @@ public class TrustAuthorityService {
 
     private void validatePurpose(String purpose) {
         if (!"AUDIT_ANCHOR".equals(purpose)) {
-            throw new IllegalArgumentException("Unsupported trust signing purpose.");
+            throw new TrustAuthorityRequestException(HttpStatus.FORBIDDEN, "Unsupported trust signing purpose.");
         }
     }
 
@@ -191,6 +275,9 @@ public class TrustAuthorityService {
                 throw new IllegalStateException("Trust authority public key path is required when loading a private key.");
             }
             return new KeyPair(publicKey, privateKey);
+        }
+        if (!localKeyGenerationAllowed) {
+            throw new IllegalStateException("Trust authority key generation is allowed only for local/dev/test profiles.");
         }
         KeyPairGenerator generator = KeyPairGenerator.getInstance(ALGORITHM);
         KeyPair generated = generator.generateKeyPair();
@@ -239,6 +326,115 @@ public class TrustAuthorityService {
             throw new IllegalStateException("Unsupported trust authority key status.");
         }
         return normalized;
+    }
+
+    private TrustVerifyResponse verifyFailure(TrustAuthorityCallerIdentity caller, TrustVerifyRequest request, String reasonCode) {
+        audit("VERIFY", caller, request.purpose(), request.payloadHash(), request.keyId(), "FAILURE", reasonCode);
+        metrics.recordVerify("FAILURE");
+        if ("SIGNATURE_INVALID".equals(reasonCode)) {
+            metrics.recordInvalidSignature();
+        } else if ("UNKNOWN_KEY".equals(reasonCode)) {
+            metrics.recordUnknownKey();
+        } else if ("KEY_REVOKED".equals(reasonCode)) {
+            metrics.recordRevokedKey();
+        }
+        return new TrustVerifyResponse("INVALID", reasonCode);
+    }
+
+    private void audit(
+            String action,
+            TrustAuthorityCallerIdentity caller,
+            String purpose,
+            String payloadHash,
+            String keyId,
+            String result,
+            String reasonCode
+    ) {
+        TrustAuthorityCallerIdentity safeCaller = caller == null
+                ? TrustAuthorityCallerIdentity.of(null, null, null)
+                : caller;
+        auditSink.append(new TrustAuthorityAuditEvent(
+                UUID.randomUUID().toString(),
+                action,
+                safeCaller.auditIdentity(),
+                safeCaller.serviceName(),
+                purpose,
+                payloadHash,
+                keyId,
+                result,
+                reasonCode,
+                Instant.now()
+        ));
+    }
+
+    private CallerAuthorization authorize(String token, TrustAuthorityCallerIdentity caller, String purpose) {
+        TrustAuthorityCallerIdentity safeCaller = caller == null
+                ? TrustAuthorityCallerIdentity.of(null, null, null)
+                : caller;
+        if (!StringUtils.hasText(token)) {
+            return CallerAuthorization.failure(HttpStatus.UNAUTHORIZED, "TOKEN_MISSING");
+        }
+        TrustAuthorityProperties.CallerEntry entry = callers().stream()
+                .filter(candidate -> safeCaller.serviceName().equals(candidate.getServiceName()))
+                .findFirst()
+                .orElse(null);
+        if (entry == null) {
+            return CallerAuthorization.failure(HttpStatus.FORBIDDEN, "CALLER_UNKNOWN");
+        }
+        String expectedToken = StringUtils.hasText(entry.getInternalToken())
+                ? entry.getInternalToken()
+                : properties.getInternalToken();
+        if (!StringUtils.hasText(expectedToken) || !expectedToken.equals(token)) {
+            return CallerAuthorization.failure(HttpStatus.UNAUTHORIZED, "TOKEN_CALLER_MISMATCH");
+        }
+        boolean purposeAllowed = entry.getAllowedPurposes().stream()
+                .anyMatch(allowed -> allowed.equals(purpose));
+        if (!purposeAllowed) {
+            return CallerAuthorization.failure(HttpStatus.FORBIDDEN, "PURPOSE_UNAUTHORIZED");
+        }
+        return CallerAuthorization.success(entry.getSignRateLimitPerMinute());
+    }
+
+    private List<TrustAuthorityProperties.CallerEntry> callers() {
+        if (!properties.getCallers().isEmpty()) {
+            return properties.getCallers();
+        }
+        TrustAuthorityProperties.CallerEntry alertService = new TrustAuthorityProperties.CallerEntry();
+        alertService.setServiceName("alert-service");
+        alertService.setInternalToken(properties.getInternalToken());
+        alertService.setAllowedPurposes(List.of("AUDIT_ANCHOR"));
+        alertService.setSignRateLimitPerMinute(1000);
+        TrustAuthorityProperties.CallerEntry scoringService = new TrustAuthorityProperties.CallerEntry();
+        scoringService.setServiceName("fraud-scoring-service");
+        scoringService.setInternalToken(properties.getInternalToken());
+        scoringService.setAllowedPurposes(List.of());
+        scoringService.setSignRateLimitPerMinute(0);
+        return List.of(alertService, scoringService);
+    }
+
+    private boolean localKeyGenerationAllowed(Environment environment) {
+        Set<String> profiles = Set.of(environment.getActiveProfiles());
+        return profiles.isEmpty()
+                || profiles.contains("local")
+                || profiles.contains("dev")
+                || profiles.contains("test")
+                || profiles.contains("docker-local");
+    }
+
+    private record CallerAuthorization(
+            boolean tokenValid,
+            boolean allowed,
+            HttpStatus status,
+            String reasonCode,
+            int signRateLimitPerMinute
+    ) {
+        static CallerAuthorization success(int signRateLimitPerMinute) {
+            return new CallerAuthorization(true, true, HttpStatus.OK, null, signRateLimitPerMinute);
+        }
+
+        static CallerAuthorization failure(HttpStatus status, String reasonCode) {
+            return new CallerAuthorization(false, false, status, reasonCode, 0);
+        }
     }
 
     private record RegisteredKey(

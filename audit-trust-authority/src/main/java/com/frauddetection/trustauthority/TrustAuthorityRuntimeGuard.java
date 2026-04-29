@@ -24,10 +24,25 @@ public class TrustAuthorityRuntimeGuard implements ApplicationRunner {
         if (!prodLikeProfile()) {
             return;
         }
+        if (properties.isEnabled() && !properties.isSigningRequired()) {
+            throw new IllegalStateException("Prod-like trust authority requires signing-required=true when enabled.");
+        }
         if (!StringUtils.hasText(properties.getInternalToken())
                 || TrustAuthorityProperties.DEFAULT_LOCAL_TOKEN.equals(properties.getInternalToken())) {
             throw new IllegalStateException("Prod-like trust authority requires an explicit non-default internal token.");
         }
+        if (properties.getCallers().isEmpty()) {
+            throw new IllegalStateException("Prod-like trust authority requires an explicit caller allowlist.");
+        }
+        properties.getCallers().forEach(caller -> {
+            if (!StringUtils.hasText(caller.getServiceName())) {
+                throw new IllegalStateException("Prod-like trust authority caller allowlist requires service names.");
+            }
+            if (!StringUtils.hasText(caller.getInternalToken())
+                    || TrustAuthorityProperties.DEFAULT_LOCAL_TOKEN.equals(caller.getInternalToken())) {
+                throw new IllegalStateException("Prod-like trust authority caller allowlist requires per-caller non-default tokens.");
+            }
+        });
         if (properties.getKeys().isEmpty()) {
             requirePersistentPath(properties.getPrivateKeyPath(), "private key");
             requirePersistentPath(properties.getPublicKeyPath(), "public key");
