@@ -20,12 +20,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
+import java.security.MessageDigest;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Date;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -298,6 +300,64 @@ class TrustAuthorityServiceTest {
     }
 
     @Test
+    void shouldFailStartupWhenCapabilityOverclaimsExternalTrust() {
+        TrustAuthorityProperties properties = new TrustAuthorityProperties();
+        properties.setCapabilityLevel("external-anchored-trust");
+
+        assertThatThrownBy(() -> new TrustAuthorityRuntimeGuard(properties, environment("local")).run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("INTERNAL_CRYPTOGRAPHIC_TRUST only");
+    }
+
+    @Test
+    void shouldFailStartupWhenUnsupportedExternalClaimsAreEnabled() {
+        TrustAuthorityProperties properties = new TrustAuthorityProperties();
+        MockEnvironment environment = environment("local");
+        environment.setProperty("app.trust-authority.notarization.enabled", "true");
+
+        assertThatThrownBy(() -> new TrustAuthorityRuntimeGuard(properties, environment).run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("notarization");
+    }
+
+    @Test
+    void shouldPinJwtPublicKeyFingerprintsWhenConfigured() throws Exception {
+        KeyPair jwtKey = rsaKeyPair();
+        TrustAuthorityProperties properties = jwtProperties(jwtKey);
+        properties.getJwtIdentity().setTrustedKeyFingerprints(List.of(fingerprint(jwtKey.getPublic().getEncoded())));
+        TrustAuthorityService service = service(properties, new RecordingAuditSink());
+        TrustSignRequest request = request("hash-1", "anchor-1");
+
+        TrustSignResponse response = service.sign(jwtCredentials(jwtKey, "alert-service", "trust-authority", List.of("AUDIT_ANCHOR")), request);
+
+        assertThat(response.keyId()).isEqualTo("local-ed25519-key-1");
+    }
+
+    @Test
+    void shouldFailStartupForUntrustedJwtPublicKeyFingerprint() throws Exception {
+        KeyPair jwtKey = rsaKeyPair();
+        TrustAuthorityProperties properties = jwtProperties(jwtKey);
+        properties.getJwtIdentity().setTrustedKeyFingerprints(List.of("0000000000000000000000000000000000000000000000000000000000000000"));
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+
+        assertThatThrownBy(() -> service(properties, new RecordingAuditSink(), new TrustAuthorityMetrics(registry)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("fingerprint is not trusted");
+        assertThat(registry.get("trust_jwt_key_fingerprint_mismatch_total").counter().count()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void shouldFailStartupWhenFingerprintPinsAreConfiguredWithoutJwtKeys() {
+        TrustAuthorityProperties properties = jwtProperties(List.of(),
+                caller("alert-service", "", List.of("AUDIT_ANCHOR"), List.of("jwt-key-1")));
+        properties.getJwtIdentity().setTrustedKeyFingerprints(List.of("0000000000000000000000000000000000000000000000000000000000000000"));
+
+        assertThatThrownBy(() -> service(properties, new RecordingAuditSink()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("require loaded public keys");
+    }
+
+    @Test
     void shouldRejectInlinePrivateKeyMaterialInProdLikeProfile() throws Exception {
         TrustAuthorityProperties properties = propertiesWithKeys(key("key-v1", "ACTIVE", keyPair()));
         properties.setHmacSecret("prod-secret");
@@ -439,6 +499,24 @@ class TrustAuthorityServiceTest {
 
         assertThatThrownBy(() -> service.sign(credentials, first))
                 .isInstanceOf(TrustAuthorityRequestException.class);
+        assertThat(auditSink.events()).extracting(TrustAuthorityAuditEvent::reasonCode)
+                .containsExactly(null, "REPLAY_DETECTED");
+    }
+
+    @Test
+    void shouldRejectDistributedHintReplayFoundInAuditChain() {
+        RecordingAuditSink auditSink = new RecordingAuditSink();
+        TrustAuthorityProperties properties = new TrustAuthorityProperties();
+        properties.getReplay().setMode("DISTRIBUTED_HINT");
+        TrustSignRequest first = request("hash-1", "anchor-1");
+        TrustAuthorityRequestCredentials credentials = credentials("alert-service", "local", "local-dev-trust-hmac-secret", "SIGN", signCredentialPayload(first), "request-distributed-1");
+
+        service(properties, auditSink).sign(credentials, first);
+
+        assertThatThrownBy(() -> service(properties, auditSink).sign(credentials, first))
+                .isInstanceOf(TrustAuthorityRequestException.class);
+        assertThat(auditSink.events()).extracting(TrustAuthorityAuditEvent::requestId)
+                .contains("request-distributed-1");
         assertThat(auditSink.events()).extracting(TrustAuthorityAuditEvent::reasonCode)
                 .containsExactly(null, "REPLAY_DETECTED");
     }
@@ -664,6 +742,7 @@ class TrustAuthorityServiceTest {
         assertThat(head.source()).isEqualTo("trust-authority-audit");
         assertThat(head.proofType()).isEqualTo("LOCAL_HASH_CHAIN_HEAD");
         assertThat(head.integrityHint()).isEqualTo("LOCAL_CHAIN_ONLY");
+        assertThat(head.capabilityLevel()).isEqualTo(TrustAuthorityCapabilityLevel.INTERNAL_CRYPTOGRAPHIC_TRUST);
         assertThat(head.occurredAt()).isNotNull();
         assertThat(auditSink.events()).extracting(TrustAuthorityAuditEvent::payloadHash)
                 .contains("trust-authority-audit-head");
@@ -697,9 +776,39 @@ class TrustAuthorityServiceTest {
             @Override
             public TrustAuthorityAuditIntegrityResponse integrity(int limit, String mode) {
                 if (calls.getAndIncrement() == 0) {
-                    return new TrustAuthorityAuditIntegrityResponse("PARTIAL", 1, "WINDOW", 2L, "hash-2", 2L, 2L, "hash-1", "BOUNDARY_PREDECESSOR_OUTSIDE_WINDOW", List.of());
+                    return new TrustAuthorityAuditIntegrityResponse(
+                            "PARTIAL",
+                            1,
+                            "WINDOW",
+                            TrustAuthorityCapabilityLevel.INTERNAL_CRYPTOGRAPHIC_TRUST,
+                            false,
+                            TrustAuthorityIntegrityConfidence.PARTIAL_BOUNDARY,
+                            2L,
+                            "hash-2",
+                            2L,
+                            2L,
+                            "hash-1",
+                            "BOUNDARY_PREDECESSOR_OUTSIDE_WINDOW",
+                            List.of(),
+                            null
+                    );
                 }
-                return new TrustAuthorityAuditIntegrityResponse("INVALID", 1, "WINDOW", 2L, "hash-2", 2L, 2L, "hash-1", "AUDIT_CHAIN_INVALID", List.of());
+                return new TrustAuthorityAuditIntegrityResponse(
+                        "INVALID",
+                        1,
+                        "WINDOW",
+                        TrustAuthorityCapabilityLevel.INTERNAL_CRYPTOGRAPHIC_TRUST,
+                        true,
+                        TrustAuthorityIntegrityConfidence.PARTIAL_BOUNDARY,
+                        2L,
+                        "hash-2",
+                        2L,
+                        2L,
+                        "hash-1",
+                        "AUDIT_CHAIN_INVALID",
+                        List.of(),
+                        null
+                );
             }
 
             @Override
@@ -709,9 +818,13 @@ class TrustAuthorityServiceTest {
         };
         TrustAuthorityService service = service(new TrustAuthorityProperties(), sink, new TrustAuthorityMetrics(registry));
 
-        service.auditIntegrity(credentials("alert-service", "local", "local-dev-trust-hmac-secret", "AUDIT_INTEGRITY", "trust-authority-audit-integrity"), 100, "WINDOW");
+        TrustAuthorityAuditIntegrityResponse partial = service.auditIntegrity(credentials("alert-service", "local", "local-dev-trust-hmac-secret", "AUDIT_INTEGRITY", "trust-authority-audit-integrity"), 100, "WINDOW");
         service.auditIntegrity(credentials("alert-service", "local", "local-dev-trust-hmac-secret", "AUDIT_INTEGRITY", "trust-authority-audit-integrity"), 100, "WINDOW");
 
+        assertThat(partial.trustDecisionTrace()).isNotNull();
+        assertThat(partial.trustDecisionTrace().identityVerified()).isTrue();
+        assertThat(partial.trustDecisionTrace().chainVerified()).isEqualTo("PARTIAL");
+        assertThat(partial.trustDecisionTrace().finalStatus()).isEqualTo("PARTIAL");
         assertThat(registry.get("trust_audit_integrity_partial_total").counter().count()).isEqualTo(1.0d);
         assertThat(registry.get("trust_audit_integrity_invalid_total").counter().count()).isEqualTo(1.0d);
     }
@@ -937,6 +1050,14 @@ class TrustAuthorityServiceTest {
         }
     }
 
+    private String fingerprint(byte[] publicKey) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(publicKey));
+        } catch (Exception exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
     private static class RecordingAuditSink implements TrustAuthorityAuditSink {
         private final List<TrustAuthorityAuditEvent> events = new ArrayList<>();
 
@@ -963,6 +1084,12 @@ class TrustAuthorityServiceTest {
                 return TrustAuthorityAuditHeadResponse.empty();
             }
             return TrustAuthorityAuditHeadResponse.from(events.getLast());
+        }
+
+        @Override
+        public boolean requestSeen(String callerService, String requestId) {
+            return events.stream()
+                    .anyMatch(event -> callerService.equals(event.callerService()) && requestId.equals(event.requestId()));
         }
 
         List<TrustAuthorityAuditEvent> events() {

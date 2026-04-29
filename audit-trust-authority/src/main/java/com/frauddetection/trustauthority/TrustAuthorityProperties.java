@@ -22,8 +22,10 @@ public class TrustAuthorityProperties {
     private boolean signingRequired = true;
     private String auditPath = "./target/trust-authority-audit.jsonl";
     private String identityMode = "hmac-local";
+    private String capabilityLevel = "internal-cryptographic-trust";
     private JwtIdentityProperties jwtIdentity = new JwtIdentityProperties();
     private AuditProperties audit = new AuditProperties();
+    private ReplayProperties replay = new ReplayProperties();
     private List<CallerEntry> callers = new ArrayList<>();
 
     public String getAuthorityName() {
@@ -110,6 +112,18 @@ public class TrustAuthorityProperties {
         return TrustAuthorityIdentityMode.from(identityMode);
     }
 
+    public String getCapabilityLevel() {
+        return capabilityLevel;
+    }
+
+    public void setCapabilityLevel(String capabilityLevel) {
+        this.capabilityLevel = capabilityLevel;
+    }
+
+    TrustAuthorityCapabilityLevel capabilityLevelEnum() {
+        return TrustAuthorityCapabilityLevel.from(capabilityLevel);
+    }
+
     public JwtIdentityProperties getJwtIdentity() {
         return jwtIdentity;
     }
@@ -124,6 +138,14 @@ public class TrustAuthorityProperties {
 
     public void setAudit(AuditProperties audit) {
         this.audit = audit == null ? new AuditProperties() : audit;
+    }
+
+    public ReplayProperties getReplay() {
+        return replay;
+    }
+
+    public void setReplay(ReplayProperties replay) {
+        this.replay = replay == null ? new ReplayProperties() : replay;
     }
 
     public List<CallerEntry> getCallers() {
@@ -230,6 +252,22 @@ public class TrustAuthorityProperties {
         }
     }
 
+    public static class ReplayProperties {
+        private String mode = "LOCAL";
+
+        public String getMode() {
+            return mode;
+        }
+
+        public void setMode(String mode) {
+            this.mode = mode;
+        }
+
+        TrustAuthorityReplayMode modeEnum() {
+            return TrustAuthorityReplayMode.from(mode);
+        }
+    }
+
     public static class JwtIdentityProperties {
         private String issuer;
         private String audience;
@@ -240,6 +278,7 @@ public class TrustAuthorityProperties {
         private Duration maxTtl = Duration.ofMinutes(5);
         private String jwksPath;
         private List<JwtKeyEntry> keys = new ArrayList<>();
+        private List<String> trustedKeyFingerprints = new ArrayList<>();
 
         public String getIssuer() {
             return issuer;
@@ -311,6 +350,14 @@ public class TrustAuthorityProperties {
 
         public void setKeys(List<JwtKeyEntry> keys) {
             this.keys = keys == null ? new ArrayList<>() : keys;
+        }
+
+        public List<String> getTrustedKeyFingerprints() {
+            return trustedKeyFingerprints;
+        }
+
+        public void setTrustedKeyFingerprints(List<String> trustedKeyFingerprints) {
+            this.trustedKeyFingerprints = trustedKeyFingerprints == null ? new ArrayList<>() : trustedKeyFingerprints;
         }
     }
 

@@ -110,22 +110,17 @@ public class TrustAuthorityService {
         CallerAuthorization authorization = authorize(credentials, "SIGN", signCredentialPayload(request), request.purpose());
         TrustAuthorityCallerIdentity caller = authorization.identity();
         if (!authorization.allowed()) {
-            audit("SIGN", caller, request.purpose(), request.payloadHash(), null, "FAILURE", authorization.reasonCode());
+            audit("SIGN", caller, requestId(credentials), request.purpose(), request.payloadHash(), null, "FAILURE", authorization.reasonCode());
             metrics.recordSign("FAILURE");
             throw new TrustAuthorityRequestException(authorization.status(), "Trust authority signing caller is not authorized.");
         }
         if (!rateLimiter.allow(caller.serviceName(), authorization.signRateLimitPerMinute())) {
-            audit("SIGN", caller, request.purpose(), request.payloadHash(), null, "FAILURE", "RATE_LIMIT_EXCEEDED");
+            audit("SIGN", caller, requestId(credentials), request.purpose(), request.payloadHash(), null, "FAILURE", "RATE_LIMIT_EXCEEDED");
             metrics.recordRateLimit();
             metrics.recordSign("FAILURE");
             throw new TrustAuthorityRequestException(HttpStatus.TOO_MANY_REQUESTS, "Trust authority signing rate limit exceeded.");
         }
-        if (!replayGuard.allow(caller.serviceName(), credentials.requestId())) {
-            audit("SIGN", caller, request.purpose(), request.payloadHash(), null, "FAILURE", "REPLAY_DETECTED");
-            metrics.recordReplayDetected();
-            metrics.recordSign("FAILURE");
-            throw new TrustAuthorityRequestException(HttpStatus.CONFLICT, "Trust authority signing replay detected.");
-        }
+        enforceReplay(caller, requestId(credentials), "SIGN", request.purpose(), request.payloadHash(), null);
         String failureReason = null;
         try {
             Signature signer = Signature.getInstance(ALGORITHM);
@@ -138,7 +133,7 @@ public class TrustAuthorityService {
                     Instant.now(),
                     properties.getAuthorityName()
             );
-            audit("SIGN", caller, request.purpose(), request.payloadHash(), response.keyId(), "SUCCESS", null);
+            audit("SIGN", caller, requestId(credentials), request.purpose(), request.payloadHash(), response.keyId(), "SUCCESS", null);
             metrics.recordSign("SUCCESS");
             return response;
         } catch (GeneralSecurityException exception) {
@@ -146,7 +141,7 @@ public class TrustAuthorityService {
             throw new IllegalStateException("Trust authority signing failed.");
         } finally {
             if (failureReason != null) {
-                audit("SIGN", caller, request.purpose(), request.payloadHash(), activeKey.keyId(), "FAILURE", failureReason);
+                audit("SIGN", caller, requestId(credentials), request.purpose(), request.payloadHash(), activeKey.keyId(), "FAILURE", failureReason);
                 metrics.recordSign("FAILURE");
             }
         }
@@ -156,29 +151,30 @@ public class TrustAuthorityService {
         CallerAuthorization authorization = authorize(credentials, "VERIFY", verifyCredentialPayload(request), request.purpose());
         TrustAuthorityCallerIdentity caller = authorization.identity();
         if (!authorization.tokenValid()) {
-            audit("VERIFY", caller, request.purpose(), request.payloadHash(), request.keyId(), "FAILURE", authorization.reasonCode());
+            audit("VERIFY", caller, requestId(credentials), request.purpose(), request.payloadHash(), request.keyId(), "FAILURE", authorization.reasonCode());
             metrics.recordVerify("FAILURE");
             throw new TrustAuthorityRequestException(authorization.status(), "Trust authority verify caller is not authenticated.");
         }
+        enforceReplay(caller, requestId(credentials), "VERIFY", request.purpose(), request.payloadHash(), request.keyId());
         validatePurpose(request.purpose());
         RegisteredKey key = keys.stream()
                 .filter(candidate -> candidate.keyId().equals(request.keyId()))
                 .findFirst()
                 .orElse(null);
         if (key == null) {
-            return verifyFailure(caller, request, "UNKNOWN_KEY");
+            return verifyFailure(caller, requestId(credentials), request, "UNKNOWN_KEY");
         }
         if ("REVOKED".equals(key.status())) {
-            return verifyFailure(caller, request, "KEY_REVOKED");
+            return verifyFailure(caller, requestId(credentials), request, "KEY_REVOKED");
         }
         if (request.signedAt() == null) {
-            return verifyFailure(caller, request, "SIGNED_AT_MISSING");
+            return verifyFailure(caller, requestId(credentials), request, "SIGNED_AT_MISSING");
         }
         if (request.signedAt().isBefore(key.validFrom())) {
-            return verifyFailure(caller, request, "KEY_NOT_YET_VALID");
+            return verifyFailure(caller, requestId(credentials), request, "KEY_NOT_YET_VALID");
         }
         if (key.validUntil() != null && request.signedAt().isAfter(key.validUntil())) {
-            return verifyFailure(caller, request, "KEY_EXPIRED");
+            return verifyFailure(caller, requestId(credentials), request, "KEY_EXPIRED");
         }
         try {
             Signature verifier = Signature.getInstance(ALGORITHM);
@@ -186,13 +182,13 @@ public class TrustAuthorityService {
             verifier.update(canonicalBytes(request.purpose(), request.payloadHash(), request.partitionKey(), request.chainPosition(), request.anchorId()));
             boolean valid = verifier.verify(Base64.getDecoder().decode(request.signature()));
             if (valid) {
-                audit("VERIFY", caller, request.purpose(), request.payloadHash(), request.keyId(), "SUCCESS", null);
+                audit("VERIFY", caller, requestId(credentials), request.purpose(), request.payloadHash(), request.keyId(), "SUCCESS", null);
                 metrics.recordVerify("SUCCESS");
                 return new TrustVerifyResponse("VALID", null);
             }
-            return verifyFailure(caller, request, "SIGNATURE_INVALID");
+            return verifyFailure(caller, requestId(credentials), request, "SIGNATURE_INVALID");
         } catch (IllegalArgumentException | GeneralSecurityException exception) {
-            return verifyFailure(caller, request, "SIGNATURE_INVALID");
+            return verifyFailure(caller, requestId(credentials), request, "SIGNATURE_INVALID");
         }
     }
 
@@ -226,17 +222,14 @@ public class TrustAuthorityService {
         CallerAuthorization authorization = authorize(credentials, "AUDIT_INTEGRITY", "trust-authority-audit-integrity", "AUDIT_INTEGRITY");
         TrustAuthorityCallerIdentity caller = authorization.identity();
         if (!authorization.tokenValid()) {
-            audit("VERIFY", caller, "AUDIT_INTEGRITY", "trust-authority-audit-integrity", null, "FAILURE", authorization.reasonCode());
+            audit("VERIFY", caller, requestId(credentials), "AUDIT_INTEGRITY", "trust-authority-audit-integrity", null, "FAILURE", authorization.reasonCode());
             throw new TrustAuthorityRequestException(authorization.status(), "Trust authority audit integrity caller is not authenticated.");
         }
-        if (!replayGuard.allow(caller.serviceName(), credentials.requestId())) {
-            audit("VERIFY", caller, "AUDIT_INTEGRITY", "trust-authority-audit-integrity", null, "FAILURE", "REPLAY_DETECTED");
-            metrics.recordReplayDetected();
-            throw new TrustAuthorityRequestException(HttpStatus.CONFLICT, "Trust authority request replay detected.");
-        }
-        TrustAuthorityAuditIntegrityResponse response = auditSink.integrity(limit, mode);
+        enforceReplay(caller, requestId(credentials), "VERIFY", "AUDIT_INTEGRITY", "trust-authority-audit-integrity", null);
+        TrustAuthorityAuditIntegrityResponse rawResponse = auditSink.integrity(limit, mode);
+        TrustAuthorityAuditIntegrityResponse response = rawResponse.withDecisionTrace(decisionTrace(true, false, rawResponse));
         metrics.recordAuditIntegrityResult(response.status());
-        audit("VERIFY", caller, "AUDIT_INTEGRITY", "trust-authority-audit-integrity", null,
+        audit("VERIFY", caller, requestId(credentials), "AUDIT_INTEGRITY", "trust-authority-audit-integrity", null,
                 "VALID".equals(response.status()) ? "SUCCESS" : "FAILURE", response.reasonCode());
         return response;
     }
@@ -245,16 +238,12 @@ public class TrustAuthorityService {
         CallerAuthorization authorization = authorize(credentials, "AUDIT_INTEGRITY", "trust-authority-audit-head", "AUDIT_INTEGRITY");
         TrustAuthorityCallerIdentity caller = authorization.identity();
         if (!authorization.tokenValid()) {
-            audit("VERIFY", caller, "AUDIT_INTEGRITY", "trust-authority-audit-head", null, "FAILURE", authorization.reasonCode());
+            audit("VERIFY", caller, requestId(credentials), "AUDIT_INTEGRITY", "trust-authority-audit-head", null, "FAILURE", authorization.reasonCode());
             throw new TrustAuthorityRequestException(authorization.status(), "Trust authority audit head caller is not authenticated.");
         }
-        if (!replayGuard.allow(caller.serviceName(), credentials.requestId())) {
-            audit("VERIFY", caller, "AUDIT_INTEGRITY", "trust-authority-audit-head", null, "FAILURE", "REPLAY_DETECTED");
-            metrics.recordReplayDetected();
-            throw new TrustAuthorityRequestException(HttpStatus.CONFLICT, "Trust authority request replay detected.");
-        }
+        enforceReplay(caller, requestId(credentials), "VERIFY", "AUDIT_INTEGRITY", "trust-authority-audit-head", null);
         TrustAuthorityAuditHeadResponse response = auditSink.head();
-        audit("VERIFY", caller, "AUDIT_INTEGRITY", "trust-authority-audit-head", null, "SUCCESS", null);
+        audit("VERIFY", caller, requestId(credentials), "AUDIT_INTEGRITY", "trust-authority-audit-head", null, "SUCCESS", null);
         return response;
     }
 
@@ -388,8 +377,8 @@ public class TrustAuthorityService {
         return normalized;
     }
 
-    private TrustVerifyResponse verifyFailure(TrustAuthorityCallerIdentity caller, TrustVerifyRequest request, String reasonCode) {
-        audit("VERIFY", caller, request.purpose(), request.payloadHash(), request.keyId(), "FAILURE", reasonCode);
+    private TrustVerifyResponse verifyFailure(TrustAuthorityCallerIdentity caller, String requestId, TrustVerifyRequest request, String reasonCode) {
+        audit("VERIFY", caller, requestId, request.purpose(), request.payloadHash(), request.keyId(), "FAILURE", reasonCode);
         metrics.recordVerify("FAILURE");
         if ("SIGNATURE_INVALID".equals(reasonCode)) {
             metrics.recordInvalidSignature();
@@ -404,6 +393,7 @@ public class TrustAuthorityService {
     private void audit(
             String action,
             TrustAuthorityCallerIdentity caller,
+            String requestId,
             String purpose,
             String payloadHash,
             String keyId,
@@ -414,10 +404,12 @@ public class TrustAuthorityService {
                 ? TrustAuthorityCallerIdentity.of(null, null, null)
                 : caller;
         auditSink.append(new TrustAuthorityAuditEvent(
+                TrustAuthorityAuditEvent.CURRENT_SCHEMA_VERSION,
                 UUID.randomUUID().toString(),
                 action,
                 safeCaller.auditIdentity(),
                 safeCaller.serviceName(),
+                requestId,
                 purpose,
                 payloadHash,
                 keyId,
@@ -428,6 +420,62 @@ public class TrustAuthorityService {
                 null,
                 null
         ));
+    }
+
+    private void enforceReplay(
+            TrustAuthorityCallerIdentity caller,
+            String requestId,
+            String action,
+            String purpose,
+            String payloadHash,
+            String keyId
+    ) {
+        if (properties.getReplay().modeEnum() == TrustAuthorityReplayMode.DISTRIBUTED_HINT
+                && StringUtils.hasText(requestId)
+                && auditSink.requestSeen(caller.serviceName(), requestId)) {
+            audit(action, caller, requestId, purpose, payloadHash, keyId, "FAILURE", "REPLAY_DETECTED");
+            metrics.recordReplayDetected();
+            if ("SIGN".equals(action)) {
+                metrics.recordSign("FAILURE");
+            } else {
+                metrics.recordVerify("FAILURE");
+            }
+            throw new TrustAuthorityRequestException(HttpStatus.CONFLICT, "Trust authority request replay detected.");
+        }
+        if (!replayGuard.allow(caller.serviceName(), requestId)) {
+            audit(action, caller, requestId, purpose, payloadHash, keyId, "FAILURE", "REPLAY_DETECTED");
+            metrics.recordReplayDetected();
+            if ("SIGN".equals(action)) {
+                metrics.recordSign("FAILURE");
+            } else {
+                metrics.recordVerify("FAILURE");
+            }
+            throw new TrustAuthorityRequestException(HttpStatus.CONFLICT, "Trust authority request replay detected.");
+        }
+    }
+
+    private TrustDecisionTrace decisionTrace(boolean identityVerified, boolean signatureVerified, TrustAuthorityAuditIntegrityResponse response) {
+        return new TrustDecisionTrace(
+                identityVerified,
+                signatureVerified,
+                chainTrace(response),
+                "signingRequired=" + properties.isSigningRequired(),
+                response.status()
+        );
+    }
+
+    private String chainTrace(TrustAuthorityAuditIntegrityResponse response) {
+        if ("PARTIAL".equals(response.status()) || response.integrityConfidence() == TrustAuthorityIntegrityConfidence.PARTIAL_BOUNDARY) {
+            return "PARTIAL";
+        }
+        if (response.integrityConfidence() == TrustAuthorityIntegrityConfidence.FULL_CHAIN_VERIFIED) {
+            return "FULL";
+        }
+        return "WINDOW";
+    }
+
+    private String requestId(TrustAuthorityRequestCredentials credentials) {
+        return credentials == null ? null : credentials.requestId();
     }
 
     private CallerAuthorization authorize(TrustAuthorityRequestCredentials credentials, String action, String payload, String purpose) {

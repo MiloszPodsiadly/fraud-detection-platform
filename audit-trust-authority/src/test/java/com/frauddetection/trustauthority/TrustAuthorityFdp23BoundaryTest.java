@@ -34,10 +34,12 @@ class TrustAuthorityFdp23BoundaryTest {
     @Test
     void shouldKeepAuditHeadLocalOnlyWithoutExternalAnchoringClaim() {
         TrustAuthorityAuditEvent event = new TrustAuthorityAuditEvent(
+                TrustAuthorityAuditEvent.CURRENT_SCHEMA_VERSION,
                 "event-1",
                 "SIGN",
                 "alert-service@jwt#alert-service",
                 "alert-service",
+                "request-1",
                 "AUDIT_ANCHOR",
                 "payload-hash",
                 "key-1",

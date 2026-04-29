@@ -15,6 +15,15 @@ public record TrustAuthorityAuditIntegrityResponse(
         @JsonProperty("mode")
         String mode,
 
+        @JsonProperty("capability_level")
+        TrustAuthorityCapabilityLevel capabilityLevel,
+
+        @JsonProperty("tamper_detected")
+        boolean tamperDetected,
+
+        @JsonProperty("integrity_confidence")
+        TrustAuthorityIntegrityConfidence integrityConfidence,
+
         @JsonProperty("latest_chain_position")
         Long latestChainPosition,
 
@@ -39,13 +48,51 @@ public record TrustAuthorityAuditIntegrityResponse(
         String reasonCode,
 
         @JsonProperty("violations")
-        List<TrustAuthorityAuditIntegrityViolation> violations
+        List<TrustAuthorityAuditIntegrityViolation> violations,
+
+        @JsonProperty("trust_decision_trace")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        TrustDecisionTrace trustDecisionTrace
 ) {
     static TrustAuthorityAuditIntegrityResponse unavailable(String reasonCode) {
         return unavailable(reasonCode, TrustAuthorityAuditIntegrityMode.WINDOW);
     }
 
     static TrustAuthorityAuditIntegrityResponse unavailable(String reasonCode, TrustAuthorityAuditIntegrityMode mode) {
-        return new TrustAuthorityAuditIntegrityResponse("UNAVAILABLE", 0, mode.name(), null, null, null, null, null, reasonCode, List.of());
+        return new TrustAuthorityAuditIntegrityResponse(
+                "UNAVAILABLE",
+                0,
+                mode.name(),
+                TrustAuthorityCapabilityLevel.INTERNAL_CRYPTOGRAPHIC_TRUST,
+                false,
+                TrustAuthorityIntegrityConfidence.PARTIAL_BOUNDARY,
+                null,
+                null,
+                null,
+                null,
+                null,
+                reasonCode,
+                List.of(),
+                null
+        );
+    }
+
+    TrustAuthorityAuditIntegrityResponse withDecisionTrace(TrustDecisionTrace trace) {
+        return new TrustAuthorityAuditIntegrityResponse(
+                status,
+                checked,
+                mode,
+                capabilityLevel,
+                tamperDetected,
+                integrityConfidence,
+                latestChainPosition,
+                latestEventHash,
+                windowStartChainPosition,
+                windowEndChainPosition,
+                boundaryPreviousEventHash,
+                reasonCode,
+                violations,
+                trace
+        );
     }
 }

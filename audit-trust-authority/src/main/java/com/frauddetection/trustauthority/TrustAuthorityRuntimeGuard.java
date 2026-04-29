@@ -41,6 +41,7 @@ public class TrustAuthorityRuntimeGuard implements ApplicationRunner {
         if (identityMode == TrustAuthorityIdentityMode.MTLS_READY || identityMode == TrustAuthorityIdentityMode.JWT_READY) {
             throw new IllegalStateException("Trust authority identity mode " + identityMode.configValue() + " is not implemented and fails closed.");
         }
+        enforceFdp23Scope();
         if (!prodLike) {
             return;
         }
@@ -93,6 +94,23 @@ public class TrustAuthorityRuntimeGuard implements ApplicationRunner {
     private void requirePersistentPath(String path, String material) {
         if (!StringUtils.hasText(path)) {
             throw new IllegalStateException("Prod-like trust authority requires explicit persistent " + material + " path.");
+        }
+    }
+
+    private void enforceFdp23Scope() {
+        TrustAuthorityCapabilityLevel capabilityLevel = properties.capabilityLevelEnum();
+        if (capabilityLevel != TrustAuthorityCapabilityLevel.INTERNAL_CRYPTOGRAPHIC_TRUST) {
+            throw new IllegalStateException("FDP-23 supports INTERNAL_CRYPTOGRAPHIC_TRUST only. External trust requires FDP-24.");
+        }
+        rejectUnsupportedClaim("app.trust-authority.external-anchoring.enabled", "external anchoring");
+        rejectUnsupportedClaim("app.trust-authority.worm-compliance.enabled", "WORM compliance");
+        rejectUnsupportedClaim("app.trust-authority.notarization.enabled", "notarization");
+    }
+
+    private void rejectUnsupportedClaim(String propertyName, String label) {
+        String configured = environment.getProperty(propertyName);
+        if (StringUtils.hasText(configured) && Boolean.parseBoolean(configured)) {
+            throw new IllegalStateException("FDP-23 does not support " + label + ". External trust requires FDP-24.");
         }
     }
 

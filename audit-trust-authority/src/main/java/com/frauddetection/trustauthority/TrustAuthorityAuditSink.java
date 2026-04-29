@@ -11,4 +11,8 @@ public interface TrustAuthorityAuditSink {
     }
 
     TrustAuthorityAuditHeadResponse head();
+
+    default boolean requestSeen(String callerService, String requestId) {
+        return false;
+    }
 }

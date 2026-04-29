@@ -30,6 +30,10 @@ final class TrustAuthorityAuditIntegrityVerifier {
         String boundaryPreviousHash = boundaryOutsideWindow ? first.previousEventHash() : null;
         for (TrustAuthorityAuditEvent event : ordered) {
             latest = event;
+            if (event.eventSchemaVersion() == null
+                    || event.eventSchemaVersion() != TrustAuthorityAuditEvent.CURRENT_SCHEMA_VERSION) {
+                violations.add(new TrustAuthorityAuditIntegrityViolation("EVENT_SCHEMA_VERSION_UNSUPPORTED", event.chainPosition(), "Audit event schema version is unsupported."));
+            }
             if (event.chainPosition() == null) {
                 violations.add(new TrustAuthorityAuditIntegrityViolation("CHAIN_POSITION_MISSING", null, "Audit event chain position is missing."));
                 continue;
@@ -69,17 +73,26 @@ final class TrustAuthorityAuditIntegrityVerifier {
         String reasonCode = violations.isEmpty()
                 ? (boundaryOutsideWindow ? "BOUNDARY_PREDECESSOR_OUTSIDE_WINDOW" : null)
                 : "AUDIT_CHAIN_INVALID";
+        TrustAuthorityIntegrityConfidence confidence = "INVALID".equals(status) || boundaryOutsideWindow
+                ? TrustAuthorityIntegrityConfidence.PARTIAL_BOUNDARY
+                : (mode == TrustAuthorityAuditIntegrityMode.FULL_CHAIN
+                    ? TrustAuthorityIntegrityConfidence.FULL_CHAIN_VERIFIED
+                    : TrustAuthorityIntegrityConfidence.WINDOW_VERIFIED);
         return new TrustAuthorityAuditIntegrityResponse(
                 status,
                 ordered.size(),
                 mode.name(),
+                TrustAuthorityCapabilityLevel.INTERNAL_CRYPTOGRAPHIC_TRUST,
+                "INVALID".equals(status),
+                confidence,
                 end,
                 latest == null ? null : latest.eventHash(),
                 start,
                 end,
                 boundaryPreviousHash,
                 reasonCode,
-                violations
+                violations,
+                null
         );
     }
 

@@ -29,12 +29,14 @@ final class TrustAuthorityAuditHasher {
         canonical.put("caller_service", event.callerService());
         canonical.put("chain_position", chainPosition);
         canonical.put("event_id", event.eventId());
+        canonical.put("event_schema_version", event.eventSchemaVersion());
         canonical.put("key_id", event.keyId());
         canonical.put("occurred_at", event.occurredAt() == null ? null : event.occurredAt().toString());
         canonical.put("payload_hash", event.payloadHash());
         canonical.put("previous_event_hash", previousEventHash);
         canonical.put("purpose", event.purpose());
         canonical.put("reason_code", event.reasonCode());
+        canonical.put("request_id", event.requestId());
         canonical.put("result", event.result());
         try {
             byte[] bytes = CANONICAL_JSON.writeValueAsBytes(canonical);

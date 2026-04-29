@@ -77,10 +77,12 @@ class DurableTrustAuthorityAuditSinkTest {
 
     private TrustAuthorityAuditEvent event(String eventId) {
         return new TrustAuthorityAuditEvent(
+                TrustAuthorityAuditEvent.CURRENT_SCHEMA_VERSION,
                 eventId,
                 "SIGN",
                 "service=alert-service",
                 "alert-service",
+                "request-" + eventId,
                 "AUDIT_ANCHOR",
                 "hash-" + eventId,
                 "key-1",

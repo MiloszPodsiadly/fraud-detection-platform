@@ -11,6 +11,7 @@ import org.springframework.util.StringUtils;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyFactory;
+import java.security.MessageDigest;
 import java.security.interfaces.RSAPublicKey;
 import java.security.spec.X509EncodedKeySpec;
 import java.time.Duration;
@@ -18,9 +19,12 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Date;
+import java.util.HexFormat;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 final class TrustAuthorityJwtIdentityVerifier {
 
@@ -136,7 +140,29 @@ final class TrustAuthorityJwtIdentityVerifier {
         entries.stream()
                 .filter(entry -> StringUtils.hasText(entry.getKeyId()))
                 .forEach(entry -> loaded.put(entry.getKeyId(), loadKey(entry)));
+        enforceFingerprintPins(loaded);
         return Map.copyOf(loaded);
+    }
+
+    private void enforceFingerprintPins(Map<String, RSAPublicKey> loaded) {
+        Set<String> pins = properties.getJwtIdentity().getTrustedKeyFingerprints().stream()
+                .filter(StringUtils::hasText)
+                .map(value -> value.trim().toLowerCase())
+                .collect(Collectors.toSet());
+        if (pins.isEmpty()) {
+            return;
+        }
+        if (loaded.isEmpty()) {
+            metrics.recordJwtKeyFingerprintMismatch();
+            throw new IllegalStateException("Trust authority JWT trusted key fingerprints require loaded public keys.");
+        }
+        for (Map.Entry<String, RSAPublicKey> entry : loaded.entrySet()) {
+            String fingerprint = fingerprint(entry.getValue());
+            if (!pins.contains(fingerprint)) {
+                metrics.recordJwtKeyFingerprintMismatch();
+                throw new IllegalStateException("Trust authority JWT public key fingerprint is not trusted.");
+            }
+        }
     }
 
     private Map<String, RSAPublicKey> loadJwks(String jwksPath) {
@@ -173,6 +199,14 @@ final class TrustAuthorityJwtIdentityVerifier {
             return (RSAPublicKey) KeyFactory.getInstance("RSA").generatePublic(new X509EncodedKeySpec(der));
         } catch (Exception exception) {
             throw new IllegalStateException("Trust authority JWT public key material could not be initialized.");
+        }
+    }
+
+    private String fingerprint(RSAPublicKey key) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(key.getEncoded()));
+        } catch (Exception exception) {
+            throw new IllegalStateException("Trust authority JWT public key fingerprint could not be calculated.");
         }
     }
 

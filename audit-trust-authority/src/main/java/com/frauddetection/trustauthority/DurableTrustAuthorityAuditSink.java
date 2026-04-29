@@ -6,6 +6,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.index.Index;
+import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Component;
 
@@ -26,6 +27,9 @@ class DurableTrustAuthorityAuditSink implements TrustAuthorityAuditSink {
         this.metrics = metrics;
         mongoTemplate.indexOps(COLLECTION).ensureIndex(new Index().on("chain_position", Sort.Direction.ASC).unique());
         mongoTemplate.indexOps(COLLECTION).ensureIndex(new Index().on("event_id", Sort.Direction.ASC).unique());
+        mongoTemplate.indexOps(COLLECTION).ensureIndex(new Index()
+                .on("caller_service", Sort.Direction.ASC)
+                .on("request_id", Sort.Direction.ASC));
     }
 
     @Override
@@ -85,6 +89,13 @@ class DurableTrustAuthorityAuditSink implements TrustAuthorityAuditSink {
         } catch (DataAccessException exception) {
             throw new TrustAuthorityAuditException("Trust authority audit head could not be read.", exception);
         }
+    }
+
+    @Override
+    public boolean requestSeen(String callerService, String requestId) {
+        Query query = new Query(Criteria.where("caller_service").is(callerService).and("request_id").is(requestId))
+                .limit(1);
+        return mongoTemplate.exists(query, TrustAuthorityAuditEvent.class, COLLECTION);
     }
 
     private void insertChained(TrustAuthorityAuditEvent event) {

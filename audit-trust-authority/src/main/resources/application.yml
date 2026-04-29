@@ -30,6 +30,7 @@ app:
     enabled: ${TRUST_AUTHORITY_ENABLED:true}
     signing-required: ${TRUST_AUTHORITY_SIGNING_REQUIRED:true}
     identity-mode: ${TRUST_AUTHORITY_IDENTITY_MODE:hmac-local}
+    capability-level: ${TRUST_AUTHORITY_CAPABILITY_LEVEL:internal-cryptographic-trust}
     jwt-identity:
       issuer: ${TRUST_AUTHORITY_JWT_ISSUER:}
       audience: ${TRUST_AUTHORITY_JWT_AUDIENCE:}
@@ -39,5 +40,8 @@ app:
       max-token-age: ${TRUST_AUTHORITY_JWT_MAX_TOKEN_AGE:5m}
       max-ttl: ${TRUST_AUTHORITY_JWT_MAX_TTL:5m}
       jwks-path: ${TRUST_AUTHORITY_JWT_JWKS_PATH:}
+      trusted-key-fingerprints: ${TRUST_AUTHORITY_JWT_TRUSTED_KEY_FINGERPRINTS:}
+    replay:
+      mode: ${TRUST_AUTHORITY_REPLAY_MODE:LOCAL}
     audit:
       sink: ${TRUST_AUTHORITY_AUDIT_SINK:local-file}

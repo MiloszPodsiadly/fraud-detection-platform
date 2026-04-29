@@ -81,6 +81,10 @@ class TrustAuthorityMetrics {
         Counter.builder("trust_jwt_authority_missing_total").register(registry).increment();
     }
 
+    void recordJwtKeyFingerprintMismatch() {
+        Counter.builder("trust_jwt_key_fingerprint_mismatch_total").register(registry).increment();
+    }
+
     void recordAuditWrite(String status) {
         Counter.builder("trust_authority_audit_write_total")
                 .tag("status", boundedStatus(status))

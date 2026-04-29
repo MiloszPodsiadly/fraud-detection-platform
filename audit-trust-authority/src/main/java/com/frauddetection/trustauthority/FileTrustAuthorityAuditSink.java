@@ -69,7 +69,24 @@ class FileTrustAuthorityAuditSink implements TrustAuthorityAuditSink {
         }
         Path path = Path.of(properties.getAuditPath());
         if (!Files.exists(path)) {
-            return new TrustAuthorityAuditIntegrityResponse("VALID", 0, mode.name(), null, null, null, null, null, null, List.of());
+            return new TrustAuthorityAuditIntegrityResponse(
+                    "VALID",
+                    0,
+                    mode.name(),
+                    TrustAuthorityCapabilityLevel.INTERNAL_CRYPTOGRAPHIC_TRUST,
+                    false,
+                    mode == TrustAuthorityAuditIntegrityMode.FULL_CHAIN
+                            ? TrustAuthorityIntegrityConfidence.FULL_CHAIN_VERIFIED
+                            : TrustAuthorityIntegrityConfidence.WINDOW_VERIFIED,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    List.of(),
+                    null
+            );
         }
         try {
             List<String> lines = Files.readAllLines(path, StandardCharsets.UTF_8);
@@ -108,6 +125,30 @@ class FileTrustAuthorityAuditSink implements TrustAuthorityAuditSink {
             return TrustAuthorityAuditHeadResponse.empty();
         } catch (IOException exception) {
             throw new TrustAuthorityAuditException("Trust authority audit head could not be read.", exception);
+        }
+    }
+
+    @Override
+    public synchronized boolean requestSeen(String callerService, String requestId) {
+        if (!StringUtils.hasText(callerService) || !StringUtils.hasText(requestId) || !StringUtils.hasText(properties.getAuditPath())) {
+            return false;
+        }
+        Path path = Path.of(properties.getAuditPath());
+        if (!Files.exists(path)) {
+            return false;
+        }
+        try {
+            for (String line : Files.readAllLines(path, StandardCharsets.UTF_8)) {
+                if (StringUtils.hasText(line)) {
+                    TrustAuthorityAuditEvent event = objectMapper.readValue(line, TrustAuthorityAuditEvent.class);
+                    if (callerService.equals(event.callerService()) && requestId.equals(event.requestId())) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        } catch (IOException exception) {
+            throw new TrustAuthorityAuditException("Trust authority audit request replay state could not be read.", exception);
         }
     }
 }

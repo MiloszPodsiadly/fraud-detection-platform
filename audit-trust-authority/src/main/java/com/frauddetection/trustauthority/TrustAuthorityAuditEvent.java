@@ -8,6 +8,10 @@ import java.time.Instant;
 
 @Document(collection = "trust_authority_audit_events")
 public record TrustAuthorityAuditEvent(
+        @JsonProperty("event_schema_version")
+        @Field("event_schema_version")
+        Integer eventSchemaVersion,
+
         @JsonProperty("event_id")
         @Field("event_id")
         String eventId,
@@ -23,6 +27,10 @@ public record TrustAuthorityAuditEvent(
         @JsonProperty("caller_service")
         @Field("caller_service")
         String callerService,
+
+        @JsonProperty("request_id")
+        @Field("request_id")
+        String requestId,
 
         @JsonProperty("purpose")
         @Field("purpose")
@@ -60,12 +68,16 @@ public record TrustAuthorityAuditEvent(
         @Field("chain_position")
         Long chainPosition
 ) {
+    static final int CURRENT_SCHEMA_VERSION = 1;
+
     TrustAuthorityAuditEvent withChain(String previousEventHash, String eventHash, long chainPosition) {
         return new TrustAuthorityAuditEvent(
+                eventSchemaVersion,
                 eventId,
                 action,
                 callerIdentity,
                 callerService,
+                requestId,
                 purpose,
                 payloadHash,
                 keyId,

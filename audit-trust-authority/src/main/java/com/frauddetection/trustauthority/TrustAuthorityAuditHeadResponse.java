@@ -17,6 +17,9 @@ public record TrustAuthorityAuditHeadResponse(
         @JsonProperty("integrity_hint")
         String integrityHint,
 
+        @JsonProperty("capability_level")
+        TrustAuthorityCapabilityLevel capabilityLevel,
+
         @JsonProperty("chain_position")
         Long chainPosition,
 
@@ -27,7 +30,16 @@ public record TrustAuthorityAuditHeadResponse(
         Instant occurredAt
 ) {
     static TrustAuthorityAuditHeadResponse empty() {
-        return new TrustAuthorityAuditHeadResponse("EMPTY", "trust-authority-audit", "LOCAL_HASH_CHAIN_HEAD", "LOCAL_CHAIN_ONLY", null, null, null);
+        return new TrustAuthorityAuditHeadResponse(
+                "EMPTY",
+                "trust-authority-audit",
+                "LOCAL_HASH_CHAIN_HEAD",
+                "LOCAL_CHAIN_ONLY",
+                TrustAuthorityCapabilityLevel.INTERNAL_CRYPTOGRAPHIC_TRUST,
+                null,
+                null,
+                null
+        );
     }
 
     static TrustAuthorityAuditHeadResponse from(TrustAuthorityAuditEvent event) {
@@ -39,6 +51,7 @@ public record TrustAuthorityAuditHeadResponse(
                 "trust-authority-audit",
                 "LOCAL_HASH_CHAIN_HEAD",
                 "LOCAL_CHAIN_ONLY",
+                TrustAuthorityCapabilityLevel.INTERNAL_CRYPTOGRAPHIC_TRUST,
                 event.chainPosition(),
                 event.eventHash(),
                 event.occurredAt()
