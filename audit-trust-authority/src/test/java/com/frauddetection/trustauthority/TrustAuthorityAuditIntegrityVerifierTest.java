@@ -1,0 +1,73 @@
+package com.frauddetection.trustauthority;
+
+import org.junit.jupiter.api.Test;
+
+import java.time.Instant;
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class TrustAuthorityAuditIntegrityVerifierTest {
+
+    @Test
+    void shouldValidateContiguousAuditHashChain() {
+        TrustAuthorityAuditEvent first = chained(event("event-1", "SIGN"), null, 1L);
+        TrustAuthorityAuditEvent second = chained(event("event-2", "VERIFY"), first.eventHash(), 2L);
+
+        TrustAuthorityAuditIntegrityResponse response = TrustAuthorityAuditIntegrityVerifier.verify(List.of(second, first));
+
+        assertThat(response.status()).isEqualTo("VALID");
+        assertThat(response.checked()).isEqualTo(2);
+        assertThat(response.latestChainPosition()).isEqualTo(2L);
+        assertThat(response.latestEventHash()).isEqualTo(second.eventHash());
+        assertThat(response.violations()).isEmpty();
+    }
+
+    @Test
+    void shouldDetectTamperedAuditEventHash() {
+        TrustAuthorityAuditEvent first = chained(event("event-1", "SIGN"), null, 1L);
+        TrustAuthorityAuditEvent tampered = chained(event("event-2", "VERIFY"), first.eventHash(), 2L)
+                .withChain(first.eventHash(), "tampered", 2L);
+
+        TrustAuthorityAuditIntegrityResponse response = TrustAuthorityAuditIntegrityVerifier.verify(List.of(first, tampered));
+
+        assertThat(response.status()).isEqualTo("INVALID");
+        assertThat(response.reasonCode()).isEqualTo("AUDIT_CHAIN_INVALID");
+        assertThat(response.violations()).extracting(TrustAuthorityAuditIntegrityViolation::reasonCode)
+                .contains("EVENT_HASH_MISMATCH");
+    }
+
+    @Test
+    void shouldDetectAuditChainGaps() {
+        TrustAuthorityAuditEvent first = chained(event("event-1", "SIGN"), null, 1L);
+        TrustAuthorityAuditEvent third = chained(event("event-3", "VERIFY"), first.eventHash(), 3L);
+
+        TrustAuthorityAuditIntegrityResponse response = TrustAuthorityAuditIntegrityVerifier.verify(List.of(first, third));
+
+        assertThat(response.status()).isEqualTo("INVALID");
+        assertThat(response.violations()).extracting(TrustAuthorityAuditIntegrityViolation::reasonCode)
+                .contains("CHAIN_POSITION_GAP");
+    }
+
+    private TrustAuthorityAuditEvent chained(TrustAuthorityAuditEvent event, String previousHash, long position) {
+        return event.withChain(previousHash, TrustAuthorityAuditHasher.hash(event, previousHash, position), position);
+    }
+
+    private TrustAuthorityAuditEvent event(String eventId, String action) {
+        return new TrustAuthorityAuditEvent(
+                eventId,
+                action,
+                "alert-service@local",
+                "alert-service",
+                "AUDIT_ANCHOR",
+                "payload-hash",
+                "key-1",
+                "SUCCESS",
+                null,
+                Instant.parse("2026-04-27T10:00:00Z"),
+                null,
+                null,
+                null
+        );
+    }
+}

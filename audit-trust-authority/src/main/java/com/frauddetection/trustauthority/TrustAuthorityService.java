@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import io.micrometer.core.instrument.Metrics;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -30,6 +31,7 @@ import java.security.spec.X509EncodedKeySpec;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -53,17 +55,18 @@ public class TrustAuthorityService {
     private final TrustAuthorityProperties properties;
     private final TrustAuthorityAuditSink auditSink;
     private final TrustAuthorityRateLimiter rateLimiter;
-    private final TrustAuthorityReplayGuard replayGuard;
+    private final TrustAuthorityRequestReplayGuard replayGuard;
     private final TrustAuthorityMetrics metrics;
     private final boolean localKeyGenerationAllowed;
     private final List<RegisteredKey> keys;
     private final RegisteredKey activeKey;
 
+    @Autowired
     public TrustAuthorityService(
             TrustAuthorityProperties properties,
             TrustAuthorityAuditSink auditSink,
             TrustAuthorityRateLimiter rateLimiter,
-            TrustAuthorityReplayGuard replayGuard,
+            TrustAuthorityRequestReplayGuard replayGuard,
             TrustAuthorityMetrics metrics,
             Environment environment
     ) {
@@ -87,7 +90,7 @@ public class TrustAuthorityService {
         this.properties = properties;
         this.auditSink = auditSink;
         this.rateLimiter = rateLimiter;
-        this.replayGuard = new TrustAuthorityReplayGuard();
+        this.replayGuard = new TrustAuthorityRequestReplayGuard();
         this.metrics = new TrustAuthorityMetrics(Metrics.globalRegistry);
         this.localKeyGenerationAllowed = true;
         this.keys = loadKeys(properties);
@@ -114,7 +117,7 @@ public class TrustAuthorityService {
             metrics.recordSign("FAILURE");
             throw new TrustAuthorityRequestException(HttpStatus.TOO_MANY_REQUESTS, "Trust authority signing rate limit exceeded.");
         }
-        if (!replayGuard.allow(request.payloadHash(), replayContext(caller, request))) {
+        if (!replayGuard.allow(caller.serviceName(), credentials.requestId())) {
             audit("SIGN", caller, request.purpose(), request.payloadHash(), null, "FAILURE", "REPLAY_DETECTED");
             metrics.recordReplayDetected();
             metrics.recordSign("FAILURE");
@@ -190,14 +193,6 @@ public class TrustAuthorityService {
         }
     }
 
-    TrustSignResponse sign(TrustSignRequest request) {
-        return sign(localCredentials("SIGN", signCredentialPayload(request)), request);
-    }
-
-    TrustVerifyResponse verify(TrustVerifyRequest request) {
-        return verify(localCredentials("VERIFY", verifyCredentialPayload(request)), request);
-    }
-
     List<TrustKeyResponse> keys() {
         return keys.stream()
                 .sorted(Comparator.comparing(RegisteredKey::keyId))
@@ -205,6 +200,7 @@ public class TrustAuthorityService {
                         key.keyId(),
                         ALGORITHM,
                         Base64.getEncoder().encodeToString(key.publicKey().getEncoded()),
+                        fingerprint(key.publicKey().getEncoded()),
                         key.validFrom(),
                         key.validUntil(),
                         key.status()
@@ -217,6 +213,24 @@ public class TrustAuthorityService {
                 .filter(key -> activeKey.keyId().equals(key.keyId()))
                 .findFirst()
                 .orElseThrow();
+    }
+
+    TrustAuthorityAuditIntegrityResponse auditIntegrity(TrustAuthorityRequestCredentials credentials, int limit) {
+        CallerAuthorization authorization = authorize(credentials, "AUDIT_INTEGRITY", "trust-authority-audit-integrity", "AUDIT_INTEGRITY");
+        TrustAuthorityCallerIdentity caller = safeCaller(credentials);
+        if (!authorization.tokenValid()) {
+            audit("VERIFY", caller, "AUDIT_INTEGRITY", "trust-authority-audit-integrity", null, "FAILURE", authorization.reasonCode());
+            throw new TrustAuthorityRequestException(authorization.status(), "Trust authority audit integrity caller is not authenticated.");
+        }
+        if (!replayGuard.allow(caller.serviceName(), credentials.requestId())) {
+            audit("VERIFY", caller, "AUDIT_INTEGRITY", "trust-authority-audit-integrity", null, "FAILURE", "REPLAY_DETECTED");
+            metrics.recordReplayDetected();
+            throw new TrustAuthorityRequestException(HttpStatus.CONFLICT, "Trust authority request replay detected.");
+        }
+        TrustAuthorityAuditIntegrityResponse response = auditSink.integrity(limit);
+        audit("VERIFY", caller, "AUDIT_INTEGRITY", "trust-authority-audit-integrity", null,
+                "VALID".equals(response.status()) ? "SUCCESS" : "FAILURE", response.reasonCode());
+        return response;
     }
 
     private List<RegisteredKey> loadKeys(TrustAuthorityProperties properties) {
@@ -384,13 +398,17 @@ public class TrustAuthorityService {
                 keyId,
                 result,
                 reasonCode,
-                Instant.now()
+                Instant.now().truncatedTo(ChronoUnit.MILLIS),
+                null,
+                null,
+                null
         ));
     }
 
     private CallerAuthorization authorize(TrustAuthorityRequestCredentials credentials, String action, String payload, String purpose) {
         TrustAuthorityCallerIdentity safeCaller = safeCaller(credentials);
-        if (credentials == null || !StringUtils.hasText(credentials.signature()) || !StringUtils.hasText(credentials.signedAt())) {
+        if (credentials == null || !StringUtils.hasText(credentials.signature()) || !StringUtils.hasText(credentials.signedAt())
+                || !StringUtils.hasText(credentials.requestId())) {
             return CallerAuthorization.failure(HttpStatus.UNAUTHORIZED, "HMAC_CREDENTIALS_MISSING");
         }
         if (!StringUtils.hasText(safeCaller.serviceName()) || !StringUtils.hasText(safeCaller.environment())) {
@@ -420,7 +438,7 @@ public class TrustAuthorityService {
         if (signedAt.isBefore(now.minus(REQUEST_SIGNATURE_MAX_AGE))) {
             return CallerAuthorization.failure(HttpStatus.UNAUTHORIZED, "HMAC_TIMESTAMP_EXPIRED");
         }
-        String expected = hmac(secret, credentialPayload(action, safeCaller, credentials.signedAt(), payload));
+        String expected = hmac(secret, credentialPayload(action, safeCaller, credentials.requestId(), credentials.signedAt(), payload));
         if (!MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8), credentials.signature().getBytes(StandardCharsets.UTF_8))) {
             return CallerAuthorization.failure(HttpStatus.UNAUTHORIZED, "HMAC_SIGNATURE_INVALID");
         }
@@ -436,15 +454,6 @@ public class TrustAuthorityService {
         return credentials == null || credentials.caller() == null
                 ? TrustAuthorityCallerIdentity.of(null, null, null)
                 : credentials.caller();
-    }
-
-    private TrustAuthorityRequestCredentials localCredentials(String action, String payload) {
-        TrustAuthorityCallerIdentity caller = TrustAuthorityCallerIdentity.of("alert-service", "local", null);
-        String signedAt = Instant.now().toString();
-        String secret = StringUtils.hasText(properties.getHmacSecret())
-                ? properties.getHmacSecret()
-                : TrustAuthorityProperties.DEFAULT_LOCAL_HMAC_SECRET;
-        return new TrustAuthorityRequestCredentials(caller, signedAt, hmac(secret, credentialPayload(action, caller, signedAt, payload)));
     }
 
     private String hmacSecret(TrustAuthorityProperties.CallerEntry entry) {
@@ -475,22 +484,14 @@ public class TrustAuthorityService {
                 request.signedAt() == null ? "" : request.signedAt().toString());
     }
 
-    private String credentialPayload(String action, TrustAuthorityCallerIdentity caller, String signedAt, String payload) {
+    private String credentialPayload(String action, TrustAuthorityCallerIdentity caller, String requestId, String signedAt, String payload) {
         return String.join("\n",
                 action,
                 nullSafe(caller.serviceName()),
                 nullSafe(caller.environment()),
+                nullSafe(requestId),
                 nullSafe(signedAt),
                 payload);
-    }
-
-    private String replayContext(TrustAuthorityCallerIdentity caller, TrustSignRequest request) {
-        return String.join("\n",
-                nullSafe(caller.serviceName()),
-                nullSafe(request.purpose()),
-                nullSafe(request.partitionKey()),
-                Long.toString(request.chainPosition()),
-                nullSafe(request.anchorId()));
     }
 
     private String hmac(String secret, String payload) {
@@ -500,6 +501,14 @@ public class TrustAuthorityService {
             return Base64.getEncoder().encodeToString(mac.doFinal(payload.getBytes(StandardCharsets.UTF_8)));
         } catch (GeneralSecurityException exception) {
             throw new IllegalStateException("Trust authority request credentials could not be verified.");
+        }
+    }
+
+    private String fingerprint(byte[] publicKey) {
+        try {
+            return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(publicKey));
+        } catch (GeneralSecurityException exception) {
+            throw new IllegalStateException("Trust authority key fingerprint could not be calculated.");
         }
     }
 
@@ -514,7 +523,7 @@ public class TrustAuthorityService {
         TrustAuthorityProperties.CallerEntry alertService = new TrustAuthorityProperties.CallerEntry();
         alertService.setServiceName("alert-service");
         alertService.setHmacSecret(properties.getHmacSecret());
-        alertService.setAllowedPurposes(List.of("AUDIT_ANCHOR"));
+        alertService.setAllowedPurposes(List.of("AUDIT_ANCHOR", "AUDIT_INTEGRITY"));
         alertService.setSignRateLimitPerMinute(1000);
         TrustAuthorityProperties.CallerEntry scoringService = new TrustAuthorityProperties.CallerEntry();
         scoringService.setServiceName("fraud-scoring-service");

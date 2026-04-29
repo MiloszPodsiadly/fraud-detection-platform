@@ -1,6 +1,9 @@
 spring:
   application:
     name: audit-trust-authority
+  data:
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://localhost:27017/fraud_trust_authority?serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000}
 
 server:
   port: ${SERVER_PORT:8095}
@@ -26,3 +29,7 @@ app:
     audit-path: ${TRUST_AUTHORITY_AUDIT_PATH:./target/trust-authority-audit.jsonl}
     enabled: ${TRUST_AUTHORITY_ENABLED:true}
     signing-required: ${TRUST_AUTHORITY_SIGNING_REQUIRED:true}
+    identity-mode: ${TRUST_AUTHORITY_IDENTITY_MODE:hmac-local}
+    allow-local-hmac-in-prod: ${TRUST_AUTHORITY_ALLOW_LOCAL_HMAC_IN_PROD:false}
+    audit:
+      sink: ${TRUST_AUTHORITY_AUDIT_SINK:local-file}

@@ -96,6 +96,7 @@ services:
       TRUST_AUTHORITY_NAME: local-trust-authority
       TRUST_AUTHORITY_KEY_ID: local-ed25519-key-1
       TRUST_AUTHORITY_HMAC_SECRET: local-dev-trust-hmac-secret
+      MONGODB_URI: mongodb://mongodb:27017/fraud_trust_authority?serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000
       TRUST_AUTHORITY_PRIVATE_KEY_PATH: /tmp/audit-trust-authority/ed25519-private.key
       TRUST_AUTHORITY_PUBLIC_KEY_PATH: /tmp/audit-trust-authority/ed25519-public.key
       TRUST_AUTHORITY_AUDIT_PATH: /tmp/audit-trust-authority/trust-authority-audit.jsonl

@@ -25,11 +25,12 @@ public class TrustAuthorityController {
             @RequestHeader(name = "X-Internal-Service-Name", required = false) String serviceName,
             @RequestHeader(name = "X-Internal-Service-Environment", required = false) String environment,
             @RequestHeader(name = "X-Internal-Service-Instance-Id", required = false) String instanceId,
+            @RequestHeader(name = "X-Internal-Trust-Request-Id", required = false) String requestId,
             @RequestHeader(name = "X-Internal-Trust-Signed-At", required = false) String signedAt,
             @RequestHeader(name = "X-Internal-Trust-Signature", required = false) String signature,
             @Valid @RequestBody TrustSignRequest request
     ) {
-        return service.sign(TrustAuthorityRequestCredentials.of(serviceName, environment, instanceId, signedAt, signature), request);
+        return service.sign(TrustAuthorityRequestCredentials.of(serviceName, environment, instanceId, requestId, signedAt, signature), request);
     }
 
     @GetMapping("/keys")
@@ -42,10 +43,23 @@ public class TrustAuthorityController {
             @RequestHeader(name = "X-Internal-Service-Name", required = false) String serviceName,
             @RequestHeader(name = "X-Internal-Service-Environment", required = false) String environment,
             @RequestHeader(name = "X-Internal-Service-Instance-Id", required = false) String instanceId,
+            @RequestHeader(name = "X-Internal-Trust-Request-Id", required = false) String requestId,
             @RequestHeader(name = "X-Internal-Trust-Signed-At", required = false) String signedAt,
             @RequestHeader(name = "X-Internal-Trust-Signature", required = false) String signature,
             @Valid @RequestBody TrustVerifyRequest request
     ) {
-        return service.verify(TrustAuthorityRequestCredentials.of(serviceName, environment, instanceId, signedAt, signature), request);
+        return service.verify(TrustAuthorityRequestCredentials.of(serviceName, environment, instanceId, requestId, signedAt, signature), request);
+    }
+
+    @GetMapping("/audit/integrity")
+    public TrustAuthorityAuditIntegrityResponse auditIntegrity(
+            @RequestHeader(name = "X-Internal-Service-Name", required = false) String serviceName,
+            @RequestHeader(name = "X-Internal-Service-Environment", required = false) String environment,
+            @RequestHeader(name = "X-Internal-Service-Instance-Id", required = false) String instanceId,
+            @RequestHeader(name = "X-Internal-Trust-Request-Id", required = false) String requestId,
+            @RequestHeader(name = "X-Internal-Trust-Signed-At", required = false) String signedAt,
+            @RequestHeader(name = "X-Internal-Trust-Signature", required = false) String signature
+    ) {
+        return service.auditIntegrity(TrustAuthorityRequestCredentials.of(serviceName, environment, instanceId, requestId, signedAt, signature), 10_000);
     }
 }

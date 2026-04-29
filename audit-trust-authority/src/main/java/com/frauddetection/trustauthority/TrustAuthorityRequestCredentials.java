@@ -4,6 +4,7 @@ import org.springframework.util.StringUtils;
 
 record TrustAuthorityRequestCredentials(
         TrustAuthorityCallerIdentity caller,
+        String requestId,
         String signedAt,
         String signature
 ) {
@@ -11,11 +12,13 @@ record TrustAuthorityRequestCredentials(
             String serviceName,
             String environment,
             String instanceId,
+            String requestId,
             String signedAt,
             String signature
     ) {
         return new TrustAuthorityRequestCredentials(
                 TrustAuthorityCallerIdentity.of(serviceName, environment, instanceId),
+                StringUtils.hasText(requestId) ? requestId : null,
                 StringUtils.hasText(signedAt) ? signedAt : null,
                 signature
         );

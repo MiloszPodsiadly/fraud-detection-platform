@@ -58,6 +58,13 @@ class TrustAuthorityMetrics {
         Counter.builder("trust_replay_detected_total").register(registry).increment();
     }
 
+    void recordAuditWrite(String status) {
+        Counter.builder("trust_authority_audit_write_total")
+                .tag("status", boundedStatus(status))
+                .register(registry)
+                .increment();
+    }
+
     private String boundedStatus(String status) {
         if ("SUCCESS".equals(status) || "FAILURE".equals(status)) {
             return status;

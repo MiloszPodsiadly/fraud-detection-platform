@@ -20,6 +20,9 @@ public class TrustAuthorityProperties {
     private boolean enabled = true;
     private boolean signingRequired = true;
     private String auditPath = "./target/trust-authority-audit.jsonl";
+    private String identityMode = "hmac-local";
+    private boolean allowLocalHmacInProd;
+    private AuditProperties audit = new AuditProperties();
     private List<CallerEntry> callers = new ArrayList<>();
 
     public String getAuthorityName() {
@@ -92,6 +95,30 @@ public class TrustAuthorityProperties {
 
     public void setAuditPath(String auditPath) {
         this.auditPath = auditPath;
+    }
+
+    public String getIdentityMode() {
+        return identityMode;
+    }
+
+    public void setIdentityMode(String identityMode) {
+        this.identityMode = identityMode;
+    }
+
+    public boolean isAllowLocalHmacInProd() {
+        return allowLocalHmacInProd;
+    }
+
+    public void setAllowLocalHmacInProd(boolean allowLocalHmacInProd) {
+        this.allowLocalHmacInProd = allowLocalHmacInProd;
+    }
+
+    public AuditProperties getAudit() {
+        return audit;
+    }
+
+    public void setAudit(AuditProperties audit) {
+        this.audit = audit == null ? new AuditProperties() : audit;
     }
 
     public List<CallerEntry> getCallers() {
@@ -183,6 +210,18 @@ public class TrustAuthorityProperties {
 
         public void setValidUntil(Instant validUntil) {
             this.validUntil = validUntil;
+        }
+    }
+
+    public static class AuditProperties {
+        private String sink = "local-file";
+
+        public String getSink() {
+            return sink;
+        }
+
+        public void setSink(String sink) {
+            this.sink = sink;
         }
     }
 
