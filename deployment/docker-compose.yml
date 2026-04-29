@@ -95,7 +95,7 @@ services:
       SERVER_PORT: 8080
       TRUST_AUTHORITY_NAME: local-trust-authority
       TRUST_AUTHORITY_KEY_ID: local-ed25519-key-1
-      TRUST_AUTHORITY_INTERNAL_TOKEN: local-dev-trust-token
+      TRUST_AUTHORITY_HMAC_SECRET: local-dev-trust-hmac-secret
       TRUST_AUTHORITY_PRIVATE_KEY_PATH: /tmp/audit-trust-authority/ed25519-private.key
       TRUST_AUTHORITY_PUBLIC_KEY_PATH: /tmp/audit-trust-authority/ed25519-public.key
       TRUST_AUTHORITY_AUDIT_PATH: /tmp/audit-trust-authority/trust-authority-audit.jsonl
@@ -313,7 +313,7 @@ services:
       AUDIT_EXTERNAL_ANCHORING_PUBLISH_DELAY_MS: "10000"
       AUDIT_TRUST_AUTHORITY_ENABLED: "true"
       AUDIT_TRUST_AUTHORITY_URL: http://audit-trust-authority:8080
-      AUDIT_TRUST_AUTHORITY_INTERNAL_TOKEN: local-dev-trust-token
+      AUDIT_TRUST_AUTHORITY_HMAC_SECRET: local-dev-trust-hmac-secret
       AUDIT_TRUST_AUTHORITY_SIGNING_REQUIRED: "false"
       AUDIT_TRUST_AUTHORITY_CALLER_SERVICE_NAME: alert-service
       AUDIT_TRUST_AUTHORITY_CALLER_ENVIRONMENT: docker-local
