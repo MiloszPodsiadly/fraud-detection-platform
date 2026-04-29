@@ -558,6 +558,47 @@ class ExternalAuditIntegrityServiceTest {
     }
 
     @Test
+    void shouldReturnBoundedCoverageWithVisibleMissingRanges() {
+        AuditAnchorRepository repository = mock(AuditAnchorRepository.class);
+        ObjectStoreExternalAuditAnchorSink objectStoreSink = objectStoreSink();
+        objectStoreSink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), objectStoreSink.sinkType()));
+        objectStoreSink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-2", 2L, "hash-2"), objectStoreSink.sinkType()));
+        objectStoreSink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-3", 3L, "hash-3"), objectStoreSink.sinkType()));
+        objectStoreSink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-5", 5L, "hash-5"), objectStoreSink.sinkType()));
+        when(repository.findLatestByPartitionKey("source_service:alert-service"))
+                .thenReturn(Optional.of(localAnchor("local-anchor-5", 5L, "hash-5")));
+
+        ExternalAuditAnchorCoverageResponse response = objectStoreIntegrityService(repository, objectStoreSink)
+                .coverage("alert-service", 5);
+
+        assertThat(response.status()).isEqualTo("AVAILABLE");
+        assertThat(response.latestLocalPosition()).isEqualTo(5L);
+        assertThat(response.latestExternalPosition()).isEqualTo(5L);
+        assertThat(response.positionLag()).isZero();
+        assertThat(response.truncated()).isFalse();
+        assertThat(response.missingRanges())
+                .extracting(ExternalAuditAnchorMissingRange::fromChainPosition, ExternalAuditAnchorMissingRange::toChainPosition)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(4L, 4L));
+    }
+
+    @Test
+    void shouldReturnUnavailableCoverageWhenExternalHeadCannotBeProven() {
+        AuditAnchorRepository repository = mock(AuditAnchorRepository.class);
+        ExternalAuditAnchorSink unavailableSink = mock(ExternalAuditAnchorSink.class);
+        when(unavailableSink.latest("source_service:alert-service"))
+                .thenThrow(new ExternalAuditAnchorSinkException("HEAD_SCAN_PAGINATION_UNSUPPORTED", "unsupported"));
+        when(repository.findLatestByPartitionKey("source_service:alert-service"))
+                .thenReturn(Optional.of(localAnchor("local-anchor-5", 5L, "hash-5")));
+        ExternalAuditIntegrityService unavailableService = objectStoreIntegrityService(repository, unavailableSink);
+
+        ExternalAuditAnchorCoverageResponse response = unavailableService.coverage("alert-service", 5);
+
+        assertThat(response.status()).isEqualTo("UNAVAILABLE");
+        assertThat(response.reasonCode()).isEqualTo("HEAD_SCAN_PAGINATION_UNSUPPORTED");
+        assertThat(response.missingRanges()).isEmpty();
+    }
+
+    @Test
     void shouldReturnUnavailableWhenLocalAnchorStoreFails() {
         when(anchorRepository.findLatestByPartitionKey("source_service:alert-service"))
                 .thenThrow(new DataAccessResourceFailureException("mongo internal timeout"));
@@ -672,7 +713,7 @@ class ExternalAuditIntegrityServiceTest {
         );
     }
 
-    private ExternalAuditAnchorSink objectStoreSink() {
+    private ObjectStoreExternalAuditAnchorSink objectStoreSink() {
         return objectStoreSink(new ObjectStoreExternalAuditAnchorSinkTest.InMemoryObjectStoreAuditAnchorClient());
     }
 

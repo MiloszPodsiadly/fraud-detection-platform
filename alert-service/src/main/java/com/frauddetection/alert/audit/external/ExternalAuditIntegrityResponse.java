@@ -41,6 +41,9 @@ public record ExternalAuditIntegrityResponse(
         @JsonProperty("external_immutability_level")
         ExternalImmutabilityLevel externalImmutabilityLevel,
 
+        @JsonProperty("timestamp_trust_level")
+        String timestampTrustLevel,
+
         @JsonProperty("signature_verification_status")
         String signatureVerificationStatus,
 
@@ -60,6 +63,14 @@ public record ExternalAuditIntegrityResponse(
         @JsonInclude(JsonInclude.Include.NON_NULL)
         String signatureReasonCode,
 
+        @JsonProperty("conflicting_hashes")
+        @JsonInclude(JsonInclude.Include.NON_EMPTY)
+        List<String> conflictingHashes,
+
+        @JsonProperty("witness_sources")
+        @JsonInclude(JsonInclude.Include.NON_EMPTY)
+        List<String> witnessSources,
+
         @JsonProperty("violations")
         List<AuditIntegrityViolation> violations
 ) {
@@ -75,7 +86,7 @@ public record ExternalAuditIntegrityResponse(
             ExternalAuditAnchorSummary externalAnchor,
             List<AuditIntegrityViolation> violations
     ) {
-        this(status, checked, limit, sourceService, partitionKey, reasonCode, message, localAnchor, externalAnchor, ExternalImmutabilityLevel.NONE, "UNSIGNED", null, null, null, null, violations);
+        this(status, checked, limit, sourceService, partitionKey, reasonCode, message, localAnchor, externalAnchor, ExternalImmutabilityLevel.NONE, "APP_OBSERVED", "UNSIGNED", null, null, null, null, List.of(), List.of(), violations);
     }
 
     public ExternalAuditIntegrityResponse(
@@ -91,7 +102,30 @@ public record ExternalAuditIntegrityResponse(
             ExternalImmutabilityLevel externalImmutabilityLevel,
             List<AuditIntegrityViolation> violations
     ) {
-        this(status, checked, limit, sourceService, partitionKey, reasonCode, message, localAnchor, externalAnchor, externalImmutabilityLevel, "UNSIGNED", null, null, null, null, violations);
+        this(status, checked, limit, sourceService, partitionKey, reasonCode, message, localAnchor, externalAnchor, externalImmutabilityLevel, "APP_OBSERVED", "UNSIGNED", null, null, null, null, List.of(), List.of(), violations);
+    }
+
+    public ExternalAuditIntegrityResponse(
+            String status,
+            int checked,
+            int limit,
+            String sourceService,
+            String partitionKey,
+            String reasonCode,
+            String message,
+            ExternalAuditAnchorSummary localAnchor,
+            ExternalAuditAnchorSummary externalAnchor,
+            ExternalImmutabilityLevel externalImmutabilityLevel,
+            String signatureVerificationStatus,
+            String signingKeyId,
+            String signingAlgorithm,
+            String signingAuthority,
+            String signatureReasonCode,
+            List<AuditIntegrityViolation> violations
+    ) {
+        this(status, checked, limit, sourceService, partitionKey, reasonCode, message, localAnchor, externalAnchor,
+                externalImmutabilityLevel, "APP_OBSERVED", signatureVerificationStatus, signingKeyId, signingAlgorithm,
+                signingAuthority, signatureReasonCode, List.of(), List.of(), violations);
     }
 
     static ExternalAuditIntegrityResponse unavailable(ExternalAuditIntegrityQuery query, String reasonCode, String message) {
@@ -106,11 +140,14 @@ public record ExternalAuditIntegrityResponse(
                 null,
                 null,
                 ExternalImmutabilityLevel.NONE,
+                "APP_OBSERVED",
                 "UNAVAILABLE",
                 null,
                 null,
                 null,
                 reasonCode,
+                List.of(),
+                List.of(),
                 List.of()
         );
     }

@@ -24,6 +24,7 @@ public class ExternalAuditIntegrityService {
 
     private static final Logger log = LoggerFactory.getLogger(ExternalAuditIntegrityService.class);
     private static final String SUPPORTED_SCHEMA_VERSION = "1.0";
+    private static final int MAX_MISSING_RANGES = 50;
 
     private final AuditAnchorRepository anchorRepository;
     private final ExternalAuditAnchorSink sink;
@@ -94,6 +95,12 @@ public class ExternalAuditIntegrityService {
             auditFailureBestEffort(query, response, "AUDIT_STORE_UNAVAILABLE");
             return response;
         } catch (ExternalAuditAnchorSinkException exception) {
+            if (exception instanceof ExternalAuditAnchorConflictException conflictException) {
+                ExternalAuditIntegrityResponse response = conflict(query, conflictException);
+                metrics.recordExternalIntegrityCheck(response.status());
+                auditFailureBestEffort(query, response, "CONFLICT");
+                return response;
+            }
             String reasonCode = externalUnavailableReasonCode(exception);
             ExternalAuditIntegrityResponse response = ExternalAuditIntegrityResponse.unavailable(
                     query,
@@ -183,6 +190,80 @@ public class ExternalAuditIntegrityService {
         return response(status, query, local, external, signature, violations, reasonCode, message);
     }
 
+    public ExternalAuditAnchorCoverageResponse coverage(String sourceService, Integer limit) {
+        ExternalAuditIntegrityQuery query = queryParser.parse(sourceService, limit);
+        try {
+            AuditAnchorDocument latestLocal = anchorRepository.findLatestByPartitionKey(query.partitionKey()).orElse(null);
+            long latestLocalPosition = latestLocal == null ? 0L : latestLocal.chainPosition();
+            ExternalAuditAnchor latestExternal = sink.latest(query.partitionKey()).orElse(null);
+            long latestExternalPosition = latestExternal == null ? 0L : latestExternal.chainPosition();
+            long from = latestLocalPosition == 0L ? 1L : Math.max(1L, latestLocalPosition - query.limit() + 1L);
+            List<ExternalAuditAnchorMissingRange> missingRanges = missingRanges(query.partitionKey(), from, latestLocalPosition);
+            boolean truncated = latestLocalPosition > query.limit() || missingRanges.size() >= MAX_MISSING_RANGES;
+            Long timeLagSeconds = latestLocal != null && latestExternal != null
+                    ? Math.max(0L, java.time.Duration.between(latestExternal.createdAt(), latestLocal.createdAt()).toSeconds())
+                    : null;
+            return new ExternalAuditAnchorCoverageResponse(
+                    "AVAILABLE",
+                    latestLocalPosition,
+                    latestExternalPosition,
+                    Math.max(0L, latestLocalPosition - latestExternalPosition),
+                    timeLagSeconds,
+                    missingRanges,
+                    truncated,
+                    query.limit(),
+                    null,
+                    null
+            );
+        } catch (DataAccessException exception) {
+            return unavailableCoverage(query, "AUDIT_STORE_UNAVAILABLE", "Local audit anchor store is currently unavailable.");
+        } catch (ExternalAuditAnchorSinkException exception) {
+            if (exception instanceof ExternalAuditAnchorConflictException) {
+                return unavailableCoverage(query, "CONFLICT", "External anchor witnesses contain incompatible truths.");
+            }
+            return unavailableCoverage(query, externalUnavailableReasonCode(exception), externalUnavailableMessage(externalUnavailableReasonCode(exception)));
+        }
+    }
+
+    private List<ExternalAuditAnchorMissingRange> missingRanges(String partitionKey, long from, long to) {
+        List<ExternalAuditAnchorMissingRange> ranges = new ArrayList<>();
+        Long openStart = null;
+        for (long position = from; position <= to; position++) {
+            boolean present = sink.findByChainPosition(partitionKey, position).isPresent();
+            if (!present && openStart == null) {
+                openStart = position;
+            }
+            if ((present || position == to) && openStart != null) {
+                long end = present ? position - 1 : position;
+                ranges.add(new ExternalAuditAnchorMissingRange(openStart, end));
+                openStart = null;
+                if (ranges.size() >= MAX_MISSING_RANGES) {
+                    return List.copyOf(ranges);
+                }
+            }
+        }
+        return List.copyOf(ranges);
+    }
+
+    private ExternalAuditAnchorCoverageResponse unavailableCoverage(
+            ExternalAuditIntegrityQuery query,
+            String reasonCode,
+            String message
+    ) {
+        return new ExternalAuditAnchorCoverageResponse(
+                "UNAVAILABLE",
+                0,
+                0,
+                0,
+                null,
+                List.of(),
+                false,
+                query.limit(),
+                reasonCode,
+                message
+        );
+    }
+
     private ExternalAuditIntegrityResponse partial(
             ExternalAuditIntegrityQuery query,
             AuditAnchorDocument local,
@@ -226,11 +307,14 @@ public class ExternalAuditIntegrityService {
                         sink.immutabilityLevel()
                 ),
                 sink.immutabilityLevel(),
+                timestampTrustLevel(),
                 signature.verification().status(),
                 signature.signingKeyId(),
                 signature.signingAlgorithm(),
                 signature.signingAuthority(),
                 signature.verification().reasonCode(),
+                List.of(),
+                List.of(),
                 violations
         );
     }
@@ -254,11 +338,14 @@ public class ExternalAuditIntegrityService {
                 null,
                 null,
                 sink.immutabilityLevel(),
+                timestampTrustLevel(),
                 signature.verification().status(),
                 null,
                 null,
                 null,
                 signature.verification().reasonCode(),
+                List.of(),
+                List.of(),
                 violations
         );
     }
@@ -288,12 +375,42 @@ public class ExternalAuditIntegrityService {
                         sink.immutabilityLevel()
                 ),
                 sink.immutabilityLevel(),
+                timestampTrustLevel(),
                 signature.verification().status(),
                 signature.signingKeyId(),
                 signature.signingAlgorithm(),
                 signature.signingAuthority(),
                 signature.verification().reasonCode(),
+                List.of(),
+                List.of(),
                 violations
+        );
+    }
+
+    private ExternalAuditIntegrityResponse conflict(
+            ExternalAuditIntegrityQuery query,
+            ExternalAuditAnchorConflictException exception
+    ) {
+        return new ExternalAuditIntegrityResponse(
+                "CONFLICT",
+                0,
+                query.limit(),
+                query.sourceService(),
+                query.partitionKey(),
+                "CONFLICT",
+                "External anchor witnesses contain incompatible truths.",
+                null,
+                null,
+                sink.immutabilityLevel(),
+                timestampTrustLevel(),
+                "UNAVAILABLE",
+                null,
+                null,
+                null,
+                "CONFLICT",
+                exception.conflictingHashes(),
+                exception.witnessSources(),
+                List.of(new AuditIntegrityViolation("EXTERNAL_ANCHOR_CONFLICT", 1, "EXTERNAL_ANCHOR_CONFLICT"))
         );
     }
 
@@ -307,6 +424,11 @@ public class ExternalAuditIntegrityService {
             }
             throw exception;
         }
+    }
+
+    private String timestampTrustLevel() {
+        ExternalWitnessCapabilities capabilities = sink.capabilities();
+        return capabilities == null ? "APP_OBSERVED" : capabilities.timestampTrustLevel();
     }
 
     private SignatureEnrichment enrichSignature(ExternalAuditAnchor external, ExternalAnchorReference reference) {

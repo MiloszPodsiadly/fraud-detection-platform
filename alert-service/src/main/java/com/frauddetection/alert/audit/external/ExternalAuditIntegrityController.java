@@ -22,4 +22,12 @@ public class ExternalAuditIntegrityController {
     ) {
         return service.verify(sourceService, limit);
     }
+
+    @GetMapping("/coverage")
+    public ExternalAuditAnchorCoverageResponse coverage(
+            @RequestParam(name = "source_service", required = false) String sourceService,
+            @RequestParam(required = false) Integer limit
+    ) {
+        return service.coverage(sourceService, limit);
+    }
 }

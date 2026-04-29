@@ -79,6 +79,7 @@ public class AlertSecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/audit/events").hasAuthority(AnalystAuthority.AUDIT_READ)
                         .requestMatchers(HttpMethod.GET, "/api/v1/audit/integrity").hasAuthority(AnalystAuthority.AUDIT_READ)
                         .requestMatchers(HttpMethod.GET, "/api/v1/audit/integrity/external").hasAuthority(AnalystAuthority.AUDIT_VERIFY)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/audit/integrity/external/coverage").hasAuthority(AnalystAuthority.AUDIT_VERIFY)
                         .requestMatchers(HttpMethod.GET, "/api/v1/audit/evidence/export").hasAuthority(AnalystAuthority.AUDIT_EXPORT)
                         .requestMatchers(HttpMethod.GET, "/api/v1/audit/trust/attestation").hasAuthority(AnalystAuthority.AUDIT_VERIFY)
                         .requestMatchers(HttpMethod.GET, "/api/v1/audit/trust/keys").hasAuthority(AnalystAuthority.AUDIT_VERIFY)

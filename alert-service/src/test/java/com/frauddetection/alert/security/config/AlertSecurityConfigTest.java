@@ -21,6 +21,7 @@ import com.frauddetection.alert.audit.external.AuditEvidenceExportService;
 import com.frauddetection.alert.audit.external.AuditTrustAuthorityClient;
 import com.frauddetection.alert.audit.external.AuditTrustAuthorityKey;
 import com.frauddetection.alert.audit.external.AuditTrustKeysController;
+import com.frauddetection.alert.audit.external.ExternalAuditAnchorCoverageResponse;
 import com.frauddetection.alert.audit.external.ExternalAuditIntegrityController;
 import com.frauddetection.alert.audit.external.ExternalAuditIntegrityResponse;
 import com.frauddetection.alert.audit.external.ExternalAuditIntegrityService;
@@ -194,6 +195,8 @@ class AlertSecurityConfigTest {
         mockMvc.perform(get("/api/v1/audit/integrity"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/audit/integrity/external"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/audit/integrity/external/coverage"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/audit/evidence/export"))
                 .andExpect(status().isUnauthorized());
@@ -382,6 +385,8 @@ class AlertSecurityConfigTest {
                 .thenReturn(new AuditIntegrityResponse("VALID", 0, 100, "HEAD", false, false, false, null, null, null, null, null, null, List.of()));
         when(externalAuditIntegrityService.verify(any(), any()))
                 .thenReturn(new ExternalAuditIntegrityResponse("VALID", 0, 100, "alert-service", "source_service:alert-service", null, null, null, null, List.of()));
+        when(externalAuditIntegrityService.coverage(any(), any()))
+                .thenReturn(new ExternalAuditAnchorCoverageResponse("AVAILABLE", 0, 0, 0, null, List.of(), false, 100, null, null));
         when(auditEvidenceExportService.export(any(), any(), any(), any(), any(Boolean.class)))
                 .thenReturn(new AuditEvidenceExportResponse(
                         "AVAILABLE",
@@ -437,6 +442,9 @@ class AlertSecurityConfigTest {
         mockMvc.perform(get("/api/v1/audit/integrity/external").with(demoUser("FRAUD_OPS_ADMIN")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("VALID"));
+        mockMvc.perform(get("/api/v1/audit/integrity/external/coverage").with(demoUser("FRAUD_OPS_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("AVAILABLE"));
         mockMvc.perform(get("/api/v1/audit/evidence/export")
                         .param("from", "2026-04-27T00:00:00Z")
                         .param("to", "2026-04-28T00:00:00Z")
@@ -456,6 +464,8 @@ class AlertSecurityConfigTest {
         mockMvc.perform(get("/api/v1/audit/integrity").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/audit/integrity/external").with(demoUser("ANALYST")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/audit/integrity/external/coverage").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/audit/evidence/export")
                         .param("from", "2026-04-27T00:00:00Z")
@@ -477,6 +487,8 @@ class AlertSecurityConfigTest {
     void shouldRequireDedicatedFdp20AuthoritiesInsteadOfAuditRead() throws Exception {
         when(externalAuditIntegrityService.verify(any(), any()))
                 .thenReturn(new ExternalAuditIntegrityResponse("VALID", 0, 100, "alert-service", "source_service:alert-service", null, null, null, null, List.of()));
+        when(externalAuditIntegrityService.coverage(any(), any()))
+                .thenReturn(new ExternalAuditAnchorCoverageResponse("AVAILABLE", 0, 0, 0, null, List.of(), false, 100, null, null));
         when(auditEvidenceExportService.export(any(), any(), any(), any(), any(Boolean.class)))
                 .thenReturn(new AuditEvidenceExportResponse(
                         "AVAILABLE",
@@ -517,6 +529,10 @@ class AlertSecurityConfigTest {
         mockMvc.perform(get("/api/v1/audit/integrity/external").with(authorities(AnalystAuthority.AUDIT_READ)))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/audit/integrity/external").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/audit/integrity/external/coverage").with(authorities(AnalystAuthority.AUDIT_READ)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/audit/integrity/external/coverage").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
                 .andExpect(status().isOk());
         mockMvc.perform(get("/api/v1/audit/trust/attestation").with(authorities(AnalystAuthority.AUDIT_READ)))
                 .andExpect(status().isForbidden());
