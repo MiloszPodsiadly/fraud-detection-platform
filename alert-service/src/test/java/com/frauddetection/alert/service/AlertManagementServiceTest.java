@@ -10,6 +10,7 @@ import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.AuditService;
+import com.frauddetection.alert.audit.PostCommitEvidenceIncompleteException;
 import com.frauddetection.alert.mapper.AlertDocumentMapper;
 import com.frauddetection.alert.mapper.FraudAlertEventMapper;
 import com.frauddetection.alert.mapper.FraudDecisionEventMapper;
@@ -153,7 +154,7 @@ class AlertManagementServiceTest {
         assertThat(outboxEvent).isNotNull();
         assertThat(documentCaptor.getValue().getDecisionOutboxStatus()).isEqualTo(DecisionOutboxStatus.PENDING);
         assertThat(response.decisionEventId()).isEqualTo(outboxEvent.eventId());
-        assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_FULLY_ANCHORED);
+        assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING);
         verify(decisionPublisher, never()).publish(any(FraudDecisionEvent.class));
         assertThat(outboxEvent.decisionMetadata())
                 .containsEntry("modelScore", 0.82d)
@@ -413,7 +414,7 @@ class AlertManagementServiceTest {
     }
 
     @Test
-    void shouldRejectBankModeCommandWhenSuccessAuditDegradesWithoutIncompleteResponse() {
+    void shouldReturnExplicitCommittedIncompleteErrorWhenBankModePostCommitAuditDegrades() {
         AlertRepository repository = mock(AlertRepository.class);
         FraudAlertEventPublisher alertPublisher = mock(FraudAlertEventPublisher.class);
         FraudDecisionEventPublisher decisionPublisher = mock(FraudDecisionEventPublisher.class);
@@ -472,7 +473,7 @@ class AlertManagementServiceTest {
                 "Confirmed after manual review",
                 List.of("chargeback"),
                 Map.of()
-        ))).isInstanceOf(AuditPersistenceUnavailableException.class);
+        ))).isInstanceOf(PostCommitEvidenceIncompleteException.class);
 
         verify(degradationService).recordPostCommitDegraded(
                 AuditAction.SUBMIT_ANALYST_DECISION,
@@ -482,6 +483,8 @@ class AlertManagementServiceTest {
         );
         assertThat(document.getDecisionOperationStatus())
                 .isNotEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE.name());
+        assertThat(document.getDecisionOperationStatus())
+                .isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING.name());
     }
 
     @Test
@@ -525,8 +528,8 @@ class AlertManagementServiceTest {
 
         assertThat(replay.decisionEventId()).isEqualTo(first.decisionEventId());
         assertThat(replay.decidedAt()).isEqualTo(first.decidedAt());
-        assertThat(replay.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_FULLY_ANCHORED);
-        verify(repository, org.mockito.Mockito.times(2)).save(any(AlertDocument.class));
+        assertThat(replay.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING);
+        verify(repository, org.mockito.Mockito.times(1)).save(any(AlertDocument.class));
         verify(auditService, org.mockito.Mockito.times(1)).audit(
                 AuditAction.SUBMIT_ANALYST_DECISION,
                 AuditResourceType.ALERT,
@@ -584,7 +587,7 @@ class AlertManagementServiceTest {
                 Map.of()
         ), "idem-1")).isInstanceOf(ConflictingIdempotencyKeyException.class);
 
-        verify(repository, org.mockito.Mockito.times(2)).save(any(AlertDocument.class));
+        verify(repository, org.mockito.Mockito.times(1)).save(any(AlertDocument.class));
         verify(decisionPublisher, never()).publish(any(FraudDecisionEvent.class));
     }
 }

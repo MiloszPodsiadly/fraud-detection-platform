@@ -2,6 +2,8 @@ package com.frauddetection.alert.audit;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Optional;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -38,5 +40,37 @@ class AuditDegradationServiceTest {
 
         assertThat(service.unresolvedPostCommitDegradedCount()).isEqualTo(2L);
         verify(repository).countByTypeAndResolved(AuditDegradationEventDocument.TYPE_POST_COMMIT_DEGRADED, false);
+    }
+
+    @Test
+    void shouldResolveDegradationWithOperatorEvidenceAndAuditResolution() {
+        AuditDegradationEventRepository repository = mock(AuditDegradationEventRepository.class);
+        AuditService auditService = mock(AuditService.class);
+        AuditDegradationService service = new AuditDegradationService(repository, auditService);
+        AuditDegradationEventDocument event = new AuditDegradationEventDocument();
+        event.setAuditId("audit-1");
+        event.setResolved(false);
+        when(repository.findByAuditId("audit-1")).thenReturn(Optional.of(event));
+        when(repository.save(event)).thenReturn(event);
+
+        AuditDegradationEventDocument resolved = service.resolveDegradation(
+                "audit-1",
+                "ops-admin",
+                "external evidence verified",
+                "ticket-123"
+        );
+
+        assertThat(resolved.isResolved()).isTrue();
+        assertThat(resolved.getResolvedAt()).isNotNull();
+        assertThat(resolved.getResolvedBy()).isEqualTo("ops-admin");
+        assertThat(resolved.getResolutionReason()).isEqualTo("external evidence verified");
+        assertThat(resolved.getResolutionEvidenceReference()).isEqualTo("ticket-123");
+        verify(auditService).audit(
+                AuditAction.RESOLVE_AUDIT_DEGRADATION,
+                AuditResourceType.AUDIT_DEGRADATION,
+                "audit-1",
+                null,
+                "ops-admin"
+        );
     }
 }

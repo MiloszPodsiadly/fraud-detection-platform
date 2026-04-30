@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -32,11 +33,12 @@ class SystemTrustLevelControllerTest {
         when(integrityService.coverage("alert-service", 100)).thenReturn(healthyCoverage());
         when(sink.capabilities()).thenReturn(verifiedCapabilities());
         when(degradationService.unresolvedPostCommitDegradedCount()).thenReturn(0L);
-        when(alertRepository.countByDecisionOutboxStatusIn(List.of(DecisionOutboxStatus.FAILED_TERMINAL, DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN)))
-                .thenReturn(0L);
+        when(alertRepository.countByDecisionOutboxStatus(DecisionOutboxStatus.FAILED_TERMINAL)).thenReturn(0L);
+        when(alertRepository.countByDecisionOutboxStatus(DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN)).thenReturn(0L);
         when(alertRepository.findTopByDecisionOutboxStatusInOrderByDecidedAtAsc(List.of(DecisionOutboxStatus.PENDING, DecisionOutboxStatus.PROCESSING, DecisionOutboxStatus.FAILED_RETRYABLE)))
                 .thenReturn(Optional.empty());
         SystemTrustLevelController controller = new SystemTrustLevelController(
+                true,
                 true,
                 true,
                 true,
@@ -57,7 +59,7 @@ class SystemTrustLevelControllerTest {
         assertThat(response.failClosed()).isTrue();
         assertThat(response.externalAnchorStrength()).isEqualTo("SIGNED_EXTERNAL");
         assertThat(response.coverageStatus()).isEqualTo("HEALTHY");
-        assertThat(response.witnessStatus()).isEqualTo("PROVIDER_VERIFIED");
+        assertThat(response.witnessStatus()).isEqualTo("PROVIDER_CAPABILITY_VERIFIED");
     }
 
     @Test
@@ -175,6 +177,7 @@ class SystemTrustLevelControllerTest {
                 true,
                 true,
                 true,
+                true,
                 Duration.ofMinutes(10),
                 integrityService,
                 sink,
@@ -197,11 +200,12 @@ class SystemTrustLevelControllerTest {
         when(integrityService.coverage("alert-service", 100)).thenReturn(healthyCoverage());
         when(sink.capabilities()).thenReturn(verifiedCapabilities());
         when(degradationService.unresolvedPostCommitDegradedCount()).thenReturn(0L);
-        when(alertRepository.countByDecisionOutboxStatusIn(List.of(DecisionOutboxStatus.FAILED_TERMINAL, DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN)))
-                .thenReturn(1L);
+        when(alertRepository.countByDecisionOutboxStatus(DecisionOutboxStatus.FAILED_TERMINAL)).thenReturn(1L);
+        when(alertRepository.countByDecisionOutboxStatus(DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN)).thenReturn(0L);
         when(alertRepository.findTopByDecisionOutboxStatusInOrderByDecidedAtAsc(List.of(DecisionOutboxStatus.PENDING, DecisionOutboxStatus.PROCESSING, DecisionOutboxStatus.FAILED_RETRYABLE)))
                 .thenReturn(Optional.empty());
         SystemTrustLevelController controller = new SystemTrustLevelController(
+                true,
                 true,
                 true,
                 true,
@@ -219,6 +223,27 @@ class SystemTrustLevelControllerTest {
         assertThat(response.guaranteeLevel()).isEqualTo("FDP24_DEGRADED");
         assertThat(response.outboxFailedTerminalCount()).isEqualTo(1L);
         assertThat(response.reasonCode()).isEqualTo("OUTBOX_TERMINAL_FAILURE");
+    }
+
+    @Test
+    void shouldFailStartupWhenRequiredFailClosedPublicationDoesNotEnableBankMode() {
+        SystemTrustLevelController controller = new SystemTrustLevelController(
+                true,
+                true,
+                true,
+                false,
+                false,
+                false,
+                Duration.ofMinutes(10),
+                mock(ExternalAuditIntegrityService.class),
+                mock(ExternalAuditAnchorSink.class),
+                null,
+                null
+        );
+
+        assertThatThrownBy(() -> controller.run(mock(org.springframework.boot.ApplicationArguments.class)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("app.audit.bank-mode.fail-closed=true is required");
     }
 
     private ExternalAuditAnchorCoverageResponse healthyCoverage() {
