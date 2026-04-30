@@ -138,7 +138,7 @@ paths:
   /api/v1/audit/integrity/external:
     get:
       summary: Verify external audit anchor consistency
-      description: Performs bounded read-only comparison between the local audit chain anchor and the external anchor. Requires audit:verify. Returns VALID, INVALID, PARTIAL, UNAVAILABLE, or CONFLICT. PUBLISHED means the anchor object was written to the external witness and verified by read-back at publication time; future witness availability is not guaranteed. Object-store sinks can verify by exact partition_key + chain_position lookup using the deterministic encoded object key before falling back to latest-anchor comparison. Latest object-store HEAD detection first verifies the optional External Head Manifest at head.json by manifest_hash and by reading the referenced anchor; the manifest is navigation metadata, not evidence. Invalid or missing manifests are not trusted and fall back to full paginated scan. Full scan requires continuation-token pagination and consumes every page; if listing may be truncated and pagination is unavailable, verification returns a degraded UNAVAILABLE state rather than reporting VALID from a best-effort HEAD. Detects missing, stale, ahead, mismatched hash, mismatched local anchor id, mismatched object key binding, mismatched payload hash binding, mismatched anchor id/version, mismatched hash algorithm, unsupported external schema version, incompatible same-position witness records, and external payload tampering. Response includes external_immutability_level and durability_guarantee; NONE, CONFIGURED, or WITNESS_RETENTION is not a fake WORM/legal proof. This endpoint does not repair data, mutate audit records, export full history, or provide WORM/legal notarization. Real S3/GCS/Azure object-store adapters remain future deployment work.
+      description: Performs bounded read-only comparison between the local audit chain anchor and the external anchor. Requires audit:verify. Returns VALID, INVALID, PARTIAL, UNAVAILABLE, or CONFLICT. PUBLISHED means the anchor object was written to the external witness and verified by read-back at publication time; future witness availability is not guaranteed. LOCAL_STATUS_UNVERIFIED means external publication/read-back may have succeeded but local publication-status persistence failed and must not be counted as clean local PUBLISHED until recovered. Object-store sinks can verify by exact partition_key + chain_position lookup using the deterministic encoded object key before falling back to latest-anchor comparison. Latest object-store HEAD detection first verifies the optional External Head Manifest at head.json by manifest_hash and by reading the referenced anchor; the manifest is navigation metadata, not evidence. Invalid or missing manifests are not trusted and fall back to full paginated scan. Full scan requires continuation-token pagination and consumes every page; if listing may be truncated and pagination is unavailable, verification returns a degraded UNAVAILABLE state rather than reporting VALID from a best-effort HEAD. Detects missing, stale, ahead, mismatched hash, mismatched local anchor id, mismatched object key binding, mismatched payload hash binding, mismatched anchor id/version, mismatched hash algorithm, unsupported external schema version, incompatible same-position witness records, and external payload tampering. Response includes external_immutability_level and durability_guarantee; NONE, CONFIGURED, or WITNESS_RETENTION is not a fake WORM/legal proof. verified_at is application read-back time, not external timestamp proof; timestamp_value is witness metadata when available. This endpoint does not repair data, mutate audit records, export full history, or provide WORM/legal notarization. Real S3/GCS/Azure object-store adapters remain future deployment work.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1527,13 +1527,28 @@ components:
         verified_at:
           type: string
           format: date-time
+          description: Application read-back verification time; not external timestamp proof.
+        timestamp_value:
+          type: string
+          format: date-time
+          nullable: true
+          description: Witness-provided timestamp metadata when available. Null means no verified witness timestamp was provided.
         timestamp_type:
           type: string
           enum: [APP_OBSERVED, STORAGE_OBSERVED, SIGNED_TIMESTAMP, LEDGER_TIMESTAMP]
+          description: APP_OBSERVED is application metadata only and is not external timestamp proof.
         timestamp_trust_level:
           type: string
-          enum: [APP_OBSERVED, STORAGE_OBSERVED, SIGNED_TIMESTAMP, LEDGER_TIMESTAMP]
-          description: APP_OBSERVED is not proof of external time. Stronger values require verified witness support.
+          enum: [WEAK, MEDIUM, STRONG, CRYPTOGRAPHIC]
+          description: WEAK application-observed timestamps are not proof of external time. Stronger values require verified witness support.
+        timestamp_source:
+          type: string
+          nullable: true
+          description: Bounded timestamp source label such as APP_CLOCK or WITNESS_METADATA; never a raw URL or provider error.
+        timestamp_verified:
+          type: boolean
+          nullable: true
+          description: True only when timestamp metadata is verified by the witness adapter.
         signature_status:
           type: string
           nullable: true
