@@ -9,6 +9,7 @@ import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditAnchorDocument;
 import com.frauddetection.alert.audit.AuditAnchorRepository;
 import com.frauddetection.alert.audit.AuditEventBusinessSemantics;
+import com.frauddetection.alert.audit.AuditEventCompensationLookup;
 import com.frauddetection.alert.audit.AuditEventDocument;
 import com.frauddetection.alert.audit.AuditEventMetadataSummary;
 import com.frauddetection.alert.audit.AuditEventRepository;
@@ -55,6 +56,7 @@ public class AuditEvidenceExportService {
     private final AuditEvidenceExportRateLimiterStrategy rateLimiter;
     private final AuditEvidenceExportAbuseDetector abuseDetector;
     private final ExternalAuditAnchorPublicationStatusRepository publicationStatusRepository;
+    private final AuditEventCompensationLookup compensationLookup;
 
     private record ExternalAnchorLookup(String status, Map<Long, ExternalAuditAnchor> anchors) {
     }
@@ -84,6 +86,33 @@ public class AuditEvidenceExportService {
         );
     }
 
+    AuditEvidenceExportService(
+            AuditEventRepository eventRepository,
+            AuditAnchorRepository anchorRepository,
+            ExternalAuditAnchorSink sink,
+            AuditEvidenceExportQueryParser queryParser,
+            AlertServiceMetrics metrics,
+            AuditService auditService,
+            CurrentAnalystUser currentAnalystUser,
+            AuditEvidenceExportRateLimiterStrategy rateLimiter,
+            AuditEvidenceExportAbuseDetector abuseDetector,
+            AuditEventCompensationLookup compensationLookup
+    ) {
+        this(
+                eventRepository,
+                anchorRepository,
+                sink,
+                queryParser,
+                metrics,
+                auditService,
+                currentAnalystUser,
+                rateLimiter,
+                abuseDetector,
+                null,
+                compensationLookup
+        );
+    }
+
     @Autowired
     public AuditEvidenceExportService(
             AuditEventRepository eventRepository,
@@ -95,7 +124,8 @@ public class AuditEvidenceExportService {
             CurrentAnalystUser currentAnalystUser,
             AuditEvidenceExportRateLimiterStrategy rateLimiter,
             AuditEvidenceExportAbuseDetector abuseDetector,
-            ExternalAuditAnchorPublicationStatusRepository publicationStatusRepository
+            ExternalAuditAnchorPublicationStatusRepository publicationStatusRepository,
+            AuditEventCompensationLookup compensationLookup
     ) {
         this.eventRepository = eventRepository;
         this.anchorRepository = anchorRepository;
@@ -107,6 +137,7 @@ public class AuditEvidenceExportService {
         this.rateLimiter = rateLimiter;
         this.abuseDetector = abuseDetector;
         this.publicationStatusRepository = publicationStatusRepository;
+        this.compensationLookup = compensationLookup;
     }
 
     public AuditEvidenceExportResponse export(String from, String to, String sourceService, Integer limit) {
@@ -195,7 +226,13 @@ public class AuditEvidenceExportService {
                 .orElse(0L);
         Map<Long, AuditAnchorDocument> localAnchors = localAnchors(query, minPosition, maxPosition);
         ExternalAnchorLookup externalAnchorLookup = externalAnchors(query);
-        Map<String, AuditEventBusinessSemantics> semantics = AuditEventBusinessSemantics.index(documents);
+        List<AuditEventDocument> compensations = compensationLookup == null
+                ? List.of()
+                : compensationLookup.findExternalAnchorAbortCompensations(documents);
+        if (compensations == null) {
+            compensations = List.of();
+        }
+        Map<String, AuditEventBusinessSemantics> semantics = AuditEventBusinessSemantics.index(documents, compensations);
         List<AuditEvidenceExportEvent> events = documents.stream()
                 .map(document -> {
                     Long position = document.chainPosition();

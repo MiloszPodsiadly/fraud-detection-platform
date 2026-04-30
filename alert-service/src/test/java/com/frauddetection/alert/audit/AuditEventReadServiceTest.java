@@ -27,12 +27,14 @@ class AuditEventReadServiceTest {
 
     private final MongoTemplate mongoTemplate = mock(MongoTemplate.class);
     private final AuditService auditService = mock(AuditService.class);
+    private final AuditEventCompensationLookup compensationLookup = mock(AuditEventCompensationLookup.class);
     private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
     private final AuditEventReadService service = new AuditEventReadService(
             mongoTemplate,
             new AuditEventQueryParser(Clock.fixed(Instant.parse("2026-04-26T10:00:00Z"), ZoneOffset.UTC)),
             new AlertServiceMetrics(meterRegistry),
-            auditService
+            auditService,
+            compensationLookup
     );
 
     @Test
@@ -143,6 +145,43 @@ class AuditEventReadServiceTest {
         assertThat(attemptResponse.compensated()).isTrue();
         assertThat(attemptResponse.supersededByEventId()).isEqualTo("audit-aborted");
         assertThat(attemptResponse.businessEffective()).isFalse();
+    }
+
+    @Test
+    void shouldExposeCompensationOutsideCurrentReadPage() {
+        AuditActor actor = new AuditActor("admin-1", Set.of("FRAUD_OPS_ADMIN"), Set.of("audit:read"));
+        AuditEventDocument success = AuditEventDocument.from("audit-success", new AuditEvent(
+                actor,
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT,
+                "alert-1",
+                Instant.parse("2026-04-26T09:00:00Z"),
+                "corr-1",
+                AuditOutcome.SUCCESS,
+                null
+        ), null, 1L);
+        AuditEventDocument compensation = AuditEventDocument.from("audit-aborted", new AuditEvent(
+                actor,
+                AuditAction.EXTERNAL_ANCHOR_REQUIRED_FAILED,
+                AuditResourceType.AUDIT_EVENT,
+                success.auditId(),
+                Instant.parse("2026-04-26T09:00:01Z"),
+                "corr-1",
+                AuditOutcome.ABORTED_EXTERNAL_ANCHOR_REQUIRED,
+                "ExternalAuditAnchorPublicationRequiredException:WRITE_NOT_VERIFIED"
+        ), success.eventHash(), 2L);
+        when(mongoTemplate.find(org.mockito.ArgumentMatchers.any(Query.class), eq(AuditEventDocument.class)))
+                .thenReturn(List.of(success));
+        when(compensationLookup.findExternalAnchorAbortCompensations(List.of(success)))
+                .thenReturn(List.of(compensation));
+
+        AuditEventReadResponse response = service.readEvents(null, null, null, null, null, null, 1);
+
+        AuditEventResponse event = response.events().getFirst();
+        assertThat(event.outcome()).isEqualTo("SUCCESS");
+        assertThat(event.compensated()).isTrue();
+        assertThat(event.supersededByEventId()).isEqualTo("audit-aborted");
+        assertThat(event.businessEffective()).isFalse();
     }
 
     @Test

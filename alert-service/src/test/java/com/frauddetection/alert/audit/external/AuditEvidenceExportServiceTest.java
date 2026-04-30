@@ -4,6 +4,7 @@ import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditAnchorDocument;
 import com.frauddetection.alert.audit.AuditAnchorRepository;
 import com.frauddetection.alert.audit.AuditEventDocument;
+import com.frauddetection.alert.audit.AuditEventCompensationLookup;
 import com.frauddetection.alert.audit.AuditEventMetadataSummary;
 import com.frauddetection.alert.audit.AuditEventRepository;
 import com.frauddetection.alert.audit.AuditFailureCategory;
@@ -162,6 +163,45 @@ class AuditEvidenceExportServiceTest {
         assertThat(attemptResponse.businessEffective()).isFalse();
         assertThat(abortResponse.relatedEventId()).isEqualTo("audit-attempted");
         assertThat(abortResponse.businessEffective()).isFalse();
+    }
+
+    @Test
+    void shouldExposeCompensationOutsideEvidenceExportWindow() {
+        AuditEventCompensationLookup compensationLookup = mock(AuditEventCompensationLookup.class);
+        AuditEvidenceExportService exportService = new AuditEvidenceExportService(
+                eventRepository,
+                anchorRepository,
+                sink,
+                new AuditEvidenceExportQueryParser(),
+                metrics,
+                auditService,
+                currentAnalystUser,
+                rateLimiter,
+                abuseDetector,
+                compensationLookup
+        );
+        AuditEventDocument success = event("audit-success", 10L, AuditAction.SUBMIT_ANALYST_DECISION, AuditResourceType.ALERT,
+                "alert-1", AuditOutcome.SUCCESS, null, null);
+        AuditEventDocument compensation = event("audit-aborted", 11L, AuditAction.EXTERNAL_ANCHOR_REQUIRED_FAILED, AuditResourceType.AUDIT_EVENT,
+                "audit-success", AuditOutcome.ABORTED_EXTERNAL_ANCHOR_REQUIRED, success.eventHash(), "ExternalAuditAnchorPublicationRequiredException:WRITE_NOT_VERIFIED");
+        when(eventRepository.findEvidenceWindow(any(), any(), any(), anyInt())).thenReturn(List.of(success));
+        when(compensationLookup.findExternalAnchorAbortCompensations(List.of(success))).thenReturn(List.of(compensation));
+        when(anchorRepository.findByPartitionKeyAndChainPositionBetween("source_service:alert-service", 10L, 10L, 100))
+                .thenReturn(List.of(localAnchor("local-anchor-10", 10L, "hash-10")));
+        when(sink.findByRange(any(), any(), any(), anyInt())).thenReturn(List.of());
+
+        AuditEvidenceExportResponse response = exportService.export(
+                "2026-04-27T00:00:00Z",
+                "2026-04-28T00:00:00Z",
+                "alert-service",
+                null
+        );
+
+        AuditEvidenceExportEvent exported = response.events().getFirst();
+        assertThat(exported.outcome()).isEqualTo("SUCCESS");
+        assertThat(exported.compensated()).isTrue();
+        assertThat(exported.supersededByEventId()).isEqualTo("audit-aborted");
+        assertThat(exported.businessEffective()).isFalse();
     }
 
     @Test

@@ -22,17 +22,20 @@ public class AuditEventReadService {
     private final AuditEventQueryParser queryParser;
     private final AlertServiceMetrics metrics;
     private final AuditService auditService;
+    private final AuditEventCompensationLookup compensationLookup;
 
     public AuditEventReadService(
             MongoTemplate mongoTemplate,
             AuditEventQueryParser queryParser,
             AlertServiceMetrics metrics,
-            AuditService auditService
+            AuditService auditService,
+            AuditEventCompensationLookup compensationLookup
     ) {
         this.mongoTemplate = mongoTemplate;
         this.queryParser = queryParser;
         this.metrics = metrics;
         this.auditService = auditService;
+        this.compensationLookup = compensationLookup;
     }
 
     public AuditEventReadResponse readEvents(
@@ -47,8 +50,12 @@ public class AuditEventReadService {
         AuditEventQuery auditQuery = queryParser.parse(eventType, actorId, resourceType, resourceId, from, to, limit);
         try {
             List<AuditEventDocument> documents = mongoTemplate.find(toMongoQuery(auditQuery), AuditEventDocument.class);
+            List<AuditEventDocument> compensations = compensationLookup.findExternalAnchorAbortCompensations(documents);
+            if (compensations == null) {
+                compensations = List.of();
+            }
             metrics.recordPlatformAuditReadRequest("AVAILABLE");
-            AuditEventReadResponse response = AuditEventReadResponse.available(auditQuery.limit(), documents);
+            AuditEventReadResponse response = AuditEventReadResponse.available(auditQuery.limit(), documents, compensations);
             auditEventsRead(auditQuery, response.count(), AuditOutcome.SUCCESS, null);
             return response;
         } catch (DataAccessException exception) {

@@ -12,7 +12,17 @@ public record AuditEventBusinessSemantics(
         String relatedEventId
 ) {
     public static Map<String, AuditEventBusinessSemantics> index(List<AuditEventDocument> documents) {
-        Map<String, AuditEventDocument> abortByRelatedEventId = documents.stream()
+        return index(documents, List.of());
+    }
+
+    public static Map<String, AuditEventBusinessSemantics> index(
+            List<AuditEventDocument> documents,
+            List<AuditEventDocument> compensations
+    ) {
+        Map<String, AuditEventDocument> abortByRelatedEventId = java.util.stream.Stream.concat(
+                        documents.stream(),
+                        compensations.stream()
+                )
                 .filter(AuditEventBusinessSemantics::isExternalAnchorAbort)
                 .filter(document -> document.resourceId() != null)
                 .collect(Collectors.toMap(
@@ -37,11 +47,11 @@ public record AuditEventBusinessSemantics(
             Map<String, AuditEventDocument> abortByRelatedEventId
     ) {
         AuditEventDocument abort = abortByRelatedEventId.get(document.auditId());
-        if (abort != null && document.outcome() == AuditOutcome.ATTEMPTED) {
-            return new AuditEventBusinessSemantics(true, abort.auditId(), false, null);
-        }
         if (isExternalAnchorAbort(document)) {
             return new AuditEventBusinessSemantics(false, null, false, document.resourceId());
+        }
+        if (abort != null) {
+            return new AuditEventBusinessSemantics(true, abort.auditId(), false, null);
         }
         return new AuditEventBusinessSemantics(false, null, document.outcome() == AuditOutcome.SUCCESS, null);
     }

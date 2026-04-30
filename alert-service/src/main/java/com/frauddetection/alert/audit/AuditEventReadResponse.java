@@ -30,7 +30,15 @@ public record AuditEventReadResponse(
     private static final String UNAVAILABLE_MESSAGE = "Audit event store is currently unavailable.";
 
     static AuditEventReadResponse available(int limit, List<AuditEventDocument> documents) {
-        var semantics = AuditEventBusinessSemantics.index(documents);
+        return available(limit, documents, List.of());
+    }
+
+    static AuditEventReadResponse available(
+            int limit,
+            List<AuditEventDocument> documents,
+            List<AuditEventDocument> compensations
+    ) {
+        var semantics = AuditEventBusinessSemantics.index(documents, compensations);
         List<AuditEventResponse> events = documents.stream()
                 .map(document -> AuditEventResponse.from(document, semantics.get(document.auditId())))
                 .toList();
