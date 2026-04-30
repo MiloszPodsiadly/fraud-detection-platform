@@ -73,6 +73,7 @@ public class FraudDecisionOutboxPublisher {
                 if (markPublished(document)) {
                     published++;
                 } else {
+                    markPublishConfirmationUnknown(document);
                     metrics.recordDecisionOutboxPublishConfirmationFailed();
                     log.warn("Fraud decision outbox publish confirmation failed: reason=OUTBOX_PUBLISH_CONFIRMATION_FAILED");
                 }
@@ -132,6 +133,20 @@ public class FraudDecisionOutboxPublisher {
             return mongoTemplate.updateFirst(query, update, AlertDocument.class).getModifiedCount() == 1;
         } catch (DataAccessException exception) {
             return false;
+        }
+    }
+
+    private void markPublishConfirmationUnknown(AlertDocument document) {
+        Update update = new Update()
+                .set("decisionOutboxStatus", DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN)
+                .set("decisionOutboxLastError", "OUTBOX_PUBLISH_CONFIRMATION_FAILED")
+                .set("decisionOutboxFailureReason", "OUTBOX_PUBLISH_CONFIRMATION_FAILED")
+                .unset("decisionOutboxLeaseOwner")
+                .unset("decisionOutboxLeaseExpiresAt");
+        try {
+            mongoTemplate.updateFirst(leasedDocumentQuery(document), update, AlertDocument.class);
+        } catch (DataAccessException exception) {
+            log.warn("Fraud decision outbox confirmation-unknown update failed: reason=OUTBOX_CONFIRMATION_UNKNOWN_UPDATE_FAILED");
         }
     }
 

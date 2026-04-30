@@ -22,6 +22,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -97,6 +98,10 @@ class FraudDecisionOutboxPublisherTest {
         assertThat(published).isZero();
         verify(publisher).publish(document.getDecisionOutboxEvent());
         verify(metrics).recordDecisionOutboxPublishConfirmationFailed();
+        org.mockito.ArgumentCaptor<Update> updateCaptor = org.mockito.ArgumentCaptor.forClass(Update.class);
+        verify(mongoTemplate, times(2)).updateFirst(any(Query.class), updateCaptor.capture(), eq(AlertDocument.class));
+        assertThat(updateCaptor.getAllValues().get(1).getUpdateObject().toJson())
+                .contains(DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
     }
 
     private AlertDocument pendingDocument() {

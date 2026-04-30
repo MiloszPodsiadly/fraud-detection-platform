@@ -4,6 +4,7 @@ public final class DecisionOutboxStatus {
     public static final String PENDING = "PENDING";
     public static final String PROCESSING = "PROCESSING";
     public static final String PUBLISHED = "PUBLISHED";
+    public static final String PUBLISH_CONFIRMATION_UNKNOWN = "PUBLISH_CONFIRMATION_UNKNOWN";
     public static final String FAILED_RETRYABLE = "FAILED_RETRYABLE";
     public static final String FAILED_TERMINAL = "FAILED_TERMINAL";
 
