@@ -7,11 +7,15 @@ import com.frauddetection.alert.audit.AuditEventDocument;
 import com.frauddetection.alert.audit.AuditEventCompensationLookup;
 import com.frauddetection.alert.audit.AuditEventMetadataSummary;
 import com.frauddetection.alert.audit.AuditEventRepository;
+import com.frauddetection.alert.audit.AuditEvidenceStatus;
+import com.frauddetection.alert.audit.AuditExternalAnchorStatus;
 import com.frauddetection.alert.audit.AuditFailureCategory;
 import com.frauddetection.alert.audit.InvalidAuditEventQueryException;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.AuditService;
+import com.frauddetection.alert.audit.BusinessEffectiveStatus;
+import com.frauddetection.alert.audit.CompensationType;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.security.authorization.AnalystRole;
 import com.frauddetection.alert.security.principal.AnalystPrincipal;
@@ -110,6 +114,10 @@ class AuditEvidenceExportServiceTest {
         assertThat(response.events().getFirst().localAnchor().publicationStatus()).isNull();
         assertThat(response.events().getFirst().externalAnchor()).isNotNull();
         assertThat(response.events().getFirst().businessEffective()).isTrue();
+        assertThat(response.events().getFirst().businessEffectiveStatus()).isEqualTo(BusinessEffectiveStatus.TRUE);
+        assertThat(response.events().getFirst().auditEvidenceStatus()).isEqualTo(AuditEvidenceStatus.EXTERNALLY_ANCHORED);
+        assertThat(response.events().getFirst().externalAnchorStatus()).isEqualTo(AuditExternalAnchorStatus.PUBLISHED);
+        assertThat(response.events().getFirst().compensationType()).isEqualTo(CompensationType.UNKNOWN);
         assertThat(response.events().getFirst().compensated()).isFalse();
         assertThat(response.toString()).doesNotContain("raw", "token", "stack", "private", "secret");
         ArgumentCaptor<AuditEventMetadataSummary> metadata = forClass(AuditEventMetadataSummary.class);
@@ -161,8 +169,16 @@ class AuditEvidenceExportServiceTest {
         assertThat(attemptResponse.compensated()).isTrue();
         assertThat(attemptResponse.supersededByEventId()).isEqualTo("audit-aborted");
         assertThat(attemptResponse.businessEffective()).isFalse();
+        assertThat(attemptResponse.businessEffectiveStatus()).isEqualTo(BusinessEffectiveStatus.FALSE);
+        assertThat(attemptResponse.auditEvidenceStatus()).isEqualTo(AuditEvidenceStatus.ANCHOR_REQUIRED_FAILED);
+        assertThat(attemptResponse.externalAnchorStatus()).isEqualTo(AuditExternalAnchorStatus.FAILED);
+        assertThat(attemptResponse.compensationType()).isEqualTo(CompensationType.EXTERNAL_ANCHOR_FAILURE);
         assertThat(abortResponse.relatedEventId()).isEqualTo("audit-attempted");
         assertThat(abortResponse.businessEffective()).isFalse();
+        assertThat(abortResponse.businessEffectiveStatus()).isEqualTo(BusinessEffectiveStatus.FALSE);
+        assertThat(abortResponse.auditEvidenceStatus()).isEqualTo(AuditEvidenceStatus.ANCHOR_REQUIRED_FAILED);
+        assertThat(abortResponse.externalAnchorStatus()).isEqualTo(AuditExternalAnchorStatus.FAILED);
+        assertThat(abortResponse.compensationType()).isEqualTo(CompensationType.EXTERNAL_ANCHOR_FAILURE);
     }
 
     @Test
@@ -201,7 +217,11 @@ class AuditEvidenceExportServiceTest {
         assertThat(exported.outcome()).isEqualTo("SUCCESS");
         assertThat(exported.compensated()).isTrue();
         assertThat(exported.supersededByEventId()).isEqualTo("audit-aborted");
-        assertThat(exported.businessEffective()).isFalse();
+        assertThat(exported.businessEffective()).isTrue();
+        assertThat(exported.businessEffectiveStatus()).isEqualTo(BusinessEffectiveStatus.TRUE);
+        assertThat(exported.auditEvidenceStatus()).isEqualTo(AuditEvidenceStatus.ANCHOR_REQUIRED_FAILED);
+        assertThat(exported.externalAnchorStatus()).isEqualTo(AuditExternalAnchorStatus.FAILED);
+        assertThat(exported.compensationType()).isEqualTo(CompensationType.EXTERNAL_ANCHOR_FAILURE);
     }
 
     @Test

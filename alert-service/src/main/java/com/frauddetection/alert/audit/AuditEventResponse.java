@@ -78,6 +78,18 @@ public record AuditEventResponse(
         @JsonProperty("business_effective")
         boolean businessEffective,
 
+        @JsonProperty("business_effective_status")
+        BusinessEffectiveStatus businessEffectiveStatus,
+
+        @JsonProperty("audit_evidence_status")
+        AuditEvidenceStatus auditEvidenceStatus,
+
+        @JsonProperty("external_anchor_status")
+        AuditExternalAnchorStatus externalAnchorStatus,
+
+        @JsonProperty("compensation_type")
+        CompensationType compensationType,
+
         @JsonProperty("related_event_id")
         String relatedEventId
 ) {
@@ -111,6 +123,10 @@ public record AuditEventResponse(
                 semantics.compensated(),
                 semantics.supersededByEventId(),
                 semantics.businessEffective(),
+                semantics.businessEffectiveStatus(),
+                semantics.auditEvidenceStatus(),
+                semantics.externalAnchorStatus(),
+                semantics.compensationType(),
                 semantics.relatedEventId()
         );
     }

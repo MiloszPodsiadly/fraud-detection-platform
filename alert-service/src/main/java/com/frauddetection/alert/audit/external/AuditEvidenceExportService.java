@@ -425,6 +425,10 @@ public class AuditEvidenceExportService {
         canonical.put("audit_event_ids", events.stream().map(AuditEvidenceExportEvent::auditEventId).toList());
         canonical.put("event_hashes", events.stream().map(AuditEvidenceExportEvent::eventHash).toList());
         canonical.put("business_effective", events.stream().map(AuditEvidenceExportEvent::businessEffective).toList());
+        canonical.put("business_effective_status", events.stream().map(AuditEvidenceExportEvent::businessEffectiveStatus).toList());
+        canonical.put("audit_evidence_status", events.stream().map(AuditEvidenceExportEvent::auditEvidenceStatus).toList());
+        canonical.put("external_anchor_status", events.stream().map(AuditEvidenceExportEvent::externalAnchorStatus).toList());
+        canonical.put("compensation_type", events.stream().map(AuditEvidenceExportEvent::compensationType).toList());
         canonical.put("compensated", events.stream().map(AuditEvidenceExportEvent::compensated).toList());
         canonical.put("local_anchor_ids", events.stream()
                 .map(AuditEvidenceExportEvent::localAnchor)

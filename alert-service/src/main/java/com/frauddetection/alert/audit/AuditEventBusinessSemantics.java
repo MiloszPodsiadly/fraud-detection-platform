@@ -9,6 +9,10 @@ public record AuditEventBusinessSemantics(
         boolean compensated,
         String supersededByEventId,
         boolean businessEffective,
+        BusinessEffectiveStatus businessEffectiveStatus,
+        AuditEvidenceStatus auditEvidenceStatus,
+        AuditExternalAnchorStatus externalAnchorStatus,
+        CompensationType compensationType,
         String relatedEventId
 ) {
     public static Map<String, AuditEventBusinessSemantics> index(List<AuditEventDocument> documents) {
@@ -48,12 +52,64 @@ public record AuditEventBusinessSemantics(
     ) {
         AuditEventDocument abort = abortByRelatedEventId.get(document.auditId());
         if (isExternalAnchorAbort(document)) {
-            return new AuditEventBusinessSemantics(false, null, false, document.resourceId());
+            return new AuditEventBusinessSemantics(
+                    false,
+                    null,
+                    false,
+                    BusinessEffectiveStatus.FALSE,
+                    AuditEvidenceStatus.ANCHOR_REQUIRED_FAILED,
+                    AuditExternalAnchorStatus.FAILED,
+                    CompensationType.EXTERNAL_ANCHOR_FAILURE,
+                    document.resourceId()
+            );
         }
         if (abort != null) {
-            return new AuditEventBusinessSemantics(true, abort.auditId(), false, null);
+            BusinessEffectiveStatus businessStatus = businessEffectiveStatus(document);
+            return new AuditEventBusinessSemantics(
+                    true,
+                    abort.auditId(),
+                    businessStatus == BusinessEffectiveStatus.TRUE,
+                    businessStatus,
+                    AuditEvidenceStatus.ANCHOR_REQUIRED_FAILED,
+                    AuditExternalAnchorStatus.FAILED,
+                    CompensationType.EXTERNAL_ANCHOR_FAILURE,
+                    null
+            );
         }
-        return new AuditEventBusinessSemantics(false, null, document.outcome() == AuditOutcome.SUCCESS, null);
+        BusinessEffectiveStatus businessStatus = businessEffectiveStatus(document);
+        return new AuditEventBusinessSemantics(
+                false,
+                null,
+                businessStatus == BusinessEffectiveStatus.TRUE,
+                businessStatus,
+                auditEvidenceStatus(document),
+                AuditExternalAnchorStatus.LOCAL_STATUS_UNVERIFIED,
+                compensationType(document),
+                null
+        );
+    }
+
+    private static BusinessEffectiveStatus businessEffectiveStatus(AuditEventDocument document) {
+        if (document.outcome() == AuditOutcome.SUCCESS) {
+            return BusinessEffectiveStatus.TRUE;
+        }
+        if (document.outcome() == AuditOutcome.ATTEMPTED
+                || document.outcome() == AuditOutcome.FAILED
+                || document.outcome() == AuditOutcome.REJECTED
+                || document.outcome() == AuditOutcome.ABORTED_EXTERNAL_ANCHOR_REQUIRED) {
+            return BusinessEffectiveStatus.FALSE;
+        }
+        return BusinessEffectiveStatus.UNKNOWN;
+    }
+
+    private static AuditEvidenceStatus auditEvidenceStatus(AuditEventDocument document) {
+        return AuditEvidenceStatus.LOCAL_ONLY;
+    }
+
+    private static CompensationType compensationType(AuditEventDocument document) {
+        return document.outcome() == AuditOutcome.FAILED
+                ? CompensationType.BUSINESS_WRITE_FAILURE
+                : CompensationType.UNKNOWN;
     }
 
     private static boolean isExternalAnchorAbort(AuditEventDocument document) {

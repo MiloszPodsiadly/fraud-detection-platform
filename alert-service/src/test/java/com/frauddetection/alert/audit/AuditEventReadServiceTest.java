@@ -97,6 +97,10 @@ class AuditEventReadServiceTest {
         assertThat(event.eventHash()).isNotBlank();
         assertThat(event.hashAlgorithm()).isEqualTo("SHA-256");
         assertThat(event.businessEffective()).isTrue();
+        assertThat(event.businessEffectiveStatus()).isEqualTo(BusinessEffectiveStatus.TRUE);
+        assertThat(event.auditEvidenceStatus()).isEqualTo(AuditEvidenceStatus.LOCAL_ONLY);
+        assertThat(event.externalAnchorStatus()).isEqualTo(AuditExternalAnchorStatus.LOCAL_STATUS_UNVERIFIED);
+        assertThat(event.compensationType()).isEqualTo(CompensationType.UNKNOWN);
         assertThat(event.compensated()).isFalse();
         verify(auditService).audit(
                 eq(AuditAction.READ_AUDIT_EVENTS),
@@ -142,9 +146,17 @@ class AuditEventReadServiceTest {
         AuditEventResponse attemptResponse = response.events().get(1);
         assertThat(abortResponse.relatedEventId()).isEqualTo("audit-attempted");
         assertThat(abortResponse.businessEffective()).isFalse();
+        assertThat(abortResponse.businessEffectiveStatus()).isEqualTo(BusinessEffectiveStatus.FALSE);
+        assertThat(abortResponse.auditEvidenceStatus()).isEqualTo(AuditEvidenceStatus.ANCHOR_REQUIRED_FAILED);
+        assertThat(abortResponse.externalAnchorStatus()).isEqualTo(AuditExternalAnchorStatus.FAILED);
+        assertThat(abortResponse.compensationType()).isEqualTo(CompensationType.EXTERNAL_ANCHOR_FAILURE);
         assertThat(attemptResponse.compensated()).isTrue();
         assertThat(attemptResponse.supersededByEventId()).isEqualTo("audit-aborted");
         assertThat(attemptResponse.businessEffective()).isFalse();
+        assertThat(attemptResponse.businessEffectiveStatus()).isEqualTo(BusinessEffectiveStatus.FALSE);
+        assertThat(attemptResponse.auditEvidenceStatus()).isEqualTo(AuditEvidenceStatus.ANCHOR_REQUIRED_FAILED);
+        assertThat(attemptResponse.externalAnchorStatus()).isEqualTo(AuditExternalAnchorStatus.FAILED);
+        assertThat(attemptResponse.compensationType()).isEqualTo(CompensationType.EXTERNAL_ANCHOR_FAILURE);
     }
 
     @Test
@@ -181,7 +193,33 @@ class AuditEventReadServiceTest {
         assertThat(event.outcome()).isEqualTo("SUCCESS");
         assertThat(event.compensated()).isTrue();
         assertThat(event.supersededByEventId()).isEqualTo("audit-aborted");
+        assertThat(event.businessEffective()).isTrue();
+        assertThat(event.businessEffectiveStatus()).isEqualTo(BusinessEffectiveStatus.TRUE);
+        assertThat(event.auditEvidenceStatus()).isEqualTo(AuditEvidenceStatus.ANCHOR_REQUIRED_FAILED);
+        assertThat(event.externalAnchorStatus()).isEqualTo(AuditExternalAnchorStatus.FAILED);
+        assertThat(event.compensationType()).isEqualTo(CompensationType.EXTERNAL_ANCHOR_FAILURE);
+    }
+
+    @Test
+    void shouldExposeBusinessWriteFailureAsBusinessIneffectiveLocalAuditEvidence() {
+        AuditEventDocument failed = AuditEventDocument.from("audit-failed", new AuditEvent(
+                new AuditActor("admin-1", Set.of("FRAUD_OPS_ADMIN"), Set.of("audit:read")),
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT,
+                "alert-1",
+                Instant.parse("2026-04-26T09:00:00Z"),
+                "corr-1",
+                AuditOutcome.FAILED,
+                "BUSINESS_WRITE_FAILED"
+        ));
+
+        AuditEventResponse event = AuditEventResponse.from(failed);
+
         assertThat(event.businessEffective()).isFalse();
+        assertThat(event.businessEffectiveStatus()).isEqualTo(BusinessEffectiveStatus.FALSE);
+        assertThat(event.auditEvidenceStatus()).isEqualTo(AuditEvidenceStatus.LOCAL_ONLY);
+        assertThat(event.externalAnchorStatus()).isEqualTo(AuditExternalAnchorStatus.LOCAL_STATUS_UNVERIFIED);
+        assertThat(event.compensationType()).isEqualTo(CompensationType.BUSINESS_WRITE_FAILURE);
     }
 
     @Test
