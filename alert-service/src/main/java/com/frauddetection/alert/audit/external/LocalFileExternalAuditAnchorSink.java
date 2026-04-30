@@ -98,6 +98,14 @@ class LocalFileExternalAuditAnchorSink implements ExternalAuditAnchorSink {
     }
 
     @Override
+    public Optional<ExternalAuditAnchor> findByChainPosition(String partitionKey, long chainPosition) {
+        return readAll().stream()
+                .filter(anchor -> Objects.equals(anchor.partitionKey(), partitionKey))
+                .filter(anchor -> anchor.chainPosition() == chainPosition)
+                .findFirst();
+    }
+
+    @Override
     public List<ExternalAuditAnchor> findByRange(String partitionKey, Instant from, Instant to, int limit) {
         return readAll().stream()
                 .filter(anchor -> Objects.equals(anchor.partitionKey(), partitionKey))

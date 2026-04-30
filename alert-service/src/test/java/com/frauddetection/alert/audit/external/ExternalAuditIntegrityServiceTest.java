@@ -582,6 +582,60 @@ class ExternalAuditIntegrityServiceTest {
     }
 
     @Test
+    void shouldExposeLocalAheadAndRequiredPublicationFailuresInCoverage() {
+        AuditAnchorRepository repository = mock(AuditAnchorRepository.class);
+        ExternalAuditAnchorSink objectStoreSink = mock(ExternalAuditAnchorSink.class);
+        ExternalAuditAnchorPublicationStatusRepository publicationRepository =
+                mock(ExternalAuditAnchorPublicationStatusRepository.class);
+        AuditAnchorDocument local = localAnchor("local-anchor-2", 2L, "hash-2");
+        when(repository.findLatestByPartitionKey("source_service:alert-service")).thenReturn(Optional.of(local));
+        when(repository.findHeadWindow("source_service:alert-service", 5)).thenReturn(List.of(local));
+        when(objectStoreSink.latest("source_service:alert-service")).thenReturn(Optional.of(external(local)));
+        when(objectStoreSink.findByChainPosition("source_service:alert-service", 2L)).thenReturn(Optional.of(external(local)));
+        when(publicationRepository.findByLocalAnchorId("local-anchor-2"))
+                .thenReturn(Optional.of(publicationStatus(
+                        "UNSIGNED",
+                        ExternalAuditAnchor.STATUS_LOCAL_ANCHOR_CREATED_EXTERNAL_REQUIRED_FAILED,
+                        "RECORDED",
+                        true
+                )));
+
+        ExternalAuditAnchorCoverageResponse response = objectStoreIntegrityService(repository, objectStoreSink, publicationRepository)
+                .coverage("alert-service", 5);
+
+        assertThat(response.status()).isEqualTo("AVAILABLE");
+        assertThat(response.coverageStatus()).isEqualTo("DEGRADED");
+        assertThat(response.localAheadOfExternal()).isTrue();
+        assertThat(response.requiredPublicationFailures()).isEqualTo(1);
+        assertThat(response.unrecoveredCount()).isEqualTo(1);
+    }
+
+    @Test
+    void shouldImproveCoverageWhenLocalStatusWasRecovered() {
+        AuditAnchorRepository repository = mock(AuditAnchorRepository.class);
+        ExternalAuditAnchorSink objectStoreSink = mock(ExternalAuditAnchorSink.class);
+        ExternalAuditAnchorPublicationStatusRepository publicationRepository =
+                mock(ExternalAuditAnchorPublicationStatusRepository.class);
+        AuditAnchorDocument local = localAnchor("local-anchor-2", 2L, "hash-2");
+        when(repository.findLatestByPartitionKey("source_service:alert-service")).thenReturn(Optional.of(local));
+        when(repository.findHeadWindow("source_service:alert-service", 5)).thenReturn(List.of(local));
+        when(objectStoreSink.latest("source_service:alert-service")).thenReturn(Optional.of(external(local)));
+        when(objectStoreSink.findByChainPosition("source_service:alert-service", 1L))
+                .thenReturn(Optional.of(external(localAnchor("local-anchor-1", 1L, "hash-1"))));
+        when(objectStoreSink.findByChainPosition("source_service:alert-service", 2L)).thenReturn(Optional.of(external(local)));
+        when(publicationRepository.findByLocalAnchorId("local-anchor-2"))
+                .thenReturn(Optional.of(publicationStatus("UNSIGNED", ExternalAuditAnchor.STATUS_PUBLISHED, "RECOVERED", false)));
+
+        ExternalAuditAnchorCoverageResponse response = objectStoreIntegrityService(repository, objectStoreSink, publicationRepository)
+                .coverage("alert-service", 5);
+
+        assertThat(response.coverageStatus()).isEqualTo("HEALTHY");
+        assertThat(response.localAheadOfExternal()).isFalse();
+        assertThat(response.recoveredCount()).isEqualTo(1);
+        assertThat(response.unrecoveredCount()).isZero();
+    }
+
+    @Test
     void shouldReturnUnavailableCoverageWhenExternalHeadCannotBeProven() {
         AuditAnchorRepository repository = mock(AuditAnchorRepository.class);
         ExternalAuditAnchorSink unavailableSink = mock(ExternalAuditAnchorSink.class);
@@ -665,12 +719,28 @@ class ExternalAuditIntegrityServiceTest {
     }
 
     private ExternalAuditAnchorPublicationStatusDocument publicationStatus(String signatureStatus) {
+        return publicationStatus(signatureStatus, ExternalAuditAnchor.STATUS_PUBLISHED, "RECORDED", false);
+    }
+
+    private ExternalAuditAnchorPublicationStatusDocument publicationStatus(
+            String signatureStatus,
+            String externalPublicationStatus,
+            String localTrackingStatus,
+            boolean externalRequired
+    ) {
         return new ExternalAuditAnchorPublicationStatusDocument(
                 "local-anchor-1",
                 "source_service:alert-service",
                 2L,
-                true,
-                "PUBLISHED",
+                ExternalAuditAnchor.STATUS_PUBLISHED.equals(externalPublicationStatus),
+                externalPublicationStatus,
+                ExternalAuditAnchor.STATUS_PUBLISHED.equals(externalPublicationStatus)
+                        ? ExternalAuditAnchor.STATUS_PUBLISHED
+                        : ExternalAuditAnchor.STATUS_FAILED,
+                null,
+                localTrackingStatus,
+                "CREATED",
+                externalRequired,
                 Instant.parse("2026-04-27T10:01:00Z"),
                 "object-store",
                 "audit-anchors/source_service-alert-service/00000000000000000002.json",
@@ -710,6 +780,22 @@ class ExternalAuditIntegrityServiceTest {
                 new ExternalAuditIntegrityQueryParser(),
                 new AlertServiceMetrics(registry),
                 mock(AuditService.class)
+        );
+    }
+
+    private ExternalAuditIntegrityService objectStoreIntegrityService(
+            AuditAnchorRepository repository,
+            ExternalAuditAnchorSink objectStoreSink,
+            ExternalAuditAnchorPublicationStatusRepository publicationRepository
+    ) {
+        return new ExternalAuditIntegrityService(
+                repository,
+                objectStoreSink,
+                new ExternalAuditIntegrityQueryParser(),
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                mock(AuditService.class),
+                publicationRepository,
+                new DisabledAuditTrustAuthorityClient()
         );
     }
 

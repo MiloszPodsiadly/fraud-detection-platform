@@ -84,10 +84,14 @@ public class ExternalAuditAnchorPublisher {
     }
 
     public ExternalAuditAnchorPublishResult publishDefaultWindow() {
-        return publishHeadWindow(defaultLimit);
+        return reconcileAnchors(defaultLimit).plus(publishNewAnchors(defaultLimit));
     }
 
     public ExternalAuditAnchorPublishResult publishHeadWindow(int limit) {
+        return publishNewAnchors(limit);
+    }
+
+    public ExternalAuditAnchorPublishResult publishNewAnchors(int limit) {
         int boundedLimit = Math.max(1, Math.min(limit, 500));
         int published = 0;
         int unverified = 0;
@@ -135,9 +139,46 @@ public class ExternalAuditAnchorPublisher {
     public void publishRequired(AuditAnchorDocument localAnchor) {
         PublicationOutcome outcome = publishLocalAnchor(localAnchor, true);
         if (!outcome.clean()) {
+            recordRequiredPublicationFailure(localAnchor, outcome.reason());
             throw new ExternalAuditAnchorPublicationRequiredException(outcome.reason());
         }
         recordLag(localAnchor.createdAt());
+    }
+
+    public ExternalAuditAnchorPublishResult reconcileAnchors(int limit) {
+        int boundedLimit = Math.max(1, Math.min(limit, 500));
+        int recovered = 0;
+        int stillUnverified = 0;
+        int missing = 0;
+        int invalid = 0;
+        int failed = 0;
+        try {
+            List<AuditAnchorDocument> localAnchors = anchorRepository.findHeadWindow(DEFAULT_PARTITION_KEY, boundedLimit);
+            for (AuditAnchorDocument localAnchor : localAnchors) {
+                try {
+                    ExternalAuditAnchorPublicationStatusDocument status =
+                            publicationStatusRepository.findByLocalAnchorId(localAnchor.anchorId()).orElse(null);
+                    if (!requiresReconciliation(status)) {
+                        continue;
+                    }
+                    ReconciliationOutcome outcome = reconcileLocalAnchor(localAnchor);
+                    recovered += outcome.recovered();
+                    stillUnverified += outcome.stillUnverified();
+                    missing += outcome.missing();
+                    invalid += outcome.invalid();
+                    failed += outcome.failed();
+                } catch (DataAccessException exception) {
+                    failed++;
+                    metrics.recordExternalAnchorStatusRecoveryFailed(sink.sinkType(), "UNAVAILABLE");
+                    log.warn("External audit anchor reconciliation status lookup failed.");
+                }
+            }
+            return new ExternalAuditAnchorPublishResult(0, 0, 0, failed, boundedLimit, 0, recovered, stillUnverified, missing, invalid);
+        } catch (DataAccessException exception) {
+            metrics.recordExternalAnchorStatusRecoveryFailed(sink.sinkType(), "UNAVAILABLE");
+            log.warn("Local audit anchor lookup failed for external reconciliation.");
+            return new ExternalAuditAnchorPublishResult(0, 0, 0, 1, boundedLimit);
+        }
     }
 
     PublicationOutcome publishLocalAnchor(AuditAnchorDocument localAnchor, boolean failClosed) {
@@ -171,7 +212,11 @@ public class ExternalAuditAnchorPublisher {
         } catch (ExternalAuditAnchorSinkException exception) {
             metrics.recordExternalAnchorPublished(sink.sinkType(), "FAILED");
             metrics.recordExternalAnchorPublishFailed(sink.sinkType(), exception.reason());
-            recordPublicationFailure(localAnchor, exception.reason());
+            if (failClosed) {
+                recordRequiredPublicationFailure(localAnchor, exception.reason());
+            } else {
+                recordPublicationFailure(localAnchor, exception.reason());
+            }
             log.warn("External audit anchor publication failed: reason={}", exception.reason());
             if (failClosed) {
                 throw new ExternalAuditAnchorPublicationRequiredException(exception.reason());
@@ -200,7 +245,16 @@ public class ExternalAuditAnchorPublisher {
                 );
                 return ExternalAuditAnchor.STATUS_UNVERIFIED;
             }
-            publicationStatusRepository.recordSuccess(localAnchor, clock.instant(), sink.sinkType(), reference, immutabilityLevel, signature);
+            publicationStatusRepository.recordSuccess(
+                    localAnchor,
+                    clock.instant(),
+                    sink.sinkType(),
+                    reference,
+                    immutabilityLevel,
+                    stored.manifestStatus(),
+                    "RECORDED",
+                    signature
+            );
             return ExternalAuditAnchor.STATUS_PUBLISHED;
         } catch (DataAccessException exception) {
             metrics.recordExternalAnchorStatusPersistenceFailed(sink.sinkType());
@@ -274,6 +328,109 @@ public class ExternalAuditAnchorPublisher {
         }
     }
 
+    private void recordRequiredPublicationFailure(AuditAnchorDocument localAnchor, String reason) {
+        metrics.recordExternalAnchorRequiredFailedAfterLocalAnchor(sink.sinkType());
+        try {
+            publicationStatusRepository.recordRequiredFailure(localAnchor, clock.instant(), reason);
+        } catch (DataAccessException exception) {
+            log.warn("External audit anchor required publication failure status update failed.");
+        }
+    }
+
+    private boolean requiresReconciliation(ExternalAuditAnchorPublicationStatusDocument status) {
+        if (status == null) {
+            return true;
+        }
+        return ExternalAuditAnchor.STATUS_LOCAL_STATUS_UNVERIFIED.equals(status.externalPublicationStatus())
+                || ExternalAuditAnchor.STATUS_LOCAL_ANCHOR_CREATED_EXTERNAL_REQUIRED_FAILED.equals(status.externalPublicationStatus());
+    }
+
+    private ReconciliationOutcome reconcileLocalAnchor(AuditAnchorDocument localAnchor) {
+        ExternalAuditAnchor external;
+        try {
+            external = sink.findByChainPosition(localAnchor.partitionKey(), localAnchor.chainPosition()).orElse(null);
+        } catch (ExternalAuditAnchorSinkException exception) {
+            metrics.recordExternalAnchorStatusRecoveryFailed(sink.sinkType(), exception.reason());
+            return ReconciliationOutcome.failedOutcome();
+        }
+        if (external == null) {
+            try {
+                publicationStatusRepository.recordRecoveryMissing(localAnchor, clock.instant());
+            } catch (DataAccessException exception) {
+                metrics.recordExternalAnchorStatusRecoveryFailed(sink.sinkType(), "MISSING");
+                return ReconciliationOutcome.failedOutcome();
+            }
+            metrics.recordExternalAnchorStatusRecoveryFailed(sink.sinkType(), "MISSING");
+            return ReconciliationOutcome.missingOutcome();
+        }
+        String mismatch = mismatchReason(localAnchor, external);
+        if (mismatch != null) {
+            try {
+                publicationStatusRepository.recordRecoveryInvalid(localAnchor, clock.instant(), mismatch);
+            } catch (DataAccessException exception) {
+                metrics.recordExternalAnchorStatusRecoveryFailed(sink.sinkType(), mismatch);
+                return ReconciliationOutcome.failedOutcome();
+            }
+            metrics.recordExternalAnchorStatusRecoveryFailed(sink.sinkType(), "INVALID");
+            return ReconciliationOutcome.invalidOutcome();
+        }
+        try {
+            ExternalAnchorReference reference = sink.externalReference(external).orElse(null);
+            ExternalImmutabilityLevel immutabilityLevel = sink.immutabilityLevel() == null
+                    ? ExternalImmutabilityLevel.NONE
+                    : sink.immutabilityLevel();
+            SignedAuditAnchorPayload signature = sign(localAnchor, external, reference, immutabilityLevel);
+            if ("SIGNATURE_FAILED".equals(signature.signatureStatus())) {
+                publicationStatusRepository.recordPartial(
+                        localAnchor,
+                        clock.instant(),
+                        sink.sinkType(),
+                        reference,
+                        immutabilityLevel,
+                        "SIGNATURE_FAILED",
+                        external.manifestStatus(),
+                        signature
+                );
+                metrics.recordExternalAnchorStatusRecoveryFailed(sink.sinkType(), "SIGNATURE_FAILED");
+                return ReconciliationOutcome.stillUnverifiedOutcome();
+            }
+            publicationStatusRepository.recordRecovered(
+                    localAnchor,
+                    clock.instant(),
+                    sink.sinkType(),
+                    reference,
+                    immutabilityLevel,
+                    external.manifestStatus(),
+                    signature
+            );
+            metrics.recordExternalAnchorStatusRecovered(sink.sinkType());
+            return ReconciliationOutcome.recoveredOutcome();
+        } catch (DataAccessException exception) {
+            metrics.recordExternalAnchorStatusPersistenceFailed(sink.sinkType());
+            metrics.recordExternalAnchorStatusRecoveryFailed(sink.sinkType(), ExternalAuditAnchor.REASON_STATUS_PERSISTENCE_FAILED_AFTER_EXTERNAL_PUBLISH);
+            return ReconciliationOutcome.stillUnverifiedOutcome();
+        } catch (ExternalAuditAnchorSinkException exception) {
+            metrics.recordExternalAnchorStatusRecoveryFailed(sink.sinkType(), exception.reason());
+            return ReconciliationOutcome.failedOutcome();
+        }
+    }
+
+    private String mismatchReason(AuditAnchorDocument localAnchor, ExternalAuditAnchor external) {
+        if (!localAnchor.anchorId().equals(external.localAnchorId())) {
+            return "EXTERNAL_LOCAL_ANCHOR_ID_MISMATCH";
+        }
+        if (!localAnchor.partitionKey().equals(external.partitionKey())) {
+            return "MISMATCH";
+        }
+        if (localAnchor.chainPosition() != external.chainPosition()) {
+            return "MISMATCH";
+        }
+        if (!localAnchor.lastEventHash().equals(external.lastEventHash())) {
+            return "EXTERNAL_PAYLOAD_HASH_MISMATCH";
+        }
+        return null;
+    }
+
     private void recordLag(Instant localAnchorCreatedAt) {
         if (localAnchorCreatedAt != null) {
             metrics.recordExternalAnchorLag(Duration.between(localAnchorCreatedAt, clock.instant()));
@@ -310,6 +467,34 @@ public class ExternalAuditAnchorPublisher {
 
         boolean clean() {
             return published == 1 || duplicate == 1;
+        }
+    }
+
+    record ReconciliationOutcome(
+            int recovered,
+            int stillUnverified,
+            int missing,
+            int invalid,
+            int failed
+    ) {
+        static ReconciliationOutcome recoveredOutcome() {
+            return new ReconciliationOutcome(1, 0, 0, 0, 0);
+        }
+
+        static ReconciliationOutcome stillUnverifiedOutcome() {
+            return new ReconciliationOutcome(0, 1, 0, 0, 0);
+        }
+
+        static ReconciliationOutcome missingOutcome() {
+            return new ReconciliationOutcome(0, 0, 1, 0, 0);
+        }
+
+        static ReconciliationOutcome invalidOutcome() {
+            return new ReconciliationOutcome(0, 0, 0, 1, 0);
+        }
+
+        static ReconciliationOutcome failedOutcome() {
+            return new ReconciliationOutcome(0, 0, 0, 0, 1);
         }
     }
 }

@@ -26,6 +26,21 @@ record ExternalAuditAnchorPublicationStatusDocument(
         @Field("external_publication_status")
         String externalPublicationStatus,
 
+        @Field("external_object_status")
+        String externalObjectStatus,
+
+        @Field("head_manifest_status")
+        String headManifestStatus,
+
+        @Field("local_tracking_status")
+        String localTrackingStatus,
+
+        @Field("local_anchor_status")
+        String localAnchorStatus,
+
+        @Field("external_required")
+        Boolean externalRequired,
+
         @Field("external_published_at")
         Instant externalPublishedAt,
 

@@ -48,7 +48,22 @@ public record ExternalAuditAnchorCoverageResponse(
         Long maxTimeLagSeconds,
 
         @JsonProperty("max_missing_ranges")
-        int maxMissingRanges
+        int maxMissingRanges,
+
+        @JsonProperty("local_ahead_of_external")
+        boolean localAheadOfExternal,
+
+        @JsonProperty("required_publication_failures")
+        int requiredPublicationFailures,
+
+        @JsonProperty("local_status_unverified")
+        int localStatusUnverified,
+
+        @JsonProperty("recovered_count")
+        int recoveredCount,
+
+        @JsonProperty("unrecovered_count")
+        int unrecoveredCount
 ) {
     public ExternalAuditAnchorCoverageResponse(
             String status,
@@ -76,7 +91,50 @@ public record ExternalAuditAnchorCoverageResponse(
                 coverageStatus(positionLag, timeLagSeconds, missingRanges, truncated),
                 0,
                 null,
-                50
+                50,
+                positionLag > 0,
+                0,
+                0,
+                0,
+                0
+        );
+    }
+
+    ExternalAuditAnchorCoverageResponse withPublicationStatus(
+            int requiredPublicationFailures,
+            int localStatusUnverified,
+            int recoveredCount,
+            int unrecoveredCount
+    ) {
+        boolean localAhead = latestLocalPosition > latestExternalPosition || requiredPublicationFailures > 0;
+        return new ExternalAuditAnchorCoverageResponse(
+                status,
+                latestLocalPosition,
+                latestExternalPosition,
+                positionLag,
+                timeLagSeconds,
+                missingRanges,
+                truncated,
+                limit,
+                reasonCode,
+                message,
+                coverageStatus(
+                        positionLag,
+                        timeLagSeconds,
+                        missingRanges,
+                        truncated,
+                        requiredPublicationFailures,
+                        localStatusUnverified,
+                        unrecoveredCount
+                ),
+                maxPositionLag,
+                maxTimeLagSeconds,
+                maxMissingRanges,
+                localAhead,
+                requiredPublicationFailures,
+                localStatusUnverified,
+                recoveredCount,
+                unrecoveredCount
         );
     }
 
@@ -90,5 +148,20 @@ public record ExternalAuditAnchorCoverageResponse(
             return "DEGRADED";
         }
         return "HEALTHY";
+    }
+
+    private static String coverageStatus(
+            long positionLag,
+            Long timeLagSeconds,
+            List<ExternalAuditAnchorMissingRange> missingRanges,
+            boolean truncated,
+            int requiredPublicationFailures,
+            int localStatusUnverified,
+            int unrecoveredCount
+    ) {
+        if (requiredPublicationFailures > 0 || localStatusUnverified > 0 || unrecoveredCount > 0) {
+            return "DEGRADED";
+        }
+        return coverageStatus(positionLag, timeLagSeconds, missingRanges, truncated);
     }
 }

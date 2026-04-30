@@ -86,6 +86,8 @@ class ExternalAuditAnchorPublisherTest {
                         org.mockito.ArgumentMatchers.eq("local-file"),
                         org.mockito.ArgumentMatchers.isNull(),
                         org.mockito.ArgumentMatchers.eq(ExternalImmutabilityLevel.NONE),
+                        org.mockito.ArgumentMatchers.isNull(),
+                        org.mockito.ArgumentMatchers.eq("RECORDED"),
                         org.mockito.ArgumentMatchers.any(SignedAuditAnchorPayload.class)
                 );
     }
@@ -123,6 +125,8 @@ class ExternalAuditAnchorPublisherTest {
                 org.mockito.ArgumentMatchers.eq("local-file"),
                 org.mockito.ArgumentMatchers.isNull(),
                 org.mockito.ArgumentMatchers.eq(ExternalImmutabilityLevel.NONE),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.eq("RECORDED"),
                 org.mockito.ArgumentMatchers.any(SignedAuditAnchorPayload.class)
         );
         assertThat(meterRegistry.get("fraud_platform_audit_external_anchor_publish_failed_total")
@@ -171,6 +175,8 @@ class ExternalAuditAnchorPublisherTest {
         assertThat(result.partial()).isEqualTo(1);
         assertThat(result.failed()).isZero();
         verify(publicationStatusRepository, never()).recordSuccess(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(),
@@ -238,6 +244,8 @@ class ExternalAuditAnchorPublisherTest {
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any()
         );
         verify(publicationStatusRepository).recordPartial(
@@ -279,6 +287,8 @@ class ExternalAuditAnchorPublisherTest {
                         org.mockito.ArgumentMatchers.eq("object-store"),
                         org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.eq(ExternalImmutabilityLevel.ENFORCED),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.eq("RECORDED"),
                         org.mockito.ArgumentMatchers.any()
                 );
         ExternalAuditAnchorPublisher publisher = new ExternalAuditAnchorPublisher(
@@ -331,6 +341,8 @@ class ExternalAuditAnchorPublisherTest {
                         org.mockito.ArgumentMatchers.eq("object-store"),
                         org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.eq(ExternalImmutabilityLevel.ENFORCED),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.eq("RECORDED"),
                         org.mockito.ArgumentMatchers.any()
                 );
         ExternalAuditAnchorPublisher publisher = new ExternalAuditAnchorPublisher(
@@ -372,6 +384,115 @@ class ExternalAuditAnchorPublisherTest {
                 .isInstanceOf(ExternalAuditAnchorPublicationRequiredException.class)
                 .extracting("reason")
                 .isEqualTo("WRITE_NOT_VERIFIED");
+        verify(publicationStatusRepository).recordRequiredFailure(
+                anchor,
+                Instant.parse("2026-04-27T10:01:00Z"),
+                "WRITE_NOT_VERIFIED"
+        );
+        assertThat(meterRegistry.get("external_anchor_required_failed_after_local_anchor_total")
+                .tag("sink", "object-store")
+                .counter()
+                .count()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void shouldRecoverMissingLocalStatusWhenExternalObjectExistsAtSamePosition() {
+        ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
+        AuditAnchorDocument anchor = localAnchor("local-anchor-1", 1L, "hash-1");
+        ExternalAuditAnchor external = ExternalAuditAnchor.from(anchor, "object-store");
+        when(sink.sinkType()).thenReturn("object-store");
+        when(sink.immutabilityLevel()).thenReturn(ExternalImmutabilityLevel.ENFORCED);
+        when(anchorRepository.findHeadWindow("source_service:alert-service", 100)).thenReturn(List.of(anchor));
+        when(publicationStatusRepository.findByLocalAnchorId("local-anchor-1")).thenReturn(java.util.Optional.empty());
+        when(sink.findByChainPosition("source_service:alert-service", 1L)).thenReturn(java.util.Optional.of(external));
+        when(sink.externalReference(external)).thenReturn(java.util.Optional.of(new ExternalAnchorReference(
+                "local-anchor-1",
+                "audit-anchors/partition/00000000000000000001.json",
+                "hash-1",
+                "hash-1",
+                Instant.parse("2026-04-27T10:01:00Z")
+        )));
+        ExternalAuditAnchorPublisher publisher = new ExternalAuditAnchorPublisher(
+                anchorRepository,
+                publicationStatusRepository,
+                sink,
+                metrics,
+                Clock.fixed(Instant.parse("2026-04-27T10:01:00Z"), ZoneOffset.UTC),
+                100
+        );
+
+        ExternalAuditAnchorPublishResult result = publisher.reconcileAnchors(100);
+
+        assertThat(result.recovered()).isEqualTo(1);
+        assertThat(result.missing()).isZero();
+        verify(publicationStatusRepository).recordRecovered(
+                org.mockito.ArgumentMatchers.eq(anchor),
+                org.mockito.ArgumentMatchers.eq(Instant.parse("2026-04-27T10:01:00Z")),
+                org.mockito.ArgumentMatchers.eq("object-store"),
+                org.mockito.ArgumentMatchers.any(ExternalAnchorReference.class),
+                org.mockito.ArgumentMatchers.eq(ExternalImmutabilityLevel.ENFORCED),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.any(SignedAuditAnchorPayload.class)
+        );
+        assertThat(meterRegistry.get("external_anchor_status_recovered_total")
+                .tag("sink", "object-store")
+                .counter()
+                .count()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void shouldReportMissingWhenReconciliationCannotFindExactExternalObject() {
+        ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
+        AuditAnchorDocument anchor = localAnchor("local-anchor-1", 1L, "hash-1");
+        when(sink.sinkType()).thenReturn("object-store");
+        when(anchorRepository.findHeadWindow("source_service:alert-service", 100)).thenReturn(List.of(anchor));
+        when(publicationStatusRepository.findByLocalAnchorId("local-anchor-1"))
+                .thenReturn(java.util.Optional.of(requiredFailedStatus(anchor)));
+        when(sink.findByChainPosition("source_service:alert-service", 1L)).thenReturn(java.util.Optional.empty());
+        ExternalAuditAnchorPublisher publisher = new ExternalAuditAnchorPublisher(
+                anchorRepository,
+                publicationStatusRepository,
+                sink,
+                metrics,
+                Clock.fixed(Instant.parse("2026-04-27T10:01:00Z"), ZoneOffset.UTC),
+                100
+        );
+
+        ExternalAuditAnchorPublishResult result = publisher.reconcileAnchors(100);
+
+        assertThat(result.missing()).isEqualTo(1);
+        assertThat(result.recovered()).isZero();
+        verify(publicationStatusRepository).recordRecoveryMissing(anchor, Instant.parse("2026-04-27T10:01:00Z"));
+    }
+
+    @Test
+    void shouldReportInvalidWhenReconciliationFindsMismatchedExternalObject() {
+        ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
+        AuditAnchorDocument anchor = localAnchor("local-anchor-1", 1L, "hash-1");
+        AuditAnchorDocument mismatched = localAnchor("local-anchor-1", 1L, "tampered-hash");
+        when(sink.sinkType()).thenReturn("object-store");
+        when(anchorRepository.findHeadWindow("source_service:alert-service", 100)).thenReturn(List.of(anchor));
+        when(publicationStatusRepository.findByLocalAnchorId("local-anchor-1")).thenReturn(java.util.Optional.empty());
+        when(sink.findByChainPosition("source_service:alert-service", 1L))
+                .thenReturn(java.util.Optional.of(ExternalAuditAnchor.from(mismatched, "object-store")));
+        ExternalAuditAnchorPublisher publisher = new ExternalAuditAnchorPublisher(
+                anchorRepository,
+                publicationStatusRepository,
+                sink,
+                metrics,
+                Clock.fixed(Instant.parse("2026-04-27T10:01:00Z"), ZoneOffset.UTC),
+                100
+        );
+
+        ExternalAuditAnchorPublishResult result = publisher.reconcileAnchors(100);
+
+        assertThat(result.invalid()).isEqualTo(1);
+        assertThat(result.recovered()).isZero();
+        verify(publicationStatusRepository).recordRecoveryInvalid(
+                org.mockito.ArgumentMatchers.eq(anchor),
+                org.mockito.ArgumentMatchers.eq(Instant.parse("2026-04-27T10:01:00Z")),
+                org.mockito.ArgumentMatchers.eq("EXTERNAL_PAYLOAD_HASH_MISMATCH")
+        );
     }
 
     @Test
@@ -429,6 +550,39 @@ class ExternalAuditAnchorPublisherTest {
                 hash,
                 chainPosition,
                 "SHA-256"
+        );
+    }
+
+    private ExternalAuditAnchorPublicationStatusDocument requiredFailedStatus(AuditAnchorDocument anchor) {
+        return new ExternalAuditAnchorPublicationStatusDocument(
+                anchor.anchorId(),
+                anchor.partitionKey(),
+                anchor.chainPosition(),
+                false,
+                ExternalAuditAnchor.STATUS_LOCAL_ANCHOR_CREATED_EXTERNAL_REQUIRED_FAILED,
+                ExternalAuditAnchor.STATUS_FAILED,
+                null,
+                "RECORDED",
+                "CREATED",
+                true,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                1,
+                ExternalAuditAnchor.REASON_EXTERNAL_ANCHOR_REQUIRED_FAILED,
+                Instant.parse("2026-04-27T10:01:00Z")
         );
     }
 

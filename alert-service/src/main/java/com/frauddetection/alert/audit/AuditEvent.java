@@ -82,7 +82,7 @@ public record AuditEvent(
     }
 
     static AuditFailureCategory failureCategory(AuditOutcome outcome, String failureReason) {
-        if (outcome == AuditOutcome.SUCCESS) {
+        if (outcome == AuditOutcome.SUCCESS || outcome == AuditOutcome.ATTEMPTED) {
             return AuditFailureCategory.NONE;
         }
         if (failureReason == null || failureReason.isBlank()) {

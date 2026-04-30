@@ -156,6 +156,28 @@ public class AlertServiceMetrics {
         ).increment();
     }
 
+    public void recordExternalAnchorRequiredFailedAfterLocalAnchor(String sink) {
+        counter(
+                "external_anchor_required_failed_after_local_anchor_total",
+                "sink", normalizeExternalSink(sink)
+        ).increment();
+    }
+
+    public void recordExternalAnchorStatusRecovered(String sink) {
+        counter(
+                "external_anchor_status_recovered_total",
+                "sink", normalizeExternalSink(sink)
+        ).increment();
+    }
+
+    public void recordExternalAnchorStatusRecoveryFailed(String sink, String reason) {
+        counter(
+                "external_anchor_status_recovery_failed_total",
+                "sink", normalizeExternalSink(sink),
+                "reason", normalizeExternalAnchorFailureReason(reason)
+        ).increment();
+    }
+
     public void recordExternalAnchorLag(Duration lag) {
         Timer.builder("fraud_platform_audit_external_anchor_lag_seconds")
                 .register(meterRegistry)
@@ -496,6 +518,7 @@ public class AlertServiceMetrics {
                 || "DUPLICATE".equals(status)
                 || "UNVERIFIED".equals(status)
                 || "LOCAL_STATUS_UNVERIFIED".equals(status)
+                || "LOCAL_ANCHOR_CREATED_EXTERNAL_REQUIRED_FAILED".equals(status)
                 || "PARTIAL".equals(status)
                 || "INVALID".equals(status)
                 || "CONFLICT".equals(status)
@@ -529,7 +552,8 @@ public class AlertServiceMetrics {
                  "EXTERNAL_ANCHOR_ID_MISMATCH", "EXTERNAL_ANCHOR_ID_VERSION_UNSUPPORTED",
                  "HEAD_SCAN_PAGINATION_UNSUPPORTED", "HEAD_SCAN_LIMIT_EXCEEDED", "HEAD_MANIFEST_INVALID",
                  "HEAD_MANIFEST_UPDATE_FAILED", "SIGNATURE_FAILED",
-                 "STATUS_PERSISTENCE_FAILED_AFTER_EXTERNAL_PUBLISH" -> reason;
+                 "STATUS_PERSISTENCE_FAILED_AFTER_EXTERNAL_PUBLISH", "EXTERNAL_ANCHOR_REQUIRED_FAILED",
+                 "MISSING", "INVALID" -> reason;
             default -> "UNKNOWN";
         };
     }

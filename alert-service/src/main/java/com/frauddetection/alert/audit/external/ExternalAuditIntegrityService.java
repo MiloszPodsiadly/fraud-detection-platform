@@ -203,6 +203,7 @@ public class ExternalAuditIntegrityService {
             Long timeLagSeconds = latestLocal != null && latestExternal != null
                     ? Math.max(0L, java.time.Duration.between(latestExternal.createdAt(), latestLocal.createdAt()).toSeconds())
                     : null;
+            PublicationCoverage publicationCoverage = publicationCoverage(query.partitionKey(), query.limit());
             return new ExternalAuditAnchorCoverageResponse(
                     "AVAILABLE",
                     latestLocalPosition,
@@ -214,6 +215,11 @@ public class ExternalAuditIntegrityService {
                     query.limit(),
                     null,
                     null
+            ).withPublicationStatus(
+                    publicationCoverage.requiredPublicationFailures(),
+                    publicationCoverage.localStatusUnverified(),
+                    publicationCoverage.recoveredCount(),
+                    publicationCoverage.unrecoveredCount()
             );
         } catch (DataAccessException exception) {
             return unavailableCoverage(query, "AUDIT_STORE_UNAVAILABLE", "Local audit anchor store is currently unavailable.");
@@ -243,6 +249,43 @@ public class ExternalAuditIntegrityService {
             }
         }
         return List.copyOf(ranges);
+    }
+
+    private PublicationCoverage publicationCoverage(String partitionKey, int limit) {
+        if (publicationStatusRepository == null) {
+            return new PublicationCoverage(0, 0, 0, 0);
+        }
+        int requiredFailures = 0;
+        int localStatusUnverified = 0;
+        int recovered = 0;
+        int unrecovered = 0;
+        List<AuditAnchorDocument> anchors = anchorRepository.findHeadWindow(partitionKey, limit);
+        if (anchors == null) {
+            anchors = List.of();
+        }
+        for (AuditAnchorDocument anchor : anchors) {
+            ExternalAuditAnchorPublicationStatusDocument status = publicationStatusRepository.findByLocalAnchorId(anchor.anchorId()).orElse(null);
+            if (status == null) {
+                localStatusUnverified++;
+                unrecovered++;
+                continue;
+            }
+            if (ExternalAuditAnchor.STATUS_LOCAL_ANCHOR_CREATED_EXTERNAL_REQUIRED_FAILED.equals(status.externalPublicationStatus())
+                    || Boolean.TRUE.equals(status.externalRequired())) {
+                requiredFailures++;
+                unrecovered++;
+            } else if (ExternalAuditAnchor.STATUS_LOCAL_STATUS_UNVERIFIED.equals(status.externalPublicationStatus())) {
+                localStatusUnverified++;
+                unrecovered++;
+            } else if ("RECOVERED".equals(status.localTrackingStatus())) {
+                recovered++;
+            } else if (ExternalAuditAnchor.STATUS_MISSING.equals(status.externalPublicationStatus())
+                    || ExternalAuditAnchor.STATUS_INVALID.equals(status.externalPublicationStatus())
+                    || ExternalAuditAnchor.STATUS_FAILED.equals(status.externalPublicationStatus())) {
+                unrecovered++;
+            }
+        }
+        return new PublicationCoverage(requiredFailures, localStatusUnverified, recovered, unrecovered);
     }
 
     private ExternalAuditAnchorCoverageResponse unavailableCoverage(
@@ -548,6 +591,14 @@ public class ExternalAuditIntegrityService {
         } catch (AuditPersistenceUnavailableException ignored) {
             log.warn("External audit integrity verification access audit could not be persisted.");
         }
+    }
+
+    private record PublicationCoverage(
+            int requiredPublicationFailures,
+            int localStatusUnverified,
+            int recoveredCount,
+            int unrecoveredCount
+    ) {
     }
 
     private void auditExternalIntegrityRead(

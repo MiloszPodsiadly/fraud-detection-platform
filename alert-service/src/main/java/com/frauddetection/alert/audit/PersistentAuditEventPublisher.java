@@ -127,6 +127,9 @@ public class PersistentAuditEventPublisher implements AuditEventPublisher {
             AuditAnchorDocument anchor = anchorRepository.insert(AuditAnchorDocument.from(UUID.randomUUID().toString(), document));
             metrics.recordPlatformAuditEventPersisted(event.action(), event.outcome());
             publishExternalAnchorIfRequired(anchor);
+        } catch (ExternalAuditAnchorPublicationRequiredException exception) {
+            insertCompensatingExternalAnchorFailure(event, exception);
+            throw exception;
         } catch (AuditChainConflictException exception) {
             throw exception;
         } catch (DataAccessException exception) {
@@ -173,6 +176,38 @@ public class PersistentAuditEventPublisher implements AuditEventPublisher {
             throw new ExternalAuditAnchorPublicationRequiredException("UNAVAILABLE");
         }
         externalAnchorPublisher.publishRequired(anchor);
+    }
+
+    private void insertCompensatingExternalAnchorFailure(
+            AuditEvent originalEvent,
+            ExternalAuditAnchorPublicationRequiredException publicationException
+    ) {
+        try {
+            AuditEventDocument previous = repository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY).orElse(null);
+            if (previous == null) {
+                return;
+            }
+            AuditEvent compensatingEvent = new AuditEvent(
+                    originalEvent.actor(),
+                    AuditAction.EXTERNAL_ANCHOR_REQUIRED_FAILED,
+                    AuditResourceType.AUDIT_EVENT,
+                    previous.auditId(),
+                    originalEvent.timestamp(),
+                    originalEvent.correlationId(),
+                    AuditOutcome.FAILED,
+                    ExternalAuditAnchorPublicationRequiredException.class.getSimpleName() + ":" + publicationException.reason()
+            );
+            AuditEventDocument document = repository.insert(AuditEventDocument.from(
+                    UUID.randomUUID().toString(),
+                    compensatingEvent,
+                    previous.eventHash(),
+                    nextChainPosition(previous)
+            ));
+            anchorRepository.insert(AuditAnchorDocument.from(UUID.randomUUID().toString(), document));
+            metrics.recordPlatformAuditEventPersisted(compensatingEvent.action(), compensatingEvent.outcome());
+        } catch (DataAccessException compensationFailure) {
+            metrics.recordPlatformAuditPersistenceFailure(AuditAction.EXTERNAL_ANCHOR_REQUIRED_FAILED);
+        }
     }
 
 }

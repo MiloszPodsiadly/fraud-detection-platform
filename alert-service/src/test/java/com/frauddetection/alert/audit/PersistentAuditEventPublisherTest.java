@@ -361,7 +361,15 @@ class PersistentAuditEventPublisherTest {
                 "SHA-256"
         );
         when(repository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY)).thenReturn(Optional.empty());
-        when(repository.insert(any(AuditEventDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        AtomicReference<AuditEventDocument> latest = new AtomicReference<>();
+        List<AuditEventDocument> inserted = new ArrayList<>();
+        when(repository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY)).thenAnswer(invocation -> Optional.ofNullable(latest.get()));
+        when(repository.insert(any(AuditEventDocument.class))).thenAnswer(invocation -> {
+            AuditEventDocument document = invocation.getArgument(0);
+            inserted.add(document);
+            latest.set(document);
+            return document;
+        });
         when(anchorRepository.insert(any(AuditAnchorDocument.class))).thenReturn(anchor);
         org.mockito.Mockito.doThrow(new ExternalAuditAnchorPublicationRequiredException("WRITE_NOT_VERIFIED"))
                 .when(externalAnchorPublisher)
@@ -382,6 +390,11 @@ class PersistentAuditEventPublisherTest {
                 .extracting("reason")
                 .isEqualTo("WRITE_NOT_VERIFIED");
         verify(externalAnchorPublisher).publishRequired(anchor);
+        assertThat(inserted).hasSize(2);
+        assertThat(inserted.get(0).outcome()).isEqualTo(AuditOutcome.SUCCESS);
+        assertThat(inserted.get(1).action()).isEqualTo(AuditAction.EXTERNAL_ANCHOR_REQUIRED_FAILED);
+        assertThat(inserted.get(1).outcome()).isEqualTo(AuditOutcome.FAILED);
+        assertThat(inserted.get(1).resourceId()).isEqualTo(inserted.get(0).auditId());
     }
 
     @Test
