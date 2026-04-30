@@ -174,7 +174,7 @@ paths:
   /api/v1/audit/integrity/external/coverage:
     get:
       summary: Inspect bounded external anchor coverage
-      description: Returns bounded external anchor coverage for the local audit chain head. Clients must treat missing_ranges and truncated as operational evidence gaps. This endpoint is read-only, bounded, and does not export audit events or repair anchors.
+      description: Returns bounded external anchor coverage for the local audit chain head. Clients must treat missing_ranges, truncated, local_ahead_of_external, required_publication_failures, local_status_unverified, and unrecovered_count as operational evidence gaps. This endpoint is read-only, bounded, and does not export audit events or repair anchors.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1040,7 +1040,7 @@ components:
     ExternalAuditAnchorCoverageResponse:
       type: object
       additionalProperties: false
-      required: [status, latest_local_position, latest_external_position, position_lag, missing_ranges, truncated, limit, coverage_status, max_position_lag, max_missing_ranges]
+      required: [status, latest_local_position, latest_external_position, position_lag, missing_ranges, truncated, limit, coverage_status, max_position_lag, max_missing_ranges, local_ahead_of_external, required_publication_failures, local_status_unverified, recovered_count, unrecovered_count]
       properties:
         status:
           type: string
@@ -1085,7 +1085,7 @@ components:
         coverage_status:
           type: string
           enum: [HEALTHY, DEGRADED]
-          description: HEALTHY means the bounded coverage window is complete within configured thresholds; DEGRADED means lag, gaps, truncation, or unavailable evidence must be investigated.
+          description: HEALTHY means the bounded coverage window is complete within configured thresholds; DEGRADED means lag, gaps, truncation, required publication failures, unrecovered status gaps, or unavailable evidence must be investigated.
         max_position_lag:
           type: integer
           format: int64
@@ -1098,6 +1098,25 @@ components:
         max_missing_ranges:
           type: integer
           minimum: 0
+        local_ahead_of_external:
+          type: boolean
+          description: True when the latest local anchor position is ahead of the latest verified external anchor position.
+        required_publication_failures:
+          type: integer
+          minimum: 0
+          description: Count of bounded-window local anchors whose required external publication failed after the local anchor was created.
+        local_status_unverified:
+          type: integer
+          minimum: 0
+          description: Count of bounded-window local anchors with missing or unverified durable publication status.
+        recovered_count:
+          type: integer
+          minimum: 0
+          description: Count of bounded-window local publication statuses recovered by reconciliation.
+        unrecovered_count:
+          type: integer
+          minimum: 0
+          description: Count of bounded-window local anchors that still need operator recovery or external witness investigation.
     ExternalAuditAnchorMissingRange:
       type: object
       additionalProperties: false
@@ -1381,11 +1400,11 @@ components:
         publication_status:
           type: string
           nullable: true
-          enum: [PUBLISHED, PARTIAL, PENDING, FAILED]
+          enum: [PUBLISHED, UNVERIFIED, LOCAL_STATUS_UNVERIFIED, LOCAL_ANCHOR_CREATED_EXTERNAL_REQUIRED_FAILED, PARTIAL, PENDING, FAILED, INVALID, CONFLICT, MISSING, UNAVAILABLE]
         publication_reason:
           type: string
           nullable: true
-          enum: [HEAD_MANIFEST_UPDATE_FAILED]
+          enum: [HEAD_MANIFEST_UPDATE_FAILED, STATUS_PERSISTENCE_FAILED_AFTER_EXTERNAL_PUBLISH, EXTERNAL_ANCHOR_REQUIRED_FAILED]
         manifest_status:
           type: string
           nullable: true
