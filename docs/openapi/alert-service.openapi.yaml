@@ -174,7 +174,7 @@ paths:
   /api/v1/audit/integrity/external/coverage:
     get:
       summary: Inspect bounded external anchor coverage
-      description: Returns bounded external anchor coverage for the local audit chain head or from a supplied from_position. Per-position state comes from the publication-status repository, not one external object read per position. Clients must treat missing_ranges, truncated, local_ahead_of_external, required_publication_failures, local_status_unverified, and unrecovered_count as operational evidence gaps. This endpoint is read-only, bounded, and does not export audit events or repair anchors.
+      description: Returns bounded external anchor coverage for the local audit chain head or from a supplied from_position. Per-position state comes from the publication-status repository, not one external object read per position. Requests are protected by Redis-backed per-principal or per-IP request-cost limiting. Clients must treat missing_ranges, truncated, local_ahead_of_external, required_publication_failures, local_status_unverified, and unrecovered_count as operational evidence gaps. This endpoint is read-only, bounded, and does not export audit events or repair anchors.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -388,7 +388,7 @@ paths:
   /api/v1/alerts/{alertId}/decision:
     post:
       summary: Submit analyst decision
-      description: Records an analyst decision with backend authorization, guarded audit, durable same-document outbox, and optional idempotency. If X-Idempotency-Key is supplied, the same key and same request body replay the prior response without duplicate audit or outbox mutation; the same key with a different request body returns 409. Kafka publication is asynchronous from the durable outbox and at-least-once unless consumers dedupe by event id. operation_status is mandatory: REJECTED_BEFORE_MUTATION means the guarded audit write failed before mutation; COMMITTED_AUDIT_PENDING is a conservative committed state before full audit completion was persisted; COMMITTED_FULLY_ANCHORED means the decision and outbox committed and audit completed; COMMITTED_AUDIT_INCOMPLETE means the business decision and outbox committed but post-commit audit/anchor completion degraded.
+      description: Records an analyst decision with backend authorization, guarded audit, durable same-document outbox, and optional idempotency. If X-Idempotency-Key is supplied, the same key and same request body replay the prior response without duplicate audit or outbox mutation; the same key with a different request body returns 409. Kafka publication is asynchronous from the durable outbox and at-least-once unless consumers dedupe by event id. FraudDecisionEvent carries delivery=AT_LEAST_ONCE and dedupeKey=eventId. operation_status is mandatory for committed responses: REJECTED_BEFORE_MUTATION maps to HTTP 503 with no command response body; COMMITTED_EVIDENCE_PENDING is a conservative committed state before full evidence completion was persisted; COMMITTED_FULLY_ANCHORED means the decision and outbox committed and audit completed; COMMITTED_EVIDENCE_INCOMPLETE means the business decision and outbox committed but post-commit evidence completion degraded.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -430,6 +430,12 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           description: Idempotency key was reused with a different payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "503":
+          description: Required audit persistence or evidence precondition failed before command success could be reported; mutation was not executed for pre-mutation failures.
           content:
             application/json:
               schema:
@@ -682,7 +688,7 @@ components:
     SystemTrustLevelResponse:
       type: object
       additionalProperties: false
-      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength, coverage_status, witness_status, signature_policy, required_publication_failures, local_status_unverified, missing_ranges, post_commit_audit_degraded]
+      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength, coverage_status, witness_status, signature_policy, required_publication_failures, local_status_unverified, missing_ranges, post_commit_audit_degraded, outbox_failed_terminal_count, outbox_oldest_pending_age_seconds]
       properties:
         guarantee_level:
           type: string
@@ -702,7 +708,8 @@ components:
           enum: [HEALTHY, DEGRADED, UNAVAILABLE]
         witness_status:
           type: string
-          enum: [VERIFIED, DECLARED_ONLY, UNAVAILABLE, DISABLED]
+          enum: [PROVIDER_VERIFIED, DECLARED_CAPABLE, UNAVAILABLE, DISABLED]
+          description: PROVIDER_VERIFIED requires provider-side metadata verification; declared capabilities alone are DECLARED_CAPABLE.
         signature_policy:
           type: string
           enum: [OPTIONAL, REQUIRED_FOR_TRUST, REQUIRED_FOR_PUBLICATION]
@@ -718,6 +725,15 @@ components:
         post_commit_audit_degraded:
           type: integer
           format: int64
+          minimum: 0
+        outbox_failed_terminal_count:
+          type: integer
+          format: int64
+          minimum: 0
+        outbox_oldest_pending_age_seconds:
+          type: integer
+          format: int64
+          nullable: true
           minimum: 0
         reason_code:
           type: string
@@ -770,8 +786,8 @@ components:
           nullable: true
         operation_status:
           type: string
-          enum: [REJECTED_BEFORE_MUTATION, COMMITTED_AUDIT_PENDING, COMMITTED_AUDIT_INCOMPLETE, COMMITTED_FULLY_ANCHORED]
-          description: Mandatory operation state. COMMITTED_AUDIT_PENDING is conservative state before full audit completion is persisted. COMMITTED_AUDIT_INCOMPLETE means the business decision and durable outbox committed while post-commit audit/anchor completion degraded.
+          enum: [REJECTED_BEFORE_MUTATION, COMMITTED_EVIDENCE_PENDING, COMMITTED_EVIDENCE_INCOMPLETE, COMMITTED_FULLY_ANCHORED]
+          description: Mandatory operation state. REJECTED_BEFORE_MUTATION is returned as HTTP 503 with no command response body. COMMITTED_EVIDENCE_PENDING is conservative state before full evidence completion is persisted. COMMITTED_EVIDENCE_INCOMPLETE means the business decision and durable outbox committed while post-commit evidence completion degraded.
     PagedGenericObject:
       type: object
       required:
@@ -1173,7 +1189,8 @@ components:
           description: Structural integrity result. Clients must not interpret this as trust without trust_level and signature_policy.
         trust_level:
           type: string
-          enum: [LOCAL_ONLY, EXTERNAL_UNSIGNED, EXTERNAL_SIGNED, EXTERNAL_VERIFIED]
+          enum: [LOCAL_ONLY, EXTERNAL_UNSIGNED, EXTERNAL_SIGNED, EXTERNAL_INDEPENDENTLY_VERIFIED]
+          description: EXTERNAL_SIGNED means signature verification succeeded or signed metadata is present. EXTERNAL_INDEPENDENTLY_VERIFIED is reserved for a real independent verifier and is not returned by signature verification alone.
         signature_policy:
           type: string
           enum: [OPTIONAL, REQUIRED_FOR_TRUST, REQUIRED_FOR_PUBLICATION]
@@ -1508,7 +1525,7 @@ components:
           description: Per-event external anchor state used by evidence consumers.
         trust_level:
           type: string
-          enum: [LOCAL_ONLY, EXTERNAL_UNSIGNED, EXTERNAL_SIGNED, EXTERNAL_VERIFIED]
+          enum: [LOCAL_ONLY, EXTERNAL_UNSIGNED, EXTERNAL_SIGNED, EXTERNAL_INDEPENDENTLY_VERIFIED]
           description: Per-event trust interpretation. Signed or verified values require corresponding signature fields; local-only is not external trust.
         integrity_status:
           type: string
