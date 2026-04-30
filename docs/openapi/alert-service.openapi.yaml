@@ -770,14 +770,14 @@ components:
           enum: ["1.0"]
         compensated:
           type: boolean
-          description: True when this event was superseded by a later compensating audit event in the returned bounded result set.
+          description: True when this event was superseded by a later compensating audit event. Compensation enrichment uses a bounded lookup for returned audit ids and is not limited to events present in the current page.
         superseded_by_event_id:
           type: string
           nullable: true
           description: Audit event id of the compensating event when compensated=true.
         business_effective:
           type: boolean
-          description: True only for final successful business events; false for ATTEMPTED, FAILED, REJECTED, or ABORTED events.
+          description: Clients must use this field rather than outcome alone. True only for uncompensated SUCCESS business events; false for ATTEMPTED, FAILED, REJECTED, ABORTED events, and compensated SUCCESS events.
         related_event_id:
           type: string
           nullable: true
@@ -1294,14 +1294,18 @@ components:
           $ref: "#/components/schemas/AuditEvidenceExportAnchorReference"
         compensated:
           type: boolean
+          description: True when this event was superseded by a later compensating audit event. Compensation enrichment uses a bounded lookup for returned audit ids and is not limited to events present in the export window.
         superseded_by_event_id:
           type: string
           nullable: true
+          description: Audit event id of the compensating event when compensated=true.
         business_effective:
           type: boolean
+          description: Clients must use this field rather than outcome alone. True only for uncompensated SUCCESS business events; false for ATTEMPTED, FAILED, REJECTED, ABORTED events, and compensated SUCCESS events.
         related_event_id:
           type: string
           nullable: true
+          description: For compensation events, the audit event id being compensated.
     AuditEvidenceExportAnchorReference:
       type: object
       additionalProperties: false
