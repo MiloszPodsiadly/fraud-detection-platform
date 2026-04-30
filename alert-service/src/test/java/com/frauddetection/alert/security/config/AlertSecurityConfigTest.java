@@ -22,6 +22,7 @@ import com.frauddetection.alert.audit.external.AuditTrustAuthorityClient;
 import com.frauddetection.alert.audit.external.AuditTrustAuthorityKey;
 import com.frauddetection.alert.audit.external.AuditTrustKeysController;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorCoverageResponse;
+import com.frauddetection.alert.audit.external.ExternalAuditCoverageRateLimiter;
 import com.frauddetection.alert.audit.external.ExternalAuditIntegrityController;
 import com.frauddetection.alert.audit.external.ExternalAuditIntegrityResponse;
 import com.frauddetection.alert.audit.external.ExternalAuditIntegrityService;
@@ -57,6 +58,7 @@ import com.frauddetection.alert.service.FraudCaseManagementService;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -149,6 +151,9 @@ class AlertSecurityConfigTest {
     private ExternalAuditIntegrityService externalAuditIntegrityService;
 
     @MockBean
+    private ExternalAuditCoverageRateLimiter externalAuditCoverageRateLimiter;
+
+    @MockBean
     private AuditEvidenceExportService auditEvidenceExportService;
 
     @MockBean
@@ -162,6 +167,11 @@ class AlertSecurityConfigTest {
 
     @MockBean
     private GovernanceAdvisoryProjectionService governanceAdvisoryProjectionService;
+
+    @BeforeEach
+    void allowCoverageRateLimit() {
+        when(externalAuditCoverageRateLimiter.allow()).thenReturn(true);
+    }
 
     @Test
     void shouldReturn401WhenAuthenticationIsMissingForAnalystEndpoints() throws Exception {
