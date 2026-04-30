@@ -103,4 +103,20 @@ public record AuditEvent(
         }
         return AuditFailureCategory.UNKNOWN;
     }
+
+    AuditEvent withOutcome(AuditOutcome nextOutcome, String nextFailureReason) {
+        return new AuditEvent(
+                actor,
+                action,
+                resourceType,
+                resourceId,
+                timestamp,
+                correlationId,
+                requestId,
+                nextOutcome,
+                failureCategory(nextOutcome, nextFailureReason),
+                nextFailureReason,
+                metadataSummary
+        );
+    }
 }

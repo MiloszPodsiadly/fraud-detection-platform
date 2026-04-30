@@ -2,6 +2,7 @@ package com.frauddetection.alert.audit.external;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.frauddetection.alert.audit.AuditEventBusinessSemantics;
 import com.frauddetection.alert.audit.AuditEventDocument;
 import com.frauddetection.alert.audit.AuditEventMetadataSummary;
 
@@ -56,12 +57,25 @@ public record AuditEvidenceExportEvent(
 
         @JsonProperty("external_anchor")
         @JsonInclude(JsonInclude.Include.NON_NULL)
-        AuditEvidenceExportAnchorReference externalAnchor
+        AuditEvidenceExportAnchorReference externalAnchor,
+
+        @JsonProperty("compensated")
+        boolean compensated,
+
+        @JsonProperty("superseded_by_event_id")
+        String supersededByEventId,
+
+        @JsonProperty("business_effective")
+        boolean businessEffective,
+
+        @JsonProperty("related_event_id")
+        String relatedEventId
 ) {
     static AuditEvidenceExportEvent from(
             AuditEventDocument document,
             AuditEvidenceExportAnchorReference localAnchor,
-            AuditEvidenceExportAnchorReference externalAnchor
+            AuditEvidenceExportAnchorReference externalAnchor,
+            AuditEventBusinessSemantics semantics
     ) {
         return new AuditEvidenceExportEvent(
                 document.auditId(),
@@ -78,7 +92,11 @@ public record AuditEvidenceExportEvent(
                 document.previousEventHash(),
                 document.chainPosition(),
                 localAnchor,
-                externalAnchor
+                externalAnchor,
+                semantics.compensated(),
+                semantics.supersededByEventId(),
+                semantics.businessEffective(),
+                semantics.relatedEventId()
         );
     }
 }

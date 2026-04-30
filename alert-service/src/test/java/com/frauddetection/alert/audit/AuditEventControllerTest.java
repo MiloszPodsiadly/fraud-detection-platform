@@ -77,7 +77,11 @@ class AuditEventControllerTest {
                         null,
                         "hash-1",
                         "SHA-256",
-                        "1.0"
+                        "1.0",
+                        false,
+                        null,
+                        true,
+                        null
                 ))
         ));
 

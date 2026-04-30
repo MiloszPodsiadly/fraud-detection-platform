@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditAnchorDocument;
 import com.frauddetection.alert.audit.AuditAnchorRepository;
+import com.frauddetection.alert.audit.AuditEventBusinessSemantics;
 import com.frauddetection.alert.audit.AuditEventDocument;
 import com.frauddetection.alert.audit.AuditEventMetadataSummary;
 import com.frauddetection.alert.audit.AuditEventRepository;
@@ -194,6 +195,7 @@ public class AuditEvidenceExportService {
                 .orElse(0L);
         Map<Long, AuditAnchorDocument> localAnchors = localAnchors(query, minPosition, maxPosition);
         ExternalAnchorLookup externalAnchorLookup = externalAnchors(query);
+        Map<String, AuditEventBusinessSemantics> semantics = AuditEventBusinessSemantics.index(documents);
         List<AuditEvidenceExportEvent> events = documents.stream()
                 .map(document -> {
                     Long position = document.chainPosition();
@@ -202,7 +204,8 @@ public class AuditEvidenceExportService {
                     return AuditEvidenceExportEvent.from(
                             document,
                             local == null ? null : AuditEvidenceExportAnchorReference.local(local),
-                            external == null ? null : externalEvidenceReference(external)
+                            external == null ? null : externalEvidenceReference(external),
+                            semantics.get(document.auditId())
                     );
                 })
                 .toList();
@@ -384,6 +387,8 @@ public class AuditEvidenceExportService {
         ));
         canonical.put("audit_event_ids", events.stream().map(AuditEvidenceExportEvent::auditEventId).toList());
         canonical.put("event_hashes", events.stream().map(AuditEvidenceExportEvent::eventHash).toList());
+        canonical.put("business_effective", events.stream().map(AuditEvidenceExportEvent::businessEffective).toList());
+        canonical.put("compensated", events.stream().map(AuditEvidenceExportEvent::compensated).toList());
         canonical.put("local_anchor_ids", events.stream()
                 .map(AuditEvidenceExportEvent::localAnchor)
                 .map(anchor -> anchor == null ? null : anchor.anchorId())

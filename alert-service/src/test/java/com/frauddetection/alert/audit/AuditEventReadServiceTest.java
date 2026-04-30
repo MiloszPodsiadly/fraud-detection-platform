@@ -94,6 +94,8 @@ class AuditEventReadServiceTest {
         assertThat(event.actorType()).isEqualTo("HUMAN");
         assertThat(event.eventHash()).isNotBlank();
         assertThat(event.hashAlgorithm()).isEqualTo("SHA-256");
+        assertThat(event.businessEffective()).isTrue();
+        assertThat(event.compensated()).isFalse();
         verify(auditService).audit(
                 eq(AuditAction.READ_AUDIT_EVENTS),
                 eq(AuditResourceType.AUDIT_EVENT),
@@ -104,6 +106,43 @@ class AuditEventReadServiceTest {
                 isNull(),
                 any(AuditEventMetadataSummary.class)
         );
+    }
+
+    @Test
+    void shouldExposeCompensatedAttemptedEventAfterExternalAnchorAbort() {
+        AuditActor actor = new AuditActor("admin-1", Set.of("FRAUD_OPS_ADMIN"), Set.of("audit:read"));
+        AuditEventDocument attempted = AuditEventDocument.from("audit-attempted", new AuditEvent(
+                actor,
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT,
+                "alert-1",
+                Instant.parse("2026-04-26T09:00:00Z"),
+                "corr-1",
+                AuditOutcome.ATTEMPTED,
+                null
+        ), null, 1L);
+        AuditEventDocument aborted = AuditEventDocument.from("audit-aborted", new AuditEvent(
+                actor,
+                AuditAction.EXTERNAL_ANCHOR_REQUIRED_FAILED,
+                AuditResourceType.AUDIT_EVENT,
+                attempted.auditId(),
+                Instant.parse("2026-04-26T09:00:01Z"),
+                "corr-1",
+                AuditOutcome.ABORTED_EXTERNAL_ANCHOR_REQUIRED,
+                "ExternalAuditAnchorPublicationRequiredException:WRITE_NOT_VERIFIED"
+        ), attempted.eventHash(), 2L);
+        when(mongoTemplate.find(org.mockito.ArgumentMatchers.any(Query.class), eq(AuditEventDocument.class)))
+                .thenReturn(List.of(aborted, attempted));
+
+        AuditEventReadResponse response = service.readEvents(null, null, null, null, null, null, 50);
+
+        AuditEventResponse abortResponse = response.events().get(0);
+        AuditEventResponse attemptResponse = response.events().get(1);
+        assertThat(abortResponse.relatedEventId()).isEqualTo("audit-attempted");
+        assertThat(abortResponse.businessEffective()).isFalse();
+        assertThat(attemptResponse.compensated()).isTrue();
+        assertThat(attemptResponse.supersededByEventId()).isEqualTo("audit-aborted");
+        assertThat(attemptResponse.businessEffective()).isFalse();
     }
 
     @Test
