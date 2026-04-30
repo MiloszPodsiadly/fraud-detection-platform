@@ -50,10 +50,12 @@ function readJsonFile(path) {
 }
 
 function parseArgs(argv) {
-  const args = { bundle: null, anchor: null, reference: null, witness: null };
+  const args = { bundle: null, anchor: null, reference: null, witness: null, help: false };
   for (let index = 0; index < argv.length; index += 1) {
     const current = argv[index];
-    if (current === "--bundle") {
+    if (current === "--help" || current === "-h") {
+      args.help = true;
+    } else if (current === "--bundle") {
       args.bundle = argv[++index];
     } else if (current === "--anchor") {
       args.anchor = argv[++index];
@@ -64,6 +66,10 @@ function parseArgs(argv) {
     }
   }
   return args;
+}
+
+function usage() {
+  return "usage: node tools/external-anchor-artifact-verifier/external-anchor-artifact-verifier.mjs --anchor anchor.json [--bundle bundle.json] [--reference reference.json] [--witness witness.json]\n\nLocal artifact mode only: verifies downloaded/exported external anchor artifacts. It does not fetch live object-store, TSA, or blockchain witness records.";
 }
 
 function compareBundle(bundle, payload) {
@@ -170,8 +176,12 @@ function result(status, reasonCode, anchor = null, timestamp = {}) {
 }
 
 const args = parseArgs(process.argv.slice(2));
+if (args.help) {
+  console.log(usage());
+  process.exit(0);
+}
 if (!args.anchor) {
-  console.error("usage: node tools/external-anchor-artifact-verifier/external-anchor-artifact-verifier.mjs --anchor anchor.json [--bundle bundle.json] [--reference reference.json] [--witness witness.json]");
+  console.error(usage());
   process.exit(2);
 }
 

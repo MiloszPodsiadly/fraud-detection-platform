@@ -119,6 +119,16 @@ test("remote witness URLs are explicitly unsupported", () => {
   assert.equal(result.reason_code, "REMOTE_WITNESS_UNSUPPORTED");
 });
 
+test("help text describes local artifact verifier mode", () => {
+  const output = execFileSync("node", [
+    "tools/external-anchor-artifact-verifier/external-anchor-artifact-verifier.mjs",
+    "--help",
+  ], { cwd: process.cwd(), encoding: "utf8" });
+
+  assert.match(output, /artifact/i);
+  assert.match(output, /does not fetch live/i);
+});
+
 test("head manifest content is not accepted as anchor evidence", () => {
   const result = run({
     anchor: {
