@@ -5,6 +5,9 @@ spring:
     mongodb:
       uri: ${MONGODB_URI:mongodb://localhost:27017/fraud_alerts}
       auto-index-creation: true
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
@@ -37,6 +40,8 @@ management:
 
 app:
   audit:
+    bank-mode:
+      fail-closed: ${AUDIT_BANK_MODE_FAIL_CLOSED:false}
     external-anchoring:
       enabled: ${AUDIT_EXTERNAL_ANCHORING_ENABLED:false}
       publication:

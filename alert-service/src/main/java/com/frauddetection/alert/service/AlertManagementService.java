@@ -4,6 +4,7 @@ import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
 import com.frauddetection.alert.api.SubmitAnalystDecisionResponse;
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.audit.AuditDegradationService;
 import com.frauddetection.alert.audit.AuditMutationRecorder;
 import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
 import com.frauddetection.alert.audit.AuditResourceType;
@@ -23,6 +24,8 @@ import com.frauddetection.common.events.contract.FraudAlertEvent;
 import com.frauddetection.common.events.contract.FraudDecisionEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.AlertStatus;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
@@ -57,6 +60,8 @@ public class AlertManagementService implements AlertManagementUseCase {
     private final AuditMutationRecorder auditMutationRecorder;
     private final AnalystActorResolver analystActorResolver;
     private final AlertServiceMetrics metrics;
+    private final AuditDegradationService auditDegradationService;
+    private final boolean bankModeFailClosed;
 
     public AlertManagementService(
             AlertRepository alertRepository,
@@ -72,6 +77,28 @@ public class AlertManagementService implements AlertManagementUseCase {
             AnalystActorResolver analystActorResolver,
             AlertServiceMetrics metrics
     ) {
+        this(alertRepository, alertDocumentMapper, fraudAlertEventMapper, fraudDecisionEventMapper, alertCaseFactory,
+                analystDecisionStatusMapper, fraudAlertEventPublisher, fraudDecisionEventPublisher, fraudCaseManagementService,
+                auditMutationRecorder, analystActorResolver, metrics, null, false);
+    }
+
+    @Autowired
+    public AlertManagementService(
+            AlertRepository alertRepository,
+            AlertDocumentMapper alertDocumentMapper,
+            FraudAlertEventMapper fraudAlertEventMapper,
+            FraudDecisionEventMapper fraudDecisionEventMapper,
+            AlertCaseFactory alertCaseFactory,
+            AnalystDecisionStatusMapper analystDecisionStatusMapper,
+            FraudAlertEventPublisher fraudAlertEventPublisher,
+            FraudDecisionEventPublisher fraudDecisionEventPublisher,
+            FraudCaseManagementService fraudCaseManagementService,
+            AuditMutationRecorder auditMutationRecorder,
+            AnalystActorResolver analystActorResolver,
+            AlertServiceMetrics metrics,
+            AuditDegradationService auditDegradationService,
+            @Value("${app.audit.bank-mode.fail-closed:false}") boolean bankModeFailClosed
+    ) {
         this.alertRepository = alertRepository;
         this.alertDocumentMapper = alertDocumentMapper;
         this.fraudAlertEventMapper = fraudAlertEventMapper;
@@ -84,6 +111,8 @@ public class AlertManagementService implements AlertManagementUseCase {
         this.auditMutationRecorder = auditMutationRecorder;
         this.analystActorResolver = analystActorResolver;
         this.metrics = metrics;
+        this.auditDegradationService = auditDegradationService;
+        this.bankModeFailClosed = bankModeFailClosed;
     }
 
     @Override
@@ -151,34 +180,34 @@ public class AlertManagementService implements AlertManagementUseCase {
                     document.getAlertId(),
                     document.getCorrelationId(),
                     actorId,
-                    () -> saveDecisionWithOutbox(document, request, resultingStatus, actorId, idempotencyKey, requestHash, SubmitDecisionOperationStatus.COMMITTED_AUDIT_PENDING)
+                    () -> saveDecisionWithOutbox(document, request, resultingStatus, actorId, idempotencyKey, requestHash, SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING)
             );
             SubmitDecisionOperationStatus finalStatus = upgradeDecisionOperationStatus(saved, SubmitDecisionOperationStatus.COMMITTED_FULLY_ANCHORED);
             metrics.recordAnalystDecisionSubmitted();
             return response(saved, request, resultingStatus, finalStatus);
         } catch (PostCommitAuditDegradedException exception) {
             AlertDocument saved = exception.result();
-            SubmitDecisionOperationStatus finalStatus = SubmitDecisionOperationStatus.COMMITTED_AUDIT_INCOMPLETE;
-            saved.setDecisionOperationStatus(SubmitDecisionOperationStatus.COMMITTED_AUDIT_INCOMPLETE.name());
+            recordPostCommitDegraded(
+                    AuditAction.SUBMIT_ANALYST_DECISION,
+                    AuditResourceType.ALERT,
+                    saved.getAlertId(),
+                    "POST_COMMIT_AUDIT_DEGRADED"
+            );
+            metrics.recordPostCommitAuditDegraded(AuditAction.SUBMIT_ANALYST_DECISION.name());
+            if (bankModeFailClosed) {
+                throw new AuditPersistenceUnavailableException();
+            }
+            SubmitDecisionOperationStatus finalStatus = SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE;
+            saved.setDecisionOperationStatus(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE.name());
             try {
                 alertRepository.save(saved);
             } catch (DataAccessException persistenceException) {
                 log.warn("Post-commit audit degraded status persistence failed: reason=POST_COMMIT_AUDIT_DEGRADED");
-                saved.setDecisionOperationStatus(SubmitDecisionOperationStatus.COMMITTED_AUDIT_PENDING.name());
-                finalStatus = SubmitDecisionOperationStatus.COMMITTED_AUDIT_PENDING;
+                saved.setDecisionOperationStatus(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING.name());
+                finalStatus = SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING;
             }
-            metrics.recordPostCommitAuditDegraded(AuditAction.SUBMIT_ANALYST_DECISION.name());
             metrics.recordAnalystDecisionSubmitted();
             return response(saved, request, resultingStatus, finalStatus);
-        } catch (AuditPersistenceUnavailableException exception) {
-            return new SubmitAnalystDecisionResponse(
-                    alertId,
-                    request.decision(),
-                    resultingStatus,
-                    null,
-                    null,
-                    SubmitDecisionOperationStatus.REJECTED_BEFORE_MUTATION
-            );
         }
     }
 
@@ -224,8 +253,14 @@ public class AlertManagementService implements AlertManagementUseCase {
         } catch (DataAccessException exception) {
             log.warn("Decision operation status upgrade failed: reason=DECISION_STATUS_UPGRADE_FAILED");
             metrics.recordPostCommitAuditDegraded(AuditAction.SUBMIT_ANALYST_DECISION.name());
-            saved.setDecisionOperationStatus(SubmitDecisionOperationStatus.COMMITTED_AUDIT_PENDING.name());
-            return SubmitDecisionOperationStatus.COMMITTED_AUDIT_PENDING;
+            recordPostCommitDegraded(
+                    AuditAction.SUBMIT_ANALYST_DECISION,
+                    AuditResourceType.ALERT,
+                    saved.getAlertId(),
+                    "DECISION_STATUS_UPGRADE_FAILED"
+            );
+            saved.setDecisionOperationStatus(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING.name());
+            return SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING;
         }
     }
 
@@ -258,6 +293,17 @@ public class AlertManagementService implements AlertManagementUseCase {
         );
     }
 
+    private void recordPostCommitDegraded(
+            AuditAction operation,
+            AuditResourceType resourceType,
+            String resourceId,
+            String reason
+    ) {
+        if (auditDegradationService != null) {
+            auditDegradationService.recordPostCommitDegraded(operation, resourceType, resourceId, reason);
+        }
+    }
+
     private SubmitAnalystDecisionResponse response(
             AlertDocument saved,
             SubmitAnalystDecisionRequest request,
@@ -277,7 +323,13 @@ public class AlertManagementService implements AlertManagementUseCase {
 
     private SubmitDecisionOperationStatus parseOperationStatus(String value) {
         if (value == null || value.isBlank()) {
-            return SubmitDecisionOperationStatus.COMMITTED_AUDIT_PENDING;
+            return SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING;
+        }
+        if ("COMMITTED_AUDIT_PENDING".equals(value)) {
+            return SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING;
+        }
+        if ("COMMITTED_AUDIT_INCOMPLETE".equals(value)) {
+            return SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE;
         }
         return SubmitDecisionOperationStatus.valueOf(value);
     }

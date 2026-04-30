@@ -96,8 +96,8 @@ public class AlertServiceExceptionHandler {
                         Instant.now(),
                         503,
                         "Service Unavailable",
-                        "Audit persistence is unavailable.",
-                        List.of()
+                        "Audit persistence is unavailable; mutation was not executed.",
+                        List.of("reason:REJECTED_BEFORE_MUTATION")
                 )
         );
     }

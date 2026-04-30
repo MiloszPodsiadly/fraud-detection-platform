@@ -4,6 +4,7 @@ import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
 import com.frauddetection.alert.api.SubmitAnalystDecisionResponse;
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.audit.AuditDegradationService;
 import com.frauddetection.alert.audit.AuditMutationRecorder;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
@@ -217,15 +218,14 @@ class AlertManagementServiceTest {
                 null
         );
 
-        SubmitAnalystDecisionResponse response = service.submitDecision("alert-1", new SubmitAnalystDecisionRequest(
+        assertThatThrownBy(() -> service.submitDecision("alert-1", new SubmitAnalystDecisionRequest(
                 "analyst-7",
                 AnalystDecision.CONFIRMED_FRAUD,
                 "Confirmed after manual review",
                 List.of("chargeback"),
                 Map.of()
-        ));
+        ))).isInstanceOf(AuditPersistenceUnavailableException.class);
 
-        assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.REJECTED_BEFORE_MUTATION);
         verify(repository, never()).save(any(AlertDocument.class));
         verify(decisionPublisher, never()).publish(any(FraudDecisionEvent.class));
         verify(metrics, never()).recordAnalystDecisionSubmitted();
@@ -344,7 +344,7 @@ class AlertManagementServiceTest {
                 Map.of()
         ));
 
-        assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_AUDIT_INCOMPLETE);
+        assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE);
         verify(repository, org.mockito.Mockito.times(2)).save(any(AlertDocument.class));
         assertThat(document.getAnalystDecision()).isEqualTo(AnalystDecision.CONFIRMED_FRAUD);
         assertThat(document.getAlertStatus()).isEqualTo(AlertStatus.RESOLVED);
@@ -402,14 +402,86 @@ class AlertManagementServiceTest {
                 Map.of()
         ));
 
-        assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_AUDIT_PENDING);
+        assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING);
         ArgumentCaptor<AlertDocument> documentCaptor = ArgumentCaptor.forClass(AlertDocument.class);
         verify(repository, org.mockito.Mockito.times(2)).save(documentCaptor.capture());
         assertThat(documentCaptor.getAllValues().getFirst().getDecisionOperationStatus())
-                .isEqualTo(SubmitDecisionOperationStatus.COMMITTED_AUDIT_PENDING.name());
+                .isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING.name());
         assertThat(documentCaptor.getAllValues().getFirst().getDecisionOperationStatus())
                 .isNotEqualTo(SubmitDecisionOperationStatus.COMMITTED_FULLY_ANCHORED.name());
         verify(metrics).recordPostCommitAuditDegraded("SUBMIT_ANALYST_DECISION");
+    }
+
+    @Test
+    void shouldRejectBankModeCommandWhenSuccessAuditDegradesWithoutIncompleteResponse() {
+        AlertRepository repository = mock(AlertRepository.class);
+        FraudAlertEventPublisher alertPublisher = mock(FraudAlertEventPublisher.class);
+        FraudDecisionEventPublisher decisionPublisher = mock(FraudDecisionEventPublisher.class);
+        AlertDocumentMapper documentMapper = new AlertDocumentMapper();
+        FraudAlertEventMapper alertEventMapper = new FraudAlertEventMapper();
+        FraudDecisionEventMapper decisionEventMapper = new FraudDecisionEventMapper();
+        AlertCaseFactory alertCaseFactory = new AlertCaseFactory();
+        AnalystDecisionStatusMapper statusMapper = new AnalystDecisionStatusMapper();
+        FraudCaseManagementService fraudCaseManagementService = mock(FraudCaseManagementService.class);
+        AuditService auditService = mock(AuditService.class);
+        AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        AuditDegradationService degradationService = mock(AuditDegradationService.class);
+
+        var service = new AlertManagementService(
+                repository,
+                documentMapper,
+                alertEventMapper,
+                decisionEventMapper,
+                alertCaseFactory,
+                statusMapper,
+                alertPublisher,
+                decisionPublisher,
+                fraudCaseManagementService,
+                new AuditMutationRecorder(auditService),
+                analystActorResolver,
+                metrics,
+                degradationService,
+                true
+        );
+        AlertDocument document = new AlertDocument();
+        document.setAlertId("alert-1");
+        document.setTransactionId("txn-1");
+        document.setCorrelationId("corr-1");
+        document.setAlertStatus(AlertStatus.OPEN);
+        document.setRiskLevel(RiskLevel.HIGH);
+        document.setFraudScore(0.82d);
+
+        when(repository.findById("alert-1")).thenReturn(Optional.of(document));
+        when(repository.save(any(AlertDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(analystActorResolver.resolveActorId(eq("analyst-7"), eq("SUBMIT_ANALYST_DECISION"), eq("alert-1")))
+                .thenReturn("principal-7");
+        doThrow(new AuditPersistenceUnavailableException()).when(auditService).audit(
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT,
+                "alert-1",
+                "corr-1",
+                "principal-7",
+                AuditOutcome.SUCCESS,
+                null
+        );
+
+        assertThatThrownBy(() -> service.submitDecision("alert-1", new SubmitAnalystDecisionRequest(
+                "analyst-7",
+                AnalystDecision.CONFIRMED_FRAUD,
+                "Confirmed after manual review",
+                List.of("chargeback"),
+                Map.of()
+        ))).isInstanceOf(AuditPersistenceUnavailableException.class);
+
+        verify(degradationService).recordPostCommitDegraded(
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT,
+                "alert-1",
+                "POST_COMMIT_AUDIT_DEGRADED"
+        );
+        assertThat(document.getDecisionOperationStatus())
+                .isNotEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE.name());
     }
 
     @Test

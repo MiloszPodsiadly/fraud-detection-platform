@@ -2,7 +2,7 @@ package com.frauddetection.alert.api;
 
 public enum SubmitDecisionOperationStatus {
     REJECTED_BEFORE_MUTATION,
-    COMMITTED_AUDIT_PENDING,
-    COMMITTED_AUDIT_INCOMPLETE,
+    COMMITTED_EVIDENCE_PENDING,
+    COMMITTED_EVIDENCE_INCOMPLETE,
     COMMITTED_FULLY_ANCHORED
 }
