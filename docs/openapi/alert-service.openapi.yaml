@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: Alert Service API
-  version: FDP-23
-  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, external anchor verification, bounded evidence export, derived audit trust attestation, public trust key export, governance advisory lifecycle projection, and human-review audit. FDP-20 extends tamper evidence outside the primary database boundary. FDP-22 adds a pluggable object-store external anchor sink boundary, verified external anchor references, and explicit external_immutability_level=NONE|CONFIGURED|ENFORCED; no WORM or full immutability claim is valid unless the adapter verifies infrastructure controls and reports ENFORCED. FDP-23 adds a separate local-first audit trust authority for Ed25519 external anchor hash signatures and public verification key export; the alert-service does not hold the trust authority private key. Audit integrity, trust authority signatures, and trust attestation do not imply certified WORM archive storage, legal notarization, SIEM integration, unbounded export, KMS/HSM signing unless explicitly integrated, or final compliance archive.
+  version: FDP-24
+  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, external anchor verification, bounded evidence export, derived audit trust attestation, public trust key export, governance advisory lifecycle projection, and human-review audit. FDP-20 extends tamper evidence outside the primary database boundary. FDP-22 adds a pluggable object-store external anchor sink boundary, verified external anchor references, and explicit external_immutability_level=NONE|CONFIGURED|ENFORCED; no WORM or full immutability claim is valid unless the adapter verifies infrastructure controls and reports ENFORCED. FDP-23 adds a separate local-first audit trust authority for Ed25519 external anchor hash signatures and public verification key export; the alert-service does not hold the trust authority private key. FDP-24 adds fail-closed posture reporting, durable analyst-decision outbox/idempotency semantics, and publication-status source-of-truth semantics. Audit integrity, trust authority signatures, and trust attestation do not imply certified WORM archive storage, legal notarization, SIEM integration, unbounded export, KMS/HSM signing unless explicitly integrated, or final compliance archive.
 servers:
   - url: http://localhost:8085
 paths:
@@ -174,7 +174,7 @@ paths:
   /api/v1/audit/integrity/external/coverage:
     get:
       summary: Inspect bounded external anchor coverage
-      description: Returns bounded external anchor coverage for the local audit chain head. Clients must treat missing_ranges, truncated, local_ahead_of_external, required_publication_failures, local_status_unverified, and unrecovered_count as operational evidence gaps. This endpoint is read-only, bounded, and does not export audit events or repair anchors.
+      description: Returns bounded external anchor coverage for the local audit chain head or from a supplied from_position. Per-position state comes from the publication-status repository, not one external object read per position. Clients must treat missing_ranges, truncated, local_ahead_of_external, required_publication_failures, local_status_unverified, and unrecovered_count as operational evidence gaps. This endpoint is read-only, bounded, and does not export audit events or repair anchors.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -191,8 +191,16 @@ paths:
           schema:
             type: integer
             minimum: 1
-            maximum: 500
+            maximum: 100
             default: 100
+        - name: from_position
+          in: query
+          required: false
+          description: Inclusive chain-position start for the bounded coverage window. Defaults to the latest bounded head window.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
       responses:
         "200":
           description: Bounded external anchor coverage result.
@@ -338,6 +346,17 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+  /system/trust-level:
+    get:
+      summary: Get deployment trust posture
+      description: Returns bounded deployment posture flags for external audit anchoring. BEST_EFFORT must not be marketed as FDP-24 fail-closed mode. SIGNED_EXTERNAL means trust-authority signing is enabled and required; it is not WORM, notarization, SIEM, or legal trust.
+      responses:
+        "200":
+          description: Deployment trust posture returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemTrustLevelResponse"
   /api/v1/alerts/{alertId}:
     get:
       summary: Get one alert
@@ -366,6 +385,55 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  /api/v1/alerts/{alertId}/decision:
+    post:
+      summary: Submit analyst decision
+      description: Records an analyst decision with backend authorization, guarded audit, durable same-document outbox, and optional idempotency. If X-Idempotency-Key is supplied, the same key and same request body replay the prior response without duplicate audit or outbox mutation; the same key with a different request body returns 409. Kafka publication is asynchronous from the durable outbox. operation_status is mandatory: REJECTED_BEFORE_MUTATION means the guarded audit write failed before mutation; COMMITTED_FULLY_ANCHORED means the decision and outbox committed and audit completed; COMMITTED_AUDIT_INCOMPLETE means the business decision and outbox committed but post-commit audit/anchor completion degraded.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: alertId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+        - name: X-Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitAnalystDecisionRequest"
+      responses:
+        "200":
+          description: Decision request reached a stable operation state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmitAnalystDecisionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Idempotency key was reused with a different payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
   /api/v1/fraud-cases/{caseId}:
     get:
       summary: Get one fraud case
@@ -611,6 +679,74 @@ components:
     GenericObject:
       type: object
       additionalProperties: true
+    SystemTrustLevelResponse:
+      type: object
+      additionalProperties: false
+      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength]
+      properties:
+        guarantee_level:
+          type: string
+          enum: [FDP24_FAIL_CLOSED, BEST_EFFORT]
+        publication_enabled:
+          type: boolean
+        publication_required:
+          type: boolean
+        fail_closed:
+          type: boolean
+        external_anchor_strength:
+          type: string
+          enum: [UNSIGNED_EXTERNAL, SIGNED_EXTERNAL]
+          description: Signing strength only. This does not provide WORM storage, notarization, SIEM integration, or legal trust.
+    SubmitAnalystDecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [analystId, decision, decisionReason, tags, decisionMetadata]
+      properties:
+        analystId:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: Submitted analyst id; backend actor resolution remains authoritative.
+        decision:
+          type: string
+          enum: [CONFIRMED_FRAUD, FALSE_POSITIVE, NEEDS_MORE_REVIEW]
+        decisionReason:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        tags:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            maxLength: 80
+        decisionMetadata:
+          type: object
+          additionalProperties: true
+    SubmitAnalystDecisionResponse:
+      type: object
+      additionalProperties: false
+      required: [alertId, decision, resultingStatus, decisionEventId, decidedAt, operation_status]
+      properties:
+        alertId:
+          type: string
+        decision:
+          type: string
+          enum: [CONFIRMED_FRAUD, FALSE_POSITIVE, NEEDS_MORE_REVIEW]
+        resultingStatus:
+          type: string
+          enum: [OPEN, IN_REVIEW, RESOLVED]
+        decisionEventId:
+          type: string
+          nullable: true
+        decidedAt:
+          type: string
+          format: date-time
+          nullable: true
+        operation_status:
+          type: string
+          enum: [REJECTED_BEFORE_MUTATION, COMMITTED_AUDIT_INCOMPLETE, COMMITTED_FULLY_ANCHORED]
+          description: Mandatory operation state. COMMITTED_AUDIT_INCOMPLETE means the business decision and durable outbox committed while post-commit audit/anchor completion degraded.
     PagedGenericObject:
       type: object
       required:
@@ -792,7 +928,7 @@ components:
           description: Audit proof state. ANCHOR_REQUIRED_FAILED means the business event may be real while external proof failed.
         external_anchor_status:
           type: string
-          enum: [PUBLISHED, UNVERIFIED, FAILED, MISSING, CONFLICT, LOCAL_STATUS_UNVERIFIED]
+          enum: [PUBLISHED, UNVERIFIED, FAILED, MISSING, CONFLICT, LOCAL_STATUS_UNVERIFIED, UNKNOWN]
           description: Per-event external anchor interpretation. Audit read without anchor lookup uses LOCAL_STATUS_UNVERIFIED unless a required anchor failure compensation is known.
         compensation_type:
           type: string
@@ -1111,7 +1247,7 @@ components:
         limit:
           type: integer
           minimum: 1
-          maximum: 500
+          maximum: 100
         reason_code:
           type: string
           nullable: true
@@ -1332,7 +1468,7 @@ components:
           description: Audit proof state for the exported event.
         external_anchor_status:
           type: string
-          enum: [PUBLISHED, UNVERIFIED, FAILED, MISSING, CONFLICT, LOCAL_STATUS_UNVERIFIED]
+          enum: [PUBLISHED, UNVERIFIED, FAILED, MISSING, CONFLICT, LOCAL_STATUS_UNVERIFIED, UNKNOWN]
           description: Per-event external anchor state used by evidence consumers.
         compensation_type:
           type: string
