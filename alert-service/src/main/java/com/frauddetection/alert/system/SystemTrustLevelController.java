@@ -30,6 +30,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
     private final boolean publicationEnabled;
     private final boolean publicationRequired;
     private final boolean failClosed;
+    private final boolean bankModeFailClosed;
     private final boolean trustAuthorityEnabled;
     private final boolean signingRequired;
     private final com.frauddetection.alert.audit.external.ExternalAuditIntegrityService externalAuditIntegrityService;
@@ -48,7 +49,22 @@ public class SystemTrustLevelController implements ApplicationRunner {
             ExternalAuditAnchorSink externalAuditAnchorSink,
             AlertServiceMetrics ignoredMetrics
     ) {
-        this(publicationEnabled, publicationRequired, failClosed, trustAuthorityEnabled, signingRequired,
+        this(publicationEnabled, publicationRequired, failClosed, true, trustAuthorityEnabled, signingRequired,
+                externalAuditIntegrityService, externalAuditAnchorSink, ignoredMetrics);
+    }
+
+    public SystemTrustLevelController(
+            boolean publicationEnabled,
+            boolean publicationRequired,
+            boolean failClosed,
+            boolean bankModeFailClosed,
+            boolean trustAuthorityEnabled,
+            boolean signingRequired,
+            com.frauddetection.alert.audit.external.ExternalAuditIntegrityService externalAuditIntegrityService,
+            ExternalAuditAnchorSink externalAuditAnchorSink,
+            AlertServiceMetrics ignoredMetrics
+    ) {
+        this(publicationEnabled, publicationRequired, failClosed, bankModeFailClosed, trustAuthorityEnabled, signingRequired,
                 Duration.ofMinutes(10), externalAuditIntegrityService, externalAuditAnchorSink, null, null);
     }
 
@@ -57,6 +73,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
             @Value("${app.audit.external-anchoring.publication.enabled:${app.audit.external-anchoring.enabled:false}}") boolean publicationEnabled,
             @Value("${app.audit.external-anchoring.publication.required:${app.audit.external-anchoring.enabled:false}}") boolean publicationRequired,
             @Value("${app.audit.external-anchoring.publication.fail-closed:${app.audit.external-anchoring.publication.required:${app.audit.external-anchoring.enabled:false}}}") boolean failClosed,
+            @Value("${app.audit.bank-mode.fail-closed:false}") boolean bankModeFailClosed,
             @Value("${app.audit.trust-authority.enabled:false}") boolean trustAuthorityEnabled,
             @Value("${app.audit.trust-authority.signing-required:false}") boolean signingRequired,
             @Value("${app.alert.decision-outbox.stale-threshold:PT10M}") Duration staleOutboxThreshold,
@@ -68,6 +85,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
         this.publicationEnabled = publicationEnabled;
         this.publicationRequired = publicationRequired;
         this.failClosed = failClosed;
+        this.bankModeFailClosed = bankModeFailClosed;
         this.trustAuthorityEnabled = trustAuthorityEnabled;
         this.signingRequired = signingRequired;
         this.externalAuditIntegrityService = externalAuditIntegrityService;
@@ -93,8 +111,11 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 live.localStatusUnverified(),
                 live.missingRanges(),
                 live.postCommitAuditDegraded(),
+                live.postCommitAuditDegradedResolved(),
                 live.outboxFailedTerminalCount(),
+                live.outboxPublishConfirmationUnknownCount(),
                 live.outboxOldestPendingAgeSeconds(),
+                live.outboxOldestAmbiguousAgeSeconds(),
                 live.reasonCode()
         );
     }
@@ -102,6 +123,9 @@ public class SystemTrustLevelController implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         if (publicationRequired && failClosed) {
+            if (!bankModeFailClosed) {
+                throw new IllegalStateException("app.audit.bank-mode.fail-closed=true is required when external publication is required and fail-closed.");
+            }
             log.info("FDP-24 FAIL-CLOSED MODE ACTIVE");
         }
     }
@@ -141,6 +165,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
         int localStatusUnverified = 0;
         int missingRanges = 0;
         long postCommitDegraded = auditDegradationService == null ? 0L : auditDegradationService.unresolvedPostCommitDegradedCount();
+        long postCommitDegradedResolved = auditDegradationService == null ? 0L : auditDegradationService.resolvedCount();
         OutboxState outboxState = outboxState();
         try {
             coverage = externalAuditIntegrityService.coverage("alert-service", 100);
@@ -161,12 +186,13 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 && publicationRequired
                 && failClosed
                 && "HEALTHY".equals(coverageStatus)
-                && "PROVIDER_VERIFIED".equals(witnessStatus)
+                && "PROVIDER_CAPABILITY_VERIFIED".equals(witnessStatus)
                 && requiredFailures == 0
                 && localStatusUnverified == 0
                 && missingRanges == 0
                 && postCommitDegraded == 0
                 && outboxState.failedTerminalCount() == 0
+                && outboxState.publishConfirmationUnknownCount() == 0
                 && !outboxState.stalePending();
         if (healthy && outboxState.reasonCode() != null) {
             healthy = false;
@@ -182,8 +208,11 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 localStatusUnverified,
                 missingRanges,
                 postCommitDegraded,
+                postCommitDegradedResolved,
                 outboxState.failedTerminalCount(),
+                outboxState.publishConfirmationUnknownCount(),
                 outboxState.oldestPendingAgeSeconds(),
+                outboxState.oldestAmbiguousAgeSeconds(),
                 reasonCode
         );
     }
@@ -200,7 +229,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 && capabilities.supportsRetention()
                 && capabilities.supportsWriteOnce()
                 && capabilities.supportsDeleteDenialOrRetention()) {
-            return "PROVIDER_VERIFIED";
+            return "PROVIDER_CAPABILITY_VERIFIED";
         }
         return "DECLARED_CAPABLE";
     }
@@ -208,31 +237,33 @@ public class SystemTrustLevelController implements ApplicationRunner {
     private OutboxState outboxState() {
         try {
             if (alertRepository == null) {
-                return new OutboxState(0L, null, false, null);
+                return new OutboxState(0L, 0L, null, null, false, null);
             }
-            List<String> failedStatuses = List.of(
-                    DecisionOutboxStatus.FAILED_TERMINAL,
-                    DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN
-            );
             List<String> pendingStatuses = List.of(
                     DecisionOutboxStatus.PENDING,
                     DecisionOutboxStatus.PROCESSING,
                     DecisionOutboxStatus.FAILED_RETRYABLE
             );
-            long failedTerminalCount = alertRepository.countByDecisionOutboxStatusIn(failedStatuses);
+            long failedTerminalCount = alertRepository.countByDecisionOutboxStatus(DecisionOutboxStatus.FAILED_TERMINAL);
+            long unknownCount = alertRepository.countByDecisionOutboxStatus(DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
             Long oldestPendingAge = alertRepository.findTopByDecisionOutboxStatusInOrderByDecidedAtAsc(pendingStatuses)
+                    .map(this::pendingAgeSeconds)
+                    .orElse(null);
+            Long oldestUnknownAge = alertRepository.findTopByDecisionOutboxStatusOrderByDecidedAtAsc(DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN)
                     .map(this::pendingAgeSeconds)
                     .orElse(null);
             boolean stalePending = oldestPendingAge != null && oldestPendingAge > staleOutboxThreshold.toSeconds();
             String reason = null;
             if (failedTerminalCount > 0) {
                 reason = "OUTBOX_TERMINAL_FAILURE";
+            } else if (unknownCount > 0) {
+                reason = "OUTBOX_PUBLISH_CONFIRMATION_UNKNOWN";
             } else if (stalePending) {
                 reason = "OUTBOX_STALE_PENDING";
             }
-            return new OutboxState(failedTerminalCount, oldestPendingAge, stalePending, reason);
+            return new OutboxState(failedTerminalCount, unknownCount, oldestPendingAge, oldestUnknownAge, stalePending, reason);
         } catch (DataAccessException exception) {
-            return new OutboxState(1L, null, true, "OUTBOX_STATUS_UNAVAILABLE");
+            return new OutboxState(1L, 1L, null, null, true, "OUTBOX_STATUS_UNAVAILABLE");
         }
     }
 
@@ -252,15 +283,20 @@ public class SystemTrustLevelController implements ApplicationRunner {
             int localStatusUnverified,
             int missingRanges,
             long postCommitAuditDegraded,
+            long postCommitAuditDegradedResolved,
             long outboxFailedTerminalCount,
+            long outboxPublishConfirmationUnknownCount,
             Long outboxOldestPendingAgeSeconds,
+            Long outboxOldestAmbiguousAgeSeconds,
             String reasonCode
     ) {
     }
 
     private record OutboxState(
             long failedTerminalCount,
+            long publishConfirmationUnknownCount,
             Long oldestPendingAgeSeconds,
+            Long oldestAmbiguousAgeSeconds,
             boolean stalePending,
             String reasonCode
     ) {

@@ -30,6 +30,9 @@ public class AuditDegradationEventDocument {
     private boolean resolved;
 
     private Instant resolvedAt;
+    private String resolvedBy;
+    private String resolutionReason;
+    private String resolutionEvidenceReference;
     private String reason;
 
     public String getAuditId() {
@@ -94,6 +97,30 @@ public class AuditDegradationEventDocument {
 
     public void setResolvedAt(Instant resolvedAt) {
         this.resolvedAt = resolvedAt;
+    }
+
+    public String getResolvedBy() {
+        return resolvedBy;
+    }
+
+    public void setResolvedBy(String resolvedBy) {
+        this.resolvedBy = resolvedBy;
+    }
+
+    public String getResolutionReason() {
+        return resolutionReason;
+    }
+
+    public void setResolutionReason(String resolutionReason) {
+        this.resolutionReason = resolutionReason;
+    }
+
+    public String getResolutionEvidenceReference() {
+        return resolutionEvidenceReference;
+    }
+
+    public void setResolutionEvidenceReference(String resolutionEvidenceReference) {
+        this.resolutionEvidenceReference = resolutionEvidenceReference;
     }
 
     public String getReason() {

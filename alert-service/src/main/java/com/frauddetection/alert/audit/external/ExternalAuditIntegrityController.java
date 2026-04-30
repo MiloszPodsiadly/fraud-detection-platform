@@ -69,7 +69,11 @@ public class ExternalAuditIntegrityController {
 
     private String rateLimitIdentity(Authentication authentication, HttpServletRequest request) {
         if (authentication != null && authentication.isAuthenticated() && authentication.getName() != null) {
-            return "principal:" + authentication.getName();
+            String authorities = authentication.getAuthorities().stream()
+                    .map(Object::toString)
+                    .sorted()
+                    .collect(java.util.stream.Collectors.joining(","));
+            return "principal:" + authentication.getName() + "|authorities:" + authorities;
         }
         String remoteAddr = request == null ? null : request.getRemoteAddr();
         return "ip:" + (remoteAddr == null || remoteAddr.isBlank() ? "unknown" : remoteAddr);

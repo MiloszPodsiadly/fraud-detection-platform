@@ -39,11 +39,20 @@ public record SystemTrustLevelResponse(
         @JsonProperty("post_commit_audit_degraded")
         long postCommitAuditDegraded,
 
+        @JsonProperty("post_commit_audit_degraded_resolved")
+        long postCommitAuditDegradedResolved,
+
         @JsonProperty("outbox_failed_terminal_count")
         long outboxFailedTerminalCount,
 
+        @JsonProperty("outbox_publish_confirmation_unknown_count")
+        long outboxPublishConfirmationUnknownCount,
+
         @JsonProperty("outbox_oldest_pending_age_seconds")
         Long outboxOldestPendingAgeSeconds,
+
+        @JsonProperty("outbox_oldest_ambiguous_age_seconds")
+        Long outboxOldestAmbiguousAgeSeconds,
 
         @JsonProperty("reason_code")
         String reasonCode

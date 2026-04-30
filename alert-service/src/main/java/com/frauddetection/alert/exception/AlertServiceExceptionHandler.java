@@ -3,6 +3,7 @@ package com.frauddetection.alert.exception;
 import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
 import com.frauddetection.alert.audit.AuditTrustAttestationUnavailableException;
 import com.frauddetection.alert.audit.InvalidAuditEventQueryException;
+import com.frauddetection.alert.audit.PostCommitEvidenceIncompleteException;
 import com.frauddetection.alert.audit.external.AuditEvidenceExportRejectedException;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorPublicationRequiredException;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryLookupUnavailableException;
@@ -98,6 +99,19 @@ public class AlertServiceExceptionHandler {
                         "Service Unavailable",
                         "Audit persistence is unavailable; mutation was not executed.",
                         List.of("reason:REJECTED_BEFORE_MUTATION")
+                )
+        );
+    }
+
+    @ExceptionHandler(PostCommitEvidenceIncompleteException.class)
+    public ResponseEntity<ApiErrorResponse> handlePostCommitEvidenceIncomplete(PostCommitEvidenceIncompleteException exception) {
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(
+                new ApiErrorResponse(
+                        Instant.now(),
+                        202,
+                        "Accepted",
+                        "Mutation committed, but audit evidence is incomplete.",
+                        List.of("operation_status:COMMITTED_EVIDENCE_INCOMPLETE")
                 )
         );
     }

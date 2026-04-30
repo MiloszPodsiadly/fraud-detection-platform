@@ -12,7 +12,11 @@ public interface AlertRepository extends MongoRepository<AlertDocument, String> 
 
     List<AlertDocument> findTop100ByDecisionOutboxStatusOrderByDecidedAtAsc(String decisionOutboxStatus);
 
+    long countByDecisionOutboxStatus(String decisionOutboxStatus);
+
     long countByDecisionOutboxStatusIn(Collection<String> decisionOutboxStatuses);
+
+    Optional<AlertDocument> findTopByDecisionOutboxStatusOrderByDecidedAtAsc(String decisionOutboxStatus);
 
     Optional<AlertDocument> findTopByDecisionOutboxStatusInOrderByDecidedAtAsc(Collection<String> decisionOutboxStatuses);
 }

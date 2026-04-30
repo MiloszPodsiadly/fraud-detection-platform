@@ -8,6 +8,7 @@ import com.frauddetection.alert.audit.AuditDegradationService;
 import com.frauddetection.alert.audit.AuditMutationRecorder;
 import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
 import com.frauddetection.alert.audit.AuditResourceType;
+import com.frauddetection.alert.audit.PostCommitEvidenceIncompleteException;
 import com.frauddetection.alert.audit.PostCommitAuditDegradedException;
 import com.frauddetection.alert.domain.AlertCase;
 import com.frauddetection.alert.exception.AlertNotFoundException;
@@ -182,7 +183,7 @@ public class AlertManagementService implements AlertManagementUseCase {
                     actorId,
                     () -> saveDecisionWithOutbox(document, request, resultingStatus, actorId, idempotencyKey, requestHash, SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING)
             );
-            SubmitDecisionOperationStatus finalStatus = upgradeDecisionOperationStatus(saved, SubmitDecisionOperationStatus.COMMITTED_FULLY_ANCHORED);
+            SubmitDecisionOperationStatus finalStatus = SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING;
             metrics.recordAnalystDecisionSubmitted();
             return response(saved, request, resultingStatus, finalStatus);
         } catch (PostCommitAuditDegradedException exception) {
@@ -195,7 +196,7 @@ public class AlertManagementService implements AlertManagementUseCase {
             );
             metrics.recordPostCommitAuditDegraded(AuditAction.SUBMIT_ANALYST_DECISION.name());
             if (bankModeFailClosed) {
-                throw new AuditPersistenceUnavailableException();
+                throw new PostCommitEvidenceIncompleteException();
             }
             SubmitDecisionOperationStatus finalStatus = SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE;
             saved.setDecisionOperationStatus(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE.name());
