@@ -52,9 +52,12 @@ public class AlertDocument {
     private String decisionOperationStatus;
     private FraudDecisionEvent decisionOutboxEvent;
     private String decisionOutboxStatus;
+    private String decisionOutboxLeaseOwner;
+    private Instant decisionOutboxLeaseExpiresAt;
     private int decisionOutboxAttempts;
     private Instant decisionOutboxLastAttemptAt;
     private Instant decisionOutboxPublishedAt;
+    private String decisionOutboxLastError;
     private String decisionOutboxFailureReason;
 
     public String getAlertId() { return alertId; }
@@ -113,12 +116,18 @@ public class AlertDocument {
     public void setDecisionOutboxEvent(FraudDecisionEvent decisionOutboxEvent) { this.decisionOutboxEvent = decisionOutboxEvent; }
     public String getDecisionOutboxStatus() { return decisionOutboxStatus; }
     public void setDecisionOutboxStatus(String decisionOutboxStatus) { this.decisionOutboxStatus = decisionOutboxStatus; }
+    public String getDecisionOutboxLeaseOwner() { return decisionOutboxLeaseOwner; }
+    public void setDecisionOutboxLeaseOwner(String decisionOutboxLeaseOwner) { this.decisionOutboxLeaseOwner = decisionOutboxLeaseOwner; }
+    public Instant getDecisionOutboxLeaseExpiresAt() { return decisionOutboxLeaseExpiresAt; }
+    public void setDecisionOutboxLeaseExpiresAt(Instant decisionOutboxLeaseExpiresAt) { this.decisionOutboxLeaseExpiresAt = decisionOutboxLeaseExpiresAt; }
     public int getDecisionOutboxAttempts() { return decisionOutboxAttempts; }
     public void setDecisionOutboxAttempts(int decisionOutboxAttempts) { this.decisionOutboxAttempts = decisionOutboxAttempts; }
     public Instant getDecisionOutboxLastAttemptAt() { return decisionOutboxLastAttemptAt; }
     public void setDecisionOutboxLastAttemptAt(Instant decisionOutboxLastAttemptAt) { this.decisionOutboxLastAttemptAt = decisionOutboxLastAttemptAt; }
     public Instant getDecisionOutboxPublishedAt() { return decisionOutboxPublishedAt; }
     public void setDecisionOutboxPublishedAt(Instant decisionOutboxPublishedAt) { this.decisionOutboxPublishedAt = decisionOutboxPublishedAt; }
+    public String getDecisionOutboxLastError() { return decisionOutboxLastError; }
+    public void setDecisionOutboxLastError(String decisionOutboxLastError) { this.decisionOutboxLastError = decisionOutboxLastError; }
     public String getDecisionOutboxFailureReason() { return decisionOutboxFailureReason; }
     public void setDecisionOutboxFailureReason(String decisionOutboxFailureReason) { this.decisionOutboxFailureReason = decisionOutboxFailureReason; }
 }

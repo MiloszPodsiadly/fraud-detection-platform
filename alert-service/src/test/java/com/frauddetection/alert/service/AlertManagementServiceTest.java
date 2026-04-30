@@ -43,6 +43,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -144,7 +145,7 @@ class AlertManagementServiceTest {
 
         assertThat(response.resultingStatus()).isEqualTo(AlertStatus.RESOLVED);
         ArgumentCaptor<AlertDocument> documentCaptor = ArgumentCaptor.forClass(AlertDocument.class);
-        verify(repository).save(documentCaptor.capture());
+        verify(repository, atLeastOnce()).save(documentCaptor.capture());
         assertThat(documentCaptor.getValue().getAnalystId()).isEqualTo("principal-7");
 
         FraudDecisionEvent outboxEvent = documentCaptor.getValue().getDecisionOutboxEvent();
@@ -354,6 +355,64 @@ class AlertManagementServiceTest {
     }
 
     @Test
+    void shouldNeverPersistFullyAnchoredBeforeSuccessAuditProof() {
+        AlertRepository repository = mock(AlertRepository.class);
+        FraudAlertEventPublisher alertPublisher = mock(FraudAlertEventPublisher.class);
+        FraudDecisionEventPublisher decisionPublisher = mock(FraudDecisionEventPublisher.class);
+        AlertDocumentMapper documentMapper = new AlertDocumentMapper();
+        FraudAlertEventMapper alertEventMapper = new FraudAlertEventMapper();
+        FraudDecisionEventMapper decisionEventMapper = new FraudDecisionEventMapper();
+        AlertCaseFactory alertCaseFactory = new AlertCaseFactory();
+        AnalystDecisionStatusMapper statusMapper = new AnalystDecisionStatusMapper();
+        FraudCaseManagementService fraudCaseManagementService = mock(FraudCaseManagementService.class);
+        AuditService auditService = mock(AuditService.class);
+        AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+
+        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher, fraudCaseManagementService, new AuditMutationRecorder(auditService), analystActorResolver, metrics);
+        AlertDocument document = new AlertDocument();
+        document.setAlertId("alert-1");
+        document.setTransactionId("txn-1");
+        document.setCorrelationId("corr-1");
+        document.setAlertStatus(AlertStatus.OPEN);
+        document.setRiskLevel(RiskLevel.HIGH);
+        document.setFraudScore(0.82d);
+
+        when(repository.findById("alert-1")).thenReturn(Optional.of(document));
+        when(repository.save(any(AlertDocument.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0))
+                .thenThrow(new DataAccessResourceFailureException("mongo down"));
+        when(analystActorResolver.resolveActorId(eq("analyst-7"), eq("SUBMIT_ANALYST_DECISION"), eq("alert-1")))
+                .thenReturn("principal-7");
+        doThrow(new AuditPersistenceUnavailableException()).when(auditService).audit(
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT,
+                "alert-1",
+                "corr-1",
+                "principal-7",
+                AuditOutcome.SUCCESS,
+                null
+        );
+
+        SubmitAnalystDecisionResponse response = service.submitDecision("alert-1", new SubmitAnalystDecisionRequest(
+                "analyst-7",
+                AnalystDecision.CONFIRMED_FRAUD,
+                "Confirmed after manual review",
+                List.of("chargeback"),
+                Map.of()
+        ));
+
+        assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_AUDIT_PENDING);
+        ArgumentCaptor<AlertDocument> documentCaptor = ArgumentCaptor.forClass(AlertDocument.class);
+        verify(repository, org.mockito.Mockito.times(2)).save(documentCaptor.capture());
+        assertThat(documentCaptor.getAllValues().getFirst().getDecisionOperationStatus())
+                .isEqualTo(SubmitDecisionOperationStatus.COMMITTED_AUDIT_PENDING.name());
+        assertThat(documentCaptor.getAllValues().getFirst().getDecisionOperationStatus())
+                .isNotEqualTo(SubmitDecisionOperationStatus.COMMITTED_FULLY_ANCHORED.name());
+        verify(metrics).recordPostCommitAuditDegraded("SUBMIT_ANALYST_DECISION");
+    }
+
+    @Test
     void shouldReplayIdempotentDecisionWithoutDuplicateAuditOrOutboxMutation() {
         AlertRepository repository = mock(AlertRepository.class);
         FraudAlertEventPublisher alertPublisher = mock(FraudAlertEventPublisher.class);
@@ -395,7 +454,7 @@ class AlertManagementServiceTest {
         assertThat(replay.decisionEventId()).isEqualTo(first.decisionEventId());
         assertThat(replay.decidedAt()).isEqualTo(first.decidedAt());
         assertThat(replay.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_FULLY_ANCHORED);
-        verify(repository, org.mockito.Mockito.times(1)).save(any(AlertDocument.class));
+        verify(repository, org.mockito.Mockito.times(2)).save(any(AlertDocument.class));
         verify(auditService, org.mockito.Mockito.times(1)).audit(
                 AuditAction.SUBMIT_ANALYST_DECISION,
                 AuditResourceType.ALERT,
@@ -453,7 +512,7 @@ class AlertManagementServiceTest {
                 Map.of()
         ), "idem-1")).isInstanceOf(ConflictingIdempotencyKeyException.class);
 
-        verify(repository, org.mockito.Mockito.times(1)).save(any(AlertDocument.class));
+        verify(repository, org.mockito.Mockito.times(2)).save(any(AlertDocument.class));
         verify(decisionPublisher, never()).publish(any(FraudDecisionEvent.class));
     }
 }

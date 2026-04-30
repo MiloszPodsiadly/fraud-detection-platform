@@ -22,6 +22,6 @@ public record SubmitAnalystDecisionResponse(
             String decisionEventId,
             Instant decidedAt
     ) {
-        this(alertId, decision, resultingStatus, decisionEventId, decidedAt, SubmitDecisionOperationStatus.COMMITTED_FULLY_ANCHORED);
+        this(alertId, decision, resultingStatus, decisionEventId, decidedAt, SubmitDecisionOperationStatus.COMMITTED_AUDIT_PENDING);
     }
 }

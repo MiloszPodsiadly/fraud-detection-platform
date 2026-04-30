@@ -151,21 +151,25 @@ public class AlertManagementService implements AlertManagementUseCase {
                     document.getAlertId(),
                     document.getCorrelationId(),
                     actorId,
-                    () -> saveDecisionWithOutbox(document, request, resultingStatus, actorId, idempotencyKey, requestHash, SubmitDecisionOperationStatus.COMMITTED_FULLY_ANCHORED)
+                    () -> saveDecisionWithOutbox(document, request, resultingStatus, actorId, idempotencyKey, requestHash, SubmitDecisionOperationStatus.COMMITTED_AUDIT_PENDING)
             );
+            SubmitDecisionOperationStatus finalStatus = upgradeDecisionOperationStatus(saved, SubmitDecisionOperationStatus.COMMITTED_FULLY_ANCHORED);
             metrics.recordAnalystDecisionSubmitted();
-            return response(saved, request, resultingStatus, SubmitDecisionOperationStatus.COMMITTED_FULLY_ANCHORED);
+            return response(saved, request, resultingStatus, finalStatus);
         } catch (PostCommitAuditDegradedException exception) {
             AlertDocument saved = exception.result();
+            SubmitDecisionOperationStatus finalStatus = SubmitDecisionOperationStatus.COMMITTED_AUDIT_INCOMPLETE;
             saved.setDecisionOperationStatus(SubmitDecisionOperationStatus.COMMITTED_AUDIT_INCOMPLETE.name());
             try {
                 alertRepository.save(saved);
             } catch (DataAccessException persistenceException) {
                 log.warn("Post-commit audit degraded status persistence failed: reason=POST_COMMIT_AUDIT_DEGRADED");
+                saved.setDecisionOperationStatus(SubmitDecisionOperationStatus.COMMITTED_AUDIT_PENDING.name());
+                finalStatus = SubmitDecisionOperationStatus.COMMITTED_AUDIT_PENDING;
             }
             metrics.recordPostCommitAuditDegraded(AuditAction.SUBMIT_ANALYST_DECISION.name());
             metrics.recordAnalystDecisionSubmitted();
-            return response(saved, request, resultingStatus, SubmitDecisionOperationStatus.COMMITTED_AUDIT_INCOMPLETE);
+            return response(saved, request, resultingStatus, finalStatus);
         } catch (AuditPersistenceUnavailableException exception) {
             return new SubmitAnalystDecisionResponse(
                     alertId,
@@ -201,9 +205,28 @@ public class AlertManagementService implements AlertManagementUseCase {
         document.setDecisionOutboxEvent(event);
         document.setDecisionOutboxStatus(DecisionOutboxStatus.PENDING);
         document.setDecisionOutboxAttempts(0);
+        document.setDecisionOutboxLeaseOwner(null);
+        document.setDecisionOutboxLeaseExpiresAt(null);
+        document.setDecisionOutboxLastError(null);
         document.setDecisionOutboxFailureReason(null);
         document.setDecisionOutboxPublishedAt(null);
         return alertRepository.save(document);
+    }
+
+    private SubmitDecisionOperationStatus upgradeDecisionOperationStatus(
+            AlertDocument saved,
+            SubmitDecisionOperationStatus status
+    ) {
+        saved.setDecisionOperationStatus(status.name());
+        try {
+            alertRepository.save(saved);
+            return status;
+        } catch (DataAccessException exception) {
+            log.warn("Decision operation status upgrade failed: reason=DECISION_STATUS_UPGRADE_FAILED");
+            metrics.recordPostCommitAuditDegraded(AuditAction.SUBMIT_ANALYST_DECISION.name());
+            saved.setDecisionOperationStatus(SubmitDecisionOperationStatus.COMMITTED_AUDIT_PENDING.name());
+            return SubmitDecisionOperationStatus.COMMITTED_AUDIT_PENDING;
+        }
     }
 
     private SubmitAnalystDecisionResponse replayIfIdempotent(
@@ -254,7 +277,7 @@ public class AlertManagementService implements AlertManagementUseCase {
 
     private SubmitDecisionOperationStatus parseOperationStatus(String value) {
         if (value == null || value.isBlank()) {
-            return SubmitDecisionOperationStatus.COMMITTED_FULLY_ANCHORED;
+            return SubmitDecisionOperationStatus.COMMITTED_AUDIT_PENDING;
         }
         return SubmitDecisionOperationStatus.valueOf(value);
     }

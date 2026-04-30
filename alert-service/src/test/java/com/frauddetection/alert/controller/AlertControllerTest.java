@@ -98,7 +98,14 @@ class AlertControllerTest {
     @Test
     void shouldSubmitAnalystDecision() throws Exception {
         when(alertManagementUseCase.submitDecision(org.mockito.ArgumentMatchers.eq("alert-1"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.isNull()))
-                .thenReturn(new SubmitAnalystDecisionResponse("alert-1", AnalystDecision.CONFIRMED_FRAUD, AlertStatus.RESOLVED, "event-1", Instant.parse("2026-04-20T10:00:00Z")));
+                .thenReturn(new SubmitAnalystDecisionResponse(
+                        "alert-1",
+                        AnalystDecision.CONFIRMED_FRAUD,
+                        AlertStatus.RESOLVED,
+                        "event-1",
+                        Instant.parse("2026-04-20T10:00:00Z"),
+                        SubmitDecisionOperationStatus.COMMITTED_FULLY_ANCHORED
+                ));
 
         SubmitAnalystDecisionRequest request = new SubmitAnalystDecisionRequest(
                 "analyst-1",

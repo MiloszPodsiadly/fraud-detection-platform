@@ -30,6 +30,7 @@ public class AlertServiceMetrics {
     private final AtomicLong auditLastAnchorHashFingerprint = new AtomicLong(0);
     private final AtomicInteger auditIntegrityValid = new AtomicInteger(0);
     private final AtomicInteger auditIntegrityInvalid = new AtomicInteger(0);
+    private final AtomicLong postCommitAuditDegraded = new AtomicLong(0);
 
     public AlertServiceMetrics(MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
@@ -55,6 +56,18 @@ public class AlertServiceMetrics {
         counter(
                 "fraud_platform_post_commit_audit_degraded_total",
                 "operation", normalizePostCommitOperation(operation)
+        ).increment();
+        postCommitAuditDegraded.incrementAndGet();
+    }
+
+    public long postCommitAuditDegradedCount() {
+        return postCommitAuditDegraded.get();
+    }
+
+    public void recordDecisionOutboxPublishConfirmationFailed() {
+        counter(
+                "fraud_platform_decision_outbox_failures_total",
+                "reason", "OUTBOX_PUBLISH_CONFIRMATION_FAILED"
         ).increment();
     }
 
