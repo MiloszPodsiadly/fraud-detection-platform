@@ -181,6 +181,57 @@ public class ExternalAuditAnchorPublisher {
         }
     }
 
+    public ExternalAuditAnchorPublishResult reconcileAnchors(String partitionKey, long fromPosition, long toPosition, int limit) {
+        if (partitionKey == null || partitionKey.isBlank()) {
+            throw new IllegalArgumentException("partitionKey is required");
+        }
+        if (fromPosition <= 0 || toPosition < fromPosition) {
+            throw new IllegalArgumentException("valid positive reconciliation range is required");
+        }
+        int boundedLimit = Math.max(1, Math.min(limit, 500));
+        long requestedPositions = toPosition - fromPosition + 1;
+        if (requestedPositions > boundedLimit) {
+            throw new IllegalArgumentException("reconciliation range exceeds limit");
+        }
+        int recovered = 0;
+        int stillUnverified = 0;
+        int missing = 0;
+        int invalid = 0;
+        int failed = 0;
+        try {
+            List<AuditAnchorDocument> localAnchors = anchorRepository.findByPartitionKeyAndChainPositionBetween(
+                    partitionKey,
+                    fromPosition,
+                    toPosition,
+                    boundedLimit
+            );
+            for (AuditAnchorDocument localAnchor : localAnchors) {
+                try {
+                    ExternalAuditAnchorPublicationStatusDocument status =
+                            publicationStatusRepository.findByLocalAnchorId(localAnchor.anchorId()).orElse(null);
+                    if (!requiresReconciliation(status)) {
+                        continue;
+                    }
+                    ReconciliationOutcome outcome = reconcileLocalAnchor(localAnchor);
+                    recovered += outcome.recovered();
+                    stillUnverified += outcome.stillUnverified();
+                    missing += outcome.missing();
+                    invalid += outcome.invalid();
+                    failed += outcome.failed();
+                } catch (DataAccessException exception) {
+                    failed++;
+                    metrics.recordExternalAnchorStatusRecoveryFailed(sink.sinkType(), "UNAVAILABLE");
+                    log.warn("External audit anchor reconciliation status lookup failed.");
+                }
+            }
+            return new ExternalAuditAnchorPublishResult(0, 0, 0, failed, boundedLimit, 0, recovered, stillUnverified, missing, invalid);
+        } catch (DataAccessException exception) {
+            metrics.recordExternalAnchorStatusRecoveryFailed(sink.sinkType(), "UNAVAILABLE");
+            log.warn("Local audit anchor range lookup failed for external reconciliation.");
+            return new ExternalAuditAnchorPublishResult(0, 0, 0, 1, boundedLimit);
+        }
+    }
+
     PublicationOutcome publishLocalAnchor(AuditAnchorDocument localAnchor, boolean failClosed) {
         try {
             ExternalAuditAnchor candidate = ExternalAuditAnchor.from(localAnchor, sink.sinkType());

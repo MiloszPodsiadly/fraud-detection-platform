@@ -141,6 +141,64 @@ class ExternalAuditAnchorSinkConfigurationTest {
     }
 
     @Test
+    void shouldRejectFailClosedPublicationWithoutRequiredPublication() {
+        assertThatThrownBy(() -> configuration.externalAuditAnchorSink(
+                new ObjectMapper(),
+                emptyObjectStoreClient(),
+                metrics(),
+                new StandardEnvironment(),
+                true,
+                false,
+                true,
+                "disabled",
+                "./target/test-audit-external-anchors.jsonl",
+                false,
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                true,
+                false,
+                Duration.ofSeconds(2),
+                Duration.ZERO,
+                2,
+                "test-instance"
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("publication.fail-closed=true requires publication.required=true");
+    }
+
+    @Test
+    void shouldRejectEnabledPublicationWithDisabledPublisherEvenWhenNotRequired() {
+        assertThatThrownBy(() -> configuration.externalAuditAnchorSink(
+                new ObjectMapper(),
+                emptyObjectStoreClient(),
+                metrics(),
+                new StandardEnvironment(),
+                true,
+                false,
+                false,
+                "disabled",
+                "./target/test-audit-external-anchors.jsonl",
+                false,
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                true,
+                false,
+                Duration.ofSeconds(2),
+                Duration.ZERO,
+                2,
+                "test-instance"
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("forbids fake publishers");
+    }
+
+    @Test
     void shouldFailClosedWhenObjectStoreConfigIsMissing() {
         assertThatThrownBy(() -> configuration.externalAuditAnchorSink(
                 new ObjectMapper(),

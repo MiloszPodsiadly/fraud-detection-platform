@@ -441,6 +441,91 @@ class ExternalAuditAnchorPublisherTest {
     }
 
     @Test
+    void shouldNotClaimOldAnchorsOutsideDefaultHeadWindowAsRecovered() {
+        ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
+        when(sink.sinkType()).thenReturn("object-store");
+        when(anchorRepository.findHeadWindow("source_service:alert-service", 1)).thenReturn(List.of());
+        ExternalAuditAnchorPublisher publisher = new ExternalAuditAnchorPublisher(
+                anchorRepository,
+                publicationStatusRepository,
+                sink,
+                metrics,
+                Clock.fixed(Instant.parse("2026-04-27T10:01:00Z"), ZoneOffset.UTC),
+                100
+        );
+
+        ExternalAuditAnchorPublishResult result = publisher.reconcileAnchors(1);
+
+        assertThat(result.recovered()).isZero();
+        assertThat(result.missing()).isZero();
+        verify(sink, never()).findByChainPosition("source_service:alert-service", 1L);
+    }
+
+    @Test
+    void shouldRecoverOldAnchorWithExplicitRangeReconciliation() {
+        ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
+        AuditAnchorDocument anchor = localAnchor("local-anchor-1", 1L, "hash-1");
+        ExternalAuditAnchor external = ExternalAuditAnchor.from(anchor, "object-store");
+        when(sink.sinkType()).thenReturn("object-store");
+        when(sink.immutabilityLevel()).thenReturn(ExternalImmutabilityLevel.ENFORCED);
+        when(anchorRepository.findByPartitionKeyAndChainPositionBetween("source_service:alert-service", 1L, 1L, 1))
+                .thenReturn(List.of(anchor));
+        when(publicationStatusRepository.findByLocalAnchorId("local-anchor-1")).thenReturn(java.util.Optional.empty());
+        when(sink.findByChainPosition("source_service:alert-service", 1L)).thenReturn(java.util.Optional.of(external));
+        when(sink.externalReference(external)).thenReturn(java.util.Optional.of(new ExternalAnchorReference(
+                "local-anchor-1",
+                "audit-anchors/partition/00000000000000000001.json",
+                "hash-1",
+                "hash-1",
+                Instant.parse("2026-04-27T10:01:00Z")
+        )));
+        ExternalAuditAnchorPublisher publisher = new ExternalAuditAnchorPublisher(
+                anchorRepository,
+                publicationStatusRepository,
+                sink,
+                metrics,
+                Clock.fixed(Instant.parse("2026-04-27T10:01:00Z"), ZoneOffset.UTC),
+                100
+        );
+
+        ExternalAuditAnchorPublishResult result = publisher.reconcileAnchors(
+                "source_service:alert-service",
+                1L,
+                1L,
+                1
+        );
+
+        assertThat(result.recovered()).isEqualTo(1);
+        assertThat(result.missing()).isZero();
+        verify(publicationStatusRepository).recordRecovered(
+                org.mockito.ArgumentMatchers.eq(anchor),
+                org.mockito.ArgumentMatchers.eq(Instant.parse("2026-04-27T10:01:00Z")),
+                org.mockito.ArgumentMatchers.eq("object-store"),
+                org.mockito.ArgumentMatchers.any(ExternalAnchorReference.class),
+                org.mockito.ArgumentMatchers.eq(ExternalImmutabilityLevel.ENFORCED),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.any(SignedAuditAnchorPayload.class)
+        );
+    }
+
+    @Test
+    void shouldRejectExplicitRangeReconciliationWhenRangeExceedsLimit() {
+        ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
+        ExternalAuditAnchorPublisher publisher = new ExternalAuditAnchorPublisher(
+                anchorRepository,
+                publicationStatusRepository,
+                sink,
+                metrics,
+                Clock.fixed(Instant.parse("2026-04-27T10:01:00Z"), ZoneOffset.UTC),
+                100
+        );
+
+        assertThatThrownBy(() -> publisher.reconcileAnchors("source_service:alert-service", 1L, 501L, 500))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("range exceeds limit");
+    }
+
+    @Test
     void shouldReportMissingWhenReconciliationCannotFindExactExternalObject() {
         ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
         AuditAnchorDocument anchor = localAnchor("local-anchor-1", 1L, "hash-1");
