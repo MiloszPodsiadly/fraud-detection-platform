@@ -57,6 +57,7 @@ public record ExternalAuditAnchor(
     public static final String STATUS_PENDING = "PENDING";
     public static final String STATUS_PUBLISHED = "PUBLISHED";
     public static final String STATUS_UNVERIFIED = "UNVERIFIED";
+    public static final String STATUS_LOCAL_STATUS_UNVERIFIED = "LOCAL_STATUS_UNVERIFIED";
     public static final String STATUS_FAILED = "FAILED";
     public static final String STATUS_INVALID = "INVALID";
     public static final String STATUS_CONFLICT = "CONFLICT";
@@ -65,6 +66,7 @@ public record ExternalAuditAnchor(
     @Deprecated
     public static final String STATUS_PARTIAL = STATUS_UNVERIFIED;
     public static final String REASON_HEAD_MANIFEST_UPDATE_FAILED = "HEAD_MANIFEST_UPDATE_FAILED";
+    public static final String REASON_STATUS_PERSISTENCE_FAILED_AFTER_EXTERNAL_PUBLISH = "STATUS_PERSISTENCE_FAILED_AFTER_EXTERNAL_PUBLISH";
     public static final String MANIFEST_STATUS_FAILED = "FAILED";
 
     public ExternalAuditAnchor {

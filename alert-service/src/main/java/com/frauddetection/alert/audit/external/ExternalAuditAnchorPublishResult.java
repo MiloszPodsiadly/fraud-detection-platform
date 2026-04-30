@@ -5,6 +5,16 @@ public record ExternalAuditAnchorPublishResult(
         int partial,
         int duplicates,
         int failed,
-        int limit
+        int limit,
+        int localStatusUnverified
 ) {
+    public ExternalAuditAnchorPublishResult(
+            int published,
+            int partial,
+            int duplicates,
+            int failed,
+            int limit
+    ) {
+        this(published, partial, duplicates, failed, limit, 0);
+    }
 }

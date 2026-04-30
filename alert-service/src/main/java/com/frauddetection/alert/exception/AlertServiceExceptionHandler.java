@@ -4,6 +4,7 @@ import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
 import com.frauddetection.alert.audit.AuditTrustAttestationUnavailableException;
 import com.frauddetection.alert.audit.InvalidAuditEventQueryException;
 import com.frauddetection.alert.audit.external.AuditEvidenceExportRejectedException;
+import com.frauddetection.alert.audit.external.ExternalAuditAnchorPublicationRequiredException;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryLookupUnavailableException;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryNotFoundException;
 import com.frauddetection.alert.governance.audit.GovernanceAuditActorUnavailableException;
@@ -113,6 +114,20 @@ public class AlertServiceExceptionHandler {
         );
     }
 
+    @ExceptionHandler(ExternalAuditAnchorPublicationRequiredException.class)
+    public ResponseEntity<ApiErrorResponse> handleExternalAuditAnchorPublicationRequired(ExternalAuditAnchorPublicationRequiredException exception) {
+        HttpStatus status = externalAnchorStatus(exception.reason());
+        return ResponseEntity.status(status).body(
+                new ApiErrorResponse(
+                        Instant.now(),
+                        status.value(),
+                        status.getReasonPhrase(),
+                        "External audit anchor publication is required but unavailable.",
+                        List.of("reason:" + exception.reason())
+                )
+        );
+    }
+
     @ExceptionHandler(InvalidAuditEventQueryException.class)
     public ResponseEntity<ApiErrorResponse> handleInvalidAuditEventQuery(InvalidAuditEventQueryException exception) {
         return ResponseEntity.badRequest().body(
@@ -195,5 +210,14 @@ public class AlertServiceExceptionHandler {
 
     private String formatFieldError(FieldError fieldError) {
         return fieldError.getField() + ": " + fieldError.getDefaultMessage();
+    }
+
+    private HttpStatus externalAnchorStatus(String reason) {
+        return switch (reason) {
+            case "CONFLICT", "MISMATCH", "EXTERNAL_PAYLOAD_HASH_MISMATCH", "EXTERNAL_OBJECT_KEY_MISMATCH",
+                 "EXTERNAL_ANCHOR_ID_MISMATCH", "EXTERNAL_ANCHOR_ID_VERSION_UNSUPPORTED" -> HttpStatus.CONFLICT;
+            case "INVALID_ANCHOR" -> HttpStatus.INTERNAL_SERVER_ERROR;
+            default -> HttpStatus.SERVICE_UNAVAILABLE;
+        };
     }
 }

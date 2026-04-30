@@ -91,6 +91,7 @@ public class ExternalAuditAnchorPublisher {
         int boundedLimit = Math.max(1, Math.min(limit, 500));
         int published = 0;
         int unverified = 0;
+        int localStatusUnverified = 0;
         int duplicates = 0;
         int failed = 0;
         try {
@@ -104,35 +105,12 @@ public class ExternalAuditAnchorPublisher {
             );
             for (AuditAnchorDocument localAnchor : anchors) {
                 try {
-                    ExternalAuditAnchor candidate = ExternalAuditAnchor.from(localAnchor, sink.sinkType());
-                    ExternalAuditAnchor stored = sink.publish(candidate);
-                    if (ExternalAuditAnchor.STATUS_UNVERIFIED.equals(stored.publicationStatus())) {
-                        metrics.recordExternalAnchorPublished(sink.sinkType(), "UNVERIFIED");
-                        unverified++;
-                        recordPublicationPartial(localAnchor, stored);
-                    } else if (ExternalAuditAnchor.STATUS_INVALID.equals(stored.publicationStatus())
-                            || ExternalAuditAnchor.STATUS_CONFLICT.equals(stored.publicationStatus())) {
-                        metrics.recordExternalAnchorPublished(sink.sinkType(), stored.publicationStatus());
-                        metrics.recordExternalAnchorPublishFailed(sink.sinkType(), stored.publicationReason());
-                        failed++;
-                        recordPublicationFailure(localAnchor, stored.publicationReason());
-                    } else if (candidate.externalAnchorId().equals(stored.externalAnchorId())) {
-                        if (recordPublicationSuccess(localAnchor, stored)) {
-                            metrics.recordExternalAnchorPublished(sink.sinkType(), "PUBLISHED");
-                            published++;
-                        } else {
-                            metrics.recordExternalAnchorPublished(sink.sinkType(), "UNVERIFIED");
-                            unverified++;
-                        }
-                    } else {
-                        if (recordPublicationSuccess(localAnchor, stored)) {
-                            metrics.recordExternalAnchorPublished(sink.sinkType(), "DUPLICATE");
-                            duplicates++;
-                        } else {
-                            metrics.recordExternalAnchorPublished(sink.sinkType(), "UNVERIFIED");
-                            unverified++;
-                        }
-                    }
+                    PublicationOutcome outcome = publishLocalAnchor(localAnchor, false);
+                    published += outcome.published();
+                    unverified += outcome.unverified();
+                    localStatusUnverified += outcome.localStatusUnverified();
+                    duplicates += outcome.duplicate();
+                    failed += outcome.failed();
                     recordLag(localAnchor.createdAt());
                 } catch (ExternalAuditAnchorSinkException exception) {
                     metrics.recordExternalAnchorPublished(sink.sinkType(), "FAILED");
@@ -142,7 +120,7 @@ public class ExternalAuditAnchorPublisher {
                     log.warn("External audit anchor publication failed: reason={}", exception.reason());
                 }
             }
-            return new ExternalAuditAnchorPublishResult(published, unverified, duplicates, failed, boundedLimit);
+            return new ExternalAuditAnchorPublishResult(published, unverified, duplicates, failed, boundedLimit, localStatusUnverified);
         } catch (DataAccessException exception) {
             metrics.recordExternalAnchorPublishFailed(sink.sinkType(), "UNAVAILABLE");
             log.warn("Local audit anchor lookup failed for external publication.");
@@ -154,7 +132,55 @@ public class ExternalAuditAnchorPublisher {
         }
     }
 
-    private boolean recordPublicationSuccess(AuditAnchorDocument localAnchor, ExternalAuditAnchor stored) {
+    public void publishRequired(AuditAnchorDocument localAnchor) {
+        PublicationOutcome outcome = publishLocalAnchor(localAnchor, true);
+        if (!outcome.clean()) {
+            throw new ExternalAuditAnchorPublicationRequiredException(outcome.reason());
+        }
+        recordLag(localAnchor.createdAt());
+    }
+
+    PublicationOutcome publishLocalAnchor(AuditAnchorDocument localAnchor, boolean failClosed) {
+        try {
+            ExternalAuditAnchor candidate = ExternalAuditAnchor.from(localAnchor, sink.sinkType());
+            ExternalAuditAnchor stored = sink.publish(candidate);
+            if (ExternalAuditAnchor.STATUS_UNVERIFIED.equals(stored.publicationStatus())) {
+                metrics.recordExternalAnchorPublished(sink.sinkType(), "UNVERIFIED");
+                recordPublicationPartial(localAnchor, stored);
+                return PublicationOutcome.unverified(stored.publicationReason());
+            }
+            if (ExternalAuditAnchor.STATUS_INVALID.equals(stored.publicationStatus())
+                    || ExternalAuditAnchor.STATUS_CONFLICT.equals(stored.publicationStatus())) {
+                metrics.recordExternalAnchorPublished(sink.sinkType(), stored.publicationStatus());
+                metrics.recordExternalAnchorPublishFailed(sink.sinkType(), stored.publicationReason());
+                recordPublicationFailure(localAnchor, stored.publicationReason());
+                return PublicationOutcome.failed(stored.publicationReason());
+            }
+            String targetStatus = candidate.externalAnchorId().equals(stored.externalAnchorId()) ? "PUBLISHED" : "DUPLICATE";
+            String persistenceStatus = recordPublicationSuccess(localAnchor, stored);
+            if (ExternalAuditAnchor.STATUS_PUBLISHED.equals(persistenceStatus)) {
+                metrics.recordExternalAnchorPublished(sink.sinkType(), targetStatus);
+                return "DUPLICATE".equals(targetStatus) ? PublicationOutcome.duplicateOutcome() : PublicationOutcome.publishedOutcome();
+            }
+            if (ExternalAuditAnchor.STATUS_LOCAL_STATUS_UNVERIFIED.equals(persistenceStatus)) {
+                metrics.recordExternalAnchorPublished(sink.sinkType(), ExternalAuditAnchor.STATUS_LOCAL_STATUS_UNVERIFIED);
+                return PublicationOutcome.localStatusUnverifiedOutcome();
+            }
+            metrics.recordExternalAnchorPublished(sink.sinkType(), "UNVERIFIED");
+            return PublicationOutcome.unverified("SIGNATURE_FAILED");
+        } catch (ExternalAuditAnchorSinkException exception) {
+            metrics.recordExternalAnchorPublished(sink.sinkType(), "FAILED");
+            metrics.recordExternalAnchorPublishFailed(sink.sinkType(), exception.reason());
+            recordPublicationFailure(localAnchor, exception.reason());
+            log.warn("External audit anchor publication failed: reason={}", exception.reason());
+            if (failClosed) {
+                throw new ExternalAuditAnchorPublicationRequiredException(exception.reason());
+            }
+            return PublicationOutcome.failed(exception.reason());
+        }
+    }
+
+    private String recordPublicationSuccess(AuditAnchorDocument localAnchor, ExternalAuditAnchor stored) {
         try {
             ExternalAnchorReference reference = sink.externalReference(stored).orElse(null);
             ExternalImmutabilityLevel immutabilityLevel = sink.immutabilityLevel() == null
@@ -172,18 +198,19 @@ public class ExternalAuditAnchorPublisher {
                         null,
                         signature
                 );
-                return false;
+                return ExternalAuditAnchor.STATUS_UNVERIFIED;
             }
             publicationStatusRepository.recordSuccess(localAnchor, clock.instant(), sink.sinkType(), reference, immutabilityLevel, signature);
-            return true;
+            return ExternalAuditAnchor.STATUS_PUBLISHED;
         } catch (DataAccessException exception) {
+            metrics.recordExternalAnchorStatusPersistenceFailed(sink.sinkType());
             log.warn("External audit anchor publication status update failed after publish.");
-            return true;
+            return ExternalAuditAnchor.STATUS_LOCAL_STATUS_UNVERIFIED;
         } catch (ExternalAuditAnchorSinkException exception) {
             metrics.recordExternalAnchorPublishFailed(sink.sinkType(), exception.reason());
             recordPublicationFailure(localAnchor, exception.reason());
             log.warn("External audit anchor reference verification failed after publish: reason={}", exception.reason());
-            return false;
+            return ExternalAuditAnchor.STATUS_UNVERIFIED;
         }
     }
 
@@ -250,6 +277,39 @@ public class ExternalAuditAnchorPublisher {
     private void recordLag(Instant localAnchorCreatedAt) {
         if (localAnchorCreatedAt != null) {
             metrics.recordExternalAnchorLag(Duration.between(localAnchorCreatedAt, clock.instant()));
+        }
+    }
+
+    record PublicationOutcome(
+            int published,
+            int unverified,
+            int localStatusUnverified,
+            int duplicate,
+            int failed,
+            String reason
+    ) {
+        static PublicationOutcome publishedOutcome() {
+            return new PublicationOutcome(1, 0, 0, 0, 0, null);
+        }
+
+        static PublicationOutcome duplicateOutcome() {
+            return new PublicationOutcome(0, 0, 0, 1, 0, null);
+        }
+
+        static PublicationOutcome unverified(String reason) {
+            return new PublicationOutcome(0, 1, 0, 0, 0, reason);
+        }
+
+        static PublicationOutcome localStatusUnverifiedOutcome() {
+            return new PublicationOutcome(0, 0, 1, 0, 0, ExternalAuditAnchor.REASON_STATUS_PERSISTENCE_FAILED_AFTER_EXTERNAL_PUBLISH);
+        }
+
+        static PublicationOutcome failed(String reason) {
+            return new PublicationOutcome(0, 0, 0, 0, 1, reason);
+        }
+
+        boolean clean() {
+            return published == 1 || duplicate == 1;
         }
     }
 }

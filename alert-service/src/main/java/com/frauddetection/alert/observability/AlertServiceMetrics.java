@@ -149,6 +149,13 @@ public class AlertServiceMetrics {
         ).increment();
     }
 
+    public void recordExternalAnchorStatusPersistenceFailed(String sink) {
+        counter(
+                "external_anchor_status_persistence_failed_total",
+                "sink", normalizeExternalSink(sink)
+        ).increment();
+    }
+
     public void recordExternalAnchorLag(Duration lag) {
         Timer.builder("fraud_platform_audit_external_anchor_lag_seconds")
                 .register(meterRegistry)
@@ -488,6 +495,7 @@ public class AlertServiceMetrics {
         if ("PUBLISHED".equals(status)
                 || "DUPLICATE".equals(status)
                 || "UNVERIFIED".equals(status)
+                || "LOCAL_STATUS_UNVERIFIED".equals(status)
                 || "PARTIAL".equals(status)
                 || "INVALID".equals(status)
                 || "CONFLICT".equals(status)
@@ -520,7 +528,8 @@ public class AlertServiceMetrics {
                  "WRITE_NOT_VERIFIED", "EXTERNAL_PAYLOAD_HASH_MISMATCH", "EXTERNAL_OBJECT_KEY_MISMATCH", "TIMEOUT",
                  "EXTERNAL_ANCHOR_ID_MISMATCH", "EXTERNAL_ANCHOR_ID_VERSION_UNSUPPORTED",
                  "HEAD_SCAN_PAGINATION_UNSUPPORTED", "HEAD_SCAN_LIMIT_EXCEEDED", "HEAD_MANIFEST_INVALID",
-                 "HEAD_MANIFEST_UPDATE_FAILED", "SIGNATURE_FAILED" -> reason;
+                 "HEAD_MANIFEST_UPDATE_FAILED", "SIGNATURE_FAILED",
+                 "STATUS_PERSISTENCE_FAILED_AFTER_EXTERNAL_PUBLISH" -> reason;
             default -> "UNKNOWN";
         };
     }

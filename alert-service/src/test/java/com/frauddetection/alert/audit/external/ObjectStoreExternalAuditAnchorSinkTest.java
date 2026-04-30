@@ -461,6 +461,77 @@ class ObjectStoreExternalAuditAnchorSinkTest {
     }
 
     @Test
+    void shouldUseWitnessTimestampValueRatherThanApplicationReadBackTimeForReference() {
+        InMemoryObjectStoreAuditAnchorClient timestampedClient = new InMemoryObjectStoreAuditAnchorClient();
+        timestampedClient.timestampValue = Instant.parse("2026-04-27T09:59:59Z");
+        timestampedClient.timestampType = ExternalWitnessTimestampType.STORAGE_OBSERVED;
+        timestampedClient.timestampSource = "OBJECT_METADATA";
+        timestampedClient.timestampVerified = true;
+        ObjectStoreExternalAuditAnchorSink timestampedSink = new ObjectStoreExternalAuditAnchorSink(
+                "audit-bucket",
+                "audit-anchors",
+                timestampedClient,
+                objectMapper,
+                null,
+                Duration.ofSeconds(2),
+                Duration.ZERO,
+                1,
+                ExternalImmutabilityLevel.ENFORCED,
+                ExternalWitnessCapabilities.objectStore(
+                        "test-witness",
+                        ExternalWitnessIndependenceLevel.SEPARATE_ACCOUNT.name(),
+                        ExternalImmutabilityLevel.ENFORCED,
+                        true,
+                        true,
+                        true,
+                        true,
+                        ExternalWitnessTimestampType.STORAGE_OBSERVED,
+                        ExternalTimestampTrustLevel.MEDIUM.name(),
+                        true,
+                        true,
+                        false,
+                        ExternalDurabilityGuarantee.WITNESS_RETENTION
+                )
+        );
+
+        ExternalAuditAnchor stored = timestampedSink.publish(ExternalAuditAnchor.from(
+                localAnchor("local-anchor-1", 1L, "hash-1"),
+                timestampedSink.sinkType()
+        ));
+        ExternalAnchorReference reference = timestampedSink.externalReference(stored).orElseThrow();
+
+        assertThat(reference.timestampValue()).isEqualTo(Instant.parse("2026-04-27T09:59:59Z"));
+        assertThat(reference.verifiedAt()).isNotEqualTo(reference.timestampValue());
+        assertThat(reference.timestampType()).isEqualTo(ExternalWitnessTimestampType.STORAGE_OBSERVED);
+        assertThat(reference.timestampTrustLevel()).isEqualTo(ExternalTimestampTrustLevel.MEDIUM.name());
+        assertThat(reference.timestampSource()).isEqualTo("OBJECT_METADATA");
+        assertThat(reference.timestampVerified()).isTrue();
+    }
+
+    @Test
+    void shouldTreatMissingWitnessTimestampAsApplicationObservedWeakSignal() {
+        InMemoryObjectStoreAuditAnchorClient timestamplessClient = new InMemoryObjectStoreAuditAnchorClient();
+        ObjectStoreExternalAuditAnchorSink timestamplessSink = new ObjectStoreExternalAuditAnchorSink(
+                "audit-bucket",
+                "audit-anchors",
+                timestamplessClient,
+                objectMapper
+        );
+
+        ExternalAuditAnchor stored = timestamplessSink.publish(ExternalAuditAnchor.from(
+                localAnchor("local-anchor-1", 1L, "hash-1"),
+                timestamplessSink.sinkType()
+        ));
+        ExternalAnchorReference reference = timestamplessSink.externalReference(stored).orElseThrow();
+
+        assertThat(reference.timestampValue()).isNull();
+        assertThat(reference.timestampType()).isEqualTo(ExternalWitnessTimestampType.APP_OBSERVED);
+        assertThat(reference.timestampTrustLevel()).isEqualTo(ExternalTimestampTrustLevel.WEAK.name());
+        assertThat(reference.timestampSource()).isEqualTo("APP_CLOCK");
+        assertThat(reference.timestampVerified()).isFalse();
+    }
+
+    @Test
     void shouldRejectNewLowerPositionWhenManifestHeadIsHigher() {
         sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-10", 10L, "hash-10"), sink.sinkType()));
 
@@ -616,6 +687,10 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         Duration getDelay = Duration.ZERO;
         boolean paginationSupported = true;
         boolean failHeadManifestPut;
+        Instant timestampValue;
+        ExternalWitnessTimestampType timestampType = ExternalWitnessTimestampType.APP_OBSERVED;
+        String timestampSource = "APP_CLOCK";
+        boolean timestampVerified;
         int getObjectCalls;
         int putObjectCalls;
         int putObjectIfAbsentCalls;
@@ -627,6 +702,18 @@ class ObjectStoreExternalAuditAnchorSinkTest {
             getObjectCalls++;
             delay(getDelay);
             return Optional.ofNullable(objects.get(bucket + "/" + key));
+        }
+
+        @Override
+        public Optional<ObjectStoreAuditAnchorObject> getObjectWithMetadata(String bucket, String key) {
+            return getObject(bucket, key)
+                    .map(content -> new ObjectStoreAuditAnchorObject(
+                            content,
+                            timestampValue,
+                            timestampType,
+                            timestampSource,
+                            timestampVerified
+                    ));
         }
 
         @Override

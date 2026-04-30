@@ -5,6 +5,7 @@ import com.frauddetection.alert.audit.AuditAnchorRepository;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataAccessResourceFailureException;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -12,6 +13,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -248,6 +250,128 @@ class ExternalAuditAnchorPublisherTest {
                 org.mockito.ArgumentMatchers.isNull(),
                 org.mockito.ArgumentMatchers.argThat(signature -> "SIGNATURE_FAILED".equals(signature.signatureStatus()))
         );
+    }
+
+    @Test
+    void shouldNotReportCleanPublishedWhenStatusPersistenceFailsAfterExternalPublish() {
+        ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
+        AuditAnchorDocument anchor = localAnchor("local-anchor-1", 1L, "hash-1");
+        when(sink.sinkType()).thenReturn("object-store");
+        when(sink.latest("source_service:alert-service")).thenReturn(java.util.Optional.empty());
+        when(sink.immutabilityLevel()).thenReturn(ExternalImmutabilityLevel.ENFORCED);
+        when(anchorRepository.findByPartitionKeyAndChainPositionGreaterThan("source_service:alert-service", 0L, 100))
+                .thenReturn(List.of(anchor));
+        when(sink.publish(any(ExternalAuditAnchor.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(sink.externalReference(any(ExternalAuditAnchor.class)))
+                .thenReturn(java.util.Optional.of(new ExternalAnchorReference(
+                        "local-anchor-1",
+                        "audit-anchors/partition/00000000000000000001.json",
+                        "hash-1",
+                        "hash-1",
+                        Instant.parse("2026-04-27T10:01:00Z")
+                )));
+        org.mockito.Mockito.doThrow(new DataAccessResourceFailureException("mongo down"))
+                .when(publicationStatusRepository)
+                .recordSuccess(
+                        org.mockito.ArgumentMatchers.eq(anchor),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.eq("object-store"),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.eq(ExternalImmutabilityLevel.ENFORCED),
+                        org.mockito.ArgumentMatchers.any()
+                );
+        ExternalAuditAnchorPublisher publisher = new ExternalAuditAnchorPublisher(
+                anchorRepository,
+                publicationStatusRepository,
+                sink,
+                metrics,
+                Clock.fixed(Instant.parse("2026-04-27T10:01:00Z"), ZoneOffset.UTC),
+                100
+        );
+
+        ExternalAuditAnchorPublishResult result = publisher.publishDefaultWindow();
+
+        assertThat(result.published()).isZero();
+        assertThat(result.localStatusUnverified()).isEqualTo(1);
+        assertThat(result.partial()).isZero();
+        assertThat(result.failed()).isZero();
+        assertThat(meterRegistry.get("external_anchor_status_persistence_failed_total")
+                .tag("sink", "object-store")
+                .counter()
+                .count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.get("fraud_platform_audit_external_anchor_published_total")
+                .tag("sink", "object-store")
+                .tag("status", ExternalAuditAnchor.STATUS_LOCAL_STATUS_UNVERIFIED)
+                .counter()
+                .count()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void shouldFailClosedWhenRequiredPublicationStatusCannotBePersisted() {
+        ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
+        AuditAnchorDocument anchor = localAnchor("local-anchor-1", 1L, "hash-1");
+        when(sink.sinkType()).thenReturn("object-store");
+        when(sink.immutabilityLevel()).thenReturn(ExternalImmutabilityLevel.ENFORCED);
+        when(sink.publish(any(ExternalAuditAnchor.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(sink.externalReference(any(ExternalAuditAnchor.class)))
+                .thenReturn(java.util.Optional.of(new ExternalAnchorReference(
+                        "local-anchor-1",
+                        "audit-anchors/partition/00000000000000000001.json",
+                        "hash-1",
+                        "hash-1",
+                        Instant.parse("2026-04-27T10:01:00Z")
+                )));
+        org.mockito.Mockito.doThrow(new DataAccessResourceFailureException("mongo down"))
+                .when(publicationStatusRepository)
+                .recordSuccess(
+                        org.mockito.ArgumentMatchers.eq(anchor),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.eq("object-store"),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.eq(ExternalImmutabilityLevel.ENFORCED),
+                        org.mockito.ArgumentMatchers.any()
+                );
+        ExternalAuditAnchorPublisher publisher = new ExternalAuditAnchorPublisher(
+                anchorRepository,
+                publicationStatusRepository,
+                sink,
+                metrics,
+                Clock.fixed(Instant.parse("2026-04-27T10:01:00Z"), ZoneOffset.UTC),
+                100
+        );
+
+        assertThatThrownBy(() -> publisher.publishRequired(anchor))
+                .isInstanceOf(ExternalAuditAnchorPublicationRequiredException.class)
+                .extracting("reason")
+                .isEqualTo(ExternalAuditAnchor.REASON_STATUS_PERSISTENCE_FAILED_AFTER_EXTERNAL_PUBLISH);
+        assertThat(meterRegistry.get("external_anchor_status_persistence_failed_total")
+                .tag("sink", "object-store")
+                .counter()
+                .count()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void shouldFailClosedWhenRequiredPublicationCannotVerifyExternalWrite() {
+        ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
+        AuditAnchorDocument anchor = localAnchor("local-anchor-1", 1L, "hash-1");
+        when(sink.sinkType()).thenReturn("object-store");
+        when(sink.publish(any(ExternalAuditAnchor.class)))
+                .thenAnswer(invocation -> ((ExternalAuditAnchor) invocation.getArgument(0)).unverified("WRITE_NOT_VERIFIED"));
+        ExternalAuditAnchorPublisher publisher = new ExternalAuditAnchorPublisher(
+                anchorRepository,
+                publicationStatusRepository,
+                sink,
+                metrics,
+                Clock.fixed(Instant.parse("2026-04-27T10:01:00Z"), ZoneOffset.UTC),
+                100
+        );
+
+        assertThatThrownBy(() -> publisher.publishRequired(anchor))
+                .isInstanceOf(ExternalAuditAnchorPublicationRequiredException.class)
+                .extracting("reason")
+                .isEqualTo("WRITE_NOT_VERIFIED");
     }
 
     @Test

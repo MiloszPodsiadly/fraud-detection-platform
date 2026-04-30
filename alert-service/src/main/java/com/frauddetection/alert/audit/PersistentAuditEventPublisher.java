@@ -1,6 +1,11 @@
 package com.frauddetection.alert.audit;
+
+import com.frauddetection.alert.audit.external.ExternalAuditAnchorPublicationRequiredException;
+import com.frauddetection.alert.audit.external.ExternalAuditAnchorPublisher;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.dao.DataAccessException;
@@ -19,6 +24,8 @@ public class PersistentAuditEventPublisher implements AuditEventPublisher {
     private final AuditAnchorRepository anchorRepository;
     private final AuditChainLockRepository lockRepository;
     private final AlertServiceMetrics metrics;
+    private final ExternalAuditAnchorPublisher externalAnchorPublisher;
+    private final boolean externalAnchoringEnabled;
     private final int maxAppendAttempts;
     private final long lockRetryBackoffMillis;
 
@@ -27,9 +34,20 @@ public class PersistentAuditEventPublisher implements AuditEventPublisher {
             AuditEventRepository repository,
             AuditAnchorRepository anchorRepository,
             AuditChainLockRepository lockRepository,
-            AlertServiceMetrics metrics
+            AlertServiceMetrics metrics,
+            ObjectProvider<ExternalAuditAnchorPublisher> externalAnchorPublisher,
+            @Value("${app.audit.external-anchoring.enabled:false}") boolean externalAnchoringEnabled
     ) {
-        this(repository, anchorRepository, lockRepository, metrics, DEFAULT_MAX_APPEND_ATTEMPTS, DEFAULT_LOCK_RETRY_BACKOFF_MILLIS);
+        this(
+                repository,
+                anchorRepository,
+                lockRepository,
+                metrics,
+                externalAnchorPublisher == null ? null : externalAnchorPublisher.getIfAvailable(),
+                externalAnchoringEnabled,
+                DEFAULT_MAX_APPEND_ATTEMPTS,
+                DEFAULT_LOCK_RETRY_BACKOFF_MILLIS
+        );
     }
 
     PersistentAuditEventPublisher(
@@ -40,10 +58,34 @@ public class PersistentAuditEventPublisher implements AuditEventPublisher {
             int maxAppendAttempts,
             long lockRetryBackoffMillis
     ) {
+        this(repository, anchorRepository, lockRepository, metrics, null, false, maxAppendAttempts, lockRetryBackoffMillis);
+    }
+
+    PersistentAuditEventPublisher(
+            AuditEventRepository repository,
+            AuditAnchorRepository anchorRepository,
+            AuditChainLockRepository lockRepository,
+            AlertServiceMetrics metrics
+    ) {
+        this(repository, anchorRepository, lockRepository, metrics, null, false, DEFAULT_MAX_APPEND_ATTEMPTS, DEFAULT_LOCK_RETRY_BACKOFF_MILLIS);
+    }
+
+    PersistentAuditEventPublisher(
+            AuditEventRepository repository,
+            AuditAnchorRepository anchorRepository,
+            AuditChainLockRepository lockRepository,
+            AlertServiceMetrics metrics,
+            ExternalAuditAnchorPublisher externalAnchorPublisher,
+            boolean externalAnchoringEnabled,
+            int maxAppendAttempts,
+            long lockRetryBackoffMillis
+    ) {
         this.repository = repository;
         this.anchorRepository = anchorRepository;
         this.lockRepository = lockRepository;
         this.metrics = metrics;
+        this.externalAnchorPublisher = externalAnchorPublisher;
+        this.externalAnchoringEnabled = externalAnchoringEnabled;
         this.maxAppendAttempts = maxAppendAttempts;
         this.lockRetryBackoffMillis = lockRetryBackoffMillis;
     }
@@ -82,8 +124,9 @@ public class PersistentAuditEventPublisher implements AuditEventPublisher {
                     chainPosition
             ));
             auditEventInserted = true;
-            anchorRepository.insert(AuditAnchorDocument.from(UUID.randomUUID().toString(), document));
+            AuditAnchorDocument anchor = anchorRepository.insert(AuditAnchorDocument.from(UUID.randomUUID().toString(), document));
             metrics.recordPlatformAuditEventPersisted(event.action(), event.outcome());
+            publishExternalAnchorIfRequired(anchor);
         } catch (AuditChainConflictException exception) {
             throw exception;
         } catch (DataAccessException exception) {
@@ -120,6 +163,16 @@ public class PersistentAuditEventPublisher implements AuditEventPublisher {
             return previous.chainPosition() + 1L;
         }
         return repository.countByPartitionKey(AuditEventDocument.PARTITION_KEY) + 1L;
+    }
+
+    private void publishExternalAnchorIfRequired(AuditAnchorDocument anchor) {
+        if (!externalAnchoringEnabled) {
+            return;
+        }
+        if (externalAnchorPublisher == null) {
+            throw new ExternalAuditAnchorPublicationRequiredException("UNAVAILABLE");
+        }
+        externalAnchorPublisher.publishRequired(anchor);
     }
 
 }
