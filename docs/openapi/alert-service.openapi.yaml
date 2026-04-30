@@ -349,7 +349,10 @@ paths:
   /system/trust-level:
     get:
       summary: Get deployment trust posture
-      description: Returns bounded deployment posture flags for external audit anchoring. BEST_EFFORT must not be marketed as FDP-24 fail-closed mode. SIGNED_EXTERNAL means trust-authority signing is enabled and required; it is not WORM, notarization, SIEM, or legal trust.
+      description: Requires audit:verify. Returns bounded live deployment posture for external audit anchoring. BEST_EFFORT and FDP24_DEGRADED must not be marketed as FDP-24 healthy fail-closed mode. SIGNED_EXTERNAL means trust-authority signing is enabled and required; it is not WORM, notarization, SIEM, mTLS, or legal trust.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
       responses:
         "200":
           description: Deployment trust posture returned.
@@ -357,6 +360,116 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SystemTrustLevelResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/audit/degradations:
+    get:
+      summary: List unresolved audit degradation events
+      description: Requires audit:verify. Returns a bounded operator list of unresolved durable audit degradation events. This is an operational workflow, not an audit event export.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      responses:
+        "200":
+          description: Unresolved degradation events returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditDegradationListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/audit/degradations/{auditId}/resolve:
+    post:
+      summary: Resolve audit degradation event
+      description: Requires audit:verify. Marks a durable degradation event resolved with operator identity, reason, evidence reference, and a resolution audit event.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: auditId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResolveAuditDegradationRequest"
+      responses:
+        "200":
+          description: Degradation event resolved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditDegradationEvent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/decision-outbox/unknown-confirmations:
+    get:
+      summary: List decision outbox unknown confirmations
+      description: Requires audit:verify. Returns bounded PUBLISH_CONFIRMATION_UNKNOWN outbox rows for manual reconciliation. It never returns decision payloads, customer data, transaction payloads, or response bodies.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      responses:
+        "200":
+          description: Unknown confirmations returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnknownConfirmationsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/decision-outbox/unknown-confirmations/{alertId}/resolve:
+    post:
+      summary: Resolve decision outbox unknown confirmation
+      description: Requires audit:verify. Resolves PUBLISH_CONFIRMATION_UNKNOWN as PUBLISHED or RETRY_REQUESTED with a mandatory reason. RETRY_REQUESTED reuses the same eventId and dedupeKey; there is no blind automatic retry.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: alertId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResolveOutboxConfirmationRequest"
+      responses:
+        "200":
+          description: Unknown confirmation resolved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnknownConfirmation"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
   /api/v1/alerts/{alertId}:
     get:
       summary: Get one alert
@@ -388,7 +501,7 @@ paths:
   /api/v1/alerts/{alertId}/decision:
     post:
       summary: Submit analyst decision
-      description: Records an analyst decision with backend authorization, guarded audit, durable same-document outbox, and optional idempotency. If X-Idempotency-Key is supplied, the same key and same request body replay the prior response without duplicate audit or outbox mutation; the same key with a different request body returns 409. Kafka publication is asynchronous from the durable outbox and at-least-once unless consumers dedupe by event id. FraudDecisionEvent carries delivery=AT_LEAST_ONCE and dedupeKey=eventId. operation_status is mandatory for committed responses: REJECTED_BEFORE_MUTATION maps to HTTP 503 with no command response body; COMMITTED_EVIDENCE_PENDING is a conservative committed state before full evidence completion was persisted; COMMITTED_FULLY_ANCHORED means the decision and outbox committed and audit completed; COMMITTED_EVIDENCE_INCOMPLETE means the business decision and outbox committed but post-commit evidence completion degraded.
+      description: Records an analyst decision with backend authorization, guarded audit, durable same-document outbox, and optional idempotency. If X-Idempotency-Key is supplied, the same key and same request body replay the prior response without duplicate audit or outbox mutation; the same key with a different request body returns 409. Kafka publication is asynchronous from the durable outbox and at-least-once unless consumers dedupe by event id. FraudDecisionEvent carries delivery=AT_LEAST_ONCE and dedupeKey=eventId. operation_status is mandatory for committed responses: REJECTED_BEFORE_MUTATION maps to HTTP 503 with no command response body; COMMITTED_EVIDENCE_PENDING is a conservative committed state before full evidence completion was persisted; COMMITTED_FULLY_ANCHORED is reserved for verified local success audit anchor plus external PUBLISHED state plus clean required signature policy; COMMITTED_EVIDENCE_INCOMPLETE means the business decision and outbox committed but post-commit evidence completion degraded.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -688,7 +801,7 @@ components:
     SystemTrustLevelResponse:
       type: object
       additionalProperties: false
-      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength, coverage_status, witness_status, signature_policy, required_publication_failures, local_status_unverified, missing_ranges, post_commit_audit_degraded, outbox_failed_terminal_count, outbox_oldest_pending_age_seconds]
+      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength, coverage_status, witness_status, signature_policy, required_publication_failures, local_status_unverified, missing_ranges, post_commit_audit_degraded, post_commit_audit_degraded_resolved, outbox_failed_terminal_count, outbox_publish_confirmation_unknown_count, outbox_oldest_pending_age_seconds, outbox_oldest_ambiguous_age_seconds]
       properties:
         guarantee_level:
           type: string
@@ -708,8 +821,8 @@ components:
           enum: [HEALTHY, DEGRADED, UNAVAILABLE]
         witness_status:
           type: string
-          enum: [PROVIDER_VERIFIED, DECLARED_CAPABLE, UNAVAILABLE, DISABLED]
-          description: PROVIDER_VERIFIED requires provider-side metadata verification; declared capabilities alone are DECLARED_CAPABLE.
+          enum: [LIVE_WITNESS_VERIFIED, PROVIDER_CAPABILITY_VERIFIED, DECLARED_CAPABLE, UNAVAILABLE, DISABLED]
+          description: PROVIDER_CAPABILITY_VERIFIED requires provider-side capability checks; declared capabilities alone are DECLARED_CAPABLE. LIVE_WITNESS_VERIFIED is reserved for actual live external proof verification.
         signature_policy:
           type: string
           enum: [OPTIONAL, REQUIRED_FOR_TRUST, REQUIRED_FOR_PUBLICATION]
@@ -726,7 +839,15 @@ components:
           type: integer
           format: int64
           minimum: 0
+        post_commit_audit_degraded_resolved:
+          type: integer
+          format: int64
+          minimum: 0
         outbox_failed_terminal_count:
+          type: integer
+          format: int64
+          minimum: 0
+        outbox_publish_confirmation_unknown_count:
           type: integer
           format: int64
           minimum: 0
@@ -735,9 +856,129 @@ components:
           format: int64
           nullable: true
           minimum: 0
+        outbox_oldest_ambiguous_age_seconds:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
         reason_code:
           type: string
           nullable: true
+    AuditDegradationListResponse:
+      type: object
+      additionalProperties: false
+      required: [events]
+      properties:
+        events:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/AuditDegradationEvent"
+    AuditDegradationEvent:
+      type: object
+      additionalProperties: false
+      required: [audit_id, type, resource_type, resource_id, operation, timestamp, resolved, resolved_at, resolved_by, resolution_reason, resolution_evidence_reference]
+      properties:
+        audit_id:
+          type: string
+        type:
+          type: string
+        resource_type:
+          type: string
+        resource_id:
+          type: string
+          nullable: true
+        operation:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        resolved:
+          type: boolean
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolved_by:
+          type: string
+          nullable: true
+        resolution_reason:
+          type: string
+          nullable: true
+          maxLength: 500
+        resolution_evidence_reference:
+          type: string
+          nullable: true
+          maxLength: 500
+    ResolveAuditDegradationRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+        evidence_reference:
+          type: string
+          nullable: true
+          maxLength: 500
+    UnknownConfirmationsResponse:
+      type: object
+      additionalProperties: false
+      required: [events]
+      properties:
+        events:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/UnknownConfirmation"
+    UnknownConfirmation:
+      type: object
+      additionalProperties: false
+      required: [alert_id, event_id, dedupe_key, status, decided_at, attempts, last_attempt_at, published_at, failure_reason]
+      properties:
+        alert_id:
+          type: string
+        event_id:
+          type: string
+          nullable: true
+        dedupe_key:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [PUBLISH_CONFIRMATION_UNKNOWN, PUBLISHED, PENDING]
+        decided_at:
+          type: string
+          format: date-time
+          nullable: true
+        attempts:
+          type: integer
+          minimum: 0
+        last_attempt_at:
+          type: string
+          format: date-time
+          nullable: true
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
+        failure_reason:
+          type: string
+          nullable: true
+    ResolveOutboxConfirmationRequest:
+      type: object
+      additionalProperties: false
+      required: [resolution, reason]
+      properties:
+        resolution:
+          type: string
+          enum: [PUBLISHED, RETRY_REQUESTED]
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
     SubmitAnalystDecisionRequest:
       type: object
       additionalProperties: false
@@ -2225,6 +2466,12 @@ components:
             $ref: "#/components/schemas/ApiErrorResponse"
     NotFound:
       description: Advisory event was not found in bounded advisory history.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+    Conflict:
+      description: Request conflicts with current resource state.
       content:
         application/json:
           schema:
