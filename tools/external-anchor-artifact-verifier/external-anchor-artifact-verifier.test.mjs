@@ -58,13 +58,13 @@ function anchor(overrides = {}) {
 }
 
 function run(files) {
-  const dir = mkdtempSync(join(tmpdir(), "external-anchor-verifier-"));
+  const dir = mkdtempSync(join(tmpdir(), "external-anchor-artifact-verifier-"));
   const paths = {};
   for (const [name, content] of Object.entries(files)) {
     paths[name] = join(dir, `${name}.json`);
     writeFileSync(paths[name], JSON.stringify(content), "utf8");
   }
-  const args = ["tools/external-anchor-verifier/external-anchor-verifier.mjs", "--anchor", paths.anchor];
+  const args = ["tools/external-anchor-artifact-verifier/external-anchor-artifact-verifier.mjs", "--anchor", paths.anchor];
   if (paths.bundle) {
     args.push("--bundle", paths.bundle);
   }
@@ -94,10 +94,10 @@ test("valid anchor with verified storage timestamp is valid", () => {
 });
 
 test("missing anchor file is explicit missing", () => {
-  const dir = mkdtempSync(join(tmpdir(), "external-anchor-verifier-"));
+  const dir = mkdtempSync(join(tmpdir(), "external-anchor-artifact-verifier-"));
   const missing = join(dir, "missing.json");
   const output = execFileSync("node", [
-    "tools/external-anchor-verifier/external-anchor-verifier.mjs",
+    "tools/external-anchor-artifact-verifier/external-anchor-artifact-verifier.mjs",
     "--anchor",
     missing,
   ], { cwd: process.cwd(), encoding: "utf8" });
@@ -105,6 +105,32 @@ test("missing anchor file is explicit missing", () => {
   const result = JSON.parse(output);
   assert.equal(result.status, "MISSING");
   assert.equal(result.reason_code, "ANCHOR_OBJECT_MISSING");
+});
+
+test("remote witness URLs are explicitly unsupported", () => {
+  const output = execFileSync("node", [
+    "tools/external-anchor-artifact-verifier/external-anchor-artifact-verifier.mjs",
+    "--anchor",
+    "https://witness.example/audit-anchors/source/00000000000000000001.json",
+  ], { cwd: process.cwd(), encoding: "utf8" });
+
+  const result = JSON.parse(output);
+  assert.equal(result.status, "UNAVAILABLE");
+  assert.equal(result.reason_code, "REMOTE_WITNESS_UNSUPPORTED");
+});
+
+test("head manifest content is not accepted as anchor evidence", () => {
+  const result = run({
+    anchor: {
+      partition_key: "source_service:alert-service",
+      latest_chain_position: 1,
+      latest_event_hash: "hash-1",
+      manifest_hash: "tampered",
+    },
+  });
+
+  assert.equal(result.status, "INVALID");
+  assert.equal(result.reason_code, "ANCHOR_ID_VERSION_UNSUPPORTED");
 });
 
 test("tampered payload hash is invalid", () => {

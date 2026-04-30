@@ -171,7 +171,7 @@ function result(status, reasonCode, anchor = null, timestamp = {}) {
 
 const args = parseArgs(process.argv.slice(2));
 if (!args.anchor) {
-  console.error("usage: node tools/external-anchor-verifier/external-anchor-verifier.mjs --anchor anchor.json [--bundle bundle.json] [--reference reference.json] [--witness witness.json]");
+  console.error("usage: node tools/external-anchor-artifact-verifier/external-anchor-artifact-verifier.mjs --anchor anchor.json [--bundle bundle.json] [--reference reference.json] [--witness witness.json]");
   process.exit(2);
 }
 
