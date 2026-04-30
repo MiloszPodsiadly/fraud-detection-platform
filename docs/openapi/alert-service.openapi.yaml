@@ -138,7 +138,7 @@ paths:
   /api/v1/audit/integrity/external:
     get:
       summary: Verify external audit anchor consistency
-      description: Performs bounded read-only comparison between the local audit chain anchor and the external anchor. Requires audit:verify. Returns VALID, INVALID, PARTIAL, UNAVAILABLE, or CONFLICT. Object-store sinks can verify by exact partition_key + chain_position lookup using the deterministic encoded object key before falling back to latest-anchor comparison. Latest object-store HEAD detection first verifies the optional External Head Manifest at head.json by manifest_hash and by reading the referenced anchor; invalid or missing manifests are not trusted and fall back to full paginated scan. Full scan requires continuation-token pagination and consumes every page; if listing may be truncated and pagination is unavailable, verification returns a degraded UNAVAILABLE state rather than reporting VALID from a best-effort HEAD. Detects missing, stale, ahead, mismatched hash, mismatched local anchor id, mismatched object key binding, mismatched payload hash binding, mismatched hash algorithm, unsupported external schema version, incompatible same-position witness records, and external payload tampering. Response includes external_immutability_level; NONE or CONFIGURED is not WORM proof. This endpoint does not repair data, mutate audit records, export full history, or provide WORM/legal notarization. Real S3/GCS/Azure object-store adapters remain future deployment work.
+      description: Performs bounded read-only comparison between the local audit chain anchor and the external anchor. Requires audit:verify. Returns VALID, INVALID, PARTIAL, UNAVAILABLE, or CONFLICT. PUBLISHED means the anchor object was written to the external witness and verified by read-back at publication time; future witness availability is not guaranteed. Object-store sinks can verify by exact partition_key + chain_position lookup using the deterministic encoded object key before falling back to latest-anchor comparison. Latest object-store HEAD detection first verifies the optional External Head Manifest at head.json by manifest_hash and by reading the referenced anchor; the manifest is navigation metadata, not evidence. Invalid or missing manifests are not trusted and fall back to full paginated scan. Full scan requires continuation-token pagination and consumes every page; if listing may be truncated and pagination is unavailable, verification returns a degraded UNAVAILABLE state rather than reporting VALID from a best-effort HEAD. Detects missing, stale, ahead, mismatched hash, mismatched local anchor id, mismatched object key binding, mismatched payload hash binding, mismatched anchor id/version, mismatched hash algorithm, unsupported external schema version, incompatible same-position witness records, and external payload tampering. Response includes external_immutability_level and durability_guarantee; NONE, CONFIGURED, or WITNESS_RETENTION is not a fake WORM/legal proof. This endpoint does not repair data, mutate audit records, export full history, or provide WORM/legal notarization. Real S3/GCS/Azure object-store adapters remain future deployment work.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -962,7 +962,7 @@ components:
     ExternalAuditIntegrityResponse:
       type: object
       additionalProperties: false
-      required: [status, checked, limit, source_service, partition_key, external_immutability_level, timestamp_trust_level, signature_verification_status, violations]
+      required: [status, checked, limit, source_service, partition_key, external_immutability_level, durability_guarantee, timestamp_trust_level, signature_verification_status, violations]
       properties:
         status:
           type: string
@@ -983,7 +983,7 @@ components:
         reason_code:
           type: string
           nullable: true
-          enum: [AUDIT_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_MISSING, STALE_EXTERNAL_ANCHOR, HEAD_SCAN_PAGINATION_UNSUPPORTED, HEAD_SCAN_LIMIT_EXCEEDED, CONFLICT, SIGNATURE_INVALID, SIGNATURE_UNKNOWN_KEY, SIGNATURE_KEY_REVOKED, SIGNATURE_UNSIGNED, SIGNATURE_UNSIGNED_REQUIRED, SIGNATURE_UNAVAILABLE, SIGNATURE_UNAVAILABLE_REQUIRED]
+          enum: [AUDIT_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_MISSING, STALE_EXTERNAL_ANCHOR, HEAD_SCAN_PAGINATION_UNSUPPORTED, HEAD_SCAN_LIMIT_EXCEEDED, CONFLICT, EXTERNAL_ANCHOR_ID_MISMATCH, EXTERNAL_ANCHOR_ID_VERSION_UNSUPPORTED, EXTERNAL_PAYLOAD_HASH_MISMATCH, EXTERNAL_OBJECT_KEY_MISMATCH, SIGNATURE_INVALID, SIGNATURE_UNKNOWN_KEY, SIGNATURE_KEY_REVOKED, SIGNATURE_UNSIGNED, SIGNATURE_UNSIGNED_REQUIRED, SIGNATURE_UNAVAILABLE, SIGNATURE_UNAVAILABLE_REQUIRED]
         message:
           type: string
           nullable: true
@@ -996,9 +996,13 @@ components:
           $ref: "#/components/schemas/AuditAnchorSummary"
         external_immutability_level:
           $ref: "#/components/schemas/ExternalImmutabilityLevel"
+        durability_guarantee:
+          type: string
+          enum: [NONE, WITNESS_RETENTION, WORM, LEDGER]
+          description: Declared durability class from verified witness capabilities. WITNESS_RETENTION is operational retention, not a legal WORM claim.
         timestamp_trust_level:
           type: string
-          enum: [NONE, APP_OBSERVED, STORAGE_OBSERVED, SIGNED_TIMESTAMP, LEDGER_TIMESTAMP]
+          enum: [WEAK, MEDIUM, STRONG, CRYPTOGRAPHIC]
           description: Timestamp interpretation for external references. APP_OBSERVED is not proof; storage/signed/ledger timestamps are progressively stronger signals when backed by the witness capabilities.
         signature_verification_status:
           type: string
@@ -1036,7 +1040,7 @@ components:
     ExternalAuditAnchorCoverageResponse:
       type: object
       additionalProperties: false
-      required: [status, latest_local_position, latest_external_position, position_lag, missing_ranges, truncated, limit]
+      required: [status, latest_local_position, latest_external_position, position_lag, missing_ranges, truncated, limit, coverage_status, max_position_lag, max_missing_ranges]
       properties:
         status:
           type: string
@@ -1078,6 +1082,22 @@ components:
           type: string
           nullable: true
           maxLength: 160
+        coverage_status:
+          type: string
+          enum: [HEALTHY, DEGRADED]
+          description: HEALTHY means the bounded coverage window is complete within configured thresholds; DEGRADED means lag, gaps, truncation, or unavailable evidence must be investigated.
+        max_position_lag:
+          type: integer
+          format: int64
+          minimum: 0
+        max_time_lag_seconds:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        max_missing_ranges:
+          type: integer
+          minimum: 0
     ExternalAuditAnchorMissingRange:
       type: object
       additionalProperties: false
@@ -1246,6 +1266,10 @@ components:
         external_anchor_id:
           type: string
           nullable: true
+        anchor_id_version:
+          type: integer
+          nullable: true
+          enum: [1]
         local_anchor_id:
           type: string
           nullable: true
@@ -1284,7 +1308,7 @@ components:
         publication_status:
           type: string
           nullable: true
-          enum: [PUBLISHED, PARTIAL, PENDING, FAILED]
+          enum: [PUBLISHED, UNVERIFIED, PENDING, FAILED, INVALID, CONFLICT]
         publication_reason:
           type: string
           nullable: true
