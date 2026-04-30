@@ -109,8 +109,8 @@ Platform Audit Integrity API:
 - A `PARTIAL` result means the bounded window was filled or the local verification time budget was reached; it should not be treated as full-chain verification. Time-budget partials use stable reason code `INTEGRITY_VERIFICATION_TIME_BUDGET_EXCEEDED`.
 - Integrity checks create a follow-up `VERIFY_AUDIT_INTEGRITY` audit event with bounded metadata.
 - Protected analyst decision and fraud-case update writes attempt durable audit persistence before the business repository save; audit failure fails the request before that business write is persisted.
-- `POST /api/v1/alerts/{alertId}/decision` persists the business decision and durable same-document outbox event together before asynchronous Kafka publication. `X-Idempotency-Key` replays the prior response for the same payload and rejects key reuse with a different payload.
-- Analyst decision responses expose `operation_status`: `REJECTED_BEFORE_MUTATION`, `COMMITTED_FULLY_ANCHORED`, or `COMMITTED_AUDIT_INCOMPLETE`. `COMMITTED_AUDIT_INCOMPLETE` means the decision and outbox record committed but post-commit audit anchoring degraded; it is not a rollback and is counted by `fraud_platform_post_commit_audit_degraded_total`.
+- `POST /api/v1/alerts/{alertId}/decision` persists the business decision and durable same-document outbox event together before asynchronous Kafka publication. `X-Idempotency-Key` replays the prior response for the same payload and rejects key reuse with a different payload. The persisted operation status is conservative before the `SUCCESS` audit proof completes; it is upgraded only after successful audit completion.
+- Analyst decision responses expose `operation_status`: `REJECTED_BEFORE_MUTATION`, `COMMITTED_AUDIT_PENDING`, `COMMITTED_AUDIT_INCOMPLETE`, or `COMMITTED_FULLY_ANCHORED`. `COMMITTED_AUDIT_PENDING` means the business decision and outbox record committed but full audit completion has not been persisted yet. `COMMITTED_AUDIT_INCOMPLETE` means the decision and outbox record committed but post-commit audit anchoring degraded; it is not a rollback and is counted by `fraud_platform_post_commit_audit_degraded_total`.
 - Scheduled verification is disabled by default and must be enabled explicitly with `app.audit.integrity.scheduled-verification-enabled=true`; when enabled it is read-only observability automation only.
 - FDP-19 integrity verification is application-level evidence support. It is not WORM storage, legal notarization, legal non-repudiation, SIEM integration, long-term archival policy, regulator-ready evidence package, protection against full DB administrator rewrite, or HSM/KMS signing. FDP-20 extends tamper evidence outside the primary database boundary. It does not create legal non-repudiation.
 
@@ -118,12 +118,12 @@ Platform External Audit Anchor Verification API:
 
 - `GET /api/v1/audit/integrity/external`
 - Requires backend-enforced `audit:verify`.
-- Query parameters: optional bounded `source_service=alert-service` and `limit` default `100`, maximum `500`.
+- Query parameters: optional bounded `source_service=alert-service` and `limit` default `100`, maximum `100`.
 - Compares local and external anchors for local anchor id, chain position, last event hash, hash algorithm, schema version, external reference, and external immutability level. FDP-22 object-store sinks can verify by exact `partition_key + chain_position` lookup using the deterministic encoded object key before falling back to latest-anchor comparison, and also validate `external_object_key`, `payload_hash`, `anchor_hash`, and `external_hash` binding.
 - Object-store latest HEAD detection requires continuation-token pagination and consumes every page. If listing may be truncated and pagination is unavailable, verification returns a degraded `UNAVAILABLE` state instead of reporting `VALID` from a best-effort HEAD.
-- External coverage accepts optional `from_position`, defaults to the latest bounded window, caps `limit` at 100, and uses publication-status records rather than per-position external object reads.
+- External coverage accepts optional `from_position`, defaults to the latest bounded window, caps `limit` at 100, is per-instance rate-limited, and uses publication-status records rather than per-position external object reads.
 - Object-store sinks may use `<partition_prefix>/head.json` as an External Head Manifest optimization. The manifest is verified by hash and by reading the referenced anchor; invalid or missing manifests are not trusted and fall back to full paginated scan. The manifest is mutable navigation metadata, not evidence; the anchor object is the evidence. Manifest status is tracked separately from external object status.
-- Response status is `VALID`, `INVALID`, `PARTIAL`, `UNAVAILABLE`, or `CONFLICT`; missing/stale external anchors and incompatible same-position witness records are explicit and never reported as a valid empty result.
+- Response status is `VALID`, `INVALID`, `PARTIAL`, `UNAVAILABLE`, or `CONFLICT`; this is structural `integrity_status`, not a trust claim by itself. Clients must also inspect `trust_level`, `signature_policy`, `signature_verification_status`, and `external_immutability_level`. Missing/stale external anchors and incompatible same-position witness records are explicit and never reported as a valid empty result.
 - The endpoint is read-only and does not repair, mutate, delete, export, or resynchronize audit data.
 
 Platform External Audit Anchor Sinks:
@@ -151,6 +151,7 @@ Platform Audit Evidence Export API:
 - Requires inclusive ISO-8601 `from`, `to`, and bounded `source_service=alert-service`.
 - `limit` defaults to `100`, maximum `500`; invalid windows or limits return the platform 400 envelope.
 - Response includes safe audit event summaries, event hash, previous hash, chain position, local anchor references, external anchor references when available, signature metadata when available, `external_anchor_status`, `export_fingerprint`, and `anchor_coverage`.
+- Each event includes explicit interpretation fields: `business_effective_status`, `audit_evidence_status`, `external_anchor_status`, `trust_level`, `integrity_status`, `signature_policy`, `signature_status`, `evidence_source`, and `confidence`.
 - `anchor_coverage` includes `total_events`, `events_with_local_anchor`, `events_with_external_anchor`, `events_missing_external_anchor`, and `coverage_ratio`; `coverage_ratio=1.0` is required for a complete external evidence export.
 - Response status is `AVAILABLE`, `PARTIAL`, or `UNAVAILABLE`. `PARTIAL` is used when external anchors are disabled, unavailable, or incomplete for exported events. Clients MUST check `status` and `anchor_coverage` before treating an export as a complete evidence package.
 - `strict=true` rejects partial evidence packages with `409`, returns no event data, and records `export_status=REJECTED_STRICT_MODE` in the audit metadata.
@@ -158,6 +159,7 @@ Platform Audit Evidence Export API:
 - Export access audit metadata records bounded query/count/status/coverage/fingerprint details only; it does not persist exported event bodies.
 - Export access creates an `EXPORT_AUDIT_EVIDENCE` audit event with bounded metadata.
 - Responses include explicit chain range fields: `chain_range_start`, `chain_range_end`, `partial_chain_range`, and `predecessor_hash` for partial ranges. Offline verifiers must not treat a partial range as independently verifiable without predecessor boundary proof. If a bundle includes optional `expected_total_events`, fewer events than expected also downgrades verification to `PARTIAL_CHAIN`.
+- FDP-24 wording rules forbid affirmative claims of notarization, regulator-proof evidence, independent verification, legal proof, WORM storage, immutable-forever storage, or exactly-once event delivery unless those properties are implemented and named by the relevant response fields. Use `tamper-evident`, `externally anchored`, `externally stored evidence`, `artifact-verifiable`, `at-least-once outbox delivery`, and `fail-closed configured/healthy/degraded`.
 - Evidence export may include sensitive audit metadata such as `actor_id` and `resource_id`; access protection relies on backend `audit:export`, bounded queries, audit trail, fingerprinting, and rate limiting.
 - The endpoint does not support unbounded export, full-text search, cursor pagination, aggregation, delete, or update, and it does not return raw payloads, tokens, stack traces, transaction payloads, customer/account/card identifiers, advisory content, or full URLs.
 

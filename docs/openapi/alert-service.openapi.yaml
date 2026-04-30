@@ -388,7 +388,7 @@ paths:
   /api/v1/alerts/{alertId}/decision:
     post:
       summary: Submit analyst decision
-      description: Records an analyst decision with backend authorization, guarded audit, durable same-document outbox, and optional idempotency. If X-Idempotency-Key is supplied, the same key and same request body replay the prior response without duplicate audit or outbox mutation; the same key with a different request body returns 409. Kafka publication is asynchronous from the durable outbox. operation_status is mandatory: REJECTED_BEFORE_MUTATION means the guarded audit write failed before mutation; COMMITTED_FULLY_ANCHORED means the decision and outbox committed and audit completed; COMMITTED_AUDIT_INCOMPLETE means the business decision and outbox committed but post-commit audit/anchor completion degraded.
+      description: Records an analyst decision with backend authorization, guarded audit, durable same-document outbox, and optional idempotency. If X-Idempotency-Key is supplied, the same key and same request body replay the prior response without duplicate audit or outbox mutation; the same key with a different request body returns 409. Kafka publication is asynchronous from the durable outbox and at-least-once unless consumers dedupe by event id. operation_status is mandatory: REJECTED_BEFORE_MUTATION means the guarded audit write failed before mutation; COMMITTED_AUDIT_PENDING is a conservative committed state before full audit completion was persisted; COMMITTED_FULLY_ANCHORED means the decision and outbox committed and audit completed; COMMITTED_AUDIT_INCOMPLETE means the business decision and outbox committed but post-commit audit/anchor completion degraded.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -682,11 +682,11 @@ components:
     SystemTrustLevelResponse:
       type: object
       additionalProperties: false
-      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength]
+      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength, coverage_status, witness_status, signature_policy, required_publication_failures, local_status_unverified, missing_ranges, post_commit_audit_degraded]
       properties:
         guarantee_level:
           type: string
-          enum: [FDP24_FAIL_CLOSED, BEST_EFFORT]
+          enum: [NONE, BEST_EFFORT, FDP24_CONFIGURED, FDP24_HEALTHY, FDP24_DEGRADED]
         publication_enabled:
           type: boolean
         publication_required:
@@ -695,8 +695,33 @@ components:
           type: boolean
         external_anchor_strength:
           type: string
-          enum: [UNSIGNED_EXTERNAL, SIGNED_EXTERNAL]
-          description: Signing strength only. This does not provide WORM storage, notarization, SIEM integration, or legal trust.
+          enum: [NONE, UNSIGNED_EXTERNAL, SIGNED_EXTERNAL]
+          description: Signing strength only when live external publication is healthy. This does not provide WORM storage, notarization, SIEM integration, or legal trust.
+        coverage_status:
+          type: string
+          enum: [HEALTHY, DEGRADED, UNAVAILABLE]
+        witness_status:
+          type: string
+          enum: [VERIFIED, DECLARED_ONLY, UNAVAILABLE, DISABLED]
+        signature_policy:
+          type: string
+          enum: [OPTIONAL, REQUIRED_FOR_TRUST, REQUIRED_FOR_PUBLICATION]
+        required_publication_failures:
+          type: integer
+          minimum: 0
+        local_status_unverified:
+          type: integer
+          minimum: 0
+        missing_ranges:
+          type: integer
+          minimum: 0
+        post_commit_audit_degraded:
+          type: integer
+          format: int64
+          minimum: 0
+        reason_code:
+          type: string
+          nullable: true
     SubmitAnalystDecisionRequest:
       type: object
       additionalProperties: false
@@ -745,8 +770,8 @@ components:
           nullable: true
         operation_status:
           type: string
-          enum: [REJECTED_BEFORE_MUTATION, COMMITTED_AUDIT_INCOMPLETE, COMMITTED_FULLY_ANCHORED]
-          description: Mandatory operation state. COMMITTED_AUDIT_INCOMPLETE means the business decision and durable outbox committed while post-commit audit/anchor completion degraded.
+          enum: [REJECTED_BEFORE_MUTATION, COMMITTED_AUDIT_PENDING, COMMITTED_AUDIT_INCOMPLETE, COMMITTED_FULLY_ANCHORED]
+          description: Mandatory operation state. COMMITTED_AUDIT_PENDING is conservative state before full audit completion is persisted. COMMITTED_AUDIT_INCOMPLETE means the business decision and durable outbox committed while post-commit audit/anchor completion degraded.
     PagedGenericObject:
       type: object
       required:
@@ -1136,18 +1161,29 @@ components:
     ExternalAuditIntegrityResponse:
       type: object
       additionalProperties: false
-      required: [status, checked, limit, source_service, partition_key, external_immutability_level, durability_guarantee, timestamp_trust_level, signature_verification_status, violations]
+      required: [status, integrity_status, trust_level, signature_policy, checked, limit, source_service, partition_key, external_immutability_level, durability_guarantee, timestamp_trust_level, signature_verification_status, violations]
       properties:
         status:
           type: string
           enum: [VALID, INVALID, PARTIAL, UNAVAILABLE, CONFLICT]
+          description: Backward-compatible structural integrity status. VALID means structure/hash consistency only, not trusted evidence by itself.
+        integrity_status:
+          type: string
+          enum: [VALID, INVALID, PARTIAL, UNAVAILABLE, CONFLICT]
+          description: Structural integrity result. Clients must not interpret this as trust without trust_level and signature_policy.
+        trust_level:
+          type: string
+          enum: [LOCAL_ONLY, EXTERNAL_UNSIGNED, EXTERNAL_SIGNED, EXTERNAL_VERIFIED]
+        signature_policy:
+          type: string
+          enum: [OPTIONAL, REQUIRED_FOR_TRUST, REQUIRED_FOR_PUBLICATION]
         checked:
           type: integer
           minimum: 0
         limit:
           type: integer
           minimum: 1
-          maximum: 500
+          maximum: 100
         source_service:
           type: string
           enum: [alert-service]
@@ -1406,7 +1442,7 @@ components:
     AuditEvidenceExportEvent:
       type: object
       additionalProperties: false
-      required: [audit_event_id, event_type, actor_id, actor_roles, resource_type, action, outcome, occurred_at, metadata_summary, event_hash, chain_position, compensated, superseded_by_event_id, business_effective, business_effective_status, audit_evidence_status, external_anchor_status, compensation_type, related_event_id]
+      required: [audit_event_id, event_type, actor_id, actor_roles, resource_type, action, outcome, occurred_at, metadata_summary, event_hash, chain_position, compensated, superseded_by_event_id, business_effective, business_effective_status, audit_evidence_status, external_anchor_status, trust_level, integrity_status, signature_policy, signature_status, evidence_source, confidence, compensation_type, related_event_id]
       properties:
         audit_event_id:
           type: string
@@ -1470,6 +1506,26 @@ components:
           type: string
           enum: [PUBLISHED, UNVERIFIED, FAILED, MISSING, CONFLICT, LOCAL_STATUS_UNVERIFIED, UNKNOWN]
           description: Per-event external anchor state used by evidence consumers.
+        trust_level:
+          type: string
+          enum: [LOCAL_ONLY, EXTERNAL_UNSIGNED, EXTERNAL_SIGNED, EXTERNAL_VERIFIED]
+          description: Per-event trust interpretation. Signed or verified values require corresponding signature fields; local-only is not external trust.
+        integrity_status:
+          type: string
+          enum: [VALID, INVALID, PARTIAL, UNAVAILABLE]
+          description: Per-event structural integrity interpretation, separate from trust_level.
+        signature_policy:
+          type: string
+          enum: [OPTIONAL, REQUIRED_FOR_TRUST, REQUIRED_FOR_PUBLICATION]
+        signature_status:
+          type: string
+          enum: [UNSIGNED, SIGNED, INVALID, UNAVAILABLE, UNKNOWN_KEY, KEY_REVOKED]
+        evidence_source:
+          type: string
+          enum: [LOCAL_CHAIN, PUBLICATION_STATUS_REPO, EXTERNAL_WITNESS, ARTIFACT_VERIFIER]
+        confidence:
+          type: string
+          enum: [STRUCTURAL_VALID, EXTERNALLY_ANCHORED_UNSIGNED, EXTERNALLY_ANCHORED_SIGNED, INDEPENDENTLY_VERIFIED]
         compensation_type:
           type: string
           enum: [EXTERNAL_ANCHOR_FAILURE, BUSINESS_WRITE_FAILURE, MANUAL_REVERSAL, UNKNOWN]
