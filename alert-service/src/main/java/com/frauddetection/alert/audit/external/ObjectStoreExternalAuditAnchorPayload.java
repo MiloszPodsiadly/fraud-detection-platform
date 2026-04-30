@@ -8,6 +8,9 @@ record ObjectStoreExternalAuditAnchorPayload(
         @JsonProperty("anchor_id")
         String anchorId,
 
+        @JsonProperty("anchor_id_version")
+        int anchorIdVersion,
+
         @JsonProperty("source")
         String source,
 
@@ -59,6 +62,7 @@ record ObjectStoreExternalAuditAnchorPayload(
     static ObjectStoreExternalAuditAnchorPayload from(ExternalAuditAnchor anchor, String externalObjectKey, String payloadHash) {
         return new ObjectStoreExternalAuditAnchorPayload(
                 anchor.externalAnchorId(),
+                anchor.anchorIdVersion(),
                 anchor.sinkType(),
                 anchor.localAnchorId(),
                 anchor.partitionKey(),
@@ -78,9 +82,33 @@ record ObjectStoreExternalAuditAnchorPayload(
         );
     }
 
+    ObjectStoreExternalAuditAnchorPayload withoutPayloadHash() {
+        return new ObjectStoreExternalAuditAnchorPayload(
+                anchorId,
+                anchorIdVersion,
+                source,
+                localAnchorId,
+                partitionKey,
+                externalObjectKey,
+                chainPosition,
+                eventHash,
+                previousEventHash,
+                null,
+                hashAlgorithm,
+                schemaVersion,
+                createdAt,
+                publishedAtLocal,
+                sinkType,
+                publicationStatus,
+                publicationReason,
+                manifestStatus
+        );
+    }
+
     ExternalAuditAnchor toExternalAnchor() {
         return new ExternalAuditAnchor(
                 anchorId,
+                anchorIdVersion,
                 localAnchorId,
                 partitionKey,
                 chainPosition,
@@ -90,8 +118,8 @@ record ObjectStoreExternalAuditAnchorPayload(
                 schemaVersion,
                 publishedAtLocal == null ? createdAt : publishedAtLocal,
                 sinkType,
-                publicationStatus,
-                publicationReason,
+                ExternalAuditAnchor.STATUS_PUBLISHED,
+                null,
                 manifestStatus
         );
     }

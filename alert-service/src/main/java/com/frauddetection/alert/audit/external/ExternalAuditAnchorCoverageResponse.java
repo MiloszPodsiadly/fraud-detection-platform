@@ -36,6 +36,59 @@ public record ExternalAuditAnchorCoverageResponse(
 
         @JsonProperty("message")
         @JsonInclude(JsonInclude.Include.NON_NULL)
-        String message
+        String message,
+
+        @JsonProperty("coverage_status")
+        String coverageStatus,
+
+        @JsonProperty("max_position_lag")
+        long maxPositionLag,
+
+        @JsonProperty("max_time_lag_seconds")
+        Long maxTimeLagSeconds,
+
+        @JsonProperty("max_missing_ranges")
+        int maxMissingRanges
 ) {
+    public ExternalAuditAnchorCoverageResponse(
+            String status,
+            long latestLocalPosition,
+            long latestExternalPosition,
+            long positionLag,
+            Long timeLagSeconds,
+            List<ExternalAuditAnchorMissingRange> missingRanges,
+            boolean truncated,
+            int limit,
+            String reasonCode,
+            String message
+    ) {
+        this(
+                status,
+                latestLocalPosition,
+                latestExternalPosition,
+                positionLag,
+                timeLagSeconds,
+                missingRanges,
+                truncated,
+                limit,
+                reasonCode,
+                message,
+                coverageStatus(positionLag, timeLagSeconds, missingRanges, truncated),
+                0,
+                null,
+                50
+        );
+    }
+
+    private static String coverageStatus(
+            long positionLag,
+            Long timeLagSeconds,
+            List<ExternalAuditAnchorMissingRange> missingRanges,
+            boolean truncated
+    ) {
+        if (truncated || positionLag > 0 || (timeLagSeconds != null && timeLagSeconds > 0) || (missingRanges != null && !missingRanges.isEmpty())) {
+            return "DEGRADED";
+        }
+        return "HEALTHY";
+    }
 }

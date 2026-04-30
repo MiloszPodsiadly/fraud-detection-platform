@@ -15,6 +15,10 @@ public record ExternalAuditAnchorSummary(
         @JsonInclude(JsonInclude.Include.NON_NULL)
         String externalAnchorId,
 
+        @JsonProperty("anchor_id_version")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        Integer anchorIdVersion,
+
         @JsonProperty("local_anchor_id")
         @JsonInclude(JsonInclude.Include.NON_NULL)
         String localAnchorId,
@@ -70,12 +74,33 @@ public record ExternalAuditAnchorSummary(
             String sinkType,
             String publicationStatus
     ) {
-        this(anchorId, externalAnchorId, localAnchorId, chainPosition, lastEventHash, hashAlgorithm, schemaVersion, createdAt, sinkType, publicationStatus, null, null, null, ExternalImmutabilityLevel.NONE);
+        this(anchorId, externalAnchorId, null, localAnchorId, chainPosition, lastEventHash, hashAlgorithm, schemaVersion, createdAt, sinkType, publicationStatus, null, null, null, ExternalImmutabilityLevel.NONE);
+    }
+
+    public ExternalAuditAnchorSummary(
+            String anchorId,
+            String externalAnchorId,
+            String localAnchorId,
+            long chainPosition,
+            String lastEventHash,
+            String hashAlgorithm,
+            String schemaVersion,
+            Instant createdAt,
+            String sinkType,
+            String publicationStatus,
+            String publicationReason,
+            String manifestStatus,
+            ExternalAnchorReference externalReference,
+            ExternalImmutabilityLevel externalImmutabilityLevel
+    ) {
+        this(anchorId, externalAnchorId, null, localAnchorId, chainPosition, lastEventHash, hashAlgorithm, schemaVersion,
+                createdAt, sinkType, publicationStatus, publicationReason, manifestStatus, externalReference, externalImmutabilityLevel);
     }
 
     static ExternalAuditAnchorSummary fromLocal(AuditAnchorDocument document) {
         return new ExternalAuditAnchorSummary(
                 document.anchorId(),
+                null,
                 null,
                 null,
                 document.chainPosition(),
@@ -104,6 +129,7 @@ public record ExternalAuditAnchorSummary(
         return new ExternalAuditAnchorSummary(
                 null,
                 anchor.externalAnchorId(),
+                anchor.anchorIdVersion(),
                 anchor.localAnchorId(),
                 anchor.chainPosition(),
                 anchor.lastEventHash(),

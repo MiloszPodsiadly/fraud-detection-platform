@@ -13,6 +13,9 @@ public record ExternalAuditAnchor(
         @JsonProperty("external_anchor_id")
         String externalAnchorId,
 
+        @JsonProperty("anchor_id_version")
+        int anchorIdVersion,
+
         @JsonProperty("local_anchor_id")
         String localAnchorId,
 
@@ -50,10 +53,23 @@ public record ExternalAuditAnchor(
         String manifestStatus
 ) {
     public static final String SCHEMA_VERSION = "1.0";
+    public static final int ANCHOR_ID_VERSION = 1;
+    public static final String STATUS_PENDING = "PENDING";
     public static final String STATUS_PUBLISHED = "PUBLISHED";
-    public static final String STATUS_PARTIAL = "PARTIAL";
+    public static final String STATUS_UNVERIFIED = "UNVERIFIED";
+    public static final String STATUS_FAILED = "FAILED";
+    public static final String STATUS_INVALID = "INVALID";
+    public static final String STATUS_CONFLICT = "CONFLICT";
+    public static final String STATUS_MISSING = "MISSING";
+    public static final String STATUS_UNAVAILABLE = "UNAVAILABLE";
+    @Deprecated
+    public static final String STATUS_PARTIAL = STATUS_UNVERIFIED;
     public static final String REASON_HEAD_MANIFEST_UPDATE_FAILED = "HEAD_MANIFEST_UPDATE_FAILED";
     public static final String MANIFEST_STATUS_FAILED = "FAILED";
+
+    public ExternalAuditAnchor {
+        anchorIdVersion = anchorIdVersion <= 0 ? ANCHOR_ID_VERSION : anchorIdVersion;
+    }
 
     public ExternalAuditAnchor(
             String externalAnchorId,
@@ -69,6 +85,7 @@ public record ExternalAuditAnchor(
     ) {
         this(
                 externalAnchorId,
+                ANCHOR_ID_VERSION,
                 localAnchorId,
                 partitionKey,
                 chainPosition,
@@ -88,6 +105,7 @@ public record ExternalAuditAnchor(
         String schemaVersion = SCHEMA_VERSION;
         return new ExternalAuditAnchor(
                 deterministicAnchorId(sinkType, schemaVersion, localAnchor.partitionKey(), localAnchor.chainPosition(), localAnchor.lastEventHash()),
+                ANCHOR_ID_VERSION,
                 localAnchor.anchorId(),
                 localAnchor.partitionKey(),
                 localAnchor.chainPosition(),
@@ -97,19 +115,42 @@ public record ExternalAuditAnchor(
                 schemaVersion,
                 localAnchor.createdAt(),
                 sinkType,
-                STATUS_PUBLISHED,
+                STATUS_PENDING,
                 null,
                 null
         );
     }
 
-    ExternalAuditAnchor partial() {
-        return partial(REASON_HEAD_MANIFEST_UPDATE_FAILED, MANIFEST_STATUS_FAILED);
+    ExternalAuditAnchor published(String reason, String manifestStatus) {
+        return withPublicationStatus(STATUS_PUBLISHED, reason, manifestStatus);
     }
 
+    ExternalAuditAnchor unverified(String reason) {
+        return withPublicationStatus(STATUS_UNVERIFIED, reason, null);
+    }
+
+    ExternalAuditAnchor invalid(String reason) {
+        return withPublicationStatus(STATUS_INVALID, reason, null);
+    }
+
+    ExternalAuditAnchor conflict(String reason) {
+        return withPublicationStatus(STATUS_CONFLICT, reason, null);
+    }
+
+    @Deprecated
+    ExternalAuditAnchor partial() {
+        return unverified(REASON_HEAD_MANIFEST_UPDATE_FAILED);
+    }
+
+    @Deprecated
     ExternalAuditAnchor partial(String reason, String manifestStatus) {
+        return withPublicationStatus(STATUS_UNVERIFIED, reason, manifestStatus);
+    }
+
+    private ExternalAuditAnchor withPublicationStatus(String status, String reason, String manifestStatus) {
         return new ExternalAuditAnchor(
                 externalAnchorId,
+                anchorIdVersion,
                 localAnchorId,
                 partitionKey,
                 chainPosition,
@@ -119,13 +160,13 @@ public record ExternalAuditAnchor(
                 schemaVersion,
                 createdAt,
                 sinkType,
-                STATUS_PARTIAL,
+                status,
                 reason,
                 manifestStatus
         );
     }
 
-    private static String deterministicAnchorId(String source, String schemaVersion, String partitionKey, long chainPosition, String eventHash) {
+    static String deterministicAnchorId(String source, String schemaVersion, String partitionKey, long chainPosition, String eventHash) {
         String canonical = nullToEmpty(source)
                 + ":" + nullToEmpty(schemaVersion)
                 + ":" + nullToEmpty(partitionKey)

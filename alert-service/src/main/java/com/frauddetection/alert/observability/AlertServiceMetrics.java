@@ -485,7 +485,16 @@ public class AlertServiceMetrics {
     }
 
     private String normalizeExternalAnchorPublishStatus(String status) {
-        if ("PUBLISHED".equals(status) || "DUPLICATE".equals(status) || "PARTIAL".equals(status) || "FAILED".equals(status)) {
+        if ("PUBLISHED".equals(status)
+                || "DUPLICATE".equals(status)
+                || "UNVERIFIED".equals(status)
+                || "PARTIAL".equals(status)
+                || "INVALID".equals(status)
+                || "CONFLICT".equals(status)
+                || "FAILED".equals(status)) {
+            if ("PARTIAL".equals(status)) {
+                return "UNVERIFIED";
+            }
             return status;
         }
         return "FAILED";
@@ -509,6 +518,7 @@ public class AlertServiceMetrics {
         return switch (reason) {
             case "DISABLED", "UNAVAILABLE", "CONFLICT", "MISMATCH", "IO_ERROR", "INVALID_ANCHOR",
                  "WRITE_NOT_VERIFIED", "EXTERNAL_PAYLOAD_HASH_MISMATCH", "EXTERNAL_OBJECT_KEY_MISMATCH", "TIMEOUT",
+                 "EXTERNAL_ANCHOR_ID_MISMATCH", "EXTERNAL_ANCHOR_ID_VERSION_UNSUPPORTED",
                  "HEAD_SCAN_PAGINATION_UNSUPPORTED", "HEAD_SCAN_LIMIT_EXCEEDED", "HEAD_MANIFEST_INVALID",
                  "HEAD_MANIFEST_UPDATE_FAILED", "SIGNATURE_FAILED" -> reason;
             default -> "UNKNOWN";

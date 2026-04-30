@@ -67,7 +67,7 @@ class ExternalAuditAnchorPublicationStatusRepository {
         Query query = query(anchor.anchorId());
         Update status = base(anchor, attemptedAt)
                 .set("external_published", false)
-                .set("external_publication_status", ExternalAuditAnchor.STATUS_PARTIAL)
+                .set("external_publication_status", ExternalAuditAnchor.STATUS_UNVERIFIED)
                 .set("external_sink_type", safe(sinkType))
                 .set("external_key", reference == null ? null : safe(reference.externalKey(), 300))
                 .set("anchor_hash", reference == null ? null : safe(reference.anchorHash(), 128))
@@ -92,7 +92,7 @@ class ExternalAuditAnchorPublicationStatusRepository {
         Query query = query(anchor.anchorId());
         Update status = base(anchor, attemptedAt)
                 .set("external_published", false)
-                .set("external_publication_status", "FAILED")
+                .set("external_publication_status", ExternalAuditAnchor.STATUS_FAILED)
                 .inc("external_publish_attempts", 1)
                 .unset("external_published_at")
                 .unset("external_sink_type")

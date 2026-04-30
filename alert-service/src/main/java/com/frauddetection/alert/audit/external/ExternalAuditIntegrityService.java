@@ -307,6 +307,7 @@ public class ExternalAuditIntegrityService {
                         sink.immutabilityLevel()
                 ),
                 sink.immutabilityLevel(),
+                durabilityGuarantee(),
                 timestampTrustLevel(),
                 signature.verification().status(),
                 signature.signingKeyId(),
@@ -338,6 +339,7 @@ public class ExternalAuditIntegrityService {
                 null,
                 null,
                 sink.immutabilityLevel(),
+                durabilityGuarantee(),
                 timestampTrustLevel(),
                 signature.verification().status(),
                 null,
@@ -375,6 +377,7 @@ public class ExternalAuditIntegrityService {
                         sink.immutabilityLevel()
                 ),
                 sink.immutabilityLevel(),
+                durabilityGuarantee(),
                 timestampTrustLevel(),
                 signature.verification().status(),
                 signature.signingKeyId(),
@@ -402,6 +405,7 @@ public class ExternalAuditIntegrityService {
                 null,
                 null,
                 sink.immutabilityLevel(),
+                durabilityGuarantee(),
                 timestampTrustLevel(),
                 "UNAVAILABLE",
                 null,
@@ -429,6 +433,11 @@ public class ExternalAuditIntegrityService {
     private String timestampTrustLevel() {
         ExternalWitnessCapabilities capabilities = sink.capabilities();
         return capabilities == null ? "APP_OBSERVED" : capabilities.timestampTrustLevel();
+    }
+
+    private ExternalDurabilityGuarantee durabilityGuarantee() {
+        ExternalWitnessCapabilities capabilities = sink.capabilities();
+        return capabilities == null ? ExternalDurabilityGuarantee.NONE : capabilities.durabilityGuarantee();
     }
 
     private SignatureEnrichment enrichSignature(ExternalAuditAnchor external, ExternalAnchorReference reference) {
@@ -576,6 +585,8 @@ public class ExternalAuditIntegrityService {
     private boolean isExternalIntegrityMismatch(String reason) {
         return "EXTERNAL_OBJECT_KEY_MISMATCH".equals(reason)
                 || "EXTERNAL_PAYLOAD_HASH_MISMATCH".equals(reason)
+                || "EXTERNAL_ANCHOR_ID_MISMATCH".equals(reason)
+                || "EXTERNAL_ANCHOR_ID_VERSION_UNSUPPORTED".equals(reason)
                 || "MISMATCH".equals(reason);
     }
 

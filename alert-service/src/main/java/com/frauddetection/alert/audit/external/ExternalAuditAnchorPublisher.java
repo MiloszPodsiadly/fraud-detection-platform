@@ -90,7 +90,7 @@ public class ExternalAuditAnchorPublisher {
     public ExternalAuditAnchorPublishResult publishHeadWindow(int limit) {
         int boundedLimit = Math.max(1, Math.min(limit, 500));
         int published = 0;
-        int partial = 0;
+        int unverified = 0;
         int duplicates = 0;
         int failed = 0;
         try {
@@ -106,25 +106,31 @@ public class ExternalAuditAnchorPublisher {
                 try {
                     ExternalAuditAnchor candidate = ExternalAuditAnchor.from(localAnchor, sink.sinkType());
                     ExternalAuditAnchor stored = sink.publish(candidate);
-                    if (ExternalAuditAnchor.STATUS_PARTIAL.equals(stored.publicationStatus())) {
-                        metrics.recordExternalAnchorPublished(sink.sinkType(), "PARTIAL");
-                        partial++;
+                    if (ExternalAuditAnchor.STATUS_UNVERIFIED.equals(stored.publicationStatus())) {
+                        metrics.recordExternalAnchorPublished(sink.sinkType(), "UNVERIFIED");
+                        unverified++;
                         recordPublicationPartial(localAnchor, stored);
+                    } else if (ExternalAuditAnchor.STATUS_INVALID.equals(stored.publicationStatus())
+                            || ExternalAuditAnchor.STATUS_CONFLICT.equals(stored.publicationStatus())) {
+                        metrics.recordExternalAnchorPublished(sink.sinkType(), stored.publicationStatus());
+                        metrics.recordExternalAnchorPublishFailed(sink.sinkType(), stored.publicationReason());
+                        failed++;
+                        recordPublicationFailure(localAnchor, stored.publicationReason());
                     } else if (candidate.externalAnchorId().equals(stored.externalAnchorId())) {
                         if (recordPublicationSuccess(localAnchor, stored)) {
                             metrics.recordExternalAnchorPublished(sink.sinkType(), "PUBLISHED");
                             published++;
                         } else {
-                            metrics.recordExternalAnchorPublished(sink.sinkType(), "PARTIAL");
-                            partial++;
+                            metrics.recordExternalAnchorPublished(sink.sinkType(), "UNVERIFIED");
+                            unverified++;
                         }
                     } else {
                         if (recordPublicationSuccess(localAnchor, stored)) {
                             metrics.recordExternalAnchorPublished(sink.sinkType(), "DUPLICATE");
                             duplicates++;
                         } else {
-                            metrics.recordExternalAnchorPublished(sink.sinkType(), "PARTIAL");
-                            partial++;
+                            metrics.recordExternalAnchorPublished(sink.sinkType(), "UNVERIFIED");
+                            unverified++;
                         }
                     }
                     recordLag(localAnchor.createdAt());
@@ -136,7 +142,7 @@ public class ExternalAuditAnchorPublisher {
                     log.warn("External audit anchor publication failed: reason={}", exception.reason());
                 }
             }
-            return new ExternalAuditAnchorPublishResult(published, partial, duplicates, failed, boundedLimit);
+            return new ExternalAuditAnchorPublishResult(published, unverified, duplicates, failed, boundedLimit);
         } catch (DataAccessException exception) {
             metrics.recordExternalAnchorPublishFailed(sink.sinkType(), "UNAVAILABLE");
             log.warn("Local audit anchor lookup failed for external publication.");
@@ -177,7 +183,7 @@ public class ExternalAuditAnchorPublisher {
             metrics.recordExternalAnchorPublishFailed(sink.sinkType(), exception.reason());
             recordPublicationFailure(localAnchor, exception.reason());
             log.warn("External audit anchor reference verification failed after publish: reason={}", exception.reason());
-            return true;
+            return false;
         }
     }
 

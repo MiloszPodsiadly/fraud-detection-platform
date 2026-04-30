@@ -2,76 +2,155 @@ package com.frauddetection.alert.audit.external;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-record ExternalWitnessCapabilities(
+public record ExternalWitnessCapabilities(
         @JsonProperty("witness_type")
         String witnessType,
 
-        @JsonProperty("immutability_level")
-        ExternalImmutabilityLevel immutabilityLevel,
-
-        @JsonProperty("timestamp_trust_level")
-        String timestampTrustLevel,
-
-        @JsonProperty("timestamp_type")
-        ExternalWitnessTimestampType timestampType,
+        @JsonProperty("witness_id")
+        String witnessId,
 
         @JsonProperty("independence_level")
         String independenceLevel,
 
-        @JsonProperty("supports_read_after_write")
-        boolean supportsReadAfterWrite,
+        @JsonProperty("immutability_level")
+        ExternalImmutabilityLevel immutabilityLevel,
 
-        @JsonProperty("supports_stable_reference")
-        boolean supportsStableReference,
+        @JsonProperty("overwrite_protection")
+        boolean overwriteProtection,
 
-        @JsonProperty("supports_write_once")
-        boolean supportsWriteOnce,
+        @JsonProperty("delete_protection")
+        boolean deleteProtection,
 
-        @JsonProperty("supports_delete_denial_or_retention")
-        boolean supportsDeleteDenialOrRetention
+        @JsonProperty("read_after_write")
+        boolean readAfterWrite,
+
+        @JsonProperty("stable_reference")
+        boolean stableReference,
+
+        @JsonProperty("timestamp_type")
+        ExternalWitnessTimestampType timestampType,
+
+        @JsonProperty("timestamp_trust_level")
+        String timestampTrustLevel,
+
+        @JsonProperty("supports_versioning")
+        boolean supportsVersioning,
+
+        @JsonProperty("supports_retention")
+        boolean supportsRetention,
+
+        @JsonProperty("supports_signed_receipts")
+        boolean supportsSignedReceipts,
+
+        @JsonProperty("durability_guarantee")
+        ExternalDurabilityGuarantee durabilityGuarantee
 ) {
     static ExternalWitnessCapabilities disabled() {
         return new ExternalWitnessCapabilities(
+                "DISABLED",
                 "disabled",
+                ExternalWitnessIndependenceLevel.NONE.name(),
                 ExternalImmutabilityLevel.NONE,
-                "NONE",
+                false,
+                false,
+                false,
+                false,
                 ExternalWitnessTimestampType.APP_OBSERVED,
-                "NONE",
+                ExternalTimestampTrustLevel.WEAK.name(),
                 false,
                 false,
                 false,
-                false
+                ExternalDurabilityGuarantee.NONE
         );
     }
 
     static ExternalWitnessCapabilities localFile() {
         return new ExternalWitnessCapabilities(
-                "local-file",
+                "LOCAL_FILE",
+                "local-file-dev",
+                ExternalWitnessIndependenceLevel.LOCAL_DEV_ONLY.name(),
                 ExternalImmutabilityLevel.NONE,
-                "APP_OBSERVED",
+                false,
+                false,
+                false,
+                false,
                 ExternalWitnessTimestampType.APP_OBSERVED,
-                "LOCAL_DEV_ONLY",
+                ExternalTimestampTrustLevel.WEAK.name(),
                 false,
                 false,
                 false,
-                false
+                ExternalDurabilityGuarantee.NONE
         );
     }
 
     static ExternalWitnessCapabilities objectStore(ExternalImmutabilityLevel immutabilityLevel) {
-        ExternalImmutabilityLevel normalized = immutabilityLevel == null ? ExternalImmutabilityLevel.NONE : immutabilityLevel;
-        return new ExternalWitnessCapabilities(
+        return objectStore(
                 "object-store",
-                normalized,
-                normalized == ExternalImmutabilityLevel.ENFORCED ? "STORAGE_OBSERVED" : "APP_OBSERVED",
-                normalized == ExternalImmutabilityLevel.ENFORCED
-                        ? ExternalWitnessTimestampType.STORAGE_OBSERVED
-                        : ExternalWitnessTimestampType.APP_OBSERVED,
-                "EXTERNAL_OBJECT_STORE",
+                ExternalWitnessIndependenceLevel.SAME_BOUNDARY.name(),
+                immutabilityLevel,
+                false,
+                false,
                 true,
                 true,
-                true,
-                normalized == ExternalImmutabilityLevel.ENFORCED
+                ExternalWitnessTimestampType.APP_OBSERVED,
+                ExternalTimestampTrustLevel.WEAK.name(),
+                false,
+                false,
+                false,
+                ExternalDurabilityGuarantee.NONE
         );
+    }
+
+    static ExternalWitnessCapabilities objectStore(
+            String witnessId,
+            String independenceLevel,
+            ExternalImmutabilityLevel immutabilityLevel,
+            boolean overwriteProtection,
+            boolean deleteProtection,
+            boolean readAfterWrite,
+            boolean stableReference,
+            ExternalWitnessTimestampType timestampType,
+            String timestampTrustLevel,
+            boolean supportsVersioning,
+            boolean supportsRetention,
+            boolean supportsSignedReceipts,
+            ExternalDurabilityGuarantee durabilityGuarantee
+    ) {
+        return new ExternalWitnessCapabilities(
+                "OBJECT_STORE",
+                hasText(witnessId) ? witnessId.trim() : "object-store",
+                hasText(independenceLevel) ? independenceLevel.trim() : ExternalWitnessIndependenceLevel.SAME_BOUNDARY.name(),
+                immutabilityLevel == null ? ExternalImmutabilityLevel.NONE : immutabilityLevel,
+                overwriteProtection,
+                deleteProtection,
+                readAfterWrite,
+                stableReference,
+                timestampType == null ? ExternalWitnessTimestampType.APP_OBSERVED : timestampType,
+                hasText(timestampTrustLevel) ? timestampTrustLevel.trim() : ExternalTimestampTrustLevel.WEAK.name(),
+                supportsVersioning,
+                supportsRetention,
+                supportsSignedReceipts,
+                durabilityGuarantee == null ? ExternalDurabilityGuarantee.NONE : durabilityGuarantee
+        );
+    }
+
+    boolean supportsReadAfterWrite() {
+        return readAfterWrite;
+    }
+
+    boolean supportsStableReference() {
+        return stableReference;
+    }
+
+    boolean supportsWriteOnce() {
+        return overwriteProtection;
+    }
+
+    boolean supportsDeleteDenialOrRetention() {
+        return deleteProtection || supportsRetention;
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 }
