@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -127,6 +127,14 @@ test("help text describes local artifact verifier mode", () => {
 
   assert.match(output, /artifact/i);
   assert.match(output, /does not fetch live/i);
+});
+
+test("README does not describe artifact verifier as live witness verifier", () => {
+  const readme = readFileSync("README.md", "utf8");
+
+  assert.match(readme, /external-anchor-artifact-verifier/i);
+  assert.match(readme, /downloaded\/exported external anchor artifacts/i);
+  assert.doesNotMatch(readme, /live witness verifier/i);
 });
 
 test("head manifest content is not accepted as anchor evidence", () => {
