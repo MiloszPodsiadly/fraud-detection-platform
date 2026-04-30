@@ -71,6 +71,13 @@ public class AlertServiceMetrics {
         ).increment();
     }
 
+    public void recordExternalCoverageRequestCost(String status, int cost) {
+        DistributionSummary.builder("fraud_platform_audit_external_coverage_request_cost")
+                .tag("status", normalizeCoverageRateLimitStatus(status))
+                .register(meterRegistry)
+                .record(Math.max(1, Math.min(cost, 100)));
+    }
+
     public void recordFraudCaseUpdated() {
         counter("fraud.alert.fraud_case.updates", "outcome", "success").increment();
     }
@@ -468,6 +475,13 @@ public class AlertServiceMetrics {
             return operation;
         }
         return "UNKNOWN";
+    }
+
+    private String normalizeCoverageRateLimitStatus(String status) {
+        if ("ALLOWED".equals(status) || "RATE_LIMITED".equals(status)) {
+            return status;
+        }
+        return "RATE_LIMITED";
     }
 
     private String normalizeAvailabilityStatus(String status) {

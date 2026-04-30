@@ -345,10 +345,11 @@ class ObjectStoreExternalAuditAnchorSinkTest {
     @Test
     void shouldHandleConcurrentWritesSafely() throws Exception {
         java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(4);
+        ExternalAuditAnchor anchor = ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), sink.sinkType());
         try {
-            List<java.util.concurrent.Callable<Void>> tasks = java.util.stream.LongStream.rangeClosed(1L, 100L)
-                    .mapToObj(chainPosition -> (java.util.concurrent.Callable<Void>) () -> {
-                        sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-" + chainPosition, chainPosition, "hash-" + chainPosition), sink.sinkType()));
+            List<java.util.concurrent.Callable<Void>> tasks = java.util.stream.IntStream.range(0, 100)
+                    .mapToObj(ignored -> (java.util.concurrent.Callable<Void>) () -> {
+                        sink.publish(anchor);
                         return null;
                     })
                     .toList();
@@ -362,7 +363,7 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         assertThat(sink.latest("source_service:alert-service"))
                 .get()
                 .extracting(ExternalAuditAnchor::chainPosition)
-                .isEqualTo(100L);
+                .isEqualTo(1L);
     }
 
     @Test

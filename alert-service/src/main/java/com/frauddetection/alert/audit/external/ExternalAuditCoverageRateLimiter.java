@@ -1,38 +1,52 @@
 package com.frauddetection.alert.audit.external;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
-import java.time.Clock;
-import java.time.Instant;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
+import java.util.HexFormat;
 
 @Component
 public class ExternalAuditCoverageRateLimiter {
 
-    private final Clock clock;
-    private final int maxRequestsPerMinute;
-    private final AtomicLong windowEpochMinute = new AtomicLong(-1L);
-    private final AtomicInteger requestsInWindow = new AtomicInteger(0);
+    private final StringRedisTemplate redisTemplate;
+    private final int maxCostPerMinute;
 
-    @Autowired
-    public ExternalAuditCoverageRateLimiter(@Value("${app.audit.external-integrity.coverage.max-per-minute:30}") int maxRequestsPerMinute) {
-        this(Clock.systemUTC(), maxRequestsPerMinute);
+    public ExternalAuditCoverageRateLimiter(
+            StringRedisTemplate redisTemplate,
+            @Value("${app.audit.external-integrity.coverage.max-cost-per-minute:300}") int maxCostPerMinute
+    ) {
+        this.redisTemplate = redisTemplate;
+        this.maxCostPerMinute = Math.max(1, Math.min(maxCostPerMinute, 10_000));
     }
 
-    ExternalAuditCoverageRateLimiter(Clock clock, int maxRequestsPerMinute) {
-        this.clock = clock;
-        this.maxRequestsPerMinute = Math.max(1, maxRequestsPerMinute);
-    }
-
-    public boolean allow() {
-        long minute = Instant.now(clock).getEpochSecond() / 60L;
-        long current = windowEpochMinute.get();
-        if (current != minute && windowEpochMinute.compareAndSet(current, minute)) {
-            requestsInWindow.set(0);
+    public boolean allow(String identity, int requestCost) {
+        int cost = Math.max(1, Math.min(requestCost, 100));
+        String key = "audit:coverage:rate:" + identityHash(identity);
+        try {
+            Long current = redisTemplate.opsForValue().increment(key, cost);
+            if (current != null && current == cost) {
+                redisTemplate.expire(key, Duration.ofMinutes(1));
+            }
+            return current != null && current <= maxCostPerMinute;
+        } catch (RuntimeException exception) {
+            return false;
         }
-        return requestsInWindow.incrementAndGet() <= maxRequestsPerMinute;
+    }
+
+    private String identityHash(String identity) {
+        String normalized = StringUtils.hasText(identity) ? identity.trim() : "unknown";
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(normalized.getBytes(StandardCharsets.UTF_8)))
+                    .substring(0, 32);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable.");
+        }
     }
 }

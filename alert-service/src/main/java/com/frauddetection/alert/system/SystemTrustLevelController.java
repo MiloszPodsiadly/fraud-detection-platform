@@ -1,16 +1,26 @@
 package com.frauddetection.alert.system;
 
+import com.frauddetection.alert.audit.AuditDegradationService;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorCoverageResponse;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorSink;
 import com.frauddetection.alert.audit.external.ExternalWitnessCapabilities;
+import com.frauddetection.alert.persistence.AlertDocument;
+import com.frauddetection.alert.persistence.AlertRepository;
+import com.frauddetection.alert.service.DecisionOutboxStatus;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.dao.DataAccessException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
 
 @RestController
 public class SystemTrustLevelController implements ApplicationRunner {
@@ -24,17 +34,36 @@ public class SystemTrustLevelController implements ApplicationRunner {
     private final boolean signingRequired;
     private final com.frauddetection.alert.audit.external.ExternalAuditIntegrityService externalAuditIntegrityService;
     private final ExternalAuditAnchorSink externalAuditAnchorSink;
-    private final AlertServiceMetrics metrics;
+    private final AuditDegradationService auditDegradationService;
+    private final AlertRepository alertRepository;
+    private final Duration staleOutboxThreshold;
 
+    public SystemTrustLevelController(
+            boolean publicationEnabled,
+            boolean publicationRequired,
+            boolean failClosed,
+            boolean trustAuthorityEnabled,
+            boolean signingRequired,
+            com.frauddetection.alert.audit.external.ExternalAuditIntegrityService externalAuditIntegrityService,
+            ExternalAuditAnchorSink externalAuditAnchorSink,
+            AlertServiceMetrics ignoredMetrics
+    ) {
+        this(publicationEnabled, publicationRequired, failClosed, trustAuthorityEnabled, signingRequired,
+                Duration.ofMinutes(10), externalAuditIntegrityService, externalAuditAnchorSink, null, null);
+    }
+
+    @Autowired
     public SystemTrustLevelController(
             @Value("${app.audit.external-anchoring.publication.enabled:${app.audit.external-anchoring.enabled:false}}") boolean publicationEnabled,
             @Value("${app.audit.external-anchoring.publication.required:${app.audit.external-anchoring.enabled:false}}") boolean publicationRequired,
             @Value("${app.audit.external-anchoring.publication.fail-closed:${app.audit.external-anchoring.publication.required:${app.audit.external-anchoring.enabled:false}}}") boolean failClosed,
             @Value("${app.audit.trust-authority.enabled:false}") boolean trustAuthorityEnabled,
             @Value("${app.audit.trust-authority.signing-required:false}") boolean signingRequired,
+            @Value("${app.alert.decision-outbox.stale-threshold:PT10M}") Duration staleOutboxThreshold,
             com.frauddetection.alert.audit.external.ExternalAuditIntegrityService externalAuditIntegrityService,
             ExternalAuditAnchorSink externalAuditAnchorSink,
-            AlertServiceMetrics metrics
+            AuditDegradationService auditDegradationService,
+            AlertRepository alertRepository
     ) {
         this.publicationEnabled = publicationEnabled;
         this.publicationRequired = publicationRequired;
@@ -43,7 +72,9 @@ public class SystemTrustLevelController implements ApplicationRunner {
         this.signingRequired = signingRequired;
         this.externalAuditIntegrityService = externalAuditIntegrityService;
         this.externalAuditAnchorSink = externalAuditAnchorSink;
-        this.metrics = metrics;
+        this.auditDegradationService = auditDegradationService;
+        this.alertRepository = alertRepository;
+        this.staleOutboxThreshold = staleOutboxThreshold == null ? Duration.ofMinutes(10) : staleOutboxThreshold;
     }
 
     @GetMapping("/system/trust-level")
@@ -62,6 +93,8 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 live.localStatusUnverified(),
                 live.missingRanges(),
                 live.postCommitAuditDegraded(),
+                live.outboxFailedTerminalCount(),
+                live.outboxOldestPendingAgeSeconds(),
                 live.reasonCode()
         );
     }
@@ -107,7 +140,8 @@ public class SystemTrustLevelController implements ApplicationRunner {
         int requiredFailures = 0;
         int localStatusUnverified = 0;
         int missingRanges = 0;
-        long postCommitDegraded = metrics.postCommitAuditDegradedCount();
+        long postCommitDegraded = auditDegradationService == null ? 0L : auditDegradationService.unresolvedPostCommitDegradedCount();
+        OutboxState outboxState = outboxState();
         try {
             coverage = externalAuditIntegrityService.coverage("alert-service", 100);
             coverageStatus = coverage.coverageStatus();
@@ -127,11 +161,19 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 && publicationRequired
                 && failClosed
                 && "HEALTHY".equals(coverageStatus)
-                && "VERIFIED".equals(witnessStatus)
+                && "PROVIDER_VERIFIED".equals(witnessStatus)
                 && requiredFailures == 0
                 && localStatusUnverified == 0
                 && missingRanges == 0
-                && postCommitDegraded == 0;
+                && postCommitDegraded == 0
+                && outboxState.failedTerminalCount() == 0
+                && !outboxState.stalePending();
+        if (healthy && outboxState.reasonCode() != null) {
+            healthy = false;
+        }
+        if (reasonCode == null) {
+            reasonCode = outboxState.reasonCode();
+        }
         return new LiveTrustState(
                 healthy,
                 coverageStatus,
@@ -140,6 +182,8 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 localStatusUnverified,
                 missingRanges,
                 postCommitDegraded,
+                outboxState.failedTerminalCount(),
+                outboxState.oldestPendingAgeSeconds(),
                 reasonCode
         );
     }
@@ -149,13 +193,55 @@ public class SystemTrustLevelController implements ApplicationRunner {
         if (capabilities == null || "DISABLED".equals(capabilities.witnessType())) {
             return publicationEnabled ? "UNAVAILABLE" : "DISABLED";
         }
-        if (capabilities.supportsReadAfterWrite()
+        if (capabilities.immutabilityLevel() == com.frauddetection.alert.audit.external.ExternalImmutabilityLevel.ENFORCED
+                && capabilities.supportsReadAfterWrite()
                 && capabilities.supportsStableReference()
                 && capabilities.supportsVersioning()
-                && capabilities.supportsRetention()) {
-            return "VERIFIED";
+                && capabilities.supportsRetention()
+                && capabilities.supportsWriteOnce()
+                && capabilities.supportsDeleteDenialOrRetention()) {
+            return "PROVIDER_VERIFIED";
         }
-        return "DECLARED_ONLY";
+        return "DECLARED_CAPABLE";
+    }
+
+    private OutboxState outboxState() {
+        try {
+            if (alertRepository == null) {
+                return new OutboxState(0L, null, false, null);
+            }
+            List<String> failedStatuses = List.of(
+                    DecisionOutboxStatus.FAILED_TERMINAL,
+                    DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN
+            );
+            List<String> pendingStatuses = List.of(
+                    DecisionOutboxStatus.PENDING,
+                    DecisionOutboxStatus.PROCESSING,
+                    DecisionOutboxStatus.FAILED_RETRYABLE
+            );
+            long failedTerminalCount = alertRepository.countByDecisionOutboxStatusIn(failedStatuses);
+            Long oldestPendingAge = alertRepository.findTopByDecisionOutboxStatusInOrderByDecidedAtAsc(pendingStatuses)
+                    .map(this::pendingAgeSeconds)
+                    .orElse(null);
+            boolean stalePending = oldestPendingAge != null && oldestPendingAge > staleOutboxThreshold.toSeconds();
+            String reason = null;
+            if (failedTerminalCount > 0) {
+                reason = "OUTBOX_TERMINAL_FAILURE";
+            } else if (stalePending) {
+                reason = "OUTBOX_STALE_PENDING";
+            }
+            return new OutboxState(failedTerminalCount, oldestPendingAge, stalePending, reason);
+        } catch (DataAccessException exception) {
+            return new OutboxState(1L, null, true, "OUTBOX_STATUS_UNAVAILABLE");
+        }
+    }
+
+    private long pendingAgeSeconds(AlertDocument document) {
+        Instant decidedAt = document.getDecidedAt();
+        if (decidedAt == null) {
+            return 0L;
+        }
+        return Math.max(0L, Duration.between(decidedAt, Instant.now()).toSeconds());
     }
 
     private record LiveTrustState(
@@ -166,6 +252,16 @@ public class SystemTrustLevelController implements ApplicationRunner {
             int localStatusUnverified,
             int missingRanges,
             long postCommitAuditDegraded,
+            long outboxFailedTerminalCount,
+            Long outboxOldestPendingAgeSeconds,
+            String reasonCode
+    ) {
+    }
+
+    private record OutboxState(
+            long failedTerminalCount,
+            Long oldestPendingAgeSeconds,
+            boolean stalePending,
             String reasonCode
     ) {
     }

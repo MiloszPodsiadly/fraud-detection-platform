@@ -1,5 +1,6 @@
 package com.frauddetection.alert.system;
 
+import com.frauddetection.alert.audit.AuditDegradationService;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorCoverageResponse;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorSink;
 import com.frauddetection.alert.audit.external.ExternalAuditIntegrityService;
@@ -7,10 +8,14 @@ import com.frauddetection.alert.audit.external.ExternalDurabilityGuarantee;
 import com.frauddetection.alert.audit.external.ExternalImmutabilityLevel;
 import com.frauddetection.alert.audit.external.ExternalWitnessCapabilities;
 import com.frauddetection.alert.audit.external.ExternalWitnessTimestampType;
-import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.persistence.AlertRepository;
+import com.frauddetection.alert.service.DecisionOutboxStatus;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -22,19 +27,26 @@ class SystemTrustLevelControllerTest {
     void shouldExposeFailClosedSignedExternalTrustLevel() {
         ExternalAuditIntegrityService integrityService = mock(ExternalAuditIntegrityService.class);
         ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
-        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        AuditDegradationService degradationService = mock(AuditDegradationService.class);
+        AlertRepository alertRepository = mock(AlertRepository.class);
         when(integrityService.coverage("alert-service", 100)).thenReturn(healthyCoverage());
         when(sink.capabilities()).thenReturn(verifiedCapabilities());
-        when(metrics.postCommitAuditDegradedCount()).thenReturn(0L);
+        when(degradationService.unresolvedPostCommitDegradedCount()).thenReturn(0L);
+        when(alertRepository.countByDecisionOutboxStatusIn(List.of(DecisionOutboxStatus.FAILED_TERMINAL, DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN)))
+                .thenReturn(0L);
+        when(alertRepository.findTopByDecisionOutboxStatusInOrderByDecidedAtAsc(List.of(DecisionOutboxStatus.PENDING, DecisionOutboxStatus.PROCESSING, DecisionOutboxStatus.FAILED_RETRYABLE)))
+                .thenReturn(Optional.empty());
         SystemTrustLevelController controller = new SystemTrustLevelController(
                 true,
                 true,
                 true,
                 true,
                 true,
+                Duration.ofMinutes(10),
                 integrityService,
                 sink,
-                metrics
+                degradationService,
+                alertRepository
         );
 
         SystemTrustLevelResponse response = controller.trustLevel();
@@ -45,17 +57,18 @@ class SystemTrustLevelControllerTest {
         assertThat(response.failClosed()).isTrue();
         assertThat(response.externalAnchorStrength()).isEqualTo("SIGNED_EXTERNAL");
         assertThat(response.coverageStatus()).isEqualTo("HEALTHY");
-        assertThat(response.witnessStatus()).isEqualTo("VERIFIED");
+        assertThat(response.witnessStatus()).isEqualTo("PROVIDER_VERIFIED");
     }
 
     @Test
     void shouldNotMarketBestEffortAsFdp24FailClosed() {
         ExternalAuditIntegrityService integrityService = mock(ExternalAuditIntegrityService.class);
         ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
-        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        AuditDegradationService degradationService = mock(AuditDegradationService.class);
+        AlertRepository alertRepository = mock(AlertRepository.class);
         when(integrityService.coverage("alert-service", 100)).thenReturn(healthyCoverage());
         when(sink.capabilities()).thenReturn(verifiedCapabilities());
-        when(metrics.postCommitAuditDegradedCount()).thenReturn(0L);
+        when(degradationService.unresolvedPostCommitDegradedCount()).thenReturn(0L);
         SystemTrustLevelController controller = new SystemTrustLevelController(
                 true,
                 false,
@@ -64,7 +77,7 @@ class SystemTrustLevelControllerTest {
                 false,
                 integrityService,
                 sink,
-                metrics
+                null
         );
 
         SystemTrustLevelResponse response = controller.trustLevel();
@@ -77,7 +90,8 @@ class SystemTrustLevelControllerTest {
     void shouldDowngradeFailClosedWhenCoverageIsDegraded() {
         ExternalAuditIntegrityService integrityService = mock(ExternalAuditIntegrityService.class);
         ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
-        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        AuditDegradationService degradationService = mock(AuditDegradationService.class);
+        AlertRepository alertRepository = mock(AlertRepository.class);
         when(integrityService.coverage("alert-service", 100)).thenReturn(new ExternalAuditAnchorCoverageResponse(
                 "AVAILABLE",
                 10,
@@ -91,7 +105,7 @@ class SystemTrustLevelControllerTest {
                 null
         ));
         when(sink.capabilities()).thenReturn(verifiedCapabilities());
-        when(metrics.postCommitAuditDegradedCount()).thenReturn(0L);
+        when(degradationService.unresolvedPostCommitDegradedCount()).thenReturn(0L);
         SystemTrustLevelController controller = new SystemTrustLevelController(
                 true,
                 true,
@@ -100,7 +114,7 @@ class SystemTrustLevelControllerTest {
                 true,
                 integrityService,
                 sink,
-                metrics
+                null
         );
 
         SystemTrustLevelResponse response = controller.trustLevel();
@@ -113,7 +127,6 @@ class SystemTrustLevelControllerTest {
     void shouldReturnNoneWhenPublicationDisabled() {
         ExternalAuditIntegrityService integrityService = mock(ExternalAuditIntegrityService.class);
         ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
-        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
         when(sink.capabilities()).thenReturn(new ExternalWitnessCapabilities(
                 "DISABLED",
                 "disabled",
@@ -138,7 +151,7 @@ class SystemTrustLevelControllerTest {
                 false,
                 integrityService,
                 sink,
-                metrics
+                null
         );
 
         SystemTrustLevelResponse response = controller.trustLevel();
@@ -151,25 +164,61 @@ class SystemTrustLevelControllerTest {
     void shouldDowngradeFailClosedWhenPostCommitAuditDegradedWasObserved() {
         ExternalAuditIntegrityService integrityService = mock(ExternalAuditIntegrityService.class);
         ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
-        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        AuditDegradationService degradationService = mock(AuditDegradationService.class);
+        AlertRepository alertRepository = mock(AlertRepository.class);
         when(integrityService.coverage("alert-service", 100)).thenReturn(healthyCoverage());
         when(sink.capabilities()).thenReturn(verifiedCapabilities());
-        when(metrics.postCommitAuditDegradedCount()).thenReturn(1L);
+        when(degradationService.unresolvedPostCommitDegradedCount()).thenReturn(1L);
         SystemTrustLevelController controller = new SystemTrustLevelController(
                 true,
                 true,
                 true,
                 true,
                 true,
+                Duration.ofMinutes(10),
                 integrityService,
                 sink,
-                metrics
+                degradationService,
+                alertRepository
         );
 
         SystemTrustLevelResponse response = controller.trustLevel();
 
         assertThat(response.guaranteeLevel()).isEqualTo("FDP24_DEGRADED");
         assertThat(response.postCommitAuditDegraded()).isEqualTo(1L);
+    }
+
+    @Test
+    void shouldDowngradeFailClosedWhenOutboxHasTerminalFailure() {
+        ExternalAuditIntegrityService integrityService = mock(ExternalAuditIntegrityService.class);
+        ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
+        AuditDegradationService degradationService = mock(AuditDegradationService.class);
+        AlertRepository alertRepository = mock(AlertRepository.class);
+        when(integrityService.coverage("alert-service", 100)).thenReturn(healthyCoverage());
+        when(sink.capabilities()).thenReturn(verifiedCapabilities());
+        when(degradationService.unresolvedPostCommitDegradedCount()).thenReturn(0L);
+        when(alertRepository.countByDecisionOutboxStatusIn(List.of(DecisionOutboxStatus.FAILED_TERMINAL, DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN)))
+                .thenReturn(1L);
+        when(alertRepository.findTopByDecisionOutboxStatusInOrderByDecidedAtAsc(List.of(DecisionOutboxStatus.PENDING, DecisionOutboxStatus.PROCESSING, DecisionOutboxStatus.FAILED_RETRYABLE)))
+                .thenReturn(Optional.empty());
+        SystemTrustLevelController controller = new SystemTrustLevelController(
+                true,
+                true,
+                true,
+                true,
+                true,
+                Duration.ofMinutes(10),
+                integrityService,
+                sink,
+                degradationService,
+                alertRepository
+        );
+
+        SystemTrustLevelResponse response = controller.trustLevel();
+
+        assertThat(response.guaranteeLevel()).isEqualTo("FDP24_DEGRADED");
+        assertThat(response.outboxFailedTerminalCount()).isEqualTo(1L);
+        assertThat(response.reasonCode()).isEqualTo("OUTBOX_TERMINAL_FAILURE");
     }
 
     private ExternalAuditAnchorCoverageResponse healthyCoverage() {

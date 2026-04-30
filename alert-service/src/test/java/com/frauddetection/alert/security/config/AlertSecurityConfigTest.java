@@ -80,6 +80,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -170,7 +171,7 @@ class AlertSecurityConfigTest {
 
     @BeforeEach
     void allowCoverageRateLimit() {
-        when(externalAuditCoverageRateLimiter.allow()).thenReturn(true);
+        when(externalAuditCoverageRateLimiter.allow(any(), anyInt())).thenReturn(true);
     }
 
     @Test

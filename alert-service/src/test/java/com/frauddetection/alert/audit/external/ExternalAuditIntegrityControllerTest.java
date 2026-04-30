@@ -18,7 +18,7 @@ class ExternalAuditIntegrityControllerTest {
         ExternalAuditIntegrityService service = mock(ExternalAuditIntegrityService.class);
         ExternalAuditCoverageRateLimiter rateLimiter = mock(ExternalAuditCoverageRateLimiter.class);
         ExternalAuditIntegrityController controller = new ExternalAuditIntegrityController(service, rateLimiter);
-        when(rateLimiter.allow()).thenReturn(false);
+        when(rateLimiter.allow("ip:unknown", 100)).thenReturn(false);
 
         assertThatThrownBy(() -> controller.coverage("alert-service", 100, 1L))
                 .isInstanceOfSatisfying(ResponseStatusException.class, exception ->
@@ -42,7 +42,7 @@ class ExternalAuditIntegrityControllerTest {
                 null,
                 null
         );
-        when(rateLimiter.allow()).thenReturn(true);
+        when(rateLimiter.allow("ip:unknown", 100)).thenReturn(true);
         when(service.coverage("alert-service", 100, 1L)).thenReturn(response);
 
         ExternalAuditAnchorCoverageResponse actual = controller.coverage("alert-service", 100, 1L);

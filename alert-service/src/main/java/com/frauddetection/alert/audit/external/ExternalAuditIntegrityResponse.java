@@ -222,10 +222,7 @@ public record ExternalAuditIntegrityResponse(
         if (externalAnchor == null) {
             return "LOCAL_ONLY";
         }
-        if ("VALID".equals(signatureVerificationStatus)) {
-            return "EXTERNAL_VERIFIED";
-        }
-        if (signingKeyId != null && !signingKeyId.isBlank()) {
+        if ("VALID".equals(signatureVerificationStatus) || (signingKeyId != null && !signingKeyId.isBlank())) {
             return "EXTERNAL_SIGNED";
         }
         return "EXTERNAL_UNSIGNED";
