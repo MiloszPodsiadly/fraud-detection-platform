@@ -430,6 +430,120 @@ class ExternalAuditAnchorSinkConfigurationTest {
     }
 
     @Test
+    void shouldFailClosedWhenEnabledObjectStoreWitnessDoesNotSupportVersioning() {
+        ObjectStoreAuditAnchorClient client = mock(ObjectStoreAuditAnchorClient.class);
+        AtomicReference<byte[]> probe = new AtomicReference<>();
+        when(client.listKeys("audit-bucket", "audit-anchors", 1)).thenReturn(List.of());
+        when(client.immutabilityLevel("audit-bucket", "audit-anchors")).thenReturn(ExternalImmutabilityLevel.ENFORCED);
+        when(client.capabilities("audit-bucket", "audit-anchors")).thenReturn(ExternalWitnessCapabilities.objectStore(
+                "test-witness",
+                ExternalWitnessIndependenceLevel.SEPARATE_ACCOUNT.name(),
+                ExternalImmutabilityLevel.ENFORCED,
+                true,
+                true,
+                true,
+                true,
+                ExternalWitnessTimestampType.STORAGE_OBSERVED,
+                ExternalTimestampTrustLevel.MEDIUM.name(),
+                false,
+                true,
+                false,
+                ExternalDurabilityGuarantee.WITNESS_RETENTION
+        ));
+        org.mockito.Mockito.doAnswer(invocation -> {
+            probe.set(invocation.getArgument(2));
+            return null;
+        }).when(client).putObjectIfAbsent(
+                org.mockito.Mockito.eq("audit-bucket"),
+                org.mockito.Mockito.eq("audit-anchors/.healthcheck/test-instance.json"),
+                org.mockito.Mockito.any()
+        );
+        when(client.getObject("audit-bucket", "audit-anchors/.healthcheck/test-instance.json"))
+                .thenAnswer(invocation -> Optional.of(probe.get()));
+
+        assertThatThrownBy(() -> configuration.externalAuditAnchorSink(
+                new ObjectMapper().findAndRegisterModules(),
+                objectStoreClient(client),
+                metrics(),
+                new StandardEnvironment(),
+                true,
+                "object-store",
+                "./target/test-audit-external-anchors.jsonl",
+                false,
+                "audit-bucket",
+                "audit-anchors",
+                "eu-central-1",
+                "",
+                "access-key",
+                "secret-key",
+                true,
+                false,
+                Duration.ofSeconds(2),
+                Duration.ZERO,
+                2,
+                "test-instance"
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("witness capabilities are not verified");
+    }
+
+    @Test
+    void shouldFailClosedWhenEnabledObjectStoreWitnessDoesNotSupportRetention() {
+        ObjectStoreAuditAnchorClient client = mock(ObjectStoreAuditAnchorClient.class);
+        AtomicReference<byte[]> probe = new AtomicReference<>();
+        when(client.listKeys("audit-bucket", "audit-anchors", 1)).thenReturn(List.of());
+        when(client.immutabilityLevel("audit-bucket", "audit-anchors")).thenReturn(ExternalImmutabilityLevel.ENFORCED);
+        when(client.capabilities("audit-bucket", "audit-anchors")).thenReturn(ExternalWitnessCapabilities.objectStore(
+                "test-witness",
+                ExternalWitnessIndependenceLevel.SEPARATE_ACCOUNT.name(),
+                ExternalImmutabilityLevel.ENFORCED,
+                true,
+                true,
+                true,
+                true,
+                ExternalWitnessTimestampType.STORAGE_OBSERVED,
+                ExternalTimestampTrustLevel.MEDIUM.name(),
+                true,
+                false,
+                false,
+                ExternalDurabilityGuarantee.WITNESS_RETENTION
+        ));
+        org.mockito.Mockito.doAnswer(invocation -> {
+            probe.set(invocation.getArgument(2));
+            return null;
+        }).when(client).putObjectIfAbsent(
+                org.mockito.Mockito.eq("audit-bucket"),
+                org.mockito.Mockito.eq("audit-anchors/.healthcheck/test-instance.json"),
+                org.mockito.Mockito.any()
+        );
+        when(client.getObject("audit-bucket", "audit-anchors/.healthcheck/test-instance.json"))
+                .thenAnswer(invocation -> Optional.of(probe.get()));
+
+        assertThatThrownBy(() -> configuration.externalAuditAnchorSink(
+                new ObjectMapper().findAndRegisterModules(),
+                objectStoreClient(client),
+                metrics(),
+                new StandardEnvironment(),
+                true,
+                "object-store",
+                "./target/test-audit-external-anchors.jsonl",
+                false,
+                "audit-bucket",
+                "audit-anchors",
+                "eu-central-1",
+                "",
+                "access-key",
+                "secret-key",
+                true,
+                false,
+                Duration.ofSeconds(2),
+                Duration.ZERO,
+                2,
+                "test-instance"
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("witness capabilities are not verified");
+    }
+
+    @Test
     void shouldFailClosedWhenEnabledWitnessOnlyProvidesApplicationObservedTimestamp() {
         ObjectStoreAuditAnchorClient client = mock(ObjectStoreAuditAnchorClient.class);
         AtomicReference<byte[]> probe = new AtomicReference<>();

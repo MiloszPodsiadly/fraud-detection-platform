@@ -314,7 +314,7 @@ class AlertSecurityConfigTest {
 
     @Test
     void shouldAllowAnalystToSubmitDecision() throws Exception {
-        when(alertManagementUseCase.submitDecision(eq("alert-1"), any()))
+        when(alertManagementUseCase.submitDecision(eq("alert-1"), any(), any()))
                 .thenReturn(new SubmitAnalystDecisionResponse(
                         "alert-1",
                         AnalystDecision.CONFIRMED_FRAUD,
@@ -360,7 +360,7 @@ class AlertSecurityConfigTest {
 
     @Test
     void shouldAllowFraudOpsAdminToSubmitDecision() throws Exception {
-        when(alertManagementUseCase.submitDecision(eq("alert-1"), any()))
+        when(alertManagementUseCase.submitDecision(eq("alert-1"), any(), any()))
                 .thenReturn(new SubmitAnalystDecisionResponse(
                         "alert-1",
                         AnalystDecision.CONFIRMED_FRAUD,
@@ -385,7 +385,7 @@ class AlertSecurityConfigTest {
                 .thenReturn(new AuditIntegrityResponse("VALID", 0, 100, "HEAD", false, false, false, null, null, null, null, null, null, List.of()));
         when(externalAuditIntegrityService.verify(any(), any()))
                 .thenReturn(new ExternalAuditIntegrityResponse("VALID", 0, 100, "alert-service", "source_service:alert-service", null, null, null, null, List.of()));
-        when(externalAuditIntegrityService.coverage(any(), any()))
+        when(externalAuditIntegrityService.coverage(any(), any(), any()))
                 .thenReturn(new ExternalAuditAnchorCoverageResponse("AVAILABLE", 0, 0, 0, null, List.of(), false, 100, null, null));
         when(auditEvidenceExportService.export(any(), any(), any(), any(), any(Boolean.class)))
                 .thenReturn(new AuditEvidenceExportResponse(
@@ -487,7 +487,7 @@ class AlertSecurityConfigTest {
     void shouldRequireDedicatedFdp20AuthoritiesInsteadOfAuditRead() throws Exception {
         when(externalAuditIntegrityService.verify(any(), any()))
                 .thenReturn(new ExternalAuditIntegrityResponse("VALID", 0, 100, "alert-service", "source_service:alert-service", null, null, null, null, List.of()));
-        when(externalAuditIntegrityService.coverage(any(), any()))
+        when(externalAuditIntegrityService.coverage(any(), any(), any()))
                 .thenReturn(new ExternalAuditAnchorCoverageResponse("AVAILABLE", 0, 0, 0, null, List.of(), false, 100, null, null));
         when(auditEvidenceExportService.export(any(), any(), any(), any(), any(Boolean.class)))
                 .thenReturn(new AuditEvidenceExportResponse(

@@ -15,7 +15,11 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ExternalAuditIntegrityServiceTest {
@@ -561,14 +565,37 @@ class ExternalAuditIntegrityServiceTest {
     void shouldReturnBoundedCoverageWithVisibleMissingRanges() {
         AuditAnchorRepository repository = mock(AuditAnchorRepository.class);
         ObjectStoreExternalAuditAnchorSink objectStoreSink = objectStoreSink();
+        ExternalAuditAnchorPublicationStatusRepository publicationRepository =
+                mock(ExternalAuditAnchorPublicationStatusRepository.class);
         objectStoreSink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), objectStoreSink.sinkType()));
         objectStoreSink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-2", 2L, "hash-2"), objectStoreSink.sinkType()));
         objectStoreSink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-3", 3L, "hash-3"), objectStoreSink.sinkType()));
         objectStoreSink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-5", 5L, "hash-5"), objectStoreSink.sinkType()));
+        List<AuditAnchorDocument> anchors = List.of(
+                localAnchor("local-anchor-1", 1L, "hash-1"),
+                localAnchor("local-anchor-2", 2L, "hash-2"),
+                localAnchor("local-anchor-3", 3L, "hash-3"),
+                localAnchor("local-anchor-4", 4L, "hash-4"),
+                localAnchor("local-anchor-5", 5L, "hash-5")
+        );
         when(repository.findLatestByPartitionKey("source_service:alert-service"))
                 .thenReturn(Optional.of(localAnchor("local-anchor-5", 5L, "hash-5")));
+        when(repository.findByPartitionKeyAndChainPositionBetween("source_service:alert-service", 1L, 5L, 5))
+                .thenReturn(anchors);
+        when(publicationRepository.findByLocalAnchorIds(List.of(
+                "local-anchor-1",
+                "local-anchor-2",
+                "local-anchor-3",
+                "local-anchor-4",
+                "local-anchor-5"
+        ))).thenReturn(List.of(
+                publicationStatusFor("local-anchor-1", 1L, ExternalAuditAnchor.STATUS_PUBLISHED),
+                publicationStatusFor("local-anchor-2", 2L, ExternalAuditAnchor.STATUS_PUBLISHED),
+                publicationStatusFor("local-anchor-3", 3L, ExternalAuditAnchor.STATUS_PUBLISHED),
+                publicationStatusFor("local-anchor-5", 5L, ExternalAuditAnchor.STATUS_PUBLISHED)
+        ));
 
-        ExternalAuditAnchorCoverageResponse response = objectStoreIntegrityService(repository, objectStoreSink)
+        ExternalAuditAnchorCoverageResponse response = objectStoreIntegrityService(repository, objectStoreSink, publicationRepository)
                 .coverage("alert-service", 5);
 
         assertThat(response.status()).isEqualTo("AVAILABLE");
@@ -579,6 +606,52 @@ class ExternalAuditIntegrityServiceTest {
         assertThat(response.missingRanges())
                 .extracting(ExternalAuditAnchorMissingRange::fromChainPosition, ExternalAuditAnchorMissingRange::toChainPosition)
                 .containsExactly(org.assertj.core.groups.Tuple.tuple(4L, 4L));
+    }
+
+    @Test
+    void shouldBuildCoverageFromPublicationStatusWithoutPerPositionExternalReads() {
+        AuditAnchorRepository repository = mock(AuditAnchorRepository.class);
+        ExternalAuditAnchorSink objectStoreSink = mock(ExternalAuditAnchorSink.class);
+        ExternalAuditAnchorPublicationStatusRepository publicationRepository =
+                mock(ExternalAuditAnchorPublicationStatusRepository.class);
+        AuditAnchorDocument latest = localAnchor("local-anchor-5", 5L, "hash-5");
+        List<AuditAnchorDocument> anchors = List.of(
+                localAnchor("local-anchor-1", 1L, "hash-1"),
+                localAnchor("local-anchor-2", 2L, "hash-2"),
+                localAnchor("local-anchor-3", 3L, "hash-3"),
+                localAnchor("local-anchor-4", 4L, "hash-4"),
+                latest
+        );
+        when(repository.findLatestByPartitionKey("source_service:alert-service")).thenReturn(Optional.of(latest));
+        when(repository.findByPartitionKeyAndChainPositionBetween("source_service:alert-service", 1L, 5L, 5))
+                .thenReturn(anchors);
+        when(objectStoreSink.latest("source_service:alert-service")).thenReturn(Optional.of(external(latest)));
+        when(publicationRepository.findByLocalAnchorIds(List.of(
+                "local-anchor-1",
+                "local-anchor-2",
+                "local-anchor-3",
+                "local-anchor-4",
+                "local-anchor-5"
+        ))).thenReturn(List.of(
+                publicationStatus("UNSIGNED", ExternalAuditAnchor.STATUS_PUBLISHED, "RECORDED", false),
+                publicationStatusFor("local-anchor-2", 2L, ExternalAuditAnchor.STATUS_PUBLISHED),
+                publicationStatusFor("local-anchor-3", 3L, ExternalAuditAnchor.STATUS_PUBLISHED),
+                publicationStatusFor("local-anchor-5", 5L, ExternalAuditAnchor.STATUS_PUBLISHED)
+        ));
+
+        ExternalAuditAnchorCoverageResponse response = objectStoreIntegrityService(repository, objectStoreSink, publicationRepository)
+                .coverage("alert-service", 5, 1L);
+
+        assertThat(response.missingRanges())
+                .extracting(ExternalAuditAnchorMissingRange::fromChainPosition, ExternalAuditAnchorMissingRange::toChainPosition)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(4L, 4L));
+        verify(objectStoreSink, never()).findByChainPosition(anyString(), anyLong());
+    }
+
+    @Test
+    void shouldRejectCoverageLimitAboveOneHundred() {
+        assertThatThrownBy(() -> service.coverage("alert-service", 101))
+                .isInstanceOf(com.frauddetection.alert.audit.InvalidAuditEventQueryException.class);
     }
 
     @Test
@@ -619,10 +692,20 @@ class ExternalAuditIntegrityServiceTest {
         AuditAnchorDocument local = localAnchor("local-anchor-2", 2L, "hash-2");
         when(repository.findLatestByPartitionKey("source_service:alert-service")).thenReturn(Optional.of(local));
         when(repository.findHeadWindow("source_service:alert-service", 5)).thenReturn(List.of(local));
+        when(repository.findByPartitionKeyAndChainPositionBetween("source_service:alert-service", 1L, 2L, 2))
+                .thenReturn(List.of(
+                        localAnchor("local-anchor-1", 1L, "hash-1"),
+                        local
+                ));
         when(objectStoreSink.latest("source_service:alert-service")).thenReturn(Optional.of(external(local)));
         when(objectStoreSink.findByChainPosition("source_service:alert-service", 1L))
                 .thenReturn(Optional.of(external(localAnchor("local-anchor-1", 1L, "hash-1"))));
         when(objectStoreSink.findByChainPosition("source_service:alert-service", 2L)).thenReturn(Optional.of(external(local)));
+        when(publicationRepository.findByLocalAnchorIds(List.of("local-anchor-1", "local-anchor-2")))
+                .thenReturn(List.of(
+                        publicationStatusFor("local-anchor-1", 1L, ExternalAuditAnchor.STATUS_PUBLISHED),
+                        publicationStatusFor("local-anchor-2", 2L, ExternalAuditAnchor.STATUS_PUBLISHED)
+                ));
         when(publicationRepository.findByLocalAnchorId("local-anchor-2"))
                 .thenReturn(Optional.of(publicationStatus("UNSIGNED", ExternalAuditAnchor.STATUS_PUBLISHED, "RECOVERED", false)));
 
@@ -780,6 +863,45 @@ class ExternalAuditIntegrityServiceTest {
                 new ExternalAuditIntegrityQueryParser(),
                 new AlertServiceMetrics(registry),
                 mock(AuditService.class)
+        );
+    }
+
+    private ExternalAuditAnchorPublicationStatusDocument publicationStatusFor(
+            String localAnchorId,
+            long chainPosition,
+            String externalPublicationStatus
+    ) {
+        return new ExternalAuditAnchorPublicationStatusDocument(
+                localAnchorId,
+                "source_service:alert-service",
+                chainPosition,
+                ExternalAuditAnchor.STATUS_PUBLISHED.equals(externalPublicationStatus),
+                externalPublicationStatus,
+                ExternalAuditAnchor.STATUS_PUBLISHED.equals(externalPublicationStatus)
+                        ? ExternalAuditAnchor.STATUS_PUBLISHED
+                        : ExternalAuditAnchor.STATUS_FAILED,
+                null,
+                "RECORDED",
+                "CREATED",
+                false,
+                Instant.parse("2026-04-27T10:01:00Z"),
+                "object-store",
+                "audit-anchors/source_service-alert-service/00000000000000000002.json",
+                "hash-" + chainPosition,
+                "hash-" + chainPosition,
+                Instant.parse("2026-04-27T10:01:00Z"),
+                "NONE",
+                null,
+                "UNSIGNED",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                1,
+                null,
+                Instant.parse("2026-04-27T10:01:00Z")
         );
     }
 

@@ -137,4 +137,27 @@ class AuditMutationRecorderTest {
                 null
         );
     }
+
+    @Test
+    void shouldExposeOperationResultWhenSuccessAuditFailsAfterOperation() {
+        doThrow(new AuditPersistenceUnavailableException()).when(auditService).audit(
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT,
+                "alert-1",
+                "corr-1",
+                "actor-1",
+                AuditOutcome.SUCCESS,
+                null
+        );
+
+        assertThatThrownBy(() -> recorder.record(
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT,
+                "alert-1",
+                "corr-1",
+                "actor-1",
+                () -> "saved"
+        )).isInstanceOfSatisfying(PostCommitAuditDegradedException.class, exception ->
+                assertThat(exception.<String>result()).isEqualTo("saved"));
+    }
 }

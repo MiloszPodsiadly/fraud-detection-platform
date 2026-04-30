@@ -1,6 +1,7 @@
 package com.frauddetection.alert.audit;
 
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.audit.external.AuditEventPublicationStatusLookup;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -28,13 +29,15 @@ class AuditEventReadServiceTest {
     private final MongoTemplate mongoTemplate = mock(MongoTemplate.class);
     private final AuditService auditService = mock(AuditService.class);
     private final AuditEventCompensationLookup compensationLookup = mock(AuditEventCompensationLookup.class);
+    private final AuditEventPublicationStatusLookup publicationStatusLookup = mock(AuditEventPublicationStatusLookup.class);
     private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
     private final AuditEventReadService service = new AuditEventReadService(
             mongoTemplate,
             new AuditEventQueryParser(Clock.fixed(Instant.parse("2026-04-26T10:00:00Z"), ZoneOffset.UTC)),
             new AlertServiceMetrics(meterRegistry),
             auditService,
-            compensationLookup
+            compensationLookup,
+            publicationStatusLookup
     );
 
     @Test
@@ -51,6 +54,8 @@ class AuditEventReadServiceTest {
         ));
         when(mongoTemplate.find(org.mockito.ArgumentMatchers.any(Query.class), eq(AuditEventDocument.class)))
                 .thenReturn(List.of(document));
+        when(publicationStatusLookup.statusesByAuditEventId(List.of(document)))
+                .thenReturn(java.util.Map.of("audit-1", AuditExternalAnchorStatus.PUBLISHED));
 
         AuditEventReadResponse response = service.readEvents(
                 "SUBMIT_ANALYST_DECISION",
@@ -98,8 +103,8 @@ class AuditEventReadServiceTest {
         assertThat(event.hashAlgorithm()).isEqualTo("SHA-256");
         assertThat(event.businessEffective()).isTrue();
         assertThat(event.businessEffectiveStatus()).isEqualTo(BusinessEffectiveStatus.TRUE);
-        assertThat(event.auditEvidenceStatus()).isEqualTo(AuditEvidenceStatus.LOCAL_ONLY);
-        assertThat(event.externalAnchorStatus()).isEqualTo(AuditExternalAnchorStatus.LOCAL_STATUS_UNVERIFIED);
+        assertThat(event.auditEvidenceStatus()).isEqualTo(AuditEvidenceStatus.EXTERNALLY_ANCHORED);
+        assertThat(event.externalAnchorStatus()).isEqualTo(AuditExternalAnchorStatus.PUBLISHED);
         assertThat(event.compensationType()).isEqualTo(CompensationType.UNKNOWN);
         assertThat(event.compensated()).isFalse();
         verify(auditService).audit(
@@ -139,6 +144,11 @@ class AuditEventReadServiceTest {
         ), attempted.eventHash(), 2L);
         when(mongoTemplate.find(org.mockito.ArgumentMatchers.any(Query.class), eq(AuditEventDocument.class)))
                 .thenReturn(List.of(aborted, attempted));
+        when(publicationStatusLookup.statusesByAuditEventId(List.of(aborted, attempted)))
+                .thenReturn(java.util.Map.of(
+                        "audit-aborted", AuditExternalAnchorStatus.FAILED,
+                        "audit-attempted", AuditExternalAnchorStatus.FAILED
+                ));
 
         AuditEventReadResponse response = service.readEvents(null, null, null, null, null, null, 50);
 
@@ -186,6 +196,8 @@ class AuditEventReadServiceTest {
                 .thenReturn(List.of(success));
         when(compensationLookup.findExternalAnchorAbortCompensations(List.of(success)))
                 .thenReturn(List.of(compensation));
+        when(publicationStatusLookup.statusesByAuditEventId(List.of(success)))
+                .thenReturn(java.util.Map.of("audit-success", AuditExternalAnchorStatus.FAILED));
 
         AuditEventReadResponse response = service.readEvents(null, null, null, null, null, null, 1);
 
@@ -217,8 +229,8 @@ class AuditEventReadServiceTest {
 
         assertThat(event.businessEffective()).isFalse();
         assertThat(event.businessEffectiveStatus()).isEqualTo(BusinessEffectiveStatus.FALSE);
-        assertThat(event.auditEvidenceStatus()).isEqualTo(AuditEvidenceStatus.LOCAL_ONLY);
-        assertThat(event.externalAnchorStatus()).isEqualTo(AuditExternalAnchorStatus.LOCAL_STATUS_UNVERIFIED);
+        assertThat(event.auditEvidenceStatus()).isEqualTo(AuditEvidenceStatus.UNAVAILABLE);
+        assertThat(event.externalAnchorStatus()).isEqualTo(AuditExternalAnchorStatus.UNKNOWN);
         assertThat(event.compensationType()).isEqualTo(CompensationType.BUSINESS_WRITE_FAILURE);
     }
 
