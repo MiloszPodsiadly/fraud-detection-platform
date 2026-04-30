@@ -75,8 +75,66 @@ public record ExternalAuditIntegrityResponse(
         List<String> witnessSources,
 
         @JsonProperty("violations")
-        List<AuditIntegrityViolation> violations
+        List<AuditIntegrityViolation> violations,
+
+        @JsonProperty("integrity_status")
+        String integrityStatus,
+
+        @JsonProperty("trust_level")
+        String trustLevel,
+
+        @JsonProperty("signature_policy")
+        String signaturePolicy
 ) {
+    public ExternalAuditIntegrityResponse(
+            String status,
+            int checked,
+            int limit,
+            String sourceService,
+            String partitionKey,
+            String reasonCode,
+            String message,
+            ExternalAuditAnchorSummary localAnchor,
+            ExternalAuditAnchorSummary externalAnchor,
+            ExternalImmutabilityLevel externalImmutabilityLevel,
+            ExternalDurabilityGuarantee durabilityGuarantee,
+            String timestampTrustLevel,
+            String signatureVerificationStatus,
+            String signingKeyId,
+            String signingAlgorithm,
+            String signingAuthority,
+            String signatureReasonCode,
+            List<String> conflictingHashes,
+            List<String> witnessSources,
+            List<AuditIntegrityViolation> violations
+    ) {
+        this(
+                status,
+                checked,
+                limit,
+                sourceService,
+                partitionKey,
+                reasonCode,
+                message,
+                localAnchor,
+                externalAnchor,
+                externalImmutabilityLevel,
+                durabilityGuarantee,
+                timestampTrustLevel,
+                signatureVerificationStatus,
+                signingKeyId,
+                signingAlgorithm,
+                signingAuthority,
+                signatureReasonCode,
+                conflictingHashes,
+                witnessSources,
+                violations,
+                status,
+                trustLevel(externalAnchor, signatureVerificationStatus, signingKeyId),
+                signaturePolicy(signatureVerificationStatus, reasonCode)
+        );
+    }
+
     public ExternalAuditIntegrityResponse(
             String status,
             int checked,
@@ -154,5 +212,32 @@ public record ExternalAuditIntegrityResponse(
                 List.of(),
                 List.of()
         );
+    }
+
+    private static String trustLevel(
+            ExternalAuditAnchorSummary externalAnchor,
+            String signatureVerificationStatus,
+            String signingKeyId
+    ) {
+        if (externalAnchor == null) {
+            return "LOCAL_ONLY";
+        }
+        if ("VALID".equals(signatureVerificationStatus)) {
+            return "EXTERNAL_VERIFIED";
+        }
+        if (signingKeyId != null && !signingKeyId.isBlank()) {
+            return "EXTERNAL_SIGNED";
+        }
+        return "EXTERNAL_UNSIGNED";
+    }
+
+    private static String signaturePolicy(String signatureVerificationStatus, String reasonCode) {
+        if (reasonCode != null && reasonCode.contains("REQUIRED")) {
+            return "REQUIRED_FOR_PUBLICATION";
+        }
+        if ("VALID".equals(signatureVerificationStatus)) {
+            return "REQUIRED_FOR_TRUST";
+        }
+        return "OPTIONAL";
     }
 }

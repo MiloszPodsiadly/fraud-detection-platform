@@ -9,6 +9,7 @@ import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
 import java.util.List;
+import java.util.Set;
 
 @Repository
 public class AuditAnchorRepository {
@@ -50,6 +51,22 @@ public class AuditAnchorRepository {
         ))
                 .with(Sort.by(Sort.Direction.ASC, "chain_position"))
                 .limit(limit);
+        return mongoTemplate.find(query, AuditAnchorDocument.class);
+    }
+
+    public List<AuditAnchorDocument> findByPartitionKeyAndChainPositionIn(
+            String partitionKey,
+            Set<Long> chainPositions
+    ) throws DataAccessException {
+        if (chainPositions == null || chainPositions.isEmpty()) {
+            return List.of();
+        }
+        Query query = new Query(new Criteria().andOperator(
+                Criteria.where("partition_key").is(partitionKey),
+                Criteria.where("chain_position").in(chainPositions)
+        ))
+                .with(Sort.by(Sort.Direction.ASC, "chain_position"))
+                .limit(Math.min(chainPositions.size(), 100));
         return mongoTemplate.find(query, AuditAnchorDocument.class);
     }
 

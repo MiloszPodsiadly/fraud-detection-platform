@@ -134,19 +134,19 @@ public record ExternalWitnessCapabilities(
         );
     }
 
-    boolean supportsReadAfterWrite() {
+    public boolean supportsReadAfterWrite() {
         return readAfterWrite;
     }
 
-    boolean supportsStableReference() {
+    public boolean supportsStableReference() {
         return stableReference;
     }
 
-    boolean supportsWriteOnce() {
+    public boolean supportsWriteOnce() {
         return overwriteProtection;
     }
 
-    boolean supportsDeleteDenialOrRetention() {
+    public boolean supportsDeleteDenialOrRetention() {
         return deleteProtection || supportsRetention;
     }
 

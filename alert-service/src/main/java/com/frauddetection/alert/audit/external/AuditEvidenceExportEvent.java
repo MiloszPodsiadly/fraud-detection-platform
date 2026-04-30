@@ -81,6 +81,24 @@ public record AuditEvidenceExportEvent(
         @JsonProperty("external_anchor_status")
         AuditExternalAnchorStatus externalAnchorStatus,
 
+        @JsonProperty("trust_level")
+        String trustLevel,
+
+        @JsonProperty("integrity_status")
+        String integrityStatus,
+
+        @JsonProperty("signature_policy")
+        String signaturePolicy,
+
+        @JsonProperty("signature_status")
+        String signatureStatus,
+
+        @JsonProperty("evidence_source")
+        String evidenceSource,
+
+        @JsonProperty("confidence")
+        String confidence,
+
         @JsonProperty("compensation_type")
         CompensationType compensationType,
 
@@ -115,6 +133,12 @@ public record AuditEvidenceExportEvent(
                 semantics.businessEffectiveStatus(),
                 auditEvidenceStatus(externalAnchor, semantics),
                 externalAnchorStatus(externalAnchor, semantics),
+                trustLevel(externalAnchor),
+                integrityStatus(externalAnchor, semantics),
+                signaturePolicy(externalAnchor),
+                signatureStatus(externalAnchor),
+                evidenceSource(localAnchor, externalAnchor),
+                confidence(externalAnchor),
                 semantics.compensationType(),
                 semantics.relatedEventId()
         );
@@ -138,5 +162,54 @@ public record AuditEvidenceExportEvent(
             return AuditExternalAnchorStatus.FAILED;
         }
         return externalAnchor == null ? AuditExternalAnchorStatus.MISSING : AuditExternalAnchorStatus.PUBLISHED;
+    }
+
+    private static String trustLevel(AuditEvidenceExportAnchorReference externalAnchor) {
+        if (externalAnchor == null) {
+            return "LOCAL_ONLY";
+        }
+        return "SIGNED".equals(externalAnchor.signatureStatus()) ? "EXTERNAL_SIGNED" : "EXTERNAL_UNSIGNED";
+    }
+
+    private static String integrityStatus(
+            AuditEvidenceExportAnchorReference externalAnchor,
+            AuditEventBusinessSemantics semantics
+    ) {
+        if (semantics.auditEvidenceStatus() == AuditEvidenceStatus.ANCHOR_REQUIRED_FAILED) {
+            return "INVALID";
+        }
+        return externalAnchor == null ? "PARTIAL" : "VALID";
+    }
+
+    private static String signaturePolicy(AuditEvidenceExportAnchorReference externalAnchor) {
+        return externalAnchor != null && "SIGNED".equals(externalAnchor.signatureStatus())
+                ? "REQUIRED_FOR_TRUST"
+                : "OPTIONAL";
+    }
+
+    private static String signatureStatus(AuditEvidenceExportAnchorReference externalAnchor) {
+        if (externalAnchor == null || externalAnchor.signatureStatus() == null) {
+            return "UNSIGNED";
+        }
+        return externalAnchor.signatureStatus();
+    }
+
+    private static String evidenceSource(
+            AuditEvidenceExportAnchorReference localAnchor,
+            AuditEvidenceExportAnchorReference externalAnchor
+    ) {
+        if (externalAnchor != null) {
+            return externalAnchor.signatureStatus() == null ? "EXTERNAL_WITNESS" : "ARTIFACT_VERIFIER";
+        }
+        return localAnchor == null ? "PUBLICATION_STATUS_REPO" : "LOCAL_CHAIN";
+    }
+
+    private static String confidence(AuditEvidenceExportAnchorReference externalAnchor) {
+        if (externalAnchor == null) {
+            return "STRUCTURAL_VALID";
+        }
+        return "SIGNED".equals(externalAnchor.signatureStatus())
+                ? "EXTERNALLY_ANCHORED_SIGNED"
+                : "EXTERNALLY_ANCHORED_UNSIGNED";
     }
 }

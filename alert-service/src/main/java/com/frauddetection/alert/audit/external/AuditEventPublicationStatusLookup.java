@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -30,19 +31,11 @@ public class AuditEventPublicationStatusLookup {
         if (documents == null || documents.isEmpty()) {
             return Map.of();
         }
-        long min = documents.stream()
+        Set<Long> positions = documents.stream()
                 .map(AuditEventDocument::chainPosition)
                 .filter(position -> position != null && position > 0)
-                .mapToLong(Long::longValue)
-                .min()
-                .orElse(0L);
-        long max = documents.stream()
-                .map(AuditEventDocument::chainPosition)
-                .filter(position -> position != null && position > 0)
-                .mapToLong(Long::longValue)
-                .max()
-                .orElse(0L);
-        if (min <= 0 || max <= 0) {
+                .collect(Collectors.toSet());
+        if (positions.isEmpty()) {
             return Map.of();
         }
         String partitionKey = documents.stream()
@@ -50,12 +43,7 @@ public class AuditEventPublicationStatusLookup {
                 .filter(value -> value != null && !value.isBlank())
                 .findFirst()
                 .orElse("source_service:alert-service");
-        List<AuditAnchorDocument> anchors = anchorRepository.findByPartitionKeyAndChainPositionBetween(
-                partitionKey,
-                min,
-                max,
-                Math.min(documents.size(), 100)
-        );
+        List<AuditAnchorDocument> anchors = anchorRepository.findByPartitionKeyAndChainPositionIn(partitionKey, positions);
         Map<Long, AuditAnchorDocument> anchorsByPosition = anchors.stream()
                 .collect(Collectors.toMap(AuditAnchorDocument::chainPosition, Function.identity(), (left, right) -> left));
         List<String> localAnchorIds = anchors.stream().map(AuditAnchorDocument::anchorId).toList();

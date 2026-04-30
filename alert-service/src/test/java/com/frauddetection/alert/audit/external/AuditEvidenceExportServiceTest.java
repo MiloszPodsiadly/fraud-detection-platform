@@ -83,7 +83,7 @@ class AuditEvidenceExportServiceTest {
                 eq(Instant.parse("2026-04-28T00:00:00Z")),
                 eq(100)
         )).thenReturn(List.of(event));
-        when(anchorRepository.findByPartitionKeyAndChainPositionBetween("source_service:alert-service", 1L, 1L, 100))
+        when(anchorRepository.findByPartitionKeyAndChainPositionIn("source_service:alert-service", Set.of(1L)))
                 .thenReturn(List.of(localAnchor));
         when(sink.findByRange(
                 "source_service:alert-service",
@@ -150,7 +150,7 @@ class AuditEvidenceExportServiceTest {
         AuditEventDocument aborted = event("audit-aborted", 2L, AuditAction.EXTERNAL_ANCHOR_REQUIRED_FAILED, AuditResourceType.AUDIT_EVENT,
                 "audit-attempted", AuditOutcome.ABORTED_EXTERNAL_ANCHOR_REQUIRED, attempted.eventHash(), "ExternalAuditAnchorPublicationRequiredException:WRITE_NOT_VERIFIED");
         when(eventRepository.findEvidenceWindow(any(), any(), any(), anyInt())).thenReturn(List.of(attempted, aborted));
-        when(anchorRepository.findByPartitionKeyAndChainPositionBetween("source_service:alert-service", 1L, 2L, 100))
+        when(anchorRepository.findByPartitionKeyAndChainPositionIn("source_service:alert-service", Set.of(1L, 2L)))
                 .thenReturn(List.of(
                         localAnchor("local-anchor-1", 1L, "hash-1"),
                         localAnchor("local-anchor-2", 2L, "hash-2")
@@ -202,7 +202,7 @@ class AuditEvidenceExportServiceTest {
                 "audit-success", AuditOutcome.ABORTED_EXTERNAL_ANCHOR_REQUIRED, success.eventHash(), "ExternalAuditAnchorPublicationRequiredException:WRITE_NOT_VERIFIED");
         when(eventRepository.findEvidenceWindow(any(), any(), any(), anyInt())).thenReturn(List.of(success));
         when(compensationLookup.findExternalAnchorAbortCompensations(List.of(success))).thenReturn(List.of(compensation));
-        when(anchorRepository.findByPartitionKeyAndChainPositionBetween("source_service:alert-service", 10L, 10L, 100))
+        when(anchorRepository.findByPartitionKeyAndChainPositionIn("source_service:alert-service", Set.of(10L)))
                 .thenReturn(List.of(localAnchor("local-anchor-10", 10L, "hash-10")));
         when(sink.findByRange(any(), any(), any(), anyInt())).thenReturn(List.of());
 
@@ -229,7 +229,7 @@ class AuditEvidenceExportServiceTest {
         AuditEventDocument event = event("audit-1", 1L);
         AuditAnchorDocument localAnchor = localAnchor("local-anchor-1", 1L, "hash-1");
         when(eventRepository.findEvidenceWindow(any(), any(), any(), anyInt())).thenReturn(List.of(event));
-        when(anchorRepository.findByPartitionKeyAndChainPositionBetween("source_service:alert-service", 1L, 1L, 100))
+        when(anchorRepository.findByPartitionKeyAndChainPositionIn("source_service:alert-service", Set.of(1L)))
                 .thenReturn(List.of(localAnchor));
         when(sink.findByRange(any(), any(), any(), anyInt()))
                 .thenThrow(new ExternalAuditAnchorSinkException("IO_ERROR", "filesystem path /internal/detail"));
@@ -257,7 +257,7 @@ class AuditEvidenceExportServiceTest {
         AuditAnchorDocument firstLocal = localAnchor("local-anchor-1", 1L, "hash-1");
         AuditAnchorDocument secondLocal = localAnchor("local-anchor-2", 2L, "hash-2");
         when(eventRepository.findEvidenceWindow(any(), any(), any(), anyInt())).thenReturn(List.of(first, second));
-        when(anchorRepository.findByPartitionKeyAndChainPositionBetween("source_service:alert-service", 1L, 2L, 100))
+        when(anchorRepository.findByPartitionKeyAndChainPositionIn("source_service:alert-service", Set.of(1L, 2L)))
                 .thenReturn(List.of(firstLocal, secondLocal));
         when(sink.findByRange(any(), any(), any(), anyInt()))
                 .thenReturn(List.of(ExternalAuditAnchor.from(firstLocal, "local-file")));
@@ -312,7 +312,7 @@ class AuditEvidenceExportServiceTest {
         AuditEventDocument event = event("audit-1", 1L);
         AuditAnchorDocument localAnchor = localAnchor("local-anchor-1", 1L, "hash-1");
         when(eventRepository.findEvidenceWindow(any(), any(), any(), anyInt())).thenReturn(List.of(event));
-        when(anchorRepository.findByPartitionKeyAndChainPositionBetween("source_service:alert-service", 1L, 1L, 100))
+        when(anchorRepository.findByPartitionKeyAndChainPositionIn("source_service:alert-service", Set.of(1L)))
                 .thenReturn(List.of(localAnchor));
 
         AuditEvidenceExportResponse response = disabledService.export(
@@ -370,7 +370,7 @@ class AuditEvidenceExportServiceTest {
         AuditEventDocument event = event("audit-1", 1L);
         AuditAnchorDocument localAnchor = localAnchor("local-anchor-1", 1L, "hash-1");
         when(eventRepository.findEvidenceWindow(any(), any(), any(), anyInt())).thenReturn(List.of(event));
-        when(anchorRepository.findByPartitionKeyAndChainPositionBetween("source_service:alert-service", 1L, 1L, 100))
+        when(anchorRepository.findByPartitionKeyAndChainPositionIn("source_service:alert-service", Set.of(1L)))
                 .thenReturn(List.of(localAnchor));
         when(sink.findByRange(any(), any(), any(), anyInt()))
                 .thenReturn(List.of(ExternalAuditAnchor.from(localAnchor, "local-file")));
@@ -425,7 +425,7 @@ class AuditEvidenceExportServiceTest {
         AuditEventDocument event = event("audit-1", 1L);
         AuditAnchorDocument localAnchor = localAnchor("local-anchor-1", 1L, "hash-1");
         when(eventRepository.findEvidenceWindow(any(), any(), any(), anyInt())).thenReturn(List.of(event));
-        when(anchorRepository.findByPartitionKeyAndChainPositionBetween("source_service:alert-service", 1L, 1L, 100))
+        when(anchorRepository.findByPartitionKeyAndChainPositionIn("source_service:alert-service", Set.of(1L)))
                 .thenReturn(List.of(localAnchor));
         when(sink.findByRange(any(), any(), any(), anyInt())).thenReturn(List.of());
 
@@ -460,7 +460,7 @@ class AuditEvidenceExportServiceTest {
         AuditEventDocument event = event("audit-1", 1L);
         AuditAnchorDocument localAnchor = localAnchor("local-anchor-1", 1L, "hash-1");
         when(eventRepository.findEvidenceWindow(any(), any(), any(), anyInt())).thenReturn(List.of(event));
-        when(anchorRepository.findByPartitionKeyAndChainPositionBetween("source_service:alert-service", 1L, 1L, 100))
+        when(anchorRepository.findByPartitionKeyAndChainPositionIn("source_service:alert-service", Set.of(1L)))
                 .thenReturn(List.of(localAnchor));
         when(sink.findByRange(any(), any(), any(), anyInt())).thenReturn(List.of());
 
@@ -481,7 +481,7 @@ class AuditEvidenceExportServiceTest {
         AuditEventDocument event = event("audit-1", 1L);
         AuditAnchorDocument localAnchor = localAnchor("local-anchor-1", 1L, "hash-1");
         when(eventRepository.findEvidenceWindow(any(), any(), any(), anyInt())).thenReturn(List.of(event));
-        when(anchorRepository.findByPartitionKeyAndChainPositionBetween("source_service:alert-service", 1L, 1L, 100))
+        when(anchorRepository.findByPartitionKeyAndChainPositionIn("source_service:alert-service", Set.of(1L)))
                 .thenReturn(List.of(localAnchor));
         when(sink.findByRange(any(), any(), any(), anyInt())).thenReturn(List.of());
 
