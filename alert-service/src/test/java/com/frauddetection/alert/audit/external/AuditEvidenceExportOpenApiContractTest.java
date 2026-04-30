@@ -23,6 +23,10 @@ class AuditEvidenceExportOpenApiContractTest {
         assertThat(openApi).contains("anchor_coverage:");
         assertThat(openApi).contains("export_fingerprint:");
         assertThat(openApi).contains("AuditEvidenceExportAnchorCoverage:");
+        assertThat(openApi).contains("business_effective_status:");
+        assertThat(openApi).contains("audit_evidence_status:");
+        assertThat(openApi).contains("compensation_type:");
+        assertThat(openApi).contains("ANCHOR_REQUIRED_FAILED");
     }
 
     private Path openApiPath() {

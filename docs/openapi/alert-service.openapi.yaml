@@ -698,6 +698,10 @@ components:
         - compensated
         - superseded_by_event_id
         - business_effective
+        - business_effective_status
+        - audit_evidence_status
+        - external_anchor_status
+        - compensation_type
         - related_event_id
       properties:
         audit_event_id:
@@ -777,7 +781,23 @@ components:
           description: Audit event id of the compensating event when compensated=true.
         business_effective:
           type: boolean
-          description: Clients must use this field rather than outcome alone. True only for uncompensated SUCCESS business events; false for ATTEMPTED, FAILED, REJECTED, ABORTED events, and compensated SUCCESS events.
+          description: Backward-compatible boolean derived from business_effective_status. External anchor compensation after a committed SUCCESS does not make this false.
+        business_effective_status:
+          type: string
+          enum: [TRUE, FALSE, UNKNOWN]
+          description: Authoritative business truth. TRUE means the business write succeeded; FALSE means it did not happen; UNKNOWN is reserved for cases where the audit record cannot prove business state.
+        audit_evidence_status:
+          type: string
+          enum: [EXTERNALLY_ANCHORED, LOCAL_ONLY, ANCHOR_REQUIRED_FAILED, UNAVAILABLE, COMPENSATED]
+          description: Audit proof state. ANCHOR_REQUIRED_FAILED means the business event may be real while external proof failed.
+        external_anchor_status:
+          type: string
+          enum: [PUBLISHED, UNVERIFIED, FAILED, MISSING, CONFLICT, LOCAL_STATUS_UNVERIFIED]
+          description: Per-event external anchor interpretation. Audit read without anchor lookup uses LOCAL_STATUS_UNVERIFIED unless a required anchor failure compensation is known.
+        compensation_type:
+          type: string
+          enum: [EXTERNAL_ANCHOR_FAILURE, BUSINESS_WRITE_FAILURE, MANUAL_REVERSAL, UNKNOWN]
+          description: Compensation reason. EXTERNAL_ANCHOR_FAILURE is evidence compensation only and is not a business rollback.
         related_event_id:
           type: string
           nullable: true
@@ -1250,7 +1270,7 @@ components:
     AuditEvidenceExportEvent:
       type: object
       additionalProperties: false
-      required: [audit_event_id, event_type, actor_id, actor_roles, resource_type, action, outcome, occurred_at, metadata_summary, event_hash, chain_position, compensated, superseded_by_event_id, business_effective, related_event_id]
+      required: [audit_event_id, event_type, actor_id, actor_roles, resource_type, action, outcome, occurred_at, metadata_summary, event_hash, chain_position, compensated, superseded_by_event_id, business_effective, business_effective_status, audit_evidence_status, external_anchor_status, compensation_type, related_event_id]
       properties:
         audit_event_id:
           type: string
@@ -1301,7 +1321,23 @@ components:
           description: Audit event id of the compensating event when compensated=true.
         business_effective:
           type: boolean
-          description: Clients must use this field rather than outcome alone. True only for uncompensated SUCCESS business events; false for ATTEMPTED, FAILED, REJECTED, ABORTED events, and compensated SUCCESS events.
+          description: Backward-compatible boolean derived from business_effective_status. outcome=SUCCESS with audit_evidence_status=ANCHOR_REQUIRED_FAILED is possible and still means the business write happened.
+        business_effective_status:
+          type: string
+          enum: [TRUE, FALSE, UNKNOWN]
+          description: Authoritative business truth for the exported event.
+        audit_evidence_status:
+          type: string
+          enum: [EXTERNALLY_ANCHORED, LOCAL_ONLY, ANCHOR_REQUIRED_FAILED, UNAVAILABLE, COMPENSATED]
+          description: Audit proof state for the exported event.
+        external_anchor_status:
+          type: string
+          enum: [PUBLISHED, UNVERIFIED, FAILED, MISSING, CONFLICT, LOCAL_STATUS_UNVERIFIED]
+          description: Per-event external anchor state used by evidence consumers.
+        compensation_type:
+          type: string
+          enum: [EXTERNAL_ANCHOR_FAILURE, BUSINESS_WRITE_FAILURE, MANUAL_REVERSAL, UNKNOWN]
+          description: Compensation reason. EXTERNAL_ANCHOR_FAILURE does not imply business rollback.
         related_event_id:
           type: string
           nullable: true
