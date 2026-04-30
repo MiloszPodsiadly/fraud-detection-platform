@@ -97,7 +97,7 @@ class ObjectStoreExternalAuditAnchorSinkTest {
     }
 
     @Test
-    void shouldPublishPaddedAnchorWhenOnlyLegacyKeyExistsWithoutScanning() {
+    void shouldTreatLegacyAnchorAsIdempotentWithoutScanning() {
         AuditAnchorDocument local = localAnchor("local-anchor-1", 1L, "hash-1");
         putLegacyAnchor("local-anchor-1", 1L, "hash-1");
         client.resetCounters();
@@ -107,8 +107,8 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         assertThat(duplicate.localAnchorId()).isEqualTo("local-anchor-1");
         assertThat(duplicate.chainPosition()).isEqualTo(1L);
         assertThat(duplicate.lastEventHash()).isEqualTo("hash-1");
-        assertThat(client.anchorKeys()).hasSize(2);
-        assertThat(client.getObject("audit-bucket", sink.objectKey("source_service:alert-service", 1L))).isPresent();
+        assertThat(client.anchorKeys()).hasSize(1);
+        assertThat(client.getObject("audit-bucket", sink.objectKey("source_service:alert-service", 1L))).isEmpty();
         assertThat(client.listKeysCalls).isZero();
         assertThat(client.listPageCalls).isZero();
     }
@@ -120,7 +120,7 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         assertThatThrownBy(() -> sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-2"), sink.sinkType())))
                 .isInstanceOf(ExternalAuditAnchorSinkException.class)
                 .extracting("reason")
-                .isEqualTo("MISMATCH");
+                .isEqualTo("CONFLICT");
     }
 
     @Test
@@ -142,19 +142,15 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         assertThatThrownBy(() -> sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-2", 1L, "hash-1"), sink.sinkType())))
                 .isInstanceOf(ExternalAuditAnchorSinkException.class)
                 .extracting("reason")
-                .isEqualTo("MISMATCH");
+                .isEqualTo("CONFLICT");
     }
 
     @Test
     void shouldRejectLegacySameChainPositionWithDifferentLocalAnchorId() {
         putLegacyAnchor("local-anchor-1", 1L, "hash-1");
 
-        ExternalAuditAnchor stored = sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-2", 1L, "hash-2"), sink.sinkType()));
-
-        assertThat(stored.localAnchorId()).isEqualTo("local-anchor-2");
-        assertThat(client.anchorKeys()).hasSize(2);
-        assertThat(client.listKeysCalls).isZero();
-        assertThat(client.listPageCalls).isZero();
+        assertThatThrownBy(() -> sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-2", 1L, "hash-2"), sink.sinkType())))
+                .isInstanceOf(ExternalAuditAnchorConflictException.class);
     }
 
     @Test
@@ -281,7 +277,7 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         assertThatThrownBy(() -> sink.latest("source_service:alert-service"))
                 .isInstanceOf(ExternalAuditAnchorSinkException.class)
                 .extracting("reason")
-                .isEqualTo("EXTERNAL_PAYLOAD_HASH_MISMATCH");
+                .isEqualTo("EXTERNAL_ANCHOR_ID_MISMATCH");
     }
 
     @Test
@@ -336,10 +332,11 @@ class ObjectStoreExternalAuditAnchorSinkTest {
     @Test
     void shouldNotRegressManifestOnLowerPositionWrite() {
         sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-10", 10L, "hash-10"), sink.sinkType()));
-        sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-5", 5L, "hash-5"), sink.sinkType()));
+
+        assertThatThrownBy(() -> sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-5", 5L, "hash-5"), sink.sinkType())))
+                .isInstanceOf(ExternalAuditAnchorConflictException.class);
 
         Optional<ExternalAuditAnchor> latest = sink.latest("source_service:alert-service");
-
         assertThat(latest).get()
                 .extracting(ExternalAuditAnchor::chainPosition)
                 .isEqualTo(10L);
@@ -418,10 +415,10 @@ class ObjectStoreExternalAuditAnchorSinkTest {
                 objectMapper
         );
 
-        assertThatThrownBy(() -> unreadableSink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), unreadableSink.sinkType())))
-                .isInstanceOf(ExternalAuditAnchorSinkException.class)
-                .extracting("reason")
-                .isEqualTo("WRITE_NOT_VERIFIED");
+        ExternalAuditAnchor stored = unreadableSink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), unreadableSink.sinkType()));
+
+        assertThat(stored.publicationStatus()).isEqualTo(ExternalAuditAnchor.STATUS_UNVERIFIED);
+        assertThat(stored.publicationReason()).isEqualTo("WRITE_NOT_VERIFIED");
     }
 
     @Test
@@ -435,14 +432,14 @@ class ObjectStoreExternalAuditAnchorSinkTest {
                 objectMapper
         );
 
-        assertThatThrownBy(() -> tamperingSink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), tamperingSink.sinkType())))
-                .isInstanceOf(ExternalAuditAnchorSinkException.class)
-                .extracting("reason")
-                .isEqualTo("EXTERNAL_PAYLOAD_HASH_MISMATCH");
+        ExternalAuditAnchor stored = tamperingSink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), tamperingSink.sinkType()));
+
+        assertThat(stored.publicationStatus()).isEqualTo(ExternalAuditAnchor.STATUS_INVALID);
+        assertThat(stored.publicationReason()).isEqualTo("EXTERNAL_ANCHOR_ID_MISMATCH");
     }
 
     @Test
-    void shouldReturnPartialWhenManifestUpdateFails() {
+    void shouldKeepAnchorPublishedWhenOnlyManifestUpdateFails() {
         InMemoryObjectStoreAuditAnchorClient manifestFailingClient = new InMemoryObjectStoreAuditAnchorClient();
         manifestFailingClient.failHeadManifestPut = true;
         ObjectStoreExternalAuditAnchorSink manifestFailingSink = new ObjectStoreExternalAuditAnchorSink(
@@ -457,10 +454,18 @@ class ObjectStoreExternalAuditAnchorSinkTest {
                 manifestFailingSink.sinkType()
         ));
 
-        assertThat(stored.publicationStatus()).isEqualTo(ExternalAuditAnchor.STATUS_PARTIAL);
+        assertThat(stored.publicationStatus()).isEqualTo(ExternalAuditAnchor.STATUS_PUBLISHED);
         assertThat(stored.publicationReason()).isEqualTo(ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED);
         assertThat(stored.manifestStatus()).isEqualTo(ExternalAuditAnchor.MANIFEST_STATUS_FAILED);
         assertThat(manifestFailingClient.getObject("audit-bucket", manifestFailingSink.objectKey("source_service:alert-service", 1L))).isPresent();
+    }
+
+    @Test
+    void shouldRejectNewLowerPositionWhenManifestHeadIsHigher() {
+        sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-10", 10L, "hash-10"), sink.sinkType()));
+
+        assertThatThrownBy(() -> sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-5", 5L, "hash-5"), sink.sinkType())))
+                .isInstanceOf(ExternalAuditAnchorConflictException.class);
     }
 
     @Test

@@ -183,12 +183,12 @@ class ExternalAuditAnchorPublisherTest {
                 org.mockito.ArgumentMatchers.any(ExternalAnchorReference.class),
                 org.mockito.ArgumentMatchers.eq(ExternalImmutabilityLevel.CONFIGURED),
                 org.mockito.ArgumentMatchers.eq(ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED),
-                org.mockito.ArgumentMatchers.eq(ExternalAuditAnchor.MANIFEST_STATUS_FAILED),
+                org.mockito.ArgumentMatchers.isNull(),
                 org.mockito.ArgumentMatchers.any(SignedAuditAnchorPayload.class)
         );
         assertThat(meterRegistry.get("fraud_platform_audit_external_anchor_published_total")
                 .tag("sink", "object-store")
-                .tag("status", "PARTIAL")
+                .tag("status", "UNVERIFIED")
                 .counter()
                 .count()).isEqualTo(1.0d);
     }

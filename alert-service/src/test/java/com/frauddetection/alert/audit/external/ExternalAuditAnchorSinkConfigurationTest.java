@@ -330,6 +330,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
         AtomicReference<byte[]> probe = new AtomicReference<>();
         when(client.listKeys("audit-bucket", "audit-anchors", 1)).thenReturn(List.of());
         when(client.immutabilityLevel("audit-bucket", "audit-anchors")).thenReturn(ExternalImmutabilityLevel.ENFORCED);
+        when(client.capabilities("audit-bucket", "audit-anchors")).thenReturn(verifiedCapabilities());
         org.mockito.Mockito.doAnswer(invocation -> {
             probe.set(invocation.getArgument(2));
             return null;
@@ -537,5 +538,23 @@ class ExternalAuditAnchorSinkConfigurationTest {
         ObjectProvider<ObjectStoreAuditAnchorClient> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(client);
         return provider;
+    }
+
+    private ExternalWitnessCapabilities verifiedCapabilities() {
+        return ExternalWitnessCapabilities.objectStore(
+                "test-witness",
+                ExternalWitnessIndependenceLevel.SEPARATE_ACCOUNT.name(),
+                ExternalImmutabilityLevel.ENFORCED,
+                true,
+                true,
+                true,
+                true,
+                ExternalWitnessTimestampType.STORAGE_OBSERVED,
+                ExternalTimestampTrustLevel.MEDIUM.name(),
+                true,
+                true,
+                false,
+                ExternalDurabilityGuarantee.WITNESS_RETENTION
+        );
     }
 }

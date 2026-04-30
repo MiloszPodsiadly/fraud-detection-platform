@@ -106,9 +106,9 @@ class ExternalAuditIntegrityServiceTest {
                 .verify("alert-service", 100);
 
         assertThat(response.status()).isEqualTo("INVALID");
-        assertThat(response.reasonCode()).isEqualTo("EXTERNAL_PAYLOAD_HASH_MISMATCH");
+        assertThat(response.reasonCode()).isEqualTo("EXTERNAL_ANCHOR_ID_MISMATCH");
         assertThat(registry.get("fraud_platform_audit_external_tampering_detected_total")
-                .tag("reason", "EXTERNAL_PAYLOAD_HASH_MISMATCH")
+                .tag("reason", "EXTERNAL_ANCHOR_ID_MISMATCH")
                 .counter()
                 .count()).isEqualTo(1.0d);
     }

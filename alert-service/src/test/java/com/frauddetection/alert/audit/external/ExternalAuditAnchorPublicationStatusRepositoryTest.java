@@ -89,7 +89,7 @@ class ExternalAuditAnchorPublicationStatusRepositoryTest {
         Document set = updateObject.get("$set", Document.class);
         Document unset = updateObject.get("$unset", Document.class);
         assertThat(set.get("external_published")).isEqualTo(false);
-        assertThat(set.get("external_publication_status")).isEqualTo("PARTIAL");
+        assertThat(set.get("external_publication_status")).isEqualTo("UNVERIFIED");
         assertThat(set.get("external_sink_type")).isEqualTo("object-store");
         assertThat(set.get("external_key")).isEqualTo("audit-anchors/partition/1.json");
         assertThat(set.get("manifest_status")).isEqualTo("FAILED");
