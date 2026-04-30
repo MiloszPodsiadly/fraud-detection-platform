@@ -113,35 +113,21 @@ public class PersistentAuditEventPublisher implements AuditEventPublisher {
 
     @Override
     public void publish(AuditEvent event) {
-        if (requiresAttemptedExternalAnchorFlow(event)) {
-            publishRequiredSuccess(event);
+        if (externalPublicationRequired && externalPublicationFailClosed) {
+            publishRequiredEvent(event);
             return;
         }
-        appendWithRetry(event, externalPublicationRequired && externalPublicationFailClosed);
+        appendWithRetry(event, false);
     }
 
-    private void publishRequiredSuccess(AuditEvent event) {
-        AuditEvent attemptedEvent = event.withOutcome(AuditOutcome.ATTEMPTED, null);
-        AppendResult attempted = appendWithRetry(attemptedEvent, false);
+    private void publishRequiredEvent(AuditEvent event) {
+        AppendResult appended = appendWithRetry(event, false);
         try {
-            publishRequiredExternalAnchor(attempted.anchor());
+            publishRequiredExternalAnchor(appended.anchor());
         } catch (ExternalAuditAnchorPublicationRequiredException exception) {
-            appendCompensatingExternalAnchorFailure(event, attempted.document(), exception);
+            appendCompensatingExternalAnchorFailure(event, appended.document(), exception);
             throw exception;
         }
-        AppendResult success = appendWithRetry(event, false);
-        try {
-            publishRequiredExternalAnchor(success.anchor());
-        } catch (ExternalAuditAnchorPublicationRequiredException exception) {
-            appendCompensatingExternalAnchorFailure(event, success.document(), exception);
-            throw exception;
-        }
-    }
-
-    private boolean requiresAttemptedExternalAnchorFlow(AuditEvent event) {
-        return externalPublicationRequired
-                && externalPublicationFailClosed
-                && event.outcome() == AuditOutcome.SUCCESS;
     }
 
     private AppendResult appendWithRetry(AuditEvent event, boolean publishRequired) {

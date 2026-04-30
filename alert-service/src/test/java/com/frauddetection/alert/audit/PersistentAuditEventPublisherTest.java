@@ -386,7 +386,7 @@ class PersistentAuditEventPublisherTest {
                 1L
         );
 
-        assertThatThrownBy(() -> publisher.publish(event("alert-1")))
+        assertThatThrownBy(() -> publisher.publish(event("alert-1").withOutcome(AuditOutcome.ATTEMPTED, null)))
                 .isInstanceOf(ExternalAuditAnchorPublicationRequiredException.class)
                 .extracting("reason")
                 .isEqualTo("WRITE_NOT_VERIFIED");
@@ -451,7 +451,7 @@ class PersistentAuditEventPublisherTest {
     }
 
     @Test
-    void shouldEmitSuccessOnlyAfterRequiredExternalAnchorPublicationSucceeds() {
+    void shouldPublishRequiredExternalAnchorForSuccessEvent() {
         AuditEventRepository repository = mock(AuditEventRepository.class);
         AuditAnchorRepository anchorRepository = mock(AuditAnchorRepository.class);
         AuditChainLockRepository lockRepository = mock(AuditChainLockRepository.class);
@@ -480,15 +480,14 @@ class PersistentAuditEventPublisherTest {
 
         publisher.publish(event("alert-1"));
 
-        assertThat(inserted).hasSize(2);
+        assertThat(inserted).hasSize(1);
         assertThat(inserted).extracting(AuditEventDocument::outcome)
-                .containsExactly(AuditOutcome.ATTEMPTED, AuditOutcome.SUCCESS);
-        assertThat(inserted.get(1).previousEventHash()).isEqualTo(inserted.get(0).eventHash());
-        verify(externalAnchorPublisher, times(2)).publishRequired(any(AuditAnchorDocument.class));
+                .containsExactly(AuditOutcome.SUCCESS);
+        verify(externalAnchorPublisher).publishRequired(any(AuditAnchorDocument.class));
     }
 
     @Test
-    void shouldCompensateFinalSuccessWhenRequiredExternalAnchorPublicationFailsAfterAttemptSucceeded() {
+    void shouldCompensateSuccessWhenRequiredExternalAnchorPublicationFails() {
         AuditEventRepository repository = mock(AuditEventRepository.class);
         AuditAnchorRepository anchorRepository = mock(AuditAnchorRepository.class);
         AuditChainLockRepository lockRepository = mock(AuditChainLockRepository.class);
@@ -503,8 +502,7 @@ class PersistentAuditEventPublisherTest {
             return document;
         });
         when(anchorRepository.insert(any(AuditAnchorDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        org.mockito.Mockito.doNothing()
-                .doThrow(new ExternalAuditAnchorPublicationRequiredException("WRITE_NOT_VERIFIED"))
+        org.mockito.Mockito.doThrow(new ExternalAuditAnchorPublicationRequiredException("WRITE_NOT_VERIFIED"))
                 .when(externalAnchorPublisher)
                 .publishRequired(any(AuditAnchorDocument.class));
         PersistentAuditEventPublisher publisher = new PersistentAuditEventPublisher(
@@ -524,12 +522,12 @@ class PersistentAuditEventPublisherTest {
                 .extracting("reason")
                 .isEqualTo("WRITE_NOT_VERIFIED");
 
-        assertThat(inserted).hasSize(3);
+        assertThat(inserted).hasSize(2);
         assertThat(inserted).extracting(AuditEventDocument::outcome)
-                .containsExactly(AuditOutcome.ATTEMPTED, AuditOutcome.SUCCESS, AuditOutcome.ABORTED_EXTERNAL_ANCHOR_REQUIRED);
-        assertThat(inserted.get(2).previousEventHash()).isEqualTo(inserted.get(1).eventHash());
-        assertThat(inserted.get(2).resourceId()).isEqualTo(inserted.get(1).auditId());
-        verify(externalAnchorPublisher, times(2)).publishRequired(any(AuditAnchorDocument.class));
+                .containsExactly(AuditOutcome.SUCCESS, AuditOutcome.ABORTED_EXTERNAL_ANCHOR_REQUIRED);
+        assertThat(inserted.get(1).previousEventHash()).isEqualTo(inserted.get(0).eventHash());
+        assertThat(inserted.get(1).resourceId()).isEqualTo(inserted.get(0).auditId());
+        verify(externalAnchorPublisher).publishRequired(any(AuditAnchorDocument.class));
     }
 
     @Test

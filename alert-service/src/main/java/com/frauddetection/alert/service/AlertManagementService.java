@@ -3,8 +3,8 @@ package com.frauddetection.alert.service;
 import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
 import com.frauddetection.alert.api.SubmitAnalystDecisionResponse;
 import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.audit.AuditMutationRecorder;
 import com.frauddetection.alert.audit.AuditResourceType;
-import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.domain.AlertCase;
 import com.frauddetection.alert.exception.AlertNotFoundException;
 import com.frauddetection.alert.mapper.AlertDocumentMapper;
@@ -44,7 +44,7 @@ public class AlertManagementService implements AlertManagementUseCase {
     private final FraudAlertEventPublisher fraudAlertEventPublisher;
     private final FraudDecisionEventPublisher fraudDecisionEventPublisher;
     private final FraudCaseManagementService fraudCaseManagementService;
-    private final AuditService auditService;
+    private final AuditMutationRecorder auditMutationRecorder;
     private final AnalystActorResolver analystActorResolver;
     private final AlertServiceMetrics metrics;
 
@@ -58,7 +58,7 @@ public class AlertManagementService implements AlertManagementUseCase {
             FraudAlertEventPublisher fraudAlertEventPublisher,
             FraudDecisionEventPublisher fraudDecisionEventPublisher,
             FraudCaseManagementService fraudCaseManagementService,
-            AuditService auditService,
+            AuditMutationRecorder auditMutationRecorder,
             AnalystActorResolver analystActorResolver,
             AlertServiceMetrics metrics
     ) {
@@ -71,7 +71,7 @@ public class AlertManagementService implements AlertManagementUseCase {
         this.fraudAlertEventPublisher = fraudAlertEventPublisher;
         this.fraudDecisionEventPublisher = fraudDecisionEventPublisher;
         this.fraudCaseManagementService = fraudCaseManagementService;
-        this.auditService = auditService;
+        this.auditMutationRecorder = auditMutationRecorder;
         this.analystActorResolver = analystActorResolver;
         this.metrics = metrics;
     }
@@ -124,22 +124,22 @@ public class AlertManagementService implements AlertManagementUseCase {
         AlertStatus resultingStatus = analystDecisionStatusMapper.toAlertStatus(request);
         String actorId = analystActorResolver.resolveActorId(request.analystId(), "SUBMIT_ANALYST_DECISION", alertId);
 
-        auditService.audit(
+        AlertDocument saved = auditMutationRecorder.record(
                 AuditAction.SUBMIT_ANALYST_DECISION,
                 AuditResourceType.ALERT,
                 document.getAlertId(),
                 document.getCorrelationId(),
-                actorId
+                actorId,
+                () -> {
+                    document.setAlertStatus(resultingStatus);
+                    document.setAnalystDecision(request.decision());
+                    document.setAnalystId(actorId);
+                    document.setDecisionReason(request.decisionReason());
+                    document.setDecisionTags(request.tags());
+                    document.setDecidedAt(Instant.now());
+                    return alertRepository.save(document);
+                }
         );
-
-        document.setAlertStatus(resultingStatus);
-        document.setAnalystDecision(request.decision());
-        document.setAnalystId(actorId);
-        document.setDecisionReason(request.decisionReason());
-        document.setDecisionTags(request.tags());
-        document.setDecidedAt(Instant.now());
-
-        AlertDocument saved = alertRepository.save(document);
         AlertCase alertCase = alertDocumentMapper.toDomain(saved);
         FraudDecisionEvent event = fraudDecisionEventMapper.toEvent(alertCase, request, resultingStatus, actorId);
         fraudDecisionEventPublisher.publish(event);

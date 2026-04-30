@@ -2,6 +2,8 @@ package com.frauddetection.alert.service;
 
 import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
 import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.audit.AuditMutationRecorder;
+import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.AuditService;
@@ -21,7 +23,9 @@ import com.frauddetection.common.events.enums.AnalystDecision;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DuplicateKeyException;
 
 import java.time.Instant;
@@ -34,6 +38,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -56,7 +61,7 @@ class AlertManagementServiceTest {
         AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
 
-        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher, fraudCaseManagementService, auditService, analystActorResolver, metrics);
+        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher, fraudCaseManagementService, new AuditMutationRecorder(auditService), analystActorResolver, metrics);
         var event = TransactionFixtures.scoredTransaction().build();
 
         when(repository.existsByTransactionId(event.transactionId())).thenReturn(false);
@@ -83,7 +88,7 @@ class AlertManagementServiceTest {
         AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
 
-        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher, fraudCaseManagementService, auditService, analystActorResolver, metrics);
+        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher, fraudCaseManagementService, new AuditMutationRecorder(auditService), analystActorResolver, metrics);
         var event = TransactionFixtures.scoredTransaction().build();
 
         when(repository.existsByTransactionId(event.transactionId())).thenReturn(false);
@@ -109,7 +114,7 @@ class AlertManagementServiceTest {
         AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
 
-        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher, fraudCaseManagementService, auditService, analystActorResolver, metrics);
+        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher, fraudCaseManagementService, new AuditMutationRecorder(auditService), analystActorResolver, metrics);
         AlertDocument document = new AlertDocument();
         document.setAlertId("alert-1");
         document.setTransactionId("txn-1");
@@ -147,12 +152,25 @@ class AlertManagementServiceTest {
                 .containsEntry("featureSnapshot", Map.of("recentTransactionCount", 5))
                 .containsEntry("modelFeedbackVersion", "2026-04-22.v1")
                 .containsEntry("queue", "night-shift");
-        verify(auditService).audit(
+        InOrder inOrder = inOrder(auditService, repository);
+        inOrder.verify(auditService).audit(
                 AuditAction.SUBMIT_ANALYST_DECISION,
                 AuditResourceType.ALERT,
                 "alert-1",
                 "corr-1",
-                "principal-7"
+                "principal-7",
+                AuditOutcome.ATTEMPTED,
+                null
+        );
+        inOrder.verify(repository).save(any(AlertDocument.class));
+        inOrder.verify(auditService).audit(
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT,
+                "alert-1",
+                "corr-1",
+                "principal-7",
+                AuditOutcome.SUCCESS,
+                null
         );
         verify(metrics).recordAnalystDecisionSubmitted();
         assertThat(eventCaptor.getValue().analystId()).isEqualTo("principal-7");
@@ -173,7 +191,7 @@ class AlertManagementServiceTest {
         AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
 
-        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher, fraudCaseManagementService, auditService, analystActorResolver, metrics);
+        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher, fraudCaseManagementService, new AuditMutationRecorder(auditService), analystActorResolver, metrics);
         AlertDocument document = new AlertDocument();
         document.setAlertId("alert-1");
         document.setCorrelationId("corr-1");
@@ -187,7 +205,9 @@ class AlertManagementServiceTest {
                 AuditResourceType.ALERT,
                 "alert-1",
                 "corr-1",
-                "principal-7"
+                "principal-7",
+                AuditOutcome.ATTEMPTED,
+                null
         );
 
         assertThatThrownBy(() -> service.submitDecision("alert-1", new SubmitAnalystDecisionRequest(
@@ -199,6 +219,73 @@ class AlertManagementServiceTest {
         ))).isInstanceOf(AuditPersistenceUnavailableException.class);
 
         verify(repository, never()).save(any(AlertDocument.class));
+        verify(decisionPublisher, never()).publish(any(FraudDecisionEvent.class));
+        verify(metrics, never()).recordAnalystDecisionSubmitted();
+    }
+
+    @Test
+    void shouldAuditFailedAnalystDecisionWhenBusinessWriteFails() {
+        AlertRepository repository = mock(AlertRepository.class);
+        FraudAlertEventPublisher alertPublisher = mock(FraudAlertEventPublisher.class);
+        FraudDecisionEventPublisher decisionPublisher = mock(FraudDecisionEventPublisher.class);
+        AlertDocumentMapper documentMapper = new AlertDocumentMapper();
+        FraudAlertEventMapper alertEventMapper = new FraudAlertEventMapper();
+        FraudDecisionEventMapper decisionEventMapper = new FraudDecisionEventMapper();
+        AlertCaseFactory alertCaseFactory = new AlertCaseFactory();
+        AnalystDecisionStatusMapper statusMapper = new AnalystDecisionStatusMapper();
+        FraudCaseManagementService fraudCaseManagementService = mock(FraudCaseManagementService.class);
+        AuditService auditService = mock(AuditService.class);
+        AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+
+        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher, fraudCaseManagementService, new AuditMutationRecorder(auditService), analystActorResolver, metrics);
+        AlertDocument document = new AlertDocument();
+        document.setAlertId("alert-1");
+        document.setCorrelationId("corr-1");
+        document.setAlertStatus(AlertStatus.OPEN);
+
+        when(repository.findById("alert-1")).thenReturn(Optional.of(document));
+        when(repository.save(any(AlertDocument.class))).thenThrow(new DataAccessResourceFailureException("mongo down"));
+        when(analystActorResolver.resolveActorId(eq("analyst-7"), eq("SUBMIT_ANALYST_DECISION"), eq("alert-1")))
+                .thenReturn("principal-7");
+
+        assertThatThrownBy(() -> service.submitDecision("alert-1", new SubmitAnalystDecisionRequest(
+                "analyst-7",
+                AnalystDecision.CONFIRMED_FRAUD,
+                "Confirmed after manual review",
+                List.of("chargeback"),
+                Map.of()
+        ))).isInstanceOf(DataAccessResourceFailureException.class);
+
+        InOrder inOrder = inOrder(auditService, repository);
+        inOrder.verify(auditService).audit(
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT,
+                "alert-1",
+                "corr-1",
+                "principal-7",
+                AuditOutcome.ATTEMPTED,
+                null
+        );
+        inOrder.verify(repository).save(any(AlertDocument.class));
+        inOrder.verify(auditService).audit(
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT,
+                "alert-1",
+                "corr-1",
+                "principal-7",
+                AuditOutcome.FAILED,
+                "BUSINESS_WRITE_FAILED"
+        );
+        verify(auditService, never()).audit(
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT,
+                "alert-1",
+                "corr-1",
+                "principal-7",
+                AuditOutcome.SUCCESS,
+                null
+        );
         verify(decisionPublisher, never()).publish(any(FraudDecisionEvent.class));
         verify(metrics, never()).recordAnalystDecisionSubmitted();
     }

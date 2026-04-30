@@ -3,8 +3,8 @@ package com.frauddetection.alert.service;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.api.UpdateFraudCaseRequest;
 import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.audit.AuditMutationRecorder;
 import com.frauddetection.alert.audit.AuditResourceType;
-import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.persistence.FraudCaseRepository;
@@ -36,20 +36,20 @@ public class FraudCaseManagementService {
 
     private final FraudCaseRepository fraudCaseRepository;
     private final ScoredTransactionRepository scoredTransactionRepository;
-    private final AuditService auditService;
+    private final AuditMutationRecorder auditMutationRecorder;
     private final AnalystActorResolver analystActorResolver;
     private final AlertServiceMetrics metrics;
 
     public FraudCaseManagementService(
             FraudCaseRepository fraudCaseRepository,
             ScoredTransactionRepository scoredTransactionRepository,
-            AuditService auditService,
+            AuditMutationRecorder auditMutationRecorder,
             AnalystActorResolver analystActorResolver,
             AlertServiceMetrics metrics
     ) {
         this.fraudCaseRepository = fraudCaseRepository;
         this.scoredTransactionRepository = scoredTransactionRepository;
-        this.auditService = auditService;
+        this.auditMutationRecorder = auditMutationRecorder;
         this.analystActorResolver = analystActorResolver;
         this.metrics = metrics;
     }
@@ -102,20 +102,23 @@ public class FraudCaseManagementService {
                 .orElseThrow(() -> new com.frauddetection.alert.exception.AlertNotFoundException(caseId));
         Instant now = Instant.now();
         String actorId = analystActorResolver.resolveActorId(request.analystId(), "UPDATE_FRAUD_CASE", caseId);
-        auditService.audit(
+        String correlationId = correlationId(document);
+        FraudCaseDocument saved = auditMutationRecorder.record(
                 AuditAction.UPDATE_FRAUD_CASE,
                 AuditResourceType.FRAUD_CASE,
                 document.getCaseId(),
-                correlationId(document),
-                actorId
+                correlationId,
+                actorId,
+                () -> {
+                    document.setStatus(request.status());
+                    document.setAnalystId(actorId);
+                    document.setDecisionReason(request.decisionReason());
+                    document.setDecisionTags(request.tags() == null ? List.of() : List.copyOf(request.tags()));
+                    document.setDecidedAt(now);
+                    document.setUpdatedAt(now);
+                    return fraudCaseRepository.save(document);
+                }
         );
-        document.setStatus(request.status());
-        document.setAnalystId(actorId);
-        document.setDecisionReason(request.decisionReason());
-        document.setDecisionTags(request.tags() == null ? List.of() : List.copyOf(request.tags()));
-        document.setDecidedAt(now);
-        document.setUpdatedAt(now);
-        FraudCaseDocument saved = fraudCaseRepository.save(document);
         metrics.recordFraudCaseUpdated();
         return saved;
     }
