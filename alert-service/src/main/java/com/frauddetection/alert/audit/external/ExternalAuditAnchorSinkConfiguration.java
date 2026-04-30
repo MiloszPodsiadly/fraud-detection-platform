@@ -367,6 +367,8 @@ class ExternalAuditAnchorSinkConfiguration {
                 || capabilities.timestampType() == ExternalWitnessTimestampType.APP_OBSERVED
                 || lowerThan(capabilities.timestampTrustLevel(), minimumTimestampTrustLevel, ExternalTimestampTrustLevel.class)
                 || !capabilities.supportsReadAfterWrite()
+                || !capabilities.supportsVersioning()
+                || !capabilities.supportsRetention()
                 || (requireStableReference && !capabilities.supportsStableReference())
                 || (requireOverwriteProtection && !capabilities.supportsWriteOnce())
                 || (requireDeleteProtection && !capabilities.supportsDeleteDenialOrRetention())) {

@@ -34,7 +34,11 @@ public class AuditMutationRecorder {
             auditFailure(action, resourceType, resourceId, correlationId, actorId, error);
             throw error;
         }
-        auditService.audit(action, resourceType, resourceId, correlationId, actorId, AuditOutcome.SUCCESS, null);
+        try {
+            auditService.audit(action, resourceType, resourceId, correlationId, actorId, AuditOutcome.SUCCESS, null);
+        } catch (RuntimeException exception) {
+            throw new PostCommitAuditDegradedException(result, exception);
+        }
         return result;
     }
 

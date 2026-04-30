@@ -6,5 +6,6 @@ public enum AuditExternalAnchorStatus {
     FAILED,
     MISSING,
     CONFLICT,
-    LOCAL_STATUS_UNVERIFIED
+    LOCAL_STATUS_UNVERIFIED,
+    UNKNOWN
 }

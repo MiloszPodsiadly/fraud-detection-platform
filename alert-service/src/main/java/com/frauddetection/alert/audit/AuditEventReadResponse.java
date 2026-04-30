@@ -38,7 +38,16 @@ public record AuditEventReadResponse(
             List<AuditEventDocument> documents,
             List<AuditEventDocument> compensations
     ) {
-        var semantics = AuditEventBusinessSemantics.index(documents, compensations);
+        return available(limit, documents, compensations, java.util.Map.of());
+    }
+
+    static AuditEventReadResponse available(
+            int limit,
+            List<AuditEventDocument> documents,
+            List<AuditEventDocument> compensations,
+            java.util.Map<String, AuditExternalAnchorStatus> externalStatuses
+    ) {
+        var semantics = AuditEventBusinessSemantics.index(documents, compensations, externalStatuses);
         List<AuditEventResponse> events = documents.stream()
                 .map(document -> AuditEventResponse.from(document, semantics.get(document.auditId())))
                 .toList();

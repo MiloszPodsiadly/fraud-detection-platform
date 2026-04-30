@@ -3,6 +3,7 @@ package com.frauddetection.alert.persistence;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.contract.FraudDecisionEvent;
 import com.frauddetection.common.events.model.CustomerContext;
 import com.frauddetection.common.events.model.DeviceInfo;
 import com.frauddetection.common.events.model.LocationInfo;
@@ -46,6 +47,15 @@ public class AlertDocument {
     private String decisionReason;
     private List<String> decisionTags;
     private Instant decidedAt;
+    private String decisionIdempotencyKey;
+    private String decisionIdempotencyRequestHash;
+    private String decisionOperationStatus;
+    private FraudDecisionEvent decisionOutboxEvent;
+    private String decisionOutboxStatus;
+    private int decisionOutboxAttempts;
+    private Instant decisionOutboxLastAttemptAt;
+    private Instant decisionOutboxPublishedAt;
+    private String decisionOutboxFailureReason;
 
     public String getAlertId() { return alertId; }
     public void setAlertId(String alertId) { this.alertId = alertId; }
@@ -93,4 +103,22 @@ public class AlertDocument {
     public void setDecisionTags(List<String> decisionTags) { this.decisionTags = decisionTags; }
     public Instant getDecidedAt() { return decidedAt; }
     public void setDecidedAt(Instant decidedAt) { this.decidedAt = decidedAt; }
+    public String getDecisionIdempotencyKey() { return decisionIdempotencyKey; }
+    public void setDecisionIdempotencyKey(String decisionIdempotencyKey) { this.decisionIdempotencyKey = decisionIdempotencyKey; }
+    public String getDecisionIdempotencyRequestHash() { return decisionIdempotencyRequestHash; }
+    public void setDecisionIdempotencyRequestHash(String decisionIdempotencyRequestHash) { this.decisionIdempotencyRequestHash = decisionIdempotencyRequestHash; }
+    public String getDecisionOperationStatus() { return decisionOperationStatus; }
+    public void setDecisionOperationStatus(String decisionOperationStatus) { this.decisionOperationStatus = decisionOperationStatus; }
+    public FraudDecisionEvent getDecisionOutboxEvent() { return decisionOutboxEvent; }
+    public void setDecisionOutboxEvent(FraudDecisionEvent decisionOutboxEvent) { this.decisionOutboxEvent = decisionOutboxEvent; }
+    public String getDecisionOutboxStatus() { return decisionOutboxStatus; }
+    public void setDecisionOutboxStatus(String decisionOutboxStatus) { this.decisionOutboxStatus = decisionOutboxStatus; }
+    public int getDecisionOutboxAttempts() { return decisionOutboxAttempts; }
+    public void setDecisionOutboxAttempts(int decisionOutboxAttempts) { this.decisionOutboxAttempts = decisionOutboxAttempts; }
+    public Instant getDecisionOutboxLastAttemptAt() { return decisionOutboxLastAttemptAt; }
+    public void setDecisionOutboxLastAttemptAt(Instant decisionOutboxLastAttemptAt) { this.decisionOutboxLastAttemptAt = decisionOutboxLastAttemptAt; }
+    public Instant getDecisionOutboxPublishedAt() { return decisionOutboxPublishedAt; }
+    public void setDecisionOutboxPublishedAt(Instant decisionOutboxPublishedAt) { this.decisionOutboxPublishedAt = decisionOutboxPublishedAt; }
+    public String getDecisionOutboxFailureReason() { return decisionOutboxFailureReason; }
+    public void setDecisionOutboxFailureReason(String decisionOutboxFailureReason) { this.decisionOutboxFailureReason = decisionOutboxFailureReason; }
 }

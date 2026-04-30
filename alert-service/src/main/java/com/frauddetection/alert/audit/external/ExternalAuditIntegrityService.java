@@ -191,15 +191,22 @@ public class ExternalAuditIntegrityService {
     }
 
     public ExternalAuditAnchorCoverageResponse coverage(String sourceService, Integer limit) {
-        ExternalAuditIntegrityQuery query = queryParser.parse(sourceService, limit);
+        return coverage(sourceService, limit, null);
+    }
+
+    public ExternalAuditAnchorCoverageResponse coverage(String sourceService, Integer limit, Long fromPosition) {
+        ExternalAuditIntegrityQuery query = queryParser.parse(sourceService, limit, fromPosition);
         try {
             AuditAnchorDocument latestLocal = anchorRepository.findLatestByPartitionKey(query.partitionKey()).orElse(null);
             long latestLocalPosition = latestLocal == null ? 0L : latestLocal.chainPosition();
             ExternalAuditAnchor latestExternal = sink.latest(query.partitionKey()).orElse(null);
             long latestExternalPosition = latestExternal == null ? 0L : latestExternal.chainPosition();
-            long from = latestLocalPosition == 0L ? 1L : Math.max(1L, latestLocalPosition - query.limit() + 1L);
-            List<ExternalAuditAnchorMissingRange> missingRanges = missingRanges(query.partitionKey(), from, latestLocalPosition);
-            boolean truncated = latestLocalPosition > query.limit() || missingRanges.size() >= MAX_MISSING_RANGES;
+            long from = query.fromPosition() == null
+                    ? (latestLocalPosition == 0L ? 1L : Math.max(1L, latestLocalPosition - query.limit() + 1L))
+                    : query.fromPosition();
+            long to = latestLocalPosition == 0L ? 0L : Math.min(latestLocalPosition, from + query.limit() - 1L);
+            List<ExternalAuditAnchorMissingRange> missingRanges = missingRanges(query.partitionKey(), from, to);
+            boolean truncated = latestLocalPosition > to || missingRanges.size() >= MAX_MISSING_RANGES;
             Long timeLagSeconds = latestLocal != null && latestExternal != null
                     ? Math.max(0L, java.time.Duration.between(latestExternal.createdAt(), latestLocal.createdAt()).toSeconds())
                     : null;
@@ -232,10 +239,22 @@ public class ExternalAuditIntegrityService {
     }
 
     private List<ExternalAuditAnchorMissingRange> missingRanges(String partitionKey, long from, long to) {
+        if (to < from || publicationStatusRepository == null) {
+            return List.of();
+        }
+        List<AuditAnchorDocument> anchors = anchorRepository.findByPartitionKeyAndChainPositionBetween(partitionKey, from, to, (int) Math.min(100, to - from + 1));
+        java.util.Map<Long, AuditAnchorDocument> anchorsByPosition = anchors.stream()
+                .collect(java.util.stream.Collectors.toMap(AuditAnchorDocument::chainPosition, java.util.function.Function.identity(), (left, right) -> left));
+        java.util.Map<String, ExternalAuditAnchorPublicationStatusDocument> statusesByAnchorId = publicationStatusRepository.findByLocalAnchorIds(
+                        anchors.stream().map(AuditAnchorDocument::anchorId).toList()
+                ).stream()
+                .collect(java.util.stream.Collectors.toMap(ExternalAuditAnchorPublicationStatusDocument::localAnchorId, java.util.function.Function.identity(), (left, right) -> left));
         List<ExternalAuditAnchorMissingRange> ranges = new ArrayList<>();
         Long openStart = null;
         for (long position = from; position <= to; position++) {
-            boolean present = sink.findByChainPosition(partitionKey, position).isPresent();
+            AuditAnchorDocument anchor = anchorsByPosition.get(position);
+            ExternalAuditAnchorPublicationStatusDocument status = anchor == null ? null : statusesByAnchorId.get(anchor.anchorId());
+            boolean present = status != null && ExternalAuditAnchor.STATUS_PUBLISHED.equals(status.externalPublicationStatus());
             if (!present && openStart == null) {
                 openStart = position;
             }

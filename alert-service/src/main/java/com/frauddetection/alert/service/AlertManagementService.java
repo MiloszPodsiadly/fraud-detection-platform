@@ -2,9 +2,12 @@ package com.frauddetection.alert.service;
 
 import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
 import com.frauddetection.alert.api.SubmitAnalystDecisionResponse;
+import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditMutationRecorder;
+import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
 import com.frauddetection.alert.audit.AuditResourceType;
+import com.frauddetection.alert.audit.PostCommitAuditDegradedException;
 import com.frauddetection.alert.domain.AlertCase;
 import com.frauddetection.alert.exception.AlertNotFoundException;
 import com.frauddetection.alert.mapper.AlertDocumentMapper;
@@ -22,13 +25,20 @@ import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.AlertStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 public class AlertManagementService implements AlertManagementUseCase {
@@ -120,31 +130,178 @@ public class AlertManagementService implements AlertManagementUseCase {
 
     @Override
     public SubmitAnalystDecisionResponse submitDecision(String alertId, SubmitAnalystDecisionRequest request) {
+        return submitDecision(alertId, request, null);
+    }
+
+    @Override
+    public SubmitAnalystDecisionResponse submitDecision(String alertId, SubmitAnalystDecisionRequest request, String idempotencyKey) {
         AlertDocument document = alertRepository.findById(alertId).orElseThrow(() -> new AlertNotFoundException(alertId));
         AlertStatus resultingStatus = analystDecisionStatusMapper.toAlertStatus(request);
         String actorId = analystActorResolver.resolveActorId(request.analystId(), "SUBMIT_ANALYST_DECISION", alertId);
+        String requestHash = requestHash(request);
+        SubmitAnalystDecisionResponse replay = replayIfIdempotent(document, request, resultingStatus, idempotencyKey, requestHash);
+        if (replay != null) {
+            return replay;
+        }
 
-        AlertDocument saved = auditMutationRecorder.record(
-                AuditAction.SUBMIT_ANALYST_DECISION,
-                AuditResourceType.ALERT,
-                document.getAlertId(),
-                document.getCorrelationId(),
-                actorId,
-                () -> {
-                    document.setAlertStatus(resultingStatus);
-                    document.setAnalystDecision(request.decision());
-                    document.setAnalystId(actorId);
-                    document.setDecisionReason(request.decisionReason());
-                    document.setDecisionTags(request.tags());
-                    document.setDecidedAt(Instant.now());
-                    return alertRepository.save(document);
-                }
-        );
-        AlertCase alertCase = alertDocumentMapper.toDomain(saved);
+        try {
+            AlertDocument saved = auditMutationRecorder.record(
+                    AuditAction.SUBMIT_ANALYST_DECISION,
+                    AuditResourceType.ALERT,
+                    document.getAlertId(),
+                    document.getCorrelationId(),
+                    actorId,
+                    () -> saveDecisionWithOutbox(document, request, resultingStatus, actorId, idempotencyKey, requestHash, SubmitDecisionOperationStatus.COMMITTED_FULLY_ANCHORED)
+            );
+            metrics.recordAnalystDecisionSubmitted();
+            return response(saved, request, resultingStatus, SubmitDecisionOperationStatus.COMMITTED_FULLY_ANCHORED);
+        } catch (PostCommitAuditDegradedException exception) {
+            AlertDocument saved = exception.result();
+            saved.setDecisionOperationStatus(SubmitDecisionOperationStatus.COMMITTED_AUDIT_INCOMPLETE.name());
+            try {
+                alertRepository.save(saved);
+            } catch (DataAccessException persistenceException) {
+                log.warn("Post-commit audit degraded status persistence failed: reason=POST_COMMIT_AUDIT_DEGRADED");
+            }
+            metrics.recordPostCommitAuditDegraded(AuditAction.SUBMIT_ANALYST_DECISION.name());
+            metrics.recordAnalystDecisionSubmitted();
+            return response(saved, request, resultingStatus, SubmitDecisionOperationStatus.COMMITTED_AUDIT_INCOMPLETE);
+        } catch (AuditPersistenceUnavailableException exception) {
+            return new SubmitAnalystDecisionResponse(
+                    alertId,
+                    request.decision(),
+                    resultingStatus,
+                    null,
+                    null,
+                    SubmitDecisionOperationStatus.REJECTED_BEFORE_MUTATION
+            );
+        }
+    }
+
+    private AlertDocument saveDecisionWithOutbox(
+            AlertDocument document,
+            SubmitAnalystDecisionRequest request,
+            AlertStatus resultingStatus,
+            String actorId,
+            String idempotencyKey,
+            String requestHash,
+            SubmitDecisionOperationStatus operationStatus
+    ) {
+        document.setAlertStatus(resultingStatus);
+        document.setAnalystDecision(request.decision());
+        document.setAnalystId(actorId);
+        document.setDecisionReason(request.decisionReason());
+        document.setDecisionTags(request.tags());
+        document.setDecidedAt(Instant.now());
+        document.setDecisionIdempotencyKey(normalizeIdempotencyKey(idempotencyKey));
+        document.setDecisionIdempotencyRequestHash(requestHash);
+        document.setDecisionOperationStatus(operationStatus.name());
+        AlertCase alertCase = alertDocumentMapper.toDomain(document);
         FraudDecisionEvent event = fraudDecisionEventMapper.toEvent(alertCase, request, resultingStatus, actorId);
-        fraudDecisionEventPublisher.publish(event);
-        metrics.recordAnalystDecisionSubmitted();
+        document.setDecisionOutboxEvent(event);
+        document.setDecisionOutboxStatus(DecisionOutboxStatus.PENDING);
+        document.setDecisionOutboxAttempts(0);
+        document.setDecisionOutboxFailureReason(null);
+        document.setDecisionOutboxPublishedAt(null);
+        return alertRepository.save(document);
+    }
 
-        return new SubmitAnalystDecisionResponse(alertId, request.decision(), resultingStatus, event.eventId(), event.decidedAt());
+    private SubmitAnalystDecisionResponse replayIfIdempotent(
+            AlertDocument document,
+            SubmitAnalystDecisionRequest request,
+            AlertStatus resultingStatus,
+            String idempotencyKey,
+            String requestHash
+    ) {
+        String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
+        if (normalizedKey == null || document.getDecisionIdempotencyKey() == null) {
+            return null;
+        }
+        if (!normalizedKey.equals(document.getDecisionIdempotencyKey())) {
+            return null;
+        }
+        if (!requestHash.equals(document.getDecisionIdempotencyRequestHash())) {
+            throw new ConflictingIdempotencyKeyException();
+        }
+        SubmitDecisionOperationStatus status = parseOperationStatus(document.getDecisionOperationStatus());
+        String eventId = document.getDecisionOutboxEvent() == null ? null : document.getDecisionOutboxEvent().eventId();
+        return new SubmitAnalystDecisionResponse(
+                document.getAlertId(),
+                request.decision(),
+                resultingStatus,
+                eventId,
+                document.getDecidedAt(),
+                status
+        );
+    }
+
+    private SubmitAnalystDecisionResponse response(
+            AlertDocument saved,
+            SubmitAnalystDecisionRequest request,
+            AlertStatus resultingStatus,
+            SubmitDecisionOperationStatus status
+    ) {
+        FraudDecisionEvent event = saved.getDecisionOutboxEvent();
+        return new SubmitAnalystDecisionResponse(
+                saved.getAlertId(),
+                request.decision(),
+                resultingStatus,
+                event == null ? null : event.eventId(),
+                saved.getDecidedAt(),
+                status
+        );
+    }
+
+    private SubmitDecisionOperationStatus parseOperationStatus(String value) {
+        if (value == null || value.isBlank()) {
+            return SubmitDecisionOperationStatus.COMMITTED_FULLY_ANCHORED;
+        }
+        return SubmitDecisionOperationStatus.valueOf(value);
+    }
+
+    private String normalizeIdempotencyKey(String idempotencyKey) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            return null;
+        }
+        return idempotencyKey.trim();
+    }
+
+    private String requestHash(SubmitAnalystDecisionRequest request) {
+        String canonical = "analystId=" + canonicalValue(request.analystId())
+                + "|decision=" + canonicalValue(request.decision())
+                + "|decisionReason=" + canonicalValue(request.decisionReason())
+                + "|tags=" + canonicalValue(request.tags())
+                + "|decisionMetadata=" + canonicalValue(request.decisionMetadata());
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(canonical.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable.");
+        }
+    }
+
+    private String canonicalValue(Object value) {
+        if (value == null) {
+            return "null";
+        }
+        if (value instanceof Map<?, ?> map) {
+            return map.entrySet().stream()
+                    .sorted(java.util.Comparator.comparing(entry -> String.valueOf(entry.getKey())))
+                    .map(entry -> canonicalValue(entry.getKey()) + ":" + canonicalValue(entry.getValue()))
+                    .collect(Collectors.joining(",", "{", "}"));
+        }
+        if (value instanceof Iterable<?> iterable) {
+            StringBuilder builder = new StringBuilder("[");
+            boolean first = true;
+            for (Object current : iterable) {
+                if (!first) {
+                    builder.append(",");
+                }
+                builder.append(canonicalValue(current));
+                first = false;
+            }
+            return builder.append("]").toString();
+        }
+        return String.valueOf(value);
     }
 }

@@ -215,6 +215,15 @@ class ExternalAuditAnchorPublicationStatusRepository {
         return java.util.Optional.ofNullable(mongoTemplate.findOne(query(localAnchorId), ExternalAuditAnchorPublicationStatusDocument.class));
     }
 
+    List<ExternalAuditAnchorPublicationStatusDocument> findByLocalAnchorIds(List<String> localAnchorIds) throws DataAccessException {
+        if (localAnchorIds == null || localAnchorIds.isEmpty()) {
+            return List.of();
+        }
+        Query query = new Query(Criteria.where("local_anchor_id").in(localAnchorIds))
+                .limit(Math.min(localAnchorIds.size(), 100));
+        return mongoTemplate.find(query, ExternalAuditAnchorPublicationStatusDocument.class);
+    }
+
     List<ExternalAuditAnchorPublicationStatusDocument> findNotPublished(String partitionKey, int limit) throws DataAccessException {
         int boundedLimit = Math.max(1, Math.min(limit, 500));
         Query query = new Query(Criteria.where("partition_key").is(partitionKey)

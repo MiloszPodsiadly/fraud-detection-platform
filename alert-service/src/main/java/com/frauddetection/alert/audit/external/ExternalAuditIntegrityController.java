@@ -26,8 +26,9 @@ public class ExternalAuditIntegrityController {
     @GetMapping("/coverage")
     public ExternalAuditAnchorCoverageResponse coverage(
             @RequestParam(name = "source_service", required = false) String sourceService,
-            @RequestParam(required = false) Integer limit
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(name = "from_position", required = false) Long fromPosition
     ) {
-        return service.coverage(sourceService, limit);
+        return service.coverage(sourceService, limit, fromPosition);
     }
 }

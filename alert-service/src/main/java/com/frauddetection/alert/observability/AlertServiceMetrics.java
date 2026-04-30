@@ -51,6 +51,13 @@ public class AlertServiceMetrics {
         counter("fraud.alert.decision.submissions", "outcome", "success").increment();
     }
 
+    public void recordPostCommitAuditDegraded(String operation) {
+        counter(
+                "fraud_platform_post_commit_audit_degraded_total",
+                "operation", normalizePostCommitOperation(operation)
+        ).increment();
+    }
+
     public void recordFraudCaseUpdated() {
         counter("fraud.alert.fraud_case.updates", "outcome", "success").increment();
     }
@@ -441,6 +448,13 @@ public class AlertServiceMetrics {
             return reason;
         }
         return "AUDIT_UNAVAILABLE";
+    }
+
+    private String normalizePostCommitOperation(String operation) {
+        if ("SUBMIT_ANALYST_DECISION".equals(operation)) {
+            return operation;
+        }
+        return "UNKNOWN";
     }
 
     private String normalizeAvailabilityStatus(String status) {

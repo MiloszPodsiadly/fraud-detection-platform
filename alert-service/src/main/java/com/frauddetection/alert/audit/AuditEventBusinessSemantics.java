@@ -23,6 +23,14 @@ public record AuditEventBusinessSemantics(
             List<AuditEventDocument> documents,
             List<AuditEventDocument> compensations
     ) {
+        return index(documents, compensations, Map.of());
+    }
+
+    public static Map<String, AuditEventBusinessSemantics> index(
+            List<AuditEventDocument> documents,
+            List<AuditEventDocument> compensations,
+            Map<String, AuditExternalAnchorStatus> externalStatuses
+    ) {
         Map<String, AuditEventDocument> abortByRelatedEventId = java.util.stream.Stream.concat(
                         documents.stream(),
                         compensations.stream()
@@ -37,20 +45,22 @@ public record AuditEventBusinessSemantics(
         return documents.stream()
                 .collect(Collectors.toMap(
                         AuditEventDocument::auditId,
-                        document -> from(document, abortByRelatedEventId),
+                        document -> from(document, abortByRelatedEventId, externalStatuses),
                         (left, right) -> left
                 ));
     }
 
     public static AuditEventBusinessSemantics from(AuditEventDocument document) {
-        return from(document, Map.of());
+        return from(document, Map.of(), Map.of());
     }
 
     private static AuditEventBusinessSemantics from(
             AuditEventDocument document,
-            Map<String, AuditEventDocument> abortByRelatedEventId
+            Map<String, AuditEventDocument> abortByRelatedEventId,
+            Map<String, AuditExternalAnchorStatus> externalStatuses
     ) {
         AuditEventDocument abort = abortByRelatedEventId.get(document.auditId());
+        AuditExternalAnchorStatus externalStatus = externalStatuses.getOrDefault(document.auditId(), AuditExternalAnchorStatus.UNKNOWN);
         if (isExternalAnchorAbort(document)) {
             return new AuditEventBusinessSemantics(
                     false,
@@ -58,7 +68,7 @@ public record AuditEventBusinessSemantics(
                     false,
                     BusinessEffectiveStatus.FALSE,
                     AuditEvidenceStatus.ANCHOR_REQUIRED_FAILED,
-                    AuditExternalAnchorStatus.FAILED,
+                    externalStatus == AuditExternalAnchorStatus.UNKNOWN ? AuditExternalAnchorStatus.FAILED : externalStatus,
                     CompensationType.EXTERNAL_ANCHOR_FAILURE,
                     document.resourceId()
             );
@@ -71,7 +81,7 @@ public record AuditEventBusinessSemantics(
                     businessStatus == BusinessEffectiveStatus.TRUE,
                     businessStatus,
                     AuditEvidenceStatus.ANCHOR_REQUIRED_FAILED,
-                    AuditExternalAnchorStatus.FAILED,
+                    externalStatus == AuditExternalAnchorStatus.UNKNOWN ? AuditExternalAnchorStatus.FAILED : externalStatus,
                     CompensationType.EXTERNAL_ANCHOR_FAILURE,
                     null
             );
@@ -82,8 +92,8 @@ public record AuditEventBusinessSemantics(
                 null,
                 businessStatus == BusinessEffectiveStatus.TRUE,
                 businessStatus,
-                auditEvidenceStatus(document),
-                AuditExternalAnchorStatus.LOCAL_STATUS_UNVERIFIED,
+                auditEvidenceStatus(externalStatus),
+                externalStatus,
                 compensationType(document),
                 null
         );
@@ -102,8 +112,12 @@ public record AuditEventBusinessSemantics(
         return BusinessEffectiveStatus.UNKNOWN;
     }
 
-    private static AuditEvidenceStatus auditEvidenceStatus(AuditEventDocument document) {
-        return AuditEvidenceStatus.LOCAL_ONLY;
+    private static AuditEvidenceStatus auditEvidenceStatus(AuditExternalAnchorStatus externalStatus) {
+        return switch (externalStatus) {
+            case PUBLISHED -> AuditEvidenceStatus.EXTERNALLY_ANCHORED;
+            case FAILED -> AuditEvidenceStatus.ANCHOR_REQUIRED_FAILED;
+            case UNKNOWN, UNVERIFIED, MISSING, CONFLICT, LOCAL_STATUS_UNVERIFIED -> AuditEvidenceStatus.UNAVAILABLE;
+        };
     }
 
     private static CompensationType compensationType(AuditEventDocument document) {

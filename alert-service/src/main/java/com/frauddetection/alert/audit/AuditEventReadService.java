@@ -1,6 +1,7 @@
 package com.frauddetection.alert.audit;
 
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.audit.external.AuditEventPublicationStatusLookup;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
@@ -23,19 +24,22 @@ public class AuditEventReadService {
     private final AlertServiceMetrics metrics;
     private final AuditService auditService;
     private final AuditEventCompensationLookup compensationLookup;
+    private final AuditEventPublicationStatusLookup publicationStatusLookup;
 
     public AuditEventReadService(
             MongoTemplate mongoTemplate,
             AuditEventQueryParser queryParser,
             AlertServiceMetrics metrics,
             AuditService auditService,
-            AuditEventCompensationLookup compensationLookup
+            AuditEventCompensationLookup compensationLookup,
+            AuditEventPublicationStatusLookup publicationStatusLookup
     ) {
         this.mongoTemplate = mongoTemplate;
         this.queryParser = queryParser;
         this.metrics = metrics;
         this.auditService = auditService;
         this.compensationLookup = compensationLookup;
+        this.publicationStatusLookup = publicationStatusLookup;
     }
 
     public AuditEventReadResponse readEvents(
@@ -54,8 +58,14 @@ public class AuditEventReadService {
             if (compensations == null) {
                 compensations = List.of();
             }
+            java.util.Map<String, AuditExternalAnchorStatus> externalStatuses = publicationStatusLookup == null
+                    ? java.util.Map.of()
+                    : publicationStatusLookup.statusesByAuditEventId(documents);
+            if (externalStatuses == null) {
+                externalStatuses = java.util.Map.of();
+            }
             metrics.recordPlatformAuditReadRequest("AVAILABLE");
-            AuditEventReadResponse response = AuditEventReadResponse.available(auditQuery.limit(), documents, compensations);
+            AuditEventReadResponse response = AuditEventReadResponse.available(auditQuery.limit(), documents, compensations, externalStatuses);
             auditEventsRead(auditQuery, response.count(), AuditOutcome.SUCCESS, null);
             return response;
         } catch (DataAccessException exception) {

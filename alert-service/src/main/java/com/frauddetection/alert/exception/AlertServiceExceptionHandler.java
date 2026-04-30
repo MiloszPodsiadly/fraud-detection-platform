@@ -12,6 +12,7 @@ import com.frauddetection.alert.governance.audit.GovernanceAuditDecision;
 import com.frauddetection.alert.governance.audit.GovernanceAuditPersistenceUnavailableException;
 import com.frauddetection.alert.governance.audit.InvalidGovernanceAuditRequestException;
 import com.frauddetection.alert.governance.audit.InvalidGovernanceAuditDecisionException;
+import com.frauddetection.alert.service.ConflictingIdempotencyKeyException;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -150,6 +151,19 @@ public class AlertServiceExceptionHandler {
                         exception.status().getReasonPhrase(),
                         exception.getMessage(),
                         exception.details()
+                )
+        );
+    }
+
+    @ExceptionHandler(ConflictingIdempotencyKeyException.class)
+    public ResponseEntity<ApiErrorResponse> handleConflictingIdempotencyKey(ConflictingIdempotencyKeyException exception) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(
+                new ApiErrorResponse(
+                        Instant.now(),
+                        409,
+                        "Conflict",
+                        exception.getMessage(),
+                        List.of("reason:IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD")
                 )
         );
     }

@@ -20,4 +20,8 @@ public interface AlertManagementUseCase {
     AlertCase getAlert(String alertId);
 
     SubmitAnalystDecisionResponse submitDecision(String alertId, SubmitAnalystDecisionRequest request);
+
+    default SubmitAnalystDecisionResponse submitDecision(String alertId, SubmitAnalystDecisionRequest request, String idempotencyKey) {
+        return submitDecision(alertId, request);
+    }
 }
