@@ -349,7 +349,7 @@ paths:
   /system/trust-level:
     get:
       summary: Get deployment trust posture
-      description: Requires audit:verify. Returns bounded live deployment posture for external audit anchoring. BEST_EFFORT and FDP24_DEGRADED must not be marketed as FDP-24 healthy fail-closed mode. SIGNED_EXTERNAL means trust-authority signing is enabled and required; it is not WORM, notarization, SIEM, mTLS, or legal trust.
+      description: Requires audit:verify. Returns bounded live deployment posture for external audit anchoring. BEST_EFFORT and FDP24_DEGRADED must not be marketed as FDP-24 healthy fail-closed mode. SIGNED_EXTERNAL means trust-authority signing is enabled and required; it is not WORM, notarization, SIEM, mTLS, or legal trust. FDP24_HEALTHY requires zero unresolved degradations, zero pending degradation resolutions, zero unknown outbox confirmations, zero pending outbox resolutions, and zero terminal outbox failures.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -385,7 +385,7 @@ paths:
   /api/v1/audit/degradations/{auditId}/resolve:
     post:
       summary: Resolve audit degradation event
-      description: Requires audit:verify. Marks a durable degradation event resolved with operator identity, reason, evidence reference, and a resolution audit event.
+      description: Requires audit-degradation:resolve. Records ATTEMPTED before mutation, SUCCESS after mutation, and FAILED on update failure. In bank fail-closed mode, structured evidence is mandatory and resolution is dual-control: first request marks resolution_pending, second distinct actor approves. A post-commit success-audit failure returns committed-incomplete and records durable degradation instead of pretending the resolution is fully evidenced.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -437,7 +437,7 @@ paths:
   /api/v1/decision-outbox/unknown-confirmations/{alertId}/resolve:
     post:
       summary: Resolve decision outbox unknown confirmation
-      description: Requires audit:verify. Resolves PUBLISH_CONFIRMATION_UNKNOWN as PUBLISHED or RETRY_REQUESTED with a mandatory reason. RETRY_REQUESTED reuses the same eventId and dedupeKey; there is no blind automatic retry.
+      description: Requires decision-outbox:reconcile. Resolves PUBLISH_CONFIRMATION_UNKNOWN as PUBLISHED or RETRY_REQUESTED with a mandatory reason. PUBLISHED requires BROKER_OFFSET evidence or equivalent broker confirmation. In bank fail-closed mode, structured evidence is mandatory and resolution is dual-control. RETRY_REQUESTED reuses the same eventId and dedupeKey; there is no blind automatic retry.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -501,7 +501,7 @@ paths:
   /api/v1/alerts/{alertId}/decision:
     post:
       summary: Submit analyst decision
-      description: Records an analyst decision with backend authorization, guarded audit, durable same-document outbox, and optional idempotency. If X-Idempotency-Key is supplied, the same key and same request body replay the prior response without duplicate audit or outbox mutation; the same key with a different request body returns 409. Kafka publication is asynchronous from the durable outbox and at-least-once unless consumers dedupe by event id. FraudDecisionEvent carries delivery=AT_LEAST_ONCE and dedupeKey=eventId. operation_status is mandatory for committed responses: REJECTED_BEFORE_MUTATION maps to HTTP 503 with no command response body; COMMITTED_EVIDENCE_PENDING is a conservative committed state before full evidence completion was persisted; COMMITTED_FULLY_ANCHORED is reserved for verified local success audit anchor plus external PUBLISHED state plus clean required signature policy; COMMITTED_EVIDENCE_INCOMPLETE means the business decision and outbox committed but post-commit evidence completion degraded.
+      description: Records an analyst decision with backend authorization, guarded audit, durable same-document outbox, and optional idempotency. If X-Idempotency-Key is supplied, the same key and same request body replay the prior response without duplicate audit or outbox mutation; the same key with a different request body returns 409. Kafka publication is asynchronous from the durable outbox and at-least-once unless consumers dedupe by event id. FraudDecisionEvent carries delivery=AT_LEAST_ONCE and dedupeKey=eventId. operation_status is mandatory for committed responses: REJECTED_BEFORE_MUTATION maps to HTTP 503 with no command response body; COMMITTED_EVIDENCE_PENDING is a conservative committed state before full evidence completion was persisted; COMMITTED_EVIDENCE_INCOMPLETE means the business decision and outbox committed but post-commit evidence completion degraded. The request API does not expose COMMITTED_FULLY_ANCHORED because there is no safe synchronous promotion path.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -801,7 +801,7 @@ components:
     SystemTrustLevelResponse:
       type: object
       additionalProperties: false
-      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength, coverage_status, witness_status, signature_policy, required_publication_failures, local_status_unverified, missing_ranges, post_commit_audit_degraded, post_commit_audit_degraded_resolved, outbox_failed_terminal_count, outbox_publish_confirmation_unknown_count, outbox_oldest_pending_age_seconds, outbox_oldest_ambiguous_age_seconds]
+      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength, coverage_status, witness_status, signature_policy, required_publication_failures, local_status_unverified, missing_ranges, post_commit_audit_degraded, unresolved_degradation_count, pending_degradation_resolution_count, post_commit_audit_degraded_resolved, outbox_failed_terminal_count, terminal_outbox_failure_count, outbox_publish_confirmation_unknown_count, unknown_outbox_confirmation_count, pending_outbox_resolution_count, outbox_oldest_pending_age_seconds, outbox_oldest_ambiguous_age_seconds]
       properties:
         guarantee_level:
           type: string
@@ -839,6 +839,14 @@ components:
           type: integer
           format: int64
           minimum: 0
+        unresolved_degradation_count:
+          type: integer
+          format: int64
+          minimum: 0
+        pending_degradation_resolution_count:
+          type: integer
+          format: int64
+          minimum: 0
         post_commit_audit_degraded_resolved:
           type: integer
           format: int64
@@ -847,7 +855,19 @@ components:
           type: integer
           format: int64
           minimum: 0
+        terminal_outbox_failure_count:
+          type: integer
+          format: int64
+          minimum: 0
         outbox_publish_confirmation_unknown_count:
+          type: integer
+          format: int64
+          minimum: 0
+        unknown_outbox_confirmation_count:
+          type: integer
+          format: int64
+          minimum: 0
+        pending_outbox_resolution_count:
           type: integer
           format: int64
           minimum: 0
@@ -877,7 +897,7 @@ components:
     AuditDegradationEvent:
       type: object
       additionalProperties: false
-      required: [audit_id, type, resource_type, resource_id, operation, timestamp, resolved, resolved_at, resolved_by, resolution_reason, resolution_evidence_reference]
+      required: [audit_id, type, resource_type, resource_id, operation, timestamp, resolved, resolution_pending, resolution_requested_at, resolution_requested_by, resolved_at, resolved_by, resolution_reason, resolution_evidence_type, resolution_evidence_reference, resolution_evidence_verified_at, resolution_evidence_verified_by, approved_at, approved_by, approval_reason]
       properties:
         audit_id:
           type: string
@@ -895,6 +915,15 @@ components:
           format: date-time
         resolved:
           type: boolean
+        resolution_pending:
+          type: boolean
+        resolution_requested_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolution_requested_by:
+          type: string
+          nullable: true
         resolved_at:
           type: string
           format: date-time
@@ -906,7 +935,29 @@ components:
           type: string
           nullable: true
           maxLength: 500
+        resolution_evidence_type:
+          type: string
+          nullable: true
+          enum: [BROKER_OFFSET, EXTERNAL_ANCHOR_REFERENCE, TICKET, RUNBOOK_STEP, OTHER]
         resolution_evidence_reference:
+          type: string
+          nullable: true
+          maxLength: 500
+        resolution_evidence_verified_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolution_evidence_verified_by:
+          type: string
+          nullable: true
+        approved_at:
+          type: string
+          format: date-time
+          nullable: true
+        approved_by:
+          type: string
+          nullable: true
+        approval_reason:
           type: string
           nullable: true
           maxLength: 500
@@ -920,9 +971,27 @@ components:
           minLength: 1
           maxLength: 500
         evidence_reference:
-          type: string
           nullable: true
+          $ref: "#/components/schemas/ResolutionEvidenceReference"
+    ResolutionEvidenceReference:
+      type: object
+      additionalProperties: false
+      required: [type, reference, verified_at, verified_by]
+      properties:
+        type:
+          type: string
+          enum: [BROKER_OFFSET, EXTERNAL_ANCHOR_REFERENCE, TICKET, RUNBOOK_STEP, OTHER]
+        reference:
+          type: string
+          minLength: 1
           maxLength: 500
+        verified_at:
+          type: string
+          format: date-time
+        verified_by:
+          type: string
+          minLength: 1
+          maxLength: 120
     UnknownConfirmationsResponse:
       type: object
       additionalProperties: false
@@ -936,7 +1005,7 @@ components:
     UnknownConfirmation:
       type: object
       additionalProperties: false
-      required: [alert_id, event_id, dedupe_key, status, decided_at, attempts, last_attempt_at, published_at, failure_reason]
+      required: [alert_id, event_id, dedupe_key, status, decided_at, attempts, last_attempt_at, published_at, failure_reason, resolution_pending, resolution_requested_at, resolution_requested_by, resolution_evidence_type, resolution_evidence_reference, resolution_evidence_verified_at, resolution_evidence_verified_by, resolution_approved_at, resolution_approved_by, resolution_approval_reason]
       properties:
         alert_id:
           type: string
@@ -967,6 +1036,41 @@ components:
         failure_reason:
           type: string
           nullable: true
+        resolution_pending:
+          type: boolean
+        resolution_requested_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolution_requested_by:
+          type: string
+          nullable: true
+        resolution_evidence_type:
+          type: string
+          nullable: true
+          enum: [BROKER_OFFSET, EXTERNAL_ANCHOR_REFERENCE, TICKET, RUNBOOK_STEP, OTHER]
+        resolution_evidence_reference:
+          type: string
+          nullable: true
+          maxLength: 500
+        resolution_evidence_verified_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolution_evidence_verified_by:
+          type: string
+          nullable: true
+        resolution_approved_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolution_approved_by:
+          type: string
+          nullable: true
+        resolution_approval_reason:
+          type: string
+          nullable: true
+          maxLength: 500
     ResolveOutboxConfirmationRequest:
       type: object
       additionalProperties: false
@@ -979,6 +1083,9 @@ components:
           type: string
           minLength: 1
           maxLength: 500
+        evidence_reference:
+          nullable: true
+          $ref: "#/components/schemas/ResolutionEvidenceReference"
     SubmitAnalystDecisionRequest:
       type: object
       additionalProperties: false
@@ -1027,8 +1134,8 @@ components:
           nullable: true
         operation_status:
           type: string
-          enum: [REJECTED_BEFORE_MUTATION, COMMITTED_EVIDENCE_PENDING, COMMITTED_EVIDENCE_INCOMPLETE, COMMITTED_FULLY_ANCHORED]
-          description: Mandatory operation state. REJECTED_BEFORE_MUTATION is returned as HTTP 503 with no command response body. COMMITTED_EVIDENCE_PENDING is conservative state before full evidence completion is persisted. COMMITTED_EVIDENCE_INCOMPLETE means the business decision and durable outbox committed while post-commit evidence completion degraded.
+          enum: [REJECTED_BEFORE_MUTATION, COMMITTED_EVIDENCE_PENDING, COMMITTED_EVIDENCE_INCOMPLETE]
+          description: Mandatory operation state. REJECTED_BEFORE_MUTATION is returned as HTTP 503 with no command response body. COMMITTED_EVIDENCE_PENDING is conservative state before full evidence completion is persisted. COMMITTED_EVIDENCE_INCOMPLETE means the business decision and durable outbox committed while post-commit evidence completion degraded. COMMITTED_FULLY_ANCHORED is intentionally not exposed until a safe promotion path exists.
     PagedGenericObject:
       type: object
       required:
