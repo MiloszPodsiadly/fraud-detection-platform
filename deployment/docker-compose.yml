@@ -303,6 +303,8 @@ services:
       APP_SECURITY_DEMO_AUTH_ENABLED: "true"
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       MONGODB_URI: mongodb://mongodb:27017/fraud_alerts?serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
       ML_GOVERNANCE_BASE_URL: http://ml-inference-service:8090
       INTERNAL_AUTH_CLIENT_ENABLED: "true"
       INTERNAL_AUTH_SERVICE_NAME: alert-service
