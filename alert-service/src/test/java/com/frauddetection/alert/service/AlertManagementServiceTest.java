@@ -246,8 +246,24 @@ class AlertManagementServiceTest {
         AuditService auditService = mock(AuditService.class);
         AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        AuditDegradationService degradationService = mock(AuditDegradationService.class);
 
-        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher, fraudCaseManagementService, new AuditMutationRecorder(auditService), analystActorResolver, metrics);
+        var service = new AlertManagementService(
+                repository,
+                documentMapper,
+                alertEventMapper,
+                decisionEventMapper,
+                alertCaseFactory,
+                statusMapper,
+                alertPublisher,
+                decisionPublisher,
+                fraudCaseManagementService,
+                new AuditMutationRecorder(auditService),
+                analystActorResolver,
+                metrics,
+                degradationService,
+                false
+        );
         AlertDocument document = new AlertDocument();
         document.setAlertId("alert-1");
         document.setCorrelationId("corr-1");
@@ -313,8 +329,24 @@ class AlertManagementServiceTest {
         AuditService auditService = mock(AuditService.class);
         AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        AuditDegradationService degradationService = mock(AuditDegradationService.class);
 
-        var service = new AlertManagementService(repository, documentMapper, alertEventMapper, decisionEventMapper, alertCaseFactory, statusMapper, alertPublisher, decisionPublisher, fraudCaseManagementService, new AuditMutationRecorder(auditService), analystActorResolver, metrics);
+        var service = new AlertManagementService(
+                repository,
+                documentMapper,
+                alertEventMapper,
+                decisionEventMapper,
+                alertCaseFactory,
+                statusMapper,
+                alertPublisher,
+                decisionPublisher,
+                fraudCaseManagementService,
+                new AuditMutationRecorder(auditService),
+                analystActorResolver,
+                metrics,
+                degradationService,
+                false
+        );
         AlertDocument document = new AlertDocument();
         document.setAlertId("alert-1");
         document.setTransactionId("txn-1");
@@ -346,10 +378,18 @@ class AlertManagementServiceTest {
         ));
 
         assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE);
+        assertThat(response.operationStatus().name()).isNotEqualTo("COMMITTED_FULLY_ANCHORED");
         verify(repository, org.mockito.Mockito.times(2)).save(any(AlertDocument.class));
         assertThat(document.getAnalystDecision()).isEqualTo(AnalystDecision.CONFIRMED_FRAUD);
         assertThat(document.getAlertStatus()).isEqualTo(AlertStatus.RESOLVED);
         assertThat(document.getDecisionOutboxStatus()).isEqualTo(DecisionOutboxStatus.PENDING);
+        assertThat(document.getDecisionOperationStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE.name());
+        verify(degradationService).recordPostCommitDegraded(
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT,
+                "alert-1",
+                "POST_COMMIT_AUDIT_DEGRADED"
+        );
         verify(decisionPublisher, never()).publish(any(FraudDecisionEvent.class));
         verify(metrics).recordPostCommitAuditDegraded("SUBMIT_ANALYST_DECISION");
         verify(metrics).recordAnalystDecisionSubmitted();

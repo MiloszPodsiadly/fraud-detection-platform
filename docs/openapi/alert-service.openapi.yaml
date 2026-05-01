@@ -501,7 +501,7 @@ paths:
   /api/v1/alerts/{alertId}/decision:
     post:
       summary: Submit analyst decision
-      description: Records an analyst decision with backend authorization, guarded audit, durable same-document outbox, and optional idempotency. If X-Idempotency-Key is supplied, the same key and same request body replay the prior response without duplicate audit or outbox mutation; the same key with a different request body returns 409. Kafka publication is asynchronous from the durable outbox and at-least-once unless consumers dedupe by event id. FraudDecisionEvent carries delivery=AT_LEAST_ONCE and dedupeKey=eventId. operation_status is mandatory for committed responses: REJECTED_BEFORE_MUTATION maps to HTTP 503 with no command response body; COMMITTED_EVIDENCE_PENDING is a conservative committed state before full evidence completion was persisted; COMMITTED_EVIDENCE_INCOMPLETE means the business decision and outbox committed but post-commit evidence completion degraded. The request API does not expose COMMITTED_FULLY_ANCHORED because there is no safe synchronous promotion path.
+      description: Records an analyst decision with backend authorization, guarded ATTEMPTED audit, durable same-document outbox, and optional idempotency. If X-Idempotency-Key is supplied, the same key and same request body replay the prior response without duplicate audit or outbox mutation; the same key with a different request body returns 409. Kafka publication is asynchronous from the durable outbox and at-least-once unless consumers dedupe by event id. FraudDecisionEvent carries delivery=AT_LEAST_ONCE and dedupeKey=eventId. operation_status is mandatory for committed responses: REJECTED_BEFORE_MUTATION maps to HTTP 503 with no command response body; COMMITTED_EVIDENCE_PENDING is a conservative committed state before full evidence completion was persisted; COMMITTED_EVIDENCE_INCOMPLETE means the business decision and outbox committed but post-commit evidence completion degraded. FDP-24 detects and exposes post-commit audit degradation; it does not eliminate it transactionally and does not guarantee that business mutation cannot commit before SUCCESS evidence exists. The request API does not expose COMMITTED_FULLY_ANCHORED because there is no safe synchronous promotion path.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1135,7 +1135,7 @@ components:
         operation_status:
           type: string
           enum: [REJECTED_BEFORE_MUTATION, COMMITTED_EVIDENCE_PENDING, COMMITTED_EVIDENCE_INCOMPLETE]
-          description: Mandatory operation state. REJECTED_BEFORE_MUTATION is returned as HTTP 503 with no command response body. COMMITTED_EVIDENCE_PENDING is conservative state before full evidence completion is persisted. COMMITTED_EVIDENCE_INCOMPLETE means the business decision and durable outbox committed while post-commit evidence completion degraded. COMMITTED_FULLY_ANCHORED is intentionally not exposed until a safe promotion path exists.
+          description: Mandatory operation state. REJECTED_BEFORE_MUTATION is returned as HTTP 503 with no command response body. COMMITTED_EVIDENCE_PENDING is conservative state before full evidence completion is persisted. COMMITTED_EVIDENCE_INCOMPLETE means the business decision and durable outbox committed while post-commit evidence completion degraded. This is not a rollback claim. COMMITTED_FULLY_ANCHORED is intentionally not exposed until a safe promotion path exists.
     PagedGenericObject:
       type: object
       required:

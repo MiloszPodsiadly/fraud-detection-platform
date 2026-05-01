@@ -189,6 +189,8 @@ class SystemTrustLevelControllerTest {
 
         assertThat(response.guaranteeLevel()).isEqualTo("FDP24_DEGRADED");
         assertThat(response.postCommitAuditDegraded()).isEqualTo(1L);
+        assertThat(response.unresolvedDegradationCount()).isEqualTo(1L);
+        assertThat(response.guaranteeLevel()).isNotEqualTo("FDP24_HEALTHY");
     }
 
     @Test
