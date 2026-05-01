@@ -449,6 +449,13 @@ paths:
             type: string
             minLength: 1
             maxLength: 160
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 160
       requestBody:
         required: true
         content:
@@ -470,6 +477,34 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "409":
           $ref: "#/components/responses/Conflict"
+  /api/v1/regulated-mutations/{idempotencyKey}:
+    get:
+      summary: Inspect one regulated mutation command
+      description: Requires regulated-mutation:recover or audit:verify. Returns command state, execution status, lease metadata, evidence ids, degradation reason, last error, and snapshot presence for one idempotency key. This endpoint is read-only and never exposes command payloads, response payloads, notes, customer/account/card identifiers, raw exception details, or unbounded exports.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: idempotencyKey
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      responses:
+        "200":
+          description: Command inspection returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegulatedMutationCommandInspectionResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /api/v1/regulated-mutations/recover:
     post:
       summary: Run bounded regulated mutation recovery
@@ -959,7 +994,7 @@ components:
     RegulatedMutationRecoveryBacklogResponse:
       type: object
       additionalProperties: false
-      required: [total_recovery_required, total_in_progress_expired, oldest_recovery_required_age, by_state, by_action]
+      required: [total_recovery_required, total_in_progress_expired, oldest_recovery_required_age, recovery_failed_terminal_count, repeated_recovery_failures, by_state, by_action]
       properties:
         total_recovery_required:
           type: integer
@@ -974,6 +1009,14 @@ components:
           format: int64
           nullable: true
           minimum: 0
+        recovery_failed_terminal_count:
+          type: integer
+          format: int64
+          minimum: 0
+        repeated_recovery_failures:
+          type: integer
+          format: int64
+          minimum: 0
         by_state:
           type: object
           additionalProperties:
@@ -986,6 +1029,54 @@ components:
             type: integer
             format: int64
             minimum: 0
+    RegulatedMutationCommandInspectionResponse:
+      type: object
+      additionalProperties: false
+      required: [idempotency_key, action, resource_type, resource_id, state, execution_status, lease_owner, lease_expires_at, response_snapshot_present, attempted_audit_id, success_audit_id, failed_audit_id, degradation_reason, last_error, updated_at]
+      properties:
+        idempotency_key:
+          type: string
+        action:
+          type: string
+        resource_type:
+          type: string
+        resource_id:
+          type: string
+          nullable: true
+        state:
+          type: string
+          nullable: true
+        execution_status:
+          type: string
+          nullable: true
+        lease_owner:
+          type: string
+          nullable: true
+        lease_expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        response_snapshot_present:
+          type: boolean
+        attempted_audit_id:
+          type: string
+          nullable: true
+        success_audit_id:
+          type: string
+          nullable: true
+        failed_audit_id:
+          type: string
+          nullable: true
+        degradation_reason:
+          type: string
+          nullable: true
+        last_error:
+          type: string
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
     AuditDegradationListResponse:
       type: object
       additionalProperties: false
@@ -1119,7 +1210,7 @@ components:
           nullable: true
         status:
           type: string
-          enum: [PUBLISH_CONFIRMATION_UNKNOWN, PUBLISHED, PENDING]
+          enum: [PUBLISH_CONFIRMATION_UNKNOWN, PUBLISHED, PENDING, REQUESTED, AUDIT_ATTEMPTED, BUSINESS_COMMITTING, BUSINESS_COMMITTED, SUCCESS_AUDIT_PENDING, SUCCESS_AUDIT_RECORDED, EVIDENCE_PENDING, EVIDENCE_CONFIRMED, COMMITTED, COMMITTED_DEGRADED, REJECTED, FAILED]
         decided_at:
           type: string
           format: date-time
@@ -2674,7 +2765,7 @@ components:
           schema:
             $ref: "#/components/schemas/ApiErrorResponse"
     NotFound:
-      description: Advisory event was not found in bounded advisory history.
+      description: Requested resource was not found.
       content:
         application/json:
           schema:

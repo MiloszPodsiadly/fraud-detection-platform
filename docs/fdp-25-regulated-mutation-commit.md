@@ -106,8 +106,11 @@ Recovery is exposed only through authenticated operational surfaces:
 
 - `POST /api/v1/regulated-mutations/recover` requires `regulated-mutation:recover`.
 - `GET /api/v1/regulated-mutations/recovery/backlog` requires `regulated-mutation:recover` or `audit:verify`.
+- `GET /api/v1/regulated-mutations/{idempotencyKey}` requires `regulated-mutation:recover` or `audit:verify`.
 
-The backlog response is bounded and includes `total_recovery_required`, `total_in_progress_expired`, `oldest_recovery_required_age`, `by_state`, and `by_action`.
+The command inspection endpoint is read-only and intentionally narrow. It exposes `idempotency_key`, `action`, `resource_type`, `resource_id`, `state`, `execution_status`, lease fields, `response_snapshot_present`, phase audit ids, degradation reason, last error, and update time. It does not expose command payloads, response bodies, notes, customer/account/card identifiers, or raw exception details.
+
+The backlog response is bounded and includes `total_recovery_required`, `total_in_progress_expired`, `oldest_recovery_required_age`, `recovery_failed_terminal_count`, `repeated_recovery_failures`, `by_state`, and `by_action`.
 
 Recovery semantics:
 
@@ -119,8 +122,10 @@ Recovery semantics:
 
 Operational metrics:
 
-- `regulated_mutation_recovery_required_total`
-- `regulated_mutation_recovery_oldest_age_seconds`
+- `regulated_mutation_recovery_required_count`
+- `oldest_recovery_required_age_seconds`
+- `recovery_failed_terminal_count`
+- `repeated_recovery_failures_count`
 - `regulated_mutation_recovery_outcome_total{outcome}`
 
 System trust degrades when `regulated_mutation_recovery_required_count > 0`.
@@ -150,3 +155,9 @@ FDP-25 Phase 1 must not describe operator evidence as cryptographic proof unless
 - `SUCCESS_AUDIT_PENDING` retry writes only missing success audit and never re-runs the business mutation.
 - recovery service covers stale leases and crash-window states with bounded scans.
 - recovery endpoints are backend-authorized; `regulated-mutation:recover` can trigger recovery, while `audit:verify` can read backlog only.
+- command inspection endpoint returns command state without payload dump, returns 404 for missing commands, and is forbidden to ordinary analysts.
+- outbox unknown-confirmation reconciliation requires `X-Idempotency-Key`, records `ATTEMPTED` before mutation, is duplicate replay safe, and records durable degradation instead of claiming fully anchored evidence when success audit fails.
+
+## FDP-26 Candidate Work
+
+FDP-25 remains a recoverable saga coordinator. FDP-26 should evaluate a stricter regulated mutation commit model for additional write paths and, where infrastructure supports it, tighter local transaction boundaries. Any future claim that a business mutation cannot become visible before all required success evidence exists must be implemented at the concrete storage/evidence boundary and tested as such.

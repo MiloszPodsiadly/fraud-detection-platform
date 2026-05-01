@@ -152,6 +152,7 @@ Example authorities:
 - `audit:export`
 - `audit-degradation:resolve`
 - `decision-outbox:reconcile`
+- `regulated-mutation:recover`
 
 Representative endpoint matrix:
 
@@ -175,7 +176,10 @@ Representative endpoint matrix:
 | `GET /api/v1/audit/degradations` | `audit:verify` |
 | `POST /api/v1/audit/degradations/{auditId}/resolve` | `audit-degradation:resolve` |
 | `GET /api/v1/decision-outbox/unknown-confirmations` | `audit:verify` |
-| `POST /api/v1/decision-outbox/unknown-confirmations/{alertId}/resolve` | `decision-outbox:reconcile` |
+| `POST /api/v1/decision-outbox/unknown-confirmations/{alertId}/resolve` | `decision-outbox:reconcile` plus `X-Idempotency-Key` |
+| `POST /api/v1/regulated-mutations/recover` | `regulated-mutation:recover` |
+| `GET /api/v1/regulated-mutations/recovery/backlog` | `regulated-mutation:recover` or `audit:verify` |
+| `GET /api/v1/regulated-mutations/{idempotencyKey}` | `regulated-mutation:recover` or `audit:verify` |
 | `GET /governance/advisories` | `transaction-monitor:read` |
 | `GET /governance/advisories/analytics` | `transaction-monitor:read` |
 | `GET /governance/advisories/{event_id}` | `transaction-monitor:read` |
@@ -252,7 +256,7 @@ Analyst decision submission returns explicit operation states. `REJECTED_BEFORE_
 
 FDP-25 Phase 1 is a saga-style recoverable command state machine for submit-decision writes, not distributed ACID across MongoDB, external witnesses, and Kafka. It detects and exposes post-commit audit degradation; it does not transactionally eliminate the possibility that a business mutation commits before success evidence is fully recorded. External evidence remains asynchronous and reconciled; `COMMITTED_FULLY_ANCHORED` means verified evidence, not initial request success. Fraud-case update and governance writes remain future migrations to this coordinator.
 
-FDP-25 recovery is operational and bounded. `POST /api/v1/regulated-mutations/recover` requires `regulated-mutation:recover`; `GET /api/v1/regulated-mutations/recovery/backlog` requires `regulated-mutation:recover` or `audit:verify`. Recovery never re-runs a business mutation after `BUSINESS_COMMITTING`; it releases only safe pre-mutation commands, binds existing phase audit events by deterministic request id (`regulated_command_id:ATTEMPTED|SUCCESS|FAILED`), retries only missing success evidence where safe, and otherwise marks `RECOVERY_REQUIRED` or `COMMITTED_DEGRADED`. System trust degrades when regulated mutation recovery is required. Recovery metrics are `regulated_mutation_recovery_required_total`, `regulated_mutation_recovery_oldest_age_seconds`, and `regulated_mutation_recovery_outcome_total{outcome}`.
+FDP-25 recovery is operational and bounded. `POST /api/v1/regulated-mutations/recover` requires `regulated-mutation:recover`; `GET /api/v1/regulated-mutations/recovery/backlog` and `GET /api/v1/regulated-mutations/{idempotencyKey}` require `regulated-mutation:recover` or `audit:verify`. The inspection endpoint exposes command state, execution status, evidence ids, degradation reason, and snapshot presence only; it does not expose request payloads, response payloads, notes, or customer data. Recovery never re-runs a business mutation after `BUSINESS_COMMITTING`; it releases only safe pre-mutation commands, binds existing phase audit events by deterministic request id (`regulated_command_id:ATTEMPTED|SUCCESS|FAILED`), retries only missing success evidence where safe, and otherwise marks `RECOVERY_REQUIRED` or `COMMITTED_DEGRADED`. System trust degrades when regulated mutation recovery is required. Recovery alerting metrics include `regulated_mutation_recovery_required_count`, `oldest_recovery_required_age_seconds`, `recovery_failed_terminal_count`, `repeated_recovery_failures_count`, and `regulated_mutation_recovery_outcome_total{outcome}`; compatibility gauges with the previous `regulated_mutation_recovery_*` names remain present.
 
 Platform audit event reads are available through `GET /api/v1/audit/events` and require `audit:read`, which is granted only to `FRAUD_OPS_ADMIN` by the local role model. This is an Audit Read API for durable platform write/governance audit events in `audit_events`; it does not return read-access audit events and is not itself proof that every sensitive data read was audited. Filters are exact-match only (`event_type`, `actor_id`, `resource_type`, `resource_id`) plus an inclusive timestamp window (`from`, `to`) and a bounded `limit` defaulting to 50 and capped at 100. The endpoint returns newest-first results and does not support regex, full-text search, export, aggregation, delete, or update operations. Clients MUST check `status` before interpreting `count` or `events`: `AVAILABLE` with `count=0` means a valid empty result, while `UNAVAILABLE` means audit storage could not be read and includes stable `reason_code=AUDIT_STORE_UNAVAILABLE` plus a non-sensitive message. Successful audit reads create a follow-up `READ_AUDIT_EVENTS` audit event with bounded filter/count metadata.
 
@@ -294,7 +298,7 @@ Bounded evidence export is available through `GET /api/v1/audit/evidence/export`
 
 FDP-24 wording rules: do not use `notarized`, `regulator-proof`, `independent verification`, `legal proof`, `WORM`, `immutable forever`, or `exactly-once event delivery` as affirmative claims unless a concrete implementation supplies that property. Allowed operational wording is `tamper-evident`, `externally anchored`, `externally stored evidence`, `artifact-verifiable`, `at-least-once outbox delivery`, and `fail-closed configured/healthy/degraded`.
 
-Fraud decision events are delivered with an explicit at-least-once contract: `delivery=AT_LEAST_ONCE` and `dedupeKey=eventId`. Consumers MUST be idempotent by `eventId`; if the same decision event is observed twice, the consumer should keep the first applied result and ignore the duplicate. If alert-service publishes to Kafka but cannot confirm the outbox row as `PUBLISHED`, the row is moved to `PUBLISH_CONFIRMATION_UNKNOWN` and is not retried automatically until a `decision-outbox:reconcile` operator resolves it through the bounded outbox reconciliation API as `PUBLISHED` or `RETRY_REQUESTED`. `PUBLISHED` requires structured broker-offset evidence or equivalent broker confirmation. Retry uses the same event id and dedupe key; there is no blind automatic retry from the unknown-confirmation state. In bank fail-closed mode, manual outbox resolution is dual-control: the requester records pending structured evidence, and a distinct approver completes the resolution.
+Fraud decision events are delivered with an explicit at-least-once contract: `delivery=AT_LEAST_ONCE` and `dedupeKey=eventId`. Consumers MUST be idempotent by `eventId`; if the same decision event is observed twice, the consumer should keep the first applied result and ignore the duplicate. If alert-service publishes to Kafka but cannot confirm the outbox row as `PUBLISHED`, the row is moved to `PUBLISH_CONFIRMATION_UNKNOWN` and is not retried automatically until a `decision-outbox:reconcile` operator resolves it through the bounded outbox reconciliation API as `PUBLISHED` or `RETRY_REQUESTED`. `POST /api/v1/decision-outbox/unknown-confirmations/{alertId}/resolve` requires `X-Idempotency-Key` and is executed through the regulated command model: no state change occurs before `ATTEMPTED` audit, duplicate replays are safe for the same payload, and conflicting reuse returns 409. `PUBLISHED` requires structured broker-offset evidence or equivalent broker confirmation. Retry uses the same event id and dedupe key; there is no blind automatic retry from the unknown-confirmation state. In bank fail-closed mode, manual outbox resolution is dual-control: the requester records pending structured evidence, and a distinct approver completes the resolution.
 
 ### PUBLISH_CONFIRMATION_UNKNOWN Runbook
 
@@ -303,6 +307,7 @@ Fraud decision events are delivered with an explicit at-least-once contract: `de
 3. If the broker confirms the event, resolve as `PUBLISHED` with `evidence_reference.type=BROKER_OFFSET`, bounded `reference`, `verified_at`, and `verified_by`.
 4. If the broker confirms the event is absent, resolve as `RETRY_REQUESTED`; the service reuses the same event id and dedupe key.
 5. In bank fail-closed mode, the requester and approver must be different authenticated operators. Pending resolution keeps `/system/trust-level` degraded until approval.
+6. If `regulated_mutation_recovery_required_count > 0`, inspect `GET /api/v1/regulated-mutations/{idempotencyKey}` before retrying. Do not infer rollback from command state; use the command state and durable degradation records.
 
 ### Sensitive Evidence Surface
 
