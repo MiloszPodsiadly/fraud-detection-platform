@@ -31,6 +31,23 @@ public class RegulatedMutationCommandDocument {
     private String correlationId;
     @Field("request_hash")
     private String requestHash;
+    @Indexed
+    @Field("idempotency_key_hash")
+    private String idempotencyKeyHash;
+    @Field("intent_hash")
+    private String intentHash;
+    @Field("intent_resource_id")
+    private String intentResourceId;
+    @Field("intent_action")
+    private String intentAction;
+    @Field("intent_actor_id")
+    private String intentActorId;
+    @Field("intent_decision")
+    private String intentDecision;
+    @Field("intent_reason_hash")
+    private String intentReasonHash;
+    @Field("intent_tags_hash")
+    private String intentTagsHash;
     private RegulatedMutationState state;
     @Field("execution_status")
     private RegulatedMutationExecutionStatus executionStatus;
@@ -83,6 +100,22 @@ public class RegulatedMutationCommandDocument {
     public void setCorrelationId(String correlationId) { this.correlationId = correlationId; }
     public String getRequestHash() { return requestHash; }
     public void setRequestHash(String requestHash) { this.requestHash = requestHash; }
+    public String getIdempotencyKeyHash() { return idempotencyKeyHash; }
+    public void setIdempotencyKeyHash(String idempotencyKeyHash) { this.idempotencyKeyHash = idempotencyKeyHash; }
+    public String getIntentHash() { return intentHash; }
+    public void setIntentHash(String intentHash) { this.intentHash = intentHash; }
+    public String getIntentResourceId() { return intentResourceId; }
+    public void setIntentResourceId(String intentResourceId) { this.intentResourceId = intentResourceId; }
+    public String getIntentAction() { return intentAction; }
+    public void setIntentAction(String intentAction) { this.intentAction = intentAction; }
+    public String getIntentActorId() { return intentActorId; }
+    public void setIntentActorId(String intentActorId) { this.intentActorId = intentActorId; }
+    public String getIntentDecision() { return intentDecision; }
+    public void setIntentDecision(String intentDecision) { this.intentDecision = intentDecision; }
+    public String getIntentReasonHash() { return intentReasonHash; }
+    public void setIntentReasonHash(String intentReasonHash) { this.intentReasonHash = intentReasonHash; }
+    public String getIntentTagsHash() { return intentTagsHash; }
+    public void setIntentTagsHash(String intentTagsHash) { this.intentTagsHash = intentTagsHash; }
     public RegulatedMutationState getState() { return state; }
     public void setState(RegulatedMutationState state) { this.state = state; }
     public RegulatedMutationExecutionStatus getExecutionStatus() { return executionStatus; }

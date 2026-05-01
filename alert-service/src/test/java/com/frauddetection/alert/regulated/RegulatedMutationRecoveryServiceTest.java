@@ -178,6 +178,7 @@ class RegulatedMutationRecoveryServiceTest {
     void shouldReconstructSnapshotFromCommittedBusinessStateAndOutboxWithoutRerunningMutation() {
         Fixture fixture = new Fixture();
         RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.BUSINESS_COMMITTED);
+        setSubmitDecisionIntent(command, AnalystDecision.CONFIRMED_FRAUD, "Manual review", List.of("chargeback"), "principal-7");
         when(fixture.alertRepository.findById("alert-1")).thenReturn(Optional.of(committedAlert(DecisionOutboxStatus.PUBLISHED)));
 
         RegulatedMutationRecoveryResult result = fixture.service.recover(command);
@@ -187,6 +188,23 @@ class RegulatedMutationRecoveryServiceTest {
         assertThat(command.getResponseSnapshot()).isNotNull();
         assertThat(command.getResponseSnapshot().decisionEventId()).isEqualTo("event-1");
         assertThat(command.getOutboxEventId()).isEqualTo("event-1");
+    }
+
+    @Test
+    void shouldRequireRecoveryWhenCommittedBusinessStateDoesNotMatchIntent() {
+        Fixture fixture = new Fixture();
+        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.BUSINESS_COMMITTED);
+        setSubmitDecisionIntent(command, AnalystDecision.CONFIRMED_FRAUD, "Manual review", List.of("chargeback"), "principal-7");
+        AlertDocument mismatched = committedAlert(DecisionOutboxStatus.PUBLISHED);
+        mismatched.setAnalystDecision(AnalystDecision.MARKED_LEGITIMATE);
+        when(fixture.alertRepository.findById("alert-1")).thenReturn(Optional.of(mismatched));
+
+        RegulatedMutationRecoveryResult result = fixture.service.recover(command);
+
+        assertThat(result.outcome()).isEqualTo(RegulatedMutationRecoveryOutcome.RECOVERY_REQUIRED);
+        assertThat(command.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
+        assertThat(command.getLastError()).isEqualTo("RECOVERY_REQUIRED");
+        assertThat(command.getResponseSnapshot()).isNull();
     }
 
     @Test
@@ -274,6 +292,18 @@ class RegulatedMutationRecoveryServiceTest {
     }
 
     @Test
+    void shouldInspectCommandByCommandIdAndIdempotencyHash() {
+        Fixture fixture = new Fixture();
+        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.EVIDENCE_PENDING);
+        command.setIdempotencyKeyHash(RegulatedMutationIntentHasher.hash("idem-1"));
+        when(fixture.commandRepository.findById("mutation-1")).thenReturn(Optional.of(command));
+        when(fixture.commandRepository.findByIdempotencyKeyHash(command.getIdempotencyKeyHash())).thenReturn(Optional.of(command));
+
+        assertThat(fixture.service.inspectByCommandId(" mutation-1 ").idempotencyKey()).isEqualTo("idem-1");
+        assertThat(fixture.service.inspectByIdempotencyHash(command.getIdempotencyKeyHash()).idempotencyKey()).isEqualTo("idem-1");
+    }
+
+    @Test
     void shouldReturnNotFoundForMissingInspectionCommand() {
         Fixture fixture = new Fixture();
 
@@ -300,6 +330,8 @@ class RegulatedMutationRecoveryServiceTest {
         document.setCorrelationId("corr-1");
         document.setAnalystId("principal-7");
         document.setAnalystDecision(AnalystDecision.CONFIRMED_FRAUD);
+        document.setDecisionReason("Manual review");
+        document.setDecisionTags(List.of("chargeback"));
         document.setAlertStatus(AlertStatus.RESOLVED);
         document.setDecidedAt(Instant.parse("2026-05-01T00:00:00Z"));
         document.setDecisionOutboxStatus(outboxStatus);
@@ -320,6 +352,29 @@ class RegulatedMutationRecoveryServiceTest {
                 Instant.parse("2026-05-01T00:00:00Z")
         ));
         return document;
+    }
+
+    private static void setSubmitDecisionIntent(
+            RegulatedMutationCommandDocument command,
+            AnalystDecision decision,
+            String reason,
+            List<String> tags,
+            String actorId
+    ) {
+        RegulatedMutationIntent intent = RegulatedMutationIntentHasher.submitDecision(
+                command.getResourceId(),
+                actorId,
+                decision,
+                reason,
+                tags
+        );
+        command.setIntentHash(intent.intentHash());
+        command.setIntentResourceId(intent.resourceId());
+        command.setIntentAction(intent.action());
+        command.setIntentActorId(intent.actorId());
+        command.setIntentDecision(intent.decision());
+        command.setIntentReasonHash(intent.reasonHash());
+        command.setIntentTagsHash(intent.tagsHash());
     }
 
     private static final class Fixture {

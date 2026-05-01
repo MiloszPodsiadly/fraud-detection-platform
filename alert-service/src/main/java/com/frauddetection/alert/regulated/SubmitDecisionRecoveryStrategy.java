@@ -9,11 +9,13 @@ import com.frauddetection.common.events.enums.AlertStatus;
 import org.springframework.stereotype.Component;
 
 import java.util.Optional;
+import java.util.Objects;
 
 @Component
 public class SubmitDecisionRecoveryStrategy implements RegulatedMutationRecoveryStrategy {
 
     private static final String BUSINESS_STATE_NOT_RECONSTRUCTABLE = "BUSINESS_STATE_NOT_RECONSTRUCTABLE";
+    private static final String BUSINESS_STATE_INTENT_MISMATCH = "BUSINESS_STATE_INTENT_MISMATCH";
 
     private final AlertRepository alertRepository;
 
@@ -42,9 +44,14 @@ public class SubmitDecisionRecoveryStrategy implements RegulatedMutationRecovery
 
     @Override
     public RecoveryValidationResult validateBusinessState(RegulatedMutationCommandDocument command) {
-        return reconstructSnapshot(command).isPresent()
+        Optional<AlertDocument> alert = alertRepository.findById(command.getResourceId())
+                .filter(this::hasCommittedDecision);
+        if (alert.isEmpty()) {
+            return RecoveryValidationResult.recoveryRequired(BUSINESS_STATE_NOT_RECONSTRUCTABLE);
+        }
+        return matchesIntent(command, alert.get())
                 ? RecoveryValidationResult.accepted()
-                : RecoveryValidationResult.recoveryRequired(BUSINESS_STATE_NOT_RECONSTRUCTABLE);
+                : RecoveryValidationResult.recoveryRequired(BUSINESS_STATE_INTENT_MISMATCH);
     }
 
     private boolean hasCommittedDecision(AlertDocument alert) {
@@ -52,5 +59,27 @@ public class SubmitDecisionRecoveryStrategy implements RegulatedMutationRecovery
                 && alert.getDecidedAt() != null
                 && alert.getDecisionOutboxEvent() != null
                 && alert.getDecisionOutboxStatus() != null;
+    }
+
+    private boolean matchesIntent(RegulatedMutationCommandDocument command, AlertDocument alert) {
+        if (command.getIntentHash() == null) {
+            return true;
+        }
+        String decision = RegulatedMutationIntentHasher.canonicalValue(alert.getAnalystDecision());
+        String reasonHash = RegulatedMutationIntentHasher.hash(alert.getDecisionReason());
+        String tagsHash = RegulatedMutationIntentHasher.hash(alert.getDecisionTags());
+        String intentHash = RegulatedMutationIntentHasher.hash("resourceId=" + RegulatedMutationIntentHasher.canonicalValue(alert.getAlertId())
+                + "|action=" + AuditAction.SUBMIT_ANALYST_DECISION.name()
+                + "|actorId=" + RegulatedMutationIntentHasher.canonicalValue(alert.getAnalystId())
+                + "|decision=" + decision
+                + "|reasonHash=" + reasonHash
+                + "|tagsHash=" + tagsHash);
+        return Objects.equals(command.getIntentResourceId(), alert.getAlertId())
+                && Objects.equals(command.getIntentAction(), AuditAction.SUBMIT_ANALYST_DECISION.name())
+                && Objects.equals(command.getIntentActorId(), alert.getAnalystId())
+                && Objects.equals(command.getIntentDecision(), decision)
+                && Objects.equals(command.getIntentReasonHash(), reasonHash)
+                && Objects.equals(command.getIntentTagsHash(), tagsHash)
+                && Objects.equals(command.getIntentHash(), intentHash);
     }
 }

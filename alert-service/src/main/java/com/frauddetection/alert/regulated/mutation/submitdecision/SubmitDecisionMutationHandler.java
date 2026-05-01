@@ -1,4 +1,4 @@
-package com.frauddetection.alert.service;
+package com.frauddetection.alert.regulated.mutation.submitdecision;
 
 import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
@@ -6,6 +6,7 @@ import com.frauddetection.alert.exception.AlertNotFoundException;
 import com.frauddetection.alert.mapper.AlertDocumentMapper;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
+import com.frauddetection.alert.service.DecisionOutboxWriter;
 import com.frauddetection.common.events.enums.AlertStatus;
 import org.springframework.stereotype.Component;
 

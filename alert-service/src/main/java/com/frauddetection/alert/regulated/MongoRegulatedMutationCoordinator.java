@@ -157,6 +157,8 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
         document.setAction(command.action().name());
         document.setCorrelationId(normalize(command.correlationId()));
         document.setRequestHash(command.requestHash());
+        document.setIdempotencyKeyHash(RegulatedMutationIntentHasher.hash(idempotencyKey));
+        applyIntent(command, document);
         document.setState(RegulatedMutationState.REQUESTED);
         document.setExecutionStatus(RegulatedMutationExecutionStatus.NEW);
         document.setId(UUID.randomUUID().toString());
@@ -169,6 +171,24 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
                     .map(existing -> existingOrConflict(existing, command.requestHash()))
                     .orElseThrow(() -> duplicate);
         }
+    }
+
+    private <R, S> void applyIntent(RegulatedMutationCommand<R, S> command, RegulatedMutationCommandDocument document) {
+        RegulatedMutationIntent intent = command.intent();
+        if (intent == null) {
+            document.setIntentHash(command.requestHash());
+            document.setIntentResourceId(command.resourceId());
+            document.setIntentAction(command.action().name());
+            document.setIntentActorId(command.actorId());
+            return;
+        }
+        document.setIntentHash(intent.intentHash());
+        document.setIntentResourceId(intent.resourceId());
+        document.setIntentAction(intent.action());
+        document.setIntentActorId(intent.actorId());
+        document.setIntentDecision(intent.decision());
+        document.setIntentReasonHash(intent.reasonHash());
+        document.setIntentTagsHash(intent.tagsHash());
     }
 
     private <R, S> RegulatedMutationCommandDocument claim(RegulatedMutationCommand<R, S> command, String idempotencyKey) {

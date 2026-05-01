@@ -10,6 +10,8 @@ import java.util.Optional;
 public interface RegulatedMutationCommandRepository extends MongoRepository<RegulatedMutationCommandDocument, String> {
     Optional<RegulatedMutationCommandDocument> findByIdempotencyKey(String idempotencyKey);
 
+    Optional<RegulatedMutationCommandDocument> findByIdempotencyKeyHash(String idempotencyKeyHash);
+
     List<RegulatedMutationCommandDocument> findTop100ByExecutionStatusInAndUpdatedAtBefore(
             Collection<RegulatedMutationExecutionStatus> executionStatuses,
             Instant updatedAt
@@ -28,6 +30,8 @@ public interface RegulatedMutationCommandRepository extends MongoRepository<Regu
             RegulatedMutationExecutionStatus executionStatus,
             int attemptCount
     );
+
+    long countByState(RegulatedMutationState state);
 
     java.util.Optional<RegulatedMutationCommandDocument> findTopByExecutionStatusOrderByUpdatedAtAsc(
             RegulatedMutationExecutionStatus executionStatus

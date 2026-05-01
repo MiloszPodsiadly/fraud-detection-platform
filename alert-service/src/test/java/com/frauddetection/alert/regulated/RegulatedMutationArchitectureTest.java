@@ -77,11 +77,18 @@ class RegulatedMutationArchitectureTest {
     @Test
     void submitDecisionMutationHandlerIsTheAllowedDomainWriteAdapter() throws Exception {
         String source = Files.readString(Path.of(
-                "src/main/java/com/frauddetection/alert/service/SubmitDecisionMutationHandler.java"
+                "src/main/java/com/frauddetection/alert/regulated/mutation/submitdecision/SubmitDecisionMutationHandler.java"
         ));
 
         assertThat(source).contains("alertRepository.save");
         assertThat(source).doesNotContain("auditService.audit");
         assertThat(source).doesNotContain("AuditMutationRecorder");
+    }
+
+    @Test
+    void servicePackageMustNotContainSubmitDecisionMutationHandler() {
+        assertThat(Files.exists(Path.of(
+                "src/main/java/com/frauddetection/alert/service/SubmitDecisionMutationHandler.java"
+        ))).isFalse();
     }
 }

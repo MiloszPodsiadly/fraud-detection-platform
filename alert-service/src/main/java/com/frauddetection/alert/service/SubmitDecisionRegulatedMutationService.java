@@ -10,19 +10,15 @@ import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.regulated.RegulatedMutationCommand;
 import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
+import com.frauddetection.alert.regulated.RegulatedMutationIntent;
+import com.frauddetection.alert.regulated.RegulatedMutationIntentHasher;
 import com.frauddetection.alert.regulated.RegulatedMutationResponseSnapshot;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
+import com.frauddetection.alert.regulated.mutation.submitdecision.SubmitDecisionMutationHandler;
 import com.frauddetection.alert.security.principal.AnalystActorResolver;
 import com.frauddetection.common.events.contract.FraudDecisionEvent;
 import com.frauddetection.common.events.enums.AlertStatus;
 import org.springframework.stereotype.Service;
-
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 @Service
 public class SubmitDecisionRegulatedMutationService {
@@ -52,6 +48,13 @@ public class SubmitDecisionRegulatedMutationService {
         AlertStatus resultingStatus = analystDecisionStatusMapper.toAlertStatus(request);
         String actorId = analystActorResolver.resolveActorId(request.analystId(), "SUBMIT_ANALYST_DECISION", alertId);
         String requestHash = requestHash(request);
+        RegulatedMutationIntent intent = RegulatedMutationIntentHasher.submitDecision(
+                alertId,
+                actorId,
+                request.decision(),
+                request.decisionReason(),
+                request.tags()
+        );
         RegulatedMutationCommand<AlertDocument, SubmitAnalystDecisionResponse> command = new RegulatedMutationCommand<>(
                 idempotencyKey,
                 actorId,
@@ -64,7 +67,8 @@ public class SubmitDecisionRegulatedMutationService {
                 (saved, state) -> response(saved, request, resultingStatus, publicStatus(state)),
                 RegulatedMutationResponseSnapshot::from,
                 RegulatedMutationResponseSnapshot::toSubmitDecisionResponse,
-                state -> statusResponse(alertId, request, resultingStatus, publicStatus(state))
+                state -> statusResponse(alertId, request, resultingStatus, publicStatus(state)),
+                intent
         );
         return regulatedMutationCoordinator.commit(command).response();
     }
@@ -115,41 +119,11 @@ public class SubmitDecisionRegulatedMutationService {
     }
 
     private String requestHash(SubmitAnalystDecisionRequest request) {
-        String canonical = "analystId=" + canonicalValue(request.analystId())
-                + "|decision=" + canonicalValue(request.decision())
-                + "|decisionReason=" + canonicalValue(request.decisionReason())
-                + "|tags=" + canonicalValue(request.tags())
-                + "|decisionMetadata=" + canonicalValue(request.decisionMetadata());
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                    .digest(canonical.getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 is unavailable.");
-        }
-    }
-
-    private String canonicalValue(Object value) {
-        if (value == null) {
-            return "null";
-        }
-        if (value instanceof Map<?, ?> map) {
-            return map.entrySet().stream()
-                    .sorted(java.util.Comparator.comparing(entry -> String.valueOf(entry.getKey())))
-                    .map(entry -> canonicalValue(entry.getKey()) + ":" + canonicalValue(entry.getValue()))
-                    .collect(Collectors.joining(",", "{", "}"));
-        }
-        if (value instanceof Iterable<?> iterable) {
-            StringBuilder builder = new StringBuilder("[");
-            boolean first = true;
-            for (Object current : iterable) {
-                if (!first) {
-                    builder.append(",");
-                }
-                builder.append(canonicalValue(current));
-                first = false;
-            }
-            return builder.append("]").toString();
-        }
-        return String.valueOf(value);
+        String canonical = "analystId=" + RegulatedMutationIntentHasher.canonicalValue(request.analystId())
+                + "|decision=" + RegulatedMutationIntentHasher.canonicalValue(request.decision())
+                + "|decisionReason=" + RegulatedMutationIntentHasher.canonicalValue(request.decisionReason())
+                + "|tags=" + RegulatedMutationIntentHasher.canonicalValue(request.tags())
+                + "|decisionMetadata=" + RegulatedMutationIntentHasher.canonicalValue(request.decisionMetadata());
+        return RegulatedMutationIntentHasher.hash(canonical);
     }
 }
