@@ -1,6 +1,7 @@
 package com.frauddetection.alert.regulated;
 
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -23,5 +24,10 @@ public class RegulatedMutationRecoveryController {
     @GetMapping("/recovery/backlog")
     public RegulatedMutationRecoveryBacklogResponse backlog() {
         return recoveryService.backlog();
+    }
+
+    @GetMapping("/{idempotencyKey}")
+    public RegulatedMutationCommandInspectionResponse inspect(@PathVariable String idempotencyKey) {
+        return recoveryService.inspect(idempotencyKey);
     }
 }

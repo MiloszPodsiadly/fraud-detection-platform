@@ -6,7 +6,6 @@ import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.exception.AlertNotFoundException;
-import com.frauddetection.alert.mapper.AlertDocumentMapper;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.regulated.RegulatedMutationCommand;
@@ -21,7 +20,6 @@ import org.springframework.stereotype.Service;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -30,25 +28,22 @@ import java.util.stream.Collectors;
 public class SubmitDecisionRegulatedMutationService {
 
     private final AlertRepository alertRepository;
-    private final AlertDocumentMapper alertDocumentMapper;
     private final AnalystDecisionStatusMapper analystDecisionStatusMapper;
     private final AnalystActorResolver analystActorResolver;
-    private final DecisionOutboxWriter decisionOutboxWriter;
+    private final SubmitDecisionMutationHandler mutationHandler;
     private final RegulatedMutationCoordinator regulatedMutationCoordinator;
 
     public SubmitDecisionRegulatedMutationService(
             AlertRepository alertRepository,
-            AlertDocumentMapper alertDocumentMapper,
             AnalystDecisionStatusMapper analystDecisionStatusMapper,
             AnalystActorResolver analystActorResolver,
-            DecisionOutboxWriter decisionOutboxWriter,
+            SubmitDecisionMutationHandler mutationHandler,
             RegulatedMutationCoordinator regulatedMutationCoordinator
     ) {
         this.alertRepository = alertRepository;
-        this.alertDocumentMapper = alertDocumentMapper;
         this.analystDecisionStatusMapper = analystDecisionStatusMapper;
         this.analystActorResolver = analystActorResolver;
-        this.decisionOutboxWriter = decisionOutboxWriter;
+        this.mutationHandler = mutationHandler;
         this.regulatedMutationCoordinator = regulatedMutationCoordinator;
     }
 
@@ -65,41 +60,13 @@ public class SubmitDecisionRegulatedMutationService {
                 AuditAction.SUBMIT_ANALYST_DECISION,
                 current.getCorrelationId(),
                 requestHash,
-                () -> applyDecision(alertId, request, resultingStatus, actorId, idempotencyKey, requestHash),
+                () -> mutationHandler.applyDecision(alertId, request, resultingStatus, actorId, idempotencyKey, requestHash),
                 (saved, state) -> response(saved, request, resultingStatus, publicStatus(state)),
                 RegulatedMutationResponseSnapshot::from,
                 RegulatedMutationResponseSnapshot::toSubmitDecisionResponse,
                 state -> statusResponse(alertId, request, resultingStatus, publicStatus(state))
         );
         return regulatedMutationCoordinator.commit(command).response();
-    }
-
-    private AlertDocument applyDecision(
-            String alertId,
-            SubmitAnalystDecisionRequest request,
-            AlertStatus resultingStatus,
-            String actorId,
-            String idempotencyKey,
-            String requestHash
-    ) {
-        AlertDocument document = alertRepository.findById(alertId).orElseThrow(() -> new AlertNotFoundException(alertId));
-        document.setAlertStatus(resultingStatus);
-        document.setAnalystDecision(request.decision());
-        document.setAnalystId(actorId);
-        document.setDecisionReason(request.decisionReason());
-        document.setDecisionTags(request.tags());
-        document.setDecidedAt(Instant.now());
-        document.setDecisionIdempotencyKey(normalizeIdempotencyKey(idempotencyKey));
-        document.setDecisionIdempotencyRequestHash(requestHash);
-        document.setDecisionOperationStatus(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING.name());
-        decisionOutboxWriter.attachPendingOutbox(
-                document,
-                alertDocumentMapper.toDomain(document),
-                request,
-                resultingStatus,
-                actorId
-        );
-        return alertRepository.save(document);
     }
 
     private SubmitAnalystDecisionResponse response(
@@ -145,13 +112,6 @@ public class SubmitDecisionRegulatedMutationService {
             case FAILED, BUSINESS_COMMITTED, SUCCESS_AUDIT_PENDING -> SubmitDecisionOperationStatus.RECOVERY_REQUIRED;
             case REJECTED -> SubmitDecisionOperationStatus.REJECTED_BEFORE_MUTATION;
         };
-    }
-
-    private String normalizeIdempotencyKey(String idempotencyKey) {
-        if (idempotencyKey == null || idempotencyKey.isBlank()) {
-            return null;
-        }
-        return idempotencyKey.trim();
     }
 
     private String requestHash(SubmitAnalystDecisionRequest request) {

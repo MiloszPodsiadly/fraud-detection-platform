@@ -7,6 +7,7 @@ import com.frauddetection.alert.audit.AuditEventRepository;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.AuditService;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -47,17 +48,23 @@ public class RegulatedMutationAuditPhaseService {
             String failureReason,
             String phaseKey
     ) {
-        auditService.audit(
-                action,
-                resourceType,
-                command.getResourceId(),
-                command.getCorrelationId(),
-                command.getActorId(),
-                outcome,
-                failureReason,
-                new AuditEventMetadataSummary(command.getCorrelationId(), phaseKey, "alert-service", "1.0", null, failureReason, null, null, null),
-                phaseKey
-        );
+        try {
+            auditService.audit(
+                    action,
+                    resourceType,
+                    command.getResourceId(),
+                    command.getCorrelationId(),
+                    command.getActorId(),
+                    outcome,
+                    failureReason,
+                    new AuditEventMetadataSummary(command.getCorrelationId(), phaseKey, "alert-service", "1.0", null, failureReason, null, null, null),
+                    phaseKey
+            );
+        } catch (DuplicateKeyException duplicate) {
+            return auditEventRepository.findByRequestId(phaseKey)
+                    .map(AuditEventDocument::auditId)
+                    .orElseThrow(() -> duplicate);
+        }
         return auditEventRepository.findByRequestId(phaseKey)
                 .map(AuditEventDocument::auditId)
                 .orElse(phaseKey);

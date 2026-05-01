@@ -89,6 +89,7 @@ public class AlertSecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/decision-outbox/unknown-confirmations/{alertId}/resolve").hasAuthority(AnalystAuthority.DECISION_OUTBOX_RECONCILE)
                         .requestMatchers(HttpMethod.POST, "/api/v1/regulated-mutations/recover").hasAuthority(AnalystAuthority.REGULATED_MUTATION_RECOVER)
                         .requestMatchers(HttpMethod.GET, "/api/v1/regulated-mutations/recovery/backlog").hasAnyAuthority(AnalystAuthority.REGULATED_MUTATION_RECOVER, AnalystAuthority.AUDIT_VERIFY)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/regulated-mutations/{idempotencyKey}").hasAnyAuthority(AnalystAuthority.REGULATED_MUTATION_RECOVER, AnalystAuthority.AUDIT_VERIFY)
                         .requestMatchers(HttpMethod.GET, "/system/trust-level").hasAuthority(AnalystAuthority.AUDIT_VERIFY)
                         .requestMatchers(HttpMethod.GET, "/governance/advisories/analytics").hasAuthority(AnalystAuthority.TRANSACTION_MONITOR_READ)
                         .requestMatchers(HttpMethod.GET, "/governance/advisories").hasAuthority(AnalystAuthority.TRANSACTION_MONITOR_READ)

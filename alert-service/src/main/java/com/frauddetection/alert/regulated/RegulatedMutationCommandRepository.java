@@ -24,6 +24,11 @@ public interface RegulatedMutationCommandRepository extends MongoRepository<Regu
 
     long countByExecutionStatusAndLeaseExpiresAtBefore(RegulatedMutationExecutionStatus executionStatus, Instant leaseExpiresAt);
 
+    long countByExecutionStatusAndAttemptCountGreaterThanEqual(
+            RegulatedMutationExecutionStatus executionStatus,
+            int attemptCount
+    );
+
     java.util.Optional<RegulatedMutationCommandDocument> findTopByExecutionStatusOrderByUpdatedAtAsc(
             RegulatedMutationExecutionStatus executionStatus
     );

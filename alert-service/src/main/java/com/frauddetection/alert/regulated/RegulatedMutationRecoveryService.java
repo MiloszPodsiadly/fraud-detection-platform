@@ -4,19 +4,18 @@ import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditDegradationService;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
-import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
-import com.frauddetection.alert.persistence.AlertDocument;
-import com.frauddetection.alert.persistence.AlertRepository;
-import com.frauddetection.common.events.enums.AlertStatus;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 @Service
@@ -28,7 +27,7 @@ public class RegulatedMutationRecoveryService {
     private final RegulatedMutationAuditPhaseService auditPhaseService;
     private final AuditDegradationService auditDegradationService;
     private final AlertServiceMetrics metrics;
-    private final AlertRepository alertRepository;
+    private final List<RegulatedMutationRecoveryStrategy> recoveryStrategies;
     private final Duration stuckThreshold;
 
     public RegulatedMutationRecoveryService(
@@ -36,14 +35,14 @@ public class RegulatedMutationRecoveryService {
             RegulatedMutationAuditPhaseService auditPhaseService,
             AuditDegradationService auditDegradationService,
             AlertServiceMetrics metrics,
-            AlertRepository alertRepository,
+            List<RegulatedMutationRecoveryStrategy> recoveryStrategies,
             @Value("${app.regulated-mutation.recovery.stuck-threshold:PT2M}") Duration stuckThreshold
     ) {
         this.commandRepository = commandRepository;
         this.auditPhaseService = auditPhaseService;
         this.auditDegradationService = auditDegradationService;
         this.metrics = metrics;
-        this.alertRepository = alertRepository;
+        this.recoveryStrategies = recoveryStrategies == null ? List.of() : List.copyOf(recoveryStrategies);
         this.stuckThreshold = stuckThreshold;
     }
 
@@ -98,6 +97,11 @@ public class RegulatedMutationRecoveryService {
                 RegulatedMutationExecutionStatus.PROCESSING,
                 now
         );
+        long failedTerminal = commandRepository.countByExecutionStatus(RegulatedMutationExecutionStatus.FAILED);
+        long repeatedFailures = commandRepository.countByExecutionStatusAndAttemptCountGreaterThanEqual(
+                RegulatedMutationExecutionStatus.RECOVERY_REQUIRED,
+                3
+        );
         Long oldestAge = commandRepository.findTopByExecutionStatusOrderByUpdatedAtAsc(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED)
                 .map(command -> Math.max(0L, Duration.between(command.getUpdatedAt(), now).toSeconds()))
                 .orElse(null);
@@ -115,11 +119,13 @@ public class RegulatedMutationRecoveryService {
                     byState.merge(command.getState() == null ? "UNKNOWN" : command.getState().name(), 1L, Long::sum);
                     byAction.merge(command.getAction() == null ? "UNKNOWN" : command.getAction(), 1L, Long::sum);
                 });
-        metrics.recordRegulatedMutationRecoveryBacklog(recoveryRequired, oldestAge);
+        metrics.recordRegulatedMutationRecoveryBacklog(recoveryRequired, oldestAge, failedTerminal, repeatedFailures);
         return new RegulatedMutationRecoveryBacklogResponse(
                 recoveryRequired,
                 expiredProcessing,
                 oldestAge,
+                failedTerminal,
+                repeatedFailures,
                 byState,
                 byAction
         );
@@ -127,6 +133,15 @@ public class RegulatedMutationRecoveryService {
 
     public long recoveryRequiredCount() {
         return commandRepository.countByExecutionStatus(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
+    }
+
+    public RegulatedMutationCommandInspectionResponse inspect(String idempotencyKey) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "regulated mutation command not found");
+        }
+        return commandRepository.findByIdempotencyKey(idempotencyKey.trim())
+                .map(RegulatedMutationCommandInspectionResponse::from)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "regulated mutation command not found"));
     }
 
     RegulatedMutationRecoveryResult recover(RegulatedMutationCommandDocument command) {
@@ -159,7 +174,7 @@ public class RegulatedMutationRecoveryService {
 
     private RegulatedMutationRecoveryOutcome recoverSuccessAuditPending(RegulatedMutationCommandDocument command) {
         if (command.getResponseSnapshot() == null) {
-            if (!reconstructSubmitDecisionSnapshot(command)) {
+            if (!reconstructSnapshot(command)) {
                 return recoveryRequired(command);
             }
         }
@@ -204,7 +219,7 @@ public class RegulatedMutationRecoveryService {
 
     private RegulatedMutationRecoveryOutcome completeIfSnapshotExists(RegulatedMutationCommandDocument command) {
         if (command.getResponseSnapshot() == null) {
-            if (!reconstructSubmitDecisionSnapshot(command)) {
+            if (!reconstructSnapshot(command)) {
                 return recoveryRequired(command);
             }
         }
@@ -226,7 +241,7 @@ public class RegulatedMutationRecoveryService {
     }
 
     private RegulatedMutationRecoveryOutcome recoverBusinessCommitted(RegulatedMutationCommandDocument command) {
-        if (!reconstructSubmitDecisionSnapshot(command)) {
+        if (!reconstructSnapshot(command)) {
             return recoveryRequired(command);
         }
         command.setState(RegulatedMutationState.SUCCESS_AUDIT_PENDING);
@@ -242,33 +257,37 @@ public class RegulatedMutationRecoveryService {
         return RegulatedMutationRecoveryOutcome.FAILED_TERMINAL;
     }
 
-    private boolean reconstructSubmitDecisionSnapshot(RegulatedMutationCommandDocument command) {
-        if (!AuditAction.SUBMIT_ANALYST_DECISION.name().equals(command.getAction())
-                || !AuditResourceType.ALERT.name().equals(command.getResourceType())) {
+    private boolean reconstructSnapshot(RegulatedMutationCommandDocument command) {
+        Optional<RegulatedMutationRecoveryStrategy> strategy = recoveryStrategy(command);
+        if (strategy.isEmpty()) {
             return false;
         }
-        return alertRepository.findById(command.getResourceId())
-                .filter(this::hasCommittedDecision)
-                .map(alert -> {
-                    command.setResponseSnapshot(new RegulatedMutationResponseSnapshot(
-                            alert.getAlertId(),
-                            alert.getAnalystDecision(),
-                            alert.getAlertStatus() == null ? AlertStatus.RESOLVED : alert.getAlertStatus(),
-                            alert.getDecisionOutboxEvent().eventId(),
-                            alert.getDecidedAt(),
-                            SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING
-                    ));
-                    command.setOutboxEventId(alert.getDecisionOutboxEvent().eventId());
-                    return true;
-                })
-                .orElse(false);
+        try {
+            RecoveryValidationResult validation = strategy.get().validateBusinessState(command);
+            if (!validation.valid()) {
+                command.setLastError(validation.reasonCode());
+                return false;
+            }
+            Optional<RegulatedMutationResponseSnapshot> snapshot = strategy.get().reconstructSnapshot(command);
+            snapshot.ifPresent(command::setResponseSnapshot);
+            snapshot.map(RegulatedMutationResponseSnapshot::decisionEventId).ifPresent(command::setOutboxEventId);
+            return snapshot.isPresent();
+        } catch (RuntimeException exception) {
+            command.setLastError("RECOVERY_STRATEGY_FAILED");
+            return false;
+        }
     }
 
-    private boolean hasCommittedDecision(AlertDocument alert) {
-        return alert.getAnalystDecision() != null
-                && alert.getDecidedAt() != null
-                && alert.getDecisionOutboxEvent() != null
-                && alert.getDecisionOutboxStatus() != null;
+    private Optional<RegulatedMutationRecoveryStrategy> recoveryStrategy(RegulatedMutationCommandDocument command) {
+        try {
+            AuditAction action = AuditAction.valueOf(command.getAction());
+            AuditResourceType resourceType = AuditResourceType.valueOf(command.getResourceType());
+            return recoveryStrategies.stream()
+                    .filter(strategy -> strategy.supports(action, resourceType))
+                    .findFirst();
+        } catch (RuntimeException exception) {
+            return Optional.empty();
+        }
     }
 
     private boolean activeLease(RegulatedMutationCommandDocument command, Instant now) {
@@ -282,10 +301,6 @@ public class RegulatedMutationRecoveryService {
     }
 
     private void recordBacklogMetric() {
-        RegulatedMutationRecoveryBacklogResponse response = backlog();
-        metrics.recordRegulatedMutationRecoveryBacklog(
-                response.totalRecoveryRequired(),
-                response.oldestRecoveryRequiredAgeSeconds()
-        );
+        backlog();
     }
 }
