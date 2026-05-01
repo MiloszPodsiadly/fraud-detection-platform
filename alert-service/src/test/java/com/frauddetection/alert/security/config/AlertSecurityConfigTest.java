@@ -359,6 +359,7 @@ class AlertSecurityConfigTest {
         mockMvc.perform(post("/api/v1/alerts/alert-1/decision")
                         .with(demoUser("READ_ONLY_ANALYST"))
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "idem-readonly-1")
                         .content(objectMapper.writeValueAsString(submitDecisionRequest())))
                 .andExpect(status().isForbidden())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
@@ -382,6 +383,7 @@ class AlertSecurityConfigTest {
         mockMvc.perform(post("/api/v1/alerts/alert-1/decision")
                         .with(demoUser("ANALYST"))
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "idem-analyst-1")
                         .content(objectMapper.writeValueAsString(submitDecisionRequest())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultingStatus").value("RESOLVED"));
@@ -428,6 +430,7 @@ class AlertSecurityConfigTest {
         mockMvc.perform(post("/api/v1/alerts/alert-1/decision")
                         .with(demoUser("FRAUD_OPS_ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "idem-admin-1")
                         .content(objectMapper.writeValueAsString(submitDecisionRequest())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultingStatus").value("RESOLVED"));

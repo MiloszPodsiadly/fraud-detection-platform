@@ -97,7 +97,7 @@ class AlertControllerTest {
 
     @Test
     void shouldSubmitAnalystDecision() throws Exception {
-        when(alertManagementUseCase.submitDecision(org.mockito.ArgumentMatchers.eq("alert-1"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.isNull()))
+        when(alertManagementUseCase.submitDecision(org.mockito.ArgumentMatchers.eq("alert-1"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("idem-1")))
                 .thenReturn(new SubmitAnalystDecisionResponse(
                         "alert-1",
                         AnalystDecision.CONFIRMED_FRAUD,
@@ -117,6 +117,7 @@ class AlertControllerTest {
 
         mockMvc.perform(post("/api/v1/alerts/alert-1/decision")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "idem-1")
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultingStatus").value("RESOLVED"))
@@ -125,7 +126,7 @@ class AlertControllerTest {
 
     @Test
     void shouldReturn503WhenAuditPersistenceFailsBeforeWrite() throws Exception {
-        when(alertManagementUseCase.submitDecision(org.mockito.ArgumentMatchers.eq("alert-1"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.isNull()))
+        when(alertManagementUseCase.submitDecision(org.mockito.ArgumentMatchers.eq("alert-1"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("idem-1")))
                 .thenThrow(new AuditPersistenceUnavailableException());
 
         SubmitAnalystDecisionRequest request = new SubmitAnalystDecisionRequest(
@@ -138,11 +139,32 @@ class AlertControllerTest {
 
         mockMvc.perform(post("/api/v1/alerts/alert-1/decision")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "idem-1")
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.message").value("Audit persistence is unavailable; mutation was not executed."))
                 .andExpect(jsonPath("$.details[0]").value("reason:REJECTED_BEFORE_MUTATION"))
                 .andExpect(jsonPath("$.operation_status").doesNotExist());
+    }
+
+    @Test
+    void shouldRejectMissingIdempotencyKeyForAnalystDecision() throws Exception {
+        when(alertManagementUseCase.submitDecision(org.mockito.ArgumentMatchers.eq("alert-1"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.isNull()))
+                .thenThrow(new com.frauddetection.alert.regulated.MissingIdempotencyKeyException());
+
+        SubmitAnalystDecisionRequest request = new SubmitAnalystDecisionRequest(
+                "analyst-1",
+                AnalystDecision.CONFIRMED_FRAUD,
+                "Manual confirmation",
+                List.of("kyc", "velocity"),
+                Map.of()
+        );
+
+        mockMvc.perform(post("/api/v1/alerts/alert-1/decision")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.details[0]").value("reason:IDEMPOTENCY_KEY_REQUIRED"));
     }
 
     @Test
