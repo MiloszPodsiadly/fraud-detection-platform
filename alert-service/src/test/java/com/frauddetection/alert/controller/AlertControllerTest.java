@@ -125,6 +125,34 @@ class AlertControllerTest {
     }
 
     @Test
+    void shouldReturn202ForInProgressRegulatedDecisionCommand() throws Exception {
+        when(alertManagementUseCase.submitDecision(org.mockito.ArgumentMatchers.eq("alert-1"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("idem-1")))
+                .thenReturn(new SubmitAnalystDecisionResponse(
+                        "alert-1",
+                        AnalystDecision.CONFIRMED_FRAUD,
+                        AlertStatus.RESOLVED,
+                        null,
+                        null,
+                        SubmitDecisionOperationStatus.IN_PROGRESS
+                ));
+
+        SubmitAnalystDecisionRequest request = new SubmitAnalystDecisionRequest(
+                "analyst-1",
+                AnalystDecision.CONFIRMED_FRAUD,
+                "Manual confirmation",
+                List.of("kyc", "velocity"),
+                Map.of()
+        );
+
+        mockMvc.perform(post("/api/v1/alerts/alert-1/decision")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "idem-1")
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.operation_status").value("IN_PROGRESS"));
+    }
+
+    @Test
     void shouldReturn503WhenAuditPersistenceFailsBeforeWrite() throws Exception {
         when(alertManagementUseCase.submitDecision(org.mockito.ArgumentMatchers.eq("alert-1"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("idem-1")))
                 .thenThrow(new AuditPersistenceUnavailableException());

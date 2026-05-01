@@ -17,6 +17,7 @@ import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.regulated.MissingIdempotencyKeyException;
 import com.frauddetection.alert.regulated.MongoRegulatedMutationCoordinator;
 import com.frauddetection.alert.regulated.RegulatedMutationCommandDocument;
+import com.frauddetection.alert.regulated.RegulatedMutationExecutionStatus;
 import com.frauddetection.alert.regulated.RegulatedMutationCommandRepository;
 import com.frauddetection.alert.regulated.RegulatedMutationResponseSnapshot;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
@@ -27,7 +28,12 @@ import com.frauddetection.common.events.enums.RiskLevel;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.data.mongodb.core.FindAndModifyOptions;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -169,7 +175,8 @@ class SubmitDecisionRegulatedMutationServiceTest {
         assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE);
         assertThat(response.operationStatus().name()).isNotEqualTo("COMMITTED_FULLY_ANCHORED");
         assertThat(alert.getAlertStatus()).isEqualTo(AlertStatus.RESOLVED);
-        assertThat(alert.getDecisionOperationStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE.name());
+        assertThat(alert.getDecisionOperationStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING.name());
+        assertThat(fixture.currentCommand.getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE);
         assertThat(fixture.states).contains(RegulatedMutationState.COMMITTED_DEGRADED);
         verify(fixture.degradationService).recordPostCommitDegraded(
                 AuditAction.SUBMIT_ANALYST_DECISION,
@@ -241,6 +248,133 @@ class SubmitDecisionRegulatedMutationServiceTest {
         verify(fixture.alertRepository, never()).save(any(AlertDocument.class));
     }
 
+    @Test
+    void shouldReturnInProgressWhenDuplicateRequestArrivesDuringActiveLease() {
+        Fixture fixture = new Fixture();
+        RegulatedMutationCommandDocument existing = fixture.existingCommand(RegulatedMutationState.AUDIT_ATTEMPTED);
+        existing.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
+        existing.setLeaseExpiresAt(Instant.now().plusSeconds(30));
+        fixture.commandLookup(Optional.of(existing));
+        when(fixture.alertRepository.findById("alert-1")).thenReturn(Optional.of(fixture.alert()));
+        when(fixture.actorResolver.resolveActorId(eq("analyst-7"), eq("SUBMIT_ANALYST_DECISION"), eq("alert-1")))
+                .thenReturn("principal-7");
+
+        SubmitAnalystDecisionResponse response = fixture.service().submit("alert-1", request(), "idem-1");
+
+        assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.IN_PROGRESS);
+        verify(fixture.alertRepository, never()).save(any(AlertDocument.class));
+        verify(fixture.auditService, never()).audit(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void shouldReturnInProgressWhenConcurrentRequestWinsAtomicClaim() {
+        Fixture fixture = new Fixture();
+        fixture.commandLookup(Optional.empty());
+        fixture.claimReturnsNull = true;
+        when(fixture.alertRepository.findById("alert-1")).thenReturn(Optional.of(fixture.alert()));
+        when(fixture.actorResolver.resolveActorId(eq("analyst-7"), eq("SUBMIT_ANALYST_DECISION"), eq("alert-1")))
+                .thenReturn("principal-7");
+
+        SubmitAnalystDecisionResponse response = fixture.service().submit("alert-1", request(), "idem-1");
+
+        assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.IN_PROGRESS);
+        verify(fixture.alertRepository, never()).save(any(AlertDocument.class));
+        verify(fixture.auditService, never()).audit(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void shouldReturnRecoveryRequiredForEvidencePendingWithoutSnapshot() {
+        Fixture fixture = new Fixture();
+        RegulatedMutationCommandDocument existing = fixture.existingCommand(RegulatedMutationState.EVIDENCE_PENDING);
+        existing.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
+        existing.setLeaseExpiresAt(Instant.now().minusSeconds(1));
+        fixture.commandLookup(Optional.of(existing));
+        when(fixture.alertRepository.findById("alert-1")).thenReturn(Optional.of(fixture.alert()));
+        when(fixture.actorResolver.resolveActorId(eq("analyst-7"), eq("SUBMIT_ANALYST_DECISION"), eq("alert-1")))
+                .thenReturn("principal-7");
+
+        SubmitAnalystDecisionResponse response = fixture.service().submit("alert-1", request(), "idem-1");
+
+        assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.RECOVERY_REQUIRED);
+        assertThat(existing.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
+        verify(fixture.alertRepository, never()).save(any(AlertDocument.class));
+        verify(fixture.auditService, never()).audit(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void shouldReturnCommitUnknownAndNotRerunMutationForBusinessCommittingWithoutSnapshot() {
+        Fixture fixture = new Fixture();
+        RegulatedMutationCommandDocument existing = fixture.existingCommand(RegulatedMutationState.BUSINESS_COMMITTING);
+        existing.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
+        existing.setLeaseExpiresAt(Instant.now().minusSeconds(1));
+        fixture.commandLookup(Optional.of(existing));
+        when(fixture.alertRepository.findById("alert-1")).thenReturn(Optional.of(fixture.alert()));
+        when(fixture.actorResolver.resolveActorId(eq("analyst-7"), eq("SUBMIT_ANALYST_DECISION"), eq("alert-1")))
+                .thenReturn("principal-7");
+
+        SubmitAnalystDecisionResponse response = fixture.service().submit("alert-1", request(), "idem-1");
+
+        assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMIT_UNKNOWN);
+        assertThat(existing.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
+        verify(fixture.alertRepository, never()).save(any(AlertDocument.class));
+        verify(fixture.auditService, never()).audit(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void shouldReturnRecoveryRequiredAndNotRerunMutationForBusinessCommittedWithoutSnapshot() {
+        Fixture fixture = new Fixture();
+        RegulatedMutationCommandDocument existing = fixture.existingCommand(RegulatedMutationState.BUSINESS_COMMITTED);
+        existing.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
+        existing.setLeaseExpiresAt(Instant.now().minusSeconds(1));
+        fixture.commandLookup(Optional.of(existing));
+        when(fixture.alertRepository.findById("alert-1")).thenReturn(Optional.of(fixture.alert()));
+        when(fixture.actorResolver.resolveActorId(eq("analyst-7"), eq("SUBMIT_ANALYST_DECISION"), eq("alert-1")))
+                .thenReturn("principal-7");
+
+        SubmitAnalystDecisionResponse response = fixture.service().submit("alert-1", request(), "idem-1");
+
+        assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.RECOVERY_REQUIRED);
+        assertThat(existing.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
+        verify(fixture.alertRepository, never()).save(any(AlertDocument.class));
+        verify(fixture.auditService, never()).audit(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void shouldRetryOnlySuccessAuditForSuccessAuditPendingSnapshot() {
+        Fixture fixture = new Fixture();
+        RegulatedMutationCommandDocument existing = fixture.existingCommand(RegulatedMutationState.SUCCESS_AUDIT_PENDING);
+        existing.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
+        existing.setLeaseExpiresAt(Instant.now().minusSeconds(1));
+        existing.setResponseSnapshot(new RegulatedMutationResponseSnapshot(
+                "alert-1",
+                AnalystDecision.CONFIRMED_FRAUD,
+                AlertStatus.RESOLVED,
+                "event-1",
+                Instant.parse("2026-05-01T00:00:00Z"),
+                SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING
+        ));
+        fixture.commandLookup(Optional.of(existing));
+        when(fixture.alertRepository.findById("alert-1")).thenReturn(Optional.of(fixture.alert()));
+        when(fixture.actorResolver.resolveActorId(eq("analyst-7"), eq("SUBMIT_ANALYST_DECISION"), eq("alert-1")))
+                .thenReturn("principal-7");
+
+        SubmitAnalystDecisionResponse response = fixture.service().submit("alert-1", request(), "idem-1");
+
+        assertThat(response.decisionEventId()).isEqualTo("event-1");
+        assertThat(existing.isSuccessAuditRecorded()).isTrue();
+        assertThat(existing.getState()).isEqualTo(RegulatedMutationState.EVIDENCE_PENDING);
+        verify(fixture.alertRepository, never()).save(any(AlertDocument.class));
+        verify(fixture.auditService).audit(
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT,
+                "alert-1",
+                "corr-1",
+                "principal-7",
+                AuditOutcome.SUCCESS,
+                null
+        );
+    }
+
     private SubmitAnalystDecisionRequest request() {
         return new SubmitAnalystDecisionRequest(
                 "analyst-7",
@@ -254,12 +388,15 @@ class SubmitDecisionRegulatedMutationServiceTest {
     private static final class Fixture {
         private final AlertRepository alertRepository = mock(AlertRepository.class);
         private final RegulatedMutationCommandRepository commandRepository = mock(RegulatedMutationCommandRepository.class);
+        private final MongoTemplate mongoTemplate = mock(MongoTemplate.class);
         private final AuditService auditService = mock(AuditService.class);
         private final AuditDegradationService degradationService = mock(AuditDegradationService.class);
         private final AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
         private final com.frauddetection.alert.security.principal.AnalystActorResolver actorResolver =
                 mock(com.frauddetection.alert.security.principal.AnalystActorResolver.class);
         private final List<RegulatedMutationState> states = new ArrayList<>();
+        private RegulatedMutationCommandDocument currentCommand;
+        private boolean claimReturnsNull;
 
         private SubmitDecisionRegulatedMutationService service() {
             return new SubmitDecisionRegulatedMutationService(
@@ -268,7 +405,15 @@ class SubmitDecisionRegulatedMutationServiceTest {
                     new AnalystDecisionStatusMapper(),
                     actorResolver,
                     new DecisionOutboxWriter(new FraudDecisionEventMapper()),
-                    new MongoRegulatedMutationCoordinator(commandRepository, auditService, degradationService, metrics, false)
+                    new MongoRegulatedMutationCoordinator(
+                            commandRepository,
+                            mongoTemplate,
+                            auditService,
+                            degradationService,
+                            metrics,
+                            false,
+                            Duration.ofSeconds(30)
+                    )
             );
         }
 
@@ -287,15 +432,48 @@ class SubmitDecisionRegulatedMutationServiceTest {
             return document;
         }
 
+        private RegulatedMutationCommandDocument existingCommand(RegulatedMutationState state) {
+            RegulatedMutationCommandDocument existing = new RegulatedMutationCommandDocument();
+            existing.setId("mutation-1");
+            existing.setIdempotencyKey("idem-1");
+            existing.setRequestHash("ef884a0e375de07e11b89639ead3cccb2256434e2adc707a0fe377ab5f13b7ad");
+            existing.setActorId("principal-7");
+            existing.setResourceId("alert-1");
+            existing.setResourceType(AuditResourceType.ALERT.name());
+            existing.setAction(AuditAction.SUBMIT_ANALYST_DECISION.name());
+            existing.setCorrelationId("corr-1");
+            existing.setState(state);
+            existing.setUpdatedAt(Instant.now().minusSeconds(60));
+            return existing;
+        }
+
         private void commandLookup(Optional<RegulatedMutationCommandDocument> existing) {
-            when(commandRepository.findByIdempotencyKey("idem-1")).thenReturn(existing);
+            existing.ifPresent(document -> currentCommand = document);
+            when(commandRepository.findByIdempotencyKey("idem-1")).thenAnswer(invocation -> Optional.ofNullable(currentCommand));
             when(commandRepository.save(any(RegulatedMutationCommandDocument.class))).thenAnswer(invocation -> {
                 RegulatedMutationCommandDocument document = invocation.getArgument(0);
                 if (document.getId() == null) {
                     document.setId("mutation-1");
                 }
+                currentCommand = document;
                 states.add(document.getState());
                 return document;
+            });
+            when(mongoTemplate.findAndModify(
+                    any(Query.class),
+                    any(Update.class),
+                    any(FindAndModifyOptions.class),
+                    eq(RegulatedMutationCommandDocument.class)
+            )).thenAnswer(invocation -> {
+                if (claimReturnsNull) {
+                    return null;
+                }
+                if (currentCommand == null) {
+                    return null;
+                }
+                currentCommand.setExecutionStatus(com.frauddetection.alert.regulated.RegulatedMutationExecutionStatus.PROCESSING);
+                currentCommand.setAttemptCount(currentCommand.getAttemptCount() + 1);
+                return currentCommand;
             });
         }
     }
