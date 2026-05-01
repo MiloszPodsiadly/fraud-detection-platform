@@ -63,4 +63,25 @@ class RegulatedMutationArchitectureTest {
         assertThat(source).doesNotContain("auditService.audit");
         assertThat(source).doesNotContain("AuditMutationRecorder");
     }
+
+    @Test
+    void regulatedSubmitDecisionServiceMustNotWriteRepositoryDirectly() throws Exception {
+        String source = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/service/SubmitDecisionRegulatedMutationService.java"
+        ));
+
+        assertThat(source).doesNotContain("alertRepository.save");
+        assertThat(source).contains("mutationHandler.applyDecision");
+    }
+
+    @Test
+    void submitDecisionMutationHandlerIsTheAllowedDomainWriteAdapter() throws Exception {
+        String source = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/service/SubmitDecisionMutationHandler.java"
+        ));
+
+        assertThat(source).contains("alertRepository.save");
+        assertThat(source).doesNotContain("auditService.audit");
+        assertThat(source).doesNotContain("AuditMutationRecorder");
+    }
 }

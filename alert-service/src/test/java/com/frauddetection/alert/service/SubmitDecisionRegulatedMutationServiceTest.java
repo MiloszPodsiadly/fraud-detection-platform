@@ -419,10 +419,13 @@ class SubmitDecisionRegulatedMutationServiceTest {
         private SubmitDecisionRegulatedMutationService service() {
             return new SubmitDecisionRegulatedMutationService(
                     alertRepository,
-                    new AlertDocumentMapper(),
                     new AnalystDecisionStatusMapper(),
                     actorResolver,
-                    new DecisionOutboxWriter(new FraudDecisionEventMapper()),
+                    new SubmitDecisionMutationHandler(
+                            alertRepository,
+                            new AlertDocumentMapper(),
+                            new DecisionOutboxWriter(new FraudDecisionEventMapper())
+                    ),
                     new MongoRegulatedMutationCoordinator(
                             commandRepository,
                             mongoTemplate,

@@ -9,6 +9,7 @@ import com.frauddetection.alert.audit.external.ExternalImmutabilityLevel;
 import com.frauddetection.alert.audit.external.ExternalWitnessCapabilities;
 import com.frauddetection.alert.audit.external.ExternalWitnessTimestampType;
 import com.frauddetection.alert.persistence.AlertRepository;
+import com.frauddetection.alert.regulated.RegulatedMutationRecoveryService;
 import com.frauddetection.alert.service.DecisionOutboxStatus;
 import org.junit.jupiter.api.Test;
 
@@ -225,6 +226,43 @@ class SystemTrustLevelControllerTest {
         assertThat(response.guaranteeLevel()).isEqualTo("FDP24_DEGRADED");
         assertThat(response.outboxFailedTerminalCount()).isEqualTo(1L);
         assertThat(response.reasonCode()).isEqualTo("OUTBOX_TERMINAL_FAILURE");
+    }
+
+    @Test
+    void shouldDowngradeFailClosedWhenRegulatedMutationRecoveryIsRequired() {
+        ExternalAuditIntegrityService integrityService = mock(ExternalAuditIntegrityService.class);
+        ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
+        AuditDegradationService degradationService = mock(AuditDegradationService.class);
+        AlertRepository alertRepository = mock(AlertRepository.class);
+        RegulatedMutationRecoveryService recoveryService = mock(RegulatedMutationRecoveryService.class);
+        when(integrityService.coverage("alert-service", 100)).thenReturn(healthyCoverage());
+        when(sink.capabilities()).thenReturn(verifiedCapabilities());
+        when(degradationService.unresolvedPostCommitDegradedCount()).thenReturn(0L);
+        when(alertRepository.countByDecisionOutboxStatus(DecisionOutboxStatus.FAILED_TERMINAL)).thenReturn(0L);
+        when(alertRepository.countByDecisionOutboxStatus(DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN)).thenReturn(0L);
+        when(alertRepository.findTopByDecisionOutboxStatusInOrderByDecidedAtAsc(List.of(DecisionOutboxStatus.PENDING, DecisionOutboxStatus.PROCESSING, DecisionOutboxStatus.FAILED_RETRYABLE)))
+                .thenReturn(Optional.empty());
+        when(recoveryService.recoveryRequiredCount()).thenReturn(1L);
+        SystemTrustLevelController controller = new SystemTrustLevelController(
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                Duration.ofMinutes(10),
+                integrityService,
+                sink,
+                degradationService,
+                alertRepository,
+                recoveryService
+        );
+
+        SystemTrustLevelResponse response = controller.trustLevel();
+
+        assertThat(response.guaranteeLevel()).isEqualTo("FDP24_DEGRADED");
+        assertThat(response.regulatedMutationRecoveryRequiredCount()).isEqualTo(1L);
+        assertThat(response.reasonCode()).isEqualTo("REGULATED_MUTATION_RECOVERY_REQUIRED");
     }
 
     @Test

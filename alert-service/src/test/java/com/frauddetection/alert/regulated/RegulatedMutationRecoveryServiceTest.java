@@ -17,6 +17,8 @@ import com.frauddetection.common.events.contract.FraudDecisionEvent;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -24,9 +26,12 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -36,6 +41,40 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 
 class RegulatedMutationRecoveryServiceTest {
+
+    @Test
+    void shouldReturnExistingAuditWhenConcurrentPhaseInsertWinsRace() {
+        AuditEventRepository auditEventRepository = mock(AuditEventRepository.class);
+        AuditService auditService = mock(AuditService.class);
+        RegulatedMutationAuditPhaseService phaseService = new RegulatedMutationAuditPhaseService(auditEventRepository, auditService);
+        RegulatedMutationCommandDocument command = new Fixture().command(RegulatedMutationState.SUCCESS_AUDIT_PENDING);
+        AuditEventDocument existingAudit = mock(AuditEventDocument.class);
+        when(existingAudit.auditId()).thenReturn("audit-success-1");
+        when(auditEventRepository.findByRequestId("mutation-1:SUCCESS"))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(existingAudit));
+        doThrow(new DuplicateKeyException("duplicate request_id")).when(auditService).audit(
+                eq(AuditAction.SUBMIT_ANALYST_DECISION),
+                eq(AuditResourceType.ALERT),
+                eq("alert-1"),
+                eq("corr-1"),
+                eq("principal-7"),
+                eq(AuditOutcome.SUCCESS),
+                isNull(),
+                any(AuditEventMetadataSummary.class),
+                eq("mutation-1:SUCCESS")
+        );
+
+        String auditId = phaseService.recordPhase(
+                command,
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT,
+                AuditOutcome.SUCCESS,
+                null
+        );
+
+        assertThat(auditId).isEqualTo("audit-success-1");
+    }
 
     @Test
     void shouldRetryOnlySuccessAuditForSuccessAuditPendingCommandWithSnapshot() {
@@ -151,6 +190,43 @@ class RegulatedMutationRecoveryServiceTest {
     }
 
     @Test
+    void shouldMarkUnsupportedMutationRecoveryRequiredWithoutGuessingSnapshot() {
+        Fixture fixture = new Fixture();
+        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.BUSINESS_COMMITTED);
+        command.setAction(AuditAction.UPDATE_FRAUD_CASE.name());
+        command.setResourceType(AuditResourceType.FRAUD_CASE.name());
+
+        RegulatedMutationRecoveryResult result = fixture.service.recover(command);
+
+        assertThat(result.outcome()).isEqualTo(RegulatedMutationRecoveryOutcome.RECOVERY_REQUIRED);
+        assertThat(command.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
+        assertThat(command.getResponseSnapshot()).isNull();
+    }
+
+    @Test
+    void shouldMarkStrategyFailureAsRecoveryRequired() {
+        RegulatedMutationCommandRepository commandRepository = mock(RegulatedMutationCommandRepository.class);
+        RegulatedMutationRecoveryStrategy strategy = mock(RegulatedMutationRecoveryStrategy.class);
+        when(strategy.supports(AuditAction.SUBMIT_ANALYST_DECISION, AuditResourceType.ALERT)).thenReturn(true);
+        when(strategy.validateBusinessState(any())).thenThrow(new IllegalStateException("repository unavailable"));
+        when(commandRepository.save(any(RegulatedMutationCommandDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        RegulatedMutationRecoveryService service = new RegulatedMutationRecoveryService(
+                commandRepository,
+                new RegulatedMutationAuditPhaseService(mock(AuditEventRepository.class), mock(AuditService.class)),
+                mock(AuditDegradationService.class),
+                mock(AlertServiceMetrics.class),
+                List.of(strategy),
+                Duration.ofMinutes(2)
+        );
+        RegulatedMutationCommandDocument command = new Fixture().command(RegulatedMutationState.BUSINESS_COMMITTED);
+
+        RegulatedMutationRecoveryResult result = service.recover(command);
+
+        assertThat(result.outcome()).isEqualTo(RegulatedMutationRecoveryOutcome.RECOVERY_REQUIRED);
+        assertThat(command.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
+    }
+
+    @Test
     void shouldScanBoundedStuckCommands() {
         Fixture fixture = new Fixture();
         RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.REQUESTED);
@@ -167,6 +243,42 @@ class RegulatedMutationRecoveryServiceTest {
         assertThat(results).hasSize(2);
         assertThat(results.getFirst().outcome()).isEqualTo(RegulatedMutationRecoveryOutcome.STILL_PENDING);
         assertThat(results.get(1).outcome()).isEqualTo(RegulatedMutationRecoveryOutcome.RECOVERED);
+        verify(fixture.metrics).recordRegulatedMutationRecoveryOutcome("STILL_PENDING");
+        verify(fixture.metrics).recordRegulatedMutationRecoveryOutcome("RECOVERED");
+        verify(fixture.metrics, atLeastOnce()).recordRegulatedMutationRecoveryBacklog(anyLong(), any(), anyLong(), anyLong());
+    }
+
+    @Test
+    void shouldInspectCommandWithoutPayloadDump() {
+        Fixture fixture = new Fixture();
+        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.EVIDENCE_PENDING);
+        command.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
+        command.setResponseSnapshot(snapshot());
+        command.setAttemptedAuditId("audit-attempted");
+        command.setSuccessAuditId("audit-success");
+        command.setLastError("RECOVERY_REQUIRED");
+        when(fixture.commandRepository.findByIdempotencyKey("idem-1")).thenReturn(Optional.of(command));
+
+        RegulatedMutationCommandInspectionResponse response = fixture.service.inspect(" idem-1 ");
+
+        assertThat(response.idempotencyKey()).isEqualTo("idem-1");
+        assertThat(response.action()).isEqualTo(AuditAction.SUBMIT_ANALYST_DECISION.name());
+        assertThat(response.resourceType()).isEqualTo(AuditResourceType.ALERT.name());
+        assertThat(response.resourceId()).isEqualTo("alert-1");
+        assertThat(response.state()).isEqualTo(RegulatedMutationState.EVIDENCE_PENDING.name());
+        assertThat(response.executionStatus()).isEqualTo(RegulatedMutationExecutionStatus.COMPLETED.name());
+        assertThat(response.responseSnapshotPresent()).isTrue();
+        assertThat(response.attemptedAuditId()).isEqualTo("audit-attempted");
+        assertThat(response.successAuditId()).isEqualTo("audit-success");
+        assertThat(response.lastError()).isEqualTo("RECOVERY_REQUIRED");
+    }
+
+    @Test
+    void shouldReturnNotFoundForMissingInspectionCommand() {
+        Fixture fixture = new Fixture();
+
+        assertThatThrownBy(() -> fixture.service.inspect("missing"))
+                .isInstanceOf(ResponseStatusException.class);
     }
 
     private static RegulatedMutationResponseSnapshot snapshot() {
@@ -222,7 +334,7 @@ class RegulatedMutationRecoveryServiceTest {
                 new RegulatedMutationAuditPhaseService(auditEventRepository, auditService),
                 auditDegradationService,
                 metrics,
-                alertRepository,
+                List.of(new SubmitDecisionRecoveryStrategy(alertRepository)),
                 Duration.ofMinutes(2)
         );
 
@@ -232,6 +344,10 @@ class RegulatedMutationRecoveryServiceTest {
             when(commandRepository.findTop100ByExecutionStatusInAndUpdatedAtBefore(anyCollection(), any()))
                     .thenReturn(List.of());
             when(commandRepository.findTop100ByStateInAndUpdatedAtBefore(anyCollection(), any()))
+                    .thenReturn(List.of());
+            when(commandRepository.findTop100ByExecutionStatusOrderByUpdatedAtAsc(any()))
+                    .thenReturn(List.of());
+            when(commandRepository.findTop100ByExecutionStatusAndLeaseExpiresAtBeforeOrderByUpdatedAtAsc(any(), any()))
                     .thenReturn(List.of());
         }
 
