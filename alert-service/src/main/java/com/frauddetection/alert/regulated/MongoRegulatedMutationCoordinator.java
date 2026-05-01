@@ -3,7 +3,6 @@ package com.frauddetection.alert.regulated;
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.audit.AuditDegradationService;
 import com.frauddetection.alert.audit.AuditOutcome;
-import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.audit.PostCommitEvidenceIncompleteException;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.service.ConflictingIdempotencyKeyException;
@@ -32,7 +31,7 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
 
     private final RegulatedMutationCommandRepository commandRepository;
     private final MongoTemplate mongoTemplate;
-    private final AuditService auditService;
+    private final RegulatedMutationAuditPhaseService auditPhaseService;
     private final AuditDegradationService auditDegradationService;
     private final AlertServiceMetrics metrics;
     private final boolean bankModeFailClosed;
@@ -41,7 +40,7 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
     public MongoRegulatedMutationCoordinator(
             RegulatedMutationCommandRepository commandRepository,
             MongoTemplate mongoTemplate,
-            AuditService auditService,
+            RegulatedMutationAuditPhaseService auditPhaseService,
             AuditDegradationService auditDegradationService,
             AlertServiceMetrics metrics,
             @Value("${app.audit.bank-mode.fail-closed:false}") boolean bankModeFailClosed,
@@ -49,7 +48,7 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
     ) {
         this.commandRepository = commandRepository;
         this.mongoTemplate = mongoTemplate;
-        this.auditService = auditService;
+        this.auditPhaseService = auditPhaseService;
         this.auditDegradationService = auditDegradationService;
         this.metrics = metrics;
         this.bankModeFailClosed = bankModeFailClosed;
@@ -160,6 +159,7 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
         document.setRequestHash(command.requestHash());
         document.setState(RegulatedMutationState.REQUESTED);
         document.setExecutionStatus(RegulatedMutationExecutionStatus.NEW);
+        document.setId(UUID.randomUUID().toString());
         document.setCreatedAt(now);
         document.setUpdatedAt(now);
         try {
@@ -220,15 +220,8 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
             RegulatedMutationCommandDocument document
     ) {
         try {
-            auditService.audit(
-                    command.action(),
-                    command.resourceType(),
-                    command.resourceId(),
-                    command.correlationId(),
-                    command.actorId(),
-                    AuditOutcome.ATTEMPTED,
-                    null
-            );
+            String auditId = auditPhaseService.recordPhase(document, command.action(), command.resourceType(), AuditOutcome.ATTEMPTED, null);
+            document.setAttemptedAuditId(auditId);
             document.setAttemptedAuditRecorded(true);
             transition(document, RegulatedMutationState.AUDIT_ATTEMPTED, null);
         } catch (RuntimeException exception) {
@@ -249,13 +242,13 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
             transition(document, RegulatedMutationState.BUSINESS_COMMITTED, null);
             return result;
         } catch (RuntimeException exception) {
-            auditFailure(command, exception);
+            auditFailure(command, document, exception);
             document.setDegradationReason(BUSINESS_WRITE_FAILED);
             document.setExecutionStatus(RegulatedMutationExecutionStatus.FAILED);
             transition(document, RegulatedMutationState.FAILED, BUSINESS_WRITE_FAILED);
             throw exception;
         } catch (Error error) {
-            auditFailure(command, error);
+            auditFailure(command, document, error);
             document.setDegradationReason(BUSINESS_WRITE_FAILED);
             document.setExecutionStatus(RegulatedMutationExecutionStatus.FAILED);
             transition(document, RegulatedMutationState.FAILED, BUSINESS_WRITE_FAILED);
@@ -263,17 +256,15 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
         }
     }
 
-    private <R, S> void auditFailure(RegulatedMutationCommand<R, S> command, Throwable originalFailure) {
+    private <R, S> void auditFailure(RegulatedMutationCommand<R, S> command, RegulatedMutationCommandDocument document, Throwable originalFailure) {
         try {
-            auditService.audit(
+            document.setFailedAuditId(auditPhaseService.recordPhase(
+                    document,
                     command.action(),
                     command.resourceType(),
-                    command.resourceId(),
-                    command.correlationId(),
-                    command.actorId(),
                     AuditOutcome.FAILED,
                     BUSINESS_WRITE_FAILED
-            );
+            ));
         } catch (RuntimeException auditFailure) {
             originalFailure.addSuppressed(auditFailure);
         }
@@ -295,15 +286,8 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
     ) {
         S response = command.responseRestorer().restore(document.getResponseSnapshot());
         try {
-            auditService.audit(
-                    command.action(),
-                    command.resourceType(),
-                    command.resourceId(),
-                    command.correlationId(),
-                    command.actorId(),
-                    AuditOutcome.SUCCESS,
-                    null
-            );
+            String auditId = auditPhaseService.recordPhase(document, command.action(), command.resourceType(), AuditOutcome.SUCCESS, null);
+            document.setSuccessAuditId(auditId);
             document.setSuccessAuditRecorded(true);
             transition(document, RegulatedMutationState.SUCCESS_AUDIT_RECORDED, null);
             document.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
@@ -314,7 +298,7 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
             document.setDegradationReason(POST_COMMIT_AUDIT_DEGRADED);
             document.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
             transition(document, RegulatedMutationState.COMMITTED_DEGRADED, POST_COMMIT_AUDIT_DEGRADED);
-            recordPostCommitDegraded(command);
+            recordPostCommitDegraded(command, document);
             if (bankModeFailClosed) {
                 throw new PostCommitEvidenceIncompleteException();
             }
@@ -333,15 +317,8 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
             RegulatedMutationResponseSnapshot pendingSnapshot
     ) {
         try {
-            auditService.audit(
-                    command.action(),
-                    command.resourceType(),
-                    command.resourceId(),
-                    command.correlationId(),
-                    command.actorId(),
-                    AuditOutcome.SUCCESS,
-                    null
-            );
+            String auditId = auditPhaseService.recordPhase(document, command.action(), command.resourceType(), AuditOutcome.SUCCESS, null);
+            document.setSuccessAuditId(auditId);
             document.setSuccessAuditRecorded(true);
             transition(document, RegulatedMutationState.SUCCESS_AUDIT_RECORDED, null);
             document.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
@@ -355,7 +332,7 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
             document.setDegradationReason(POST_COMMIT_AUDIT_DEGRADED);
             document.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
             transition(document, RegulatedMutationState.COMMITTED_DEGRADED, POST_COMMIT_AUDIT_DEGRADED);
-            recordPostCommitDegraded(command);
+            recordPostCommitDegraded(command, document);
             if (bankModeFailClosed) {
                 throw new PostCommitEvidenceIncompleteException();
             }
@@ -364,12 +341,13 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
         }
     }
 
-    private <R, S> void recordPostCommitDegraded(RegulatedMutationCommand<R, S> command) {
+    private <R, S> void recordPostCommitDegraded(RegulatedMutationCommand<R, S> command, RegulatedMutationCommandDocument document) {
         auditDegradationService.recordPostCommitDegraded(
                 command.action(),
                 command.resourceType(),
                 command.resourceId(),
-                POST_COMMIT_AUDIT_DEGRADED
+                POST_COMMIT_AUDIT_DEGRADED,
+                document.getId()
         );
         metrics.recordPostCommitAuditDegraded(command.action().name());
     }

@@ -62,6 +62,20 @@ public class AuditService {
             String failureReason,
             AuditEventMetadataSummary metadataSummary
     ) {
+        audit(action, resourceType, resourceId, correlationId, fallbackActorId, outcome, failureReason, metadataSummary, null);
+    }
+
+    public void audit(
+            AuditAction action,
+            AuditResourceType resourceType,
+            String resourceId,
+            String correlationId,
+            String fallbackActorId,
+            AuditOutcome outcome,
+            String failureReason,
+            AuditEventMetadataSummary metadataSummary,
+            String requestId
+    ) {
         AuditEvent event = new AuditEvent(
                 actor(fallbackActorId),
                 Objects.requireNonNull(action, "action must not be null"),
@@ -69,7 +83,9 @@ public class AuditService {
                 resourceId,
                 Instant.now(),
                 normalizeOptional(correlationId),
+                normalizeOptional(requestId),
                 Objects.requireNonNull(outcome, "outcome must not be null"),
+                AuditEvent.failureCategory(outcome, normalizeOptional(failureReason)),
                 normalizeOptional(failureReason),
                 metadataSummary
         );

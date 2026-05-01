@@ -48,8 +48,14 @@ public class RegulatedMutationCommandDocument {
     private RegulatedMutationResponseSnapshot responseSnapshot;
     @Field("attempted_audit_recorded")
     private boolean attemptedAuditRecorded;
+    @Field("attempted_audit_id")
+    private String attemptedAuditId;
     @Field("success_audit_recorded")
     private boolean successAuditRecorded;
+    @Field("success_audit_id")
+    private String successAuditId;
+    @Field("failed_audit_id")
+    private String failedAuditId;
     @Field("outbox_event_id")
     private String outboxEventId;
     @Field("created_at")
@@ -95,8 +101,14 @@ public class RegulatedMutationCommandDocument {
     public void setResponseSnapshot(RegulatedMutationResponseSnapshot responseSnapshot) { this.responseSnapshot = responseSnapshot; }
     public boolean isAttemptedAuditRecorded() { return attemptedAuditRecorded; }
     public void setAttemptedAuditRecorded(boolean attemptedAuditRecorded) { this.attemptedAuditRecorded = attemptedAuditRecorded; }
+    public String getAttemptedAuditId() { return attemptedAuditId; }
+    public void setAttemptedAuditId(String attemptedAuditId) { this.attemptedAuditId = attemptedAuditId; }
     public boolean isSuccessAuditRecorded() { return successAuditRecorded; }
     public void setSuccessAuditRecorded(boolean successAuditRecorded) { this.successAuditRecorded = successAuditRecorded; }
+    public String getSuccessAuditId() { return successAuditId; }
+    public void setSuccessAuditId(String successAuditId) { this.successAuditId = successAuditId; }
+    public String getFailedAuditId() { return failedAuditId; }
+    public void setFailedAuditId(String failedAuditId) { this.failedAuditId = failedAuditId; }
     public String getOutboxEventId() { return outboxEventId; }
     public void setOutboxEventId(String outboxEventId) { this.outboxEventId = outboxEventId; }
     public Instant getCreatedAt() { return createdAt; }

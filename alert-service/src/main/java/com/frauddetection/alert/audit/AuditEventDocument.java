@@ -19,7 +19,8 @@ import java.util.List;
         @CompoundIndex(name = "audit_event_type_created_at_idx", def = "{'event_type': 1, 'created_at': -1}"),
         @CompoundIndex(name = "audit_resource_created_at_idx", def = "{'resource_type': 1, 'resource_id': 1, 'created_at': -1}"),
         @CompoundIndex(name = "audit_source_service_created_at_idx", def = "{'source_service': 1, 'created_at': -1}"),
-        @CompoundIndex(name = "audit_partition_created_at_idx", def = "{'partition_key': 1, 'created_at': -1}")
+        @CompoundIndex(name = "audit_partition_created_at_idx", def = "{'partition_key': 1, 'created_at': -1}"),
+        @CompoundIndex(name = "audit_request_id_idx", def = "{'request_id': 1}", unique = true, sparse = true)
 })
 public record AuditEventDocument(
         @Id

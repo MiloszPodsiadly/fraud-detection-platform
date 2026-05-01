@@ -24,6 +24,7 @@ public class AuditDegradationEventDocument {
     private String resourceId;
 
     private String operation;
+    private String commandId;
     private Instant timestamp;
 
     @Indexed
@@ -85,6 +86,14 @@ public class AuditDegradationEventDocument {
 
     public void setOperation(String operation) {
         this.operation = operation;
+    }
+
+    public String getCommandId() {
+        return commandId;
+    }
+
+    public void setCommandId(String commandId) {
+        this.commandId = commandId;
     }
 
     public Instant getTimestamp() {

@@ -6,6 +6,7 @@ import com.frauddetection.alert.audit.external.ExternalAuditAnchorSink;
 import com.frauddetection.alert.audit.external.ExternalWitnessCapabilities;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
+import com.frauddetection.alert.regulated.RegulatedMutationRecoveryService;
 import com.frauddetection.alert.service.DecisionOutboxStatus;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import org.slf4j.Logger;
@@ -37,6 +38,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
     private final ExternalAuditAnchorSink externalAuditAnchorSink;
     private final AuditDegradationService auditDegradationService;
     private final AlertRepository alertRepository;
+    private final RegulatedMutationRecoveryService regulatedMutationRecoveryService;
     private final Duration staleOutboxThreshold;
 
     public SystemTrustLevelController(
@@ -65,7 +67,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
             AlertServiceMetrics ignoredMetrics
     ) {
         this(publicationEnabled, publicationRequired, failClosed, bankModeFailClosed, trustAuthorityEnabled, signingRequired,
-                Duration.ofMinutes(10), externalAuditIntegrityService, externalAuditAnchorSink, null, null);
+                Duration.ofMinutes(10), externalAuditIntegrityService, externalAuditAnchorSink, null, null, null);
     }
 
     @Autowired
@@ -80,7 +82,8 @@ public class SystemTrustLevelController implements ApplicationRunner {
             com.frauddetection.alert.audit.external.ExternalAuditIntegrityService externalAuditIntegrityService,
             ExternalAuditAnchorSink externalAuditAnchorSink,
             AuditDegradationService auditDegradationService,
-            AlertRepository alertRepository
+            AlertRepository alertRepository,
+            RegulatedMutationRecoveryService regulatedMutationRecoveryService
     ) {
         this.publicationEnabled = publicationEnabled;
         this.publicationRequired = publicationRequired;
@@ -92,7 +95,37 @@ public class SystemTrustLevelController implements ApplicationRunner {
         this.externalAuditAnchorSink = externalAuditAnchorSink;
         this.auditDegradationService = auditDegradationService;
         this.alertRepository = alertRepository;
+        this.regulatedMutationRecoveryService = regulatedMutationRecoveryService;
         this.staleOutboxThreshold = staleOutboxThreshold == null ? Duration.ofMinutes(10) : staleOutboxThreshold;
+    }
+
+    public SystemTrustLevelController(
+            boolean publicationEnabled,
+            boolean publicationRequired,
+            boolean failClosed,
+            boolean bankModeFailClosed,
+            boolean trustAuthorityEnabled,
+            boolean signingRequired,
+            Duration staleOutboxThreshold,
+            com.frauddetection.alert.audit.external.ExternalAuditIntegrityService externalAuditIntegrityService,
+            ExternalAuditAnchorSink externalAuditAnchorSink,
+            AuditDegradationService auditDegradationService,
+            AlertRepository alertRepository
+    ) {
+        this(
+                publicationEnabled,
+                publicationRequired,
+                failClosed,
+                bankModeFailClosed,
+                trustAuthorityEnabled,
+                signingRequired,
+                staleOutboxThreshold,
+                externalAuditIntegrityService,
+                externalAuditAnchorSink,
+                auditDegradationService,
+                alertRepository,
+                null
+        );
     }
 
     @GetMapping("/system/trust-level")
@@ -121,6 +154,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 live.outboxPendingResolutionCount(),
                 live.outboxOldestPendingAgeSeconds(),
                 live.outboxOldestAmbiguousAgeSeconds(),
+                live.regulatedMutationRecoveryRequiredCount(),
                 live.reasonCode()
         );
     }
@@ -172,6 +206,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
         long postCommitDegraded = auditDegradationService == null ? 0L : auditDegradationService.unresolvedPostCommitDegradedCount();
         long pendingDegradationResolution = auditDegradationService == null ? 0L : auditDegradationService.pendingResolutionCount();
         long postCommitDegradedResolved = auditDegradationService == null ? 0L : auditDegradationService.resolvedCount();
+        long regulatedRecoveryRequired = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.recoveryRequiredCount();
         OutboxState outboxState = outboxState();
         try {
             coverage = externalAuditIntegrityService.coverage("alert-service", 100);
@@ -201,7 +236,8 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 && outboxState.failedTerminalCount() == 0
                 && outboxState.publishConfirmationUnknownCount() == 0
                 && outboxState.pendingResolutionCount() == 0
-                && !outboxState.stalePending();
+                && !outboxState.stalePending()
+                && regulatedRecoveryRequired == 0;
         if (healthy && outboxState.reasonCode() != null) {
             healthy = false;
         }
@@ -210,6 +246,9 @@ public class SystemTrustLevelController implements ApplicationRunner {
         }
         if (reasonCode == null && pendingDegradationResolution > 0) {
             reasonCode = "AUDIT_DEGRADATION_RESOLUTION_PENDING_APPROVAL";
+        }
+        if (reasonCode == null && regulatedRecoveryRequired > 0) {
+            reasonCode = "REGULATED_MUTATION_RECOVERY_REQUIRED";
         }
         return new LiveTrustState(
                 healthy,
@@ -226,6 +265,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 outboxState.pendingResolutionCount(),
                 outboxState.oldestPendingAgeSeconds(),
                 outboxState.oldestAmbiguousAgeSeconds(),
+                regulatedRecoveryRequired,
                 reasonCode
         );
     }
@@ -306,6 +346,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
             long outboxPendingResolutionCount,
             Long outboxOldestPendingAgeSeconds,
             Long outboxOldestAmbiguousAgeSeconds,
+            long regulatedMutationRecoveryRequiredCount,
             String reasonCode
     ) {
     }

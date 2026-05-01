@@ -14,6 +14,7 @@ export const AUTHORITIES = Object.freeze({
   AUDIT_EXPORT: "audit:export",
   AUDIT_DEGRADATION_RESOLVE: "audit-degradation:resolve",
   DECISION_OUTBOX_RECONCILE: "decision-outbox:reconcile",
+  REGULATED_MUTATION_RECOVER: "regulated-mutation:recover",
 });
 
 export const AUTHORITY_VALUES = Object.freeze([
@@ -29,4 +30,5 @@ export const AUTHORITY_VALUES = Object.freeze([
   "audit:export",
   "audit-degradation:resolve",
   "decision-outbox:reconcile",
+  "regulated-mutation:recover",
 ]);

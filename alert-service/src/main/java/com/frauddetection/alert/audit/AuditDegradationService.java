@@ -43,10 +43,15 @@ public class AuditDegradationService {
     }
 
     public void recordPostCommitDegraded(AuditAction operation, AuditResourceType resourceType, String resourceId, String reason) {
+        recordPostCommitDegraded(operation, resourceType, resourceId, reason, null);
+    }
+
+    public void recordPostCommitDegraded(AuditAction operation, AuditResourceType resourceType, String resourceId, String reason, String commandId) {
         AuditDegradationEventDocument event = new AuditDegradationEventDocument();
         event.setAuditId(UUID.randomUUID().toString());
         event.setType(AuditDegradationEventDocument.TYPE_POST_COMMIT_DEGRADED);
         event.setOperation(operation == null ? "UNKNOWN" : operation.name());
+        event.setCommandId(normalize(commandId, 120, null));
         event.setResourceType(resourceType == null ? "UNKNOWN" : resourceType.name());
         event.setResourceId(resourceId);
         event.setTimestamp(Instant.now());
