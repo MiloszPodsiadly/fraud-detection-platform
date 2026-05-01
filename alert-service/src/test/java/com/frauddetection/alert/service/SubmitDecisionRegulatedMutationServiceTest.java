@@ -7,6 +7,8 @@ import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditDegradationService;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
+import com.frauddetection.alert.audit.AuditEventRepository;
+import com.frauddetection.alert.audit.AuditEventMetadataSummary;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.mapper.AlertDocumentMapper;
@@ -19,6 +21,7 @@ import com.frauddetection.alert.regulated.MongoRegulatedMutationCoordinator;
 import com.frauddetection.alert.regulated.RegulatedMutationCommandDocument;
 import com.frauddetection.alert.regulated.RegulatedMutationExecutionStatus;
 import com.frauddetection.alert.regulated.RegulatedMutationCommandRepository;
+import com.frauddetection.alert.regulated.RegulatedMutationAuditPhaseService;
 import com.frauddetection.alert.regulated.RegulatedMutationResponseSnapshot;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.common.events.contract.FraudDecisionEvent;
@@ -44,6 +47,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -81,23 +85,27 @@ class SubmitDecisionRegulatedMutationServiceTest {
         );
         InOrder inOrder = inOrder(fixture.auditService, fixture.alertRepository);
         inOrder.verify(fixture.auditService).audit(
-                AuditAction.SUBMIT_ANALYST_DECISION,
-                AuditResourceType.ALERT,
-                "alert-1",
-                "corr-1",
-                "principal-7",
-                AuditOutcome.ATTEMPTED,
-                null
+                eq(AuditAction.SUBMIT_ANALYST_DECISION),
+                eq(AuditResourceType.ALERT),
+                eq("alert-1"),
+                eq("corr-1"),
+                eq("principal-7"),
+                eq(AuditOutcome.ATTEMPTED),
+                isNull(),
+                any(AuditEventMetadataSummary.class),
+                org.mockito.ArgumentMatchers.endsWith(":ATTEMPTED")
         );
         inOrder.verify(fixture.alertRepository).save(any(AlertDocument.class));
         inOrder.verify(fixture.auditService).audit(
-                AuditAction.SUBMIT_ANALYST_DECISION,
-                AuditResourceType.ALERT,
-                "alert-1",
-                "corr-1",
-                "principal-7",
-                AuditOutcome.SUCCESS,
-                null
+                eq(AuditAction.SUBMIT_ANALYST_DECISION),
+                eq(AuditResourceType.ALERT),
+                eq("alert-1"),
+                eq("corr-1"),
+                eq("principal-7"),
+                eq(AuditOutcome.SUCCESS),
+                isNull(),
+                any(AuditEventMetadataSummary.class),
+                org.mockito.ArgumentMatchers.endsWith(":SUCCESS")
         );
     }
 
@@ -110,13 +118,15 @@ class SubmitDecisionRegulatedMutationServiceTest {
         when(fixture.actorResolver.resolveActorId(eq("analyst-7"), eq("SUBMIT_ANALYST_DECISION"), eq("alert-1")))
                 .thenReturn("principal-7");
         doThrow(new AuditPersistenceUnavailableException()).when(fixture.auditService).audit(
-                AuditAction.SUBMIT_ANALYST_DECISION,
-                AuditResourceType.ALERT,
-                "alert-1",
-                "corr-1",
-                "principal-7",
-                AuditOutcome.ATTEMPTED,
-                null
+                eq(AuditAction.SUBMIT_ANALYST_DECISION),
+                eq(AuditResourceType.ALERT),
+                eq("alert-1"),
+                eq("corr-1"),
+                eq("principal-7"),
+                eq(AuditOutcome.ATTEMPTED),
+                isNull(),
+                any(AuditEventMetadataSummary.class),
+                org.mockito.ArgumentMatchers.endsWith(":ATTEMPTED")
         );
 
         assertThatThrownBy(() -> fixture.service().submit("alert-1", request(), "idem-1"))
@@ -141,13 +151,15 @@ class SubmitDecisionRegulatedMutationServiceTest {
 
         assertThat(fixture.states).contains(RegulatedMutationState.FAILED);
         verify(fixture.auditService).audit(
-                AuditAction.SUBMIT_ANALYST_DECISION,
-                AuditResourceType.ALERT,
-                "alert-1",
-                "corr-1",
-                "principal-7",
-                AuditOutcome.FAILED,
-                "BUSINESS_WRITE_FAILED"
+                eq(AuditAction.SUBMIT_ANALYST_DECISION),
+                eq(AuditResourceType.ALERT),
+                eq("alert-1"),
+                eq("corr-1"),
+                eq("principal-7"),
+                eq(AuditOutcome.FAILED),
+                eq("BUSINESS_WRITE_FAILED"),
+                any(AuditEventMetadataSummary.class),
+                org.mockito.ArgumentMatchers.endsWith(":FAILED")
         );
     }
 
@@ -161,13 +173,15 @@ class SubmitDecisionRegulatedMutationServiceTest {
         when(fixture.actorResolver.resolveActorId(eq("analyst-7"), eq("SUBMIT_ANALYST_DECISION"), eq("alert-1")))
                 .thenReturn("principal-7");
         doThrow(new AuditPersistenceUnavailableException()).when(fixture.auditService).audit(
-                AuditAction.SUBMIT_ANALYST_DECISION,
-                AuditResourceType.ALERT,
-                "alert-1",
-                "corr-1",
-                "principal-7",
-                AuditOutcome.SUCCESS,
-                null
+                eq(AuditAction.SUBMIT_ANALYST_DECISION),
+                eq(AuditResourceType.ALERT),
+                eq("alert-1"),
+                eq("corr-1"),
+                eq("principal-7"),
+                eq(AuditOutcome.SUCCESS),
+                isNull(),
+                any(AuditEventMetadataSummary.class),
+                org.mockito.ArgumentMatchers.endsWith(":SUCCESS")
         );
 
         SubmitAnalystDecisionResponse response = fixture.service().submit("alert-1", request(), "idem-1");
@@ -182,7 +196,8 @@ class SubmitDecisionRegulatedMutationServiceTest {
                 AuditAction.SUBMIT_ANALYST_DECISION,
                 AuditResourceType.ALERT,
                 "alert-1",
-                "POST_COMMIT_AUDIT_DEGRADED"
+                "POST_COMMIT_AUDIT_DEGRADED",
+                fixture.currentCommand.getId()
         );
         verify(fixture.metrics).recordPostCommitAuditDegraded("SUBMIT_ANALYST_DECISION");
     }
@@ -211,7 +226,7 @@ class SubmitDecisionRegulatedMutationServiceTest {
 
         assertThat(response.decisionEventId()).isEqualTo("event-1");
         assertThat(response.decidedAt()).isEqualTo(Instant.parse("2026-05-01T00:00:00Z"));
-        verify(fixture.auditService, never()).audit(any(), any(), any(), any(), any(), any(), any());
+        verify(fixture.auditService, never()).audit(any(), any(), any(), any(), any(), any(), any(), any(), any());
         verify(fixture.alertRepository, never()).save(any(AlertDocument.class));
     }
 
@@ -230,7 +245,7 @@ class SubmitDecisionRegulatedMutationServiceTest {
         assertThatThrownBy(() -> fixture.service().submit("alert-1", request(), "idem-1"))
                 .isInstanceOf(ConflictingIdempotencyKeyException.class);
 
-        verify(fixture.auditService, never()).audit(any(), any(), any(), any(), any(), any(), any());
+        verify(fixture.auditService, never()).audit(any(), any(), any(), any(), any(), any(), any(), any(), any());
         verify(fixture.alertRepository, never()).save(any(AlertDocument.class));
     }
 
@@ -244,7 +259,7 @@ class SubmitDecisionRegulatedMutationServiceTest {
         assertThatThrownBy(() -> fixture.service().submit("alert-1", request(), null))
                 .isInstanceOf(MissingIdempotencyKeyException.class);
 
-        verify(fixture.auditService, never()).audit(any(), any(), any(), any(), any(), any(), any());
+        verify(fixture.auditService, never()).audit(any(), any(), any(), any(), any(), any(), any(), any(), any());
         verify(fixture.alertRepository, never()).save(any(AlertDocument.class));
     }
 
@@ -263,7 +278,7 @@ class SubmitDecisionRegulatedMutationServiceTest {
 
         assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.IN_PROGRESS);
         verify(fixture.alertRepository, never()).save(any(AlertDocument.class));
-        verify(fixture.auditService, never()).audit(any(), any(), any(), any(), any(), any(), any());
+        verify(fixture.auditService, never()).audit(any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -279,7 +294,7 @@ class SubmitDecisionRegulatedMutationServiceTest {
 
         assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.IN_PROGRESS);
         verify(fixture.alertRepository, never()).save(any(AlertDocument.class));
-        verify(fixture.auditService, never()).audit(any(), any(), any(), any(), any(), any(), any());
+        verify(fixture.auditService, never()).audit(any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -298,7 +313,7 @@ class SubmitDecisionRegulatedMutationServiceTest {
         assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.RECOVERY_REQUIRED);
         assertThat(existing.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
         verify(fixture.alertRepository, never()).save(any(AlertDocument.class));
-        verify(fixture.auditService, never()).audit(any(), any(), any(), any(), any(), any(), any());
+        verify(fixture.auditService, never()).audit(any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -317,7 +332,7 @@ class SubmitDecisionRegulatedMutationServiceTest {
         assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMIT_UNKNOWN);
         assertThat(existing.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
         verify(fixture.alertRepository, never()).save(any(AlertDocument.class));
-        verify(fixture.auditService, never()).audit(any(), any(), any(), any(), any(), any(), any());
+        verify(fixture.auditService, never()).audit(any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -336,7 +351,7 @@ class SubmitDecisionRegulatedMutationServiceTest {
         assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.RECOVERY_REQUIRED);
         assertThat(existing.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
         verify(fixture.alertRepository, never()).save(any(AlertDocument.class));
-        verify(fixture.auditService, never()).audit(any(), any(), any(), any(), any(), any(), any());
+        verify(fixture.auditService, never()).audit(any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -365,13 +380,15 @@ class SubmitDecisionRegulatedMutationServiceTest {
         assertThat(existing.getState()).isEqualTo(RegulatedMutationState.EVIDENCE_PENDING);
         verify(fixture.alertRepository, never()).save(any(AlertDocument.class));
         verify(fixture.auditService).audit(
-                AuditAction.SUBMIT_ANALYST_DECISION,
-                AuditResourceType.ALERT,
-                "alert-1",
-                "corr-1",
-                "principal-7",
-                AuditOutcome.SUCCESS,
-                null
+                eq(AuditAction.SUBMIT_ANALYST_DECISION),
+                eq(AuditResourceType.ALERT),
+                eq("alert-1"),
+                eq("corr-1"),
+                eq("principal-7"),
+                eq(AuditOutcome.SUCCESS),
+                isNull(),
+                any(AuditEventMetadataSummary.class),
+                eq("mutation-1:SUCCESS")
         );
     }
 
@@ -389,6 +406,7 @@ class SubmitDecisionRegulatedMutationServiceTest {
         private final AlertRepository alertRepository = mock(AlertRepository.class);
         private final RegulatedMutationCommandRepository commandRepository = mock(RegulatedMutationCommandRepository.class);
         private final MongoTemplate mongoTemplate = mock(MongoTemplate.class);
+        private final AuditEventRepository auditEventRepository = mock(AuditEventRepository.class);
         private final AuditService auditService = mock(AuditService.class);
         private final AuditDegradationService degradationService = mock(AuditDegradationService.class);
         private final AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
@@ -408,7 +426,7 @@ class SubmitDecisionRegulatedMutationServiceTest {
                     new MongoRegulatedMutationCoordinator(
                             commandRepository,
                             mongoTemplate,
-                            auditService,
+                            new RegulatedMutationAuditPhaseService(auditEventRepository, auditService),
                             degradationService,
                             metrics,
                             false,

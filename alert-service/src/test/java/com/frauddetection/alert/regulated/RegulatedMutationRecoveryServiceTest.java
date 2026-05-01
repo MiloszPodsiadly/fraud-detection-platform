@@ -1,10 +1,19 @@
 package com.frauddetection.alert.regulated;
 
 import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.audit.AuditDegradationService;
+import com.frauddetection.alert.audit.AuditEventDocument;
+import com.frauddetection.alert.audit.AuditEventMetadataSummary;
+import com.frauddetection.alert.audit.AuditEventRepository;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.persistence.AlertDocument;
+import com.frauddetection.alert.persistence.AlertRepository;
+import com.frauddetection.alert.service.DecisionOutboxStatus;
+import com.frauddetection.common.events.contract.FraudDecisionEvent;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
 import org.junit.jupiter.api.Test;
@@ -12,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -22,6 +32,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 
 class RegulatedMutationRecoveryServiceTest {
 
@@ -38,13 +50,15 @@ class RegulatedMutationRecoveryServiceTest {
         assertThat(command.getState()).isEqualTo(RegulatedMutationState.EVIDENCE_PENDING);
         assertThat(command.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.COMPLETED);
         verify(fixture.auditService).audit(
-                AuditAction.SUBMIT_ANALYST_DECISION,
-                AuditResourceType.ALERT,
-                "alert-1",
-                "corr-1",
-                "principal-7",
-                AuditOutcome.SUCCESS,
-                null
+                eq(AuditAction.SUBMIT_ANALYST_DECISION),
+                eq(AuditResourceType.ALERT),
+                eq("alert-1"),
+                eq("corr-1"),
+                eq("principal-7"),
+                eq(AuditOutcome.SUCCESS),
+                isNull(),
+                any(AuditEventMetadataSummary.class),
+                eq("mutation-1:SUCCESS")
         );
     }
 
@@ -58,7 +72,7 @@ class RegulatedMutationRecoveryServiceTest {
         assertThat(result.outcome()).isEqualTo(RegulatedMutationRecoveryOutcome.RECOVERY_REQUIRED);
         assertThat(command.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
         assertThat(command.getLastError()).isEqualTo("RECOVERY_REQUIRED");
-        verify(fixture.auditService, never()).audit(any(), any(), anyString(), any(), anyString(), any(), any());
+        verify(fixture.auditService, never()).audit(any(), any(), anyString(), any(), anyString(), any(), any(), any(), any());
     }
 
     @Test
@@ -75,7 +89,7 @@ class RegulatedMutationRecoveryServiceTest {
         assertThat(command.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.NEW);
         assertThat(command.getLeaseOwner()).isNull();
         assertThat(command.getLeaseExpiresAt()).isNull();
-        verify(fixture.auditService, never()).audit(any(), any(), anyString(), any(), anyString(), any(), any());
+        verify(fixture.auditService, never()).audit(any(), any(), anyString(), any(), anyString(), any(), any(), any(), any());
     }
 
     @Test
@@ -84,13 +98,15 @@ class RegulatedMutationRecoveryServiceTest {
         RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.SUCCESS_AUDIT_PENDING);
         command.setResponseSnapshot(snapshot());
         doThrow(new IllegalStateException("audit unavailable")).when(fixture.auditService).audit(
-                AuditAction.SUBMIT_ANALYST_DECISION,
-                AuditResourceType.ALERT,
-                "alert-1",
-                "corr-1",
-                "principal-7",
-                AuditOutcome.SUCCESS,
-                null
+                eq(AuditAction.SUBMIT_ANALYST_DECISION),
+                eq(AuditResourceType.ALERT),
+                eq("alert-1"),
+                eq("corr-1"),
+                eq("principal-7"),
+                eq(AuditOutcome.SUCCESS),
+                isNull(),
+                any(AuditEventMetadataSummary.class),
+                eq("mutation-1:SUCCESS")
         );
 
         RegulatedMutationRecoveryResult result = fixture.service.recover(command);
@@ -99,6 +115,39 @@ class RegulatedMutationRecoveryServiceTest {
         assertThat(command.getState()).isEqualTo(RegulatedMutationState.COMMITTED_DEGRADED);
         assertThat(command.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.COMPLETED);
         assertThat(command.getLastError()).isEqualTo("POST_COMMIT_AUDIT_DEGRADED");
+    }
+
+    @Test
+    void shouldBindExistingSuccessAuditWithoutCreatingDuplicateWhenRecovering() {
+        Fixture fixture = new Fixture();
+        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.SUCCESS_AUDIT_PENDING);
+        command.setResponseSnapshot(snapshot());
+        AuditEventDocument existingAudit = mock(AuditEventDocument.class);
+        when(existingAudit.auditId()).thenReturn("audit-success-1");
+        when(fixture.auditEventRepository.findByRequestId("mutation-1:SUCCESS")).thenReturn(Optional.of(existingAudit));
+
+        RegulatedMutationRecoveryResult result = fixture.service.recover(command);
+
+        assertThat(result.outcome()).isEqualTo(RegulatedMutationRecoveryOutcome.RECOVERED);
+        assertThat(command.isSuccessAuditRecorded()).isTrue();
+        assertThat(command.getSuccessAuditId()).isEqualTo("audit-success-1");
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.EVIDENCE_PENDING);
+        verify(fixture.auditService, never()).audit(any(), any(), anyString(), any(), anyString(), any(), any(), any(), any());
+    }
+
+    @Test
+    void shouldReconstructSnapshotFromCommittedBusinessStateAndOutboxWithoutRerunningMutation() {
+        Fixture fixture = new Fixture();
+        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.BUSINESS_COMMITTED);
+        when(fixture.alertRepository.findById("alert-1")).thenReturn(Optional.of(committedAlert(DecisionOutboxStatus.PUBLISHED)));
+
+        RegulatedMutationRecoveryResult result = fixture.service.recover(command);
+
+        assertThat(result.outcome()).isEqualTo(RegulatedMutationRecoveryOutcome.RECOVERED);
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.EVIDENCE_PENDING);
+        assertThat(command.getResponseSnapshot()).isNotNull();
+        assertThat(command.getResponseSnapshot().decisionEventId()).isEqualTo("event-1");
+        assertThat(command.getOutboxEventId()).isEqualTo("event-1");
     }
 
     @Test
@@ -131,12 +180,49 @@ class RegulatedMutationRecoveryServiceTest {
         );
     }
 
+    private static AlertDocument committedAlert(String outboxStatus) {
+        AlertDocument document = new AlertDocument();
+        document.setAlertId("alert-1");
+        document.setTransactionId("txn-1");
+        document.setCustomerId("cust-1");
+        document.setCorrelationId("corr-1");
+        document.setAnalystId("principal-7");
+        document.setAnalystDecision(AnalystDecision.CONFIRMED_FRAUD);
+        document.setAlertStatus(AlertStatus.RESOLVED);
+        document.setDecidedAt(Instant.parse("2026-05-01T00:00:00Z"));
+        document.setDecisionOutboxStatus(outboxStatus);
+        document.setDecisionOutboxEvent(new FraudDecisionEvent(
+                "event-1",
+                "decision-1",
+                "alert-1",
+                "txn-1",
+                "cust-1",
+                "corr-1",
+                "principal-7",
+                AnalystDecision.CONFIRMED_FRAUD,
+                AlertStatus.RESOLVED,
+                "Manual review",
+                List.of("chargeback"),
+                java.util.Map.of(),
+                Instant.parse("2026-05-01T00:00:00Z"),
+                Instant.parse("2026-05-01T00:00:00Z")
+        ));
+        return document;
+    }
+
     private static final class Fixture {
         private final RegulatedMutationCommandRepository commandRepository = mock(RegulatedMutationCommandRepository.class);
+        private final AuditEventRepository auditEventRepository = mock(AuditEventRepository.class);
         private final AuditService auditService = mock(AuditService.class);
+        private final AuditDegradationService auditDegradationService = mock(AuditDegradationService.class);
+        private final AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        private final AlertRepository alertRepository = mock(AlertRepository.class);
         private final RegulatedMutationRecoveryService service = new RegulatedMutationRecoveryService(
                 commandRepository,
-                auditService,
+                new RegulatedMutationAuditPhaseService(auditEventRepository, auditService),
+                auditDegradationService,
+                metrics,
+                alertRepository,
                 Duration.ofMinutes(2)
         );
 

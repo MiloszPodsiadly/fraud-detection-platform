@@ -53,6 +53,10 @@ import com.frauddetection.alert.mapper.ScoredTransactionResponseMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
+import com.frauddetection.alert.regulated.RegulatedMutationRecoveryBacklogResponse;
+import com.frauddetection.alert.regulated.RegulatedMutationRecoveryController;
+import com.frauddetection.alert.regulated.RegulatedMutationRecoveryRunResponse;
+import com.frauddetection.alert.regulated.RegulatedMutationRecoveryService;
 import com.frauddetection.alert.security.auth.AnalystAuthenticationFactory;
 import com.frauddetection.alert.security.auth.DemoAuthHeaderParser;
 import com.frauddetection.alert.security.auth.DemoAuthHeaders;
@@ -116,6 +120,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         AuditTrustKeysController.class,
         AuditDegradationController.class,
         DecisionOutboxReconciliationController.class,
+        RegulatedMutationRecoveryController.class,
         SystemTrustLevelController.class,
         GovernanceAdvisoryController.class,
         GovernanceAuditController.class
@@ -184,6 +189,9 @@ class AlertSecurityConfigTest {
 
     @MockBean
     private DecisionOutboxReconciliationService decisionOutboxReconciliationService;
+
+    @MockBean
+    private RegulatedMutationRecoveryService regulatedMutationRecoveryService;
 
     @MockBean
     private ExternalAuditAnchorSink externalAuditAnchorSink;
@@ -257,6 +265,10 @@ class AlertSecurityConfigTest {
         mockMvc.perform(post("/api/v1/decision-outbox/unknown-confirmations/alert-1/resolve")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"resolution\":\"PUBLISHED\",\"reason\":\"kafka confirmed\"}"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/v1/regulated-mutations/recover"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/regulated-mutations/recovery/backlog"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/system/trust-level"))
                 .andExpect(status().isUnauthorized());
@@ -497,6 +509,10 @@ class AlertSecurityConfigTest {
         when(decisionOutboxReconciliationService.listUnknownConfirmations()).thenReturn(List.of());
         when(decisionOutboxReconciliationService.resolve(eq("alert-1"), any(), any(), any(), any()))
                 .thenReturn(unknownConfirmation());
+        when(regulatedMutationRecoveryService.recoverNow())
+                .thenReturn(new RegulatedMutationRecoveryRunResponse(1, 0, 0, 0, 1));
+        when(regulatedMutationRecoveryService.backlog())
+                .thenReturn(new RegulatedMutationRecoveryBacklogResponse(0, 0, null, Map.of(), Map.of()));
         when(externalAuditAnchorSink.capabilities()).thenReturn(providerCapabilities());
 
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("FRAUD_OPS_ADMIN")))
@@ -566,6 +582,16 @@ class AlertSecurityConfigTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"resolution\":\"RETRY_REQUESTED\",\"reason\":\"not present\"}"))
                 .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/regulated-mutations/recover").with(demoUser("FRAUD_OPS_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recovered").value(1));
+        mockMvc.perform(get("/api/v1/regulated-mutations/recovery/backlog").with(demoUser("FRAUD_OPS_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total_recovery_required").value(0));
+        mockMvc.perform(get("/api/v1/regulated-mutations/recovery/backlog").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/regulated-mutations/recover").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
+                .andExpect(status().isForbidden());
         mockMvc.perform(get("/system/trust-level").with(demoUser("FRAUD_OPS_ADMIN")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.witness_status").value("PROVIDER_CAPABILITY_VERIFIED"));
@@ -591,6 +617,10 @@ class AlertSecurityConfigTest {
         mockMvc.perform(get("/api/v1/audit/degradations").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/decision-outbox/unknown-confirmations").with(demoUser("ANALYST")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/regulated-mutations/recover").with(demoUser("ANALYST")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/regulated-mutations/recovery/backlog").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/system/trust-level").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
