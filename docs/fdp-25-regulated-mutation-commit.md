@@ -31,7 +31,7 @@ FDP-25 Phase 1 uses a pending command architecture for regulated mutation paths.
    - If another worker holds a non-expired lease, return HTTP 202 with `IN_PROGRESS`.
 
 3. Record audit intent.
-   - Persist durable `ATTEMPTED` audit.
+   - Persist durable `ATTEMPTED` audit with deterministic phase request id `regulated_command_id:ATTEMPTED`.
    - Set state `AUDIT_ATTEMPTED`.
 
 4. Validate command.
@@ -46,7 +46,7 @@ FDP-25 Phase 1 uses a pending command architecture for regulated mutation paths.
 
 6. Record success evidence.
    - Set state `SUCCESS_AUDIT_PENDING`.
-   - Persist durable `SUCCESS` audit.
+   - Persist durable `SUCCESS` audit with deterministic phase request id `regulated_command_id:SUCCESS`.
    - Set state `SUCCESS_AUDIT_RECORDED`.
 
 7. Return pending external evidence state.
@@ -58,7 +58,7 @@ FDP-25 Phase 1 uses a pending command architecture for regulated mutation paths.
    - Set state `COMMITTED_DEGRADED`.
    - Persist response snapshot with `COMMITTED_EVIDENCE_INCOMPLETE`.
    - Set `executionStatus=COMPLETED`.
-   - Record durable audit degradation.
+   - Record durable audit degradation including command id, resource id, action, and reason.
 
 ## Required Statuses
 
@@ -102,6 +102,31 @@ The recovery service performs a bounded scan of stale command execution records.
 
 Recovery never re-runs the business mutation when the command state indicates the mutation may already have started.
 
+Recovery is exposed only through authenticated operational surfaces:
+
+- `POST /api/v1/regulated-mutations/recover` requires `regulated-mutation:recover`.
+- `GET /api/v1/regulated-mutations/recovery/backlog` requires `regulated-mutation:recover` or `audit:verify`.
+
+The backlog response is bounded and includes `total_recovery_required`, `total_in_progress_expired`, `oldest_recovery_required_age`, `by_state`, and `by_action`.
+
+Recovery semantics:
+
+- `REQUESTED` and `AUDIT_ATTEMPTED` may be released to `NEW` for safe retry.
+- `BUSINESS_COMMITTING` always becomes `RECOVERY_REQUIRED`; the platform does not infer success from an uncertain commit window.
+- `BUSINESS_COMMITTED` reconstructs a response snapshot only from committed business state plus outbox evidence; otherwise it becomes `RECOVERY_REQUIRED`.
+- `SUCCESS_AUDIT_PENDING` first binds an existing `regulated_command_id:SUCCESS` audit event and does not duplicate it. If none exists, it retries only the success audit phase.
+- If success audit retry fails after the business mutation is visible, the command becomes `COMMITTED_DEGRADED`, a durable degradation event is recorded, and no `COMMITTED_FULLY_ANCHORED` status is returned.
+
+Operational metrics:
+
+- `regulated_mutation_recovery_required_total`
+- `regulated_mutation_recovery_oldest_age_seconds`
+- `regulated_mutation_recovery_outcome_total{outcome}`
+
+System trust degrades when `regulated_mutation_recovery_required_count > 0`.
+
+Mongo multi-document transactions are not required by FDP-25 Phase 1 and are not claimed as the guarantee. A future optional transaction mode may narrow local Mongo write windows, but the declared FDP-25 guarantee remains the recoverable command state machine and explicit degradation, not cross-system ACID.
+
 ## Non-Goals
 
 FDP-25 Phase 1 must not change scoring behavior, ML model behavior, Kafka event contracts, governance advisory semantics, model retraining, rollback automation, alert triggering, or SLA enforcement.
@@ -115,6 +140,7 @@ FDP-25 Phase 1 must not describe operator evidence as cryptographic proof unless
 - success audit unavailable after business write -> `COMMITTED_DEGRADED`, durable degradation, and no `COMMITTED_FULLY_ANCHORED`.
 - committed command -> business mutation visible, local `SUCCESS` audit recorded, and domain outbox event persisted.
 - replayed command idempotency -> stored response snapshot replayed without duplicate audit or duplicate domain outbox event.
+- recovery binds an existing `regulated_command_id:SUCCESS` audit event without creating a duplicate success audit.
 - duplicate idempotency key with different payload -> 409.
 - missing idempotency key -> 400.
 - request path never returns `COMMITTED_FULLY_ANCHORED`.
@@ -123,3 +149,4 @@ FDP-25 Phase 1 must not describe operator evidence as cryptographic proof unless
 - unsafe partial replay returns `RECOVERY_REQUIRED` or `COMMIT_UNKNOWN`, not a generic 500 and not a duplicate mutation.
 - `SUCCESS_AUDIT_PENDING` retry writes only missing success audit and never re-runs the business mutation.
 - recovery service covers stale leases and crash-window states with bounded scans.
+- recovery endpoints are backend-authorized; `regulated-mutation:recover` can trigger recovery, while `audit:verify` can read backlog only.
