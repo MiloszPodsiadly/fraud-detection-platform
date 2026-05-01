@@ -480,7 +480,7 @@ paths:
   /api/v1/regulated-mutations/{idempotencyKey}:
     get:
       summary: Inspect one regulated mutation command by raw idempotency key
-      description: Compatibility endpoint. Requires regulated-mutation:recover or audit:verify. Rate-limited per actor/IP and audits successful inspection access. Returns command state, execution status, lease metadata, evidence ids, degradation reason, last error, and snapshot presence for one idempotency key. Prefer /by-command/{commandId} or /by-idempotency-hash/{hash} for new tooling so raw idempotency keys are not placed in URLs. This endpoint is read-only and never exposes command payloads, response payloads, notes, customer/account/card identifiers, raw exception details, or unbounded exports.
+      description: Legacy/debug compatibility endpoint. Requires regulated-mutation:recover or audit:verify. Rate-limited per actor/IP and fails closed with 503 when inspection access cannot be durably audited. Returns command state, execution status, lease metadata, evidence ids, degradation reason, last error, idempotency key hash, masked idempotency key, and snapshot presence for one idempotency key. Prefer /by-command/{commandId} or /by-idempotency-hash/{hash} for new tooling so raw idempotency keys are not placed in URLs. Operators must not paste raw idempotency keys in tickets, logs, runbooks, or dashboards. This endpoint is read-only and never exposes raw idempotency keys in the response, command payloads, response payloads, notes, customer/account/card identifiers, raw exception details, or unbounded exports.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -511,10 +511,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiErrorResponse"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /api/v1/regulated-mutations/by-command/{commandId}:
     get:
       summary: Inspect one regulated mutation command by command id
-      description: Requires regulated-mutation:recover or audit:verify. Rate-limited per actor/IP and audits successful inspection access. Returns command state, execution status, lease metadata, evidence ids, degradation reason, last error, and snapshot presence for one command id. This endpoint is read-only and never exposes command payloads, response payloads, notes, customer/account/card identifiers, raw exception details, or unbounded exports.
+      description: Requires regulated-mutation:recover or audit:verify. Rate-limited per actor/IP and fails closed with 503 when inspection access cannot be durably audited. Returns command state, execution status, lease metadata, evidence ids, degradation reason, last error, idempotency key hash, masked idempotency key, and snapshot presence for one command id. This endpoint is read-only and never exposes raw idempotency keys, command payloads, response payloads, notes, customer/account/card identifiers, raw exception details, or unbounded exports.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -545,10 +547,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiErrorResponse"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /api/v1/regulated-mutations/by-idempotency-hash/{hash}:
     get:
       summary: Inspect one regulated mutation command by idempotency-key hash
-      description: Requires regulated-mutation:recover or audit:verify. The hash is the lowercase SHA-256 hex digest of the idempotency key. Rate-limited per actor/IP and audits successful inspection access. Returns command state, execution status, lease metadata, evidence ids, degradation reason, last error, and snapshot presence for one idempotency-key hash. This endpoint is read-only and never exposes command payloads, response payloads, notes, customer/account/card identifiers, raw exception details, or unbounded exports.
+      description: Requires regulated-mutation:recover or audit:verify. The hash is the lowercase SHA-256 hex digest of the idempotency key. Rate-limited per actor/IP and fails closed with 503 when inspection access cannot be durably audited. Returns command state, execution status, lease metadata, evidence ids, degradation reason, last error, idempotency key hash, masked idempotency key, and snapshot presence for one idempotency-key hash. This endpoint is read-only and never exposes raw idempotency keys, command payloads, response payloads, notes, customer/account/card identifiers, raw exception details, or unbounded exports.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -580,6 +584,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiErrorResponse"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /api/v1/regulated-mutations/recover:
     post:
       summary: Run bounded regulated mutation recovery
@@ -1128,10 +1134,16 @@ components:
     RegulatedMutationCommandInspectionResponse:
       type: object
       additionalProperties: false
-      required: [idempotency_key, action, resource_type, resource_id, state, execution_status, lease_owner, lease_expires_at, response_snapshot_present, attempted_audit_id, success_audit_id, failed_audit_id, degradation_reason, last_error, updated_at]
+      required: [idempotency_key_hash, idempotency_key_masked, action, resource_type, resource_id, state, execution_status, lease_owner, lease_expires_at, response_snapshot_present, attempted_audit_id, success_audit_id, failed_audit_id, degradation_reason, last_error, updated_at]
       properties:
-        idempotency_key:
+        idempotency_key_hash:
           type: string
+          nullable: true
+          description: SHA-256 hash of the idempotency key. The raw key is never returned.
+        idempotency_key_masked:
+          type: string
+          nullable: true
+          description: Masked display form only, never the full idempotency key.
         action:
           type: string
         resource_type:

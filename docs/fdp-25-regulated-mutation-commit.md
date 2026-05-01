@@ -107,11 +107,11 @@ Recovery is exposed only through authenticated operational surfaces:
 
 - `POST /api/v1/regulated-mutations/recover` requires `regulated-mutation:recover`.
 - `GET /api/v1/regulated-mutations/recovery/backlog` requires `regulated-mutation:recover` or `audit:verify`.
-- `GET /api/v1/regulated-mutations/{idempotencyKey}` requires `regulated-mutation:recover` or `audit:verify` and remains for compatibility.
+- `GET /api/v1/regulated-mutations/{idempotencyKey}` requires `regulated-mutation:recover` or `audit:verify` and remains for legacy/debug compatibility only. Avoid it in runbooks and tickets.
 - `GET /api/v1/regulated-mutations/by-command/{commandId}` requires `regulated-mutation:recover` or `audit:verify` and is preferred for direct command inspection.
 - `GET /api/v1/regulated-mutations/by-idempotency-hash/{hash}` requires `regulated-mutation:recover` or `audit:verify` and is preferred when only the idempotency-key hash is available.
 
-The command inspection endpoints are read-only, rate-limited per actor/IP, audited on successful access, and intentionally narrow. They expose `idempotency_key`, `action`, `resource_type`, `resource_id`, `state`, `execution_status`, lease fields, `response_snapshot_present`, phase audit ids, degradation reason, last error, and update time. They do not expose command payloads, response bodies, notes, customer/account/card identifiers, or raw exception details. New operational tooling should prefer command id or idempotency hash over raw idempotency keys in URLs.
+The command inspection endpoints are read-only, rate-limited per actor/IP, audit-fail-closed, and intentionally narrow. They expose `idempotency_key_hash`, `idempotency_key_masked`, `action`, `resource_type`, `resource_id`, `state`, `execution_status`, lease fields, `response_snapshot_present`, phase audit ids, degradation reason, last error, and update time. They do not expose raw idempotency keys, command payloads, response bodies, notes, customer/account/card identifiers, or raw exception details. New operational tooling should prefer command id or idempotency hash over raw idempotency keys in URLs. Operators must not paste raw idempotency keys in tickets, logs, runbooks, or dashboards.
 
 The backlog response is bounded and includes `total_recovery_required`, `total_in_progress_expired`, `oldest_recovery_required_age`, `recovery_failed_terminal_count`, `repeated_recovery_failures`, `by_state`, and `by_action`.
 
