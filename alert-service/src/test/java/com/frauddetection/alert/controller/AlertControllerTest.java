@@ -104,7 +104,7 @@ class AlertControllerTest {
                         AlertStatus.RESOLVED,
                         "event-1",
                         Instant.parse("2026-04-20T10:00:00Z"),
-                        SubmitDecisionOperationStatus.COMMITTED_FULLY_ANCHORED
+                        SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING
                 ));
 
         SubmitAnalystDecisionRequest request = new SubmitAnalystDecisionRequest(
@@ -120,7 +120,7 @@ class AlertControllerTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultingStatus").value("RESOLVED"))
-                .andExpect(jsonPath("$.operation_status").value("COMMITTED_FULLY_ANCHORED"));
+                .andExpect(jsonPath("$.operation_status").value("COMMITTED_EVIDENCE_PENDING"));
     }
 
     @Test

@@ -21,7 +21,9 @@ class AnalystRoleTest {
                         AnalystAuthority.GOVERNANCE_ADVISORY_AUDIT_WRITE,
                         AnalystAuthority.AUDIT_READ,
                         AnalystAuthority.AUDIT_VERIFY,
-                        AnalystAuthority.AUDIT_EXPORT
+                        AnalystAuthority.AUDIT_EXPORT,
+                        AnalystAuthority.AUDIT_DEGRADATION_RESOLVE,
+                        AnalystAuthority.DECISION_OUTBOX_RECONCILE
                 );
     }
 
@@ -36,7 +38,9 @@ class AnalystRoleTest {
                         AnalystAuthority.FRAUD_CASE_UPDATE,
                         AnalystAuthority.AUDIT_READ,
                         AnalystAuthority.AUDIT_VERIFY,
-                        AnalystAuthority.AUDIT_EXPORT
+                        AnalystAuthority.AUDIT_EXPORT,
+                        AnalystAuthority.AUDIT_DEGRADATION_RESOLVE,
+                        AnalystAuthority.DECISION_OUTBOX_RECONCILE
                 );
     }
 
@@ -50,7 +54,9 @@ class AnalystRoleTest {
                 .doesNotContain(
                         AnalystAuthority.AUDIT_READ,
                         AnalystAuthority.AUDIT_VERIFY,
-                        AnalystAuthority.AUDIT_EXPORT
+                        AnalystAuthority.AUDIT_EXPORT,
+                        AnalystAuthority.AUDIT_DEGRADATION_RESOLVE,
+                        AnalystAuthority.DECISION_OUTBOX_RECONCILE
                 );
     }
 

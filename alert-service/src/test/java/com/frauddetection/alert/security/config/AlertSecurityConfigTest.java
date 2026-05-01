@@ -5,6 +5,7 @@ import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
 import com.frauddetection.alert.api.SubmitAnalystDecisionResponse;
 import com.frauddetection.alert.api.UpdateFraudCaseRequest;
 import com.frauddetection.alert.assistant.AnalystCaseSummaryUseCase;
+import com.frauddetection.alert.audit.AuditDegradationEventDocument;
 import com.frauddetection.alert.audit.AuditEventController;
 import com.frauddetection.alert.audit.AuditEventReadResponse;
 import com.frauddetection.alert.audit.AuditEventReadService;
@@ -488,7 +489,11 @@ class AlertSecurityConfigTest {
                         "ACTIVE"
                 )));
         when(auditDegradationService.unresolvedEvents()).thenReturn(List.of());
+        when(auditDegradationService.resolveDegradation(eq("audit-1"), any(), any(), any()))
+                .thenReturn(auditDegradationDocument());
         when(decisionOutboxReconciliationService.listUnknownConfirmations()).thenReturn(List.of());
+        when(decisionOutboxReconciliationService.resolve(eq("alert-1"), any(), any(), any(), any()))
+                .thenReturn(unknownConfirmation());
         when(externalAuditAnchorSink.capabilities()).thenReturn(providerCapabilities());
 
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("FRAUD_OPS_ADMIN")))
@@ -519,9 +524,45 @@ class AlertSecurityConfigTest {
         mockMvc.perform(get("/api/v1/audit/degradations").with(demoUser("FRAUD_OPS_ADMIN")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.events").isArray());
+        mockMvc.perform(post("/api/v1/audit/degradations/audit-1/resolve")
+                        .with(demoUser("FRAUD_OPS_ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"reason":"verified","evidence_reference":{"type":"TICKET","reference":"ticket-123","verified_at":"2026-04-30T12:00:00Z","verified_by":"ops-admin"}}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.audit_id").value("audit-1"));
+        mockMvc.perform(post("/api/v1/audit/degradations/audit-1/resolve")
+                        .with(authorities(AnalystAuthority.AUDIT_VERIFY))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"verified\"}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/audit/degradations/audit-1/resolve")
+                        .with(authorities(AnalystAuthority.AUDIT_DEGRADATION_RESOLVE))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"verified\"}"))
+                .andExpect(status().isOk());
         mockMvc.perform(get("/api/v1/decision-outbox/unknown-confirmations").with(demoUser("FRAUD_OPS_ADMIN")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.events").isArray());
+        mockMvc.perform(post("/api/v1/decision-outbox/unknown-confirmations/alert-1/resolve")
+                        .with(demoUser("FRAUD_OPS_ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"resolution":"PUBLISHED","reason":"kafka confirmed","evidence_reference":{"type":"BROKER_OFFSET","reference":"topic=fraud-decisions,partition=0,offset=42","verified_at":"2026-04-30T12:00:00Z","verified_by":"ops-admin"}}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.alert_id").value("alert-1"));
+        mockMvc.perform(post("/api/v1/decision-outbox/unknown-confirmations/alert-1/resolve")
+                        .with(authorities(AnalystAuthority.AUDIT_VERIFY))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"resolution\":\"RETRY_REQUESTED\",\"reason\":\"not present\"}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/decision-outbox/unknown-confirmations/alert-1/resolve")
+                        .with(authorities(AnalystAuthority.DECISION_OUTBOX_RECONCILE))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"resolution\":\"RETRY_REQUESTED\",\"reason\":\"not present\"}"))
+                .andExpect(status().isOk());
         mockMvc.perform(get("/system/trust-level").with(demoUser("FRAUD_OPS_ADMIN")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.witness_status").value("PROVIDER_CAPABILITY_VERIFIED"));
@@ -734,6 +775,44 @@ class AlertSecurityConfigTest {
         document.setTransactionIds(List.of());
         document.setTransactions(List.of());
         return document;
+    }
+
+    private AuditDegradationEventDocument auditDegradationDocument() {
+        AuditDegradationEventDocument document = new AuditDegradationEventDocument();
+        document.setAuditId("audit-1");
+        document.setType(AuditDegradationEventDocument.TYPE_POST_COMMIT_DEGRADED);
+        document.setResourceType("ALERT");
+        document.setResourceId("alert-1");
+        document.setOperation("SUBMIT_ANALYST_DECISION");
+        document.setTimestamp(Instant.parse("2026-04-30T12:00:00Z"));
+        document.setResolved(true);
+        document.setResolvedBy("analyst-1");
+        document.setResolvedAt(Instant.parse("2026-04-30T12:05:00Z"));
+        return document;
+    }
+
+    private DecisionOutboxReconciliationService.UnknownConfirmation unknownConfirmation() {
+        return new DecisionOutboxReconciliationService.UnknownConfirmation(
+                "alert-1",
+                "event-1",
+                "event-1",
+                "PUBLISHED",
+                Instant.parse("2026-04-30T12:00:00Z"),
+                1,
+                Instant.parse("2026-04-30T12:01:00Z"),
+                Instant.parse("2026-04-30T12:02:00Z"),
+                "confirmed",
+                false,
+                null,
+                null,
+                "BROKER_OFFSET",
+                "topic=fraud-decisions,partition=0,offset=42",
+                Instant.parse("2026-04-30T12:00:00Z"),
+                "ops-admin",
+                Instant.parse("2026-04-30T12:05:00Z"),
+                "ops-admin",
+                "confirmed"
+        );
     }
 
     private ExternalWitnessCapabilities providerCapabilities() {

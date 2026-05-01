@@ -409,7 +409,7 @@ class AlertManagementServiceTest {
         assertThat(documentCaptor.getAllValues().getFirst().getDecisionOperationStatus())
                 .isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING.name());
         assertThat(documentCaptor.getAllValues().getFirst().getDecisionOperationStatus())
-                .isNotEqualTo(SubmitDecisionOperationStatus.COMMITTED_FULLY_ANCHORED.name());
+                .isNotEqualTo("COMMITTED_FULLY_ANCHORED");
         verify(metrics).recordPostCommitAuditDegraded("SUBMIT_ANALYST_DECISION");
     }
 
