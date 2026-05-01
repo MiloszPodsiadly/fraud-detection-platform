@@ -1,64 +1,90 @@
 # FDP-25 Regulated Mutation Commit Model
 
-FDP-25 is the planned architecture for regulated mutation commit semantics.
+FDP-25 is the regulated mutation commit protocol for the first migrated write path: `POST /api/v1/alerts/{alertId}/decision`.
 
 FDP-24 remains intentionally narrower. FDP-24 provides external audit anchoring, fail-closed `ATTEMPTED` audit persistence, durable post-commit degradation detection, explicit `COMMITTED_EVIDENCE_PENDING` / `COMMITTED_EVIDENCE_INCOMPLETE` states, and recovery/reconciliation workflows. FDP-24 detects and exposes post-commit audit degradation. It does not eliminate it transactionally.
 
 ## Goal
 
-Eliminate the class of failure where a business mutation becomes visible and the required `SUCCESS` audit evidence cannot be completed.
+Stop domain services from hand-assembling audit, business mutation, idempotency, and outbox behavior. Submit-decision writes now pass through one coordinator, one idempotency key, one command record, and one explicit state machine.
 
-In regulated mode, no business mutation is visible unless audit evidence preconditions are satisfied.
+The synchronous request path does not return `COMMITTED_FULLY_ANCHORED`. It returns `COMMITTED_EVIDENCE_PENDING` only after local `SUCCESS` audit is recorded; external evidence remains asynchronous and reconciled. If local success evidence degrades after the business write, the command becomes `COMMITTED_DEGRADED` and the API returns or records `COMMITTED_EVIDENCE_INCOMPLETE`.
 
 ## Model
 
-FDP-25 should use a pending command architecture for regulated mutation paths.
+FDP-25 uses a pending command architecture for regulated mutation paths.
 
 1. Submit command.
-   - Create `PendingMutationCommand`.
-   - Set status `PENDING_AUDIT`.
+   - Require `X-Idempotency-Key`.
+   - Create `regulated_mutation_commands`.
+   - Set state `REQUESTED`.
    - Do not mutate business state.
 
-2. Anchor command attempt evidence.
-   - Persist and externally anchor `ATTEMPTED` command evidence.
+2. Record audit intent.
+   - Persist durable `ATTEMPTED` audit.
+   - Set state `AUDIT_ATTEMPTED`.
 
 3. Validate command.
    - Perform authorization, request validation, idempotency checks, and business validation against current state.
-   - Validation failure sets `FAILED_BUSINESS_VALIDATION`.
+   - Idempotency conflict returns 409.
+   - Missing idempotency key returns 400.
 
-4. Prepare success evidence path.
-   - Ensure the required durable audit and external anchor path for `SUCCESS` evidence is available before business mutation is made visible.
+4. Apply business mutation.
+   - Set state `BUSINESS_COMMITTING`.
+   - Persist the alert decision and same-document outbox record.
+   - Set state `BUSINESS_COMMITTED`.
 
-5. Apply business mutation.
-   - Apply the domain state change only after required evidence preconditions pass.
-   - Emit the domain outbox event in the same durable write boundary as the mutation where the local datastore supports it.
+5. Record success evidence.
+   - Set state `SUCCESS_AUDIT_PENDING`.
+   - Persist durable `SUCCESS` audit.
+   - Set state `SUCCESS_AUDIT_RECORDED`.
 
-6. Commit command.
-   - Mark command `COMMITTED`.
+6. Return pending external evidence state.
+   - Set state `EVIDENCE_PENDING`.
+   - Return `COMMITTED_EVIDENCE_PENDING`.
 
-7. Reject unavailable evidence.
-   - If audit evidence cannot be completed, set command status `REJECTED_AUDIT_EVIDENCE_UNAVAILABLE`.
-   - No business mutation is applied.
+7. Degrade explicitly when success evidence fails after business write.
+   - Set state `COMMITTED_DEGRADED`.
+   - Persist response snapshot with `COMMITTED_EVIDENCE_INCOMPLETE`.
+   - Record durable audit degradation.
 
 ## Required Statuses
 
-- `PENDING_AUDIT`
-- `AUDIT_READY`
+- `REQUESTED`
+- `AUDIT_ATTEMPTED`
+- `BUSINESS_COMMITTING`
+- `BUSINESS_COMMITTED`
+- `SUCCESS_AUDIT_PENDING`
+- `SUCCESS_AUDIT_RECORDED`
+- `EVIDENCE_PENDING`
+- `EVIDENCE_CONFIRMED`
 - `COMMITTED`
-- `REJECTED_AUDIT_EVIDENCE_UNAVAILABLE`
-- `FAILED_BUSINESS_VALIDATION`
+- `COMMITTED_DEGRADED`
+- `REJECTED`
+- `FAILED`
+
+Public request statuses remain:
+
+- `REJECTED_BEFORE_MUTATION`
+- `COMMITTED_EVIDENCE_PENDING`
+- `COMMITTED_EVIDENCE_INCOMPLETE`
+
+`COMMITTED_FULLY_ANCHORED` is async-only and must not be returned by the synchronous submit-decision request.
 
 ## Non-Goals
 
 FDP-25 must not change scoring behavior, ML model behavior, Kafka event contracts, governance advisory semantics, model retraining, rollback automation, alert triggering, or SLA enforcement.
 
-FDP-25 must not describe operator evidence as cryptographic proof unless the evidence is actually cryptographically verifiable.
+FDP-25 must not describe operator evidence as cryptographic proof unless the evidence is actually cryptographically verifiable. It is not distributed ACID, exactly-once Kafka, legal notarization, WORM storage, or perfect rollback.
 
 ## Required Tests
 
-- `SUCCESS` audit evidence unavailable -> no business state mutation is visible.
-- command validation failure -> `FAILED_BUSINESS_VALIDATION`, no business mutation.
-- evidence unavailable -> `REJECTED_AUDIT_EVIDENCE_UNAVAILABLE`, no domain outbox event.
-- committed command -> business mutation visible and domain outbox event persisted.
-- replayed command idempotency -> no duplicate mutation or duplicate domain outbox event.
-- `COMMITTED` is never reached without required audit evidence preconditions.
+- `ATTEMPTED` audit unavailable -> no business state mutation is visible.
+- business write failure -> `FAILED` command and `FAILED` audit.
+- success audit unavailable after business write -> `COMMITTED_DEGRADED`, durable degradation, and no `COMMITTED_FULLY_ANCHORED`.
+- committed command -> business mutation visible, local `SUCCESS` audit recorded, and domain outbox event persisted.
+- replayed command idempotency -> stored response snapshot replayed without duplicate audit or duplicate domain outbox event.
+- duplicate idempotency key with different payload -> 409.
+- missing idempotency key -> 400.
+- request path never returns `COMMITTED_FULLY_ANCHORED`.
+- `AlertManagementService` does not call `AuditMutationRecorder`, audit service, or decision outbox writes for submit decision.
