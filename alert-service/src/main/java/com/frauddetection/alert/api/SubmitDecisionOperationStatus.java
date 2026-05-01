@@ -2,6 +2,9 @@ package com.frauddetection.alert.api;
 
 public enum SubmitDecisionOperationStatus {
     REJECTED_BEFORE_MUTATION,
+    IN_PROGRESS,
+    RECOVERY_REQUIRED,
+    COMMIT_UNKNOWN,
     COMMITTED_EVIDENCE_PENDING,
     COMMITTED_EVIDENCE_INCOMPLETE
 }

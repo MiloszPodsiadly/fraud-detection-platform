@@ -32,6 +32,16 @@ public class RegulatedMutationCommandDocument {
     @Field("request_hash")
     private String requestHash;
     private RegulatedMutationState state;
+    @Field("execution_status")
+    private RegulatedMutationExecutionStatus executionStatus;
+    @Field("lease_owner")
+    private String leaseOwner;
+    @Field("lease_expires_at")
+    private Instant leaseExpiresAt;
+    @Field("attempt_count")
+    private int attemptCount;
+    @Field("last_heartbeat_at")
+    private Instant lastHeartbeatAt;
     @Field("public_status")
     private SubmitDecisionOperationStatus publicStatus;
     @Field("response_snapshot")
@@ -69,6 +79,16 @@ public class RegulatedMutationCommandDocument {
     public void setRequestHash(String requestHash) { this.requestHash = requestHash; }
     public RegulatedMutationState getState() { return state; }
     public void setState(RegulatedMutationState state) { this.state = state; }
+    public RegulatedMutationExecutionStatus getExecutionStatus() { return executionStatus; }
+    public void setExecutionStatus(RegulatedMutationExecutionStatus executionStatus) { this.executionStatus = executionStatus; }
+    public String getLeaseOwner() { return leaseOwner; }
+    public void setLeaseOwner(String leaseOwner) { this.leaseOwner = leaseOwner; }
+    public Instant getLeaseExpiresAt() { return leaseExpiresAt; }
+    public void setLeaseExpiresAt(Instant leaseExpiresAt) { this.leaseExpiresAt = leaseExpiresAt; }
+    public int getAttemptCount() { return attemptCount; }
+    public void setAttemptCount(int attemptCount) { this.attemptCount = attemptCount; }
+    public Instant getLastHeartbeatAt() { return lastHeartbeatAt; }
+    public void setLastHeartbeatAt(Instant lastHeartbeatAt) { this.lastHeartbeatAt = lastHeartbeatAt; }
     public SubmitDecisionOperationStatus getPublicStatus() { return publicStatus; }
     public void setPublicStatus(SubmitDecisionOperationStatus publicStatus) { this.publicStatus = publicStatus; }
     public RegulatedMutationResponseSnapshot getResponseSnapshot() { return responseSnapshot; }

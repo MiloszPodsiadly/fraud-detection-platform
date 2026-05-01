@@ -67,7 +67,9 @@ public class SubmitDecisionRegulatedMutationService {
                 requestHash,
                 () -> applyDecision(alertId, request, resultingStatus, actorId, idempotencyKey, requestHash),
                 (saved, state) -> response(saved, request, resultingStatus, publicStatus(state)),
-                RegulatedMutationResponseSnapshot::from
+                RegulatedMutationResponseSnapshot::from,
+                RegulatedMutationResponseSnapshot::toSubmitDecisionResponse,
+                state -> statusResponse(alertId, request, resultingStatus, publicStatus(state))
         );
         return regulatedMutationCoordinator.commit(command).response();
     }
@@ -106,14 +108,6 @@ public class SubmitDecisionRegulatedMutationService {
             AlertStatus resultingStatus,
             SubmitDecisionOperationStatus status
     ) {
-        if (status != SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING) {
-            saved.setDecisionOperationStatus(status.name());
-            try {
-                alertRepository.save(saved);
-            } catch (RuntimeException ignored) {
-                status = SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING;
-            }
-        }
         FraudDecisionEvent event = saved.getDecisionOutboxEvent();
         return new SubmitAnalystDecisionResponse(
                 saved.getAlertId(),
@@ -125,11 +119,32 @@ public class SubmitDecisionRegulatedMutationService {
         );
     }
 
+    private SubmitAnalystDecisionResponse statusResponse(
+            String alertId,
+            SubmitAnalystDecisionRequest request,
+            AlertStatus resultingStatus,
+            SubmitDecisionOperationStatus status
+    ) {
+        return new SubmitAnalystDecisionResponse(
+                alertId,
+                request.decision(),
+                resultingStatus,
+                null,
+                null,
+                status
+        );
+    }
+
     private SubmitDecisionOperationStatus publicStatus(RegulatedMutationState state) {
-        if (state == RegulatedMutationState.COMMITTED_DEGRADED) {
-            return SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE;
-        }
-        return SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING;
+        return switch (state) {
+            case REQUESTED, AUDIT_ATTEMPTED -> SubmitDecisionOperationStatus.IN_PROGRESS;
+            case BUSINESS_COMMITTING -> SubmitDecisionOperationStatus.COMMIT_UNKNOWN;
+            case EVIDENCE_PENDING, EVIDENCE_CONFIRMED, COMMITTED, SUCCESS_AUDIT_RECORDED ->
+                    SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING;
+            case COMMITTED_DEGRADED -> SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE;
+            case FAILED, BUSINESS_COMMITTED, SUCCESS_AUDIT_PENDING -> SubmitDecisionOperationStatus.RECOVERY_REQUIRED;
+            case REJECTED -> SubmitDecisionOperationStatus.REJECTED_BEFORE_MUTATION;
+        };
     }
 
     private String normalizeIdempotencyKey(String idempotencyKey) {

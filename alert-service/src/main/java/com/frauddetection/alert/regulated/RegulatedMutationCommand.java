@@ -13,6 +13,8 @@ public record RegulatedMutationCommand<R, S>(
         String requestHash,
         BusinessMutation<R> mutation,
         RegulatedMutationResponseMapper<R, S> responseMapper,
-        RegulatedMutationResponseSnapshotter<S> responseSnapshotter
+        RegulatedMutationResponseSnapshotter<S> responseSnapshotter,
+        RegulatedMutationResponseRestorer<S> responseRestorer,
+        RegulatedMutationStatusResponseFactory<S> statusResponseFactory
 ) {
 }
