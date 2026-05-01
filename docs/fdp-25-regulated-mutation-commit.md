@@ -2,9 +2,9 @@
 
 FDP-25 Phase 1 is the regulated mutation coordinator for the first migrated write path: `POST /api/v1/alerts/{alertId}/decision`.
 
-This phase is a saga-style recoverable command state machine. It is not an ACID transaction boundary and it does not prove that a business mutation can never commit before success evidence exists.
+This phase is a saga-style recoverable command state machine. It is not a single atomic boundary across business state, audit evidence, external witnesses, and Kafka, and it does not prove that a business mutation can never commit before success evidence exists.
 
-FDP-24 remains intentionally narrower. FDP-24 provides external audit anchoring, fail-closed `ATTEMPTED` audit persistence, durable post-commit degradation detection, explicit `COMMITTED_EVIDENCE_PENDING` / `COMMITTED_EVIDENCE_INCOMPLETE` states, and recovery/reconciliation workflows. FDP-24 detects and exposes post-commit audit degradation. It does not eliminate it transactionally.
+FDP-24 remains intentionally narrower. FDP-24 provides external audit anchoring, fail-closed `ATTEMPTED` audit persistence, durable post-commit degradation detection, explicit `COMMITTED_EVIDENCE_PENDING` / `COMMITTED_EVIDENCE_INCOMPLETE` states, and recovery/reconciliation workflows. FDP-24 detects and exposes post-commit audit degradation. It does not eliminate that window.
 
 ## Goal
 
@@ -12,7 +12,7 @@ Stop domain services from hand-assembling audit, business mutation, idempotency,
 
 The synchronous request path does not return `COMMITTED_FULLY_ANCHORED`. It returns `COMMITTED_EVIDENCE_PENDING` only after local `SUCCESS` audit is recorded; external evidence remains asynchronous and reconciled. If local success evidence degrades after the business write, the command becomes `COMMITTED_DEGRADED` and the API returns or records `COMMITTED_EVIDENCE_INCOMPLETE`.
 
-FDP-25 Phase 1 detects and exposes post-commit audit degradation. It does not eliminate that window transactionally.
+FDP-25 Phase 1 detects and exposes post-commit audit degradation. It does not eliminate that window.
 
 ## Model
 
@@ -21,6 +21,7 @@ FDP-25 Phase 1 uses a pending command architecture for regulated mutation paths.
 1. Submit command.
    - Require `X-Idempotency-Key`.
    - Create `regulated_mutation_commands`.
+   - Store canonical intent fields: `intent_hash`, `intent_resource_id`, `intent_action`, `intent_actor_id`, `intent_decision`, `intent_reason_hash`, and `intent_tags_hash`.
    - Set state `REQUESTED`.
    - Do not mutate business state.
    - Set `executionStatus=NEW`.
@@ -106,9 +107,11 @@ Recovery is exposed only through authenticated operational surfaces:
 
 - `POST /api/v1/regulated-mutations/recover` requires `regulated-mutation:recover`.
 - `GET /api/v1/regulated-mutations/recovery/backlog` requires `regulated-mutation:recover` or `audit:verify`.
-- `GET /api/v1/regulated-mutations/{idempotencyKey}` requires `regulated-mutation:recover` or `audit:verify`.
+- `GET /api/v1/regulated-mutations/{idempotencyKey}` requires `regulated-mutation:recover` or `audit:verify` and remains for compatibility.
+- `GET /api/v1/regulated-mutations/by-command/{commandId}` requires `regulated-mutation:recover` or `audit:verify` and is preferred for direct command inspection.
+- `GET /api/v1/regulated-mutations/by-idempotency-hash/{hash}` requires `regulated-mutation:recover` or `audit:verify` and is preferred when only the idempotency-key hash is available.
 
-The command inspection endpoint is read-only and intentionally narrow. It exposes `idempotency_key`, `action`, `resource_type`, `resource_id`, `state`, `execution_status`, lease fields, `response_snapshot_present`, phase audit ids, degradation reason, last error, and update time. It does not expose command payloads, response bodies, notes, customer/account/card identifiers, or raw exception details.
+The command inspection endpoints are read-only, rate-limited per actor/IP, audited on successful access, and intentionally narrow. They expose `idempotency_key`, `action`, `resource_type`, `resource_id`, `state`, `execution_status`, lease fields, `response_snapshot_present`, phase audit ids, degradation reason, last error, and update time. They do not expose command payloads, response bodies, notes, customer/account/card identifiers, or raw exception details. New operational tooling should prefer command id or idempotency hash over raw idempotency keys in URLs.
 
 The backlog response is bounded and includes `total_recovery_required`, `total_in_progress_expired`, `oldest_recovery_required_age`, `recovery_failed_terminal_count`, `repeated_recovery_failures`, `by_state`, and `by_action`.
 
@@ -116,7 +119,7 @@ Recovery semantics:
 
 - `REQUESTED` and `AUDIT_ATTEMPTED` may be released to `NEW` for safe retry.
 - `BUSINESS_COMMITTING` always becomes `RECOVERY_REQUIRED`; the platform does not infer success from an uncertain commit window.
-- `BUSINESS_COMMITTED` reconstructs a response snapshot only from committed business state plus outbox evidence; otherwise it becomes `RECOVERY_REQUIRED`.
+- `BUSINESS_COMMITTED` reconstructs a response snapshot only from committed business state plus outbox evidence and only when that state matches stored canonical intent; otherwise it becomes `RECOVERY_REQUIRED`.
 - `SUCCESS_AUDIT_PENDING` first binds an existing `regulated_command_id:SUCCESS` audit event and does not duplicate it. If none exists, it retries only the success audit phase.
 - If success audit retry fails after the business mutation is visible, the command becomes `COMMITTED_DEGRADED`, a durable degradation event is recorded, and no `COMMITTED_FULLY_ANCHORED` status is returned.
 
@@ -128,15 +131,15 @@ Operational metrics:
 - `repeated_recovery_failures_count`
 - `regulated_mutation_recovery_outcome_total{outcome}`
 
-System trust degrades when `regulated_mutation_recovery_required_count > 0`.
+System trust degrades when any regulated mutation backlog health signal is non-zero: recovery-required commands, stale processing leases, committed-degraded commands, or repeated recovery failures.
 
-Mongo multi-document transactions are not required by FDP-25 Phase 1 and are not claimed as the guarantee. A future optional transaction mode may narrow local Mongo write windows, but the declared FDP-25 guarantee remains the recoverable command state machine and explicit degradation, not cross-system ACID.
+Mongo multi-document transactions are not required by FDP-25 Phase 1 and are not claimed as the guarantee. A future optional transaction mode may narrow local Mongo write windows, but the declared FDP-25 guarantee remains the recoverable command state machine and explicit degradation, not a cross-system atomic commit guarantee.
 
 ## Non-Goals
 
 FDP-25 Phase 1 must not change scoring behavior, ML model behavior, Kafka event contracts, governance advisory semantics, model retraining, rollback automation, alert triggering, or SLA enforcement.
 
-FDP-25 Phase 1 must not describe operator evidence as cryptographic proof unless the evidence is actually cryptographically verifiable. It is not distributed ACID, exactly-once Kafka, legal notarization, WORM storage, transactional regulated commit, or perfect rollback.
+FDP-25 Phase 1 must not describe operator evidence as cryptographic proof unless the evidence is actually cryptographically verifiable. It is not exactly-once Kafka, legal notarization, WORM storage, perfect rollback, a final regulated commit guarantee, or a single atomic boundary across business data, audit storage, external witnesses, and Kafka.
 
 ## Required Tests
 
