@@ -11,6 +11,8 @@ public interface AuditDegradationEventRepository extends MongoRepository<AuditDe
 
     long countByResolved(boolean resolved);
 
+    long countByResolutionPending(boolean resolutionPending);
+
     Optional<AuditDegradationEventDocument> findByAuditId(String auditId);
 
     List<AuditDegradationEventDocument> findTop100ByResolvedOrderByTimestampAsc(boolean resolved);

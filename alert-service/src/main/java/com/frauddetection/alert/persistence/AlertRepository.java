@@ -14,6 +14,8 @@ public interface AlertRepository extends MongoRepository<AlertDocument, String> 
 
     long countByDecisionOutboxStatus(String decisionOutboxStatus);
 
+    long countByDecisionOutboxResolutionPending(boolean decisionOutboxResolutionPending);
+
     long countByDecisionOutboxStatusIn(Collection<String> decisionOutboxStatuses);
 
     Optional<AlertDocument> findTopByDecisionOutboxStatusOrderByDecidedAtAsc(String decisionOutboxStatus);

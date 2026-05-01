@@ -29,10 +29,22 @@ public class AuditDegradationEventDocument {
     @Indexed
     private boolean resolved;
 
+    @Indexed
+    private boolean resolutionPending;
+
+    private Instant resolutionRequestedAt;
+    private String resolutionRequestedBy;
+    private String resolutionRequestReason;
     private Instant resolvedAt;
     private String resolvedBy;
     private String resolutionReason;
+    private String resolutionEvidenceType;
     private String resolutionEvidenceReference;
+    private Instant resolutionEvidenceVerifiedAt;
+    private String resolutionEvidenceVerifiedBy;
+    private Instant approvedAt;
+    private String approvedBy;
+    private String approvalReason;
     private String reason;
 
     public String getAuditId() {
@@ -91,6 +103,38 @@ public class AuditDegradationEventDocument {
         this.resolved = resolved;
     }
 
+    public boolean isResolutionPending() {
+        return resolutionPending;
+    }
+
+    public void setResolutionPending(boolean resolutionPending) {
+        this.resolutionPending = resolutionPending;
+    }
+
+    public Instant getResolutionRequestedAt() {
+        return resolutionRequestedAt;
+    }
+
+    public void setResolutionRequestedAt(Instant resolutionRequestedAt) {
+        this.resolutionRequestedAt = resolutionRequestedAt;
+    }
+
+    public String getResolutionRequestedBy() {
+        return resolutionRequestedBy;
+    }
+
+    public void setResolutionRequestedBy(String resolutionRequestedBy) {
+        this.resolutionRequestedBy = resolutionRequestedBy;
+    }
+
+    public String getResolutionRequestReason() {
+        return resolutionRequestReason;
+    }
+
+    public void setResolutionRequestReason(String resolutionRequestReason) {
+        this.resolutionRequestReason = resolutionRequestReason;
+    }
+
     public Instant getResolvedAt() {
         return resolvedAt;
     }
@@ -115,12 +159,60 @@ public class AuditDegradationEventDocument {
         this.resolutionReason = resolutionReason;
     }
 
+    public String getResolutionEvidenceType() {
+        return resolutionEvidenceType;
+    }
+
+    public void setResolutionEvidenceType(String resolutionEvidenceType) {
+        this.resolutionEvidenceType = resolutionEvidenceType;
+    }
+
     public String getResolutionEvidenceReference() {
         return resolutionEvidenceReference;
     }
 
     public void setResolutionEvidenceReference(String resolutionEvidenceReference) {
         this.resolutionEvidenceReference = resolutionEvidenceReference;
+    }
+
+    public Instant getResolutionEvidenceVerifiedAt() {
+        return resolutionEvidenceVerifiedAt;
+    }
+
+    public void setResolutionEvidenceVerifiedAt(Instant resolutionEvidenceVerifiedAt) {
+        this.resolutionEvidenceVerifiedAt = resolutionEvidenceVerifiedAt;
+    }
+
+    public String getResolutionEvidenceVerifiedBy() {
+        return resolutionEvidenceVerifiedBy;
+    }
+
+    public void setResolutionEvidenceVerifiedBy(String resolutionEvidenceVerifiedBy) {
+        this.resolutionEvidenceVerifiedBy = resolutionEvidenceVerifiedBy;
+    }
+
+    public Instant getApprovedAt() {
+        return approvedAt;
+    }
+
+    public void setApprovedAt(Instant approvedAt) {
+        this.approvedAt = approvedAt;
+    }
+
+    public String getApprovedBy() {
+        return approvedBy;
+    }
+
+    public void setApprovedBy(String approvedBy) {
+        this.approvedBy = approvedBy;
+    }
+
+    public String getApprovalReason() {
+        return approvalReason;
+    }
+
+    public void setApprovalReason(String approvalReason) {
+        this.approvalReason = approvalReason;
     }
 
     public String getReason() {

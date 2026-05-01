@@ -332,6 +332,9 @@ public class AlertManagementService implements AlertManagementUseCase {
         if ("COMMITTED_AUDIT_INCOMPLETE".equals(value)) {
             return SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE;
         }
+        if ("COMMITTED_FULLY_ANCHORED".equals(value)) {
+            return SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING;
+        }
         return SubmitDecisionOperationStatus.valueOf(value);
     }
 

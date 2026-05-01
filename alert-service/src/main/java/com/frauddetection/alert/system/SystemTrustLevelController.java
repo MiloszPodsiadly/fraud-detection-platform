@@ -111,9 +111,14 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 live.localStatusUnverified(),
                 live.missingRanges(),
                 live.postCommitAuditDegraded(),
+                live.postCommitAuditDegraded(),
+                live.pendingDegradationResolutionCount(),
                 live.postCommitAuditDegradedResolved(),
                 live.outboxFailedTerminalCount(),
+                live.outboxFailedTerminalCount(),
                 live.outboxPublishConfirmationUnknownCount(),
+                live.outboxPublishConfirmationUnknownCount(),
+                live.outboxPendingResolutionCount(),
                 live.outboxOldestPendingAgeSeconds(),
                 live.outboxOldestAmbiguousAgeSeconds(),
                 live.reasonCode()
@@ -165,6 +170,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
         int localStatusUnverified = 0;
         int missingRanges = 0;
         long postCommitDegraded = auditDegradationService == null ? 0L : auditDegradationService.unresolvedPostCommitDegradedCount();
+        long pendingDegradationResolution = auditDegradationService == null ? 0L : auditDegradationService.pendingResolutionCount();
         long postCommitDegradedResolved = auditDegradationService == null ? 0L : auditDegradationService.resolvedCount();
         OutboxState outboxState = outboxState();
         try {
@@ -191,14 +197,19 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 && localStatusUnverified == 0
                 && missingRanges == 0
                 && postCommitDegraded == 0
+                && pendingDegradationResolution == 0
                 && outboxState.failedTerminalCount() == 0
                 && outboxState.publishConfirmationUnknownCount() == 0
+                && outboxState.pendingResolutionCount() == 0
                 && !outboxState.stalePending();
         if (healthy && outboxState.reasonCode() != null) {
             healthy = false;
         }
         if (reasonCode == null) {
             reasonCode = outboxState.reasonCode();
+        }
+        if (reasonCode == null && pendingDegradationResolution > 0) {
+            reasonCode = "AUDIT_DEGRADATION_RESOLUTION_PENDING_APPROVAL";
         }
         return new LiveTrustState(
                 healthy,
@@ -208,9 +219,11 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 localStatusUnverified,
                 missingRanges,
                 postCommitDegraded,
+                pendingDegradationResolution,
                 postCommitDegradedResolved,
                 outboxState.failedTerminalCount(),
                 outboxState.publishConfirmationUnknownCount(),
+                outboxState.pendingResolutionCount(),
                 outboxState.oldestPendingAgeSeconds(),
                 outboxState.oldestAmbiguousAgeSeconds(),
                 reasonCode
@@ -237,7 +250,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
     private OutboxState outboxState() {
         try {
             if (alertRepository == null) {
-                return new OutboxState(0L, 0L, null, null, false, null);
+                return new OutboxState(0L, 0L, 0L, null, null, false, null);
             }
             List<String> pendingStatuses = List.of(
                     DecisionOutboxStatus.PENDING,
@@ -246,6 +259,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
             );
             long failedTerminalCount = alertRepository.countByDecisionOutboxStatus(DecisionOutboxStatus.FAILED_TERMINAL);
             long unknownCount = alertRepository.countByDecisionOutboxStatus(DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
+            long pendingResolutionCount = alertRepository.countByDecisionOutboxResolutionPending(true);
             Long oldestPendingAge = alertRepository.findTopByDecisionOutboxStatusInOrderByDecidedAtAsc(pendingStatuses)
                     .map(this::pendingAgeSeconds)
                     .orElse(null);
@@ -258,12 +272,14 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 reason = "OUTBOX_TERMINAL_FAILURE";
             } else if (unknownCount > 0) {
                 reason = "OUTBOX_PUBLISH_CONFIRMATION_UNKNOWN";
+            } else if (pendingResolutionCount > 0) {
+                reason = "OUTBOX_RESOLUTION_PENDING_APPROVAL";
             } else if (stalePending) {
                 reason = "OUTBOX_STALE_PENDING";
             }
-            return new OutboxState(failedTerminalCount, unknownCount, oldestPendingAge, oldestUnknownAge, stalePending, reason);
+            return new OutboxState(failedTerminalCount, unknownCount, pendingResolutionCount, oldestPendingAge, oldestUnknownAge, stalePending, reason);
         } catch (DataAccessException exception) {
-            return new OutboxState(1L, 1L, null, null, true, "OUTBOX_STATUS_UNAVAILABLE");
+            return new OutboxState(1L, 1L, 1L, null, null, true, "OUTBOX_STATUS_UNAVAILABLE");
         }
     }
 
@@ -283,9 +299,11 @@ public class SystemTrustLevelController implements ApplicationRunner {
             int localStatusUnverified,
             int missingRanges,
             long postCommitAuditDegraded,
+            long pendingDegradationResolutionCount,
             long postCommitAuditDegradedResolved,
             long outboxFailedTerminalCount,
             long outboxPublishConfirmationUnknownCount,
+            long outboxPendingResolutionCount,
             Long outboxOldestPendingAgeSeconds,
             Long outboxOldestAmbiguousAgeSeconds,
             String reasonCode
@@ -295,6 +313,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
     private record OutboxState(
             long failedTerminalCount,
             long publishConfirmationUnknownCount,
+            long pendingResolutionCount,
             Long oldestPendingAgeSeconds,
             Long oldestAmbiguousAgeSeconds,
             boolean stalePending,

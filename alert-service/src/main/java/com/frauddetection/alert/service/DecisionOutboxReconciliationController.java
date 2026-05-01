@@ -1,6 +1,7 @@
 package com.frauddetection.alert.service;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.frauddetection.alert.audit.ResolutionEvidenceReference;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -52,6 +53,7 @@ public class DecisionOutboxReconciliationController {
                 alertId,
                 request.resolution(),
                 request.reason(),
+                request.evidenceReference(),
                 actor
         ));
     }
@@ -62,7 +64,11 @@ public class DecisionOutboxReconciliationController {
 
             @NotBlank
             @Size(max = 500)
-            String reason
+            String reason,
+
+            @JsonProperty("evidence_reference")
+            @Valid
+            ResolutionEvidenceReference evidenceReference
     ) {
     }
 
@@ -85,7 +91,27 @@ public class DecisionOutboxReconciliationController {
             @JsonProperty("published_at")
             Instant publishedAt,
             @JsonProperty("failure_reason")
-            String failureReason
+            String failureReason,
+            @JsonProperty("resolution_pending")
+            boolean resolutionPending,
+            @JsonProperty("resolution_requested_at")
+            Instant resolutionRequestedAt,
+            @JsonProperty("resolution_requested_by")
+            String resolutionRequestedBy,
+            @JsonProperty("resolution_evidence_type")
+            String resolutionEvidenceType,
+            @JsonProperty("resolution_evidence_reference")
+            String resolutionEvidenceReference,
+            @JsonProperty("resolution_evidence_verified_at")
+            Instant resolutionEvidenceVerifiedAt,
+            @JsonProperty("resolution_evidence_verified_by")
+            String resolutionEvidenceVerifiedBy,
+            @JsonProperty("resolution_approved_at")
+            Instant resolutionApprovedAt,
+            @JsonProperty("resolution_approved_by")
+            String resolutionApprovedBy,
+            @JsonProperty("resolution_approval_reason")
+            String resolutionApprovalReason
     ) {
         static UnknownConfirmationResponse from(DecisionOutboxReconciliationService.UnknownConfirmation event) {
             return new UnknownConfirmationResponse(
@@ -97,7 +123,17 @@ public class DecisionOutboxReconciliationController {
                     event.attempts(),
                     event.lastAttemptAt(),
                     event.publishedAt(),
-                    event.failureReason()
+                    event.failureReason(),
+                    event.resolutionPending(),
+                    event.resolutionRequestedAt(),
+                    event.resolutionRequestedBy(),
+                    event.resolutionEvidenceType(),
+                    event.resolutionEvidenceReference(),
+                    event.resolutionEvidenceVerifiedAt(),
+                    event.resolutionEvidenceVerifiedBy(),
+                    event.resolutionApprovedAt(),
+                    event.resolutionApprovedBy(),
+                    event.resolutionApprovalReason()
             );
         }
     }

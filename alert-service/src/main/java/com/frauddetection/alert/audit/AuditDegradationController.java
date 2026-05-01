@@ -59,8 +59,8 @@ public class AuditDegradationController {
             String reason,
 
             @JsonProperty("evidence_reference")
-            @Size(max = 500)
-            String evidenceReference
+            @Valid
+            ResolutionEvidenceReference evidenceReference
     ) {
     }
 
@@ -78,14 +78,32 @@ public class AuditDegradationController {
             String operation,
             Instant timestamp,
             boolean resolved,
+            @JsonProperty("resolution_pending")
+            boolean resolutionPending,
+            @JsonProperty("resolution_requested_at")
+            Instant resolutionRequestedAt,
+            @JsonProperty("resolution_requested_by")
+            String resolutionRequestedBy,
             @JsonProperty("resolved_at")
             Instant resolvedAt,
             @JsonProperty("resolved_by")
             String resolvedBy,
             @JsonProperty("resolution_reason")
             String resolutionReason,
+            @JsonProperty("resolution_evidence_type")
+            String resolutionEvidenceType,
             @JsonProperty("resolution_evidence_reference")
-            String resolutionEvidenceReference
+            String resolutionEvidenceReference,
+            @JsonProperty("resolution_evidence_verified_at")
+            Instant resolutionEvidenceVerifiedAt,
+            @JsonProperty("resolution_evidence_verified_by")
+            String resolutionEvidenceVerifiedBy,
+            @JsonProperty("approved_at")
+            Instant approvedAt,
+            @JsonProperty("approved_by")
+            String approvedBy,
+            @JsonProperty("approval_reason")
+            String approvalReason
     ) {
         static AuditDegradationResponse from(AuditDegradationEventDocument document) {
             return new AuditDegradationResponse(
@@ -96,10 +114,19 @@ public class AuditDegradationController {
                     document.getOperation(),
                     document.getTimestamp(),
                     document.isResolved(),
+                    document.isResolutionPending(),
+                    document.getResolutionRequestedAt(),
+                    document.getResolutionRequestedBy(),
                     document.getResolvedAt(),
                     document.getResolvedBy(),
                     document.getResolutionReason(),
-                    document.getResolutionEvidenceReference()
+                    document.getResolutionEvidenceType(),
+                    document.getResolutionEvidenceReference(),
+                    document.getResolutionEvidenceVerifiedAt(),
+                    document.getResolutionEvidenceVerifiedBy(),
+                    document.getApprovedAt(),
+                    document.getApprovedBy(),
+                    document.getApprovalReason()
             );
         }
     }

@@ -14,6 +14,8 @@ public final class AnalystAuthority {
     public static final String AUDIT_READ = "audit:read";
     public static final String AUDIT_VERIFY = "audit:verify";
     public static final String AUDIT_EXPORT = "audit:export";
+    public static final String AUDIT_DEGRADATION_RESOLVE = "audit-degradation:resolve";
+    public static final String DECISION_OUTBOX_RECONCILE = "decision-outbox:reconcile";
 
     public static final Set<String> ALL = Set.of(
             ALERT_READ,
@@ -25,7 +27,9 @@ public final class AnalystAuthority {
             GOVERNANCE_ADVISORY_AUDIT_WRITE,
             AUDIT_READ,
             AUDIT_VERIFY,
-            AUDIT_EXPORT
+            AUDIT_EXPORT,
+            AUDIT_DEGRADATION_RESOLVE,
+            DECISION_OUTBOX_RECONCILE
     );
 
     private AnalystAuthority() {

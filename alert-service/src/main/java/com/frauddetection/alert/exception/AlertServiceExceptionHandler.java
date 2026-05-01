@@ -110,7 +110,7 @@ public class AlertServiceExceptionHandler {
                         Instant.now(),
                         202,
                         "Accepted",
-                        "Mutation committed, but audit evidence is incomplete.",
+                        exception.getMessage(),
                         List.of("operation_status:COMMITTED_EVIDENCE_INCOMPLETE")
                 )
         );

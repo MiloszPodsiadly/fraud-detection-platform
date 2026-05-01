@@ -59,6 +59,17 @@ public class AlertDocument {
     private Instant decisionOutboxPublishedAt;
     private String decisionOutboxLastError;
     private String decisionOutboxFailureReason;
+    private boolean decisionOutboxResolutionPending;
+    private Instant decisionOutboxResolutionRequestedAt;
+    private String decisionOutboxResolutionRequestedBy;
+    private String decisionOutboxResolutionRequestReason;
+    private String decisionOutboxResolutionEvidenceType;
+    private String decisionOutboxResolutionEvidenceReference;
+    private Instant decisionOutboxResolutionEvidenceVerifiedAt;
+    private String decisionOutboxResolutionEvidenceVerifiedBy;
+    private Instant decisionOutboxResolutionApprovedAt;
+    private String decisionOutboxResolutionApprovedBy;
+    private String decisionOutboxResolutionApprovalReason;
 
     public String getAlertId() { return alertId; }
     public void setAlertId(String alertId) { this.alertId = alertId; }
@@ -130,4 +141,26 @@ public class AlertDocument {
     public void setDecisionOutboxLastError(String decisionOutboxLastError) { this.decisionOutboxLastError = decisionOutboxLastError; }
     public String getDecisionOutboxFailureReason() { return decisionOutboxFailureReason; }
     public void setDecisionOutboxFailureReason(String decisionOutboxFailureReason) { this.decisionOutboxFailureReason = decisionOutboxFailureReason; }
+    public boolean isDecisionOutboxResolutionPending() { return decisionOutboxResolutionPending; }
+    public void setDecisionOutboxResolutionPending(boolean decisionOutboxResolutionPending) { this.decisionOutboxResolutionPending = decisionOutboxResolutionPending; }
+    public Instant getDecisionOutboxResolutionRequestedAt() { return decisionOutboxResolutionRequestedAt; }
+    public void setDecisionOutboxResolutionRequestedAt(Instant decisionOutboxResolutionRequestedAt) { this.decisionOutboxResolutionRequestedAt = decisionOutboxResolutionRequestedAt; }
+    public String getDecisionOutboxResolutionRequestedBy() { return decisionOutboxResolutionRequestedBy; }
+    public void setDecisionOutboxResolutionRequestedBy(String decisionOutboxResolutionRequestedBy) { this.decisionOutboxResolutionRequestedBy = decisionOutboxResolutionRequestedBy; }
+    public String getDecisionOutboxResolutionRequestReason() { return decisionOutboxResolutionRequestReason; }
+    public void setDecisionOutboxResolutionRequestReason(String decisionOutboxResolutionRequestReason) { this.decisionOutboxResolutionRequestReason = decisionOutboxResolutionRequestReason; }
+    public String getDecisionOutboxResolutionEvidenceType() { return decisionOutboxResolutionEvidenceType; }
+    public void setDecisionOutboxResolutionEvidenceType(String decisionOutboxResolutionEvidenceType) { this.decisionOutboxResolutionEvidenceType = decisionOutboxResolutionEvidenceType; }
+    public String getDecisionOutboxResolutionEvidenceReference() { return decisionOutboxResolutionEvidenceReference; }
+    public void setDecisionOutboxResolutionEvidenceReference(String decisionOutboxResolutionEvidenceReference) { this.decisionOutboxResolutionEvidenceReference = decisionOutboxResolutionEvidenceReference; }
+    public Instant getDecisionOutboxResolutionEvidenceVerifiedAt() { return decisionOutboxResolutionEvidenceVerifiedAt; }
+    public void setDecisionOutboxResolutionEvidenceVerifiedAt(Instant decisionOutboxResolutionEvidenceVerifiedAt) { this.decisionOutboxResolutionEvidenceVerifiedAt = decisionOutboxResolutionEvidenceVerifiedAt; }
+    public String getDecisionOutboxResolutionEvidenceVerifiedBy() { return decisionOutboxResolutionEvidenceVerifiedBy; }
+    public void setDecisionOutboxResolutionEvidenceVerifiedBy(String decisionOutboxResolutionEvidenceVerifiedBy) { this.decisionOutboxResolutionEvidenceVerifiedBy = decisionOutboxResolutionEvidenceVerifiedBy; }
+    public Instant getDecisionOutboxResolutionApprovedAt() { return decisionOutboxResolutionApprovedAt; }
+    public void setDecisionOutboxResolutionApprovedAt(Instant decisionOutboxResolutionApprovedAt) { this.decisionOutboxResolutionApprovedAt = decisionOutboxResolutionApprovedAt; }
+    public String getDecisionOutboxResolutionApprovedBy() { return decisionOutboxResolutionApprovedBy; }
+    public void setDecisionOutboxResolutionApprovedBy(String decisionOutboxResolutionApprovedBy) { this.decisionOutboxResolutionApprovedBy = decisionOutboxResolutionApprovedBy; }
+    public String getDecisionOutboxResolutionApprovalReason() { return decisionOutboxResolutionApprovalReason; }
+    public void setDecisionOutboxResolutionApprovalReason(String decisionOutboxResolutionApprovalReason) { this.decisionOutboxResolutionApprovalReason = decisionOutboxResolutionApprovalReason; }
 }
