@@ -1,0 +1,16 @@
+package com.frauddetection.alert.regulated;
+
+public enum RegulatedMutationState {
+    REQUESTED,
+    AUDIT_ATTEMPTED,
+    BUSINESS_COMMITTING,
+    BUSINESS_COMMITTED,
+    SUCCESS_AUDIT_PENDING,
+    SUCCESS_AUDIT_RECORDED,
+    EVIDENCE_PENDING,
+    EVIDENCE_CONFIRMED,
+    COMMITTED,
+    COMMITTED_DEGRADED,
+    REJECTED,
+    FAILED
+}

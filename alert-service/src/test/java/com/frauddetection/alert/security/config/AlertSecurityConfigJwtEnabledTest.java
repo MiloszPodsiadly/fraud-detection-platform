@@ -139,6 +139,7 @@ class AlertSecurityConfigJwtEnabledTest {
     void shouldReturn403WhenJwtDoesNotMapToRequiredAuthority() throws Exception {
         mockMvc.perform(post("/api/v1/alerts/alert-1/decision")
                         .header("Authorization", "Bearer token-readonly")
+                        .header("X-Idempotency-Key", "idem-readonly-jwt-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(submitDecisionRequest())))
                 .andExpect(status().isForbidden())

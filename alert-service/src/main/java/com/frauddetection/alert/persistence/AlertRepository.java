@@ -21,4 +21,6 @@ public interface AlertRepository extends MongoRepository<AlertDocument, String> 
     Optional<AlertDocument> findTopByDecisionOutboxStatusOrderByDecidedAtAsc(String decisionOutboxStatus);
 
     Optional<AlertDocument> findTopByDecisionOutboxStatusInOrderByDecidedAtAsc(Collection<String> decisionOutboxStatuses);
+
+    Optional<AlertDocument> findByDecisionOutboxEventEventId(String eventId);
 }

@@ -31,6 +31,10 @@ public class AlertServiceMetrics {
     private final AtomicInteger auditIntegrityValid = new AtomicInteger(0);
     private final AtomicInteger auditIntegrityInvalid = new AtomicInteger(0);
     private final AtomicLong postCommitAuditDegraded = new AtomicLong(0);
+    private final AtomicLong regulatedMutationRecoveryRequired = new AtomicLong(0);
+    private final AtomicLong regulatedMutationRecoveryOldestAgeSeconds = new AtomicLong(0);
+    private final AtomicLong regulatedMutationRecoveryFailedTerminal = new AtomicLong(0);
+    private final AtomicLong regulatedMutationRecoveryRepeatedFailures = new AtomicLong(0);
 
     public AlertServiceMetrics(MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
@@ -45,6 +49,22 @@ public class AlertServiceMetrics {
                 .register(meterRegistry);
         Gauge.builder("fraud_audit_integrity_status", auditIntegrityInvalid, AtomicInteger::get)
                 .tag("status", "INVALID")
+                .register(meterRegistry);
+        Gauge.builder("regulated_mutation_recovery_required_total", regulatedMutationRecoveryRequired, AtomicLong::get)
+                .register(meterRegistry);
+        Gauge.builder("regulated_mutation_recovery_required_count", regulatedMutationRecoveryRequired, AtomicLong::get)
+                .register(meterRegistry);
+        Gauge.builder("regulated_mutation_recovery_oldest_age_seconds", regulatedMutationRecoveryOldestAgeSeconds, AtomicLong::get)
+                .register(meterRegistry);
+        Gauge.builder("oldest_recovery_required_age_seconds", regulatedMutationRecoveryOldestAgeSeconds, AtomicLong::get)
+                .register(meterRegistry);
+        Gauge.builder("regulated_mutation_recovery_failed_terminal_count", regulatedMutationRecoveryFailedTerminal, AtomicLong::get)
+                .register(meterRegistry);
+        Gauge.builder("recovery_failed_terminal_count", regulatedMutationRecoveryFailedTerminal, AtomicLong::get)
+                .register(meterRegistry);
+        Gauge.builder("regulated_mutation_recovery_repeated_failures_total", regulatedMutationRecoveryRepeatedFailures, AtomicLong::get)
+                .register(meterRegistry);
+        Gauge.builder("repeated_recovery_failures_count", regulatedMutationRecoveryRepeatedFailures, AtomicLong::get)
                 .register(meterRegistry);
     }
 
@@ -62,6 +82,29 @@ public class AlertServiceMetrics {
 
     public long postCommitAuditDegradedCount() {
         return postCommitAuditDegraded.get();
+    }
+
+    public void recordRegulatedMutationRecoveryBacklog(long recoveryRequiredCount, Long oldestAgeSeconds) {
+        regulatedMutationRecoveryRequired.set(Math.max(0L, recoveryRequiredCount));
+        regulatedMutationRecoveryOldestAgeSeconds.set(oldestAgeSeconds == null ? 0L : Math.max(0L, oldestAgeSeconds));
+    }
+
+    public void recordRegulatedMutationRecoveryBacklog(
+            long recoveryRequiredCount,
+            Long oldestAgeSeconds,
+            long failedTerminalCount,
+            long repeatedFailureCount
+    ) {
+        recordRegulatedMutationRecoveryBacklog(recoveryRequiredCount, oldestAgeSeconds);
+        regulatedMutationRecoveryFailedTerminal.set(Math.max(0L, failedTerminalCount));
+        regulatedMutationRecoveryRepeatedFailures.set(Math.max(0L, repeatedFailureCount));
+    }
+
+    public void recordRegulatedMutationRecoveryOutcome(String outcome) {
+        counter(
+                "regulated_mutation_recovery_outcome_total",
+                "outcome", normalizeRegulatedMutationRecoveryOutcome(outcome)
+        ).increment();
     }
 
     public void recordDecisionOutboxPublishConfirmationFailed() {
@@ -475,6 +518,13 @@ public class AlertServiceMetrics {
             return operation;
         }
         return "UNKNOWN";
+    }
+
+    private String normalizeRegulatedMutationRecoveryOutcome(String outcome) {
+        return switch (outcome) {
+            case "RECOVERED", "STILL_PENDING", "RECOVERY_REQUIRED", "FAILED_TERMINAL" -> outcome;
+            default -> "RECOVERY_REQUIRED";
+        };
     }
 
     private String normalizeCoverageRateLimitStatus(String status) {

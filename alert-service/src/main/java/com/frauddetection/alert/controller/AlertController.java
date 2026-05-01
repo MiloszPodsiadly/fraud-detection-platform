@@ -15,6 +15,8 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -73,11 +75,16 @@ public class AlertController {
     }
 
     @PostMapping("/{alertId}/decision")
-    public SubmitAnalystDecisionResponse submitDecision(
+    public ResponseEntity<SubmitAnalystDecisionResponse> submitDecision(
             @PathVariable String alertId,
             @RequestHeader(name = "X-Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody SubmitAnalystDecisionRequest request
     ) {
-        return alertManagementUseCase.submitDecision(alertId, request, idempotencyKey);
+        SubmitAnalystDecisionResponse response = alertManagementUseCase.submitDecision(alertId, request, idempotencyKey);
+        HttpStatus status = switch (response.operationStatus()) {
+            case IN_PROGRESS, RECOVERY_REQUIRED, COMMIT_UNKNOWN -> HttpStatus.ACCEPTED;
+            default -> HttpStatus.OK;
+        };
+        return ResponseEntity.status(status).body(response);
     }
 }

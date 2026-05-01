@@ -13,6 +13,7 @@ import com.frauddetection.alert.governance.audit.GovernanceAuditDecision;
 import com.frauddetection.alert.governance.audit.GovernanceAuditPersistenceUnavailableException;
 import com.frauddetection.alert.governance.audit.InvalidGovernanceAuditRequestException;
 import com.frauddetection.alert.governance.audit.InvalidGovernanceAuditDecisionException;
+import com.frauddetection.alert.regulated.MissingIdempotencyKeyException;
 import com.frauddetection.alert.service.ConflictingIdempotencyKeyException;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
@@ -25,6 +26,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
 import java.util.List;
@@ -182,6 +184,19 @@ public class AlertServiceExceptionHandler {
         );
     }
 
+    @ExceptionHandler(MissingIdempotencyKeyException.class)
+    public ResponseEntity<ApiErrorResponse> handleMissingIdempotencyKey(MissingIdempotencyKeyException exception) {
+        return ResponseEntity.badRequest().body(
+                new ApiErrorResponse(
+                        Instant.now(),
+                        400,
+                        "Bad Request",
+                        exception.getMessage(),
+                        List.of("reason:IDEMPOTENCY_KEY_REQUIRED")
+                )
+        );
+    }
+
     @ExceptionHandler(GovernanceAuditActorUnavailableException.class)
     public ResponseEntity<ApiErrorResponse> handleGovernanceAuditActorUnavailable(GovernanceAuditActorUnavailableException exception) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(
@@ -225,6 +240,17 @@ public class AlertServiceExceptionHandler {
     public ResponseEntity<ApiErrorResponse> handleMalformedJson(HttpMessageNotReadableException exception) {
         return ResponseEntity.badRequest().body(
                 new ApiErrorResponse(Instant.now(), 400, "Bad Request", "Malformed JSON request.", List.of())
+        );
+    }
+
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<ApiErrorResponse> handleResponseStatusException(ResponseStatusException exception) {
+        int status = exception.getStatusCode().value();
+        HttpStatus httpStatus = HttpStatus.resolve(status);
+        String error = httpStatus == null ? exception.getStatusCode().toString() : httpStatus.getReasonPhrase();
+        String reason = exception.getReason() == null ? error : exception.getReason();
+        return ResponseEntity.status(exception.getStatusCode()).body(
+                new ApiErrorResponse(Instant.now(), status, error, reason, List.of())
         );
     }
 

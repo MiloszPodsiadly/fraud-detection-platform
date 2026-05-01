@@ -5,6 +5,7 @@ import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
 import com.frauddetection.alert.api.SubmitAnalystDecisionResponse;
 import com.frauddetection.alert.api.UpdateFraudCaseRequest;
 import com.frauddetection.alert.assistant.AnalystCaseSummaryUseCase;
+import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditDegradationEventDocument;
 import com.frauddetection.alert.audit.AuditEventController;
 import com.frauddetection.alert.audit.AuditEventReadResponse;
@@ -14,6 +15,9 @@ import com.frauddetection.alert.audit.AuditDegradationService;
 import com.frauddetection.alert.audit.AuditIntegrityController;
 import com.frauddetection.alert.audit.AuditIntegrityResponse;
 import com.frauddetection.alert.audit.AuditIntegrityService;
+import com.frauddetection.alert.audit.AuditOutcome;
+import com.frauddetection.alert.audit.AuditResourceType;
+import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.audit.AuditTrustAttestationController;
 import com.frauddetection.alert.audit.AuditTrustAttestationResponse;
 import com.frauddetection.alert.audit.AuditTrustAttestationService;
@@ -53,6 +57,12 @@ import com.frauddetection.alert.mapper.ScoredTransactionResponseMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
+import com.frauddetection.alert.regulated.RegulatedMutationRecoveryBacklogResponse;
+import com.frauddetection.alert.regulated.RegulatedMutationCommandInspectionResponse;
+import com.frauddetection.alert.regulated.RegulatedMutationInspectionRateLimiter;
+import com.frauddetection.alert.regulated.RegulatedMutationRecoveryController;
+import com.frauddetection.alert.regulated.RegulatedMutationRecoveryRunResponse;
+import com.frauddetection.alert.regulated.RegulatedMutationRecoveryService;
 import com.frauddetection.alert.security.auth.AnalystAuthenticationFactory;
 import com.frauddetection.alert.security.auth.DemoAuthHeaderParser;
 import com.frauddetection.alert.security.auth.DemoAuthHeaders;
@@ -95,6 +105,9 @@ import java.util.Set;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -116,6 +129,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         AuditTrustKeysController.class,
         AuditDegradationController.class,
         DecisionOutboxReconciliationController.class,
+        RegulatedMutationRecoveryController.class,
         SystemTrustLevelController.class,
         GovernanceAdvisoryController.class,
         GovernanceAuditController.class
@@ -186,6 +200,15 @@ class AlertSecurityConfigTest {
     private DecisionOutboxReconciliationService decisionOutboxReconciliationService;
 
     @MockBean
+    private RegulatedMutationRecoveryService regulatedMutationRecoveryService;
+
+    @MockBean
+    private RegulatedMutationInspectionRateLimiter regulatedMutationInspectionRateLimiter;
+
+    @MockBean
+    private AuditService auditService;
+
+    @MockBean
     private ExternalAuditAnchorSink externalAuditAnchorSink;
 
     @MockBean
@@ -203,6 +226,7 @@ class AlertSecurityConfigTest {
     @BeforeEach
     void allowCoverageRateLimit() {
         when(externalAuditCoverageRateLimiter.allow(any(), anyInt())).thenReturn(true);
+        when(regulatedMutationInspectionRateLimiter.allow(any())).thenReturn(true);
     }
 
     @Test
@@ -257,6 +281,16 @@ class AlertSecurityConfigTest {
         mockMvc.perform(post("/api/v1/decision-outbox/unknown-confirmations/alert-1/resolve")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"resolution\":\"PUBLISHED\",\"reason\":\"kafka confirmed\"}"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/v1/regulated-mutations/recover"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/regulated-mutations/recovery/backlog"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/regulated-mutations/idem-1"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/regulated-mutations/by-command/mutation-1"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/regulated-mutations/by-idempotency-hash/96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/system/trust-level"))
                 .andExpect(status().isUnauthorized());
@@ -359,6 +393,7 @@ class AlertSecurityConfigTest {
         mockMvc.perform(post("/api/v1/alerts/alert-1/decision")
                         .with(demoUser("READ_ONLY_ANALYST"))
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "idem-readonly-1")
                         .content(objectMapper.writeValueAsString(submitDecisionRequest())))
                 .andExpect(status().isForbidden())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
@@ -382,6 +417,7 @@ class AlertSecurityConfigTest {
         mockMvc.perform(post("/api/v1/alerts/alert-1/decision")
                         .with(demoUser("ANALYST"))
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "idem-analyst-1")
                         .content(objectMapper.writeValueAsString(submitDecisionRequest())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultingStatus").value("RESOLVED"));
@@ -428,6 +464,7 @@ class AlertSecurityConfigTest {
         mockMvc.perform(post("/api/v1/alerts/alert-1/decision")
                         .with(demoUser("FRAUD_OPS_ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "idem-admin-1")
                         .content(objectMapper.writeValueAsString(submitDecisionRequest())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultingStatus").value("RESOLVED"));
@@ -492,8 +529,69 @@ class AlertSecurityConfigTest {
         when(auditDegradationService.resolveDegradation(eq("audit-1"), any(), any(), any()))
                 .thenReturn(auditDegradationDocument());
         when(decisionOutboxReconciliationService.listUnknownConfirmations()).thenReturn(List.of());
-        when(decisionOutboxReconciliationService.resolve(eq("alert-1"), any(), any(), any(), any()))
+        when(decisionOutboxReconciliationService.resolve(eq("alert-1"), any(), any(), any(), any(), any()))
                 .thenReturn(unknownConfirmation());
+        when(regulatedMutationRecoveryService.recoverNow())
+                .thenReturn(new RegulatedMutationRecoveryRunResponse(1, 0, 0, 0, 1));
+        when(regulatedMutationRecoveryService.backlog())
+                .thenReturn(new RegulatedMutationRecoveryBacklogResponse(0, 0, null, 0, 0, Map.of(), Map.of()));
+        when(regulatedMutationRecoveryService.inspect("idem-1"))
+                .thenReturn(new RegulatedMutationCommandInspectionResponse(
+                        "96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b",
+                        "...em-1",
+                        "SUBMIT_ANALYST_DECISION",
+                        "ALERT",
+                        "alert-1",
+                        "EVIDENCE_PENDING",
+                        "COMPLETED",
+                        null,
+                        null,
+                        true,
+                        "audit-attempted",
+                        "audit-success",
+                        null,
+                        null,
+                        null,
+                        Instant.parse("2026-05-01T00:00:00Z")
+                ));
+        when(regulatedMutationRecoveryService.inspectByCommandId("mutation-1"))
+                .thenReturn(new RegulatedMutationCommandInspectionResponse(
+                        "96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b",
+                        "...em-1",
+                        "SUBMIT_ANALYST_DECISION",
+                        "ALERT",
+                        "alert-1",
+                        "EVIDENCE_PENDING",
+                        "COMPLETED",
+                        null,
+                        null,
+                        true,
+                        "audit-attempted",
+                        "audit-success",
+                        null,
+                        null,
+                        null,
+                        Instant.parse("2026-05-01T00:00:00Z")
+                ));
+        when(regulatedMutationRecoveryService.inspectByIdempotencyHash("96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b"))
+                .thenReturn(new RegulatedMutationCommandInspectionResponse(
+                        "96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b",
+                        "...em-1",
+                        "SUBMIT_ANALYST_DECISION",
+                        "ALERT",
+                        "alert-1",
+                        "EVIDENCE_PENDING",
+                        "COMPLETED",
+                        null,
+                        null,
+                        true,
+                        "audit-attempted",
+                        "audit-success",
+                        null,
+                        null,
+                        null,
+                        Instant.parse("2026-05-01T00:00:00Z")
+                ));
         when(externalAuditAnchorSink.capabilities()).thenReturn(providerCapabilities());
 
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("FRAUD_OPS_ADMIN")))
@@ -548,6 +646,7 @@ class AlertSecurityConfigTest {
         mockMvc.perform(post("/api/v1/decision-outbox/unknown-confirmations/alert-1/resolve")
                         .with(demoUser("FRAUD_OPS_ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "outbox-resolve-1")
                         .content("""
                                 {"resolution":"PUBLISHED","reason":"kafka confirmed","evidence_reference":{"type":"BROKER_OFFSET","reference":"topic=fraud-decisions,partition=0,offset=42","verified_at":"2026-04-30T12:00:00Z","verified_by":"ops-admin"}}
                                 """))
@@ -561,8 +660,42 @@ class AlertSecurityConfigTest {
         mockMvc.perform(post("/api/v1/decision-outbox/unknown-confirmations/alert-1/resolve")
                         .with(authorities(AnalystAuthority.DECISION_OUTBOX_RECONCILE))
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "outbox-resolve-2")
                         .content("{\"resolution\":\"RETRY_REQUESTED\",\"reason\":\"not present\"}"))
                 .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/regulated-mutations/recover").with(demoUser("FRAUD_OPS_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recovered").value(1));
+        mockMvc.perform(get("/api/v1/regulated-mutations/recovery/backlog").with(demoUser("FRAUD_OPS_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total_recovery_required").value(0));
+        mockMvc.perform(get("/api/v1/regulated-mutations/recovery/backlog").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/regulated-mutations/idem-1").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.idempotency_key").doesNotExist())
+                .andExpect(jsonPath("$.idempotency_key_hash").value("96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b"))
+                .andExpect(jsonPath("$.idempotency_key_masked").value("...em-1"));
+        mockMvc.perform(get("/api/v1/regulated-mutations/by-command/mutation-1").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.idempotency_key").doesNotExist())
+                .andExpect(jsonPath("$.idempotency_key_hash").value("96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b"));
+        mockMvc.perform(get("/api/v1/regulated-mutations/by-idempotency-hash/96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.idempotency_key").doesNotExist())
+                .andExpect(jsonPath("$.idempotency_key_hash").value("96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b"));
+        verify(auditService, atLeastOnce()).audit(
+                eq(AuditAction.INSPECT_REGULATED_MUTATION_COMMAND),
+                eq(AuditResourceType.REGULATED_MUTATION_COMMAND),
+                any(),
+                any(),
+                any(),
+                eq(AuditOutcome.SUCCESS),
+                any(),
+                any()
+        );
+        mockMvc.perform(post("/api/v1/regulated-mutations/recover").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
+                .andExpect(status().isForbidden());
         mockMvc.perform(get("/system/trust-level").with(demoUser("FRAUD_OPS_ADMIN")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.witness_status").value("PROVIDER_CAPABILITY_VERIFIED"));
@@ -589,12 +722,69 @@ class AlertSecurityConfigTest {
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/decision-outbox/unknown-confirmations").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/regulated-mutations/recover").with(demoUser("ANALYST")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/regulated-mutations/recovery/backlog").with(demoUser("ANALYST")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/regulated-mutations/idem-1").with(demoUser("ANALYST")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/regulated-mutations/by-command/mutation-1").with(demoUser("ANALYST")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/regulated-mutations/by-idempotency-hash/96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b").with(demoUser("ANALYST")))
+                .andExpect(status().isForbidden());
         mockMvc.perform(get("/system/trust-level").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("REVIEWER")))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("READ_ONLY_ANALYST")))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void shouldRateLimitRegulatedMutationInspection() throws Exception {
+        when(regulatedMutationInspectionRateLimiter.allow(any())).thenReturn(false);
+
+        mockMvc.perform(get("/api/v1/regulated-mutations/by-command/mutation-1")
+                        .with(authorities(AnalystAuthority.AUDIT_VERIFY)))
+                .andExpect(status().isTooManyRequests());
+    }
+
+    @Test
+    void shouldFailClosedWhenRegulatedMutationInspectionAuditFails() throws Exception {
+        when(regulatedMutationRecoveryService.inspectByCommandId("mutation-1"))
+                .thenReturn(new RegulatedMutationCommandInspectionResponse(
+                        "96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b",
+                        "...em-1",
+                        "SUBMIT_ANALYST_DECISION",
+                        "ALERT",
+                        "alert-1",
+                        "EVIDENCE_PENDING",
+                        "COMPLETED",
+                        null,
+                        null,
+                        true,
+                        "audit-attempted",
+                        "audit-success",
+                        null,
+                        null,
+                        null,
+                        Instant.parse("2026-05-01T00:00:00Z")
+                ));
+        doThrow(new RuntimeException("audit down")).when(auditService).audit(
+                eq(AuditAction.INSPECT_REGULATED_MUTATION_COMMAND),
+                eq(AuditResourceType.REGULATED_MUTATION_COMMAND),
+                any(),
+                any(),
+                any(),
+                eq(AuditOutcome.SUCCESS),
+                any(),
+                any()
+        );
+
+        mockMvc.perform(get("/api/v1/regulated-mutations/by-command/mutation-1")
+                        .with(authorities(AnalystAuthority.AUDIT_VERIFY)))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.message").value("Audit persistence is unavailable; mutation was not executed."));
     }
 
     @Test

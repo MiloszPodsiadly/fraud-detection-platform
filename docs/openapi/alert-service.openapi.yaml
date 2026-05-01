@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: Alert Service API
-  version: FDP-24
-  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, external anchor verification, bounded evidence export, derived audit trust attestation, public trust key export, governance advisory lifecycle projection, and human-review audit. FDP-20 extends tamper evidence outside the primary database boundary. FDP-22 adds a pluggable object-store external anchor sink boundary, verified external anchor references, and explicit external_immutability_level=NONE|CONFIGURED|ENFORCED; no WORM or full immutability claim is valid unless the adapter verifies infrastructure controls and reports ENFORCED. FDP-23 adds a separate local-first audit trust authority for Ed25519 external anchor hash signatures and public verification key export; the alert-service does not hold the trust authority private key. FDP-24 adds fail-closed posture reporting, durable analyst-decision outbox/idempotency semantics, and publication-status source-of-truth semantics. Audit integrity, trust authority signatures, and trust attestation do not imply certified WORM archive storage, legal notarization, SIEM integration, unbounded export, KMS/HSM signing unless explicitly integrated, or final compliance archive.
+  version: FDP-25
+  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, external anchor verification, bounded evidence export, derived audit trust attestation, public trust key export, governance advisory lifecycle projection, and human-review audit. FDP-20 extends tamper evidence outside the primary database boundary. FDP-22 adds a pluggable object-store external anchor sink boundary, verified external anchor references, and explicit external_immutability_level=NONE|CONFIGURED|ENFORCED; no WORM or full immutability claim is valid unless the adapter verifies infrastructure controls and reports ENFORCED. FDP-23 adds a separate local-first audit trust authority for Ed25519 external anchor hash signatures and public verification key export; the alert-service does not hold the trust authority private key. FDP-24 adds fail-closed posture reporting, durable analyst-decision outbox/idempotency semantics, and publication-status source-of-truth semantics. FDP-25 adds a recoverable regulated mutation state machine for submit-decision writes with canonical intent, idempotent audit phase keys, bounded operational recovery, and rate-limited audited inspection endpoints. Audit integrity, trust authority signatures, and trust attestation do not imply certified WORM archive storage, legal notarization, SIEM integration, unbounded export, KMS/HSM signing unless explicitly integrated, a single atomic commit boundary across business state/audit/external witnesses/Kafka, or final compliance archive.
 servers:
   - url: http://localhost:8085
 paths:
@@ -449,6 +449,13 @@ paths:
             type: string
             minLength: 1
             maxLength: 160
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 160
       requestBody:
         required: true
         content:
@@ -470,6 +477,151 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "409":
           $ref: "#/components/responses/Conflict"
+  /api/v1/regulated-mutations/{idempotencyKey}:
+    get:
+      summary: Inspect one regulated mutation command by raw idempotency key
+      description: Legacy/debug compatibility endpoint. Requires regulated-mutation:recover or audit:verify. Rate-limited per actor/IP and fails closed with 503 when inspection access cannot be durably audited. Returns command state, execution status, lease metadata, evidence ids, degradation reason, last error, idempotency key hash, masked idempotency key, and snapshot presence for one idempotency key. Prefer /by-command/{commandId} or /by-idempotency-hash/{hash} for new tooling so raw idempotency keys are not placed in URLs. Operators must not paste raw idempotency keys in tickets, logs, runbooks, or dashboards. This endpoint is read-only and never exposes raw idempotency keys in the response, command payloads, response payloads, notes, customer/account/card identifiers, raw exception details, or unbounded exports.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: idempotencyKey
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      responses:
+        "200":
+          description: Command inspection returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegulatedMutationCommandInspectionResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          description: Inspection rate limit exceeded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/regulated-mutations/by-command/{commandId}:
+    get:
+      summary: Inspect one regulated mutation command by command id
+      description: Requires regulated-mutation:recover or audit:verify. Rate-limited per actor/IP and fails closed with 503 when inspection access cannot be durably audited. Returns command state, execution status, lease metadata, evidence ids, degradation reason, last error, idempotency key hash, masked idempotency key, and snapshot presence for one command id. This endpoint is read-only and never exposes raw idempotency keys, command payloads, response payloads, notes, customer/account/card identifiers, raw exception details, or unbounded exports.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: commandId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      responses:
+        "200":
+          description: Command inspection returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegulatedMutationCommandInspectionResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          description: Inspection rate limit exceeded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/regulated-mutations/by-idempotency-hash/{hash}:
+    get:
+      summary: Inspect one regulated mutation command by idempotency-key hash
+      description: Requires regulated-mutation:recover or audit:verify. The hash is the lowercase SHA-256 hex digest of the idempotency key. Rate-limited per actor/IP and fails closed with 503 when inspection access cannot be durably audited. Returns command state, execution status, lease metadata, evidence ids, degradation reason, last error, idempotency key hash, masked idempotency key, and snapshot presence for one idempotency-key hash. This endpoint is read-only and never exposes raw idempotency keys, command payloads, response payloads, notes, customer/account/card identifiers, raw exception details, or unbounded exports.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: hash
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[a-fA-F0-9]{64}$"
+      responses:
+        "200":
+          description: Command inspection returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegulatedMutationCommandInspectionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          description: Inspection rate limit exceeded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/regulated-mutations/recover:
+    post:
+      summary: Run bounded regulated mutation recovery
+      description: Requires regulated-mutation:recover. Runs bounded recovery for stale or recovery-required FDP-25 command records. Recovery releases only safe pre-mutation commands, validates reconstructed business state against stored canonical intent, binds existing idempotent phase audits, retries only missing success evidence where safe, and never re-runs business mutation after BUSINESS_COMMITTING. This endpoint does not claim rollback safety, workflow automation, scoring changes, Kafka contract changes, or full evidence anchoring.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      responses:
+        "200":
+          description: Recovery run summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegulatedMutationRecoveryRunResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/regulated-mutations/recovery/backlog:
+    get:
+      summary: Inspect regulated mutation recovery backlog
+      description: Requires regulated-mutation:recover or audit:verify. Returns bounded operational recovery counts. Clients must treat total_recovery_required greater than zero as degraded trust posture. This endpoint does not expose command payloads, raw request bodies, decision notes, customer data, or unbounded exports.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      responses:
+        "200":
+          description: Recovery backlog returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegulatedMutationRecoveryBacklogResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /api/v1/alerts/{alertId}:
     get:
       summary: Get one alert
@@ -501,7 +653,7 @@ paths:
   /api/v1/alerts/{alertId}/decision:
     post:
       summary: Submit analyst decision
-      description: Records an analyst decision with backend authorization, guarded ATTEMPTED audit, durable same-document outbox, and optional idempotency. If X-Idempotency-Key is supplied, the same key and same request body replay the prior response without duplicate audit or outbox mutation; the same key with a different request body returns 409. Kafka publication is asynchronous from the durable outbox and at-least-once unless consumers dedupe by event id. FraudDecisionEvent carries delivery=AT_LEAST_ONCE and dedupeKey=eventId. operation_status is mandatory for committed responses: REJECTED_BEFORE_MUTATION maps to HTTP 503 with no command response body; COMMITTED_EVIDENCE_PENDING is a conservative committed state before full evidence completion was persisted; COMMITTED_EVIDENCE_INCOMPLETE means the business decision and outbox committed but post-commit evidence completion degraded. FDP-24 detects and exposes post-commit audit degradation; it does not eliminate it transactionally and does not guarantee that business mutation cannot commit before SUCCESS evidence exists. The request API does not expose COMMITTED_FULLY_ANCHORED because there is no safe synchronous promotion path.
+      description: Records an analyst decision through the FDP-25 Phase 1 regulated mutation coordinator. X-Idempotency-Key is required. The coordinator stores a regulated mutation command with canonical intent fields, atomically claims execution with a bounded lease, writes ATTEMPTED audit before business mutation, persists the business decision plus durable same-document outbox, then writes SUCCESS audit before returning COMMITTED_EVIDENCE_PENDING. Phase audit events use deterministic request ids regulated_command_id:ATTEMPTED, regulated_command_id:SUCCESS, and regulated_command_id:FAILED so recovery can bind existing evidence without duplicate success audit. The same idempotency key and request body replay the stored response snapshot; the same key with a different body returns 409; a missing key returns 400. Kafka publication is asynchronous from the durable outbox and at-least-once unless consumers dedupe by event id. FraudDecisionEvent carries delivery=AT_LEAST_ONCE and dedupeKey=eventId. operation_status is mandatory: REJECTED_BEFORE_MUTATION maps to HTTP 503 with no command response body; IN_PROGRESS, RECOVERY_REQUIRED, and COMMIT_UNKNOWN map to HTTP 202; COMMITTED_EVIDENCE_PENDING means local SUCCESS audit was recorded and external evidence promotion remains pending; COMMITTED_EVIDENCE_INCOMPLETE means the business decision and outbox committed but local success audit/evidence completion degraded. FDP-25 Phase 1 is not a single atomic boundary across MongoDB, external witnesses, and Kafka and does not eliminate post-commit audit degradation. COMMITTED_FULLY_ANCHORED is async-only and is not exposed by this synchronous request path.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -513,11 +665,11 @@ paths:
             type: string
             minLength: 1
             maxLength: 160
-        - name: X-Idempotency-Key
-          in: header
-          required: false
-          schema:
-            type: string
+          - name: X-Idempotency-Key
+            in: header
+            required: true
+            schema:
+              type: string
             minLength: 1
             maxLength: 160
       requestBody:
@@ -529,6 +681,12 @@ paths:
       responses:
         "200":
           description: Decision request reached a stable operation state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmitAnalystDecisionResponse"
+        "202":
+          description: Decision command is accepted but still processing, requires recovery, or has an uncertain commit window.
           content:
             application/json:
               schema:
@@ -801,7 +959,7 @@ components:
     SystemTrustLevelResponse:
       type: object
       additionalProperties: false
-      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength, coverage_status, witness_status, signature_policy, required_publication_failures, local_status_unverified, missing_ranges, post_commit_audit_degraded, unresolved_degradation_count, pending_degradation_resolution_count, post_commit_audit_degraded_resolved, outbox_failed_terminal_count, terminal_outbox_failure_count, outbox_publish_confirmation_unknown_count, unknown_outbox_confirmation_count, pending_outbox_resolution_count, outbox_oldest_pending_age_seconds, outbox_oldest_ambiguous_age_seconds]
+      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength, coverage_status, witness_status, signature_policy, required_publication_failures, local_status_unverified, missing_ranges, post_commit_audit_degraded, unresolved_degradation_count, pending_degradation_resolution_count, post_commit_audit_degraded_resolved, outbox_failed_terminal_count, terminal_outbox_failure_count, outbox_publish_confirmation_unknown_count, unknown_outbox_confirmation_count, pending_outbox_resolution_count, outbox_oldest_pending_age_seconds, outbox_oldest_ambiguous_age_seconds, regulated_mutation_recovery_required_count, stale_processing_lease_count, committed_degraded_count, repeated_recovery_failure_count, oldest_recovery_required_age_seconds]
       properties:
         guarantee_level:
           type: string
@@ -881,8 +1039,151 @@ components:
           format: int64
           nullable: true
           minimum: 0
+        regulated_mutation_recovery_required_count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Number of regulated mutation commands that require recovery. Any value greater than zero degrades deployment trust posture.
+        stale_processing_lease_count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Number of regulated mutation commands with expired processing leases. Any value greater than zero degrades deployment trust posture.
+        committed_degraded_count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Number of regulated mutation commands committed with degraded evidence. Any value greater than zero degrades deployment trust posture.
+        repeated_recovery_failure_count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Number of regulated mutation commands with repeated recovery failures. Any value greater than zero degrades deployment trust posture.
+        oldest_recovery_required_age_seconds:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+          description: Age in seconds of the oldest recovery-required regulated mutation command, or null when there is no recovery-required backlog.
         reason_code:
           type: string
+          nullable: true
+    RegulatedMutationRecoveryRunResponse:
+      type: object
+      additionalProperties: false
+      required: [recovered, still_pending, recovery_required, failed, scanned]
+      properties:
+        recovered:
+          type: integer
+          format: int64
+          minimum: 0
+        still_pending:
+          type: integer
+          format: int64
+          minimum: 0
+        recovery_required:
+          type: integer
+          format: int64
+          minimum: 0
+        failed:
+          type: integer
+          format: int64
+          minimum: 0
+        scanned:
+          type: integer
+          format: int64
+          minimum: 0
+    RegulatedMutationRecoveryBacklogResponse:
+      type: object
+      additionalProperties: false
+      required: [total_recovery_required, total_in_progress_expired, oldest_recovery_required_age, recovery_failed_terminal_count, repeated_recovery_failures, by_state, by_action]
+      properties:
+        total_recovery_required:
+          type: integer
+          format: int64
+          minimum: 0
+        total_in_progress_expired:
+          type: integer
+          format: int64
+          minimum: 0
+        oldest_recovery_required_age:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        recovery_failed_terminal_count:
+          type: integer
+          format: int64
+          minimum: 0
+        repeated_recovery_failures:
+          type: integer
+          format: int64
+          minimum: 0
+        by_state:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+            minimum: 0
+        by_action:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+            minimum: 0
+    RegulatedMutationCommandInspectionResponse:
+      type: object
+      additionalProperties: false
+      required: [idempotency_key_hash, idempotency_key_masked, action, resource_type, resource_id, state, execution_status, lease_owner, lease_expires_at, response_snapshot_present, attempted_audit_id, success_audit_id, failed_audit_id, degradation_reason, last_error, updated_at]
+      properties:
+        idempotency_key_hash:
+          type: string
+          nullable: true
+          description: SHA-256 hash of the idempotency key. The raw key is never returned.
+        idempotency_key_masked:
+          type: string
+          nullable: true
+          description: Masked display form only, never the full idempotency key.
+        action:
+          type: string
+        resource_type:
+          type: string
+        resource_id:
+          type: string
+          nullable: true
+        state:
+          type: string
+          nullable: true
+        execution_status:
+          type: string
+          nullable: true
+        lease_owner:
+          type: string
+          nullable: true
+        lease_expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        response_snapshot_present:
+          type: boolean
+        attempted_audit_id:
+          type: string
+          nullable: true
+        success_audit_id:
+          type: string
+          nullable: true
+        failed_audit_id:
+          type: string
+          nullable: true
+        degradation_reason:
+          type: string
+          nullable: true
+        last_error:
+          type: string
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
           nullable: true
     AuditDegradationListResponse:
       type: object
@@ -1017,7 +1318,7 @@ components:
           nullable: true
         status:
           type: string
-          enum: [PUBLISH_CONFIRMATION_UNKNOWN, PUBLISHED, PENDING]
+          enum: [PUBLISH_CONFIRMATION_UNKNOWN, PUBLISHED, PENDING, REQUESTED, AUDIT_ATTEMPTED, BUSINESS_COMMITTING, BUSINESS_COMMITTED, SUCCESS_AUDIT_PENDING, SUCCESS_AUDIT_RECORDED, EVIDENCE_PENDING, EVIDENCE_CONFIRMED, COMMITTED, COMMITTED_DEGRADED, REJECTED, FAILED]
         decided_at:
           type: string
           format: date-time
@@ -1134,8 +1435,8 @@ components:
           nullable: true
         operation_status:
           type: string
-          enum: [REJECTED_BEFORE_MUTATION, COMMITTED_EVIDENCE_PENDING, COMMITTED_EVIDENCE_INCOMPLETE]
-          description: Mandatory operation state. REJECTED_BEFORE_MUTATION is returned as HTTP 503 with no command response body. COMMITTED_EVIDENCE_PENDING is conservative state before full evidence completion is persisted. COMMITTED_EVIDENCE_INCOMPLETE means the business decision and durable outbox committed while post-commit evidence completion degraded. This is not a rollback claim. COMMITTED_FULLY_ANCHORED is intentionally not exposed until a safe promotion path exists.
+          enum: [REJECTED_BEFORE_MUTATION, IN_PROGRESS, RECOVERY_REQUIRED, COMMIT_UNKNOWN, COMMITTED_EVIDENCE_PENDING, COMMITTED_EVIDENCE_INCOMPLETE]
+          description: Mandatory operation state. REJECTED_BEFORE_MUTATION is returned as HTTP 503 with no command response body. IN_PROGRESS, RECOVERY_REQUIRED, and COMMIT_UNKNOWN are returned as HTTP 202 and must not be treated as completed success. COMMITTED_EVIDENCE_PENDING is conservative state before full evidence completion is persisted. COMMITTED_EVIDENCE_INCOMPLETE means the business decision and durable outbox committed while post-commit evidence completion degraded. This is not a rollback claim. COMMITTED_FULLY_ANCHORED is intentionally not exposed until a safe promotion path exists.
     PagedGenericObject:
       type: object
       required:
@@ -2572,7 +2873,7 @@ components:
           schema:
             $ref: "#/components/schemas/ApiErrorResponse"
     NotFound:
-      description: Advisory event was not found in bounded advisory history.
+      description: Requested resource was not found.
       content:
         application/json:
           schema:

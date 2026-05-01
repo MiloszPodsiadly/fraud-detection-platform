@@ -1,22 +1,26 @@
 package com.frauddetection.alert.service;
 
 import com.frauddetection.alert.audit.AuditAction;
-import com.frauddetection.alert.audit.AuditDegradationService;
-import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
-import com.frauddetection.alert.audit.AuditService;
-import com.frauddetection.alert.audit.PostCommitEvidenceIncompleteException;
 import com.frauddetection.alert.audit.ResolutionEvidenceReference;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
+import com.frauddetection.alert.regulated.RegulatedMutationCommand;
+import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
+import com.frauddetection.alert.regulated.RegulatedMutationResponseSnapshot;
+import com.frauddetection.alert.regulated.RegulatedMutationState;
+import com.frauddetection.alert.regulated.mutation.decisionoutbox.DecisionOutboxReconciliationMutationHandler;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.HexFormat;
 import java.util.List;
-import java.util.function.Supplier;
 
 @Service
 public class DecisionOutboxReconciliationService {
@@ -27,19 +31,19 @@ public class DecisionOutboxReconciliationService {
     }
 
     private final AlertRepository alertRepository;
-    private final AuditService auditService;
-    private final AuditDegradationService auditDegradationService;
+    private final RegulatedMutationCoordinator regulatedMutationCoordinator;
+    private final DecisionOutboxReconciliationMutationHandler mutationHandler;
     private final boolean bankModeFailClosed;
 
     public DecisionOutboxReconciliationService(
             AlertRepository alertRepository,
-            AuditService auditService,
-            AuditDegradationService auditDegradationService,
+            RegulatedMutationCoordinator regulatedMutationCoordinator,
+            DecisionOutboxReconciliationMutationHandler mutationHandler,
             @Value("${app.audit.bank-mode.fail-closed:false}") boolean bankModeFailClosed
     ) {
         this.alertRepository = alertRepository;
-        this.auditService = auditService;
-        this.auditDegradationService = auditDegradationService;
+        this.regulatedMutationCoordinator = regulatedMutationCoordinator;
+        this.mutationHandler = mutationHandler;
         this.bankModeFailClosed = bankModeFailClosed;
     }
 
@@ -57,121 +61,147 @@ public class DecisionOutboxReconciliationService {
             Resolution resolution,
             String reason,
             ResolutionEvidenceReference evidenceReference,
-            String actorId
+            String actorId,
+            String idempotencyKey
     ) {
+        if (resolution == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "resolution is required");
+        }
         if (reason == null || reason.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "resolution reason is required");
         }
         String normalizedReason = normalizeReason(reason);
         String normalizedActor = normalize(actorId, 120, "unknown");
-        AlertDocument alert = alertRepository.findById(alertId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "unknown outbox event"));
-        if (!DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN.equals(alert.getDecisionOutboxStatus())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "outbox event is not in confirmation-unknown state");
-        }
         if (resolution == Resolution.PUBLISHED) {
             ResolutionEvidenceReference.requireBrokerEvidence(evidenceReference);
         } else if (bankModeFailClosed) {
             ResolutionEvidenceReference.require(evidenceReference, "resolution evidence is required in bank mode");
         }
 
-        if (bankModeFailClosed && !alert.isDecisionOutboxResolutionPending()) {
-            return auditedOutboxResolution(outboxResourceId(alert), normalizedActor, () -> {
-                alert.setDecisionOutboxResolutionPending(true);
-                alert.setDecisionOutboxResolutionRequestedAt(Instant.now());
-                alert.setDecisionOutboxResolutionRequestedBy(normalizedActor);
-                alert.setDecisionOutboxResolutionRequestReason(normalizedReason);
-                applyEvidence(alert, evidenceReference);
-                return UnknownConfirmation.from(alertRepository.save(alert));
-            });
-        }
-        if (bankModeFailClosed && normalizedActor.equals(alert.getDecisionOutboxResolutionRequestedBy())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "resolution approver must differ from requester");
-        }
-
-        return auditedOutboxResolution(outboxResourceId(alert), normalizedActor, () -> {
-            if (resolution == Resolution.PUBLISHED) {
-                alert.setDecisionOutboxStatus(DecisionOutboxStatus.PUBLISHED);
-                alert.setDecisionOutboxPublishedAt(Instant.now());
-            } else if (resolution == Resolution.RETRY_REQUESTED) {
-                alert.setDecisionOutboxStatus(DecisionOutboxStatus.PENDING);
-                alert.setDecisionOutboxPublishedAt(null);
-            } else {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "unsupported resolution");
-            }
-            alert.setDecisionOutboxResolutionPending(false);
-            alert.setDecisionOutboxResolutionApprovedAt(Instant.now());
-            alert.setDecisionOutboxResolutionApprovedBy(normalizedActor);
-            alert.setDecisionOutboxResolutionApprovalReason(normalizedReason);
-            if (evidenceReference != null) {
-                applyEvidence(alert, evidenceReference);
-            }
-            alert.setDecisionOutboxLeaseOwner(null);
-            alert.setDecisionOutboxLeaseExpiresAt(null);
-            alert.setDecisionOutboxLastError(null);
-            alert.setDecisionOutboxFailureReason(normalizedReason);
-
-            AlertDocument saved = alertRepository.save(alert);
-            return UnknownConfirmation.from(saved);
-        });
+        String normalizedAlertId = normalize(alertId, 160, "");
+        RegulatedMutationCommand<UnknownConfirmation, UnknownConfirmation> command = new RegulatedMutationCommand<>(
+                idempotencyKey,
+                normalizedActor,
+                normalizedAlertId,
+                AuditResourceType.DECISION_OUTBOX,
+                AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION,
+                null,
+                requestHash(normalizedAlertId, resolution, normalizedReason, evidenceReference, normalizedActor),
+                () -> mutationHandler.applyResolution(
+                        normalizedAlertId,
+                        resolution,
+                        normalizedReason,
+                        evidenceReference,
+                        normalizedActor,
+                        bankModeFailClosed
+                ),
+                (result, state) -> result,
+                DecisionOutboxReconciliationService::snapshot,
+                DecisionOutboxReconciliationService::restore,
+                state -> statusResponse(normalizedAlertId, state)
+        );
+        return regulatedMutationCoordinator.commit(command).response();
     }
 
-    private UnknownConfirmation auditedOutboxResolution(
-            String resourceId,
-            String actorId,
-            Supplier<UnknownConfirmation> mutation
-    ) {
-        auditService.audit(
-                AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION,
-                AuditResourceType.DECISION_OUTBOX,
-                resourceId,
+    private UnknownConfirmation statusResponse(String alertId, RegulatedMutationState state) {
+        return new UnknownConfirmation(
+                alertId,
                 null,
-                actorId,
-                AuditOutcome.ATTEMPTED,
+                null,
+                state.name(),
+                null,
+                0,
+                null,
+                null,
+                null,
+                false,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
                 null
         );
-        UnknownConfirmation result;
-        try {
-            result = mutation.get();
-        } catch (RuntimeException exception) {
-            auditService.audit(
-                    AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION,
-                    AuditResourceType.DECISION_OUTBOX,
-                    resourceId,
-                    null,
-                    actorId,
-                    AuditOutcome.FAILED,
-                    "RESOLUTION_STATE_UPDATE_FAILED"
-            );
-            throw exception;
-        }
-        try {
-            auditService.audit(
-                    AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION,
-                    AuditResourceType.DECISION_OUTBOX,
-                    resourceId,
-                    null,
-                    actorId,
-                    AuditOutcome.SUCCESS,
-                    null
-            );
-        } catch (RuntimeException exception) {
-            auditDegradationService.recordPostCommitDegraded(
-                    AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION,
-                    AuditResourceType.DECISION_OUTBOX,
-                    resourceId,
-                    "POST_COMMIT_AUDIT_DEGRADED"
-            );
-            throw new PostCommitEvidenceIncompleteException("Resolution committed; audit evidence is incomplete.");
-        }
-        return result;
     }
 
-    private static String outboxResourceId(AlertDocument document) {
-        if (document.getDecisionOutboxEvent() != null && document.getDecisionOutboxEvent().eventId() != null) {
-            return document.getDecisionOutboxEvent().eventId();
+    private static RegulatedMutationResponseSnapshot snapshot(UnknownConfirmation event) {
+        return new RegulatedMutationResponseSnapshot(
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                event.alertId(),
+                event.eventId(),
+                event.dedupeKey(),
+                event.status(),
+                event.decidedAt(),
+                event.attempts(),
+                event.lastAttemptAt(),
+                event.publishedAt(),
+                event.failureReason(),
+                event.resolutionPending(),
+                event.resolutionRequestedAt(),
+                event.resolutionRequestedBy(),
+                event.resolutionEvidenceType(),
+                event.resolutionEvidenceReference(),
+                event.resolutionEvidenceVerifiedAt(),
+                event.resolutionEvidenceVerifiedBy(),
+                event.resolutionApprovedAt(),
+                event.resolutionApprovedBy(),
+                event.resolutionApprovalReason()
+        );
+    }
+
+    private static UnknownConfirmation restore(RegulatedMutationResponseSnapshot snapshot) {
+        return new UnknownConfirmation(
+                snapshot.outboxAlertId(),
+                snapshot.outboxEventId(),
+                snapshot.outboxDedupeKey(),
+                snapshot.outboxStatus(),
+                snapshot.outboxDecidedAt(),
+                snapshot.outboxAttempts() == null ? 0 : snapshot.outboxAttempts(),
+                snapshot.outboxLastAttemptAt(),
+                snapshot.outboxPublishedAt(),
+                snapshot.outboxFailureReason(),
+                Boolean.TRUE.equals(snapshot.outboxResolutionPending()),
+                snapshot.outboxResolutionRequestedAt(),
+                snapshot.outboxResolutionRequestedBy(),
+                snapshot.outboxResolutionEvidenceType(),
+                snapshot.outboxResolutionEvidenceReference(),
+                snapshot.outboxResolutionEvidenceVerifiedAt(),
+                snapshot.outboxResolutionEvidenceVerifiedBy(),
+                snapshot.outboxResolutionApprovedAt(),
+                snapshot.outboxResolutionApprovedBy(),
+                snapshot.outboxResolutionApprovalReason()
+        );
+    }
+
+    private String requestHash(
+            String alertId,
+            Resolution resolution,
+            String reason,
+            ResolutionEvidenceReference evidenceReference,
+            String actorId
+    ) {
+        String canonical = "alertId=" + normalize(alertId, 160, "")
+                + "|resolution=" + resolution
+                + "|reason=" + reason
+                + "|actorId=" + actorId
+                + "|evidenceType=" + (evidenceReference == null ? "null" : evidenceReference.type())
+                + "|evidenceReference=" + (evidenceReference == null ? "null" : evidenceReference.reference())
+                + "|evidenceVerifiedAt=" + (evidenceReference == null ? "null" : evidenceReference.verifiedAt())
+                + "|evidenceVerifiedBy=" + (evidenceReference == null ? "null" : evidenceReference.verifiedBy());
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(canonical.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable.");
         }
-        return document.getAlertId();
     }
 
     private static String normalizeReason(String reason) {
@@ -185,16 +215,6 @@ public class DecisionOutboxReconciliationService {
         }
         String normalized = value.trim().replaceAll("[\\r\\n\\t]+", " ");
         return normalized.length() <= maxLength ? normalized : normalized.substring(0, maxLength);
-    }
-
-    private static void applyEvidence(AlertDocument alert, ResolutionEvidenceReference evidence) {
-        if (evidence == null) {
-            return;
-        }
-        alert.setDecisionOutboxResolutionEvidenceType(evidence.type().name());
-        alert.setDecisionOutboxResolutionEvidenceReference(evidence.reference());
-        alert.setDecisionOutboxResolutionEvidenceVerifiedAt(evidence.verifiedAt());
-        alert.setDecisionOutboxResolutionEvidenceVerifiedBy(evidence.verifiedBy());
     }
 
     public record UnknownConfirmation(
@@ -218,7 +238,7 @@ public class DecisionOutboxReconciliationService {
             String resolutionApprovedBy,
             String resolutionApprovalReason
     ) {
-        static UnknownConfirmation from(AlertDocument document) {
+        public static UnknownConfirmation from(AlertDocument document) {
             String eventId = null;
             String dedupeKey = null;
             if (document.getDecisionOutboxEvent() != null) {
