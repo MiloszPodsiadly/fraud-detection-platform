@@ -13,6 +13,7 @@ import com.frauddetection.alert.governance.audit.GovernanceAuditDecision;
 import com.frauddetection.alert.governance.audit.GovernanceAuditPersistenceUnavailableException;
 import com.frauddetection.alert.governance.audit.InvalidGovernanceAuditRequestException;
 import com.frauddetection.alert.governance.audit.InvalidGovernanceAuditDecisionException;
+import com.frauddetection.alert.regulated.MissingIdempotencyKeyException;
 import com.frauddetection.alert.service.ConflictingIdempotencyKeyException;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
@@ -178,6 +179,19 @@ public class AlertServiceExceptionHandler {
                         "Conflict",
                         exception.getMessage(),
                         List.of("reason:IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD")
+                )
+        );
+    }
+
+    @ExceptionHandler(MissingIdempotencyKeyException.class)
+    public ResponseEntity<ApiErrorResponse> handleMissingIdempotencyKey(MissingIdempotencyKeyException exception) {
+        return ResponseEntity.badRequest().body(
+                new ApiErrorResponse(
+                        Instant.now(),
+                        400,
+                        "Bad Request",
+                        exception.getMessage(),
+                        List.of("reason:IDEMPOTENCY_KEY_REQUIRED")
                 )
         );
     }
