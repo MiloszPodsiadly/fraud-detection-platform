@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -44,6 +45,7 @@ public class DecisionOutboxReconciliationController {
     @PostMapping("/{alertId}/resolve")
     public UnknownConfirmationResponse resolve(
             @PathVariable String alertId,
+            @RequestHeader("X-Idempotency-Key") String idempotencyKey,
             @Valid @RequestBody ResolveOutboxConfirmationRequest request
     ) {
         String actor = currentAnalystUser.get()
@@ -54,7 +56,8 @@ public class DecisionOutboxReconciliationController {
                 request.resolution(),
                 request.reason(),
                 request.evidenceReference(),
-                actor
+                actor,
+                idempotencyKey
         ));
     }
 
