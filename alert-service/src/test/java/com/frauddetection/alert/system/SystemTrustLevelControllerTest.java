@@ -266,6 +266,49 @@ class SystemTrustLevelControllerTest {
     }
 
     @Test
+    void shouldDowngradeFailClosedWhenRegulatedMutationHealthSignalsAreNonZero() {
+        ExternalAuditIntegrityService integrityService = mock(ExternalAuditIntegrityService.class);
+        ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
+        AuditDegradationService degradationService = mock(AuditDegradationService.class);
+        AlertRepository alertRepository = mock(AlertRepository.class);
+        RegulatedMutationRecoveryService recoveryService = mock(RegulatedMutationRecoveryService.class);
+        when(integrityService.coverage("alert-service", 100)).thenReturn(healthyCoverage());
+        when(sink.capabilities()).thenReturn(verifiedCapabilities());
+        when(degradationService.unresolvedPostCommitDegradedCount()).thenReturn(0L);
+        when(alertRepository.countByDecisionOutboxStatus(DecisionOutboxStatus.FAILED_TERMINAL)).thenReturn(0L);
+        when(alertRepository.countByDecisionOutboxStatus(DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN)).thenReturn(0L);
+        when(alertRepository.findTopByDecisionOutboxStatusInOrderByDecidedAtAsc(List.of(DecisionOutboxStatus.PENDING, DecisionOutboxStatus.PROCESSING, DecisionOutboxStatus.FAILED_RETRYABLE)))
+                .thenReturn(Optional.empty());
+        when(recoveryService.staleProcessingLeaseCount()).thenReturn(1L);
+        when(recoveryService.committedDegradedCount()).thenReturn(2L);
+        when(recoveryService.repeatedRecoveryFailureCount()).thenReturn(3L);
+        when(recoveryService.oldestRecoveryRequiredAgeSeconds()).thenReturn(120L);
+        SystemTrustLevelController controller = new SystemTrustLevelController(
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                Duration.ofMinutes(10),
+                integrityService,
+                sink,
+                degradationService,
+                alertRepository,
+                recoveryService
+        );
+
+        SystemTrustLevelResponse response = controller.trustLevel();
+
+        assertThat(response.guaranteeLevel()).isEqualTo("FDP24_DEGRADED");
+        assertThat(response.staleProcessingLeaseCount()).isEqualTo(1L);
+        assertThat(response.committedDegradedCount()).isEqualTo(2L);
+        assertThat(response.repeatedRecoveryFailureCount()).isEqualTo(3L);
+        assertThat(response.oldestRecoveryRequiredAgeSeconds()).isEqualTo(120L);
+        assertThat(response.reasonCode()).isEqualTo("REGULATED_MUTATION_STALE_PROCESSING_LEASE");
+    }
+
+    @Test
     void shouldFailStartupWhenRequiredFailClosedPublicationDoesNotEnableBankMode() {
         SystemTrustLevelController controller = new SystemTrustLevelController(
                 true,

@@ -144,6 +144,49 @@ public class RegulatedMutationRecoveryService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "regulated mutation command not found"));
     }
 
+    public RegulatedMutationCommandInspectionResponse inspectByCommandId(String commandId) {
+        if (commandId == null || commandId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "regulated mutation command not found");
+        }
+        return commandRepository.findById(commandId.trim())
+                .map(RegulatedMutationCommandInspectionResponse::from)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "regulated mutation command not found"));
+    }
+
+    public RegulatedMutationCommandInspectionResponse inspectByIdempotencyHash(String idempotencyHash) {
+        if (idempotencyHash == null || !idempotencyHash.matches("^[a-fA-F0-9]{64}$")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid idempotency hash");
+        }
+        return commandRepository.findByIdempotencyKeyHash(idempotencyHash.toLowerCase(java.util.Locale.ROOT))
+                .map(RegulatedMutationCommandInspectionResponse::from)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "regulated mutation command not found"));
+    }
+
+    public long staleProcessingLeaseCount() {
+        return commandRepository.countByExecutionStatusAndLeaseExpiresAtBefore(
+                RegulatedMutationExecutionStatus.PROCESSING,
+                Instant.now()
+        );
+    }
+
+    public long committedDegradedCount() {
+        return commandRepository.countByState(RegulatedMutationState.COMMITTED_DEGRADED);
+    }
+
+    public long repeatedRecoveryFailureCount() {
+        return commandRepository.countByExecutionStatusAndAttemptCountGreaterThanEqual(
+                RegulatedMutationExecutionStatus.RECOVERY_REQUIRED,
+                3
+        );
+    }
+
+    public Long oldestRecoveryRequiredAgeSeconds() {
+        Instant now = Instant.now();
+        return commandRepository.findTopByExecutionStatusOrderByUpdatedAtAsc(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED)
+                .map(command -> Math.max(0L, Duration.between(command.getUpdatedAt(), now).toSeconds()))
+                .orElse(null);
+    }
+
     RegulatedMutationRecoveryResult recover(RegulatedMutationCommandDocument command) {
         RegulatedMutationRecoveryOutcome outcome = switch (command.getState()) {
             case REQUESTED, AUDIT_ATTEMPTED -> stillPending(command);

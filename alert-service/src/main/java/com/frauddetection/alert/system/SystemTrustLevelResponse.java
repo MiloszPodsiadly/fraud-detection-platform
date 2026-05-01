@@ -72,6 +72,18 @@ public record SystemTrustLevelResponse(
         @JsonProperty("regulated_mutation_recovery_required_count")
         long regulatedMutationRecoveryRequiredCount,
 
+        @JsonProperty("stale_processing_lease_count")
+        long staleProcessingLeaseCount,
+
+        @JsonProperty("committed_degraded_count")
+        long committedDegradedCount,
+
+        @JsonProperty("repeated_recovery_failure_count")
+        long repeatedRecoveryFailureCount,
+
+        @JsonProperty("oldest_recovery_required_age_seconds")
+        Long oldestRecoveryRequiredAgeSeconds,
+
         @JsonProperty("reason_code")
         String reasonCode
 ) {

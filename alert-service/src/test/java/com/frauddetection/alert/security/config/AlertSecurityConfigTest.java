@@ -5,6 +5,7 @@ import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
 import com.frauddetection.alert.api.SubmitAnalystDecisionResponse;
 import com.frauddetection.alert.api.UpdateFraudCaseRequest;
 import com.frauddetection.alert.assistant.AnalystCaseSummaryUseCase;
+import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditDegradationEventDocument;
 import com.frauddetection.alert.audit.AuditEventController;
 import com.frauddetection.alert.audit.AuditEventReadResponse;
@@ -14,6 +15,9 @@ import com.frauddetection.alert.audit.AuditDegradationService;
 import com.frauddetection.alert.audit.AuditIntegrityController;
 import com.frauddetection.alert.audit.AuditIntegrityResponse;
 import com.frauddetection.alert.audit.AuditIntegrityService;
+import com.frauddetection.alert.audit.AuditOutcome;
+import com.frauddetection.alert.audit.AuditResourceType;
+import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.audit.AuditTrustAttestationController;
 import com.frauddetection.alert.audit.AuditTrustAttestationResponse;
 import com.frauddetection.alert.audit.AuditTrustAttestationService;
@@ -55,6 +59,7 @@ import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.regulated.RegulatedMutationRecoveryBacklogResponse;
 import com.frauddetection.alert.regulated.RegulatedMutationCommandInspectionResponse;
+import com.frauddetection.alert.regulated.RegulatedMutationInspectionRateLimiter;
 import com.frauddetection.alert.regulated.RegulatedMutationRecoveryController;
 import com.frauddetection.alert.regulated.RegulatedMutationRecoveryRunResponse;
 import com.frauddetection.alert.regulated.RegulatedMutationRecoveryService;
@@ -100,6 +105,8 @@ import java.util.Set;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -195,6 +202,12 @@ class AlertSecurityConfigTest {
     private RegulatedMutationRecoveryService regulatedMutationRecoveryService;
 
     @MockBean
+    private RegulatedMutationInspectionRateLimiter regulatedMutationInspectionRateLimiter;
+
+    @MockBean
+    private AuditService auditService;
+
+    @MockBean
     private ExternalAuditAnchorSink externalAuditAnchorSink;
 
     @MockBean
@@ -212,6 +225,7 @@ class AlertSecurityConfigTest {
     @BeforeEach
     void allowCoverageRateLimit() {
         when(externalAuditCoverageRateLimiter.allow(any(), anyInt())).thenReturn(true);
+        when(regulatedMutationInspectionRateLimiter.allow(any())).thenReturn(true);
     }
 
     @Test
@@ -272,6 +286,10 @@ class AlertSecurityConfigTest {
         mockMvc.perform(get("/api/v1/regulated-mutations/recovery/backlog"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/regulated-mutations/idem-1"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/regulated-mutations/by-command/mutation-1"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/regulated-mutations/by-idempotency-hash/96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/system/trust-level"))
                 .andExpect(status().isUnauthorized());
@@ -534,6 +552,42 @@ class AlertSecurityConfigTest {
                         null,
                         Instant.parse("2026-05-01T00:00:00Z")
                 ));
+        when(regulatedMutationRecoveryService.inspectByCommandId("mutation-1"))
+                .thenReturn(new RegulatedMutationCommandInspectionResponse(
+                        "idem-1",
+                        "SUBMIT_ANALYST_DECISION",
+                        "ALERT",
+                        "alert-1",
+                        "EVIDENCE_PENDING",
+                        "COMPLETED",
+                        null,
+                        null,
+                        true,
+                        "audit-attempted",
+                        "audit-success",
+                        null,
+                        null,
+                        null,
+                        Instant.parse("2026-05-01T00:00:00Z")
+                ));
+        when(regulatedMutationRecoveryService.inspectByIdempotencyHash("96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b"))
+                .thenReturn(new RegulatedMutationCommandInspectionResponse(
+                        "idem-1",
+                        "SUBMIT_ANALYST_DECISION",
+                        "ALERT",
+                        "alert-1",
+                        "EVIDENCE_PENDING",
+                        "COMPLETED",
+                        null,
+                        null,
+                        true,
+                        "audit-attempted",
+                        "audit-success",
+                        null,
+                        null,
+                        null,
+                        Instant.parse("2026-05-01T00:00:00Z")
+                ));
         when(externalAuditAnchorSink.capabilities()).thenReturn(providerCapabilities());
 
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("FRAUD_OPS_ADMIN")))
@@ -616,6 +670,22 @@ class AlertSecurityConfigTest {
         mockMvc.perform(get("/api/v1/regulated-mutations/idem-1").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.idempotency_key").value("idem-1"));
+        mockMvc.perform(get("/api/v1/regulated-mutations/by-command/mutation-1").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.idempotency_key").value("idem-1"));
+        mockMvc.perform(get("/api/v1/regulated-mutations/by-idempotency-hash/96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.idempotency_key").value("idem-1"));
+        verify(auditService, atLeastOnce()).audit(
+                eq(AuditAction.INSPECT_REGULATED_MUTATION_COMMAND),
+                eq(AuditResourceType.REGULATED_MUTATION_COMMAND),
+                any(),
+                any(),
+                any(),
+                eq(AuditOutcome.SUCCESS),
+                any(),
+                any()
+        );
         mockMvc.perform(post("/api/v1/regulated-mutations/recover").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/system/trust-level").with(demoUser("FRAUD_OPS_ADMIN")))
@@ -650,12 +720,25 @@ class AlertSecurityConfigTest {
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/regulated-mutations/idem-1").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/regulated-mutations/by-command/mutation-1").with(demoUser("ANALYST")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/regulated-mutations/by-idempotency-hash/96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b").with(demoUser("ANALYST")))
+                .andExpect(status().isForbidden());
         mockMvc.perform(get("/system/trust-level").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("REVIEWER")))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("READ_ONLY_ANALYST")))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void shouldRateLimitRegulatedMutationInspection() throws Exception {
+        when(regulatedMutationInspectionRateLimiter.allow(any())).thenReturn(false);
+
+        mockMvc.perform(get("/api/v1/regulated-mutations/by-command/mutation-1")
+                        .with(authorities(AnalystAuthority.AUDIT_VERIFY)))
+                .andExpect(status().isTooManyRequests());
     }
 
     @Test

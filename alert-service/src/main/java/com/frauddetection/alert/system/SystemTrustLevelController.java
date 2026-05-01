@@ -155,6 +155,10 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 live.outboxOldestPendingAgeSeconds(),
                 live.outboxOldestAmbiguousAgeSeconds(),
                 live.regulatedMutationRecoveryRequiredCount(),
+                live.staleProcessingLeaseCount(),
+                live.committedDegradedCount(),
+                live.repeatedRecoveryFailureCount(),
+                live.oldestRecoveryRequiredAgeSeconds(),
                 live.reasonCode()
         );
     }
@@ -207,6 +211,10 @@ public class SystemTrustLevelController implements ApplicationRunner {
         long pendingDegradationResolution = auditDegradationService == null ? 0L : auditDegradationService.pendingResolutionCount();
         long postCommitDegradedResolved = auditDegradationService == null ? 0L : auditDegradationService.resolvedCount();
         long regulatedRecoveryRequired = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.recoveryRequiredCount();
+        long staleProcessingLeaseCount = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.staleProcessingLeaseCount();
+        long committedDegradedCount = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.committedDegradedCount();
+        long repeatedRecoveryFailureCount = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.repeatedRecoveryFailureCount();
+        Long oldestRecoveryRequiredAgeSeconds = regulatedMutationRecoveryService == null ? null : regulatedMutationRecoveryService.oldestRecoveryRequiredAgeSeconds();
         OutboxState outboxState = outboxState();
         try {
             coverage = externalAuditIntegrityService.coverage("alert-service", 100);
@@ -237,7 +245,11 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 && outboxState.publishConfirmationUnknownCount() == 0
                 && outboxState.pendingResolutionCount() == 0
                 && !outboxState.stalePending()
-                && regulatedRecoveryRequired == 0;
+                && regulatedRecoveryRequired == 0
+                && staleProcessingLeaseCount == 0
+                && committedDegradedCount == 0
+                && repeatedRecoveryFailureCount == 0
+                && oldestRecoveryRequiredAgeSeconds == null;
         if (healthy && outboxState.reasonCode() != null) {
             healthy = false;
         }
@@ -249,6 +261,15 @@ public class SystemTrustLevelController implements ApplicationRunner {
         }
         if (reasonCode == null && regulatedRecoveryRequired > 0) {
             reasonCode = "REGULATED_MUTATION_RECOVERY_REQUIRED";
+        }
+        if (reasonCode == null && staleProcessingLeaseCount > 0) {
+            reasonCode = "REGULATED_MUTATION_STALE_PROCESSING_LEASE";
+        }
+        if (reasonCode == null && committedDegradedCount > 0) {
+            reasonCode = "REGULATED_MUTATION_COMMITTED_DEGRADED";
+        }
+        if (reasonCode == null && repeatedRecoveryFailureCount > 0) {
+            reasonCode = "REGULATED_MUTATION_REPEATED_RECOVERY_FAILURE";
         }
         return new LiveTrustState(
                 healthy,
@@ -266,6 +287,10 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 outboxState.oldestPendingAgeSeconds(),
                 outboxState.oldestAmbiguousAgeSeconds(),
                 regulatedRecoveryRequired,
+                staleProcessingLeaseCount,
+                committedDegradedCount,
+                repeatedRecoveryFailureCount,
+                oldestRecoveryRequiredAgeSeconds,
                 reasonCode
         );
     }
@@ -347,6 +372,10 @@ public class SystemTrustLevelController implements ApplicationRunner {
             Long outboxOldestPendingAgeSeconds,
             Long outboxOldestAmbiguousAgeSeconds,
             long regulatedMutationRecoveryRequiredCount,
+            long staleProcessingLeaseCount,
+            long committedDegradedCount,
+            long repeatedRecoveryFailureCount,
+            Long oldestRecoveryRequiredAgeSeconds,
             String reasonCode
     ) {
     }
