@@ -106,6 +106,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -536,7 +537,8 @@ class AlertSecurityConfigTest {
                 .thenReturn(new RegulatedMutationRecoveryBacklogResponse(0, 0, null, 0, 0, Map.of(), Map.of()));
         when(regulatedMutationRecoveryService.inspect("idem-1"))
                 .thenReturn(new RegulatedMutationCommandInspectionResponse(
-                        "idem-1",
+                        "96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b",
+                        "...em-1",
                         "SUBMIT_ANALYST_DECISION",
                         "ALERT",
                         "alert-1",
@@ -554,7 +556,8 @@ class AlertSecurityConfigTest {
                 ));
         when(regulatedMutationRecoveryService.inspectByCommandId("mutation-1"))
                 .thenReturn(new RegulatedMutationCommandInspectionResponse(
-                        "idem-1",
+                        "96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b",
+                        "...em-1",
                         "SUBMIT_ANALYST_DECISION",
                         "ALERT",
                         "alert-1",
@@ -572,7 +575,8 @@ class AlertSecurityConfigTest {
                 ));
         when(regulatedMutationRecoveryService.inspectByIdempotencyHash("96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b"))
                 .thenReturn(new RegulatedMutationCommandInspectionResponse(
-                        "idem-1",
+                        "96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b",
+                        "...em-1",
                         "SUBMIT_ANALYST_DECISION",
                         "ALERT",
                         "alert-1",
@@ -669,13 +673,17 @@ class AlertSecurityConfigTest {
                 .andExpect(status().isOk());
         mockMvc.perform(get("/api/v1/regulated-mutations/idem-1").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.idempotency_key").value("idem-1"));
+                .andExpect(jsonPath("$.idempotency_key").doesNotExist())
+                .andExpect(jsonPath("$.idempotency_key_hash").value("96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b"))
+                .andExpect(jsonPath("$.idempotency_key_masked").value("...em-1"));
         mockMvc.perform(get("/api/v1/regulated-mutations/by-command/mutation-1").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.idempotency_key").value("idem-1"));
+                .andExpect(jsonPath("$.idempotency_key").doesNotExist())
+                .andExpect(jsonPath("$.idempotency_key_hash").value("96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b"));
         mockMvc.perform(get("/api/v1/regulated-mutations/by-idempotency-hash/96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.idempotency_key").value("idem-1"));
+                .andExpect(jsonPath("$.idempotency_key").doesNotExist())
+                .andExpect(jsonPath("$.idempotency_key_hash").value("96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b"));
         verify(auditService, atLeastOnce()).audit(
                 eq(AuditAction.INSPECT_REGULATED_MUTATION_COMMAND),
                 eq(AuditResourceType.REGULATED_MUTATION_COMMAND),
@@ -739,6 +747,44 @@ class AlertSecurityConfigTest {
         mockMvc.perform(get("/api/v1/regulated-mutations/by-command/mutation-1")
                         .with(authorities(AnalystAuthority.AUDIT_VERIFY)))
                 .andExpect(status().isTooManyRequests());
+    }
+
+    @Test
+    void shouldFailClosedWhenRegulatedMutationInspectionAuditFails() throws Exception {
+        when(regulatedMutationRecoveryService.inspectByCommandId("mutation-1"))
+                .thenReturn(new RegulatedMutationCommandInspectionResponse(
+                        "96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b",
+                        "...em-1",
+                        "SUBMIT_ANALYST_DECISION",
+                        "ALERT",
+                        "alert-1",
+                        "EVIDENCE_PENDING",
+                        "COMPLETED",
+                        null,
+                        null,
+                        true,
+                        "audit-attempted",
+                        "audit-success",
+                        null,
+                        null,
+                        null,
+                        Instant.parse("2026-05-01T00:00:00Z")
+                ));
+        doThrow(new RuntimeException("audit down")).when(auditService).audit(
+                eq(AuditAction.INSPECT_REGULATED_MUTATION_COMMAND),
+                eq(AuditResourceType.REGULATED_MUTATION_COMMAND),
+                any(),
+                any(),
+                any(),
+                eq(AuditOutcome.SUCCESS),
+                any(),
+                any()
+        );
+
+        mockMvc.perform(get("/api/v1/regulated-mutations/by-command/mutation-1")
+                        .with(authorities(AnalystAuthority.AUDIT_VERIFY)))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.message").value("Audit persistence is unavailable; mutation was not executed."));
     }
 
     @Test

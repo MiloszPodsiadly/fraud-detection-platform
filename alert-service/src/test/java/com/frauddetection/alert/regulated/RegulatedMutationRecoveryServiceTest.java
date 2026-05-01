@@ -279,7 +279,8 @@ class RegulatedMutationRecoveryServiceTest {
 
         RegulatedMutationCommandInspectionResponse response = fixture.service.inspect(" idem-1 ");
 
-        assertThat(response.idempotencyKey()).isEqualTo("idem-1");
+        assertThat(response.idempotencyKeyHash()).isEqualTo(RegulatedMutationIntentHasher.hash("idem-1"));
+        assertThat(response.idempotencyKeyMasked()).isEqualTo("...em-1");
         assertThat(response.action()).isEqualTo(AuditAction.SUBMIT_ANALYST_DECISION.name());
         assertThat(response.resourceType()).isEqualTo(AuditResourceType.ALERT.name());
         assertThat(response.resourceId()).isEqualTo("alert-1");
@@ -299,8 +300,8 @@ class RegulatedMutationRecoveryServiceTest {
         when(fixture.commandRepository.findById("mutation-1")).thenReturn(Optional.of(command));
         when(fixture.commandRepository.findByIdempotencyKeyHash(command.getIdempotencyKeyHash())).thenReturn(Optional.of(command));
 
-        assertThat(fixture.service.inspectByCommandId(" mutation-1 ").idempotencyKey()).isEqualTo("idem-1");
-        assertThat(fixture.service.inspectByIdempotencyHash(command.getIdempotencyKeyHash()).idempotencyKey()).isEqualTo("idem-1");
+        assertThat(fixture.service.inspectByCommandId(" mutation-1 ").idempotencyKeyHash()).isEqualTo(command.getIdempotencyKeyHash());
+        assertThat(fixture.service.inspectByIdempotencyHash(command.getIdempotencyKeyHash()).idempotencyKeyHash()).isEqualTo(command.getIdempotencyKeyHash());
     }
 
     @Test

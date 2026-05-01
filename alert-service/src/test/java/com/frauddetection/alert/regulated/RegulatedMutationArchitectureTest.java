@@ -91,4 +91,25 @@ class RegulatedMutationArchitectureTest {
                 "src/main/java/com/frauddetection/alert/service/SubmitDecisionMutationHandler.java"
         ))).isFalse();
     }
+
+    @Test
+    void decisionOutboxReconciliationServiceMustNotWriteRepositoryDirectly() throws Exception {
+        String source = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/service/DecisionOutboxReconciliationService.java"
+        ));
+
+        assertThat(source).doesNotContain("alertRepository.save");
+        assertThat(source).contains("mutationHandler.applyResolution");
+    }
+
+    @Test
+    void decisionOutboxMutationHandlerIsTheAllowedDomainWriteAdapter() throws Exception {
+        String source = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/mutation/decisionoutbox/DecisionOutboxReconciliationMutationHandler.java"
+        ));
+
+        assertThat(source).contains("alertRepository.save");
+        assertThat(source).doesNotContain("auditService.audit");
+        assertThat(source).doesNotContain("AuditMutationRecorder");
+    }
 }

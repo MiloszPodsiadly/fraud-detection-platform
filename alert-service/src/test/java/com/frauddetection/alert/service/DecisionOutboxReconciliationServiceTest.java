@@ -17,6 +17,7 @@ import com.frauddetection.alert.regulated.RegulatedMutationAuditPhaseService;
 import com.frauddetection.alert.regulated.RegulatedMutationCommandDocument;
 import com.frauddetection.alert.regulated.RegulatedMutationCommandRepository;
 import com.frauddetection.alert.regulated.RegulatedMutationExecutionStatus;
+import com.frauddetection.alert.regulated.mutation.decisionoutbox.DecisionOutboxReconciliationMutationHandler;
 import com.frauddetection.common.events.contract.FraudDecisionEvent;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
@@ -91,7 +92,7 @@ class DecisionOutboxReconciliationServiceTest {
         verify(auditService).audit(
                 eq(AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION),
                 eq(AuditResourceType.DECISION_OUTBOX),
-                eq("event-1"),
+                eq("alert-1"),
                 isNull(),
                 eq("ops-admin"),
                 eq(AuditOutcome.SUCCESS),
@@ -125,7 +126,7 @@ class DecisionOutboxReconciliationServiceTest {
         verify(auditService).audit(
                 eq(AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION),
                 eq(AuditResourceType.DECISION_OUTBOX),
-                eq("event-1"),
+                eq("alert-1"),
                 isNull(),
                 eq("ops-admin"),
                 eq(AuditOutcome.SUCCESS),
@@ -140,8 +141,6 @@ class DecisionOutboxReconciliationServiceTest {
         AlertRepository repository = mock(AlertRepository.class);
         AuditService auditService = mock(AuditService.class);
         DecisionOutboxReconciliationService service = service(repository, auditService, false);
-        when(repository.findById("alert-1")).thenReturn(Optional.of(unknownDocument()));
-
         assertThatThrownBy(() -> service.resolve(
                 "alert-1",
                 DecisionOutboxReconciliationService.Resolution.PUBLISHED,
@@ -162,7 +161,7 @@ class DecisionOutboxReconciliationServiceTest {
         doThrow(new RuntimeException("audit down")).when(auditService).audit(
                 eq(AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION),
                 eq(AuditResourceType.DECISION_OUTBOX),
-                eq("event-1"),
+                eq("alert-1"),
                 isNull(),
                 eq("ops-admin"),
                 eq(AuditOutcome.ATTEMPTED),
@@ -205,7 +204,7 @@ class DecisionOutboxReconciliationServiceTest {
         verify(auditService).audit(
                 eq(AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION),
                 eq(AuditResourceType.DECISION_OUTBOX),
-                eq("event-1"),
+                eq("alert-1"),
                 isNull(),
                 eq("ops-admin"),
                 eq(AuditOutcome.FAILED),
@@ -227,7 +226,7 @@ class DecisionOutboxReconciliationServiceTest {
         doThrow(new RuntimeException("audit down")).when(auditService).audit(
                 eq(AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION),
                 eq(AuditResourceType.DECISION_OUTBOX),
-                eq("event-1"),
+                eq("alert-1"),
                 isNull(),
                 eq("ops-admin"),
                 eq(AuditOutcome.SUCCESS),
@@ -251,10 +250,87 @@ class DecisionOutboxReconciliationServiceTest {
         verify(degradationService).recordPostCommitDegraded(
                 AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION,
                 AuditResourceType.DECISION_OUTBOX,
-                "event-1",
+                "alert-1",
                 "POST_COMMIT_AUDIT_DEGRADED",
                 "mutation-1"
         );
+    }
+
+    @Test
+    void shouldReplayResolvedOutboxCommandBeforeLiveStateValidation() {
+        AlertRepository repository = mock(AlertRepository.class);
+        AuditService auditService = mock(AuditService.class);
+        DecisionOutboxReconciliationService service = service(repository, auditService, false);
+        AlertDocument document = unknownDocument();
+        when(repository.findById("alert-1")).thenReturn(Optional.of(document));
+        when(repository.save(document)).thenReturn(document);
+
+        DecisionOutboxReconciliationService.UnknownConfirmation first = service.resolve(
+                "alert-1",
+                DecisionOutboxReconciliationService.Resolution.PUBLISHED,
+                "confirmed in broker logs",
+                brokerEvidence(),
+                "ops-admin",
+                "idem-1"
+        );
+        DecisionOutboxReconciliationService.UnknownConfirmation replayed = service.resolve(
+                "alert-1",
+                DecisionOutboxReconciliationService.Resolution.PUBLISHED,
+                "confirmed in broker logs",
+                brokerEvidence(),
+                "ops-admin",
+                "idem-1"
+        );
+
+        assertThat(first).isEqualTo(replayed);
+        assertThat(replayed.status()).isEqualTo(DecisionOutboxStatus.PUBLISHED);
+    }
+
+    @Test
+    void shouldRejectDifferentPayloadForSameResolvedOutboxIdempotencyKey() {
+        AlertRepository repository = mock(AlertRepository.class);
+        AuditService auditService = mock(AuditService.class);
+        DecisionOutboxReconciliationService service = service(repository, auditService, false);
+        AlertDocument document = unknownDocument();
+        when(repository.findById("alert-1")).thenReturn(Optional.of(document));
+        when(repository.save(document)).thenReturn(document);
+
+        service.resolve(
+                "alert-1",
+                DecisionOutboxReconciliationService.Resolution.PUBLISHED,
+                "confirmed in broker logs",
+                brokerEvidence(),
+                "ops-admin",
+                "idem-1"
+        );
+
+        assertThatThrownBy(() -> service.resolve(
+                "alert-1",
+                DecisionOutboxReconciliationService.Resolution.RETRY_REQUESTED,
+                "not present in broker",
+                null,
+                "ops-admin",
+                "idem-1"
+        )).isInstanceOf(ConflictingIdempotencyKeyException.class);
+    }
+
+    @Test
+    void shouldRejectNewOutboxResolutionCommandAfterAlreadyResolved() {
+        AlertRepository repository = mock(AlertRepository.class);
+        AuditService auditService = mock(AuditService.class);
+        DecisionOutboxReconciliationService service = service(repository, auditService, false);
+        AlertDocument document = unknownDocument();
+        document.setDecisionOutboxStatus(DecisionOutboxStatus.PUBLISHED);
+        when(repository.findById("alert-1")).thenReturn(Optional.of(document));
+
+        assertThatThrownBy(() -> service.resolve(
+                "alert-1",
+                DecisionOutboxReconciliationService.Resolution.PUBLISHED,
+                "confirmed in broker logs",
+                brokerEvidence(),
+                "ops-admin",
+                "idem-new"
+        )).isInstanceOf(ResponseStatusException.class);
     }
 
     @Test
@@ -343,6 +419,7 @@ class DecisionOutboxReconciliationServiceTest {
                         bankMode,
                         Duration.ofSeconds(30)
                 ),
+                new DecisionOutboxReconciliationMutationHandler(repository),
                 bankMode
         );
     }
