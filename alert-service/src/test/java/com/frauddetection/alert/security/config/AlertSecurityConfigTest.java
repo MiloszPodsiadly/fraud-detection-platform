@@ -5,9 +5,12 @@ import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
 import com.frauddetection.alert.api.SubmitAnalystDecisionResponse;
 import com.frauddetection.alert.api.UpdateFraudCaseRequest;
 import com.frauddetection.alert.assistant.AnalystCaseSummaryUseCase;
+import com.frauddetection.alert.audit.AuditDegradationEventDocument;
 import com.frauddetection.alert.audit.AuditEventController;
 import com.frauddetection.alert.audit.AuditEventReadResponse;
 import com.frauddetection.alert.audit.AuditEventReadService;
+import com.frauddetection.alert.audit.AuditDegradationController;
+import com.frauddetection.alert.audit.AuditDegradationService;
 import com.frauddetection.alert.audit.AuditIntegrityController;
 import com.frauddetection.alert.audit.AuditIntegrityResponse;
 import com.frauddetection.alert.audit.AuditIntegrityService;
@@ -21,9 +24,16 @@ import com.frauddetection.alert.audit.external.AuditEvidenceExportService;
 import com.frauddetection.alert.audit.external.AuditTrustAuthorityClient;
 import com.frauddetection.alert.audit.external.AuditTrustAuthorityKey;
 import com.frauddetection.alert.audit.external.AuditTrustKeysController;
+import com.frauddetection.alert.audit.external.ExternalAuditAnchorSink;
+import com.frauddetection.alert.audit.external.ExternalAuditAnchorCoverageResponse;
+import com.frauddetection.alert.audit.external.ExternalAuditCoverageRateLimiter;
+import com.frauddetection.alert.audit.external.ExternalDurabilityGuarantee;
+import com.frauddetection.alert.audit.external.ExternalImmutabilityLevel;
 import com.frauddetection.alert.audit.external.ExternalAuditIntegrityController;
 import com.frauddetection.alert.audit.external.ExternalAuditIntegrityResponse;
 import com.frauddetection.alert.audit.external.ExternalAuditIntegrityService;
+import com.frauddetection.alert.audit.external.ExternalWitnessCapabilities;
+import com.frauddetection.alert.audit.external.ExternalWitnessTimestampType;
 import com.frauddetection.alert.controller.AlertController;
 import com.frauddetection.alert.controller.FraudCaseController;
 import com.frauddetection.alert.controller.ScoredTransactionController;
@@ -41,6 +51,7 @@ import com.frauddetection.alert.mapper.AlertResponseMapper;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.mapper.ScoredTransactionResponseMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.security.auth.AnalystAuthenticationFactory;
 import com.frauddetection.alert.security.auth.DemoAuthHeaderParser;
@@ -51,11 +62,16 @@ import com.frauddetection.alert.security.error.ApiAccessDeniedHandler;
 import com.frauddetection.alert.security.error.ApiAuthenticationEntryPoint;
 import com.frauddetection.alert.security.error.SecurityErrorResponseWriter;
 import com.frauddetection.alert.security.principal.AnalystPrincipal;
+import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.alert.service.AlertManagementUseCase;
+import com.frauddetection.alert.service.DecisionOutboxReconciliationController;
+import com.frauddetection.alert.service.DecisionOutboxReconciliationService;
 import com.frauddetection.alert.service.FraudCaseManagementService;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
+import com.frauddetection.alert.system.SystemTrustLevelController;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -77,6 +93,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -97,6 +114,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         AuditEvidenceExportController.class,
         AuditTrustAttestationController.class,
         AuditTrustKeysController.class,
+        AuditDegradationController.class,
+        DecisionOutboxReconciliationController.class,
+        SystemTrustLevelController.class,
         GovernanceAdvisoryController.class,
         GovernanceAuditController.class
 })
@@ -148,6 +168,9 @@ class AlertSecurityConfigTest {
     private ExternalAuditIntegrityService externalAuditIntegrityService;
 
     @MockBean
+    private ExternalAuditCoverageRateLimiter externalAuditCoverageRateLimiter;
+
+    @MockBean
     private AuditEvidenceExportService auditEvidenceExportService;
 
     @MockBean
@@ -157,10 +180,30 @@ class AlertSecurityConfigTest {
     private AuditTrustAuthorityClient auditTrustAuthorityClient;
 
     @MockBean
+    private AuditDegradationService auditDegradationService;
+
+    @MockBean
+    private DecisionOutboxReconciliationService decisionOutboxReconciliationService;
+
+    @MockBean
+    private ExternalAuditAnchorSink externalAuditAnchorSink;
+
+    @MockBean
+    private CurrentAnalystUser currentAnalystUser;
+
+    @MockBean
+    private AlertRepository alertRepository;
+
+    @MockBean
     private GovernanceAuditService governanceAuditService;
 
     @MockBean
     private GovernanceAdvisoryProjectionService governanceAdvisoryProjectionService;
+
+    @BeforeEach
+    void allowCoverageRateLimit() {
+        when(externalAuditCoverageRateLimiter.allow(any(), anyInt())).thenReturn(true);
+    }
 
     @Test
     void shouldReturn401WhenAuthenticationIsMissingForAnalystEndpoints() throws Exception {
@@ -195,11 +238,27 @@ class AlertSecurityConfigTest {
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/audit/integrity/external"))
                 .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/audit/integrity/external/coverage"))
+                .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/audit/evidence/export"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/audit/trust/attestation"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/audit/trust/keys"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/audit/degradations"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/v1/audit/degradations/audit-1/resolve")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"verified\"}"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/decision-outbox/unknown-confirmations"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/v1/decision-outbox/unknown-confirmations/alert-1/resolve")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"resolution\":\"PUBLISHED\",\"reason\":\"kafka confirmed\"}"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/system/trust-level"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/governance/advisories"))
                 .andExpect(status().isUnauthorized());
@@ -311,7 +370,7 @@ class AlertSecurityConfigTest {
 
     @Test
     void shouldAllowAnalystToSubmitDecision() throws Exception {
-        when(alertManagementUseCase.submitDecision(eq("alert-1"), any()))
+        when(alertManagementUseCase.submitDecision(eq("alert-1"), any(), any()))
                 .thenReturn(new SubmitAnalystDecisionResponse(
                         "alert-1",
                         AnalystDecision.CONFIRMED_FRAUD,
@@ -357,7 +416,7 @@ class AlertSecurityConfigTest {
 
     @Test
     void shouldAllowFraudOpsAdminToSubmitDecision() throws Exception {
-        when(alertManagementUseCase.submitDecision(eq("alert-1"), any()))
+        when(alertManagementUseCase.submitDecision(eq("alert-1"), any(), any()))
                 .thenReturn(new SubmitAnalystDecisionResponse(
                         "alert-1",
                         AnalystDecision.CONFIRMED_FRAUD,
@@ -382,6 +441,8 @@ class AlertSecurityConfigTest {
                 .thenReturn(new AuditIntegrityResponse("VALID", 0, 100, "HEAD", false, false, false, null, null, null, null, null, null, List.of()));
         when(externalAuditIntegrityService.verify(any(), any()))
                 .thenReturn(new ExternalAuditIntegrityResponse("VALID", 0, 100, "alert-service", "source_service:alert-service", null, null, null, null, List.of()));
+        when(externalAuditIntegrityService.coverage(any(), any(), any()))
+                .thenReturn(new ExternalAuditAnchorCoverageResponse("AVAILABLE", 0, 0, 0, null, List.of(), false, 100, null, null));
         when(auditEvidenceExportService.export(any(), any(), any(), any(), any(Boolean.class)))
                 .thenReturn(new AuditEvidenceExportResponse(
                         "AVAILABLE",
@@ -427,6 +488,13 @@ class AlertSecurityConfigTest {
                         null,
                         "ACTIVE"
                 )));
+        when(auditDegradationService.unresolvedEvents()).thenReturn(List.of());
+        when(auditDegradationService.resolveDegradation(eq("audit-1"), any(), any(), any()))
+                .thenReturn(auditDegradationDocument());
+        when(decisionOutboxReconciliationService.listUnknownConfirmations()).thenReturn(List.of());
+        when(decisionOutboxReconciliationService.resolve(eq("alert-1"), any(), any(), any(), any()))
+                .thenReturn(unknownConfirmation());
+        when(externalAuditAnchorSink.capabilities()).thenReturn(providerCapabilities());
 
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("FRAUD_OPS_ADMIN")))
                 .andExpect(status().isOk())
@@ -437,6 +505,9 @@ class AlertSecurityConfigTest {
         mockMvc.perform(get("/api/v1/audit/integrity/external").with(demoUser("FRAUD_OPS_ADMIN")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("VALID"));
+        mockMvc.perform(get("/api/v1/audit/integrity/external/coverage").with(demoUser("FRAUD_OPS_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("AVAILABLE"));
         mockMvc.perform(get("/api/v1/audit/evidence/export")
                         .param("from", "2026-04-27T00:00:00Z")
                         .param("to", "2026-04-28T00:00:00Z")
@@ -450,12 +521,59 @@ class AlertSecurityConfigTest {
         mockMvc.perform(get("/api/v1/audit/trust/keys").with(demoUser("FRAUD_OPS_ADMIN")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].key_id").value("local-ed25519-key-1"));
+        mockMvc.perform(get("/api/v1/audit/degradations").with(demoUser("FRAUD_OPS_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.events").isArray());
+        mockMvc.perform(post("/api/v1/audit/degradations/audit-1/resolve")
+                        .with(demoUser("FRAUD_OPS_ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"reason":"verified","evidence_reference":{"type":"TICKET","reference":"ticket-123","verified_at":"2026-04-30T12:00:00Z","verified_by":"ops-admin"}}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.audit_id").value("audit-1"));
+        mockMvc.perform(post("/api/v1/audit/degradations/audit-1/resolve")
+                        .with(authorities(AnalystAuthority.AUDIT_VERIFY))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"verified\"}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/audit/degradations/audit-1/resolve")
+                        .with(authorities(AnalystAuthority.AUDIT_DEGRADATION_RESOLVE))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"verified\"}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/decision-outbox/unknown-confirmations").with(demoUser("FRAUD_OPS_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.events").isArray());
+        mockMvc.perform(post("/api/v1/decision-outbox/unknown-confirmations/alert-1/resolve")
+                        .with(demoUser("FRAUD_OPS_ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"resolution":"PUBLISHED","reason":"kafka confirmed","evidence_reference":{"type":"BROKER_OFFSET","reference":"topic=fraud-decisions,partition=0,offset=42","verified_at":"2026-04-30T12:00:00Z","verified_by":"ops-admin"}}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.alert_id").value("alert-1"));
+        mockMvc.perform(post("/api/v1/decision-outbox/unknown-confirmations/alert-1/resolve")
+                        .with(authorities(AnalystAuthority.AUDIT_VERIFY))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"resolution\":\"RETRY_REQUESTED\",\"reason\":\"not present\"}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/decision-outbox/unknown-confirmations/alert-1/resolve")
+                        .with(authorities(AnalystAuthority.DECISION_OUTBOX_RECONCILE))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"resolution\":\"RETRY_REQUESTED\",\"reason\":\"not present\"}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/system/trust-level").with(demoUser("FRAUD_OPS_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.witness_status").value("PROVIDER_CAPABILITY_VERIFIED"));
 
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/audit/integrity").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/audit/integrity/external").with(demoUser("ANALYST")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/audit/integrity/external/coverage").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/audit/evidence/export")
                         .param("from", "2026-04-27T00:00:00Z")
@@ -467,6 +585,12 @@ class AlertSecurityConfigTest {
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/audit/trust/keys").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/audit/degradations").with(demoUser("ANALYST")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/decision-outbox/unknown-confirmations").with(demoUser("ANALYST")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/system/trust-level").with(demoUser("ANALYST")))
+                .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("REVIEWER")))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("READ_ONLY_ANALYST")))
@@ -477,6 +601,8 @@ class AlertSecurityConfigTest {
     void shouldRequireDedicatedFdp20AuthoritiesInsteadOfAuditRead() throws Exception {
         when(externalAuditIntegrityService.verify(any(), any()))
                 .thenReturn(new ExternalAuditIntegrityResponse("VALID", 0, 100, "alert-service", "source_service:alert-service", null, null, null, null, List.of()));
+        when(externalAuditIntegrityService.coverage(any(), any(), any()))
+                .thenReturn(new ExternalAuditAnchorCoverageResponse("AVAILABLE", 0, 0, 0, null, List.of(), false, 100, null, null));
         when(auditEvidenceExportService.export(any(), any(), any(), any(), any(Boolean.class)))
                 .thenReturn(new AuditEvidenceExportResponse(
                         "AVAILABLE",
@@ -517,6 +643,10 @@ class AlertSecurityConfigTest {
         mockMvc.perform(get("/api/v1/audit/integrity/external").with(authorities(AnalystAuthority.AUDIT_READ)))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/audit/integrity/external").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/audit/integrity/external/coverage").with(authorities(AnalystAuthority.AUDIT_READ)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/audit/integrity/external/coverage").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
                 .andExpect(status().isOk());
         mockMvc.perform(get("/api/v1/audit/trust/attestation").with(authorities(AnalystAuthority.AUDIT_READ)))
                 .andExpect(status().isForbidden());
@@ -645,5 +775,62 @@ class AlertSecurityConfigTest {
         document.setTransactionIds(List.of());
         document.setTransactions(List.of());
         return document;
+    }
+
+    private AuditDegradationEventDocument auditDegradationDocument() {
+        AuditDegradationEventDocument document = new AuditDegradationEventDocument();
+        document.setAuditId("audit-1");
+        document.setType(AuditDegradationEventDocument.TYPE_POST_COMMIT_DEGRADED);
+        document.setResourceType("ALERT");
+        document.setResourceId("alert-1");
+        document.setOperation("SUBMIT_ANALYST_DECISION");
+        document.setTimestamp(Instant.parse("2026-04-30T12:00:00Z"));
+        document.setResolved(true);
+        document.setResolvedBy("analyst-1");
+        document.setResolvedAt(Instant.parse("2026-04-30T12:05:00Z"));
+        return document;
+    }
+
+    private DecisionOutboxReconciliationService.UnknownConfirmation unknownConfirmation() {
+        return new DecisionOutboxReconciliationService.UnknownConfirmation(
+                "alert-1",
+                "event-1",
+                "event-1",
+                "PUBLISHED",
+                Instant.parse("2026-04-30T12:00:00Z"),
+                1,
+                Instant.parse("2026-04-30T12:01:00Z"),
+                Instant.parse("2026-04-30T12:02:00Z"),
+                "confirmed",
+                false,
+                null,
+                null,
+                "BROKER_OFFSET",
+                "topic=fraud-decisions,partition=0,offset=42",
+                Instant.parse("2026-04-30T12:00:00Z"),
+                "ops-admin",
+                Instant.parse("2026-04-30T12:05:00Z"),
+                "ops-admin",
+                "confirmed"
+        );
+    }
+
+    private ExternalWitnessCapabilities providerCapabilities() {
+        return new ExternalWitnessCapabilities(
+                "OBJECT_STORE",
+                "object-store",
+                "SAME_BOUNDARY",
+                ExternalImmutabilityLevel.ENFORCED,
+                true,
+                true,
+                true,
+                true,
+                ExternalWitnessTimestampType.APP_OBSERVED,
+                "WEAK",
+                true,
+                true,
+                false,
+                ExternalDurabilityGuarantee.WITNESS_RETENTION
+        );
     }
 }

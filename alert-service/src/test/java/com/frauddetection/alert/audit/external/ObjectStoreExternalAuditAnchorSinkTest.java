@@ -56,15 +56,18 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         assertThat(sink.formatChainPosition(1L)).isEqualTo("00000000000000000001");
         assertThat(sink.parseChainPosition(objectKey)).isEqualTo(1L);
         assertThat(storedJson).contains(
+                "\"anchor_id\":\"" + anchor.externalAnchorId() + "\"",
+                "\"source\":\"object-store\"",
                 "\"local_anchor_id\":\"local-anchor-1\"",
                 "\"partition_key\":\"source_service:alert-service\"",
                 "\"external_object_key\":\"" + objectKey + "\"",
                 "\"chain_position\":1",
                 "\"event_hash\":\"hash-1\"",
+                "\"previous_event_hash\":null",
                 "\"payload_hash\":\"",
-                "\"created_at\":\"" + anchor.createdAt() + "\""
+                "\"created_at\":\"" + anchor.createdAt() + "\"",
+                "\"published_at_local\":\"" + anchor.createdAt() + "\""
         );
-        assertThat(storedJson).doesNotContain("previous_event_hash");
     }
 
     @Test
@@ -94,7 +97,7 @@ class ObjectStoreExternalAuditAnchorSinkTest {
     }
 
     @Test
-    void shouldPublishPaddedAnchorWhenOnlyLegacyKeyExistsWithoutScanning() {
+    void shouldTreatLegacyAnchorAsIdempotentWithoutScanning() {
         AuditAnchorDocument local = localAnchor("local-anchor-1", 1L, "hash-1");
         putLegacyAnchor("local-anchor-1", 1L, "hash-1");
         client.resetCounters();
@@ -104,8 +107,8 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         assertThat(duplicate.localAnchorId()).isEqualTo("local-anchor-1");
         assertThat(duplicate.chainPosition()).isEqualTo(1L);
         assertThat(duplicate.lastEventHash()).isEqualTo("hash-1");
-        assertThat(client.anchorKeys()).hasSize(2);
-        assertThat(client.getObject("audit-bucket", sink.objectKey("source_service:alert-service", 1L))).isPresent();
+        assertThat(client.anchorKeys()).hasSize(1);
+        assertThat(client.getObject("audit-bucket", sink.objectKey("source_service:alert-service", 1L))).isEmpty();
         assertThat(client.listKeysCalls).isZero();
         assertThat(client.listPageCalls).isZero();
     }
@@ -117,7 +120,7 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         assertThatThrownBy(() -> sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-2"), sink.sinkType())))
                 .isInstanceOf(ExternalAuditAnchorSinkException.class)
                 .extracting("reason")
-                .isEqualTo("MISMATCH");
+                .isEqualTo("CONFLICT");
     }
 
     @Test
@@ -139,19 +142,15 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         assertThatThrownBy(() -> sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-2", 1L, "hash-1"), sink.sinkType())))
                 .isInstanceOf(ExternalAuditAnchorSinkException.class)
                 .extracting("reason")
-                .isEqualTo("MISMATCH");
+                .isEqualTo("CONFLICT");
     }
 
     @Test
     void shouldRejectLegacySameChainPositionWithDifferentLocalAnchorId() {
         putLegacyAnchor("local-anchor-1", 1L, "hash-1");
 
-        ExternalAuditAnchor stored = sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-2", 1L, "hash-2"), sink.sinkType()));
-
-        assertThat(stored.localAnchorId()).isEqualTo("local-anchor-2");
-        assertThat(client.anchorKeys()).hasSize(2);
-        assertThat(client.listKeysCalls).isZero();
-        assertThat(client.listPageCalls).isZero();
+        assertThatThrownBy(() -> sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-2", 1L, "hash-2"), sink.sinkType())))
+                .isInstanceOf(ExternalAuditAnchorConflictException.class);
     }
 
     @Test
@@ -267,6 +266,21 @@ class ObjectStoreExternalAuditAnchorSinkTest {
     }
 
     @Test
+    void shouldNotReturnBestEffortHeadWhenScannedAnchorPayloadIsTampered() {
+        putPaddedAnchor("local-anchor-1", 1L, "hash-1");
+        putPaddedAnchor("local-anchor-2", 2L, "hash-2");
+        String secondKey = sink.objectKey("source_service:alert-service", 2L);
+        client.putRaw("audit-bucket", secondKey, new String(client.getObject("audit-bucket", secondKey).orElseThrow(), StandardCharsets.UTF_8)
+                .replace("\"event_hash\":\"hash-2\"", "\"event_hash\":\"hash-X\"")
+                .getBytes(StandardCharsets.UTF_8));
+
+        assertThatThrownBy(() -> sink.latest("source_service:alert-service"))
+                .isInstanceOf(ExternalAuditAnchorSinkException.class)
+                .extracting("reason")
+                .isEqualTo("EXTERNAL_ANCHOR_ID_MISMATCH");
+    }
+
+    @Test
     void shouldFallbackToScanWhenManifestTampered() {
         SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
         ObjectStoreExternalAuditAnchorSink manifestSink = sinkWithMetrics(meterRegistry);
@@ -318,10 +332,11 @@ class ObjectStoreExternalAuditAnchorSinkTest {
     @Test
     void shouldNotRegressManifestOnLowerPositionWrite() {
         sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-10", 10L, "hash-10"), sink.sinkType()));
-        sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-5", 5L, "hash-5"), sink.sinkType()));
+
+        assertThatThrownBy(() -> sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-5", 5L, "hash-5"), sink.sinkType())))
+                .isInstanceOf(ExternalAuditAnchorConflictException.class);
 
         Optional<ExternalAuditAnchor> latest = sink.latest("source_service:alert-service");
-
         assertThat(latest).get()
                 .extracting(ExternalAuditAnchor::chainPosition)
                 .isEqualTo(10L);
@@ -330,10 +345,11 @@ class ObjectStoreExternalAuditAnchorSinkTest {
     @Test
     void shouldHandleConcurrentWritesSafely() throws Exception {
         java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(4);
+        ExternalAuditAnchor anchor = ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), sink.sinkType());
         try {
-            List<java.util.concurrent.Callable<Void>> tasks = java.util.stream.LongStream.rangeClosed(1L, 100L)
-                    .mapToObj(chainPosition -> (java.util.concurrent.Callable<Void>) () -> {
-                        sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-" + chainPosition, chainPosition, "hash-" + chainPosition), sink.sinkType()));
+            List<java.util.concurrent.Callable<Void>> tasks = java.util.stream.IntStream.range(0, 100)
+                    .mapToObj(ignored -> (java.util.concurrent.Callable<Void>) () -> {
+                        sink.publish(anchor);
                         return null;
                     })
                     .toList();
@@ -347,7 +363,7 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         assertThat(sink.latest("source_service:alert-service"))
                 .get()
                 .extracting(ExternalAuditAnchor::chainPosition)
-                .isEqualTo(100L);
+                .isEqualTo(1L);
     }
 
     @Test
@@ -400,10 +416,10 @@ class ObjectStoreExternalAuditAnchorSinkTest {
                 objectMapper
         );
 
-        assertThatThrownBy(() -> unreadableSink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), unreadableSink.sinkType())))
-                .isInstanceOf(ExternalAuditAnchorSinkException.class)
-                .extracting("reason")
-                .isEqualTo("WRITE_NOT_VERIFIED");
+        ExternalAuditAnchor stored = unreadableSink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), unreadableSink.sinkType()));
+
+        assertThat(stored.publicationStatus()).isEqualTo(ExternalAuditAnchor.STATUS_UNVERIFIED);
+        assertThat(stored.publicationReason()).isEqualTo("WRITE_NOT_VERIFIED");
     }
 
     @Test
@@ -417,14 +433,14 @@ class ObjectStoreExternalAuditAnchorSinkTest {
                 objectMapper
         );
 
-        assertThatThrownBy(() -> tamperingSink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), tamperingSink.sinkType())))
-                .isInstanceOf(ExternalAuditAnchorSinkException.class)
-                .extracting("reason")
-                .isEqualTo("EXTERNAL_PAYLOAD_HASH_MISMATCH");
+        ExternalAuditAnchor stored = tamperingSink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), tamperingSink.sinkType()));
+
+        assertThat(stored.publicationStatus()).isEqualTo(ExternalAuditAnchor.STATUS_INVALID);
+        assertThat(stored.publicationReason()).isEqualTo("EXTERNAL_ANCHOR_ID_MISMATCH");
     }
 
     @Test
-    void shouldReturnPartialWhenManifestUpdateFails() {
+    void shouldKeepAnchorPublishedWhenOnlyManifestUpdateFails() {
         InMemoryObjectStoreAuditAnchorClient manifestFailingClient = new InMemoryObjectStoreAuditAnchorClient();
         manifestFailingClient.failHeadManifestPut = true;
         ObjectStoreExternalAuditAnchorSink manifestFailingSink = new ObjectStoreExternalAuditAnchorSink(
@@ -439,10 +455,89 @@ class ObjectStoreExternalAuditAnchorSinkTest {
                 manifestFailingSink.sinkType()
         ));
 
-        assertThat(stored.publicationStatus()).isEqualTo(ExternalAuditAnchor.STATUS_PARTIAL);
+        assertThat(stored.publicationStatus()).isEqualTo(ExternalAuditAnchor.STATUS_PUBLISHED);
         assertThat(stored.publicationReason()).isEqualTo(ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED);
         assertThat(stored.manifestStatus()).isEqualTo(ExternalAuditAnchor.MANIFEST_STATUS_FAILED);
         assertThat(manifestFailingClient.getObject("audit-bucket", manifestFailingSink.objectKey("source_service:alert-service", 1L))).isPresent();
+    }
+
+    @Test
+    void shouldUseWitnessTimestampValueRatherThanApplicationReadBackTimeForReference() {
+        InMemoryObjectStoreAuditAnchorClient timestampedClient = new InMemoryObjectStoreAuditAnchorClient();
+        timestampedClient.timestampValue = Instant.parse("2026-04-27T09:59:59Z");
+        timestampedClient.timestampType = ExternalWitnessTimestampType.STORAGE_OBSERVED;
+        timestampedClient.timestampSource = "OBJECT_METADATA";
+        timestampedClient.timestampVerified = true;
+        ObjectStoreExternalAuditAnchorSink timestampedSink = new ObjectStoreExternalAuditAnchorSink(
+                "audit-bucket",
+                "audit-anchors",
+                timestampedClient,
+                objectMapper,
+                null,
+                Duration.ofSeconds(2),
+                Duration.ZERO,
+                1,
+                ExternalImmutabilityLevel.ENFORCED,
+                ExternalWitnessCapabilities.objectStore(
+                        "test-witness",
+                        ExternalWitnessIndependenceLevel.SEPARATE_ACCOUNT.name(),
+                        ExternalImmutabilityLevel.ENFORCED,
+                        true,
+                        true,
+                        true,
+                        true,
+                        ExternalWitnessTimestampType.STORAGE_OBSERVED,
+                        ExternalTimestampTrustLevel.MEDIUM.name(),
+                        true,
+                        true,
+                        false,
+                        ExternalDurabilityGuarantee.WITNESS_RETENTION
+                )
+        );
+
+        ExternalAuditAnchor stored = timestampedSink.publish(ExternalAuditAnchor.from(
+                localAnchor("local-anchor-1", 1L, "hash-1"),
+                timestampedSink.sinkType()
+        ));
+        ExternalAnchorReference reference = timestampedSink.externalReference(stored).orElseThrow();
+
+        assertThat(reference.timestampValue()).isEqualTo(Instant.parse("2026-04-27T09:59:59Z"));
+        assertThat(reference.verifiedAt()).isNotEqualTo(reference.timestampValue());
+        assertThat(reference.timestampType()).isEqualTo(ExternalWitnessTimestampType.STORAGE_OBSERVED);
+        assertThat(reference.timestampTrustLevel()).isEqualTo(ExternalTimestampTrustLevel.MEDIUM.name());
+        assertThat(reference.timestampSource()).isEqualTo("OBJECT_METADATA");
+        assertThat(reference.timestampVerified()).isTrue();
+    }
+
+    @Test
+    void shouldTreatMissingWitnessTimestampAsApplicationObservedWeakSignal() {
+        InMemoryObjectStoreAuditAnchorClient timestamplessClient = new InMemoryObjectStoreAuditAnchorClient();
+        ObjectStoreExternalAuditAnchorSink timestamplessSink = new ObjectStoreExternalAuditAnchorSink(
+                "audit-bucket",
+                "audit-anchors",
+                timestamplessClient,
+                objectMapper
+        );
+
+        ExternalAuditAnchor stored = timestamplessSink.publish(ExternalAuditAnchor.from(
+                localAnchor("local-anchor-1", 1L, "hash-1"),
+                timestamplessSink.sinkType()
+        ));
+        ExternalAnchorReference reference = timestamplessSink.externalReference(stored).orElseThrow();
+
+        assertThat(reference.timestampValue()).isNull();
+        assertThat(reference.timestampType()).isEqualTo(ExternalWitnessTimestampType.APP_OBSERVED);
+        assertThat(reference.timestampTrustLevel()).isEqualTo(ExternalTimestampTrustLevel.WEAK.name());
+        assertThat(reference.timestampSource()).isEqualTo("APP_CLOCK");
+        assertThat(reference.timestampVerified()).isFalse();
+    }
+
+    @Test
+    void shouldRejectNewLowerPositionWhenManifestHeadIsHigher() {
+        sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-10", 10L, "hash-10"), sink.sinkType()));
+
+        assertThatThrownBy(() -> sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-5", 5L, "hash-5"), sink.sinkType())))
+                .isInstanceOf(ExternalAuditAnchorConflictException.class);
     }
 
     @Test
@@ -593,6 +688,10 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         Duration getDelay = Duration.ZERO;
         boolean paginationSupported = true;
         boolean failHeadManifestPut;
+        Instant timestampValue;
+        ExternalWitnessTimestampType timestampType = ExternalWitnessTimestampType.APP_OBSERVED;
+        String timestampSource = "APP_CLOCK";
+        boolean timestampVerified;
         int getObjectCalls;
         int putObjectCalls;
         int putObjectIfAbsentCalls;
@@ -604,6 +703,18 @@ class ObjectStoreExternalAuditAnchorSinkTest {
             getObjectCalls++;
             delay(getDelay);
             return Optional.ofNullable(objects.get(bucket + "/" + key));
+        }
+
+        @Override
+        public Optional<ObjectStoreAuditAnchorObject> getObjectWithMetadata(String bucket, String key) {
+            return getObject(bucket, key)
+                    .map(content -> new ObjectStoreAuditAnchorObject(
+                            content,
+                            timestampValue,
+                            timestampType,
+                            timestampSource,
+                            timestampVerified
+                    ));
         }
 
         @Override

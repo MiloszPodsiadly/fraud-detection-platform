@@ -82,7 +82,7 @@ public record AuditEvent(
     }
 
     static AuditFailureCategory failureCategory(AuditOutcome outcome, String failureReason) {
-        if (outcome == AuditOutcome.SUCCESS) {
+        if (outcome == AuditOutcome.SUCCESS || outcome == AuditOutcome.ATTEMPTED) {
             return AuditFailureCategory.NONE;
         }
         if (failureReason == null || failureReason.isBlank()) {
@@ -102,5 +102,21 @@ public record AuditEvent(
             return AuditFailureCategory.DEPENDENCY;
         }
         return AuditFailureCategory.UNKNOWN;
+    }
+
+    AuditEvent withOutcome(AuditOutcome nextOutcome, String nextFailureReason) {
+        return new AuditEvent(
+                actor,
+                action,
+                resourceType,
+                resourceId,
+                timestamp,
+                correlationId,
+                requestId,
+                nextOutcome,
+                failureCategory(nextOutcome, nextFailureReason),
+                nextFailureReason,
+                metadataSummary
+        );
     }
 }

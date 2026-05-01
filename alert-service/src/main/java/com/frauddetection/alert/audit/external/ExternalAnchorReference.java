@@ -20,6 +20,24 @@ public record ExternalAnchorReference(
         @JsonProperty("verified_at")
         Instant verifiedAt,
 
+        @JsonProperty("timestamp_value")
+        Instant timestampValue,
+
+        @JsonProperty("timestamp_type")
+        ExternalWitnessTimestampType timestampType,
+
+        @JsonProperty("timestamp_trust_level")
+        String timestampTrustLevel,
+
+        @JsonProperty("timestamp_source")
+        String timestampSource,
+
+        @JsonProperty("timestamp_verified")
+        boolean timestampVerified,
+
+        @JsonProperty("durability_guarantee")
+        ExternalDurabilityGuarantee durabilityGuarantee,
+
         @JsonProperty("signature_status")
         String signatureStatus,
 
@@ -48,7 +66,61 @@ public record ExternalAnchorReference(
             String externalHash,
             Instant verifiedAt
     ) {
-        this(anchorId, externalKey, anchorHash, externalHash, verifiedAt, null, null, null, null, null, null, null);
+        this(anchorId, externalKey, anchorHash, externalHash, verifiedAt, verifiedAt, ExternalWitnessTimestampType.APP_OBSERVED,
+                ExternalTimestampTrustLevel.WEAK.name(), "APP_CLOCK", false, ExternalDurabilityGuarantee.NONE,
+                null, null, null, null, null, null, null);
+    }
+
+    public ExternalAnchorReference(
+            String anchorId,
+            String externalKey,
+            String anchorHash,
+            String externalHash,
+            Instant verifiedAt,
+            String signatureStatus,
+            String signature,
+            String signingKeyId,
+            String signingAlgorithm,
+            Instant signedAt,
+            String signingAuthority,
+            String signedPayloadHash
+    ) {
+        this(anchorId, externalKey, anchorHash, externalHash, verifiedAt, verifiedAt, ExternalWitnessTimestampType.APP_OBSERVED,
+                ExternalTimestampTrustLevel.WEAK.name(), "APP_CLOCK", false, ExternalDurabilityGuarantee.NONE,
+                signatureStatus, signature, signingKeyId, signingAlgorithm, signedAt, signingAuthority, signedPayloadHash);
+    }
+
+    public ExternalAnchorReference(
+            String anchorId,
+            String externalKey,
+            String anchorHash,
+            String externalHash,
+            Instant verifiedAt,
+            ExternalWitnessTimestampType timestampType,
+            String timestampTrustLevel
+    ) {
+        this(anchorId, externalKey, anchorHash, externalHash, verifiedAt, verifiedAt, timestampType, timestampTrustLevel,
+                timestampType == ExternalWitnessTimestampType.APP_OBSERVED ? "APP_CLOCK" : "WITNESS_METADATA",
+                timestampType != ExternalWitnessTimestampType.APP_OBSERVED,
+                ExternalDurabilityGuarantee.NONE,
+                null, null, null, null, null, null, null);
+    }
+
+    public ExternalAnchorReference(
+            String anchorId,
+            String externalKey,
+            String anchorHash,
+            String externalHash,
+            Instant verifiedAt,
+            Instant timestampValue,
+            ExternalWitnessTimestampType timestampType,
+            String timestampTrustLevel,
+            String timestampSource,
+            boolean timestampVerified,
+            ExternalDurabilityGuarantee durabilityGuarantee
+    ) {
+        this(anchorId, externalKey, anchorHash, externalHash, verifiedAt, timestampValue, timestampType, timestampTrustLevel,
+                timestampSource, timestampVerified, durabilityGuarantee, null, null, null, null, null, null, null);
     }
 
     ExternalAnchorReference withSignature(SignedAuditAnchorPayload signature) {
@@ -61,6 +133,12 @@ public record ExternalAnchorReference(
                 anchorHash,
                 externalHash,
                 verifiedAt,
+                timestampValue,
+                timestampType,
+                timestampTrustLevel,
+                timestampSource,
+                timestampVerified,
+                durabilityGuarantee,
                 signature.signatureStatus(),
                 signature.signature(),
                 signature.keyId(),

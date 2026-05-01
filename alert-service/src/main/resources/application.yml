@@ -5,6 +5,9 @@ spring:
     mongodb:
       uri: ${MONGODB_URI:mongodb://localhost:27017/fraud_alerts}
       auto-index-creation: true
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
@@ -37,8 +40,14 @@ management:
 
 app:
   audit:
+    bank-mode:
+      fail-closed: ${AUDIT_BANK_MODE_FAIL_CLOSED:false}
     external-anchoring:
       enabled: ${AUDIT_EXTERNAL_ANCHORING_ENABLED:false}
+      publication:
+        enabled: ${AUDIT_EXTERNAL_ANCHORING_PUBLICATION_ENABLED:${AUDIT_EXTERNAL_ANCHORING_ENABLED:false}}
+        required: ${AUDIT_EXTERNAL_ANCHORING_PUBLICATION_REQUIRED:${AUDIT_EXTERNAL_ANCHORING_ENABLED:false}}
+        fail-closed: ${AUDIT_EXTERNAL_ANCHORING_PUBLICATION_FAIL_CLOSED:${AUDIT_EXTERNAL_ANCHORING_PUBLICATION_REQUIRED:${AUDIT_EXTERNAL_ANCHORING_ENABLED:false}}}
       sink: ${AUDIT_EXTERNAL_ANCHORING_SINK:disabled}
       publish-limit: ${AUDIT_EXTERNAL_ANCHORING_PUBLISH_LIMIT:100}
       local-file:

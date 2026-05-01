@@ -67,9 +67,37 @@ public record AuditEventResponse(
         String hashAlgorithm,
 
         @JsonProperty("schema_version")
-        String schemaVersion
+        String schemaVersion,
+
+        @JsonProperty("compensated")
+        boolean compensated,
+
+        @JsonProperty("superseded_by_event_id")
+        String supersededByEventId,
+
+        @JsonProperty("business_effective")
+        boolean businessEffective,
+
+        @JsonProperty("business_effective_status")
+        BusinessEffectiveStatus businessEffectiveStatus,
+
+        @JsonProperty("audit_evidence_status")
+        AuditEvidenceStatus auditEvidenceStatus,
+
+        @JsonProperty("external_anchor_status")
+        AuditExternalAnchorStatus externalAnchorStatus,
+
+        @JsonProperty("compensation_type")
+        CompensationType compensationType,
+
+        @JsonProperty("related_event_id")
+        String relatedEventId
 ) {
     static AuditEventResponse from(AuditEventDocument document) {
+        return from(document, AuditEventBusinessSemantics.from(document));
+    }
+
+    static AuditEventResponse from(AuditEventDocument document, AuditEventBusinessSemantics semantics) {
         return new AuditEventResponse(
                 document.auditId(),
                 document.eventType().name(),
@@ -91,7 +119,15 @@ public record AuditEventResponse(
                 document.previousEventHash(),
                 document.eventHash(),
                 document.hashAlgorithm(),
-                document.schemaVersion()
+                document.schemaVersion(),
+                semantics.compensated(),
+                semantics.supersededByEventId(),
+                semantics.businessEffective(),
+                semantics.businessEffectiveStatus(),
+                semantics.auditEvidenceStatus(),
+                semantics.externalAnchorStatus(),
+                semantics.compensationType(),
+                semantics.relatedEventId()
         );
     }
 }

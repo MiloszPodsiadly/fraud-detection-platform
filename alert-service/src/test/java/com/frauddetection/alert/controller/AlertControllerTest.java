@@ -3,6 +3,7 @@ package com.frauddetection.alert.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
 import com.frauddetection.alert.api.SubmitAnalystDecisionResponse;
+import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.assistant.AnalystCaseSummaryResponse;
 import com.frauddetection.alert.assistant.AnalystCaseSummaryUseCase;
 import com.frauddetection.alert.assistant.CustomerRecentBehaviorSummary;
@@ -96,8 +97,15 @@ class AlertControllerTest {
 
     @Test
     void shouldSubmitAnalystDecision() throws Exception {
-        when(alertManagementUseCase.submitDecision(org.mockito.ArgumentMatchers.eq("alert-1"), org.mockito.ArgumentMatchers.any()))
-                .thenReturn(new SubmitAnalystDecisionResponse("alert-1", AnalystDecision.CONFIRMED_FRAUD, AlertStatus.RESOLVED, "event-1", Instant.parse("2026-04-20T10:00:00Z")));
+        when(alertManagementUseCase.submitDecision(org.mockito.ArgumentMatchers.eq("alert-1"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.isNull()))
+                .thenReturn(new SubmitAnalystDecisionResponse(
+                        "alert-1",
+                        AnalystDecision.CONFIRMED_FRAUD,
+                        AlertStatus.RESOLVED,
+                        "event-1",
+                        Instant.parse("2026-04-20T10:00:00Z"),
+                        SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING
+                ));
 
         SubmitAnalystDecisionRequest request = new SubmitAnalystDecisionRequest(
                 "analyst-1",
@@ -111,12 +119,13 @@ class AlertControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.resultingStatus").value("RESOLVED"));
+                .andExpect(jsonPath("$.resultingStatus").value("RESOLVED"))
+                .andExpect(jsonPath("$.operation_status").value("COMMITTED_EVIDENCE_PENDING"));
     }
 
     @Test
-    void shouldReturnServiceUnavailableWhenAuditPersistenceFailsOnWrite() throws Exception {
-        when(alertManagementUseCase.submitDecision(org.mockito.ArgumentMatchers.eq("alert-1"), org.mockito.ArgumentMatchers.any()))
+    void shouldReturn503WhenAuditPersistenceFailsBeforeWrite() throws Exception {
+        when(alertManagementUseCase.submitDecision(org.mockito.ArgumentMatchers.eq("alert-1"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.isNull()))
                 .thenThrow(new AuditPersistenceUnavailableException());
 
         SubmitAnalystDecisionRequest request = new SubmitAnalystDecisionRequest(
@@ -129,10 +138,11 @@ class AlertControllerTest {
 
         mockMvc.perform(post("/api/v1/alerts/alert-1/decision")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
+                .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.message").value("Audit persistence is unavailable."))
-                .andExpect(jsonPath("$.details").isEmpty());
+                .andExpect(jsonPath("$.message").value("Audit persistence is unavailable; mutation was not executed."))
+                .andExpect(jsonPath("$.details[0]").value("reason:REJECTED_BEFORE_MUTATION"))
+                .andExpect(jsonPath("$.operation_status").doesNotExist());
     }
 
     @Test

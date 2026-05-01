@@ -34,6 +34,11 @@ class LocalFileExternalAuditAnchorSink implements ExternalAuditAnchorSink {
     }
 
     @Override
+    public ExternalWitnessCapabilities capabilities() {
+        return ExternalWitnessCapabilities.localFile();
+    }
+
+    @Override
     public synchronized ExternalAuditAnchor publish(ExternalAuditAnchor anchor) {
         try {
             Optional<ExternalAuditAnchor> existing = findByLocalAnchorId(anchor.localAnchorId());
@@ -90,6 +95,14 @@ class LocalFileExternalAuditAnchorSink implements ExternalAuditAnchorSink {
                 .filter(anchor -> Objects.equals(anchor.partitionKey(), partitionKey))
                 .max(Comparator.comparingLong(ExternalAuditAnchor::chainPosition)
                         .thenComparing(ExternalAuditAnchor::createdAt));
+    }
+
+    @Override
+    public Optional<ExternalAuditAnchor> findByChainPosition(String partitionKey, long chainPosition) {
+        return readAll().stream()
+                .filter(anchor -> Objects.equals(anchor.partitionKey(), partitionKey))
+                .filter(anchor -> anchor.chainPosition() == chainPosition)
+                .findFirst();
     }
 
     @Override

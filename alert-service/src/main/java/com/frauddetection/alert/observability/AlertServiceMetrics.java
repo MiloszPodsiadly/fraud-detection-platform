@@ -30,6 +30,7 @@ public class AlertServiceMetrics {
     private final AtomicLong auditLastAnchorHashFingerprint = new AtomicLong(0);
     private final AtomicInteger auditIntegrityValid = new AtomicInteger(0);
     private final AtomicInteger auditIntegrityInvalid = new AtomicInteger(0);
+    private final AtomicLong postCommitAuditDegraded = new AtomicLong(0);
 
     public AlertServiceMetrics(MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
@@ -49,6 +50,32 @@ public class AlertServiceMetrics {
 
     public void recordAnalystDecisionSubmitted() {
         counter("fraud.alert.decision.submissions", "outcome", "success").increment();
+    }
+
+    public void recordPostCommitAuditDegraded(String operation) {
+        counter(
+                "fraud_platform_post_commit_audit_degraded_total",
+                "operation", normalizePostCommitOperation(operation)
+        ).increment();
+        postCommitAuditDegraded.incrementAndGet();
+    }
+
+    public long postCommitAuditDegradedCount() {
+        return postCommitAuditDegraded.get();
+    }
+
+    public void recordDecisionOutboxPublishConfirmationFailed() {
+        counter(
+                "fraud_platform_decision_outbox_failures_total",
+                "reason", "OUTBOX_PUBLISH_CONFIRMATION_FAILED"
+        ).increment();
+    }
+
+    public void recordExternalCoverageRequestCost(String status, int cost) {
+        DistributionSummary.builder("fraud_platform_audit_external_coverage_request_cost")
+                .tag("status", normalizeCoverageRateLimitStatus(status))
+                .register(meterRegistry)
+                .record(Math.max(1, Math.min(cost, 100)));
     }
 
     public void recordFraudCaseUpdated() {
@@ -144,6 +171,35 @@ public class AlertServiceMetrics {
     public void recordExternalAnchorPublishFailed(String sink, String reason) {
         counter(
                 "fraud_platform_audit_external_anchor_publish_failed_total",
+                "sink", normalizeExternalSink(sink),
+                "reason", normalizeExternalAnchorFailureReason(reason)
+        ).increment();
+    }
+
+    public void recordExternalAnchorStatusPersistenceFailed(String sink) {
+        counter(
+                "external_anchor_status_persistence_failed_total",
+                "sink", normalizeExternalSink(sink)
+        ).increment();
+    }
+
+    public void recordExternalAnchorRequiredFailedAfterLocalAnchor(String sink) {
+        counter(
+                "external_anchor_required_failed_after_local_anchor_total",
+                "sink", normalizeExternalSink(sink)
+        ).increment();
+    }
+
+    public void recordExternalAnchorStatusRecovered(String sink) {
+        counter(
+                "external_anchor_status_recovered_total",
+                "sink", normalizeExternalSink(sink)
+        ).increment();
+    }
+
+    public void recordExternalAnchorStatusRecoveryFailed(String sink, String reason) {
+        counter(
+                "external_anchor_status_recovery_failed_total",
                 "sink", normalizeExternalSink(sink),
                 "reason", normalizeExternalAnchorFailureReason(reason)
         ).increment();
@@ -414,6 +470,20 @@ public class AlertServiceMetrics {
         return "AUDIT_UNAVAILABLE";
     }
 
+    private String normalizePostCommitOperation(String operation) {
+        if ("SUBMIT_ANALYST_DECISION".equals(operation)) {
+            return operation;
+        }
+        return "UNKNOWN";
+    }
+
+    private String normalizeCoverageRateLimitStatus(String status) {
+        if ("ALLOWED".equals(status) || "RATE_LIMITED".equals(status)) {
+            return status;
+        }
+        return "RATE_LIMITED";
+    }
+
     private String normalizeAvailabilityStatus(String status) {
         if ("AVAILABLE".equals(status) || "PARTIAL".equals(status) || "UNAVAILABLE".equals(status)) {
             return status;
@@ -485,7 +555,18 @@ public class AlertServiceMetrics {
     }
 
     private String normalizeExternalAnchorPublishStatus(String status) {
-        if ("PUBLISHED".equals(status) || "DUPLICATE".equals(status) || "PARTIAL".equals(status) || "FAILED".equals(status)) {
+        if ("PUBLISHED".equals(status)
+                || "DUPLICATE".equals(status)
+                || "UNVERIFIED".equals(status)
+                || "LOCAL_STATUS_UNVERIFIED".equals(status)
+                || "LOCAL_ANCHOR_CREATED_EXTERNAL_REQUIRED_FAILED".equals(status)
+                || "PARTIAL".equals(status)
+                || "INVALID".equals(status)
+                || "CONFLICT".equals(status)
+                || "FAILED".equals(status)) {
+            if ("PARTIAL".equals(status)) {
+                return "UNVERIFIED";
+            }
             return status;
         }
         return "FAILED";
@@ -509,8 +590,11 @@ public class AlertServiceMetrics {
         return switch (reason) {
             case "DISABLED", "UNAVAILABLE", "CONFLICT", "MISMATCH", "IO_ERROR", "INVALID_ANCHOR",
                  "WRITE_NOT_VERIFIED", "EXTERNAL_PAYLOAD_HASH_MISMATCH", "EXTERNAL_OBJECT_KEY_MISMATCH", "TIMEOUT",
+                 "EXTERNAL_ANCHOR_ID_MISMATCH", "EXTERNAL_ANCHOR_ID_VERSION_UNSUPPORTED",
                  "HEAD_SCAN_PAGINATION_UNSUPPORTED", "HEAD_SCAN_LIMIT_EXCEEDED", "HEAD_MANIFEST_INVALID",
-                 "HEAD_MANIFEST_UPDATE_FAILED", "SIGNATURE_FAILED" -> reason;
+                 "HEAD_MANIFEST_UPDATE_FAILED", "SIGNATURE_FAILED",
+                 "STATUS_PERSISTENCE_FAILED_AFTER_EXTERNAL_PUBLISH", "EXTERNAL_ANCHOR_REQUIRED_FAILED",
+                 "MISSING", "INVALID" -> reason;
             default -> "UNKNOWN";
         };
     }

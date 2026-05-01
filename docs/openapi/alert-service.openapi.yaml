@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: Alert Service API
-  version: FDP-23
-  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, external anchor verification, bounded evidence export, derived audit trust attestation, public trust key export, governance advisory lifecycle projection, and human-review audit. FDP-20 extends tamper evidence outside the primary database boundary. FDP-22 adds a pluggable object-store external anchor sink boundary, verified external anchor references, and explicit external_immutability_level=NONE|CONFIGURED|ENFORCED; no WORM or full immutability claim is valid unless the adapter verifies infrastructure controls and reports ENFORCED. FDP-23 adds a separate local-first audit trust authority for Ed25519 external anchor hash signatures and public verification key export; the alert-service does not hold the trust authority private key. Audit integrity, trust authority signatures, and trust attestation do not imply certified WORM archive storage, legal notarization, SIEM integration, unbounded export, KMS/HSM signing unless explicitly integrated, or final compliance archive.
+  version: FDP-24
+  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, external anchor verification, bounded evidence export, derived audit trust attestation, public trust key export, governance advisory lifecycle projection, and human-review audit. FDP-20 extends tamper evidence outside the primary database boundary. FDP-22 adds a pluggable object-store external anchor sink boundary, verified external anchor references, and explicit external_immutability_level=NONE|CONFIGURED|ENFORCED; no WORM or full immutability claim is valid unless the adapter verifies infrastructure controls and reports ENFORCED. FDP-23 adds a separate local-first audit trust authority for Ed25519 external anchor hash signatures and public verification key export; the alert-service does not hold the trust authority private key. FDP-24 adds fail-closed posture reporting, durable analyst-decision outbox/idempotency semantics, and publication-status source-of-truth semantics. Audit integrity, trust authority signatures, and trust attestation do not imply certified WORM archive storage, legal notarization, SIEM integration, unbounded export, KMS/HSM signing unless explicitly integrated, or final compliance archive.
 servers:
   - url: http://localhost:8085
 paths:
@@ -138,7 +138,7 @@ paths:
   /api/v1/audit/integrity/external:
     get:
       summary: Verify external audit anchor consistency
-      description: Performs bounded read-only comparison between the local audit chain anchor and the external anchor. Requires audit:verify. Returns VALID, INVALID, PARTIAL, or UNAVAILABLE. Object-store sinks can verify by exact partition_key + chain_position lookup using the deterministic encoded object key before falling back to latest-anchor comparison. Latest object-store HEAD detection first verifies the optional External Head Manifest at head.json by manifest_hash and by reading the referenced anchor; invalid or missing manifests are not trusted and fall back to full paginated scan. Full scan requires continuation-token pagination and consumes every page; if listing may be truncated and pagination is unavailable, verification returns a degraded UNAVAILABLE state rather than reporting VALID from a best-effort HEAD. Detects missing, stale, ahead, mismatched hash, mismatched local anchor id, mismatched object key binding, mismatched payload hash binding, mismatched hash algorithm, unsupported external schema version, and external payload tampering. Response includes external_immutability_level; NONE or CONFIGURED is not WORM proof. This endpoint does not repair data, mutate audit records, export full history, or provide WORM/legal notarization. Real S3/GCS/Azure object-store adapters remain future deployment work.
+      description: Performs bounded read-only comparison between the local audit chain anchor and the external anchor. Requires audit:verify. Returns VALID, INVALID, PARTIAL, UNAVAILABLE, or CONFLICT. PUBLISHED means the anchor object was written to the external witness and verified by read-back at publication time; future witness availability is not guaranteed. LOCAL_STATUS_UNVERIFIED means external publication/read-back may have succeeded but local publication-status persistence failed and must not be counted as clean local PUBLISHED until recovered. Object-store sinks can verify by exact partition_key + chain_position lookup using the deterministic encoded object key before falling back to latest-anchor comparison. Latest object-store HEAD detection first verifies the optional External Head Manifest at head.json by manifest_hash and by reading the referenced anchor; the manifest is navigation metadata, not evidence. Invalid or missing manifests are not trusted and fall back to full paginated scan. Full scan requires continuation-token pagination and consumes every page; if listing may be truncated and pagination is unavailable, verification returns a degraded UNAVAILABLE state rather than reporting VALID from a best-effort HEAD. Detects missing, stale, ahead, mismatched hash, mismatched local anchor id, mismatched object key binding, mismatched payload hash binding, mismatched anchor id/version, mismatched hash algorithm, unsupported external schema version, incompatible same-position witness records, and external payload tampering. Response includes external_immutability_level and durability_guarantee; NONE, CONFIGURED, or WITNESS_RETENTION is not a fake WORM/legal proof. verified_at is application read-back time, not external timestamp proof; timestamp_value is witness metadata when available. This endpoint does not repair data, mutate audit records, export full history, or provide WORM/legal notarization. Real S3/GCS/Azure object-store adapters remain future deployment work.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -165,6 +165,49 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ExternalAuditIntegrityResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/audit/integrity/external/coverage:
+    get:
+      summary: Inspect bounded external anchor coverage
+      description: Returns bounded external anchor coverage for the local audit chain head or from a supplied from_position. Per-position state comes from the publication-status repository, not one external object read per position. Requests are protected by Redis-backed per-principal or per-IP request-cost limiting. Clients must treat missing_ranges, truncated, local_ahead_of_external, required_publication_failures, local_status_unverified, and unrecovered_count as operational evidence gaps. This endpoint is read-only, bounded, and does not export audit events or repair anchors.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: source_service
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [alert-service]
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 100
+        - name: from_position
+          in: query
+          required: false
+          description: Inclusive chain-position start for the bounded coverage window. Defaults to the latest bounded head window.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        "200":
+          description: Bounded external anchor coverage result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExternalAuditAnchorCoverageResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -303,6 +346,130 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+  /system/trust-level:
+    get:
+      summary: Get deployment trust posture
+      description: Requires audit:verify. Returns bounded live deployment posture for external audit anchoring. BEST_EFFORT and FDP24_DEGRADED must not be marketed as FDP-24 healthy fail-closed mode. SIGNED_EXTERNAL means trust-authority signing is enabled and required; it is not WORM, notarization, SIEM, mTLS, or legal trust. FDP24_HEALTHY requires zero unresolved degradations, zero pending degradation resolutions, zero unknown outbox confirmations, zero pending outbox resolutions, and zero terminal outbox failures.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      responses:
+        "200":
+          description: Deployment trust posture returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemTrustLevelResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/audit/degradations:
+    get:
+      summary: List unresolved audit degradation events
+      description: Requires audit:verify. Returns a bounded operator list of unresolved durable audit degradation events. This is an operational workflow, not an audit event export.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      responses:
+        "200":
+          description: Unresolved degradation events returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditDegradationListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/audit/degradations/{auditId}/resolve:
+    post:
+      summary: Resolve audit degradation event
+      description: Requires audit-degradation:resolve. Records ATTEMPTED before mutation, SUCCESS after mutation, and FAILED on update failure. In bank fail-closed mode, structured evidence is mandatory and resolution is dual-control: first request marks resolution_pending, second distinct actor approves. A post-commit success-audit failure returns committed-incomplete and records durable degradation instead of pretending the resolution is fully evidenced.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: auditId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResolveAuditDegradationRequest"
+      responses:
+        "200":
+          description: Degradation event resolved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditDegradationEvent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/decision-outbox/unknown-confirmations:
+    get:
+      summary: List decision outbox unknown confirmations
+      description: Requires audit:verify. Returns bounded PUBLISH_CONFIRMATION_UNKNOWN outbox rows for manual reconciliation. It never returns decision payloads, customer data, transaction payloads, or response bodies.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      responses:
+        "200":
+          description: Unknown confirmations returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnknownConfirmationsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/decision-outbox/unknown-confirmations/{alertId}/resolve:
+    post:
+      summary: Resolve decision outbox unknown confirmation
+      description: Requires decision-outbox:reconcile. Resolves PUBLISH_CONFIRMATION_UNKNOWN as PUBLISHED or RETRY_REQUESTED with a mandatory reason. PUBLISHED requires BROKER_OFFSET evidence or equivalent broker confirmation. In bank fail-closed mode, structured evidence is mandatory and resolution is dual-control. RETRY_REQUESTED reuses the same eventId and dedupeKey; there is no blind automatic retry.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: alertId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResolveOutboxConfirmationRequest"
+      responses:
+        "200":
+          description: Unknown confirmation resolved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnknownConfirmation"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
   /api/v1/alerts/{alertId}:
     get:
       summary: Get one alert
@@ -331,6 +498,61 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  /api/v1/alerts/{alertId}/decision:
+    post:
+      summary: Submit analyst decision
+      description: Records an analyst decision with backend authorization, guarded ATTEMPTED audit, durable same-document outbox, and optional idempotency. If X-Idempotency-Key is supplied, the same key and same request body replay the prior response without duplicate audit or outbox mutation; the same key with a different request body returns 409. Kafka publication is asynchronous from the durable outbox and at-least-once unless consumers dedupe by event id. FraudDecisionEvent carries delivery=AT_LEAST_ONCE and dedupeKey=eventId. operation_status is mandatory for committed responses: REJECTED_BEFORE_MUTATION maps to HTTP 503 with no command response body; COMMITTED_EVIDENCE_PENDING is a conservative committed state before full evidence completion was persisted; COMMITTED_EVIDENCE_INCOMPLETE means the business decision and outbox committed but post-commit evidence completion degraded. FDP-24 detects and exposes post-commit audit degradation; it does not eliminate it transactionally and does not guarantee that business mutation cannot commit before SUCCESS evidence exists. The request API does not expose COMMITTED_FULLY_ANCHORED because there is no safe synchronous promotion path.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: alertId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+        - name: X-Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitAnalystDecisionRequest"
+      responses:
+        "200":
+          description: Decision request reached a stable operation state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmitAnalystDecisionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Idempotency key was reused with a different payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "503":
+          description: Required audit persistence or evidence precondition failed before command success could be reported; mutation was not executed for pre-mutation failures.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
   /api/v1/fraud-cases/{caseId}:
     get:
       summary: Get one fraud case
@@ -576,6 +798,344 @@ components:
     GenericObject:
       type: object
       additionalProperties: true
+    SystemTrustLevelResponse:
+      type: object
+      additionalProperties: false
+      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength, coverage_status, witness_status, signature_policy, required_publication_failures, local_status_unverified, missing_ranges, post_commit_audit_degraded, unresolved_degradation_count, pending_degradation_resolution_count, post_commit_audit_degraded_resolved, outbox_failed_terminal_count, terminal_outbox_failure_count, outbox_publish_confirmation_unknown_count, unknown_outbox_confirmation_count, pending_outbox_resolution_count, outbox_oldest_pending_age_seconds, outbox_oldest_ambiguous_age_seconds]
+      properties:
+        guarantee_level:
+          type: string
+          enum: [NONE, BEST_EFFORT, FDP24_CONFIGURED, FDP24_HEALTHY, FDP24_DEGRADED]
+        publication_enabled:
+          type: boolean
+        publication_required:
+          type: boolean
+        fail_closed:
+          type: boolean
+        external_anchor_strength:
+          type: string
+          enum: [NONE, UNSIGNED_EXTERNAL, SIGNED_EXTERNAL]
+          description: Signing strength only when live external publication is healthy. This does not provide WORM storage, notarization, SIEM integration, or legal trust.
+        coverage_status:
+          type: string
+          enum: [HEALTHY, DEGRADED, UNAVAILABLE]
+        witness_status:
+          type: string
+          enum: [LIVE_WITNESS_VERIFIED, PROVIDER_CAPABILITY_VERIFIED, DECLARED_CAPABLE, UNAVAILABLE, DISABLED]
+          description: PROVIDER_CAPABILITY_VERIFIED requires provider-side capability checks; declared capabilities alone are DECLARED_CAPABLE. LIVE_WITNESS_VERIFIED is reserved for actual live external proof verification.
+        signature_policy:
+          type: string
+          enum: [OPTIONAL, REQUIRED_FOR_TRUST, REQUIRED_FOR_PUBLICATION]
+        required_publication_failures:
+          type: integer
+          minimum: 0
+        local_status_unverified:
+          type: integer
+          minimum: 0
+        missing_ranges:
+          type: integer
+          minimum: 0
+        post_commit_audit_degraded:
+          type: integer
+          format: int64
+          minimum: 0
+        unresolved_degradation_count:
+          type: integer
+          format: int64
+          minimum: 0
+        pending_degradation_resolution_count:
+          type: integer
+          format: int64
+          minimum: 0
+        post_commit_audit_degraded_resolved:
+          type: integer
+          format: int64
+          minimum: 0
+        outbox_failed_terminal_count:
+          type: integer
+          format: int64
+          minimum: 0
+        terminal_outbox_failure_count:
+          type: integer
+          format: int64
+          minimum: 0
+        outbox_publish_confirmation_unknown_count:
+          type: integer
+          format: int64
+          minimum: 0
+        unknown_outbox_confirmation_count:
+          type: integer
+          format: int64
+          minimum: 0
+        pending_outbox_resolution_count:
+          type: integer
+          format: int64
+          minimum: 0
+        outbox_oldest_pending_age_seconds:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        outbox_oldest_ambiguous_age_seconds:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        reason_code:
+          type: string
+          nullable: true
+    AuditDegradationListResponse:
+      type: object
+      additionalProperties: false
+      required: [events]
+      properties:
+        events:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/AuditDegradationEvent"
+    AuditDegradationEvent:
+      type: object
+      additionalProperties: false
+      required: [audit_id, type, resource_type, resource_id, operation, timestamp, resolved, resolution_pending, resolution_requested_at, resolution_requested_by, resolved_at, resolved_by, resolution_reason, resolution_evidence_type, resolution_evidence_reference, resolution_evidence_verified_at, resolution_evidence_verified_by, approved_at, approved_by, approval_reason]
+      properties:
+        audit_id:
+          type: string
+        type:
+          type: string
+        resource_type:
+          type: string
+        resource_id:
+          type: string
+          nullable: true
+        operation:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        resolved:
+          type: boolean
+        resolution_pending:
+          type: boolean
+        resolution_requested_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolution_requested_by:
+          type: string
+          nullable: true
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolved_by:
+          type: string
+          nullable: true
+        resolution_reason:
+          type: string
+          nullable: true
+          maxLength: 500
+        resolution_evidence_type:
+          type: string
+          nullable: true
+          enum: [BROKER_OFFSET, EXTERNAL_ANCHOR_REFERENCE, TICKET, RUNBOOK_STEP, OTHER]
+        resolution_evidence_reference:
+          type: string
+          nullable: true
+          maxLength: 500
+        resolution_evidence_verified_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolution_evidence_verified_by:
+          type: string
+          nullable: true
+        approved_at:
+          type: string
+          format: date-time
+          nullable: true
+        approved_by:
+          type: string
+          nullable: true
+        approval_reason:
+          type: string
+          nullable: true
+          maxLength: 500
+    ResolveAuditDegradationRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+        evidence_reference:
+          nullable: true
+          $ref: "#/components/schemas/ResolutionEvidenceReference"
+    ResolutionEvidenceReference:
+      type: object
+      additionalProperties: false
+      required: [type, reference, verified_at, verified_by]
+      properties:
+        type:
+          type: string
+          enum: [BROKER_OFFSET, EXTERNAL_ANCHOR_REFERENCE, TICKET, RUNBOOK_STEP, OTHER]
+        reference:
+          type: string
+          minLength: 1
+          maxLength: 500
+        verified_at:
+          type: string
+          format: date-time
+        verified_by:
+          type: string
+          minLength: 1
+          maxLength: 120
+    UnknownConfirmationsResponse:
+      type: object
+      additionalProperties: false
+      required: [events]
+      properties:
+        events:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/UnknownConfirmation"
+    UnknownConfirmation:
+      type: object
+      additionalProperties: false
+      required: [alert_id, event_id, dedupe_key, status, decided_at, attempts, last_attempt_at, published_at, failure_reason, resolution_pending, resolution_requested_at, resolution_requested_by, resolution_evidence_type, resolution_evidence_reference, resolution_evidence_verified_at, resolution_evidence_verified_by, resolution_approved_at, resolution_approved_by, resolution_approval_reason]
+      properties:
+        alert_id:
+          type: string
+        event_id:
+          type: string
+          nullable: true
+        dedupe_key:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [PUBLISH_CONFIRMATION_UNKNOWN, PUBLISHED, PENDING]
+        decided_at:
+          type: string
+          format: date-time
+          nullable: true
+        attempts:
+          type: integer
+          minimum: 0
+        last_attempt_at:
+          type: string
+          format: date-time
+          nullable: true
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
+        failure_reason:
+          type: string
+          nullable: true
+        resolution_pending:
+          type: boolean
+        resolution_requested_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolution_requested_by:
+          type: string
+          nullable: true
+        resolution_evidence_type:
+          type: string
+          nullable: true
+          enum: [BROKER_OFFSET, EXTERNAL_ANCHOR_REFERENCE, TICKET, RUNBOOK_STEP, OTHER]
+        resolution_evidence_reference:
+          type: string
+          nullable: true
+          maxLength: 500
+        resolution_evidence_verified_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolution_evidence_verified_by:
+          type: string
+          nullable: true
+        resolution_approved_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolution_approved_by:
+          type: string
+          nullable: true
+        resolution_approval_reason:
+          type: string
+          nullable: true
+          maxLength: 500
+    ResolveOutboxConfirmationRequest:
+      type: object
+      additionalProperties: false
+      required: [resolution, reason]
+      properties:
+        resolution:
+          type: string
+          enum: [PUBLISHED, RETRY_REQUESTED]
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+        evidence_reference:
+          nullable: true
+          $ref: "#/components/schemas/ResolutionEvidenceReference"
+    SubmitAnalystDecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [analystId, decision, decisionReason, tags, decisionMetadata]
+      properties:
+        analystId:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: Submitted analyst id; backend actor resolution remains authoritative.
+        decision:
+          type: string
+          enum: [CONFIRMED_FRAUD, FALSE_POSITIVE, NEEDS_MORE_REVIEW]
+        decisionReason:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        tags:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            maxLength: 80
+        decisionMetadata:
+          type: object
+          additionalProperties: true
+    SubmitAnalystDecisionResponse:
+      type: object
+      additionalProperties: false
+      required: [alertId, decision, resultingStatus, decisionEventId, decidedAt, operation_status]
+      properties:
+        alertId:
+          type: string
+        decision:
+          type: string
+          enum: [CONFIRMED_FRAUD, FALSE_POSITIVE, NEEDS_MORE_REVIEW]
+        resultingStatus:
+          type: string
+          enum: [OPEN, IN_REVIEW, RESOLVED]
+        decisionEventId:
+          type: string
+          nullable: true
+        decidedAt:
+          type: string
+          format: date-time
+          nullable: true
+        operation_status:
+          type: string
+          enum: [REJECTED_BEFORE_MUTATION, COMMITTED_EVIDENCE_PENDING, COMMITTED_EVIDENCE_INCOMPLETE]
+          description: Mandatory operation state. REJECTED_BEFORE_MUTATION is returned as HTTP 503 with no command response body. COMMITTED_EVIDENCE_PENDING is conservative state before full evidence completion is persisted. COMMITTED_EVIDENCE_INCOMPLETE means the business decision and durable outbox committed while post-commit evidence completion degraded. This is not a rollback claim. COMMITTED_FULLY_ANCHORED is intentionally not exposed until a safe promotion path exists.
     PagedGenericObject:
       type: object
       required:
@@ -660,12 +1220,20 @@ components:
         - event_hash
         - hash_algorithm
         - schema_version
+        - compensated
+        - superseded_by_event_id
+        - business_effective
+        - business_effective_status
+        - audit_evidence_status
+        - external_anchor_status
+        - compensation_type
+        - related_event_id
       properties:
         audit_event_id:
           type: string
         event_type:
           type: string
-          enum: [SUBMIT_ANALYST_DECISION, UPDATE_FRAUD_CASE, READ_AUDIT_EVENTS, VERIFY_AUDIT_INTEGRITY, VERIFY_EXTERNAL_AUDIT_INTEGRITY, EXPORT_AUDIT_EVIDENCE]
+          enum: [SUBMIT_ANALYST_DECISION, UPDATE_FRAUD_CASE, READ_AUDIT_EVENTS, VERIFY_AUDIT_INTEGRITY, VERIFY_EXTERNAL_AUDIT_INTEGRITY, EXPORT_AUDIT_EVIDENCE, EXTERNAL_ANCHOR_REQUIRED_FAILED]
         actor_id:
           type: string
           description: Backend-derived authenticated actor identity.
@@ -686,10 +1254,10 @@ components:
           nullable: true
         action:
           type: string
-          enum: [SUBMIT_ANALYST_DECISION, UPDATE_FRAUD_CASE, READ_AUDIT_EVENTS, VERIFY_AUDIT_INTEGRITY, VERIFY_EXTERNAL_AUDIT_INTEGRITY, EXPORT_AUDIT_EVIDENCE]
+          enum: [SUBMIT_ANALYST_DECISION, UPDATE_FRAUD_CASE, READ_AUDIT_EVENTS, VERIFY_AUDIT_INTEGRITY, VERIFY_EXTERNAL_AUDIT_INTEGRITY, EXPORT_AUDIT_EVIDENCE, EXTERNAL_ANCHOR_REQUIRED_FAILED]
         outcome:
           type: string
-          enum: [SUCCESS, REJECTED, FAILED]
+          enum: [ATTEMPTED, SUCCESS, REJECTED, FAILED, ABORTED_EXTERNAL_ANCHOR_REQUIRED]
         occurred_at:
           type: string
           format: date-time
@@ -729,6 +1297,36 @@ components:
         schema_version:
           type: string
           enum: ["1.0"]
+        compensated:
+          type: boolean
+          description: True when this event was superseded by a later compensating audit event. Compensation enrichment uses a bounded lookup for returned audit ids and is not limited to events present in the current page.
+        superseded_by_event_id:
+          type: string
+          nullable: true
+          description: Audit event id of the compensating event when compensated=true.
+        business_effective:
+          type: boolean
+          description: Backward-compatible boolean derived from business_effective_status. External anchor compensation after a committed SUCCESS does not make this false.
+        business_effective_status:
+          type: string
+          enum: [TRUE, FALSE, UNKNOWN]
+          description: Authoritative business truth. TRUE means the business write succeeded; FALSE means it did not happen; UNKNOWN is reserved for cases where the audit record cannot prove business state.
+        audit_evidence_status:
+          type: string
+          enum: [EXTERNALLY_ANCHORED, LOCAL_ONLY, ANCHOR_REQUIRED_FAILED, UNAVAILABLE, COMPENSATED]
+          description: Audit proof state. ANCHOR_REQUIRED_FAILED means the business event may be real while external proof failed.
+        external_anchor_status:
+          type: string
+          enum: [PUBLISHED, UNVERIFIED, FAILED, MISSING, CONFLICT, LOCAL_STATUS_UNVERIFIED, UNKNOWN]
+          description: Per-event external anchor interpretation. Audit read without anchor lookup uses LOCAL_STATUS_UNVERIFIED unless a required anchor failure compensation is known.
+        compensation_type:
+          type: string
+          enum: [EXTERNAL_ANCHOR_FAILURE, BUSINESS_WRITE_FAILURE, MANUAL_REVERSAL, UNKNOWN]
+          description: Compensation reason. EXTERNAL_ANCHOR_FAILURE is evidence compensation only and is not a business rollback.
+        related_event_id:
+          type: string
+          nullable: true
+          description: For compensation events, the audit event id being compensated.
     AuditEventMetadataSummary:
       type: object
       additionalProperties: false
@@ -917,28 +1515,40 @@ components:
       properties:
         violation_type:
           type: string
-          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, INVALID_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, MISSING_PREDECESSOR, CHAIN_FORK_DETECTED, CHAIN_POSITION_INVALID, CHAIN_POSITION_DUPLICATE, CHAIN_POSITION_GAP, EXTERNAL_ANCHOR_MISSING, STALE_EXTERNAL_ANCHOR, EXTERNAL_CHAIN_POSITION_AHEAD, EXTERNAL_HASH_MISMATCH, EXTERNAL_CHAIN_POSITION_MISMATCH, EXTERNAL_HASH_ALGORITHM_MISMATCH, EXTERNAL_SCHEMA_VERSION_UNSUPPORTED, EXTERNAL_LOCAL_ANCHOR_ID_MISMATCH, SIGNATURE_INVALID, SIGNATURE_UNKNOWN_KEY, SIGNATURE_KEY_REVOKED, SIGNATURE_UNSIGNED, SIGNATURE_UNSIGNED_REQUIRED, SIGNATURE_UNAVAILABLE, SIGNATURE_UNAVAILABLE_REQUIRED]
+          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, INVALID_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, MISSING_PREDECESSOR, CHAIN_FORK_DETECTED, CHAIN_POSITION_INVALID, CHAIN_POSITION_DUPLICATE, CHAIN_POSITION_GAP, EXTERNAL_ANCHOR_MISSING, STALE_EXTERNAL_ANCHOR, EXTERNAL_CHAIN_POSITION_AHEAD, EXTERNAL_HASH_MISMATCH, EXTERNAL_CHAIN_POSITION_MISMATCH, EXTERNAL_HASH_ALGORITHM_MISMATCH, EXTERNAL_SCHEMA_VERSION_UNSUPPORTED, EXTERNAL_LOCAL_ANCHOR_ID_MISMATCH, EXTERNAL_ANCHOR_CONFLICT, SIGNATURE_INVALID, SIGNATURE_UNKNOWN_KEY, SIGNATURE_KEY_REVOKED, SIGNATURE_UNSIGNED, SIGNATURE_UNSIGNED_REQUIRED, SIGNATURE_UNAVAILABLE, SIGNATURE_UNAVAILABLE_REQUIRED]
         position:
           type: integer
           minimum: 1
         reason_code:
           type: string
-          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, UNSUPPORTED_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, MISSING_PREDECESSOR, CHAIN_FORK_DETECTED, CHAIN_POSITION_INVALID, CHAIN_POSITION_DUPLICATE, CHAIN_POSITION_GAP, EXTERNAL_ANCHOR_MISSING, STALE_EXTERNAL_ANCHOR, EXTERNAL_CHAIN_POSITION_AHEAD, EXTERNAL_HASH_MISMATCH, EXTERNAL_CHAIN_POSITION_MISMATCH, EXTERNAL_HASH_ALGORITHM_MISMATCH, EXTERNAL_SCHEMA_VERSION_UNSUPPORTED, EXTERNAL_LOCAL_ANCHOR_ID_MISMATCH, SIGNATURE_INVALID, SIGNATURE_UNKNOWN_KEY, SIGNATURE_KEY_REVOKED, SIGNATURE_UNSIGNED, SIGNATURE_UNSIGNED_REQUIRED, SIGNATURE_UNAVAILABLE, SIGNATURE_UNAVAILABLE_REQUIRED]
+          enum: [EVENT_HASH_MISMATCH, PREVIOUS_HASH_MISMATCH, UNSUPPORTED_SCHEMA_VERSION, UNSUPPORTED_HASH_ALGORITHM, ANCHOR_MISSING, ANCHOR_HASH_MISMATCH, ANCHOR_CHAIN_POSITION_MISMATCH, MISSING_PREDECESSOR, CHAIN_FORK_DETECTED, CHAIN_POSITION_INVALID, CHAIN_POSITION_DUPLICATE, CHAIN_POSITION_GAP, EXTERNAL_ANCHOR_MISSING, STALE_EXTERNAL_ANCHOR, EXTERNAL_CHAIN_POSITION_AHEAD, EXTERNAL_HASH_MISMATCH, EXTERNAL_CHAIN_POSITION_MISMATCH, EXTERNAL_HASH_ALGORITHM_MISMATCH, EXTERNAL_SCHEMA_VERSION_UNSUPPORTED, EXTERNAL_LOCAL_ANCHOR_ID_MISMATCH, EXTERNAL_ANCHOR_CONFLICT, SIGNATURE_INVALID, SIGNATURE_UNKNOWN_KEY, SIGNATURE_KEY_REVOKED, SIGNATURE_UNSIGNED, SIGNATURE_UNSIGNED_REQUIRED, SIGNATURE_UNAVAILABLE, SIGNATURE_UNAVAILABLE_REQUIRED]
     ExternalAuditIntegrityResponse:
       type: object
       additionalProperties: false
-      required: [status, checked, limit, source_service, partition_key, external_immutability_level, signature_verification_status, violations]
+      required: [status, integrity_status, trust_level, signature_policy, checked, limit, source_service, partition_key, external_immutability_level, durability_guarantee, timestamp_trust_level, signature_verification_status, violations]
       properties:
         status:
           type: string
-          enum: [VALID, INVALID, PARTIAL, UNAVAILABLE]
+          enum: [VALID, INVALID, PARTIAL, UNAVAILABLE, CONFLICT]
+          description: Backward-compatible structural integrity status. VALID means structure/hash consistency only, not trusted evidence by itself.
+        integrity_status:
+          type: string
+          enum: [VALID, INVALID, PARTIAL, UNAVAILABLE, CONFLICT]
+          description: Structural integrity result. Clients must not interpret this as trust without trust_level and signature_policy.
+        trust_level:
+          type: string
+          enum: [LOCAL_ONLY, EXTERNAL_UNSIGNED, EXTERNAL_SIGNED, EXTERNAL_INDEPENDENTLY_VERIFIED]
+          description: EXTERNAL_SIGNED means signature verification succeeded or signed metadata is present. EXTERNAL_INDEPENDENTLY_VERIFIED is reserved for a real independent verifier and is not returned by signature verification alone.
+        signature_policy:
+          type: string
+          enum: [OPTIONAL, REQUIRED_FOR_TRUST, REQUIRED_FOR_PUBLICATION]
         checked:
           type: integer
           minimum: 0
         limit:
           type: integer
           minimum: 1
-          maximum: 500
+          maximum: 100
         source_service:
           type: string
           enum: [alert-service]
@@ -948,7 +1558,7 @@ components:
         reason_code:
           type: string
           nullable: true
-          enum: [AUDIT_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_MISSING, STALE_EXTERNAL_ANCHOR, HEAD_SCAN_PAGINATION_UNSUPPORTED, HEAD_SCAN_LIMIT_EXCEEDED, SIGNATURE_INVALID, SIGNATURE_UNKNOWN_KEY, SIGNATURE_KEY_REVOKED, SIGNATURE_UNSIGNED, SIGNATURE_UNSIGNED_REQUIRED, SIGNATURE_UNAVAILABLE, SIGNATURE_UNAVAILABLE_REQUIRED]
+          enum: [AUDIT_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_MISSING, STALE_EXTERNAL_ANCHOR, HEAD_SCAN_PAGINATION_UNSUPPORTED, HEAD_SCAN_LIMIT_EXCEEDED, CONFLICT, EXTERNAL_ANCHOR_ID_MISMATCH, EXTERNAL_ANCHOR_ID_VERSION_UNSUPPORTED, EXTERNAL_PAYLOAD_HASH_MISMATCH, EXTERNAL_OBJECT_KEY_MISMATCH, SIGNATURE_INVALID, SIGNATURE_UNKNOWN_KEY, SIGNATURE_KEY_REVOKED, SIGNATURE_UNSIGNED, SIGNATURE_UNSIGNED_REQUIRED, SIGNATURE_UNAVAILABLE, SIGNATURE_UNAVAILABLE_REQUIRED]
         message:
           type: string
           nullable: true
@@ -961,6 +1571,14 @@ components:
           $ref: "#/components/schemas/AuditAnchorSummary"
         external_immutability_level:
           $ref: "#/components/schemas/ExternalImmutabilityLevel"
+        durability_guarantee:
+          type: string
+          enum: [NONE, WITNESS_RETENTION, WORM, LEDGER]
+          description: Declared durability class from verified witness capabilities. WITNESS_RETENTION is operational retention, not a legal WORM claim.
+        timestamp_trust_level:
+          type: string
+          enum: [WEAK, MEDIUM, STRONG, CRYPTOGRAPHIC]
+          description: Timestamp interpretation for external references. APP_OBSERVED is not proof; storage/signed/ledger timestamps are progressively stronger signals when backed by the witness capabilities.
         signature_verification_status:
           type: string
           enum: [VALID, INVALID, UNAVAILABLE, UNKNOWN_KEY, KEY_REVOKED, UNSIGNED]
@@ -979,11 +1597,114 @@ components:
         signature_reason_code:
           type: string
           nullable: true
-          enum: [SIGNATURE_INVALID, SIGNATURE_UNKNOWN_KEY, SIGNATURE_KEY_REVOKED, SIGNATURE_UNAVAILABLE, SIGNATURE_UNSIGNED, SIGNATURE_UNSIGNED_REQUIRED, SIGNATURE_UNAVAILABLE_REQUIRED, AUDIT_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_STORE_UNAVAILABLE]
+          enum: [SIGNATURE_INVALID, SIGNATURE_UNKNOWN_KEY, SIGNATURE_KEY_REVOKED, SIGNATURE_UNAVAILABLE, SIGNATURE_UNSIGNED, SIGNATURE_UNSIGNED_REQUIRED, SIGNATURE_UNAVAILABLE_REQUIRED, AUDIT_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_STORE_UNAVAILABLE, CONFLICT]
+        conflicting_hashes:
+          type: array
+          items:
+            type: string
+          description: Present only when status=CONFLICT. Contains bounded incompatible event hashes observed for the same chain position.
+        witness_sources:
+          type: array
+          items:
+            type: string
+          description: Present only when status=CONFLICT. Contains bounded witness/source labels for incompatible anchors.
         violations:
           type: array
           items:
             $ref: "#/components/schemas/AuditIntegrityViolation"
+    ExternalAuditAnchorCoverageResponse:
+      type: object
+      additionalProperties: false
+      required: [status, latest_local_position, latest_external_position, position_lag, missing_ranges, truncated, limit, coverage_status, max_position_lag, max_missing_ranges, local_ahead_of_external, required_publication_failures, local_status_unverified, recovered_count, unrecovered_count]
+      properties:
+        status:
+          type: string
+          enum: [AVAILABLE, UNAVAILABLE]
+        latest_local_position:
+          type: integer
+          format: int64
+          minimum: 0
+        latest_external_position:
+          type: integer
+          format: int64
+          minimum: 0
+        position_lag:
+          type: integer
+          format: int64
+          minimum: 0
+        time_lag_seconds:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        missing_ranges:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/ExternalAuditAnchorMissingRange"
+        truncated:
+          type: boolean
+          description: True when the bounded coverage window cannot represent all local positions or all missing ranges.
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+        reason_code:
+          type: string
+          nullable: true
+          enum: [AUDIT_STORE_UNAVAILABLE, EXTERNAL_ANCHOR_STORE_UNAVAILABLE, HEAD_SCAN_PAGINATION_UNSUPPORTED, HEAD_SCAN_LIMIT_EXCEEDED, CONFLICT]
+        message:
+          type: string
+          nullable: true
+          maxLength: 160
+        coverage_status:
+          type: string
+          enum: [HEALTHY, DEGRADED]
+          description: HEALTHY means the bounded coverage window is complete within configured thresholds; DEGRADED means lag, gaps, truncation, required publication failures, unrecovered status gaps, or unavailable evidence must be investigated.
+        max_position_lag:
+          type: integer
+          format: int64
+          minimum: 0
+        max_time_lag_seconds:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        max_missing_ranges:
+          type: integer
+          minimum: 0
+        local_ahead_of_external:
+          type: boolean
+          description: True when the latest local anchor position is ahead of the latest verified external anchor position.
+        required_publication_failures:
+          type: integer
+          minimum: 0
+          description: Count of bounded-window local anchors whose required external publication failed after the local anchor was created.
+        local_status_unverified:
+          type: integer
+          minimum: 0
+          description: Count of bounded-window local anchors with missing or unverified durable publication status.
+        recovered_count:
+          type: integer
+          minimum: 0
+          description: Count of bounded-window local publication statuses recovered by reconciliation.
+        unrecovered_count:
+          type: integer
+          minimum: 0
+          description: Count of bounded-window local anchors that still need operator recovery or external witness investigation.
+    ExternalAuditAnchorMissingRange:
+      type: object
+      additionalProperties: false
+      required: [from_chain_position, to_chain_position]
+      properties:
+        from_chain_position:
+          type: integer
+          format: int64
+          minimum: 1
+        to_chain_position:
+          type: integer
+          format: int64
+          minimum: 1
     AuditEvidenceExportResponse:
       type: object
       additionalProperties: false
@@ -1086,7 +1807,7 @@ components:
     AuditEvidenceExportEvent:
       type: object
       additionalProperties: false
-      required: [audit_event_id, event_type, actor_id, actor_roles, resource_type, action, outcome, occurred_at, metadata_summary, event_hash, chain_position]
+      required: [audit_event_id, event_type, actor_id, actor_roles, resource_type, action, outcome, occurred_at, metadata_summary, event_hash, chain_position, compensated, superseded_by_event_id, business_effective, business_effective_status, audit_evidence_status, external_anchor_status, trust_level, integrity_status, signature_policy, signature_status, evidence_source, confidence, compensation_type, related_event_id]
       properties:
         audit_event_id:
           type: string
@@ -1107,7 +1828,7 @@ components:
           type: string
         outcome:
           type: string
-          enum: [SUCCESS, REJECTED, FAILED]
+          enum: [ATTEMPTED, SUCCESS, REJECTED, FAILED, ABORTED_EXTERNAL_ANCHOR_REQUIRED]
         occurred_at:
           type: string
           format: date-time
@@ -1128,6 +1849,56 @@ components:
         external_anchor:
           nullable: true
           $ref: "#/components/schemas/AuditEvidenceExportAnchorReference"
+        compensated:
+          type: boolean
+          description: True when this event was superseded by a later compensating audit event. Compensation enrichment uses a bounded lookup for returned audit ids and is not limited to events present in the export window.
+        superseded_by_event_id:
+          type: string
+          nullable: true
+          description: Audit event id of the compensating event when compensated=true.
+        business_effective:
+          type: boolean
+          description: Backward-compatible boolean derived from business_effective_status. outcome=SUCCESS with audit_evidence_status=ANCHOR_REQUIRED_FAILED is possible and still means the business write happened.
+        business_effective_status:
+          type: string
+          enum: [TRUE, FALSE, UNKNOWN]
+          description: Authoritative business truth for the exported event.
+        audit_evidence_status:
+          type: string
+          enum: [EXTERNALLY_ANCHORED, LOCAL_ONLY, ANCHOR_REQUIRED_FAILED, UNAVAILABLE, COMPENSATED]
+          description: Audit proof state for the exported event.
+        external_anchor_status:
+          type: string
+          enum: [PUBLISHED, UNVERIFIED, FAILED, MISSING, CONFLICT, LOCAL_STATUS_UNVERIFIED, UNKNOWN]
+          description: Per-event external anchor state used by evidence consumers.
+        trust_level:
+          type: string
+          enum: [LOCAL_ONLY, EXTERNAL_UNSIGNED, EXTERNAL_SIGNED, EXTERNAL_INDEPENDENTLY_VERIFIED]
+          description: Per-event trust interpretation. Signed or verified values require corresponding signature fields; local-only is not external trust.
+        integrity_status:
+          type: string
+          enum: [VALID, INVALID, PARTIAL, UNAVAILABLE]
+          description: Per-event structural integrity interpretation, separate from trust_level.
+        signature_policy:
+          type: string
+          enum: [OPTIONAL, REQUIRED_FOR_TRUST, REQUIRED_FOR_PUBLICATION]
+        signature_status:
+          type: string
+          enum: [UNSIGNED, SIGNED, INVALID, UNAVAILABLE, UNKNOWN_KEY, KEY_REVOKED]
+        evidence_source:
+          type: string
+          enum: [LOCAL_CHAIN, PUBLICATION_STATUS_REPO, EXTERNAL_WITNESS, ARTIFACT_VERIFIER]
+        confidence:
+          type: string
+          enum: [STRUCTURAL_VALID, EXTERNALLY_ANCHORED_UNSIGNED, EXTERNALLY_ANCHORED_SIGNED, INDEPENDENTLY_VERIFIED]
+        compensation_type:
+          type: string
+          enum: [EXTERNAL_ANCHOR_FAILURE, BUSINESS_WRITE_FAILURE, MANUAL_REVERSAL, UNKNOWN]
+          description: Compensation reason. EXTERNAL_ANCHOR_FAILURE does not imply business rollback.
+        related_event_id:
+          type: string
+          nullable: true
+          description: For compensation events, the audit event id being compensated.
     AuditEvidenceExportAnchorReference:
       type: object
       additionalProperties: false
@@ -1139,6 +1910,10 @@ components:
         external_anchor_id:
           type: string
           nullable: true
+        anchor_id_version:
+          type: integer
+          nullable: true
+          enum: [1]
         local_anchor_id:
           type: string
           nullable: true
@@ -1177,7 +1952,7 @@ components:
         publication_status:
           type: string
           nullable: true
-          enum: [PUBLISHED, PARTIAL, PENDING, FAILED]
+          enum: [PUBLISHED, UNVERIFIED, PENDING, FAILED, INVALID, CONFLICT]
         publication_reason:
           type: string
           nullable: true
@@ -1250,11 +2025,11 @@ components:
         publication_status:
           type: string
           nullable: true
-          enum: [PUBLISHED, PARTIAL, PENDING, FAILED]
+          enum: [PUBLISHED, UNVERIFIED, LOCAL_STATUS_UNVERIFIED, LOCAL_ANCHOR_CREATED_EXTERNAL_REQUIRED_FAILED, PARTIAL, PENDING, FAILED, INVALID, CONFLICT, MISSING, UNAVAILABLE]
         publication_reason:
           type: string
           nullable: true
-          enum: [HEAD_MANIFEST_UPDATE_FAILED]
+          enum: [HEAD_MANIFEST_UPDATE_FAILED, STATUS_PERSISTENCE_FAILED_AFTER_EXTERNAL_PUBLISH, EXTERNAL_ANCHOR_REQUIRED_FAILED]
         manifest_status:
           type: string
           nullable: true
@@ -1378,7 +2153,7 @@ components:
     ExternalAnchorReference:
       type: object
       additionalProperties: false
-      required: [anchor_id, external_key, anchor_hash, external_hash, verified_at]
+      required: [anchor_id, external_key, anchor_hash, external_hash, verified_at, timestamp_type, timestamp_trust_level]
       properties:
         anchor_id:
           type: string
@@ -1396,6 +2171,28 @@ components:
         verified_at:
           type: string
           format: date-time
+          description: Application read-back verification time; not external timestamp proof.
+        timestamp_value:
+          type: string
+          format: date-time
+          nullable: true
+          description: Witness-provided timestamp metadata when available. Null means no verified witness timestamp was provided.
+        timestamp_type:
+          type: string
+          enum: [APP_OBSERVED, STORAGE_OBSERVED, SIGNED_TIMESTAMP, LEDGER_TIMESTAMP]
+          description: APP_OBSERVED is application metadata only and is not external timestamp proof.
+        timestamp_trust_level:
+          type: string
+          enum: [WEAK, MEDIUM, STRONG, CRYPTOGRAPHIC]
+          description: WEAK application-observed timestamps are not proof of external time. Stronger values require verified witness support.
+        timestamp_source:
+          type: string
+          nullable: true
+          description: Bounded timestamp source label such as APP_CLOCK or WITNESS_METADATA; never a raw URL or provider error.
+        timestamp_verified:
+          type: boolean
+          nullable: true
+          description: True only when timestamp metadata is verified by the witness adapter.
         signature_status:
           type: string
           nullable: true
@@ -1776,6 +2573,12 @@ components:
             $ref: "#/components/schemas/ApiErrorResponse"
     NotFound:
       description: Advisory event was not found in bounded advisory history.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+    Conflict:
+      description: Request conflicts with current resource state.
       content:
         application/json:
           schema:

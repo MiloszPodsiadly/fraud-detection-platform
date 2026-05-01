@@ -1,6 +1,7 @@
 package com.frauddetection.alert.audit.external;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -15,7 +16,6 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Arrays;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -48,6 +48,7 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
     private final Duration retryBackoff;
     private final int maxAttempts;
     private final ExternalImmutabilityLevel immutabilityLevel;
+    private final ExternalWitnessCapabilities capabilities;
 
     ObjectStoreExternalAuditAnchorSink(
             String bucket,
@@ -69,6 +70,22 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
             int maxAttempts,
             ExternalImmutabilityLevel immutabilityLevel
     ) {
+        this(bucket, prefix, client, objectMapper, metrics, operationTimeout, retryBackoff, maxAttempts,
+                immutabilityLevel, ExternalWitnessCapabilities.objectStore(immutabilityLevel));
+    }
+
+    ObjectStoreExternalAuditAnchorSink(
+            String bucket,
+            String prefix,
+            ObjectStoreAuditAnchorClient client,
+            ObjectMapper objectMapper,
+            AlertServiceMetrics metrics,
+            Duration operationTimeout,
+            Duration retryBackoff,
+            int maxAttempts,
+            ExternalImmutabilityLevel immutabilityLevel,
+            ExternalWitnessCapabilities capabilities
+    ) {
         this.bucket = requireText(bucket, "bucket");
         this.prefix = trimSlashes(requireText(prefix, "prefix"));
         this.client = Objects.requireNonNull(client, "client");
@@ -82,6 +99,7 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
                 : retryBackoff;
         this.maxAttempts = Math.max(1, Math.min(maxAttempts, 3));
         this.immutabilityLevel = immutabilityLevel == null ? ExternalImmutabilityLevel.NONE : immutabilityLevel;
+        this.capabilities = capabilities == null ? ExternalWitnessCapabilities.objectStore(this.immutabilityLevel) : capabilities;
     }
 
     @Override
@@ -95,6 +113,11 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
     }
 
     @Override
+    public ExternalWitnessCapabilities capabilities() {
+        return capabilities;
+    }
+
+    @Override
     public ExternalAuditAnchor publish(ExternalAuditAnchor anchor) {
         String key = objectKey(anchor.partitionKey(), anchor.chainPosition());
         ObjectStoreExternalAuditAnchorPayload candidate = payload(anchor, key);
@@ -104,17 +127,30 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
             if (existing.isPresent()) {
                 return idempotentExisting(key, existing.get(), payload, candidate);
             }
+            Optional<byte[]> legacyExisting = getObject(legacyObjectKey(anchor.partitionKey(), anchor.chainPosition()));
+            if (legacyExisting.isPresent()) {
+                return idempotentExisting(legacyObjectKey(anchor.partitionKey(), anchor.chainPosition()), legacyExisting.get(), payload, candidate);
+            }
+            rejectNonMonotonicNewAnchor(anchor);
             try {
                 putObjectIfAbsent(key, payload);
                 verifyStoredObject(key, candidate);
-                return updateHeadManifest(anchor, key);
+                return updateHeadManifest(anchor.published(null, null), key);
             } catch (ExternalAuditAnchorSinkException exception) {
-                if (!"CONFLICT".equals(exception.reason())) {
-                    throw exception;
+                if ("CONFLICT".equals(exception.reason())) {
+                    ExternalAuditAnchor stored = idempotentExisting(key, getObject(key)
+                            .orElseThrow(() -> new ExternalAuditAnchorSinkException("IO_ERROR", "External anchor sink is unavailable.")), payload, candidate);
+                    return updateHeadManifest(stored, key);
                 }
-                ExternalAuditAnchor stored = idempotentExisting(key, getObject(key)
-                        .orElseThrow(() -> new ExternalAuditAnchorSinkException("IO_ERROR", "External anchor sink is unavailable.")), payload, candidate);
-                return updateHeadManifest(stored, key);
+                if (isUnverifiedWrite(exception.reason())) {
+                    recordFailure("get");
+                    return anchor.unverified(exception.reason());
+                }
+                if (isInvalidWrite(exception.reason())) {
+                    recordFailure("get");
+                    return anchor.invalid(exception.reason());
+                }
+                throw exception;
             }
         } catch (ExternalAuditAnchorSinkException exception) {
             throw exception;
@@ -130,14 +166,22 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
             return Optional.empty();
         }
         String key = objectKey(anchor.partitionKey(), anchor.chainPosition());
-        ObjectStoreExternalAuditAnchorPayload payload = readPayload(key, getObject(key)
-                .orElseThrow(() -> new ExternalAuditAnchorSinkException("IO_ERROR", "External anchor object is unavailable.")));
+        ObjectStoreAuditAnchorObject object = getObjectWithMetadata(key)
+                .orElseThrow(() -> new ExternalAuditAnchorSinkException("IO_ERROR", "External anchor object is unavailable."));
+        ObjectStoreExternalAuditAnchorPayload payload = readPayload(key, object.content());
+        TimestampEvidence timestamp = timestampEvidence(object);
         return Optional.of(new ExternalAnchorReference(
                 anchor.localAnchorId(),
                 key,
                 anchor.lastEventHash(),
                 payload.eventHash(),
-                Instant.now()
+                Instant.now(),
+                timestamp.timestampValue(),
+                timestamp.timestampType(),
+                timestamp.timestampTrustLevel(),
+                timestamp.timestampSource(),
+                timestamp.timestampVerified(),
+                capabilities().durabilityGuarantee()
         ));
     }
 
@@ -167,10 +211,11 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
     public Optional<ExternalAuditAnchor> findByChainPosition(String partitionKey, long chainPosition) {
         try {
             Optional<ExternalAuditAnchor> padded = read(objectKey(partitionKey, chainPosition));
-            if (padded.isPresent()) {
-                return padded;
+            Optional<ExternalAuditAnchor> legacy = read(legacyObjectKey(partitionKey, chainPosition));
+            if (padded.isPresent() && legacy.isPresent() && !sameImmutableAnchor(padded.get(), legacy.get())) {
+                throw conflict(padded.get(), legacy.get());
             }
-            return read(legacyObjectKey(partitionKey, chainPosition));
+            return padded.or(() -> legacy);
         } catch (ExternalAuditAnchorSinkException exception) {
             throw exception;
         } catch (RuntimeException exception) {
@@ -258,9 +303,6 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
             byte[] candidate,
             ObjectStoreExternalAuditAnchorPayload expected
     ) {
-        if (!Arrays.equals(existing, candidate)) {
-            throw new ExternalAuditAnchorSinkException("MISMATCH", "External anchor object content mismatch.");
-        }
         ObjectStoreExternalAuditAnchorPayload payload = readPayload(key, existing);
         verifyPayloadBinding(key, payload, expected);
         return payload.toExternalAnchor();
@@ -291,7 +333,7 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
         } catch (ExternalAuditAnchorSinkException exception) {
             recordManifestUpdate("FAILED");
             log.warn("External audit anchor head manifest update failed: reason={}", exception.reason());
-            return anchor.partial(ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED, ExternalAuditAnchor.MANIFEST_STATUS_FAILED);
+            return anchor.published(ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED, ExternalAuditAnchor.MANIFEST_STATUS_FAILED);
         }
     }
 
@@ -427,16 +469,47 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
     }
 
     private void verifyPayloadSelfBinding(String key, ObjectStoreExternalAuditAnchorPayload payload) {
+        if (payload.anchorIdVersion() != ExternalAuditAnchor.ANCHOR_ID_VERSION) {
+            throw tampering("EXTERNAL_ANCHOR_ID_VERSION_UNSUPPORTED", "External anchor id version is unsupported.");
+        }
+        String expectedAnchorId = ExternalAuditAnchor.deterministicAnchorId(
+                payload.source(),
+                payload.schemaVersion(),
+                payload.partitionKey(),
+                payload.chainPosition(),
+                payload.eventHash()
+        );
+        if (!expectedAnchorId.equals(payload.anchorId())) {
+            throw tampering("EXTERNAL_ANCHOR_ID_MISMATCH", "External anchor id binding mismatch.");
+        }
         if (!key.equals(payload.externalObjectKey())) {
             throw tampering("EXTERNAL_OBJECT_KEY_MISMATCH", "External anchor object key binding mismatch.");
         }
-        String actualPayloadHash = sha256Hex(serialize(ObjectStoreExternalAuditAnchorPayload.from(
-                payload.toExternalAnchor(),
-                payload.externalObjectKey(),
-                null
-        )));
+        String actualPayloadHash = sha256Hex(serialize(payload.withoutPayloadHash()));
         if (!actualPayloadHash.equals(payload.payloadHash())) {
             throw tampering("EXTERNAL_PAYLOAD_HASH_MISMATCH", "External anchor payload hash mismatch.");
+        }
+    }
+
+    private void rejectNonMonotonicNewAnchor(ExternalAuditAnchor anchor) {
+        Optional<ObjectStoreExternalAuditHeadManifest> current = readHeadManifestForUpdate(anchor.partitionKey());
+        if (current.isEmpty()) {
+            return;
+        }
+        long currentPosition = current.get().latestChainPosition();
+        if (currentPosition > anchor.chainPosition()) {
+            throw new ExternalAuditAnchorConflictException(
+                    List.of(current.get().latestEventHash(), anchor.lastEventHash()),
+                    List.of("head-manifest", anchor.sinkType())
+            );
+        }
+        if (currentPosition == anchor.chainPosition()
+                && (!anchor.localAnchorId().equals(current.get().latestAnchorId())
+                || !anchor.lastEventHash().equals(current.get().latestEventHash()))) {
+            throw new ExternalAuditAnchorConflictException(
+                    List.of(current.get().latestEventHash(), anchor.lastEventHash()),
+                    List.of("head-manifest", anchor.sinkType())
+            );
         }
     }
 
@@ -446,20 +519,39 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
             ObjectStoreExternalAuditAnchorPayload expected
     ) {
         if (!key.equals(stored.externalObjectKey()) || !stored.externalObjectKey().equals(expected.externalObjectKey())) {
+            if (stored.chainPosition() == expected.chainPosition()) {
+                if (stored.localAnchorId().equals(expected.localAnchorId())
+                        && stored.eventHash().equals(expected.eventHash())) {
+                    return;
+                }
+                throw new ExternalAuditAnchorConflictException(
+                        List.of(stored.eventHash(), expected.eventHash()),
+                        List.of(stored.source(), expected.source())
+                );
+            }
             throw tampering("EXTERNAL_OBJECT_KEY_MISMATCH", "External anchor object key binding mismatch.");
+        }
+        if (stored.anchorIdVersion() != expected.anchorIdVersion()
+                || !stored.anchorId().equals(expected.anchorId())
+                || !stored.localAnchorId().equals(expected.localAnchorId())
+                || stored.chainPosition() != expected.chainPosition()
+                || !stored.eventHash().equals(expected.eventHash())) {
+            throw new ExternalAuditAnchorConflictException(
+                    List.of(stored.eventHash(), expected.eventHash()),
+                    List.of(stored.source(), expected.source())
+            );
         }
         if (!stored.payloadHash().equals(expected.payloadHash())) {
             throw tampering("EXTERNAL_PAYLOAD_HASH_MISMATCH", "External anchor payload hash mismatch.");
-        }
-        if (!stored.localAnchorId().equals(expected.localAnchorId())
-                || stored.chainPosition() != expected.chainPosition()
-                || !stored.eventHash().equals(expected.eventHash())) {
-            throw new ExternalAuditAnchorSinkException("MISMATCH", "External anchor local binding mismatch.");
         }
     }
 
     private Optional<byte[]> getObject(String key) {
         return callWithRetry("get", () -> client.getObject(bucket, key));
+    }
+
+    private Optional<ObjectStoreAuditAnchorObject> getObjectWithMetadata(String key) {
+        return callWithRetry("get", () -> client.getObjectWithMetadata(bucket, key));
     }
 
     private void putObjectIfAbsent(String key, byte[] payload) {
@@ -486,6 +578,7 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
 
     private List<String> scanAnchorKeys(String keyPrefix) {
         java.util.ArrayList<String> keys = new java.util.ArrayList<>();
+        java.util.Map<Long, ExternalAuditAnchor> anchorsByPosition = new java.util.HashMap<>();
         Set<String> seenContinuationTokens = new HashSet<>();
         String continuationToken = null;
         do {
@@ -500,6 +593,22 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
                         }
                     })
                     .toList());
+            for (String key : page.keys()) {
+                try {
+                    long chainPosition = parseChainPosition(key);
+                    Optional<ExternalAuditAnchor> anchor = read(key);
+                    if (anchor.isPresent()) {
+                        ExternalAuditAnchor previous = anchorsByPosition.putIfAbsent(chainPosition, anchor.get());
+                        if (previous != null && !sameImmutableAnchor(previous, anchor.get())) {
+                            throw conflict(previous, anchor.get());
+                        }
+                    }
+                } catch (ExternalAuditAnchorSinkException exception) {
+                    if (!"INVALID_ANCHOR".equals(exception.reason())) {
+                        throw exception;
+                    }
+                }
+            }
             /*
              * HEAD detection must consume every page because legacy non-padded keys do not sort
              * by numeric chain position. A client without continuation-token semantics must fail
@@ -514,6 +623,23 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
             }
         } while (continuationToken != null);
         return List.copyOf(keys);
+    }
+
+    private boolean sameImmutableAnchor(ExternalAuditAnchor left, ExternalAuditAnchor right) {
+        return Objects.equals(left.localAnchorId(), right.localAnchorId())
+                && Objects.equals(left.partitionKey(), right.partitionKey())
+                && left.chainPosition() == right.chainPosition()
+                && Objects.equals(left.lastEventHash(), right.lastEventHash())
+                && Objects.equals(left.previousEventHash(), right.previousEventHash())
+                && Objects.equals(left.hashAlgorithm(), right.hashAlgorithm())
+                && Objects.equals(left.schemaVersion(), right.schemaVersion());
+    }
+
+    private ExternalAuditAnchorConflictException conflict(ExternalAuditAnchor left, ExternalAuditAnchor right) {
+        return new ExternalAuditAnchorConflictException(
+                List.of(left.lastEventHash(), right.lastEventHash()),
+                List.of(left.sinkType(), right.sinkType())
+        );
     }
 
     private <T> T callWithRetry(String operation, Supplier<T> operationCall) {
@@ -658,7 +784,54 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
         mapper.configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true);
         mapper.configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
         mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        mapper.setSerializationInclusion(JsonInclude.Include.ALWAYS);
         return mapper;
+    }
+
+    private boolean isUnverifiedWrite(String reason) {
+        return "WRITE_NOT_VERIFIED".equals(reason)
+                || "IO_ERROR".equals(reason)
+                || "TIMEOUT".equals(reason);
+    }
+
+    private boolean isInvalidWrite(String reason) {
+        return "EXTERNAL_OBJECT_KEY_MISMATCH".equals(reason)
+                || "EXTERNAL_PAYLOAD_HASH_MISMATCH".equals(reason)
+                || "EXTERNAL_ANCHOR_ID_MISMATCH".equals(reason)
+                || "EXTERNAL_ANCHOR_ID_VERSION_UNSUPPORTED".equals(reason)
+                || "MISMATCH".equals(reason);
+    }
+
+    private TimestampEvidence timestampEvidence(ObjectStoreAuditAnchorObject object) {
+        if (object != null
+                && object.timestampVerified()
+                && object.timestampValue() != null
+                && object.timestampType() != null
+                && object.timestampType() != ExternalWitnessTimestampType.APP_OBSERVED) {
+            return new TimestampEvidence(
+                    object.timestampValue(),
+                    object.timestampType(),
+                    capabilities.timestampTrustLevel(),
+                    StringUtils.hasText(object.timestampSource()) ? object.timestampSource() : "WITNESS_METADATA",
+                    true
+            );
+        }
+        return new TimestampEvidence(
+                null,
+                ExternalWitnessTimestampType.APP_OBSERVED,
+                ExternalTimestampTrustLevel.WEAK.name(),
+                "APP_CLOCK",
+                false
+        );
+    }
+
+    private record TimestampEvidence(
+            Instant timestampValue,
+            ExternalWitnessTimestampType timestampType,
+            String timestampTrustLevel,
+            String timestampSource,
+            boolean timestampVerified
+    ) {
     }
 
     private String requireText(String value, String name) {

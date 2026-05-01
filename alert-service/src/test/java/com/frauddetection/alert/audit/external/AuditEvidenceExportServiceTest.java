@@ -4,13 +4,18 @@ import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditAnchorDocument;
 import com.frauddetection.alert.audit.AuditAnchorRepository;
 import com.frauddetection.alert.audit.AuditEventDocument;
+import com.frauddetection.alert.audit.AuditEventCompensationLookup;
 import com.frauddetection.alert.audit.AuditEventMetadataSummary;
 import com.frauddetection.alert.audit.AuditEventRepository;
+import com.frauddetection.alert.audit.AuditEvidenceStatus;
+import com.frauddetection.alert.audit.AuditExternalAnchorStatus;
 import com.frauddetection.alert.audit.AuditFailureCategory;
 import com.frauddetection.alert.audit.InvalidAuditEventQueryException;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.AuditService;
+import com.frauddetection.alert.audit.BusinessEffectiveStatus;
+import com.frauddetection.alert.audit.CompensationType;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.security.authorization.AnalystRole;
 import com.frauddetection.alert.security.principal.AnalystPrincipal;
@@ -78,7 +83,7 @@ class AuditEvidenceExportServiceTest {
                 eq(Instant.parse("2026-04-28T00:00:00Z")),
                 eq(100)
         )).thenReturn(List.of(event));
-        when(anchorRepository.findByPartitionKeyAndChainPositionBetween("source_service:alert-service", 1L, 1L, 100))
+        when(anchorRepository.findByPartitionKeyAndChainPositionIn("source_service:alert-service", Set.of(1L)))
                 .thenReturn(List.of(localAnchor));
         when(sink.findByRange(
                 "source_service:alert-service",
@@ -108,6 +113,12 @@ class AuditEvidenceExportServiceTest {
         assertThat(response.events().getFirst().localAnchor()).isNotNull();
         assertThat(response.events().getFirst().localAnchor().publicationStatus()).isNull();
         assertThat(response.events().getFirst().externalAnchor()).isNotNull();
+        assertThat(response.events().getFirst().businessEffective()).isTrue();
+        assertThat(response.events().getFirst().businessEffectiveStatus()).isEqualTo(BusinessEffectiveStatus.TRUE);
+        assertThat(response.events().getFirst().auditEvidenceStatus()).isEqualTo(AuditEvidenceStatus.EXTERNALLY_ANCHORED);
+        assertThat(response.events().getFirst().externalAnchorStatus()).isEqualTo(AuditExternalAnchorStatus.PUBLISHED);
+        assertThat(response.events().getFirst().compensationType()).isEqualTo(CompensationType.UNKNOWN);
+        assertThat(response.events().getFirst().compensated()).isFalse();
         assertThat(response.toString()).doesNotContain("raw", "token", "stack", "private", "secret");
         ArgumentCaptor<AuditEventMetadataSummary> metadata = forClass(AuditEventMetadataSummary.class);
         verify(auditService).audit(
@@ -133,11 +144,92 @@ class AuditEvidenceExportServiceTest {
     }
 
     @Test
+    void shouldExposeCompensatedAttemptedEventsInEvidenceExport() {
+        AuditEventDocument attempted = event("audit-attempted", 1L, AuditAction.SUBMIT_ANALYST_DECISION, AuditResourceType.ALERT,
+                "alert-1", AuditOutcome.ATTEMPTED, null, null);
+        AuditEventDocument aborted = event("audit-aborted", 2L, AuditAction.EXTERNAL_ANCHOR_REQUIRED_FAILED, AuditResourceType.AUDIT_EVENT,
+                "audit-attempted", AuditOutcome.ABORTED_EXTERNAL_ANCHOR_REQUIRED, attempted.eventHash(), "ExternalAuditAnchorPublicationRequiredException:WRITE_NOT_VERIFIED");
+        when(eventRepository.findEvidenceWindow(any(), any(), any(), anyInt())).thenReturn(List.of(attempted, aborted));
+        when(anchorRepository.findByPartitionKeyAndChainPositionIn("source_service:alert-service", Set.of(1L, 2L)))
+                .thenReturn(List.of(
+                        localAnchor("local-anchor-1", 1L, "hash-1"),
+                        localAnchor("local-anchor-2", 2L, "hash-2")
+                ));
+        when(sink.findByRange(any(), any(), any(), anyInt())).thenReturn(List.of());
+
+        AuditEvidenceExportResponse response = service.export(
+                "2026-04-27T00:00:00Z",
+                "2026-04-28T00:00:00Z",
+                "alert-service",
+                null
+        );
+
+        AuditEvidenceExportEvent attemptResponse = response.events().getFirst();
+        AuditEvidenceExportEvent abortResponse = response.events().get(1);
+        assertThat(attemptResponse.compensated()).isTrue();
+        assertThat(attemptResponse.supersededByEventId()).isEqualTo("audit-aborted");
+        assertThat(attemptResponse.businessEffective()).isFalse();
+        assertThat(attemptResponse.businessEffectiveStatus()).isEqualTo(BusinessEffectiveStatus.FALSE);
+        assertThat(attemptResponse.auditEvidenceStatus()).isEqualTo(AuditEvidenceStatus.ANCHOR_REQUIRED_FAILED);
+        assertThat(attemptResponse.externalAnchorStatus()).isEqualTo(AuditExternalAnchorStatus.FAILED);
+        assertThat(attemptResponse.compensationType()).isEqualTo(CompensationType.EXTERNAL_ANCHOR_FAILURE);
+        assertThat(abortResponse.relatedEventId()).isEqualTo("audit-attempted");
+        assertThat(abortResponse.businessEffective()).isFalse();
+        assertThat(abortResponse.businessEffectiveStatus()).isEqualTo(BusinessEffectiveStatus.FALSE);
+        assertThat(abortResponse.auditEvidenceStatus()).isEqualTo(AuditEvidenceStatus.ANCHOR_REQUIRED_FAILED);
+        assertThat(abortResponse.externalAnchorStatus()).isEqualTo(AuditExternalAnchorStatus.FAILED);
+        assertThat(abortResponse.compensationType()).isEqualTo(CompensationType.EXTERNAL_ANCHOR_FAILURE);
+    }
+
+    @Test
+    void shouldExposeCompensationOutsideEvidenceExportWindow() {
+        AuditEventCompensationLookup compensationLookup = mock(AuditEventCompensationLookup.class);
+        AuditEvidenceExportService exportService = new AuditEvidenceExportService(
+                eventRepository,
+                anchorRepository,
+                sink,
+                new AuditEvidenceExportQueryParser(),
+                metrics,
+                auditService,
+                currentAnalystUser,
+                rateLimiter,
+                abuseDetector,
+                compensationLookup
+        );
+        AuditEventDocument success = event("audit-success", 10L, AuditAction.SUBMIT_ANALYST_DECISION, AuditResourceType.ALERT,
+                "alert-1", AuditOutcome.SUCCESS, null, null);
+        AuditEventDocument compensation = event("audit-aborted", 11L, AuditAction.EXTERNAL_ANCHOR_REQUIRED_FAILED, AuditResourceType.AUDIT_EVENT,
+                "audit-success", AuditOutcome.ABORTED_EXTERNAL_ANCHOR_REQUIRED, success.eventHash(), "ExternalAuditAnchorPublicationRequiredException:WRITE_NOT_VERIFIED");
+        when(eventRepository.findEvidenceWindow(any(), any(), any(), anyInt())).thenReturn(List.of(success));
+        when(compensationLookup.findExternalAnchorAbortCompensations(List.of(success))).thenReturn(List.of(compensation));
+        when(anchorRepository.findByPartitionKeyAndChainPositionIn("source_service:alert-service", Set.of(10L)))
+                .thenReturn(List.of(localAnchor("local-anchor-10", 10L, "hash-10")));
+        when(sink.findByRange(any(), any(), any(), anyInt())).thenReturn(List.of());
+
+        AuditEvidenceExportResponse response = exportService.export(
+                "2026-04-27T00:00:00Z",
+                "2026-04-28T00:00:00Z",
+                "alert-service",
+                null
+        );
+
+        AuditEvidenceExportEvent exported = response.events().getFirst();
+        assertThat(exported.outcome()).isEqualTo("SUCCESS");
+        assertThat(exported.compensated()).isTrue();
+        assertThat(exported.supersededByEventId()).isEqualTo("audit-aborted");
+        assertThat(exported.businessEffective()).isTrue();
+        assertThat(exported.businessEffectiveStatus()).isEqualTo(BusinessEffectiveStatus.TRUE);
+        assertThat(exported.auditEvidenceStatus()).isEqualTo(AuditEvidenceStatus.ANCHOR_REQUIRED_FAILED);
+        assertThat(exported.externalAnchorStatus()).isEqualTo(AuditExternalAnchorStatus.FAILED);
+        assertThat(exported.compensationType()).isEqualTo(CompensationType.EXTERNAL_ANCHOR_FAILURE);
+    }
+
+    @Test
     void shouldReturnPartialWhenExternalAnchorsAreUnavailable() {
         AuditEventDocument event = event("audit-1", 1L);
         AuditAnchorDocument localAnchor = localAnchor("local-anchor-1", 1L, "hash-1");
         when(eventRepository.findEvidenceWindow(any(), any(), any(), anyInt())).thenReturn(List.of(event));
-        when(anchorRepository.findByPartitionKeyAndChainPositionBetween("source_service:alert-service", 1L, 1L, 100))
+        when(anchorRepository.findByPartitionKeyAndChainPositionIn("source_service:alert-service", Set.of(1L)))
                 .thenReturn(List.of(localAnchor));
         when(sink.findByRange(any(), any(), any(), anyInt()))
                 .thenThrow(new ExternalAuditAnchorSinkException("IO_ERROR", "filesystem path /internal/detail"));
@@ -165,7 +257,7 @@ class AuditEvidenceExportServiceTest {
         AuditAnchorDocument firstLocal = localAnchor("local-anchor-1", 1L, "hash-1");
         AuditAnchorDocument secondLocal = localAnchor("local-anchor-2", 2L, "hash-2");
         when(eventRepository.findEvidenceWindow(any(), any(), any(), anyInt())).thenReturn(List.of(first, second));
-        when(anchorRepository.findByPartitionKeyAndChainPositionBetween("source_service:alert-service", 1L, 2L, 100))
+        when(anchorRepository.findByPartitionKeyAndChainPositionIn("source_service:alert-service", Set.of(1L, 2L)))
                 .thenReturn(List.of(firstLocal, secondLocal));
         when(sink.findByRange(any(), any(), any(), anyInt()))
                 .thenReturn(List.of(ExternalAuditAnchor.from(firstLocal, "local-file")));
@@ -220,7 +312,7 @@ class AuditEvidenceExportServiceTest {
         AuditEventDocument event = event("audit-1", 1L);
         AuditAnchorDocument localAnchor = localAnchor("local-anchor-1", 1L, "hash-1");
         when(eventRepository.findEvidenceWindow(any(), any(), any(), anyInt())).thenReturn(List.of(event));
-        when(anchorRepository.findByPartitionKeyAndChainPositionBetween("source_service:alert-service", 1L, 1L, 100))
+        when(anchorRepository.findByPartitionKeyAndChainPositionIn("source_service:alert-service", Set.of(1L)))
                 .thenReturn(List.of(localAnchor));
 
         AuditEvidenceExportResponse response = disabledService.export(
@@ -278,7 +370,7 @@ class AuditEvidenceExportServiceTest {
         AuditEventDocument event = event("audit-1", 1L);
         AuditAnchorDocument localAnchor = localAnchor("local-anchor-1", 1L, "hash-1");
         when(eventRepository.findEvidenceWindow(any(), any(), any(), anyInt())).thenReturn(List.of(event));
-        when(anchorRepository.findByPartitionKeyAndChainPositionBetween("source_service:alert-service", 1L, 1L, 100))
+        when(anchorRepository.findByPartitionKeyAndChainPositionIn("source_service:alert-service", Set.of(1L)))
                 .thenReturn(List.of(localAnchor));
         when(sink.findByRange(any(), any(), any(), anyInt()))
                 .thenReturn(List.of(ExternalAuditAnchor.from(localAnchor, "local-file")));
@@ -333,7 +425,7 @@ class AuditEvidenceExportServiceTest {
         AuditEventDocument event = event("audit-1", 1L);
         AuditAnchorDocument localAnchor = localAnchor("local-anchor-1", 1L, "hash-1");
         when(eventRepository.findEvidenceWindow(any(), any(), any(), anyInt())).thenReturn(List.of(event));
-        when(anchorRepository.findByPartitionKeyAndChainPositionBetween("source_service:alert-service", 1L, 1L, 100))
+        when(anchorRepository.findByPartitionKeyAndChainPositionIn("source_service:alert-service", Set.of(1L)))
                 .thenReturn(List.of(localAnchor));
         when(sink.findByRange(any(), any(), any(), anyInt())).thenReturn(List.of());
 
@@ -368,7 +460,7 @@ class AuditEvidenceExportServiceTest {
         AuditEventDocument event = event("audit-1", 1L);
         AuditAnchorDocument localAnchor = localAnchor("local-anchor-1", 1L, "hash-1");
         when(eventRepository.findEvidenceWindow(any(), any(), any(), anyInt())).thenReturn(List.of(event));
-        when(anchorRepository.findByPartitionKeyAndChainPositionBetween("source_service:alert-service", 1L, 1L, 100))
+        when(anchorRepository.findByPartitionKeyAndChainPositionIn("source_service:alert-service", Set.of(1L)))
                 .thenReturn(List.of(localAnchor));
         when(sink.findByRange(any(), any(), any(), anyInt())).thenReturn(List.of());
 
@@ -389,7 +481,7 @@ class AuditEvidenceExportServiceTest {
         AuditEventDocument event = event("audit-1", 1L);
         AuditAnchorDocument localAnchor = localAnchor("local-anchor-1", 1L, "hash-1");
         when(eventRepository.findEvidenceWindow(any(), any(), any(), anyInt())).thenReturn(List.of(event));
-        when(anchorRepository.findByPartitionKeyAndChainPositionBetween("source_service:alert-service", 1L, 1L, 100))
+        when(anchorRepository.findByPartitionKeyAndChainPositionIn("source_service:alert-service", Set.of(1L)))
                 .thenReturn(List.of(localAnchor));
         when(sink.findByRange(any(), any(), any(), anyInt())).thenReturn(List.of());
 
@@ -489,28 +581,44 @@ class AuditEvidenceExportServiceTest {
     }
 
     private AuditEventDocument event(String auditId, Long chainPosition) {
+        return event(auditId, chainPosition, AuditAction.SUBMIT_ANALYST_DECISION, AuditResourceType.ALERT, "alert-1",
+                AuditOutcome.SUCCESS, null, null);
+    }
+
+    private AuditEventDocument event(
+            String auditId,
+            Long chainPosition,
+            AuditAction action,
+            AuditResourceType resourceType,
+            String resourceId,
+            AuditOutcome outcome,
+            String previousEventHash,
+            String failureReason
+    ) {
         return new AuditEventDocument(
                 auditId,
-                AuditAction.SUBMIT_ANALYST_DECISION,
+                action,
                 "admin-1",
                 "admin-1",
                 List.of("FRAUD_OPS_ADMIN"),
                 "HUMAN",
                 List.of("audit:export"),
-                AuditAction.SUBMIT_ANALYST_DECISION,
-                AuditResourceType.ALERT,
-                "alert-1",
+                action,
+                resourceType,
+                resourceId,
                 Instant.parse("2026-04-27T10:00:00Z"),
                 "corr-1",
                 "request-1",
                 "alert-service",
                 "source_service:alert-service",
                 chainPosition,
-                AuditOutcome.SUCCESS,
-                AuditFailureCategory.NONE,
-                null,
+                outcome,
+                outcome == AuditOutcome.SUCCESS || outcome == AuditOutcome.ATTEMPTED
+                        ? AuditFailureCategory.NONE
+                        : AuditFailureCategory.DEPENDENCY,
+                failureReason,
                 AuditEventMetadataSummary.auditRead(null, "alert-service", "1.0", "TEST", "limit=1", 1),
-                null,
+                previousEventHash,
                 chainPosition == null ? "hash-legacy" : "hash-" + chainPosition,
                 "SHA-256",
                 "1.0"

@@ -5,6 +5,15 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.Instant;
 
 record ObjectStoreExternalAuditAnchorPayload(
+        @JsonProperty("anchor_id")
+        String anchorId,
+
+        @JsonProperty("anchor_id_version")
+        int anchorIdVersion,
+
+        @JsonProperty("source")
+        String source,
+
         @JsonProperty("local_anchor_id")
         String localAnchorId,
 
@@ -20,6 +29,9 @@ record ObjectStoreExternalAuditAnchorPayload(
         @JsonProperty("event_hash")
         String eventHash,
 
+        @JsonProperty("previous_event_hash")
+        String previousEventHash,
+
         @JsonProperty("payload_hash")
         String payloadHash,
 
@@ -31,6 +43,9 @@ record ObjectStoreExternalAuditAnchorPayload(
 
         @JsonProperty("created_at")
         Instant createdAt,
+
+        @JsonProperty("published_at_local")
+        Instant publishedAtLocal,
 
         @JsonProperty("sink_type")
         String sinkType,
@@ -46,14 +61,19 @@ record ObjectStoreExternalAuditAnchorPayload(
 ) {
     static ObjectStoreExternalAuditAnchorPayload from(ExternalAuditAnchor anchor, String externalObjectKey, String payloadHash) {
         return new ObjectStoreExternalAuditAnchorPayload(
+                anchor.externalAnchorId(),
+                anchor.anchorIdVersion(),
+                anchor.sinkType(),
                 anchor.localAnchorId(),
                 anchor.partitionKey(),
                 externalObjectKey,
                 anchor.chainPosition(),
                 anchor.lastEventHash(),
+                anchor.previousEventHash(),
                 payloadHash,
                 anchor.hashAlgorithm(),
                 anchor.schemaVersion(),
+                anchor.createdAt(),
                 anchor.createdAt(),
                 anchor.sinkType(),
                 anchor.publicationStatus(),
@@ -62,19 +82,44 @@ record ObjectStoreExternalAuditAnchorPayload(
         );
     }
 
+    ObjectStoreExternalAuditAnchorPayload withoutPayloadHash() {
+        return new ObjectStoreExternalAuditAnchorPayload(
+                anchorId,
+                anchorIdVersion,
+                source,
+                localAnchorId,
+                partitionKey,
+                externalObjectKey,
+                chainPosition,
+                eventHash,
+                previousEventHash,
+                null,
+                hashAlgorithm,
+                schemaVersion,
+                createdAt,
+                publishedAtLocal,
+                sinkType,
+                publicationStatus,
+                publicationReason,
+                manifestStatus
+        );
+    }
+
     ExternalAuditAnchor toExternalAnchor() {
         return new ExternalAuditAnchor(
-                "object-store:" + localAnchorId,
+                anchorId,
+                anchorIdVersion,
                 localAnchorId,
                 partitionKey,
                 chainPosition,
                 eventHash,
+                previousEventHash,
                 hashAlgorithm,
                 schemaVersion,
-                createdAt,
+                publishedAtLocal == null ? createdAt : publishedAtLocal,
                 sinkType,
-                publicationStatus,
-                publicationReason,
+                ExternalAuditAnchor.STATUS_PUBLISHED,
+                null,
                 manifestStatus
         );
     }

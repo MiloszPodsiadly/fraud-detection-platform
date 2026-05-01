@@ -24,6 +24,7 @@ public class ExternalAuditIntegrityService {
 
     private static final Logger log = LoggerFactory.getLogger(ExternalAuditIntegrityService.class);
     private static final String SUPPORTED_SCHEMA_VERSION = "1.0";
+    private static final int MAX_MISSING_RANGES = 50;
 
     private final AuditAnchorRepository anchorRepository;
     private final ExternalAuditAnchorSink sink;
@@ -94,6 +95,12 @@ public class ExternalAuditIntegrityService {
             auditFailureBestEffort(query, response, "AUDIT_STORE_UNAVAILABLE");
             return response;
         } catch (ExternalAuditAnchorSinkException exception) {
+            if (exception instanceof ExternalAuditAnchorConflictException conflictException) {
+                ExternalAuditIntegrityResponse response = conflict(query, conflictException);
+                metrics.recordExternalIntegrityCheck(response.status());
+                auditFailureBestEffort(query, response, "CONFLICT");
+                return response;
+            }
             String reasonCode = externalUnavailableReasonCode(exception);
             ExternalAuditIntegrityResponse response = ExternalAuditIntegrityResponse.unavailable(
                     query,
@@ -183,6 +190,142 @@ public class ExternalAuditIntegrityService {
         return response(status, query, local, external, signature, violations, reasonCode, message);
     }
 
+    public ExternalAuditAnchorCoverageResponse coverage(String sourceService, Integer limit) {
+        return coverage(sourceService, limit, null);
+    }
+
+    public ExternalAuditAnchorCoverageResponse coverage(String sourceService, Integer limit, Long fromPosition) {
+        ExternalAuditIntegrityQuery query = queryParser.parse(sourceService, limit, fromPosition);
+        try {
+            AuditAnchorDocument latestLocal = anchorRepository.findLatestByPartitionKey(query.partitionKey()).orElse(null);
+            long latestLocalPosition = latestLocal == null ? 0L : latestLocal.chainPosition();
+            ExternalAuditAnchor latestExternal = sink.latest(query.partitionKey()).orElse(null);
+            long latestExternalPosition = latestExternal == null ? 0L : latestExternal.chainPosition();
+            long from = query.fromPosition() == null
+                    ? (latestLocalPosition == 0L ? 1L : Math.max(1L, latestLocalPosition - query.limit() + 1L))
+                    : query.fromPosition();
+            long to = latestLocalPosition == 0L ? 0L : Math.min(latestLocalPosition, from + query.limit() - 1L);
+            List<ExternalAuditAnchorMissingRange> missingRanges = missingRanges(query.partitionKey(), from, to);
+            boolean truncated = latestLocalPosition > to || missingRanges.size() >= MAX_MISSING_RANGES;
+            Long timeLagSeconds = latestLocal != null && latestExternal != null
+                    ? Math.max(0L, java.time.Duration.between(latestExternal.createdAt(), latestLocal.createdAt()).toSeconds())
+                    : null;
+            PublicationCoverage publicationCoverage = publicationCoverage(query.partitionKey(), query.limit());
+            return new ExternalAuditAnchorCoverageResponse(
+                    "AVAILABLE",
+                    latestLocalPosition,
+                    latestExternalPosition,
+                    Math.max(0L, latestLocalPosition - latestExternalPosition),
+                    timeLagSeconds,
+                    missingRanges,
+                    truncated,
+                    query.limit(),
+                    null,
+                    null
+            ).withPublicationStatus(
+                    publicationCoverage.requiredPublicationFailures(),
+                    publicationCoverage.localStatusUnverified(),
+                    publicationCoverage.recoveredCount(),
+                    publicationCoverage.unrecoveredCount()
+            );
+        } catch (DataAccessException exception) {
+            return unavailableCoverage(query, "AUDIT_STORE_UNAVAILABLE", "Local audit anchor store is currently unavailable.");
+        } catch (ExternalAuditAnchorSinkException exception) {
+            if (exception instanceof ExternalAuditAnchorConflictException) {
+                return unavailableCoverage(query, "CONFLICT", "External anchor witnesses contain incompatible truths.");
+            }
+            return unavailableCoverage(query, externalUnavailableReasonCode(exception), externalUnavailableMessage(externalUnavailableReasonCode(exception)));
+        }
+    }
+
+    private List<ExternalAuditAnchorMissingRange> missingRanges(String partitionKey, long from, long to) {
+        if (to < from || publicationStatusRepository == null) {
+            return List.of();
+        }
+        List<AuditAnchorDocument> anchors = anchorRepository.findByPartitionKeyAndChainPositionBetween(partitionKey, from, to, (int) Math.min(100, to - from + 1));
+        java.util.Map<Long, AuditAnchorDocument> anchorsByPosition = anchors.stream()
+                .collect(java.util.stream.Collectors.toMap(AuditAnchorDocument::chainPosition, java.util.function.Function.identity(), (left, right) -> left));
+        java.util.Map<String, ExternalAuditAnchorPublicationStatusDocument> statusesByAnchorId = publicationStatusRepository.findByLocalAnchorIds(
+                        anchors.stream().map(AuditAnchorDocument::anchorId).toList()
+                ).stream()
+                .collect(java.util.stream.Collectors.toMap(ExternalAuditAnchorPublicationStatusDocument::localAnchorId, java.util.function.Function.identity(), (left, right) -> left));
+        List<ExternalAuditAnchorMissingRange> ranges = new ArrayList<>();
+        Long openStart = null;
+        for (long position = from; position <= to; position++) {
+            AuditAnchorDocument anchor = anchorsByPosition.get(position);
+            ExternalAuditAnchorPublicationStatusDocument status = anchor == null ? null : statusesByAnchorId.get(anchor.anchorId());
+            boolean present = status != null && ExternalAuditAnchor.STATUS_PUBLISHED.equals(status.externalPublicationStatus());
+            if (!present && openStart == null) {
+                openStart = position;
+            }
+            if ((present || position == to) && openStart != null) {
+                long end = present ? position - 1 : position;
+                ranges.add(new ExternalAuditAnchorMissingRange(openStart, end));
+                openStart = null;
+                if (ranges.size() >= MAX_MISSING_RANGES) {
+                    return List.copyOf(ranges);
+                }
+            }
+        }
+        return List.copyOf(ranges);
+    }
+
+    private PublicationCoverage publicationCoverage(String partitionKey, int limit) {
+        if (publicationStatusRepository == null) {
+            return new PublicationCoverage(0, 0, 0, 0);
+        }
+        int requiredFailures = 0;
+        int localStatusUnverified = 0;
+        int recovered = 0;
+        int unrecovered = 0;
+        List<AuditAnchorDocument> anchors = anchorRepository.findHeadWindow(partitionKey, limit);
+        if (anchors == null) {
+            anchors = List.of();
+        }
+        for (AuditAnchorDocument anchor : anchors) {
+            ExternalAuditAnchorPublicationStatusDocument status = publicationStatusRepository.findByLocalAnchorId(anchor.anchorId()).orElse(null);
+            if (status == null) {
+                localStatusUnverified++;
+                unrecovered++;
+                continue;
+            }
+            if (ExternalAuditAnchor.STATUS_LOCAL_ANCHOR_CREATED_EXTERNAL_REQUIRED_FAILED.equals(status.externalPublicationStatus())
+                    || Boolean.TRUE.equals(status.externalRequired())) {
+                requiredFailures++;
+                unrecovered++;
+            } else if (ExternalAuditAnchor.STATUS_LOCAL_STATUS_UNVERIFIED.equals(status.externalPublicationStatus())) {
+                localStatusUnverified++;
+                unrecovered++;
+            } else if ("RECOVERED".equals(status.localTrackingStatus())) {
+                recovered++;
+            } else if (ExternalAuditAnchor.STATUS_MISSING.equals(status.externalPublicationStatus())
+                    || ExternalAuditAnchor.STATUS_INVALID.equals(status.externalPublicationStatus())
+                    || ExternalAuditAnchor.STATUS_FAILED.equals(status.externalPublicationStatus())) {
+                unrecovered++;
+            }
+        }
+        return new PublicationCoverage(requiredFailures, localStatusUnverified, recovered, unrecovered);
+    }
+
+    private ExternalAuditAnchorCoverageResponse unavailableCoverage(
+            ExternalAuditIntegrityQuery query,
+            String reasonCode,
+            String message
+    ) {
+        return new ExternalAuditAnchorCoverageResponse(
+                "UNAVAILABLE",
+                0,
+                0,
+                0,
+                null,
+                List.of(),
+                false,
+                query.limit(),
+                reasonCode,
+                message
+        );
+    }
+
     private ExternalAuditIntegrityResponse partial(
             ExternalAuditIntegrityQuery query,
             AuditAnchorDocument local,
@@ -226,11 +369,15 @@ public class ExternalAuditIntegrityService {
                         sink.immutabilityLevel()
                 ),
                 sink.immutabilityLevel(),
+                durabilityGuarantee(),
+                timestampTrustLevel(),
                 signature.verification().status(),
                 signature.signingKeyId(),
                 signature.signingAlgorithm(),
                 signature.signingAuthority(),
                 signature.verification().reasonCode(),
+                List.of(),
+                List.of(),
                 violations
         );
     }
@@ -254,11 +401,15 @@ public class ExternalAuditIntegrityService {
                 null,
                 null,
                 sink.immutabilityLevel(),
+                durabilityGuarantee(),
+                timestampTrustLevel(),
                 signature.verification().status(),
                 null,
                 null,
                 null,
                 signature.verification().reasonCode(),
+                List.of(),
+                List.of(),
                 violations
         );
     }
@@ -288,12 +439,44 @@ public class ExternalAuditIntegrityService {
                         sink.immutabilityLevel()
                 ),
                 sink.immutabilityLevel(),
+                durabilityGuarantee(),
+                timestampTrustLevel(),
                 signature.verification().status(),
                 signature.signingKeyId(),
                 signature.signingAlgorithm(),
                 signature.signingAuthority(),
                 signature.verification().reasonCode(),
+                List.of(),
+                List.of(),
                 violations
+        );
+    }
+
+    private ExternalAuditIntegrityResponse conflict(
+            ExternalAuditIntegrityQuery query,
+            ExternalAuditAnchorConflictException exception
+    ) {
+        return new ExternalAuditIntegrityResponse(
+                "CONFLICT",
+                0,
+                query.limit(),
+                query.sourceService(),
+                query.partitionKey(),
+                "CONFLICT",
+                "External anchor witnesses contain incompatible truths.",
+                null,
+                null,
+                sink.immutabilityLevel(),
+                durabilityGuarantee(),
+                timestampTrustLevel(),
+                "UNAVAILABLE",
+                null,
+                null,
+                null,
+                "CONFLICT",
+                exception.conflictingHashes(),
+                exception.witnessSources(),
+                List.of(new AuditIntegrityViolation("EXTERNAL_ANCHOR_CONFLICT", 1, "EXTERNAL_ANCHOR_CONFLICT"))
         );
     }
 
@@ -307,6 +490,16 @@ public class ExternalAuditIntegrityService {
             }
             throw exception;
         }
+    }
+
+    private String timestampTrustLevel() {
+        ExternalWitnessCapabilities capabilities = sink.capabilities();
+        return capabilities == null ? "APP_OBSERVED" : capabilities.timestampTrustLevel();
+    }
+
+    private ExternalDurabilityGuarantee durabilityGuarantee() {
+        ExternalWitnessCapabilities capabilities = sink.capabilities();
+        return capabilities == null ? ExternalDurabilityGuarantee.NONE : capabilities.durabilityGuarantee();
     }
 
     private SignatureEnrichment enrichSignature(ExternalAuditAnchor external, ExternalAnchorReference reference) {
@@ -419,6 +612,14 @@ public class ExternalAuditIntegrityService {
         }
     }
 
+    private record PublicationCoverage(
+            int requiredPublicationFailures,
+            int localStatusUnverified,
+            int recoveredCount,
+            int unrecoveredCount
+    ) {
+    }
+
     private void auditExternalIntegrityRead(
             ExternalAuditIntegrityQuery query,
             ExternalAuditIntegrityResponse response,
@@ -454,6 +655,8 @@ public class ExternalAuditIntegrityService {
     private boolean isExternalIntegrityMismatch(String reason) {
         return "EXTERNAL_OBJECT_KEY_MISMATCH".equals(reason)
                 || "EXTERNAL_PAYLOAD_HASH_MISMATCH".equals(reason)
+                || "EXTERNAL_ANCHOR_ID_MISMATCH".equals(reason)
+                || "EXTERNAL_ANCHOR_ID_VERSION_UNSUPPORTED".equals(reason)
                 || "MISMATCH".equals(reason);
     }
 

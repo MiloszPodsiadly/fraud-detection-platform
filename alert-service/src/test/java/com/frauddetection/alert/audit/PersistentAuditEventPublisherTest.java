@@ -1,4 +1,6 @@
 package com.frauddetection.alert.audit;
+import com.frauddetection.alert.audit.external.ExternalAuditAnchorPublicationRequiredException;
+import com.frauddetection.alert.audit.external.ExternalAuditAnchorPublisher;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
@@ -27,6 +29,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -342,6 +345,292 @@ class PersistentAuditEventPublisherTest {
         assertThatThrownBy(() -> publisher.publish(event("alert-1")))
                 .isInstanceOf(AuditPersistenceUnavailableException.class);
         assertThat(meterRegistry.get("fraud_platform_audit_anchor_write_failures_total").counter().count()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void shouldFailClosedWhenRequiredExternalAnchorPublicationFails() {
+        AuditEventRepository repository = mock(AuditEventRepository.class);
+        AuditAnchorRepository anchorRepository = mock(AuditAnchorRepository.class);
+        AuditChainLockRepository lockRepository = mock(AuditChainLockRepository.class);
+        ExternalAuditAnchorPublisher externalAnchorPublisher = mock(ExternalAuditAnchorPublisher.class);
+        AuditAnchorDocument anchor = new AuditAnchorDocument(
+                "anchor-1",
+                Instant.parse("2026-04-23T10:00:00Z"),
+                AuditEventDocument.PARTITION_KEY,
+                "hash-1",
+                1L,
+                "SHA-256"
+        );
+        when(repository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY)).thenReturn(Optional.empty());
+        AtomicReference<AuditEventDocument> latest = new AtomicReference<>();
+        List<AuditEventDocument> inserted = new ArrayList<>();
+        when(repository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY)).thenAnswer(invocation -> Optional.ofNullable(latest.get()));
+        when(repository.insert(any(AuditEventDocument.class))).thenAnswer(invocation -> {
+            AuditEventDocument document = invocation.getArgument(0);
+            inserted.add(document);
+            latest.set(document);
+            return document;
+        });
+        when(anchorRepository.insert(any(AuditAnchorDocument.class))).thenReturn(anchor);
+        org.mockito.Mockito.doThrow(new ExternalAuditAnchorPublicationRequiredException("WRITE_NOT_VERIFIED"))
+                .when(externalAnchorPublisher)
+                .publishRequired(anchor);
+        PersistentAuditEventPublisher publisher = new PersistentAuditEventPublisher(
+                repository,
+                anchorRepository,
+                lockRepository,
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                externalAnchorPublisher,
+                true,
+                3,
+                1L
+        );
+
+        assertThatThrownBy(() -> publisher.publish(event("alert-1").withOutcome(AuditOutcome.ATTEMPTED, null)))
+                .isInstanceOf(ExternalAuditAnchorPublicationRequiredException.class)
+                .extracting("reason")
+                .isEqualTo("WRITE_NOT_VERIFIED");
+        verify(externalAnchorPublisher).publishRequired(anchor);
+        verify(lockRepository, times(2)).acquire(eq(AuditEventDocument.PARTITION_KEY), any(String.class));
+        verify(lockRepository, times(2)).release(eq(AuditEventDocument.PARTITION_KEY), any(String.class));
+        assertThat(inserted).hasSize(2);
+        assertThat(inserted).extracting(AuditEventDocument::outcome)
+                .containsExactly(AuditOutcome.ATTEMPTED, AuditOutcome.ABORTED_EXTERNAL_ANCHOR_REQUIRED);
+        assertThat(inserted).extracting(AuditEventDocument::outcome)
+                .doesNotContain(AuditOutcome.SUCCESS);
+        assertThat(inserted.get(1).previousEventHash()).isEqualTo(inserted.get(0).eventHash());
+        assertThat(inserted.get(1).action()).isEqualTo(AuditAction.EXTERNAL_ANCHOR_REQUIRED_FAILED);
+        assertThat(inserted.get(1).resourceId()).isEqualTo(inserted.get(0).auditId());
+    }
+
+    @Test
+    void shouldExposeCompensationAppendFailureWhenRequiredExternalAnchorPublicationFails() {
+        AuditEventRepository repository = mock(AuditEventRepository.class);
+        AuditAnchorRepository anchorRepository = mock(AuditAnchorRepository.class);
+        AuditChainLockRepository lockRepository = mock(AuditChainLockRepository.class);
+        ExternalAuditAnchorPublisher externalAnchorPublisher = mock(ExternalAuditAnchorPublisher.class);
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        AuditAnchorDocument anchor = new AuditAnchorDocument(
+                "anchor-1",
+                Instant.parse("2026-04-23T10:00:00Z"),
+                AuditEventDocument.PARTITION_KEY,
+                "hash-1",
+                1L,
+                "SHA-256"
+        );
+        when(repository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY))
+                .thenReturn(Optional.empty())
+                .thenThrow(new DataAccessResourceFailureException("mongo down"));
+        when(repository.insert(any(AuditEventDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(anchorRepository.insert(any(AuditAnchorDocument.class))).thenReturn(anchor);
+        org.mockito.Mockito.doThrow(new ExternalAuditAnchorPublicationRequiredException("WRITE_NOT_VERIFIED"))
+                .when(externalAnchorPublisher)
+                .publishRequired(anchor);
+        PersistentAuditEventPublisher publisher = new PersistentAuditEventPublisher(
+                repository,
+                anchorRepository,
+                lockRepository,
+                new AlertServiceMetrics(meterRegistry),
+                externalAnchorPublisher,
+                true,
+                true,
+                3,
+                1L
+        );
+
+        assertThatThrownBy(() -> publisher.publish(event("alert-1")))
+                .isInstanceOf(ExternalAuditAnchorPublicationRequiredException.class)
+                .extracting("reason")
+                .isEqualTo("WRITE_NOT_VERIFIED");
+
+        verify(lockRepository, times(2)).acquire(eq(AuditEventDocument.PARTITION_KEY), any(String.class));
+        assertThat(meterRegistry.get("fraud_platform_audit_persistence_failures_total")
+                .tag("event_type", "external_anchor_required_failed")
+                .counter()
+                .count()).isGreaterThanOrEqualTo(1.0d);
+    }
+
+    @Test
+    void shouldPublishRequiredExternalAnchorForSuccessEvent() {
+        AuditEventRepository repository = mock(AuditEventRepository.class);
+        AuditAnchorRepository anchorRepository = mock(AuditAnchorRepository.class);
+        AuditChainLockRepository lockRepository = mock(AuditChainLockRepository.class);
+        ExternalAuditAnchorPublisher externalAnchorPublisher = mock(ExternalAuditAnchorPublisher.class);
+        AtomicReference<AuditEventDocument> latest = new AtomicReference<>();
+        List<AuditEventDocument> inserted = new ArrayList<>();
+        when(repository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY)).thenAnswer(invocation -> Optional.ofNullable(latest.get()));
+        when(repository.insert(any(AuditEventDocument.class))).thenAnswer(invocation -> {
+            AuditEventDocument document = invocation.getArgument(0);
+            inserted.add(document);
+            latest.set(document);
+            return document;
+        });
+        when(anchorRepository.insert(any(AuditAnchorDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        PersistentAuditEventPublisher publisher = new PersistentAuditEventPublisher(
+                repository,
+                anchorRepository,
+                lockRepository,
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                externalAnchorPublisher,
+                true,
+                true,
+                3,
+                1L
+        );
+
+        publisher.publish(event("alert-1"));
+
+        assertThat(inserted).hasSize(1);
+        assertThat(inserted).extracting(AuditEventDocument::outcome)
+                .containsExactly(AuditOutcome.SUCCESS);
+        verify(externalAnchorPublisher).publishRequired(any(AuditAnchorDocument.class));
+    }
+
+    @Test
+    void shouldCompensateSuccessWhenRequiredExternalAnchorPublicationFails() {
+        AuditEventRepository repository = mock(AuditEventRepository.class);
+        AuditAnchorRepository anchorRepository = mock(AuditAnchorRepository.class);
+        AuditChainLockRepository lockRepository = mock(AuditChainLockRepository.class);
+        ExternalAuditAnchorPublisher externalAnchorPublisher = mock(ExternalAuditAnchorPublisher.class);
+        AtomicReference<AuditEventDocument> latest = new AtomicReference<>();
+        List<AuditEventDocument> inserted = new ArrayList<>();
+        when(repository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY)).thenAnswer(invocation -> Optional.ofNullable(latest.get()));
+        when(repository.insert(any(AuditEventDocument.class))).thenAnswer(invocation -> {
+            AuditEventDocument document = invocation.getArgument(0);
+            inserted.add(document);
+            latest.set(document);
+            return document;
+        });
+        when(anchorRepository.insert(any(AuditAnchorDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        org.mockito.Mockito.doThrow(new ExternalAuditAnchorPublicationRequiredException("WRITE_NOT_VERIFIED"))
+                .when(externalAnchorPublisher)
+                .publishRequired(any(AuditAnchorDocument.class));
+        PersistentAuditEventPublisher publisher = new PersistentAuditEventPublisher(
+                repository,
+                anchorRepository,
+                lockRepository,
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                externalAnchorPublisher,
+                true,
+                true,
+                3,
+                1L
+        );
+
+        assertThatThrownBy(() -> publisher.publish(event("alert-1")))
+                .isInstanceOf(ExternalAuditAnchorPublicationRequiredException.class)
+                .extracting("reason")
+                .isEqualTo("WRITE_NOT_VERIFIED");
+
+        assertThat(inserted).hasSize(2);
+        assertThat(inserted).extracting(AuditEventDocument::outcome)
+                .containsExactly(AuditOutcome.SUCCESS, AuditOutcome.ABORTED_EXTERNAL_ANCHOR_REQUIRED);
+        assertThat(inserted.get(1).previousEventHash()).isEqualTo(inserted.get(0).eventHash());
+        assertThat(inserted.get(1).resourceId()).isEqualTo(inserted.get(0).auditId());
+        verify(externalAnchorPublisher).publishRequired(any(AuditAnchorDocument.class));
+    }
+
+    @Test
+    void shouldKeepBusinessWriteFailureAsFailedWithoutFalseSuccess() {
+        AuditEventRepository repository = mock(AuditEventRepository.class);
+        AuditAnchorRepository anchorRepository = mock(AuditAnchorRepository.class);
+        AuditChainLockRepository lockRepository = mock(AuditChainLockRepository.class);
+        ExternalAuditAnchorPublisher externalAnchorPublisher = mock(ExternalAuditAnchorPublisher.class);
+        List<AuditEventDocument> inserted = new ArrayList<>();
+        when(repository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY)).thenReturn(Optional.empty());
+        when(repository.insert(any(AuditEventDocument.class))).thenAnswer(invocation -> {
+            AuditEventDocument document = invocation.getArgument(0);
+            inserted.add(document);
+            return document;
+        });
+        when(anchorRepository.insert(any(AuditAnchorDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        PersistentAuditEventPublisher publisher = new PersistentAuditEventPublisher(
+                repository,
+                anchorRepository,
+                lockRepository,
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                externalAnchorPublisher,
+                true,
+                true,
+                3,
+                1L
+        );
+
+        publisher.publish(event("alert-1").withOutcome(AuditOutcome.FAILED, "BUSINESS_WRITE_FAILED"));
+
+        assertThat(inserted).hasSize(1);
+        assertThat(inserted.getFirst().outcome()).isEqualTo(AuditOutcome.FAILED);
+        assertThat(inserted).extracting(AuditEventDocument::outcome).doesNotContain(AuditOutcome.SUCCESS);
+        verify(externalAnchorPublisher).publishRequired(any(AuditAnchorDocument.class));
+    }
+
+    @Test
+    void shouldNotBlockRequestPathWhenPublicationIsEnabledButNotRequired() {
+        AuditEventRepository repository = mock(AuditEventRepository.class);
+        AuditAnchorRepository anchorRepository = mock(AuditAnchorRepository.class);
+        AuditChainLockRepository lockRepository = mock(AuditChainLockRepository.class);
+        ExternalAuditAnchorPublisher externalAnchorPublisher = mock(ExternalAuditAnchorPublisher.class);
+        List<AuditEventDocument> inserted = new ArrayList<>();
+        when(repository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY)).thenReturn(Optional.empty());
+        when(repository.insert(any(AuditEventDocument.class))).thenAnswer(invocation -> {
+            AuditEventDocument document = invocation.getArgument(0);
+            inserted.add(document);
+            return document;
+        });
+        when(anchorRepository.insert(any(AuditAnchorDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        org.mockito.Mockito.doThrow(new ExternalAuditAnchorPublicationRequiredException("WRITE_NOT_VERIFIED"))
+                .when(externalAnchorPublisher)
+                .publishRequired(any(AuditAnchorDocument.class));
+        PersistentAuditEventPublisher publisher = new PersistentAuditEventPublisher(
+                repository,
+                anchorRepository,
+                lockRepository,
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                externalAnchorPublisher,
+                false,
+                false,
+                3,
+                1L
+        );
+
+        publisher.publish(event("alert-1"));
+
+        assertThat(inserted).hasSize(1);
+        assertThat(inserted.getFirst().outcome()).isEqualTo(AuditOutcome.SUCCESS);
+        org.mockito.Mockito.verifyNoInteractions(externalAnchorPublisher);
+    }
+
+    @Test
+    void shouldFailClosedWhenExternalAnchoringEnabledWithoutPublisherBoundary() {
+        AuditEventRepository repository = mock(AuditEventRepository.class);
+        AuditAnchorRepository anchorRepository = mock(AuditAnchorRepository.class);
+        AuditChainLockRepository lockRepository = mock(AuditChainLockRepository.class);
+        AuditAnchorDocument anchor = new AuditAnchorDocument(
+                "anchor-1",
+                Instant.parse("2026-04-23T10:00:00Z"),
+                AuditEventDocument.PARTITION_KEY,
+                "hash-1",
+                1L,
+                "SHA-256"
+        );
+        when(repository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY)).thenReturn(Optional.empty());
+        when(repository.insert(any(AuditEventDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(anchorRepository.insert(any(AuditAnchorDocument.class))).thenReturn(anchor);
+        PersistentAuditEventPublisher publisher = new PersistentAuditEventPublisher(
+                repository,
+                anchorRepository,
+                lockRepository,
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                null,
+                true,
+                3,
+                1L
+        );
+
+        assertThatThrownBy(() -> publisher.publish(event("alert-1")))
+                .isInstanceOf(ExternalAuditAnchorPublicationRequiredException.class)
+                .extracting("reason")
+                .isEqualTo("UNAVAILABLE");
     }
 
     void shouldRejectApplicationLevelAuditMutationAttempts() {

@@ -7,6 +7,17 @@ interface ObjectStoreAuditAnchorClient {
 
     Optional<byte[]> getObject(String bucket, String key);
 
+    default Optional<ObjectStoreAuditAnchorObject> getObjectWithMetadata(String bucket, String key) {
+        return getObject(bucket, key)
+                .map(content -> new ObjectStoreAuditAnchorObject(
+                        content,
+                        null,
+                        ExternalWitnessTimestampType.APP_OBSERVED,
+                        "APP_CLOCK",
+                        false
+                ));
+    }
+
     void putObjectIfAbsent(String bucket, String key, byte[] content);
 
     default void putObject(String bucket, String key, byte[] content) {
@@ -43,6 +54,10 @@ interface ObjectStoreAuditAnchorClient {
     default ExternalImmutabilityLevel immutabilityLevel(String bucket, String keyPrefix) {
         return ExternalImmutabilityLevel.NONE;
     }
+
+    default ExternalWitnessCapabilities capabilities(String bucket, String keyPrefix) {
+        return ExternalWitnessCapabilities.objectStore(immutabilityLevel(bucket, keyPrefix));
+    }
 }
 
 record ObjectStoreAuditAnchorKeyPage(
@@ -52,4 +67,13 @@ record ObjectStoreAuditAnchorKeyPage(
     ObjectStoreAuditAnchorKeyPage {
         keys = keys == null ? List.of() : List.copyOf(keys);
     }
+}
+
+record ObjectStoreAuditAnchorObject(
+        byte[] content,
+        java.time.Instant timestampValue,
+        ExternalWitnessTimestampType timestampType,
+        String timestampSource,
+        boolean timestampVerified
+) {
 }

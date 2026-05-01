@@ -30,10 +30,41 @@ class ExternalAuditAnchorPublicationStatusRepository {
             ExternalImmutabilityLevel immutabilityLevel,
             SignedAuditAnchorPayload signature
     ) throws DataAccessException {
+        recordSuccess(anchor, publishedAt, sinkType, reference, immutabilityLevel, null, "RECORDED", signature);
+    }
+
+    void recordRecovered(
+            AuditAnchorDocument anchor,
+            Instant publishedAt,
+            String sinkType,
+            ExternalAnchorReference reference,
+            ExternalImmutabilityLevel immutabilityLevel,
+            String manifestStatus,
+            SignedAuditAnchorPayload signature
+    ) throws DataAccessException {
+        recordSuccess(anchor, publishedAt, sinkType, reference, immutabilityLevel, manifestStatus, "RECOVERED", signature);
+    }
+
+    void recordSuccess(
+            AuditAnchorDocument anchor,
+            Instant publishedAt,
+            String sinkType,
+            ExternalAnchorReference reference,
+            ExternalImmutabilityLevel immutabilityLevel,
+            String manifestStatus,
+            String localTrackingStatus,
+            SignedAuditAnchorPayload signature
+    ) throws DataAccessException {
         Query query = query(anchor.anchorId());
         Update status = base(anchor, publishedAt)
                 .set("external_published", true)
                 .set("external_publication_status", ExternalAuditAnchor.STATUS_PUBLISHED)
+                .set("external_object_status", ExternalAuditAnchor.STATUS_PUBLISHED)
+                .set("head_manifest_status", safe(manifestStatus))
+                .set("local_tracking_status", safe(localTrackingStatus))
+                .set("local_anchor_status", "CREATED")
+                .set("external_required", false)
+                .set("manifest_status", safe(manifestStatus))
                 .set("external_published_at", publishedAt)
                 .set("external_sink_type", safe(sinkType))
                 .set("external_key", reference == null ? null : safe(reference.externalKey(), 300))
@@ -49,7 +80,6 @@ class ExternalAuditAnchorPublicationStatusRepository {
                 .set("signing_authority", signature == null ? null : safe(signature.signingAuthority()))
                 .set("signed_payload_hash", signature == null ? null : safe(signature.signedPayloadHash(), 128))
                 .inc("external_publish_attempts", 1)
-                .unset("manifest_status")
                 .unset("last_external_publish_failure_reason");
         mongoTemplate.upsert(query, status, ExternalAuditAnchorPublicationStatusDocument.class);
     }
@@ -67,7 +97,12 @@ class ExternalAuditAnchorPublicationStatusRepository {
         Query query = query(anchor.anchorId());
         Update status = base(anchor, attemptedAt)
                 .set("external_published", false)
-                .set("external_publication_status", ExternalAuditAnchor.STATUS_PARTIAL)
+                .set("external_publication_status", ExternalAuditAnchor.STATUS_UNVERIFIED)
+                .set("external_object_status", reference == null ? ExternalAuditAnchor.STATUS_UNVERIFIED : ExternalAuditAnchor.STATUS_PUBLISHED)
+                .set("head_manifest_status", safe(manifestStatus))
+                .set("local_tracking_status", "RECORDED")
+                .set("local_anchor_status", "CREATED")
+                .set("external_required", false)
                 .set("external_sink_type", safe(sinkType))
                 .set("external_key", reference == null ? null : safe(reference.externalKey(), 300))
                 .set("anchor_hash", reference == null ? null : safe(reference.anchorHash(), 128))
@@ -92,7 +127,12 @@ class ExternalAuditAnchorPublicationStatusRepository {
         Query query = query(anchor.anchorId());
         Update status = base(anchor, attemptedAt)
                 .set("external_published", false)
-                .set("external_publication_status", "FAILED")
+                .set("external_publication_status", ExternalAuditAnchor.STATUS_FAILED)
+                .set("external_object_status", ExternalAuditAnchor.STATUS_FAILED)
+                .set("head_manifest_status", null)
+                .set("local_tracking_status", "RECORDED")
+                .set("local_anchor_status", "CREATED")
+                .set("external_required", false)
                 .inc("external_publish_attempts", 1)
                 .unset("external_published_at")
                 .unset("external_sink_type")
@@ -113,8 +153,75 @@ class ExternalAuditAnchorPublicationStatusRepository {
         mongoTemplate.upsert(query, status, ExternalAuditAnchorPublicationStatusDocument.class);
     }
 
+    void recordRequiredFailure(AuditAnchorDocument anchor, Instant attemptedAt, String reason) throws DataAccessException {
+        Query query = query(anchor.anchorId());
+        Update status = base(anchor, attemptedAt)
+                .set("external_published", false)
+                .set("external_publication_status", ExternalAuditAnchor.STATUS_LOCAL_ANCHOR_CREATED_EXTERNAL_REQUIRED_FAILED)
+                .set("external_object_status", externalObjectStatusFor(reason))
+                .set("head_manifest_status", null)
+                .set("local_tracking_status", "RECORDED")
+                .set("local_anchor_status", "CREATED")
+                .set("external_required", true)
+                .inc("external_publish_attempts", 1)
+                .unset("external_published_at")
+                .unset("external_sink_type")
+                .unset("external_key")
+                .unset("anchor_hash")
+                .unset("external_hash")
+                .unset("external_reference_verified_at")
+                .unset("external_immutability_level")
+                .unset("manifest_status")
+                .unset("signature_status")
+                .unset("signature")
+                .unset("signing_key_id")
+                .unset("signing_algorithm")
+                .unset("signed_at")
+                .unset("signing_authority")
+                .unset("signed_payload_hash")
+                .set("last_external_publish_failure_reason", ExternalAuditAnchor.REASON_EXTERNAL_ANCHOR_REQUIRED_FAILED);
+        mongoTemplate.upsert(query, status, ExternalAuditAnchorPublicationStatusDocument.class);
+    }
+
+    void recordRecoveryMissing(AuditAnchorDocument anchor, Instant attemptedAt) throws DataAccessException {
+        Query query = query(anchor.anchorId());
+        Update status = base(anchor, attemptedAt)
+                .set("external_published", false)
+                .set("external_publication_status", ExternalAuditAnchor.STATUS_MISSING)
+                .set("external_object_status", ExternalAuditAnchor.STATUS_MISSING)
+                .set("head_manifest_status", null)
+                .set("local_tracking_status", "RECORDED")
+                .set("local_anchor_status", "CREATED")
+                .set("external_required", false)
+                .set("last_external_publish_failure_reason", ExternalAuditAnchor.STATUS_MISSING);
+        mongoTemplate.upsert(query, status, ExternalAuditAnchorPublicationStatusDocument.class);
+    }
+
+    void recordRecoveryInvalid(AuditAnchorDocument anchor, Instant attemptedAt, String reason) throws DataAccessException {
+        Query query = query(anchor.anchorId());
+        Update status = base(anchor, attemptedAt)
+                .set("external_published", false)
+                .set("external_publication_status", ExternalAuditAnchor.STATUS_INVALID)
+                .set("external_object_status", ExternalAuditAnchor.STATUS_INVALID)
+                .set("head_manifest_status", null)
+                .set("local_tracking_status", "RECORDED")
+                .set("local_anchor_status", "CREATED")
+                .set("external_required", false)
+                .set("last_external_publish_failure_reason", safe(reason));
+        mongoTemplate.upsert(query, status, ExternalAuditAnchorPublicationStatusDocument.class);
+    }
+
     java.util.Optional<ExternalAuditAnchorPublicationStatusDocument> findByLocalAnchorId(String localAnchorId) throws DataAccessException {
         return java.util.Optional.ofNullable(mongoTemplate.findOne(query(localAnchorId), ExternalAuditAnchorPublicationStatusDocument.class));
+    }
+
+    List<ExternalAuditAnchorPublicationStatusDocument> findByLocalAnchorIds(List<String> localAnchorIds) throws DataAccessException {
+        if (localAnchorIds == null || localAnchorIds.isEmpty()) {
+            return List.of();
+        }
+        Query query = new Query(Criteria.where("local_anchor_id").in(localAnchorIds))
+                .limit(Math.min(localAnchorIds.size(), 100));
+        return mongoTemplate.find(query, ExternalAuditAnchorPublicationStatusDocument.class);
     }
 
     List<ExternalAuditAnchorPublicationStatusDocument> findNotPublished(String partitionKey, int limit) throws DataAccessException {
@@ -124,6 +231,13 @@ class ExternalAuditAnchorPublicationStatusRepository {
                 .with(Sort.by(Sort.Direction.ASC, "chain_position"))
                 .limit(boundedLimit);
         return mongoTemplate.find(query, ExternalAuditAnchorPublicationStatusDocument.class);
+    }
+
+    private String externalObjectStatusFor(String reason) {
+        if ("IO_ERROR".equals(reason) || "TIMEOUT".equals(reason) || "UNAVAILABLE".equals(reason)) {
+            return ExternalAuditAnchor.STATUS_UNAVAILABLE;
+        }
+        return ExternalAuditAnchor.STATUS_FAILED;
     }
 
     private Query query(String localAnchorId) {

@@ -31,6 +31,9 @@ class ExternalAuditAnchorSinkConfiguration {
             ObjectProvider<ObjectStoreAuditAnchorClient> objectStoreClient,
             AlertServiceMetrics metrics,
             Environment environment,
+            @Value("${app.audit.external-anchoring.publication.enabled:${app.audit.external-anchoring.enabled:false}}") boolean publicationEnabled,
+            @Value("${app.audit.external-anchoring.publication.required:${app.audit.external-anchoring.enabled:false}}") boolean publicationRequired,
+            @Value("${app.audit.external-anchoring.publication.fail-closed:${app.audit.external-anchoring.publication.required:${app.audit.external-anchoring.enabled:false}}}") boolean publicationFailClosed,
             @Value("${app.audit.external-anchoring.sink:disabled}") String sink,
             @Value("${app.audit.external-anchoring.local-file.path:./target/audit-external-anchors.jsonl}") String localFilePath,
             @Value("${app.audit.external-anchoring.allow-local-file-in-prod:false}") boolean allowLocalFileInProd,
@@ -45,9 +48,23 @@ class ExternalAuditAnchorSinkConfiguration {
             @Value("${app.audit.external-anchoring.object-store.operation-timeout:2s}") Duration objectStoreOperationTimeout,
             @Value("${app.audit.external-anchoring.object-store.retry-backoff:100ms}") Duration objectStoreRetryBackoff,
             @Value("${app.audit.external-anchoring.object-store.max-attempts:2}") int objectStoreMaxAttempts,
+            @Value("${app.audit.external-anchoring.policy.minimum-independence-level:SEPARATE_ACCOUNT}") String minimumIndependenceLevel,
+            @Value("${app.audit.external-anchoring.policy.minimum-immutability-level:ENFORCED}") String minimumImmutabilityLevel,
+            @Value("${app.audit.external-anchoring.policy.minimum-timestamp-trust-level:MEDIUM}") String minimumTimestampTrustLevel,
+            @Value("${app.audit.external-anchoring.policy.require-delete-protection:true}") boolean requireDeleteProtection,
+            @Value("${app.audit.external-anchoring.policy.require-overwrite-protection:true}") boolean requireOverwriteProtection,
+            @Value("${app.audit.external-anchoring.policy.require-stable-reference:true}") boolean requireStableReference,
+            @Value("${app.audit.external-anchoring.policy.allow-separate-account-in-prod:false}") boolean allowSeparateAccountInProd,
             @Value("${HOSTNAME:alert-service}") String instanceId
     ) {
+        warnIfLegacyExternalAnchoringEnabled(environment);
+        validatePublicationPolicy(publicationRequired, publicationFailClosed);
+        boolean strictPublication = publicationRequired || publicationFailClosed;
+        validateForbiddenPublisher(sink, publicationEnabled || strictPublication);
         if ("local-file".equals(sink)) {
+            if (strictPublication) {
+                throw new IllegalStateException("External anchoring requires a verified external witness; local-file is forbidden.");
+            }
             validateLocalFileSink(environment, allowLocalFileInProd);
             log.info("External audit anchor sink configured: sink_type=local-file path={}", localFilePath);
             return new LocalFileExternalAuditAnchorSink(Path.of(localFilePath), objectMapper);
@@ -70,8 +87,21 @@ class ExternalAuditAnchorSinkConfiguration {
                     objectStoreBucket,
                     objectStorePrefix,
                     objectStoreStartupCheckEnabled,
-                    objectStoreStartupTestWriteEnabled,
+                    publicationEnabled || strictPublication || objectStoreStartupTestWriteEnabled,
                     instanceId
+            );
+            ExternalWitnessCapabilities capabilities = client.capabilities(objectStoreBucket, trimSlashes(objectStorePrefix));
+            validateExternalWitnessCapabilities(
+                    capabilities,
+                    strictPublication,
+                    environment,
+                    minimumIndependenceLevel,
+                    minimumImmutabilityLevel,
+                    minimumTimestampTrustLevel,
+                    requireDeleteProtection,
+                    requireOverwriteProtection,
+                    requireStableReference,
+                    allowSeparateAccountInProd
             );
             log.info(
                     "External audit anchor sink configured: sink_type=object-store bucket={} prefix={} region_configured={} endpoint_configured={} immutability_level={}",
@@ -90,14 +120,160 @@ class ExternalAuditAnchorSinkConfiguration {
                     objectStoreOperationTimeout,
                     objectStoreRetryBackoff,
                     objectStoreMaxAttempts,
-                    immutabilityLevel
+                    immutabilityLevel,
+                    capabilities
             );
         }
         if ("external-object-store".equals(sink)) {
             throw new IllegalStateException("Use app.audit.external-anchoring.sink=object-store for FDP-22 object-store anchoring.");
         }
+        if (strictPublication) {
+            throw new IllegalStateException("External anchoring is enabled but no verified external witness publisher is configured.");
+        }
         log.info("External audit anchor sink configured: sink_type=disabled");
         return new DisabledExternalAuditAnchorSink();
+    }
+
+    ExternalAuditAnchorSink externalAuditAnchorSink(
+            ObjectMapper objectMapper,
+            ObjectProvider<ObjectStoreAuditAnchorClient> objectStoreClient,
+            AlertServiceMetrics metrics,
+            Environment environment,
+            boolean externalAnchoringEnabled,
+            String sink,
+            String localFilePath,
+            boolean allowLocalFileInProd,
+            String objectStoreBucket,
+            String objectStorePrefix,
+            String objectStoreRegion,
+            String objectStoreEndpoint,
+            String objectStoreAccessKeyId,
+            String objectStoreSecretAccessKey,
+            boolean objectStoreStartupCheckEnabled,
+            boolean objectStoreStartupTestWriteEnabled,
+            Duration objectStoreOperationTimeout,
+            Duration objectStoreRetryBackoff,
+            int objectStoreMaxAttempts,
+            String instanceId
+    ) {
+        return externalAuditAnchorSink(
+                objectMapper,
+                objectStoreClient,
+                metrics,
+                environment,
+                externalAnchoringEnabled,
+                externalAnchoringEnabled,
+                externalAnchoringEnabled,
+                sink,
+                localFilePath,
+                allowLocalFileInProd,
+                objectStoreBucket,
+                objectStorePrefix,
+                objectStoreRegion,
+                objectStoreEndpoint,
+                objectStoreAccessKeyId,
+                objectStoreSecretAccessKey,
+                objectStoreStartupCheckEnabled,
+                objectStoreStartupTestWriteEnabled,
+                objectStoreOperationTimeout,
+                objectStoreRetryBackoff,
+                objectStoreMaxAttempts,
+                "SEPARATE_ACCOUNT",
+                "ENFORCED",
+                "MEDIUM",
+                true,
+                true,
+                true,
+                false,
+                instanceId
+        );
+    }
+
+    ExternalAuditAnchorSink externalAuditAnchorSink(
+            ObjectMapper objectMapper,
+            ObjectProvider<ObjectStoreAuditAnchorClient> objectStoreClient,
+            AlertServiceMetrics metrics,
+            Environment environment,
+            boolean publicationEnabled,
+            boolean publicationRequired,
+            boolean publicationFailClosed,
+            String sink,
+            String localFilePath,
+            boolean allowLocalFileInProd,
+            String objectStoreBucket,
+            String objectStorePrefix,
+            String objectStoreRegion,
+            String objectStoreEndpoint,
+            String objectStoreAccessKeyId,
+            String objectStoreSecretAccessKey,
+            boolean objectStoreStartupCheckEnabled,
+            boolean objectStoreStartupTestWriteEnabled,
+            Duration objectStoreOperationTimeout,
+            Duration objectStoreRetryBackoff,
+            int objectStoreMaxAttempts,
+            String instanceId
+    ) {
+        return externalAuditAnchorSink(
+                objectMapper,
+                objectStoreClient,
+                metrics,
+                environment,
+                publicationEnabled,
+                publicationRequired,
+                publicationFailClosed,
+                sink,
+                localFilePath,
+                allowLocalFileInProd,
+                objectStoreBucket,
+                objectStorePrefix,
+                objectStoreRegion,
+                objectStoreEndpoint,
+                objectStoreAccessKeyId,
+                objectStoreSecretAccessKey,
+                objectStoreStartupCheckEnabled,
+                objectStoreStartupTestWriteEnabled,
+                objectStoreOperationTimeout,
+                objectStoreRetryBackoff,
+                objectStoreMaxAttempts,
+                "SEPARATE_ACCOUNT",
+                "ENFORCED",
+                "MEDIUM",
+                true,
+                true,
+                true,
+                false,
+                instanceId
+        );
+    }
+
+    private void validatePublicationPolicy(boolean publicationRequired, boolean publicationFailClosed) {
+        if (publicationFailClosed && !publicationRequired) {
+            throw new IllegalStateException("app.audit.external-anchoring.publication.fail-closed=true requires publication.required=true.");
+        }
+    }
+
+    private void warnIfLegacyExternalAnchoringEnabled(Environment environment) {
+        if (environment == null) {
+            return;
+        }
+        boolean legacyEnabled = "true".equalsIgnoreCase(environment.getProperty("AUDIT_EXTERNAL_ANCHORING_ENABLED"))
+                || "true".equalsIgnoreCase(environment.getProperty("app.audit.external-anchoring.enabled"));
+        if (legacyEnabled) {
+            log.warn("app.audit.external-anchoring.enabled is deprecated; use app.audit.external-anchoring.publication.enabled, publication.required, and publication.fail-closed.");
+        }
+    }
+
+    private void validateForbiddenPublisher(String sink, boolean externalAnchoringEnabled) {
+        if (!externalAnchoringEnabled) {
+            return;
+        }
+        if ("disabled".equals(sink)
+                || "noop".equals(sink)
+                || "local-file".equals(sink)
+                || "in-memory".equals(sink)
+                || "same-database".equals(sink)) {
+            throw new IllegalStateException("External anchoring forbids fake publishers: " + sink + ".");
+        }
     }
 
     private void validateLocalFileSink(Environment environment, boolean allowLocalFileInProd) {
@@ -169,6 +345,42 @@ class ExternalAuditAnchorSinkConfiguration {
         return immutabilityLevel;
     }
 
+    private void validateExternalWitnessCapabilities(
+            ExternalWitnessCapabilities capabilities,
+            boolean externalAnchoringEnabled,
+            Environment environment,
+            String minimumIndependenceLevel,
+            String minimumImmutabilityLevel,
+            String minimumTimestampTrustLevel,
+            boolean requireDeleteProtection,
+            boolean requireOverwriteProtection,
+            boolean requireStableReference,
+            boolean allowSeparateAccountInProd
+    ) {
+        if (!externalAnchoringEnabled) {
+            return;
+        }
+        if (capabilities == null
+                || fakeWitnessType(capabilities.witnessType())
+                || lowerThan(capabilities.independenceLevel(), minimumIndependenceLevel, ExternalWitnessIndependenceLevel.class)
+                || lowerThan(capabilities.immutabilityLevel().name(), minimumImmutabilityLevel, ExternalImmutabilityLevel.class)
+                || capabilities.timestampType() == ExternalWitnessTimestampType.APP_OBSERVED
+                || lowerThan(capabilities.timestampTrustLevel(), minimumTimestampTrustLevel, ExternalTimestampTrustLevel.class)
+                || !capabilities.supportsReadAfterWrite()
+                || !capabilities.supportsVersioning()
+                || !capabilities.supportsRetention()
+                || (requireStableReference && !capabilities.supportsStableReference())
+                || (requireOverwriteProtection && !capabilities.supportsWriteOnce())
+                || (requireDeleteProtection && !capabilities.supportsDeleteDenialOrRetention())) {
+            throw new IllegalStateException("External anchoring witness capabilities are not verified.");
+        }
+        if (isProdLike(environment)
+                && lowerThan(capabilities.independenceLevel(), ExternalWitnessIndependenceLevel.CROSS_ORG.name(), ExternalWitnessIndependenceLevel.class)
+                && !allowSeparateAccountInProd) {
+            throw new IllegalStateException("Prod-like external anchoring requires CROSS_ORG witness independence or an explicit SEPARATE_ACCOUNT limitation override.");
+        }
+    }
+
     private void verifyStartupProbeWrite(
             ObjectStoreAuditAnchorClient client,
             String bucket,
@@ -204,5 +416,37 @@ class ExternalAuditAnchorSinkConfiguration {
             trimmed = trimmed.substring(0, trimmed.length() - 1);
         }
         return trimmed;
+    }
+
+    private boolean fakeWitnessType(String witnessType) {
+        String normalized = witnessType == null ? "" : witnessType.trim().toUpperCase();
+        return normalized.isBlank()
+                || "LOCAL_FILE".equals(normalized)
+                || "IN_MEMORY".equals(normalized)
+                || "SAME_DATABASE".equals(normalized)
+                || "NOOP".equals(normalized)
+                || "TEST_FIXTURE".equals(normalized)
+                || "DISABLED".equals(normalized);
+    }
+
+    private boolean isProdLike(Environment environment) {
+        return Arrays.stream(environment.getActiveProfiles()).anyMatch(PROD_LIKE_PROFILES::contains);
+    }
+
+    private <E extends Enum<E>> boolean lowerThan(String actual, String minimum, Class<E> enumType) {
+        E actualValue = enumValue(actual, enumType);
+        E minimumValue = enumValue(minimum, enumType);
+        return actualValue.ordinal() < minimumValue.ordinal();
+    }
+
+    private <E extends Enum<E>> E enumValue(String value, Class<E> enumType) {
+        if (!StringUtils.hasText(value)) {
+            return enumType.getEnumConstants()[0];
+        }
+        try {
+            return Enum.valueOf(enumType, value.trim().toUpperCase());
+        } catch (IllegalArgumentException exception) {
+            return enumType.getEnumConstants()[0];
+        }
     }
 }

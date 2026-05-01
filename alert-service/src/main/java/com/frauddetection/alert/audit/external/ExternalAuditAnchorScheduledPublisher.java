@@ -1,17 +1,21 @@
 package com.frauddetection.alert.audit.external;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 @Component
-@ConditionalOnProperty(name = "app.audit.external-anchoring.enabled", havingValue = "true")
 class ExternalAuditAnchorScheduledPublisher {
 
     private final ExternalAuditAnchorPublisher publisher;
+    private final boolean publicationEnabled;
 
-    ExternalAuditAnchorScheduledPublisher(ExternalAuditAnchorPublisher publisher) {
+    ExternalAuditAnchorScheduledPublisher(
+            ExternalAuditAnchorPublisher publisher,
+            @Value("${app.audit.external-anchoring.publication.enabled:${app.audit.external-anchoring.enabled:false}}") boolean publicationEnabled
+    ) {
         this.publisher = publisher;
+        this.publicationEnabled = publicationEnabled;
     }
 
     @Scheduled(
@@ -19,6 +23,9 @@ class ExternalAuditAnchorScheduledPublisher {
             initialDelayString = "${app.audit.external-anchoring.initial-delay-ms:10000}"
     )
     void publishAnchors() {
+        if (!publicationEnabled) {
+            return;
+        }
         publisher.publishDefaultWindow();
     }
 }

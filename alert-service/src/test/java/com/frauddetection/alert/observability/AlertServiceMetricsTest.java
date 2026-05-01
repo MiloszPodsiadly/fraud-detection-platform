@@ -110,6 +110,7 @@ class AlertServiceMetricsTest {
         metrics.recordEvidenceExport("PARTIAL");
         metrics.recordEvidenceExportRateLimited();
         metrics.recordEvidenceExportRepeatedFingerprint();
+        metrics.recordPostCommitAuditDegraded("SUBMIT_ANALYST_DECISION");
 
         Meter persisted = meterRegistry.get("fraud_platform_audit_events_persisted_total").meter();
         Meter failures = meterRegistry.get("fraud_platform_audit_persistence_failures_total").meter();
@@ -128,6 +129,7 @@ class AlertServiceMetricsTest {
         Meter evidenceExports = meterRegistry.get("fraud_platform_audit_evidence_exports_total").meter();
         Meter evidenceExportRateLimited = meterRegistry.get("fraud_platform_audit_evidence_export_rate_limited_total").meter();
         Meter evidenceExportRepeatedFingerprint = meterRegistry.get("fraud_platform_audit_evidence_export_repeated_fingerprint_total").meter();
+        Meter postCommitDegraded = meterRegistry.get("fraud_platform_post_commit_audit_degraded_total").meter();
 
         assertThat(persisted.getId().getTags())
                 .extracting(Tag::getKey)
@@ -177,6 +179,12 @@ class AlertServiceMetricsTest {
                 .containsExactly("PARTIAL");
         assertThat(evidenceExportRateLimited.getId().getTags()).isEmpty();
         assertThat(evidenceExportRepeatedFingerprint.getId().getTags()).isEmpty();
+        assertThat(postCommitDegraded.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactly("operation");
+        assertThat(postCommitDegraded.getId().getTags())
+                .extracting(Tag::getValue)
+                .containsExactly("SUBMIT_ANALYST_DECISION");
         assertThat(persisted.getId().getTags())
                 .extracting(Tag::getKey)
                 .doesNotContain("actor_id", "resource_id", "audit_event_id", "hash", "exception", "message");

@@ -8,6 +8,8 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditAnchorDocument;
 import com.frauddetection.alert.audit.AuditAnchorRepository;
+import com.frauddetection.alert.audit.AuditEventBusinessSemantics;
+import com.frauddetection.alert.audit.AuditEventCompensationLookup;
 import com.frauddetection.alert.audit.AuditEventDocument;
 import com.frauddetection.alert.audit.AuditEventMetadataSummary;
 import com.frauddetection.alert.audit.AuditEventRepository;
@@ -32,6 +34,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -54,6 +57,7 @@ public class AuditEvidenceExportService {
     private final AuditEvidenceExportRateLimiterStrategy rateLimiter;
     private final AuditEvidenceExportAbuseDetector abuseDetector;
     private final ExternalAuditAnchorPublicationStatusRepository publicationStatusRepository;
+    private final AuditEventCompensationLookup compensationLookup;
 
     private record ExternalAnchorLookup(String status, Map<Long, ExternalAuditAnchor> anchors) {
     }
@@ -83,6 +87,33 @@ public class AuditEvidenceExportService {
         );
     }
 
+    AuditEvidenceExportService(
+            AuditEventRepository eventRepository,
+            AuditAnchorRepository anchorRepository,
+            ExternalAuditAnchorSink sink,
+            AuditEvidenceExportQueryParser queryParser,
+            AlertServiceMetrics metrics,
+            AuditService auditService,
+            CurrentAnalystUser currentAnalystUser,
+            AuditEvidenceExportRateLimiterStrategy rateLimiter,
+            AuditEvidenceExportAbuseDetector abuseDetector,
+            AuditEventCompensationLookup compensationLookup
+    ) {
+        this(
+                eventRepository,
+                anchorRepository,
+                sink,
+                queryParser,
+                metrics,
+                auditService,
+                currentAnalystUser,
+                rateLimiter,
+                abuseDetector,
+                null,
+                compensationLookup
+        );
+    }
+
     @Autowired
     public AuditEvidenceExportService(
             AuditEventRepository eventRepository,
@@ -94,7 +125,8 @@ public class AuditEvidenceExportService {
             CurrentAnalystUser currentAnalystUser,
             AuditEvidenceExportRateLimiterStrategy rateLimiter,
             AuditEvidenceExportAbuseDetector abuseDetector,
-            ExternalAuditAnchorPublicationStatusRepository publicationStatusRepository
+            ExternalAuditAnchorPublicationStatusRepository publicationStatusRepository,
+            AuditEventCompensationLookup compensationLookup
     ) {
         this.eventRepository = eventRepository;
         this.anchorRepository = anchorRepository;
@@ -106,6 +138,7 @@ public class AuditEvidenceExportService {
         this.rateLimiter = rateLimiter;
         this.abuseDetector = abuseDetector;
         this.publicationStatusRepository = publicationStatusRepository;
+        this.compensationLookup = compensationLookup;
     }
 
     public AuditEvidenceExportResponse export(String from, String to, String sourceService, Integer limit) {
@@ -192,8 +225,15 @@ public class AuditEvidenceExportService {
                 .mapToLong(Long::longValue)
                 .max()
                 .orElse(0L);
-        Map<Long, AuditAnchorDocument> localAnchors = localAnchors(query, minPosition, maxPosition);
+        Map<Long, AuditAnchorDocument> localAnchors = localAnchors(query, documents, minPosition, maxPosition);
         ExternalAnchorLookup externalAnchorLookup = externalAnchors(query);
+        List<AuditEventDocument> compensations = compensationLookup == null
+                ? List.of()
+                : compensationLookup.findExternalAnchorAbortCompensations(documents);
+        if (compensations == null) {
+            compensations = List.of();
+        }
+        Map<String, AuditEventBusinessSemantics> semantics = AuditEventBusinessSemantics.index(documents, compensations);
         List<AuditEvidenceExportEvent> events = documents.stream()
                 .map(document -> {
                     Long position = document.chainPosition();
@@ -202,7 +242,8 @@ public class AuditEvidenceExportService {
                     return AuditEvidenceExportEvent.from(
                             document,
                             local == null ? null : AuditEvidenceExportAnchorReference.local(local),
-                            external == null ? null : externalEvidenceReference(external)
+                            external == null ? null : externalEvidenceReference(external),
+                            semantics.get(document.auditId())
                     );
                 })
                 .toList();
@@ -244,16 +285,20 @@ public class AuditEvidenceExportService {
         return new ChainRange(start, end, partial ? first.previousEventHash() : null, partial);
     }
 
-    private Map<Long, AuditAnchorDocument> localAnchors(AuditEvidenceExportQuery query, long minPosition, long maxPosition) {
+    private Map<Long, AuditAnchorDocument> localAnchors(
+            AuditEvidenceExportQuery query,
+            List<AuditEventDocument> documents,
+            long minPosition,
+            long maxPosition
+    ) {
         if (minPosition <= 0 || maxPosition <= 0) {
             return Map.of();
         }
-        return anchorRepository.findByPartitionKeyAndChainPositionBetween(
-                        query.partitionKey(),
-                        minPosition,
-                        maxPosition,
-                        query.limit()
-                ).stream()
+        Set<Long> positions = documents.stream()
+                .map(AuditEventDocument::chainPosition)
+                .filter(position -> position != null && position > 0)
+                .collect(Collectors.toSet());
+        return anchorRepository.findByPartitionKeyAndChainPositionIn(query.partitionKey(), positions).stream()
                 .collect(Collectors.toMap(AuditAnchorDocument::chainPosition, Function.identity(), (left, right) -> left));
     }
 
@@ -384,6 +429,18 @@ public class AuditEvidenceExportService {
         ));
         canonical.put("audit_event_ids", events.stream().map(AuditEvidenceExportEvent::auditEventId).toList());
         canonical.put("event_hashes", events.stream().map(AuditEvidenceExportEvent::eventHash).toList());
+        canonical.put("business_effective", events.stream().map(AuditEvidenceExportEvent::businessEffective).toList());
+        canonical.put("business_effective_status", events.stream().map(AuditEvidenceExportEvent::businessEffectiveStatus).toList());
+        canonical.put("audit_evidence_status", events.stream().map(AuditEvidenceExportEvent::auditEvidenceStatus).toList());
+        canonical.put("external_anchor_status", events.stream().map(AuditEvidenceExportEvent::externalAnchorStatus).toList());
+        canonical.put("trust_level", events.stream().map(AuditEvidenceExportEvent::trustLevel).toList());
+        canonical.put("integrity_status", events.stream().map(AuditEvidenceExportEvent::integrityStatus).toList());
+        canonical.put("signature_policy", events.stream().map(AuditEvidenceExportEvent::signaturePolicy).toList());
+        canonical.put("signature_status", events.stream().map(AuditEvidenceExportEvent::signatureStatus).toList());
+        canonical.put("evidence_source", events.stream().map(AuditEvidenceExportEvent::evidenceSource).toList());
+        canonical.put("confidence", events.stream().map(AuditEvidenceExportEvent::confidence).toList());
+        canonical.put("compensation_type", events.stream().map(AuditEvidenceExportEvent::compensationType).toList());
+        canonical.put("compensated", events.stream().map(AuditEvidenceExportEvent::compensated).toList());
         canonical.put("local_anchor_ids", events.stream()
                 .map(AuditEvidenceExportEvent::localAnchor)
                 .map(anchor -> anchor == null ? null : anchor.anchorId())

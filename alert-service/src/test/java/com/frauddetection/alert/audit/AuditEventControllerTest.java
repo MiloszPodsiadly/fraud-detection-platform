@@ -77,7 +77,15 @@ class AuditEventControllerTest {
                         null,
                         "hash-1",
                         "SHA-256",
-                        "1.0"
+                        "1.0",
+                        false,
+                        null,
+                        true,
+                        BusinessEffectiveStatus.TRUE,
+                        AuditEvidenceStatus.LOCAL_ONLY,
+                        AuditExternalAnchorStatus.LOCAL_STATUS_UNVERIFIED,
+                        CompensationType.UNKNOWN,
+                        null
                 ))
         ));
 
@@ -109,6 +117,11 @@ class AuditEventControllerTest {
                 .andExpect(jsonPath("$.events[0].metadata_summary.correlation_id").value("corr-1"))
                 .andExpect(jsonPath("$.events[0].event_hash").value("hash-1"))
                 .andExpect(jsonPath("$.events[0].hash_algorithm").value("SHA-256"))
+                .andExpect(jsonPath("$.events[0].business_effective").value(true))
+                .andExpect(jsonPath("$.events[0].business_effective_status").value("TRUE"))
+                .andExpect(jsonPath("$.events[0].audit_evidence_status").value("LOCAL_ONLY"))
+                .andExpect(jsonPath("$.events[0].external_anchor_status").value("LOCAL_STATUS_UNVERIFIED"))
+                .andExpect(jsonPath("$.events[0].compensation_type").value("UNKNOWN"))
                 .andExpect(jsonPath("$.events[0].actor_authorities").doesNotExist())
                 .andExpect(jsonPath("$.events[0].request_body").doesNotExist())
                 .andExpect(jsonPath("$.events[0].response_body").doesNotExist());
