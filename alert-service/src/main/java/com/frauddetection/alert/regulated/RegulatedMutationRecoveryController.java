@@ -3,11 +3,10 @@ package com.frauddetection.alert.regulated;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditEventMetadataSummary;
 import com.frauddetection.alert.audit.AuditOutcome;
+import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.AuditService;
 import jakarta.servlet.http.HttpServletRequest;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -20,8 +19,6 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController
 @RequestMapping("/api/v1/regulated-mutations")
 public class RegulatedMutationRecoveryController {
-
-    private static final Logger log = LoggerFactory.getLogger(RegulatedMutationRecoveryController.class);
 
     private final RegulatedMutationRecoveryService recoveryService;
     private final RegulatedMutationInspectionRateLimiter inspectionRateLimiter;
@@ -101,7 +98,7 @@ public class RegulatedMutationRecoveryController {
             auditService.audit(
                     AuditAction.INSPECT_REGULATED_MUTATION_COMMAND,
                     AuditResourceType.REGULATED_MUTATION_COMMAND,
-                    response.idempotencyKey() == null ? null : RegulatedMutationIntentHasher.hash(response.idempotencyKey()),
+                    response.idempotencyKeyHash(),
                     null,
                     authentication == null ? null : authentication.getName(),
                     AuditOutcome.SUCCESS,
@@ -109,7 +106,7 @@ public class RegulatedMutationRecoveryController {
                     new AuditEventMetadataSummary(null, lookupMode, "alert-service", "1.0", null, null, null, null, null)
             );
         } catch (RuntimeException exception) {
-            log.warn("Regulated mutation command inspection audit failed.");
+            throw new AuditPersistenceUnavailableException();
         }
     }
 }

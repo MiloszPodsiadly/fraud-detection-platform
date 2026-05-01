@@ -5,8 +5,10 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.Instant;
 
 public record RegulatedMutationCommandInspectionResponse(
-        @JsonProperty("idempotency_key")
-        String idempotencyKey,
+        @JsonProperty("idempotency_key_hash")
+        String idempotencyKeyHash,
+        @JsonProperty("idempotency_key_masked")
+        String idempotencyKeyMasked,
         String action,
         @JsonProperty("resource_type")
         String resourceType,
@@ -36,7 +38,8 @@ public record RegulatedMutationCommandInspectionResponse(
 ) {
     static RegulatedMutationCommandInspectionResponse from(RegulatedMutationCommandDocument command) {
         return new RegulatedMutationCommandInspectionResponse(
-                command.getIdempotencyKey(),
+                idempotencyKeyHash(command),
+                mask(command.getIdempotencyKey()),
                 command.getAction(),
                 command.getResourceType(),
                 command.getResourceId(),
@@ -52,5 +55,23 @@ public record RegulatedMutationCommandInspectionResponse(
                 command.getLastError(),
                 command.getUpdatedAt()
         );
+    }
+
+    private static String idempotencyKeyHash(RegulatedMutationCommandDocument command) {
+        if (command.getIdempotencyKeyHash() != null && !command.getIdempotencyKeyHash().isBlank()) {
+            return command.getIdempotencyKeyHash();
+        }
+        return command.getIdempotencyKey() == null ? null : RegulatedMutationIntentHasher.hash(command.getIdempotencyKey());
+    }
+
+    private static String mask(String idempotencyKey) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            return null;
+        }
+        String normalized = idempotencyKey.trim();
+        if (normalized.length() <= 10) {
+            return "..." + normalized.substring(Math.max(0, normalized.length() - 4));
+        }
+        return normalized.substring(0, 6) + "..." + normalized.substring(normalized.length() - 4);
     }
 }
