@@ -501,7 +501,7 @@ paths:
   /api/v1/alerts/{alertId}/decision:
     post:
       summary: Submit analyst decision
-      description: Records an analyst decision through the FDP-25 regulated mutation coordinator. X-Idempotency-Key is required. The coordinator stores a regulated mutation command, writes ATTEMPTED audit before business mutation, persists the business decision plus durable same-document outbox, then writes SUCCESS audit before returning COMMITTED_EVIDENCE_PENDING. The same idempotency key and request body replay the stored response snapshot; the same key with a different body returns 409; a missing key returns 400. Kafka publication is asynchronous from the durable outbox and at-least-once unless consumers dedupe by event id. FraudDecisionEvent carries delivery=AT_LEAST_ONCE and dedupeKey=eventId. operation_status is mandatory for committed responses: REJECTED_BEFORE_MUTATION maps to HTTP 503 with no command response body; COMMITTED_EVIDENCE_PENDING means local SUCCESS audit was recorded and external evidence promotion remains pending; COMMITTED_EVIDENCE_INCOMPLETE means the business decision and outbox committed but local success audit/evidence completion degraded. FDP-25 is not distributed ACID across MongoDB, external witnesses, and Kafka. COMMITTED_FULLY_ANCHORED is async-only and is not exposed by this synchronous request path.
+      description: Records an analyst decision through the FDP-25 Phase 1 regulated mutation coordinator. X-Idempotency-Key is required. The coordinator stores a regulated mutation command, atomically claims execution with a bounded lease, writes ATTEMPTED audit before business mutation, persists the business decision plus durable same-document outbox, then writes SUCCESS audit before returning COMMITTED_EVIDENCE_PENDING. The same idempotency key and request body replay the stored response snapshot; the same key with a different body returns 409; a missing key returns 400. Kafka publication is asynchronous from the durable outbox and at-least-once unless consumers dedupe by event id. FraudDecisionEvent carries delivery=AT_LEAST_ONCE and dedupeKey=eventId. operation_status is mandatory: REJECTED_BEFORE_MUTATION maps to HTTP 503 with no command response body; IN_PROGRESS, RECOVERY_REQUIRED, and COMMIT_UNKNOWN map to HTTP 202; COMMITTED_EVIDENCE_PENDING means local SUCCESS audit was recorded and external evidence promotion remains pending; COMMITTED_EVIDENCE_INCOMPLETE means the business decision and outbox committed but local success audit/evidence completion degraded. FDP-25 Phase 1 is not distributed ACID across MongoDB, external witnesses, and Kafka and does not transactionally eliminate post-commit audit degradation. COMMITTED_FULLY_ANCHORED is async-only and is not exposed by this synchronous request path.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -529,6 +529,12 @@ paths:
       responses:
         "200":
           description: Decision request reached a stable operation state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmitAnalystDecisionResponse"
+        "202":
+          description: Decision command is accepted but still processing, requires recovery, or has an uncertain commit window.
           content:
             application/json:
               schema:
@@ -1134,8 +1140,8 @@ components:
           nullable: true
         operation_status:
           type: string
-          enum: [REJECTED_BEFORE_MUTATION, COMMITTED_EVIDENCE_PENDING, COMMITTED_EVIDENCE_INCOMPLETE]
-          description: Mandatory operation state. REJECTED_BEFORE_MUTATION is returned as HTTP 503 with no command response body. COMMITTED_EVIDENCE_PENDING is conservative state before full evidence completion is persisted. COMMITTED_EVIDENCE_INCOMPLETE means the business decision and durable outbox committed while post-commit evidence completion degraded. This is not a rollback claim. COMMITTED_FULLY_ANCHORED is intentionally not exposed until a safe promotion path exists.
+          enum: [REJECTED_BEFORE_MUTATION, IN_PROGRESS, RECOVERY_REQUIRED, COMMIT_UNKNOWN, COMMITTED_EVIDENCE_PENDING, COMMITTED_EVIDENCE_INCOMPLETE]
+          description: Mandatory operation state. REJECTED_BEFORE_MUTATION is returned as HTTP 503 with no command response body. IN_PROGRESS, RECOVERY_REQUIRED, and COMMIT_UNKNOWN are returned as HTTP 202 and must not be treated as completed success. COMMITTED_EVIDENCE_PENDING is conservative state before full evidence completion is persisted. COMMITTED_EVIDENCE_INCOMPLETE means the business decision and durable outbox committed while post-commit evidence completion degraded. This is not a rollback claim. COMMITTED_FULLY_ANCHORED is intentionally not exposed until a safe promotion path exists.
     PagedGenericObject:
       type: object
       required:

@@ -1,51 +1,63 @@
-# FDP-25 Regulated Mutation Commit Model
+# FDP-25 Phase 1 - Regulated Mutation Coordinator
 
-FDP-25 is the regulated mutation commit protocol for the first migrated write path: `POST /api/v1/alerts/{alertId}/decision`.
+FDP-25 Phase 1 is the regulated mutation coordinator for the first migrated write path: `POST /api/v1/alerts/{alertId}/decision`.
+
+This phase is a saga-style recoverable command state machine. It is not an ACID transaction boundary and it does not prove that a business mutation can never commit before success evidence exists.
 
 FDP-24 remains intentionally narrower. FDP-24 provides external audit anchoring, fail-closed `ATTEMPTED` audit persistence, durable post-commit degradation detection, explicit `COMMITTED_EVIDENCE_PENDING` / `COMMITTED_EVIDENCE_INCOMPLETE` states, and recovery/reconciliation workflows. FDP-24 detects and exposes post-commit audit degradation. It does not eliminate it transactionally.
 
 ## Goal
 
-Stop domain services from hand-assembling audit, business mutation, idempotency, and outbox behavior. Submit-decision writes now pass through one coordinator, one idempotency key, one command record, and one explicit state machine.
+Stop domain services from hand-assembling audit, business mutation, idempotency, and outbox behavior. Submit-decision writes now pass through one coordinator, one idempotency key, one command record, one lease/claim path, and one explicit state machine.
 
 The synchronous request path does not return `COMMITTED_FULLY_ANCHORED`. It returns `COMMITTED_EVIDENCE_PENDING` only after local `SUCCESS` audit is recorded; external evidence remains asynchronous and reconciled. If local success evidence degrades after the business write, the command becomes `COMMITTED_DEGRADED` and the API returns or records `COMMITTED_EVIDENCE_INCOMPLETE`.
 
+FDP-25 Phase 1 detects and exposes post-commit audit degradation. It does not eliminate that window transactionally.
+
 ## Model
 
-FDP-25 uses a pending command architecture for regulated mutation paths.
+FDP-25 Phase 1 uses a pending command architecture for regulated mutation paths.
 
 1. Submit command.
    - Require `X-Idempotency-Key`.
    - Create `regulated_mutation_commands`.
    - Set state `REQUESTED`.
    - Do not mutate business state.
+   - Set `executionStatus=NEW`.
 
-2. Record audit intent.
+2. Claim command execution.
+   - Atomically claim by `idempotencyKey`, `requestHash`, `executionStatus`, and lease expiry.
+   - Set `executionStatus=PROCESSING`, `leaseOwner`, `leaseExpiresAt`, `attemptCount`, and `lastHeartbeatAt`.
+   - If another worker holds a non-expired lease, return HTTP 202 with `IN_PROGRESS`.
+
+3. Record audit intent.
    - Persist durable `ATTEMPTED` audit.
    - Set state `AUDIT_ATTEMPTED`.
 
-3. Validate command.
+4. Validate command.
    - Perform authorization, request validation, idempotency checks, and business validation against current state.
    - Idempotency conflict returns 409.
    - Missing idempotency key returns 400.
 
-4. Apply business mutation.
+5. Apply business mutation.
    - Set state `BUSINESS_COMMITTING`.
    - Persist the alert decision and same-document outbox record.
    - Set state `BUSINESS_COMMITTED`.
 
-5. Record success evidence.
+6. Record success evidence.
    - Set state `SUCCESS_AUDIT_PENDING`.
    - Persist durable `SUCCESS` audit.
    - Set state `SUCCESS_AUDIT_RECORDED`.
 
-6. Return pending external evidence state.
+7. Return pending external evidence state.
    - Set state `EVIDENCE_PENDING`.
+   - Set `executionStatus=COMPLETED`.
    - Return `COMMITTED_EVIDENCE_PENDING`.
 
-7. Degrade explicitly when success evidence fails after business write.
+8. Degrade explicitly when success evidence fails after business write.
    - Set state `COMMITTED_DEGRADED`.
    - Persist response snapshot with `COMMITTED_EVIDENCE_INCOMPLETE`.
+   - Set `executionStatus=COMPLETED`.
    - Record durable audit degradation.
 
 ## Required Statuses
@@ -66,16 +78,35 @@ FDP-25 uses a pending command architecture for regulated mutation paths.
 Public request statuses remain:
 
 - `REJECTED_BEFORE_MUTATION`
+- `IN_PROGRESS`
+- `RECOVERY_REQUIRED`
+- `COMMIT_UNKNOWN`
 - `COMMITTED_EVIDENCE_PENDING`
 - `COMMITTED_EVIDENCE_INCOMPLETE`
 
 `COMMITTED_FULLY_ANCHORED` is async-only and must not be returned by the synchronous submit-decision request.
 
+Client behavior:
+
+- `IN_PROGRESS`: another execution owns the active lease; retry later with the same idempotency key.
+- `RECOVERY_REQUIRED`: the command is in a known partial state and the platform will not guess a better result.
+- `COMMIT_UNKNOWN`: business mutation may have started, but the command lacks enough durable evidence to report a final status.
+- `COMMITTED_EVIDENCE_PENDING`: business mutation and local success audit completed; external evidence promotion remains pending.
+- `COMMITTED_EVIDENCE_INCOMPLETE`: business mutation committed, but local success audit or evidence completion degraded.
+
+The command store is authoritative for mutation lifecycle and public operation status. `AlertDocument` is the business aggregate. Outbox fields describe delivery state. Audit and external evidence describe proof state. Divergence between those layers must degrade to `RECOVERY_REQUIRED` or an evidence-incomplete state; APIs must not derive final operation status from the alert document alone.
+
+## Recovery
+
+The recovery service performs a bounded scan of stale command execution records. It may release safe pre-mutation commands back to `NEW`, retry only the missing success audit for `SUCCESS_AUDIT_PENDING` commands that already have a response snapshot, or mark unsafe partial states as `RECOVERY_REQUIRED`.
+
+Recovery never re-runs the business mutation when the command state indicates the mutation may already have started.
+
 ## Non-Goals
 
-FDP-25 must not change scoring behavior, ML model behavior, Kafka event contracts, governance advisory semantics, model retraining, rollback automation, alert triggering, or SLA enforcement.
+FDP-25 Phase 1 must not change scoring behavior, ML model behavior, Kafka event contracts, governance advisory semantics, model retraining, rollback automation, alert triggering, or SLA enforcement.
 
-FDP-25 must not describe operator evidence as cryptographic proof unless the evidence is actually cryptographically verifiable. It is not distributed ACID, exactly-once Kafka, legal notarization, WORM storage, or perfect rollback.
+FDP-25 Phase 1 must not describe operator evidence as cryptographic proof unless the evidence is actually cryptographically verifiable. It is not distributed ACID, exactly-once Kafka, legal notarization, WORM storage, transactional regulated commit, or perfect rollback.
 
 ## Required Tests
 
@@ -88,3 +119,7 @@ FDP-25 must not describe operator evidence as cryptographic proof unless the evi
 - missing idempotency key -> 400.
 - request path never returns `COMMITTED_FULLY_ANCHORED`.
 - `AlertManagementService` does not call `AuditMutationRecorder`, audit service, or decision outbox writes for submit decision.
+- duplicate active request returns `IN_PROGRESS` without executing a second business mutation.
+- unsafe partial replay returns `RECOVERY_REQUIRED` or `COMMIT_UNKNOWN`, not a generic 500 and not a duplicate mutation.
+- `SUCCESS_AUDIT_PENDING` retry writes only missing success audit and never re-runs the business mutation.
+- recovery service covers stale leases and crash-window states with bounded scans.
