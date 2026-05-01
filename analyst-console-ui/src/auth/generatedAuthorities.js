@@ -12,6 +12,8 @@ export const AUTHORITIES = Object.freeze({
   AUDIT_READ: "audit:read",
   AUDIT_VERIFY: "audit:verify",
   AUDIT_EXPORT: "audit:export",
+  AUDIT_DEGRADATION_RESOLVE: "audit-degradation:resolve",
+  DECISION_OUTBOX_RECONCILE: "decision-outbox:reconcile",
 });
 
 export const AUTHORITY_VALUES = Object.freeze([
@@ -25,4 +27,6 @@ export const AUTHORITY_VALUES = Object.freeze([
   "audit:read",
   "audit:verify",
   "audit:export",
+  "audit-degradation:resolve",
+  "decision-outbox:reconcile",
 ]);
