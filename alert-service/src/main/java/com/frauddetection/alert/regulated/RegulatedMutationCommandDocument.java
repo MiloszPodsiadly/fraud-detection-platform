@@ -75,6 +75,10 @@ public class RegulatedMutationCommandDocument {
     private String failedAuditId;
     @Field("outbox_event_id")
     private String outboxEventId;
+    @Field("local_commit_marker")
+    private String localCommitMarker;
+    @Field("local_committed_at")
+    private Instant localCommittedAt;
     @Field("created_at")
     private Instant createdAt;
     @Field("updated_at")
@@ -144,6 +148,10 @@ public class RegulatedMutationCommandDocument {
     public void setFailedAuditId(String failedAuditId) { this.failedAuditId = failedAuditId; }
     public String getOutboxEventId() { return outboxEventId; }
     public void setOutboxEventId(String outboxEventId) { this.outboxEventId = outboxEventId; }
+    public String getLocalCommitMarker() { return localCommitMarker; }
+    public void setLocalCommitMarker(String localCommitMarker) { this.localCommitMarker = localCommitMarker; }
+    public Instant getLocalCommittedAt() { return localCommittedAt; }
+    public void setLocalCommittedAt(Instant localCommittedAt) { this.localCommittedAt = localCommittedAt; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

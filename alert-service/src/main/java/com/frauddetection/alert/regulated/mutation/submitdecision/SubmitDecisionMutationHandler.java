@@ -35,7 +35,8 @@ public class SubmitDecisionMutationHandler {
             AlertStatus resultingStatus,
             String actorId,
             String idempotencyKey,
-            String requestHash
+            String requestHash,
+            String mutationCommandId
     ) {
         AlertDocument document = alertRepository.findById(alertId).orElseThrow(() -> new AlertNotFoundException(alertId));
         document.setAlertStatus(resultingStatus);
@@ -52,7 +53,8 @@ public class SubmitDecisionMutationHandler {
                 alertDocumentMapper.toDomain(document),
                 request,
                 resultingStatus,
-                actorId
+                actorId,
+                mutationCommandId
         );
         return alertRepository.save(document);
     }

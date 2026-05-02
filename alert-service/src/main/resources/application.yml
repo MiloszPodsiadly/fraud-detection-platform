@@ -39,6 +39,19 @@ management:
             requests: true
 
 app:
+  regulated-mutations:
+    transaction-mode: ${REGULATED_MUTATIONS_TRANSACTION_MODE:OFF}
+  outbox:
+    publisher:
+      enabled: ${OUTBOX_PUBLISHER_ENABLED:true}
+    recovery:
+      enabled: ${OUTBOX_RECOVERY_ENABLED:true}
+      stale-processing-threshold: ${OUTBOX_RECOVERY_STALE_PROCESSING_THRESHOLD:PT2M}
+    lease-duration: ${OUTBOX_LEASE_DURATION:${APP_ALERT_DECISION_OUTBOX_LEASE_DURATION:PT1M}}
+    max-attempts: ${OUTBOX_MAX_ATTEMPTS:${APP_ALERT_DECISION_OUTBOX_MAX_ATTEMPTS:5}}
+  evidence-confirmation:
+    enabled: ${EVIDENCE_CONFIRMATION_ENABLED:true}
+    delay-ms: ${EVIDENCE_CONFIRMATION_DELAY_MS:10000}
   audit:
     bank-mode:
       fail-closed: ${AUDIT_BANK_MODE_FAIL_CLOSED:false}

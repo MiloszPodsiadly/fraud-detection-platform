@@ -4,6 +4,7 @@ import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.read.ReadAccessAuditOutcome;
 import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.outbox.OutboxBacklogResponse;
 import com.frauddetection.alert.security.error.SecurityFailureClassifier;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.DistributionSummary;
@@ -35,6 +36,12 @@ public class AlertServiceMetrics {
     private final AtomicLong regulatedMutationRecoveryOldestAgeSeconds = new AtomicLong(0);
     private final AtomicLong regulatedMutationRecoveryFailedTerminal = new AtomicLong(0);
     private final AtomicLong regulatedMutationRecoveryRepeatedFailures = new AtomicLong(0);
+    private final AtomicLong outboxPending = new AtomicLong(0);
+    private final AtomicLong outboxProcessing = new AtomicLong(0);
+    private final AtomicLong outboxConfirmationUnknown = new AtomicLong(0);
+    private final AtomicLong outboxFailedTerminal = new AtomicLong(0);
+    private final AtomicLong outboxOldestPendingAgeSeconds = new AtomicLong(0);
+    private final AtomicLong evidenceConfirmationPending = new AtomicLong(0);
 
     public AlertServiceMetrics(MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
@@ -66,6 +73,12 @@ public class AlertServiceMetrics {
                 .register(meterRegistry);
         Gauge.builder("repeated_recovery_failures_count", regulatedMutationRecoveryRepeatedFailures, AtomicLong::get)
                 .register(meterRegistry);
+        Gauge.builder("outbox_pending_count", outboxPending, AtomicLong::get).register(meterRegistry);
+        Gauge.builder("outbox_processing_count", outboxProcessing, AtomicLong::get).register(meterRegistry);
+        Gauge.builder("outbox_confirmation_unknown_count", outboxConfirmationUnknown, AtomicLong::get).register(meterRegistry);
+        Gauge.builder("outbox_failed_terminal_count", outboxFailedTerminal, AtomicLong::get).register(meterRegistry);
+        Gauge.builder("outbox_oldest_pending_age_seconds", outboxOldestPendingAgeSeconds, AtomicLong::get).register(meterRegistry);
+        Gauge.builder("evidence_confirmation_pending_count", evidenceConfirmationPending, AtomicLong::get).register(meterRegistry);
     }
 
     public void recordAnalystDecisionSubmitted() {
@@ -111,6 +124,38 @@ public class AlertServiceMetrics {
         counter(
                 "fraud_platform_decision_outbox_failures_total",
                 "reason", "OUTBOX_PUBLISH_CONFIRMATION_FAILED"
+        ).increment();
+    }
+
+    public void recordOutboxBacklog(OutboxBacklogResponse response) {
+        outboxPending.set(Math.max(0L, response.pendingCount()));
+        outboxProcessing.set(Math.max(0L, response.processingCount()));
+        outboxConfirmationUnknown.set(Math.max(0L, response.confirmationUnknownCount()));
+        outboxFailedTerminal.set(Math.max(0L, response.failedTerminalCount()));
+        outboxOldestPendingAgeSeconds.set(response.oldestPendingAgeSeconds() == null ? 0L : Math.max(0L, response.oldestPendingAgeSeconds()));
+    }
+
+    public void recordOutboxPublishAttempt(String result) {
+        counter(
+                "outbox_publish_attempt_total",
+                "result", normalizeOutboxPublishResult(result)
+        ).increment();
+    }
+
+    public void recordOutboxDeliveryLatency(Duration latency) {
+        Timer.builder("outbox_delivery_latency_seconds")
+                .register(meterRegistry)
+                .record(latency == null || latency.isNegative() ? Duration.ZERO : latency);
+    }
+
+    public void recordEvidenceConfirmationPending(long pendingCount) {
+        evidenceConfirmationPending.set(Math.max(0L, pendingCount));
+    }
+
+    public void recordEvidenceConfirmationFailed(String reason) {
+        counter(
+                "evidence_confirmation_failed_total",
+                "reason", normalizeEvidenceConfirmationFailure(reason)
         ).increment();
     }
 
@@ -524,6 +569,20 @@ public class AlertServiceMetrics {
         return switch (outcome) {
             case "RECOVERED", "STILL_PENDING", "RECOVERY_REQUIRED", "FAILED_TERMINAL" -> outcome;
             default -> "RECOVERY_REQUIRED";
+        };
+    }
+
+    private String normalizeOutboxPublishResult(String result) {
+        return switch (result) {
+            case "SUCCESS", "FAILED", "CONFIRMATION_UNKNOWN" -> result;
+            default -> "FAILED";
+        };
+    }
+
+    private String normalizeEvidenceConfirmationFailure(String reason) {
+        return switch (reason) {
+            case "OUTBOX_NOT_PUBLISHED", "SUCCESS_AUDIT_MISSING", "EXTERNAL_ANCHOR_MISSING", "SIGNATURE_UNAVAILABLE" -> reason;
+            default -> "OUTBOX_NOT_PUBLISHED";
         };
     }
 

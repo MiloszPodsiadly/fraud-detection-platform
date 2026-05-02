@@ -2,5 +2,5 @@ package com.frauddetection.alert.regulated;
 
 @FunctionalInterface
 public interface BusinessMutation<R> {
-    R execute();
+    R execute(RegulatedMutationExecutionContext context);
 }
