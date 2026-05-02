@@ -85,6 +85,15 @@ public record SystemTrustLevelResponse(
         Long oldestRecoveryRequiredAgeSeconds,
 
         @JsonProperty("reason_code")
-        String reasonCode
+        String reasonCode,
+
+        @JsonProperty("transaction_mode")
+        String transactionMode,
+
+        @JsonProperty("outbox_delivery_mode")
+        String outboxDeliveryMode,
+
+        @JsonProperty("evidence_confirmation_mode")
+        String evidenceConfirmationMode
 ) {
 }

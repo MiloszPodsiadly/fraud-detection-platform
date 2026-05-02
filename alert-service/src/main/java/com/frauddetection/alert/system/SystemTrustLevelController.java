@@ -6,12 +6,15 @@ import com.frauddetection.alert.audit.external.ExternalAuditAnchorSink;
 import com.frauddetection.alert.audit.external.ExternalWitnessCapabilities;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
+import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
+import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.regulated.RegulatedMutationRecoveryService;
 import com.frauddetection.alert.service.DecisionOutboxStatus;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
@@ -38,8 +41,12 @@ public class SystemTrustLevelController implements ApplicationRunner {
     private final ExternalAuditAnchorSink externalAuditAnchorSink;
     private final AuditDegradationService auditDegradationService;
     private final AlertRepository alertRepository;
+    private final TransactionalOutboxRecordRepository outboxRepository;
     private final RegulatedMutationRecoveryService regulatedMutationRecoveryService;
     private final Duration staleOutboxThreshold;
+    private final String transactionMode;
+    private final boolean outboxPublisherEnabled;
+    private final boolean evidenceConfirmationEnabled;
 
     public SystemTrustLevelController(
             boolean publicationEnabled,
@@ -67,7 +74,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
             AlertServiceMetrics ignoredMetrics
     ) {
         this(publicationEnabled, publicationRequired, failClosed, bankModeFailClosed, trustAuthorityEnabled, signingRequired,
-                Duration.ofMinutes(10), externalAuditIntegrityService, externalAuditAnchorSink, null, null, null);
+                Duration.ofMinutes(10), "OFF", true, true, externalAuditIntegrityService, externalAuditAnchorSink, null, null, null, null);
     }
 
     @Autowired
@@ -79,10 +86,14 @@ public class SystemTrustLevelController implements ApplicationRunner {
             @Value("${app.audit.trust-authority.enabled:false}") boolean trustAuthorityEnabled,
             @Value("${app.audit.trust-authority.signing-required:false}") boolean signingRequired,
             @Value("${app.alert.decision-outbox.stale-threshold:PT10M}") Duration staleOutboxThreshold,
+            @Value("${app.regulated-mutations.transaction-mode:OFF}") String transactionMode,
+            @Value("${app.outbox.publisher.enabled:true}") boolean outboxPublisherEnabled,
+            @Value("${app.evidence-confirmation.enabled:true}") boolean evidenceConfirmationEnabled,
             com.frauddetection.alert.audit.external.ExternalAuditIntegrityService externalAuditIntegrityService,
             ExternalAuditAnchorSink externalAuditAnchorSink,
             AuditDegradationService auditDegradationService,
             AlertRepository alertRepository,
+            ObjectProvider<TransactionalOutboxRecordRepository> outboxRepository,
             RegulatedMutationRecoveryService regulatedMutationRecoveryService
     ) {
         this.publicationEnabled = publicationEnabled;
@@ -95,8 +106,12 @@ public class SystemTrustLevelController implements ApplicationRunner {
         this.externalAuditAnchorSink = externalAuditAnchorSink;
         this.auditDegradationService = auditDegradationService;
         this.alertRepository = alertRepository;
+        this.outboxRepository = outboxRepository == null ? null : outboxRepository.getIfAvailable();
         this.regulatedMutationRecoveryService = regulatedMutationRecoveryService;
         this.staleOutboxThreshold = staleOutboxThreshold == null ? Duration.ofMinutes(10) : staleOutboxThreshold;
+        this.transactionMode = transactionMode == null || transactionMode.isBlank() ? "OFF" : transactionMode.trim().toUpperCase();
+        this.outboxPublisherEnabled = outboxPublisherEnabled;
+        this.evidenceConfirmationEnabled = evidenceConfirmationEnabled;
     }
 
     public SystemTrustLevelController(
@@ -125,6 +140,40 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 auditDegradationService,
                 alertRepository,
                 null
+        );
+    }
+
+    public SystemTrustLevelController(
+            boolean publicationEnabled,
+            boolean publicationRequired,
+            boolean failClosed,
+            boolean bankModeFailClosed,
+            boolean trustAuthorityEnabled,
+            boolean signingRequired,
+            Duration staleOutboxThreshold,
+            com.frauddetection.alert.audit.external.ExternalAuditIntegrityService externalAuditIntegrityService,
+            ExternalAuditAnchorSink externalAuditAnchorSink,
+            AuditDegradationService auditDegradationService,
+            AlertRepository alertRepository,
+            RegulatedMutationRecoveryService regulatedMutationRecoveryService
+    ) {
+        this(
+                publicationEnabled,
+                publicationRequired,
+                failClosed,
+                bankModeFailClosed,
+                trustAuthorityEnabled,
+                signingRequired,
+                staleOutboxThreshold,
+                "OFF",
+                true,
+                true,
+                externalAuditIntegrityService,
+                externalAuditAnchorSink,
+                auditDegradationService,
+                alertRepository,
+                null,
+                regulatedMutationRecoveryService
         );
     }
 
@@ -159,7 +208,10 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 live.committedDegradedCount(),
                 live.repeatedRecoveryFailureCount(),
                 live.oldestRecoveryRequiredAgeSeconds(),
-                live.reasonCode()
+                live.reasonCode(),
+                transactionMode,
+                outboxDeliveryMode(),
+                evidenceConfirmationEnabled ? "ENABLED" : "DISABLED"
         );
     }
 
@@ -317,6 +369,9 @@ public class SystemTrustLevelController implements ApplicationRunner {
             if (alertRepository == null) {
                 return new OutboxState(0L, 0L, 0L, null, null, false, null);
             }
+            if (outboxRepository != null) {
+                return transactionalOutboxState();
+            }
             List<String> pendingStatuses = List.of(
                     DecisionOutboxStatus.PENDING,
                     DecisionOutboxStatus.PROCESSING,
@@ -346,6 +401,36 @@ public class SystemTrustLevelController implements ApplicationRunner {
         } catch (DataAccessException exception) {
             return new OutboxState(1L, 1L, 1L, null, null, true, "OUTBOX_STATUS_UNAVAILABLE");
         }
+    }
+
+    private OutboxState transactionalOutboxState() {
+        List<TransactionalOutboxStatus> pendingStatuses = List.of(
+                TransactionalOutboxStatus.PENDING,
+                TransactionalOutboxStatus.PROCESSING,
+                TransactionalOutboxStatus.FAILED_RETRYABLE
+        );
+        long failedTerminalCount = outboxRepository.countByStatus(TransactionalOutboxStatus.FAILED_TERMINAL);
+        long unknownCount = outboxRepository.countByStatus(TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
+        Long oldestPendingAge = outboxRepository.findTopByStatusInOrderByCreatedAtAsc(pendingStatuses)
+                .map(document -> {
+                    Instant created = document.getCreatedAt();
+                    return created == null ? 0L : Math.max(0L, Duration.between(created, Instant.now()).toSeconds());
+                })
+                .orElse(null);
+        boolean stalePending = oldestPendingAge != null && oldestPendingAge > staleOutboxThreshold.toSeconds();
+        String reason = null;
+        if (failedTerminalCount > 0) {
+            reason = "OUTBOX_TERMINAL_FAILURE";
+        } else if (unknownCount > 0) {
+            reason = "OUTBOX_PUBLISH_CONFIRMATION_UNKNOWN";
+        } else if (stalePending) {
+            reason = "OUTBOX_STALE_PENDING";
+        }
+        return new OutboxState(failedTerminalCount, unknownCount, 0L, oldestPendingAge, null, stalePending, reason);
+    }
+
+    private String outboxDeliveryMode() {
+        return outboxPublisherEnabled ? "TRANSACTIONAL_OUTBOX_AT_LEAST_ONCE" : "DISABLED";
     }
 
     private long pendingAgeSeconds(AlertDocument document) {
