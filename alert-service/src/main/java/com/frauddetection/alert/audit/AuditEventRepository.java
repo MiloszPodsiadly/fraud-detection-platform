@@ -60,6 +60,11 @@ public class AuditEventRepository {
         return Optional.ofNullable(mongoTemplate.findOne(query, AuditEventDocument.class));
     }
 
+    public Optional<AuditEventDocument> findByAuditId(String auditId) throws DataAccessException {
+        Query query = new Query(Criteria.where("audit_id").is(auditId)).limit(1);
+        return Optional.ofNullable(mongoTemplate.findOne(query, AuditEventDocument.class));
+    }
+
     public List<AuditEventDocument> findHeadWindow(String partitionKey, int limit) throws DataAccessException {
         Query query = new Query(Criteria.where("partition_key").is(partitionKey))
                 .with(Sort.by(Sort.Direction.DESC, "chain_position"))

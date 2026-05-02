@@ -3,7 +3,10 @@ package com.frauddetection.alert.security.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
 import com.frauddetection.alert.api.SubmitAnalystDecisionResponse;
+import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
+import com.frauddetection.alert.api.FraudCaseResponse;
 import com.frauddetection.alert.api.UpdateFraudCaseRequest;
+import com.frauddetection.alert.api.UpdateFraudCaseResponse;
 import com.frauddetection.alert.assistant.AnalystCaseSummaryUseCase;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditDegradationEventDocument;
@@ -22,6 +25,7 @@ import com.frauddetection.alert.audit.AuditTrustAttestationController;
 import com.frauddetection.alert.audit.AuditTrustAttestationResponse;
 import com.frauddetection.alert.audit.AuditTrustAttestationService;
 import com.frauddetection.alert.audit.AuditTrustLevel;
+import com.frauddetection.alert.audit.read.ReadAccessAuditService;
 import com.frauddetection.alert.audit.external.AuditEvidenceExportController;
 import com.frauddetection.alert.audit.external.AuditEvidenceExportResponse;
 import com.frauddetection.alert.audit.external.AuditEvidenceExportService;
@@ -55,6 +59,12 @@ import com.frauddetection.alert.mapper.AlertResponseMapper;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.mapper.ScoredTransactionResponseMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.outbox.OutboxBacklogResponse;
+import com.frauddetection.alert.outbox.OutboxRecoveryController;
+import com.frauddetection.alert.outbox.OutboxRecoveryRunResponse;
+import com.frauddetection.alert.outbox.OutboxRecoveryService;
+import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
+import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.regulated.RegulatedMutationRecoveryBacklogResponse;
@@ -79,6 +89,12 @@ import com.frauddetection.alert.service.DecisionOutboxReconciliationService;
 import com.frauddetection.alert.service.FraudCaseManagementService;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
 import com.frauddetection.alert.system.SystemTrustLevelController;
+import com.frauddetection.alert.trust.TrustIncidentController;
+import com.frauddetection.alert.trust.TrustIncidentResponse;
+import com.frauddetection.alert.trust.TrustIncidentService;
+import com.frauddetection.alert.trust.TrustIncidentSummary;
+import com.frauddetection.alert.trust.TrustIncidentPreviewRateLimiter;
+import com.frauddetection.alert.trust.TrustSignalCollector;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
 import org.junit.jupiter.api.BeforeEach;
@@ -130,6 +146,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         AuditDegradationController.class,
         DecisionOutboxReconciliationController.class,
         RegulatedMutationRecoveryController.class,
+        OutboxRecoveryController.class,
+        TrustIncidentController.class,
         SystemTrustLevelController.class,
         GovernanceAdvisoryController.class,
         GovernanceAuditController.class
@@ -203,7 +221,22 @@ class AlertSecurityConfigTest {
     private RegulatedMutationRecoveryService regulatedMutationRecoveryService;
 
     @MockBean
+    private OutboxRecoveryService outboxRecoveryService;
+
+    @MockBean
+    private TrustIncidentService trustIncidentService;
+
+    @MockBean
+    private TrustSignalCollector trustSignalCollector;
+
+    @MockBean
+    private TrustIncidentPreviewRateLimiter trustIncidentPreviewRateLimiter;
+
+    @MockBean
     private RegulatedMutationInspectionRateLimiter regulatedMutationInspectionRateLimiter;
+
+    @MockBean
+    private ReadAccessAuditService readAccessAuditService;
 
     @MockBean
     private AuditService auditService;
@@ -227,6 +260,31 @@ class AlertSecurityConfigTest {
     void allowCoverageRateLimit() {
         when(externalAuditCoverageRateLimiter.allow(any(), anyInt())).thenReturn(true);
         when(regulatedMutationInspectionRateLimiter.allow(any())).thenReturn(true);
+        when(trustIncidentPreviewRateLimiter.allow(any())).thenReturn(true);
+        when(trustSignalCollector.collect()).thenReturn(List.of());
+        when(trustIncidentService.listOpen()).thenReturn(List.of());
+        when(trustIncidentService.summary()).thenReturn(TrustIncidentSummary.empty());
+        TrustIncidentResponse incident = new TrustIncidentResponse(
+                "incident-1",
+                "OUTBOX_TERMINAL_FAILURE",
+                "CRITICAL",
+                "transactional_outbox",
+                "fingerprint",
+                "OPEN",
+                Instant.parse("2026-05-02T10:00:00Z"),
+                Instant.parse("2026-05-02T10:00:00Z"),
+                1,
+                List.of("outbox:event-1"),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+        );
+        when(trustIncidentService.acknowledge(eq("incident-1"), any(), any(), any())).thenReturn(incident);
+        when(trustIncidentService.resolve(eq("incident-1"), any(), any(), any())).thenReturn(incident);
     }
 
     @Test
@@ -285,6 +343,26 @@ class AlertSecurityConfigTest {
         mockMvc.perform(post("/api/v1/regulated-mutations/recover"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/regulated-mutations/recovery/backlog"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/outbox/recovery/backlog"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/v1/outbox/recovery/run"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/v1/outbox/event-1/resolve-confirmation")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"resolution\":\"PUBLISHED\",\"evidence_reference\":{\"type\":\"BROKER_OFFSET\",\"reference\":\"topic=fraud-decisions,partition=0,offset=42\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/trust/incidents"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/trust/incidents/signals/preview"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/v1/trust/incidents/incident-1/ack")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/v1/trust/incidents/incident-1/resolve")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"verified\",\"resolution_evidence\":{\"type\":\"RUNBOOK_STEP\",\"reference\":\"runbook-1\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/regulated-mutations/idem-1"))
                 .andExpect(status().isUnauthorized());
@@ -593,6 +671,10 @@ class AlertSecurityConfigTest {
                         Instant.parse("2026-05-01T00:00:00Z")
                 ));
         when(externalAuditAnchorSink.capabilities()).thenReturn(providerCapabilities());
+        when(outboxRecoveryService.backlog()).thenReturn(new OutboxBacklogResponse(1, 0, 0, 0, 0, 0, 0, 0, 5L));
+        when(outboxRecoveryService.recoverNow()).thenReturn(new OutboxRecoveryRunResponse(1, 0, 0, 1));
+        when(outboxRecoveryService.resolveConfirmation(eq("event-1"), any(), any(), any()))
+                .thenReturn(outboxRecord("event-1", TransactionalOutboxStatus.PUBLISHED));
 
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("FRAUD_OPS_ADMIN")))
                 .andExpect(status().isOk())
@@ -671,6 +753,58 @@ class AlertSecurityConfigTest {
                 .andExpect(jsonPath("$.total_recovery_required").value(0));
         mockMvc.perform(get("/api/v1/regulated-mutations/recovery/backlog").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
                 .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/outbox/recovery/backlog").with(demoUser("FRAUD_OPS_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.pending_count").value(1));
+        mockMvc.perform(post("/api/v1/outbox/recovery/run").with(demoUser("FRAUD_OPS_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.publish_attempted").value(1));
+        mockMvc.perform(post("/api/v1/outbox/event-1/resolve-confirmation")
+                        .with(demoUser("FRAUD_OPS_ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "outbox-confirm-event-1")
+                        .content("{\"resolution\":\"PUBLISHED\",\"reason\":\"broker offset verified\",\"evidence_reference\":{\"type\":\"BROKER_OFFSET\",\"reference\":\"topic=fraud-decisions,partition=0,offset=42\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.event_id").value("event-1"))
+                .andExpect(jsonPath("$.payload").doesNotExist());
+        mockMvc.perform(post("/api/v1/outbox/event-1/resolve-confirmation")
+                        .with(demoUser("FRAUD_OPS_ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"resolution\":\"PUBLISHED\",\"reason\":\"broker offset verified\",\"evidence_reference\":{\"type\":\"BROKER_OFFSET\",\"reference\":\"topic=fraud-decisions,partition=0,offset=42\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/v1/outbox/recovery/backlog").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/outbox/recovery/run").with(authorities(AnalystAuthority.OUTBOX_INSPECT)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/outbox/event-1/resolve-confirmation")
+                        .with(authorities(AnalystAuthority.OUTBOX_INSPECT))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "outbox-confirm-event-1-denied")
+                        .content("{\"resolution\":\"PUBLISHED\",\"reason\":\"broker offset verified\",\"evidence_reference\":{\"type\":\"BROKER_OFFSET\",\"reference\":\"topic=fraud-decisions,partition=0,offset=42\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/trust/incidents").with(demoUser("FRAUD_OPS_ADMIN")))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/trust/incidents/signals/preview").with(demoUser("FRAUD_OPS_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.preview").value(true));
+        mockMvc.perform(post("/api/v1/trust/incidents/incident-1/ack")
+                        .with(demoUser("FRAUD_OPS_ADMIN"))
+                        .header("X-Idempotency-Key", "trust-ack-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.incident_id").value("incident-1"));
+        mockMvc.perform(post("/api/v1/trust/incidents/incident-1/resolve")
+                        .with(demoUser("FRAUD_OPS_ADMIN"))
+                        .header("X-Idempotency-Key", "trust-resolve-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"verified\",\"resolution_evidence\":{\"type\":\"RUNBOOK_STEP\",\"reference\":\"runbook-1\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.incident_id").value("incident-1"));
+        mockMvc.perform(get("/api/v1/trust/incidents").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/trust/incidents/signals/preview").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
+                .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/regulated-mutations/idem-1").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.idempotency_key").doesNotExist())
@@ -725,6 +859,19 @@ class AlertSecurityConfigTest {
         mockMvc.perform(post("/api/v1/regulated-mutations/recover").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/regulated-mutations/recovery/backlog").with(demoUser("ANALYST")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/outbox/recovery/backlog").with(demoUser("ANALYST")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/outbox/recovery/run").with(demoUser("ANALYST")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/outbox/event-1/resolve-confirmation")
+                        .with(demoUser("ANALYST"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"resolution\":\"PUBLISHED\",\"evidence_reference\":{\"type\":\"BROKER_OFFSET\",\"reference\":\"topic=fraud-decisions,partition=0,offset=42\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/trust/incidents").with(demoUser("ANALYST")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/trust/incidents/signals/preview").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/regulated-mutations/idem-1").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
@@ -896,28 +1043,30 @@ class AlertSecurityConfigTest {
 
     @Test
     void shouldAllowReviewerToUpdateFraudCase() throws Exception {
-        when(fraudCaseManagementService.updateCase(eq("case-1"), any()))
-                .thenReturn(fraudCaseDocument());
+        when(fraudCaseManagementService.updateCase(eq("case-1"), any(), eq("case-update-1")))
+                .thenReturn(updateFraudCaseResponse());
 
         mockMvc.perform(patch("/api/v1/fraud-cases/case-1")
                         .with(demoUser("REVIEWER"))
+                        .header("X-Idempotency-Key", "case-update-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(updateFraudCaseRequest())))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.caseId").value("case-1"));
+                .andExpect(jsonPath("$.case_id").value("case-1"));
     }
 
     @Test
     void shouldAllowFraudOpsAdminToUpdateFraudCase() throws Exception {
-        when(fraudCaseManagementService.updateCase(eq("case-1"), any()))
-                .thenReturn(fraudCaseDocument());
+        when(fraudCaseManagementService.updateCase(eq("case-1"), any(), eq("case-update-1")))
+                .thenReturn(updateFraudCaseResponse());
 
         mockMvc.perform(patch("/api/v1/fraud-cases/case-1")
                         .with(demoUser("FRAUD_OPS_ADMIN"))
+                        .header("X-Idempotency-Key", "case-update-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(updateFraudCaseRequest())))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.caseId").value("case-1"));
+                .andExpect(jsonPath("$.case_id").value("case-1"));
     }
 
     private RequestPostProcessor demoUser(String roles) {
@@ -964,6 +1113,63 @@ class AlertSecurityConfigTest {
         document.setStatus(FraudCaseStatus.CONFIRMED_FRAUD);
         document.setTransactionIds(List.of());
         document.setTransactions(List.of());
+        return document;
+    }
+
+    @Test
+    void shouldRateLimitTrustIncidentSignalPreview() throws Exception {
+        when(trustIncidentPreviewRateLimiter.allow(any())).thenReturn(false);
+
+        mockMvc.perform(get("/api/v1/trust/incidents/signals/preview")
+                        .with(demoUser("FRAUD_OPS_ADMIN")))
+                .andExpect(status().isTooManyRequests());
+    }
+
+    private UpdateFraudCaseResponse updateFraudCaseResponse() {
+        FraudCaseDocument document = fraudCaseDocument();
+        FraudCaseResponse updated = new FraudCaseResponse(
+                document.getCaseId(),
+                document.getCustomerId(),
+                null,
+                document.getStatus(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of()
+        );
+        return new UpdateFraudCaseResponse(
+                SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING,
+                null,
+                "idem-hash",
+                "case-1",
+                null,
+                updated,
+                null
+        );
+    }
+
+    private TransactionalOutboxRecordDocument outboxRecord(String eventId, TransactionalOutboxStatus status) {
+        TransactionalOutboxRecordDocument document = new TransactionalOutboxRecordDocument();
+        document.setEventId(eventId);
+        document.setDedupeKey(eventId);
+        document.setMutationCommandId("mutation-1");
+        document.setResourceType("ALERT");
+        document.setResourceId("alert-1");
+        document.setEventType("FRAUD_DECISION");
+        document.setPayloadHash("payload-hash");
+        document.setStatus(status);
+        document.setAttempts(1);
+        document.setUpdatedAt(Instant.parse("2026-05-02T10:00:00Z"));
         return document;
     }
 

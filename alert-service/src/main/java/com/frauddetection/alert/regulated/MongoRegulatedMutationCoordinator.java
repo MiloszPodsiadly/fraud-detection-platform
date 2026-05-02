@@ -1,6 +1,7 @@
 package com.frauddetection.alert.regulated;
 
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
+import com.frauddetection.alert.api.RegulatedMutationPublicStatusProjection;
 import com.frauddetection.alert.audit.AuditDegradationService;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.PostCommitEvidenceIncompleteException;
@@ -8,6 +9,7 @@ import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.service.ConflictingIdempotencyKeyException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.mongodb.core.FindAndModifyOptions;
@@ -34,6 +36,7 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
     private final RegulatedMutationAuditPhaseService auditPhaseService;
     private final AuditDegradationService auditDegradationService;
     private final AlertServiceMetrics metrics;
+    private final RegulatedMutationTransactionRunner transactionRunner;
     private final boolean bankModeFailClosed;
     private final Duration leaseDuration;
 
@@ -43,6 +46,29 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
             RegulatedMutationAuditPhaseService auditPhaseService,
             AuditDegradationService auditDegradationService,
             AlertServiceMetrics metrics,
+            boolean bankModeFailClosed,
+            Duration leaseDuration
+    ) {
+        this(
+                commandRepository,
+                mongoTemplate,
+                auditPhaseService,
+                auditDegradationService,
+                metrics,
+                new RegulatedMutationTransactionRunner(RegulatedMutationTransactionMode.OFF, null),
+                bankModeFailClosed,
+                leaseDuration
+        );
+    }
+
+    @Autowired
+    public MongoRegulatedMutationCoordinator(
+            RegulatedMutationCommandRepository commandRepository,
+            MongoTemplate mongoTemplate,
+            RegulatedMutationAuditPhaseService auditPhaseService,
+            AuditDegradationService auditDegradationService,
+            AlertServiceMetrics metrics,
+            RegulatedMutationTransactionRunner transactionRunner,
             @Value("${app.audit.bank-mode.fail-closed:false}") boolean bankModeFailClosed,
             @Value("${app.regulated-mutation.lease-duration:PT30S}") Duration leaseDuration
     ) {
@@ -51,6 +77,7 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
         this.auditPhaseService = auditPhaseService;
         this.auditDegradationService = auditDegradationService;
         this.metrics = metrics;
+        this.transactionRunner = transactionRunner;
         this.bankModeFailClosed = bankModeFailClosed;
         this.leaseDuration = leaseDuration;
     }
@@ -94,15 +121,19 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
         if (!document.isAttemptedAuditRecorded()) {
             writeAttemptedAudit(command, document);
         }
-        R result = executeBusinessMutation(command, document);
-        S pendingResponse = command.responseMapper().response(result, RegulatedMutationState.EVIDENCE_PENDING);
-        RegulatedMutationResponseSnapshot pendingSnapshot = command.responseSnapshotter().snapshot(pendingResponse);
-        markBusinessCommitted(document, pendingSnapshot);
-        S finalResponse = writeSuccessAudit(command, document, result, pendingSnapshot);
+        RegulatedMutationCommandDocument claimedDocument = document;
+        LocalCommit<R, S> localCommit = transactionRunner.runLocalCommit(() -> {
+            R result = executeBusinessMutation(command, claimedDocument);
+            S pendingResponse = command.responseMapper().response(result, RegulatedMutationState.EVIDENCE_PENDING);
+            RegulatedMutationResponseSnapshot pendingSnapshot = command.responseSnapshotter().snapshot(pendingResponse);
+            markBusinessCommitted(claimedDocument, pendingSnapshot);
+            return new LocalCommit<>(result, pendingResponse, pendingSnapshot);
+        });
+        S finalResponse = writeSuccessAudit(command, document, localCommit.result(), localCommit.pendingSnapshot());
         if (finalResponse != null) {
             return new RegulatedMutationResult<>(document.getState(), finalResponse);
         }
-        return new RegulatedMutationResult<>(RegulatedMutationState.EVIDENCE_PENDING, pendingResponse);
+        return new RegulatedMutationResult<>(RegulatedMutationState.EVIDENCE_PENDING, localCommit.pendingResponse());
     }
 
     private <R, S> RegulatedMutationResult<S> terminalOrPartialResponse(
@@ -128,7 +159,16 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
             RegulatedMutationCommand<R, S> command,
             RegulatedMutationCommandDocument document
     ) {
-        return new RegulatedMutationResult<>(document.getState(), command.responseRestorer().restore(document.getResponseSnapshot()));
+        S restored = command.responseRestorer().restore(document.getResponseSnapshot());
+        return new RegulatedMutationResult<>(document.getState(), authoritativePublicStatus(restored, document));
+    }
+
+    @SuppressWarnings("unchecked")
+    private <S> S authoritativePublicStatus(S restored, RegulatedMutationCommandDocument document) {
+        if (restored instanceof RegulatedMutationPublicStatusProjection<?> response && document.getPublicStatus() != null) {
+            return (S) response.withPublicStatus(document.getPublicStatus());
+        }
+        return restored;
     }
 
     private <R, S> RegulatedMutationCommandDocument createOrLoad(
@@ -189,6 +229,10 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
         document.setIntentDecision(intent.decision());
         document.setIntentReasonHash(intent.reasonHash());
         document.setIntentTagsHash(intent.tagsHash());
+        document.setIntentStatus(intent.status());
+        document.setIntentAssigneeHash(intent.assigneeHash());
+        document.setIntentNotesHash(intent.notesHash());
+        document.setIntentPayloadHash(intent.payloadHash());
     }
 
     private <R, S> RegulatedMutationCommandDocument claim(RegulatedMutationCommand<R, S> command, String idempotencyKey) {
@@ -258,17 +302,31 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
     ) {
         transition(document, RegulatedMutationState.BUSINESS_COMMITTING, null);
         try {
-            R result = command.mutation().execute();
+            R result = command.mutation().execute(new RegulatedMutationExecutionContext(document.getId()));
             transition(document, RegulatedMutationState.BUSINESS_COMMITTED, null);
             return result;
+        } catch (RegulatedMutationPartialCommitException exception) {
+            if (transactionRunner.mode() == RegulatedMutationTransactionMode.REQUIRED) {
+                auditFailure(command, document, exception, "TRUST_INCIDENT_REFRESH_ROLLED_BACK");
+                document.setDegradationReason("TRUST_INCIDENT_REFRESH_ROLLED_BACK");
+                document.setExecutionStatus(RegulatedMutationExecutionStatus.FAILED);
+                transition(document, RegulatedMutationState.FAILED, "TRUST_INCIDENT_REFRESH_ROLLED_BACK");
+                throw new IllegalStateException("Regulated mutation partial commit is invalid when transaction-mode=REQUIRED.", exception);
+            }
+            auditFailure(command, document, exception, exception.reasonCode());
+            document.setResponseSnapshot(exception.responseSnapshot());
+            document.setDegradationReason(exception.reasonCode());
+            document.setExecutionStatus(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
+            transition(document, RegulatedMutationState.COMMITTED_DEGRADED, exception.reasonCode());
+            throw exception;
         } catch (RuntimeException exception) {
-            auditFailure(command, document, exception);
+            auditFailure(command, document, exception, BUSINESS_WRITE_FAILED);
             document.setDegradationReason(BUSINESS_WRITE_FAILED);
             document.setExecutionStatus(RegulatedMutationExecutionStatus.FAILED);
             transition(document, RegulatedMutationState.FAILED, BUSINESS_WRITE_FAILED);
             throw exception;
         } catch (Error error) {
-            auditFailure(command, document, error);
+            auditFailure(command, document, error, BUSINESS_WRITE_FAILED);
             document.setDegradationReason(BUSINESS_WRITE_FAILED);
             document.setExecutionStatus(RegulatedMutationExecutionStatus.FAILED);
             transition(document, RegulatedMutationState.FAILED, BUSINESS_WRITE_FAILED);
@@ -276,14 +334,19 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
         }
     }
 
-    private <R, S> void auditFailure(RegulatedMutationCommand<R, S> command, RegulatedMutationCommandDocument document, Throwable originalFailure) {
+    private <R, S> void auditFailure(
+            RegulatedMutationCommand<R, S> command,
+            RegulatedMutationCommandDocument document,
+            Throwable originalFailure,
+            String reasonCode
+    ) {
         try {
             document.setFailedAuditId(auditPhaseService.recordPhase(
                     document,
                     command.action(),
                     command.resourceType(),
                     AuditOutcome.FAILED,
-                    BUSINESS_WRITE_FAILED
+                    reasonCode
             ));
         } catch (RuntimeException auditFailure) {
             originalFailure.addSuppressed(auditFailure);
@@ -297,6 +360,8 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
         document.setPublicStatus(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING);
         document.setResponseSnapshot(pendingSnapshot);
         document.setOutboxEventId(pendingSnapshot.decisionEventId());
+        document.setLocalCommitMarker("LOCAL_COMMITTED");
+        document.setLocalCommittedAt(Instant.now());
         transition(document, RegulatedMutationState.SUCCESS_AUDIT_PENDING, null);
     }
 
@@ -426,5 +491,12 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
             return null;
         }
         return value.trim();
+    }
+
+    private record LocalCommit<R, S>(
+            R result,
+            S pendingResponse,
+            RegulatedMutationResponseSnapshot pendingSnapshot
+    ) {
     }
 }

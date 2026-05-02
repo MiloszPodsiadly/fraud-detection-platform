@@ -6,12 +6,17 @@ import com.frauddetection.alert.audit.external.ExternalAuditAnchorSink;
 import com.frauddetection.alert.audit.external.ExternalWitnessCapabilities;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
+import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
+import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.regulated.RegulatedMutationRecoveryService;
 import com.frauddetection.alert.service.DecisionOutboxStatus;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.trust.TrustIncidentService;
+import com.frauddetection.alert.trust.TrustIncidentSummary;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
@@ -38,8 +43,13 @@ public class SystemTrustLevelController implements ApplicationRunner {
     private final ExternalAuditAnchorSink externalAuditAnchorSink;
     private final AuditDegradationService auditDegradationService;
     private final AlertRepository alertRepository;
+    private final TransactionalOutboxRecordRepository outboxRepository;
     private final RegulatedMutationRecoveryService regulatedMutationRecoveryService;
     private final Duration staleOutboxThreshold;
+    private final String transactionMode;
+    private final boolean outboxPublisherEnabled;
+    private final boolean evidenceConfirmationEnabled;
+    private final TrustIncidentService trustIncidentService;
 
     public SystemTrustLevelController(
             boolean publicationEnabled,
@@ -67,7 +77,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
             AlertServiceMetrics ignoredMetrics
     ) {
         this(publicationEnabled, publicationRequired, failClosed, bankModeFailClosed, trustAuthorityEnabled, signingRequired,
-                Duration.ofMinutes(10), externalAuditIntegrityService, externalAuditAnchorSink, null, null, null);
+                Duration.ofMinutes(10), bankModeFailClosed ? "REQUIRED" : "OFF", true, true, externalAuditIntegrityService, externalAuditAnchorSink, null, null, null, null, null, null);
     }
 
     @Autowired
@@ -79,11 +89,17 @@ public class SystemTrustLevelController implements ApplicationRunner {
             @Value("${app.audit.trust-authority.enabled:false}") boolean trustAuthorityEnabled,
             @Value("${app.audit.trust-authority.signing-required:false}") boolean signingRequired,
             @Value("${app.alert.decision-outbox.stale-threshold:PT10M}") Duration staleOutboxThreshold,
+            @Value("${app.regulated-mutations.transaction-mode:OFF}") String transactionMode,
+            @Value("${app.outbox.publisher.enabled:true}") boolean outboxPublisherEnabled,
+            @Value("${app.evidence-confirmation.enabled:true}") boolean evidenceConfirmationEnabled,
             com.frauddetection.alert.audit.external.ExternalAuditIntegrityService externalAuditIntegrityService,
             ExternalAuditAnchorSink externalAuditAnchorSink,
             AuditDegradationService auditDegradationService,
             AlertRepository alertRepository,
-            RegulatedMutationRecoveryService regulatedMutationRecoveryService
+            ObjectProvider<TransactionalOutboxRecordRepository> outboxRepository,
+            RegulatedMutationRecoveryService regulatedMutationRecoveryService,
+            ObjectProvider<TrustIncidentService> trustIncidentService,
+            ObjectProvider<com.frauddetection.alert.trust.TrustSignalCollector> ignoredTrustSignalCollector
     ) {
         this.publicationEnabled = publicationEnabled;
         this.publicationRequired = publicationRequired;
@@ -95,8 +111,13 @@ public class SystemTrustLevelController implements ApplicationRunner {
         this.externalAuditAnchorSink = externalAuditAnchorSink;
         this.auditDegradationService = auditDegradationService;
         this.alertRepository = alertRepository;
+        this.outboxRepository = outboxRepository == null ? null : outboxRepository.getIfAvailable();
         this.regulatedMutationRecoveryService = regulatedMutationRecoveryService;
         this.staleOutboxThreshold = staleOutboxThreshold == null ? Duration.ofMinutes(10) : staleOutboxThreshold;
+        this.transactionMode = transactionMode == null || transactionMode.isBlank() ? "OFF" : transactionMode.trim().toUpperCase();
+        this.outboxPublisherEnabled = outboxPublisherEnabled;
+        this.evidenceConfirmationEnabled = evidenceConfirmationEnabled;
+        this.trustIncidentService = trustIncidentService == null ? null : trustIncidentService.getIfAvailable();
     }
 
     public SystemTrustLevelController(
@@ -128,6 +149,42 @@ public class SystemTrustLevelController implements ApplicationRunner {
         );
     }
 
+    public SystemTrustLevelController(
+            boolean publicationEnabled,
+            boolean publicationRequired,
+            boolean failClosed,
+            boolean bankModeFailClosed,
+            boolean trustAuthorityEnabled,
+            boolean signingRequired,
+            Duration staleOutboxThreshold,
+            com.frauddetection.alert.audit.external.ExternalAuditIntegrityService externalAuditIntegrityService,
+            ExternalAuditAnchorSink externalAuditAnchorSink,
+            AuditDegradationService auditDegradationService,
+            AlertRepository alertRepository,
+            RegulatedMutationRecoveryService regulatedMutationRecoveryService
+    ) {
+        this(
+                publicationEnabled,
+                publicationRequired,
+                failClosed,
+                bankModeFailClosed,
+                trustAuthorityEnabled,
+                signingRequired,
+                staleOutboxThreshold,
+                bankModeFailClosed ? "REQUIRED" : "OFF",
+                true,
+                true,
+                externalAuditIntegrityService,
+                externalAuditAnchorSink,
+                auditDegradationService,
+                alertRepository,
+                null,
+                regulatedMutationRecoveryService,
+                null,
+                null
+        );
+    }
+
     @GetMapping("/system/trust-level")
     public SystemTrustLevelResponse trustLevel() {
         LiveTrustState live = liveTrustState();
@@ -148,6 +205,11 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 live.pendingDegradationResolutionCount(),
                 live.postCommitAuditDegradedResolved(),
                 live.outboxFailedTerminalCount(),
+                live.outboxPendingCount(),
+                live.outboxProcessingCount(),
+                live.outboxPublishAttemptedCount(),
+                live.outboxPublishConfirmationUnknownCount(),
+                live.outboxProjectionMismatchCount(),
                 live.outboxFailedTerminalCount(),
                 live.outboxPublishConfirmationUnknownCount(),
                 live.outboxPublishConfirmationUnknownCount(),
@@ -157,9 +219,21 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 live.regulatedMutationRecoveryRequiredCount(),
                 live.staleProcessingLeaseCount(),
                 live.committedDegradedCount(),
+                live.evidenceConfirmationPendingCount(),
+                live.evidenceConfirmationFailedCount(),
                 live.repeatedRecoveryFailureCount(),
                 live.oldestRecoveryRequiredAgeSeconds(),
-                live.reasonCode()
+                live.reasonCode(),
+                transactionMode,
+                transactionCapabilityStatus(),
+                outboxDeliveryMode(),
+                evidenceConfirmationEnabled ? "ENABLED" : "DISABLED",
+                live.openCriticalIncidentCount(),
+                live.openHighIncidentCount(),
+                live.unacknowledgedCriticalIncidentCount(),
+                live.oldestOpenIncidentAgeSeconds(),
+                live.topIncidentTypes(),
+                live.incidentHealthStatus()
         );
     }
 
@@ -213,9 +287,12 @@ public class SystemTrustLevelController implements ApplicationRunner {
         long regulatedRecoveryRequired = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.recoveryRequiredCount();
         long staleProcessingLeaseCount = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.staleProcessingLeaseCount();
         long committedDegradedCount = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.committedDegradedCount();
+        long evidenceConfirmationPendingCount = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.evidenceConfirmationPendingCount();
+        long evidenceConfirmationFailedCount = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.evidenceConfirmationFailedCount();
         long repeatedRecoveryFailureCount = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.repeatedRecoveryFailureCount();
         Long oldestRecoveryRequiredAgeSeconds = regulatedMutationRecoveryService == null ? null : regulatedMutationRecoveryService.oldestRecoveryRequiredAgeSeconds();
         OutboxState outboxState = outboxState();
+        TrustIncidentSummary incidentSummary = trustIncidentSummary();
         try {
             coverage = externalAuditIntegrityService.coverage("alert-service", 100);
             coverageStatus = coverage.coverageStatus();
@@ -241,20 +318,29 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 && missingRanges == 0
                 && postCommitDegraded == 0
                 && pendingDegradationResolution == 0
+                && (!bankModeFailClosed || "REQUIRED".equals(transactionMode))
                 && outboxState.failedTerminalCount() == 0
+                && outboxState.projectionMismatchCount() == 0
                 && outboxState.publishConfirmationUnknownCount() == 0
+                && outboxState.publishAttemptedCount() == 0
                 && outboxState.pendingResolutionCount() == 0
                 && !outboxState.stalePending()
                 && regulatedRecoveryRequired == 0
                 && staleProcessingLeaseCount == 0
                 && committedDegradedCount == 0
+                && evidenceConfirmationFailedCount == 0
                 && repeatedRecoveryFailureCount == 0
-                && oldestRecoveryRequiredAgeSeconds == null;
+                && oldestRecoveryRequiredAgeSeconds == null
+                && incidentSummary.openCriticalIncidentCount() == 0
+                && incidentSummary.unacknowledgedCriticalIncidentCount() == 0;
         if (healthy && outboxState.reasonCode() != null) {
             healthy = false;
         }
         if (reasonCode == null) {
             reasonCode = outboxState.reasonCode();
+        }
+        if (reasonCode == null && bankModeFailClosed && !"REQUIRED".equals(transactionMode)) {
+            reasonCode = "TRANSACTION_MODE_OFF_IN_BANK_MODE";
         }
         if (reasonCode == null && pendingDegradationResolution > 0) {
             reasonCode = "AUDIT_DEGRADATION_RESOLUTION_PENDING_APPROVAL";
@@ -268,8 +354,17 @@ public class SystemTrustLevelController implements ApplicationRunner {
         if (reasonCode == null && committedDegradedCount > 0) {
             reasonCode = "REGULATED_MUTATION_COMMITTED_DEGRADED";
         }
+        if (reasonCode == null && evidenceConfirmationFailedCount > 0) {
+            reasonCode = "EVIDENCE_CONFIRMATION_FAILED";
+        }
         if (reasonCode == null && repeatedRecoveryFailureCount > 0) {
             reasonCode = "REGULATED_MUTATION_REPEATED_RECOVERY_FAILURE";
+        }
+        if (reasonCode == null && incidentSummary.unacknowledgedCriticalIncidentCount() > 0) {
+            reasonCode = "TRUST_INCIDENT_UNACKNOWLEDGED_CRITICAL";
+        }
+        if (reasonCode == null && incidentSummary.openCriticalIncidentCount() > 0) {
+            reasonCode = "TRUST_INCIDENT_OPEN_CRITICAL";
         }
         return new LiveTrustState(
                 healthy,
@@ -282,17 +377,40 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 pendingDegradationResolution,
                 postCommitDegradedResolved,
                 outboxState.failedTerminalCount(),
+                outboxState.pendingCount(),
+                outboxState.processingCount(),
+                outboxState.publishAttemptedCount(),
                 outboxState.publishConfirmationUnknownCount(),
+                outboxState.projectionMismatchCount(),
                 outboxState.pendingResolutionCount(),
                 outboxState.oldestPendingAgeSeconds(),
                 outboxState.oldestAmbiguousAgeSeconds(),
                 regulatedRecoveryRequired,
                 staleProcessingLeaseCount,
                 committedDegradedCount,
+                evidenceConfirmationPendingCount,
+                evidenceConfirmationFailedCount,
                 repeatedRecoveryFailureCount,
                 oldestRecoveryRequiredAgeSeconds,
-                reasonCode
+                reasonCode,
+                incidentSummary.openCriticalIncidentCount(),
+                incidentSummary.openHighIncidentCount(),
+                incidentSummary.unacknowledgedCriticalIncidentCount(),
+                incidentSummary.oldestOpenIncidentAgeSeconds(),
+                incidentSummary.topIncidentTypes(),
+                incidentSummary.incidentHealthStatus()
         );
+    }
+
+    private TrustIncidentSummary trustIncidentSummary() {
+        if (trustIncidentService == null) {
+            return TrustIncidentSummary.empty();
+        }
+        try {
+            return trustIncidentService.summary();
+        } catch (RuntimeException exception) {
+            return new TrustIncidentSummary(1L, 0L, 1L, null, List.of("TRUST_INCIDENT_CONTROL_PLANE_UNAVAILABLE"), "CRITICAL");
+        }
     }
 
     private String witnessStatus() {
@@ -315,7 +433,10 @@ public class SystemTrustLevelController implements ApplicationRunner {
     private OutboxState outboxState() {
         try {
             if (alertRepository == null) {
-                return new OutboxState(0L, 0L, 0L, null, null, false, null);
+                return new OutboxState(0L, 0L, 0L, 0L, 0L, 0L, 0L, null, null, false, null);
+            }
+            if (outboxRepository != null) {
+                return transactionalOutboxState();
             }
             List<String> pendingStatuses = List.of(
                     DecisionOutboxStatus.PENDING,
@@ -342,10 +463,55 @@ public class SystemTrustLevelController implements ApplicationRunner {
             } else if (stalePending) {
                 reason = "OUTBOX_STALE_PENDING";
             }
-            return new OutboxState(failedTerminalCount, unknownCount, pendingResolutionCount, oldestPendingAge, oldestUnknownAge, stalePending, reason);
+            return new OutboxState(0L, 0L, 0L, failedTerminalCount, unknownCount, 0L, pendingResolutionCount, oldestPendingAge, oldestUnknownAge, stalePending, reason);
         } catch (DataAccessException exception) {
-            return new OutboxState(1L, 1L, 1L, null, null, true, "OUTBOX_STATUS_UNAVAILABLE");
+            return new OutboxState(0L, 0L, 0L, 1L, 1L, 1L, 1L, null, null, true, "OUTBOX_STATUS_UNAVAILABLE");
         }
+    }
+
+    private OutboxState transactionalOutboxState() {
+        List<TransactionalOutboxStatus> pendingStatuses = List.of(
+                TransactionalOutboxStatus.PENDING,
+                TransactionalOutboxStatus.PROCESSING,
+                TransactionalOutboxStatus.FAILED_RETRYABLE
+        );
+        long failedTerminalCount = outboxRepository.countByStatus(TransactionalOutboxStatus.FAILED_TERMINAL);
+        long pendingCount = outboxRepository.countByStatus(TransactionalOutboxStatus.PENDING);
+        long processingCount = outboxRepository.countByStatus(TransactionalOutboxStatus.PROCESSING);
+        long publishAttemptedCount = outboxRepository.countByStatus(TransactionalOutboxStatus.PUBLISH_ATTEMPTED);
+        long unknownCount = outboxRepository.countByStatus(TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
+        long projectionMismatchCount = outboxRepository.countByProjectionMismatchTrue();
+        Long oldestPendingAge = outboxRepository.findTopByStatusInOrderByCreatedAtAsc(pendingStatuses)
+                .map(document -> {
+                    Instant created = document.getCreatedAt();
+                    return created == null ? 0L : Math.max(0L, Duration.between(created, Instant.now()).toSeconds());
+                })
+                .orElse(null);
+        boolean stalePending = oldestPendingAge != null && oldestPendingAge > staleOutboxThreshold.toSeconds();
+        String reason = null;
+        if (failedTerminalCount > 0) {
+            reason = "OUTBOX_TERMINAL_FAILURE";
+        } else if (projectionMismatchCount > 0) {
+            reason = "OUTBOX_PROJECTION_MISMATCH";
+        } else if (publishAttemptedCount > 0) {
+            reason = "OUTBOX_PUBLISH_ATTEMPT_CONFIRMATION_PENDING";
+        } else if (unknownCount > 0) {
+            reason = "OUTBOX_PUBLISH_CONFIRMATION_UNKNOWN";
+        } else if (stalePending) {
+            reason = "OUTBOX_STALE_PENDING";
+        }
+        return new OutboxState(pendingCount, processingCount, publishAttemptedCount, failedTerminalCount, unknownCount, projectionMismatchCount, 0L, oldestPendingAge, null, stalePending, reason);
+    }
+
+    private String outboxDeliveryMode() {
+        return outboxPublisherEnabled ? "TRANSACTIONAL_OUTBOX_AT_LEAST_ONCE" : "DISABLED";
+    }
+
+    private String transactionCapabilityStatus() {
+        if ("REQUIRED".equals(transactionMode)) {
+            return "LOCAL_MONGO_TRANSACTION_REQUIRED";
+        }
+        return "NON_TRANSACTIONAL_RECOVERABLE_SAGA";
     }
 
     private long pendingAgeSeconds(AlertDocument document) {
@@ -367,22 +533,38 @@ public class SystemTrustLevelController implements ApplicationRunner {
             long pendingDegradationResolutionCount,
             long postCommitAuditDegradedResolved,
             long outboxFailedTerminalCount,
+            long outboxPendingCount,
+            long outboxProcessingCount,
+            long outboxPublishAttemptedCount,
             long outboxPublishConfirmationUnknownCount,
+            long outboxProjectionMismatchCount,
             long outboxPendingResolutionCount,
             Long outboxOldestPendingAgeSeconds,
             Long outboxOldestAmbiguousAgeSeconds,
             long regulatedMutationRecoveryRequiredCount,
             long staleProcessingLeaseCount,
             long committedDegradedCount,
+            long evidenceConfirmationPendingCount,
+            long evidenceConfirmationFailedCount,
             long repeatedRecoveryFailureCount,
             Long oldestRecoveryRequiredAgeSeconds,
-            String reasonCode
+            String reasonCode,
+            long openCriticalIncidentCount,
+            long openHighIncidentCount,
+            long unacknowledgedCriticalIncidentCount,
+            Long oldestOpenIncidentAgeSeconds,
+            List<String> topIncidentTypes,
+            String incidentHealthStatus
     ) {
     }
 
     private record OutboxState(
+            long pendingCount,
+            long processingCount,
+            long publishAttemptedCount,
             long failedTerminalCount,
             long publishConfirmationUnknownCount,
+            long projectionMismatchCount,
             long pendingResolutionCount,
             Long oldestPendingAgeSeconds,
             Long oldestAmbiguousAgeSeconds,

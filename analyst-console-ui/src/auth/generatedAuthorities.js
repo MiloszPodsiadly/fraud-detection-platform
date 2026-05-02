@@ -15,6 +15,13 @@ export const AUTHORITIES = Object.freeze({
   AUDIT_DEGRADATION_RESOLVE: "audit-degradation:resolve",
   DECISION_OUTBOX_RECONCILE: "decision-outbox:reconcile",
   REGULATED_MUTATION_RECOVER: "regulated-mutation:recover",
+  OUTBOX_INSPECT: "outbox:inspect",
+  OUTBOX_RECOVER: "outbox:recover",
+  OUTBOX_RESOLVE: "outbox:resolve",
+  TRUST_INCIDENT_READ: "trust-incident:read",
+  TRUST_INCIDENT_REFRESH: "trust-incident:refresh",
+  TRUST_INCIDENT_ACK: "trust-incident:ack",
+  TRUST_INCIDENT_RESOLVE: "trust-incident:resolve",
 });
 
 export const AUTHORITY_VALUES = Object.freeze([
@@ -31,4 +38,11 @@ export const AUTHORITY_VALUES = Object.freeze([
   "audit-degradation:resolve",
   "decision-outbox:reconcile",
   "regulated-mutation:recover",
+  "outbox:inspect",
+  "outbox:recover",
+  "outbox:resolve",
+  "trust-incident:read",
+  "trust-incident:refresh",
+  "trust-incident:ack",
+  "trust-incident:resolve",
 ]);

@@ -87,7 +87,7 @@ public class DecisionOutboxReconciliationService {
                 AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION,
                 null,
                 requestHash(normalizedAlertId, resolution, normalizedReason, evidenceReference, normalizedActor),
-                () -> mutationHandler.applyResolution(
+                context -> mutationHandler.applyResolution(
                         normalizedAlertId,
                         resolution,
                         normalizedReason,

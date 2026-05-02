@@ -4,6 +4,7 @@ import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.read.ReadAccessAuditOutcome;
 import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.outbox.OutboxBacklogResponse;
 import com.frauddetection.alert.security.error.SecurityFailureClassifier;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.DistributionSummary;
@@ -35,6 +36,13 @@ public class AlertServiceMetrics {
     private final AtomicLong regulatedMutationRecoveryOldestAgeSeconds = new AtomicLong(0);
     private final AtomicLong regulatedMutationRecoveryFailedTerminal = new AtomicLong(0);
     private final AtomicLong regulatedMutationRecoveryRepeatedFailures = new AtomicLong(0);
+    private final AtomicLong outboxPending = new AtomicLong(0);
+    private final AtomicLong outboxProcessing = new AtomicLong(0);
+    private final AtomicLong outboxConfirmationUnknown = new AtomicLong(0);
+    private final AtomicLong outboxFailedTerminal = new AtomicLong(0);
+    private final AtomicLong outboxProjectionMismatch = new AtomicLong(0);
+    private final AtomicLong outboxOldestPendingAgeSeconds = new AtomicLong(0);
+    private final AtomicLong evidenceConfirmationPending = new AtomicLong(0);
 
     public AlertServiceMetrics(MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
@@ -66,6 +74,13 @@ public class AlertServiceMetrics {
                 .register(meterRegistry);
         Gauge.builder("repeated_recovery_failures_count", regulatedMutationRecoveryRepeatedFailures, AtomicLong::get)
                 .register(meterRegistry);
+        Gauge.builder("outbox_pending_count", outboxPending, AtomicLong::get).register(meterRegistry);
+        Gauge.builder("outbox_processing_count", outboxProcessing, AtomicLong::get).register(meterRegistry);
+        Gauge.builder("outbox_confirmation_unknown_count", outboxConfirmationUnknown, AtomicLong::get).register(meterRegistry);
+        Gauge.builder("outbox_failed_terminal_count", outboxFailedTerminal, AtomicLong::get).register(meterRegistry);
+        Gauge.builder("outbox_projection_mismatch_count", outboxProjectionMismatch, AtomicLong::get).register(meterRegistry);
+        Gauge.builder("outbox_oldest_pending_age_seconds", outboxOldestPendingAgeSeconds, AtomicLong::get).register(meterRegistry);
+        Gauge.builder("evidence_confirmation_pending_count", evidenceConfirmationPending, AtomicLong::get).register(meterRegistry);
     }
 
     public void recordAnalystDecisionSubmitted() {
@@ -114,6 +129,44 @@ public class AlertServiceMetrics {
         ).increment();
     }
 
+    public void recordOutboxBacklog(OutboxBacklogResponse response) {
+        outboxPending.set(Math.max(0L, response.pendingCount()));
+        outboxProcessing.set(Math.max(0L, response.processingCount()));
+        outboxConfirmationUnknown.set(Math.max(0L, response.confirmationUnknownCount()));
+        outboxFailedTerminal.set(Math.max(0L, response.failedTerminalCount()));
+        outboxProjectionMismatch.set(Math.max(0L, response.projectionMismatchCount()));
+        outboxOldestPendingAgeSeconds.set(response.oldestPendingAgeSeconds() == null ? 0L : Math.max(0L, response.oldestPendingAgeSeconds()));
+    }
+
+    public void recordOutboxProjectionMismatch(long mismatchCount) {
+        outboxProjectionMismatch.set(Math.max(0L, mismatchCount));
+        counter("outbox_projection_mismatch_total", "reason", "PROJECTION_UPDATE_FAILED").increment();
+    }
+
+    public void recordOutboxPublishAttempt(String result) {
+        counter(
+                "outbox_publish_attempt_total",
+                "result", normalizeOutboxPublishResult(result)
+        ).increment();
+    }
+
+    public void recordOutboxDeliveryLatency(Duration latency) {
+        Timer.builder("outbox_delivery_latency_seconds")
+                .register(meterRegistry)
+                .record(latency == null || latency.isNegative() ? Duration.ZERO : latency);
+    }
+
+    public void recordEvidenceConfirmationPending(long pendingCount) {
+        evidenceConfirmationPending.set(Math.max(0L, pendingCount));
+    }
+
+    public void recordEvidenceConfirmationFailed(String reason) {
+        counter(
+                "evidence_confirmation_failed_total",
+                "reason", normalizeEvidenceConfirmationFailure(reason)
+        ).increment();
+    }
+
     public void recordExternalCoverageRequestCost(String status, int cost) {
         DistributionSummary.builder("fraud_platform_audit_external_coverage_request_cost")
                 .tag("status", normalizeCoverageRateLimitStatus(status))
@@ -123,6 +176,30 @@ public class AlertServiceMetrics {
 
     public void recordFraudCaseUpdated() {
         counter("fraud.alert.fraud_case.updates", "outcome", "success").increment();
+    }
+
+    public void recordTrustIncidentMaterialized(String type, String severity, String result) {
+        counter(
+                "trust_incident_materialized_total",
+                "type", normalizeTrustIncidentType(type),
+                "severity", normalizeTrustIncidentSeverity(severity),
+                "result", normalizeTrustIncidentMaterializationResult(result)
+        ).increment();
+    }
+
+    public void recordTrustIncidentDeduped(String type, String severity) {
+        counter(
+                "trust_incident_deduped_total",
+                "type", normalizeTrustIncidentType(type),
+                "severity", normalizeTrustIncidentSeverity(severity)
+        ).increment();
+    }
+
+    public void recordTrustIncidentMaterializationFailed(String reason) {
+        counter(
+                "trust_incident_materialization_failed_total",
+                "reason", normalizeTrustIncidentMaterializationFailure(reason)
+        ).increment();
     }
 
     public void recordAuditEventPublished(AuditAction action, AuditOutcome outcome) {
@@ -514,16 +591,71 @@ public class AlertServiceMetrics {
     }
 
     private String normalizePostCommitOperation(String operation) {
-        if ("SUBMIT_ANALYST_DECISION".equals(operation)) {
+        if ("SUBMIT_ANALYST_DECISION".equals(operation)
+                || "UPDATE_FRAUD_CASE".equals(operation)
+                || "RESOLVE_DECISION_OUTBOX_CONFIRMATION".equals(operation)
+                || "ACK_TRUST_INCIDENT".equals(operation)
+                || "RESOLVE_TRUST_INCIDENT".equals(operation)) {
             return operation;
         }
         return "UNKNOWN";
+    }
+
+    private String normalizeTrustIncidentType(String type) {
+        return switch (type) {
+            case "OUTBOX_TERMINAL_FAILURE",
+                 "OUTBOX_PUBLISH_CONFIRMATION_UNKNOWN",
+                 "OUTBOX_PROJECTION_MISMATCH",
+                 "REGULATED_MUTATION_RECOVERY_REQUIRED",
+                 "REGULATED_MUTATION_COMMITTED_DEGRADED",
+                 "EVIDENCE_CONFIRMATION_FAILED",
+                 "AUDIT_DEGRADATION_UNRESOLVED",
+                 "COVERAGE_UNAVAILABLE",
+                 "EXTERNAL_ANCHOR_GAP",
+                 "TRUST_AUTHORITY_UNAVAILABLE" -> type;
+            default -> "UNKNOWN";
+        };
+    }
+
+    private String normalizeTrustIncidentSeverity(String severity) {
+        return switch (severity) {
+            case "CRITICAL", "HIGH", "MEDIUM", "LOW" -> severity;
+            default -> "MEDIUM";
+        };
+    }
+
+    private String normalizeTrustIncidentMaterializationResult(String result) {
+        return switch (result) {
+            case "CREATED", "UPDATED" -> result;
+            default -> "UPDATED";
+        };
+    }
+
+    private String normalizeTrustIncidentMaterializationFailure(String reason) {
+        return switch (reason) {
+            case "PERSISTENCE_UNAVAILABLE", "AUDIT_UNAVAILABLE" -> reason;
+            default -> "PERSISTENCE_UNAVAILABLE";
+        };
     }
 
     private String normalizeRegulatedMutationRecoveryOutcome(String outcome) {
         return switch (outcome) {
             case "RECOVERED", "STILL_PENDING", "RECOVERY_REQUIRED", "FAILED_TERMINAL" -> outcome;
             default -> "RECOVERY_REQUIRED";
+        };
+    }
+
+    private String normalizeOutboxPublishResult(String result) {
+        return switch (result) {
+            case "SUCCESS", "FAILED", "CONFIRMATION_UNKNOWN" -> result;
+            default -> "FAILED";
+        };
+    }
+
+    private String normalizeEvidenceConfirmationFailure(String reason) {
+        return switch (reason) {
+            case "OUTBOX_NOT_PUBLISHED", "SUCCESS_AUDIT_MISSING", "EXTERNAL_ANCHOR_MISSING", "SIGNATURE_UNAVAILABLE" -> reason;
+            default -> "OUTBOX_NOT_PUBLISHED";
         };
     }
 

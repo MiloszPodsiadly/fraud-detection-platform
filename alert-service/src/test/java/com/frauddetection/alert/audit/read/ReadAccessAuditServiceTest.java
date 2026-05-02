@@ -12,6 +12,7 @@ import org.springframework.dao.DataAccessResourceFailureException;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -84,6 +85,33 @@ class ReadAccessAuditServiceTest {
 
         assertThat(meterRegistry.get("fraud_platform_read_access_audit_persistence_failures_total")
                 .tag("endpoint_category", "governance_advisory_analytics")
+                .counter()
+                .count()).isEqualTo(1.0);
+    }
+
+    @Test
+    void shouldThrowWhenPersistenceFailsAndCallerRequiresFailClosedRead() {
+        when(currentAnalystUser.get()).thenReturn(java.util.Optional.of(new AnalystPrincipal(
+                "ops-admin",
+                Set.of(AnalystRole.FRAUD_OPS_ADMIN),
+                AnalystRole.FRAUD_OPS_ADMIN.authorities()
+        )));
+        doThrow(new DataAccessResourceFailureException("mongo unavailable"))
+                .when(repository).save(org.mockito.ArgumentMatchers.any());
+        ReadAccessAuditTarget target = new ReadAccessAuditTarget(
+                ReadAccessEndpointCategory.PREVIEW_TRUST_INCIDENT_SIGNALS,
+                ReadAccessResourceType.TRUST_INCIDENT_SIGNAL,
+                null,
+                null,
+                null,
+                1
+        );
+
+        assertThatThrownBy(() -> service.auditOrThrow(target, ReadAccessAuditOutcome.SUCCESS, 1, "corr-1"))
+                .isInstanceOf(DataAccessResourceFailureException.class);
+
+        assertThat(meterRegistry.get("fraud_platform_read_access_audit_persistence_failures_total")
+                .tag("endpoint_category", "preview_trust_incident_signals")
                 .counter()
                 .count()).isEqualTo(1.0);
     }

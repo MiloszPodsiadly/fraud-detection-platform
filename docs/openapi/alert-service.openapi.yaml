@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: Alert Service API
-  version: FDP-25
-  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, external anchor verification, bounded evidence export, derived audit trust attestation, public trust key export, governance advisory lifecycle projection, and human-review audit. FDP-20 extends tamper evidence outside the primary database boundary. FDP-22 adds a pluggable object-store external anchor sink boundary, verified external anchor references, and explicit external_immutability_level=NONE|CONFIGURED|ENFORCED; no WORM or full immutability claim is valid unless the adapter verifies infrastructure controls and reports ENFORCED. FDP-23 adds a separate local-first audit trust authority for Ed25519 external anchor hash signatures and public verification key export; the alert-service does not hold the trust authority private key. FDP-24 adds fail-closed posture reporting, durable analyst-decision outbox/idempotency semantics, and publication-status source-of-truth semantics. FDP-25 adds a recoverable regulated mutation state machine for submit-decision writes with canonical intent, idempotent audit phase keys, bounded operational recovery, and rate-limited audited inspection endpoints. Audit integrity, trust authority signatures, and trust attestation do not imply certified WORM archive storage, legal notarization, SIEM integration, unbounded export, KMS/HSM signing unless explicitly integrated, a single atomic commit boundary across business state/audit/external witnesses/Kafka, or final compliance archive.
+  version: FDP-26
+  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, external anchor verification, bounded evidence export, derived audit trust attestation, public trust key export, governance advisory lifecycle projection, and human-review audit. FDP-20 extends tamper evidence outside the primary database boundary. FDP-22 adds a pluggable object-store external anchor sink boundary, verified external anchor references, and explicit external_immutability_level=NONE|CONFIGURED|ENFORCED; no WORM or full immutability claim is valid unless the adapter verifies infrastructure controls and reports ENFORCED. FDP-23 adds a separate local-first audit trust authority for Ed25519 external anchor hash signatures and public verification key export; the alert-service does not hold the trust authority private key. FDP-24 adds fail-closed posture reporting, durable analyst-decision outbox/idempotency semantics, and publication-status source-of-truth semantics. FDP-25 adds a recoverable regulated mutation state machine for submit-decision writes with canonical intent, idempotent audit phase keys, bounded operational recovery, and rate-limited audited inspection endpoints. FDP-26 adds a REQUIRED local Mongo transaction boundary option for supported regulated mutations, regulated fraud-case update, a separate authoritative transactional outbox record, bounded outbox recovery APIs, asynchronous evidence confirmation, bank-mode dual-control for manual outbox confirmation, and a minimal trust incident control plane. Audit integrity, trust authority signatures, trust attestation, and FDP-26 transaction mode do not imply certified WORM archive storage, legal notarization, SIEM integration, unbounded export, KMS/HSM signing unless explicitly integrated, distributed ACID across MongoDB/Kafka/external witnesses, exactly-once broker delivery, pre-commit/finalize commit, or final compliance archive.
 servers:
   - url: http://localhost:8085
 paths:
@@ -349,7 +349,7 @@ paths:
   /system/trust-level:
     get:
       summary: Get deployment trust posture
-      description: Requires audit:verify. Returns bounded live deployment posture for external audit anchoring. BEST_EFFORT and FDP24_DEGRADED must not be marketed as FDP-24 healthy fail-closed mode. SIGNED_EXTERNAL means trust-authority signing is enabled and required; it is not WORM, notarization, SIEM, mTLS, or legal trust. FDP24_HEALTHY requires zero unresolved degradations, zero pending degradation resolutions, zero unknown outbox confirmations, zero pending outbox resolutions, and zero terminal outbox failures.
+      description: Requires audit:verify. Returns bounded live deployment posture for external audit anchoring and FDP-26 local transaction/outbox/trust-incident modes. BEST_EFFORT and FDP24_DEGRADED must not be marketed as FDP-24 healthy fail-closed mode. SIGNED_EXTERNAL means trust-authority signing is enabled and required; it is not WORM, notarization, SIEM, mTLS, or legal trust. FDP24_HEALTHY requires zero unresolved degradations, zero pending degradation resolutions, zero unknown outbox confirmations, zero publish-attempted ambiguity, zero projection mismatches, zero pending outbox resolutions, zero terminal outbox failures, no regulated mutation recovery/evidence degradation, and no open/unacknowledged critical trust incidents. transaction_mode and transaction_capability_status describe the local Mongo transaction posture only; they are not distributed ACID or exactly-once delivery.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -364,6 +364,171 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+  /api/v1/trust/incidents:
+    get:
+      summary: List open trust incidents
+      description: Requires trust-incident:read. Returns a bounded operational list of open trust incidents. This read path does not materialize trust signals or save incident state. No export, delete, update, bulk action, workflow automation, or raw payload access is provided.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      responses:
+        "200":
+          description: Open trust incidents returned.
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 100
+                items:
+                  $ref: "#/components/schemas/TrustIncidentResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/trust/incidents/refresh:
+    post:
+      summary: Materialize trust incidents from current signals
+      description: Requires trust-incident:refresh or trust-incident:resolve and X-Idempotency-Key. Explicit regulated mutation write path that collects bounded low-cardinality trust signals, stores a durable command, writes coordinator-owned phase audits, persists a response snapshot for replay, and atomically materializes active incidents by active dedupe key. app.trust-incidents.refresh-mode=ATOMIC|PARTIAL controls failure semantics. In transaction-mode=REQUIRED or refresh-mode=ATOMIC, a materialization exception is rollback/failure and is not reported as a partial commit. PARTIAL is non-transactional/local compatibility only and reports committed-degraded state only after persisted incidents are verified by active dedupe key. Failed materialization does not receive a clean SUCCESS audit. GET trust incident, signal preview, and system trust-level paths do not perform this write.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      responses:
+        "200":
+          description: Trust incident materialization completed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrustIncidentMaterializationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/trust/incidents/signals/preview:
+    get:
+      summary: Preview current trust signals
+      description: Requires trust-incident:read. Read-only endpoint that collects current bounded trust signals for operator inspection. Applies a per-actor/IP in-memory rate limit and records a bounded read-access audit with endpoint_category=PREVIEW_TRUST_INCIDENT_SIGNALS, signal count, actor, and correlation id only. It does not persist raw evidence payloads, response bodies, customer/account/card identifiers, full URLs, materialize incidents, create regulated command state, write mutation audit events, or save TrustIncidentDocument state. In bank/prod mode, audit persistence failure returns no preview data.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      responses:
+        "200":
+          description: Trust signal preview returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrustSignalPreviewResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          description: Trust signal preview rate limit exceeded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/trust/incidents/{incidentId}/ack:
+    post:
+      summary: Acknowledge trust incident
+      description: Requires trust-incident:ack and X-Idempotency-Key. ACK is a regulated mutation: ATTEMPTED audit is recorded before state mutation and SUCCESS audit is owned by the coordinator after the incident state save. ACK means the operator has seen and accepted ownership; it does not mean mitigation or resolution. In bank fail-closed mode, acknowledgement reason is required. The mutation handler does not write AuditService directly.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: incidentId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TrustIncidentAcknowledgementRequest"
+      responses:
+        "200":
+          description: Trust incident acknowledged.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrustIncidentResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/trust/incidents/{incidentId}/resolve:
+    post:
+      summary: Resolve trust incident
+      description: Requires trust-incident:resolve and X-Idempotency-Key. Resolution requires a reason and structured evidence and is a regulated mutation. It may mark the incident RESOLVED or FALSE_POSITIVE. No delete, auto-resolve, or workflow automation is provided.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: incidentId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TrustIncidentResolutionRequest"
+      responses:
+        "200":
+          description: Trust incident resolved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrustIncidentResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
   /api/v1/audit/degradations:
     get:
       summary: List unresolved audit degradation events
@@ -475,6 +640,87 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/outbox/recovery/backlog:
+    get:
+      summary: Inspect transactional outbox recovery backlog
+      description: Requires outbox:inspect. Returns bounded counts for FDP-26 transactional outbox records. Transactional outbox records are authoritative; alert embedded outbox fields are projection/cache. This endpoint is operational metadata only and never returns event payloads, transaction data, customer/account/card identifiers, decision notes, response bodies, raw exception details, or unbounded exports.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      responses:
+        "200":
+          description: Transactional outbox backlog returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OutboxBacklogResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/outbox/recovery/run:
+    post:
+      summary: Run bounded transactional outbox recovery
+      description: Requires outbox:recover. Releases stale PROCESSING leases, moves stale PUBLISH_ATTEMPTED records to confirmation-unknown instead of normal retry, repairs bounded projection mismatches, and runs a bounded transactional outbox publish pass. Delivery remains at-least-once; this endpoint does not provide exactly-once delivery, direct request-path publishing, workflow automation, rollback, or unbounded repair.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      responses:
+        "200":
+          description: Transactional outbox recovery run summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OutboxRecoveryRunResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/outbox/{eventId}/resolve-confirmation:
+    post:
+      summary: Resolve transactional outbox confirmation-unknown state
+      description: Requires outbox:resolve and X-Idempotency-Key. Resolves a PUBLISH_CONFIRMATION_UNKNOWN transactional outbox record as PUBLISHED or RECOVERY_REQUIRED through the regulated mutation coordinator with mandatory reason and structured evidence. The response contains safe metadata only and does not expose the event payload. Resolution is an operational evidence action, not proof of exactly-once delivery or legal notarization.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OutboxConfirmationResolutionRequest"
+      responses:
+        "200":
+          description: Confirmation state resolved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OutboxRecordResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
   /api/v1/regulated-mutations/{idempotencyKey}:
@@ -653,7 +899,7 @@ paths:
   /api/v1/alerts/{alertId}/decision:
     post:
       summary: Submit analyst decision
-      description: Records an analyst decision through the FDP-25 Phase 1 regulated mutation coordinator. X-Idempotency-Key is required. The coordinator stores a regulated mutation command with canonical intent fields, atomically claims execution with a bounded lease, writes ATTEMPTED audit before business mutation, persists the business decision plus durable same-document outbox, then writes SUCCESS audit before returning COMMITTED_EVIDENCE_PENDING. Phase audit events use deterministic request ids regulated_command_id:ATTEMPTED, regulated_command_id:SUCCESS, and regulated_command_id:FAILED so recovery can bind existing evidence without duplicate success audit. The same idempotency key and request body replay the stored response snapshot; the same key with a different body returns 409; a missing key returns 400. Kafka publication is asynchronous from the durable outbox and at-least-once unless consumers dedupe by event id. FraudDecisionEvent carries delivery=AT_LEAST_ONCE and dedupeKey=eventId. operation_status is mandatory: REJECTED_BEFORE_MUTATION maps to HTTP 503 with no command response body; IN_PROGRESS, RECOVERY_REQUIRED, and COMMIT_UNKNOWN map to HTTP 202; COMMITTED_EVIDENCE_PENDING means local SUCCESS audit was recorded and external evidence promotion remains pending; COMMITTED_EVIDENCE_INCOMPLETE means the business decision and outbox committed but local success audit/evidence completion degraded. FDP-25 Phase 1 is not a single atomic boundary across MongoDB, external witnesses, and Kafka and does not eliminate post-commit audit degradation. COMMITTED_FULLY_ANCHORED is async-only and is not exposed by this synchronous request path.
+      description: Records an analyst decision through the regulated mutation coordinator. X-Idempotency-Key is required. The coordinator stores a regulated mutation command with canonical intent fields, atomically claims execution with a bounded lease, writes ATTEMPTED audit before business mutation, and when app.regulated-mutations.transaction-mode=REQUIRED wraps the local commit in a Mongo transaction covering command state, alert business write, transactional_outbox_records insert, response snapshot, and local commit marker. Phase audit events use deterministic request ids regulated_command_id:ATTEMPTED, regulated_command_id:SUCCESS, and regulated_command_id:FAILED so recovery can bind existing evidence without duplicate success audit. The same idempotency key and request body replay the stored response snapshot; the same key with a different body returns 409; a missing key returns 400. Kafka publication is asynchronous from authoritative transactional_outbox_records and at-least-once unless consumers dedupe by event id. FraudDecisionEvent carries delivery=AT_LEAST_ONCE and dedupeKey=eventId. operation_status is mandatory: REJECTED_BEFORE_MUTATION maps to HTTP 503 with no command response body; IN_PROGRESS, RECOVERY_REQUIRED, and COMMIT_UNKNOWN map to HTTP 202; COMMITTED_EVIDENCE_PENDING means local SUCCESS audit was recorded and external/outbox evidence promotion remains pending; COMMITTED_EVIDENCE_CONFIRMED means local commit marker, success audit, authoritative PUBLISHED outbox evidence, and any configured external/signature evidence are present; COMMITTED_EVIDENCE_INCOMPLETE means the business decision and outbox committed but local success audit/evidence completion degraded. FDP-26 is a local Mongo ACID boundary plus transactional outbox foundation; it is not distributed ACID across MongoDB, external witnesses, trust-authority signing, and Kafka, and it does not provide exactly-once broker delivery, pre-commit/finalize evidence-gated commit, WORM storage, legal notarization, SIEM integration, or certified archive evidence. SUCCESS audit and external evidence remain outside the local Mongo transaction unless a future phase changes the commit model.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -739,6 +985,50 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+    patch:
+      summary: Update fraud case through regulated mutation coordinator
+      description: Requires fraud-case:update and X-Idempotency-Key. Stores a regulated mutation command with canonical bounded intent fields for case id, backend-resolved actor, UPDATE_FRAUD_CASE, status, assignee hash, notes hash, tags hash, and payload hash. Matching idempotency replay returns the stored snapshot; conflicting key reuse returns 409. Non-terminal states return operation metadata and current_case_snapshot only; updated_case is present only when the mutation has committed. No raw fraud-case payloads, customer identifiers, or notes bodies are persisted in command intent.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateFraudCaseRequest"
+      responses:
+        "200":
+          description: Fraud case update accepted or replayed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdateFraudCaseResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
   /api/v1/transactions/scored:
     get:
       summary: List scored transaction projections
@@ -959,7 +1249,7 @@ components:
     SystemTrustLevelResponse:
       type: object
       additionalProperties: false
-      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength, coverage_status, witness_status, signature_policy, required_publication_failures, local_status_unverified, missing_ranges, post_commit_audit_degraded, unresolved_degradation_count, pending_degradation_resolution_count, post_commit_audit_degraded_resolved, outbox_failed_terminal_count, terminal_outbox_failure_count, outbox_publish_confirmation_unknown_count, unknown_outbox_confirmation_count, pending_outbox_resolution_count, outbox_oldest_pending_age_seconds, outbox_oldest_ambiguous_age_seconds, regulated_mutation_recovery_required_count, stale_processing_lease_count, committed_degraded_count, repeated_recovery_failure_count, oldest_recovery_required_age_seconds]
+      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength, coverage_status, witness_status, signature_policy, required_publication_failures, local_status_unverified, missing_ranges, post_commit_audit_degraded, unresolved_degradation_count, pending_degradation_resolution_count, post_commit_audit_degraded_resolved, outbox_failed_terminal_count, outbox_pending_count, outbox_processing_count, outbox_publish_attempted_count, outbox_confirmation_unknown_count, outbox_projection_mismatch_count, terminal_outbox_failure_count, outbox_publish_confirmation_unknown_count, unknown_outbox_confirmation_count, pending_outbox_resolution_count, outbox_oldest_pending_age_seconds, outbox_oldest_ambiguous_age_seconds, regulated_mutation_recovery_required_count, stale_processing_lease_count, committed_degraded_count, evidence_confirmation_pending_count, evidence_confirmation_failed_count, repeated_recovery_failure_count, oldest_recovery_required_age_seconds, transaction_mode, transaction_capability_status, outbox_delivery_mode, evidence_confirmation_mode, open_critical_incident_count, open_high_incident_count, unacknowledged_critical_incident_count, oldest_open_incident_age_seconds, top_incident_types, incident_health_status]
       properties:
         guarantee_level:
           type: string
@@ -1013,6 +1303,28 @@ components:
           type: integer
           format: int64
           minimum: 0
+        outbox_pending_count:
+          type: integer
+          format: int64
+          minimum: 0
+        outbox_processing_count:
+          type: integer
+          format: int64
+          minimum: 0
+        outbox_publish_attempted_count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Records where a broker publish may have been attempted and must not be blindly retried.
+        outbox_confirmation_unknown_count:
+          type: integer
+          format: int64
+          minimum: 0
+        outbox_projection_mismatch_count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Projection/cache mismatch count; transactional_outbox_records remain authoritative.
         terminal_outbox_failure_count:
           type: integer
           format: int64
@@ -1054,6 +1366,16 @@ components:
           format: int64
           minimum: 0
           description: Number of regulated mutation commands committed with degraded evidence. Any value greater than zero degrades deployment trust posture.
+        evidence_confirmation_pending_count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Number of locally committed regulated mutation commands still awaiting asynchronous evidence confirmation.
+        evidence_confirmation_failed_count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Number of regulated mutation commands whose evidence confirmation failed into a degraded committed state. Any value greater than zero degrades deployment trust posture.
         repeated_recovery_failure_count:
           type: integer
           format: int64
@@ -1068,6 +1390,226 @@ components:
         reason_code:
           type: string
           nullable: true
+        transaction_mode:
+          type: string
+          enum: [OFF, REQUIRED]
+          description: Local regulated mutation transaction mode. REQUIRED is a Mongo local transaction boundary only, not distributed ACID.
+        transaction_capability_status:
+          type: string
+          enum: [LOCAL_MONGO_TRANSACTION_REQUIRED, NON_TRANSACTIONAL_RECOVERABLE_SAGA]
+          description: Interprets transaction_mode for FDP-26. OFF is a recoverable saga posture, not a regulated local ACID commit boundary.
+        outbox_delivery_mode:
+          type: string
+          enum: [TRANSACTIONAL_OUTBOX_AT_LEAST_ONCE, DISABLED]
+          description: Broker delivery posture. AT_LEAST_ONCE requires consumer dedupe and is not exactly-once delivery.
+        evidence_confirmation_mode:
+          type: string
+          enum: [ENABLED, DISABLED]
+        open_critical_incident_count:
+          type: integer
+          format: int64
+          minimum: 0
+        open_high_incident_count:
+          type: integer
+          format: int64
+          minimum: 0
+        unacknowledged_critical_incident_count:
+          type: integer
+          format: int64
+          minimum: 0
+        oldest_open_incident_age_seconds:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        top_incident_types:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+        incident_health_status:
+          type: string
+          enum: [HEALTHY, DEGRADED, CRITICAL]
+    TrustIncidentAcknowledgementRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          nullable: true
+          maxLength: 300
+    TrustIncidentResolutionRequest:
+      type: object
+      additionalProperties: false
+      required: [reason, resolution_evidence]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+        resolution_evidence:
+          $ref: "#/components/schemas/ResolutionEvidenceReference"
+        false_positive:
+          type: boolean
+          default: false
+    TrustIncidentMaterializationResponse:
+      type: object
+      additionalProperties: false
+      required: [status, signal_count, incident_count, requested_signal_count, materialized_count, failed_signal_count, partial_failure, incidents, operation_status, rollback_applied]
+      properties:
+        status:
+          type: string
+          enum: [AVAILABLE, PARTIAL, FAILED, REQUESTED, AUDIT_ATTEMPTED, BUSINESS_COMMITTING, BUSINESS_COMMITTED, SUCCESS_AUDIT_PENDING, SUCCESS_AUDIT_RECORDED, EVIDENCE_PENDING, EVIDENCE_CONFIRMED, COMMITTED, COMMITTED_DEGRADED, REJECTED]
+        signal_count:
+          type: integer
+          minimum: 0
+          maximum: 100
+        incident_count:
+          type: integer
+          minimum: 0
+          maximum: 100
+        requested_signal_count:
+          type: integer
+          minimum: 0
+          maximum: 100
+        materialized_count:
+          type: integer
+          minimum: 0
+          maximum: 100
+        failed_signal_count:
+          type: integer
+          minimum: 0
+          maximum: 100
+        partial_failure:
+          type: boolean
+        failure_reason:
+          type: string
+          nullable: true
+          enum: [PERSISTENCE_UNAVAILABLE, COMMITTED_DEGRADED, FAILED]
+        incidents:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/TrustIncidentResponse"
+        operation_status:
+          type: string
+          description: AVAILABLE for completed refresh, COMMITTED_DEGRADED only for verified non-transactional partial refresh, or the regulated command state for non-terminal replay/status responses.
+          enum: [AVAILABLE, FAILED, REQUESTED, AUDIT_ATTEMPTED, BUSINESS_COMMITTING, BUSINESS_COMMITTED, SUCCESS_AUDIT_PENDING, SUCCESS_AUDIT_RECORDED, EVIDENCE_PENDING, EVIDENCE_CONFIRMED, COMMITTED, COMMITTED_DEGRADED, REJECTED]
+        transaction_mode:
+          type: string
+          nullable: true
+          enum: [OFF, REQUIRED]
+          description: Local regulated mutation transaction mode when available.
+        rollback_applied:
+          type: boolean
+          description: True only when the response represents a rollback/failure state rather than verified persisted partial state.
+        recovery_required_reason:
+          type: string
+          nullable: true
+          enum: [PERSISTENCE_UNAVAILABLE, COMMITTED_DEGRADED, FAILED, TRUST_INCIDENT_REFRESH_PARTIAL_OFF_MODE, TRUST_INCIDENT_REFRESH_ROLLED_BACK]
+          description: Stable non-sensitive reason code for degraded or failed refresh responses.
+    TrustSignalPreviewResponse:
+      type: object
+      additionalProperties: false
+      required: [preview, signal_count, signals]
+      properties:
+        preview:
+          type: boolean
+          enum: [true]
+        signal_count:
+          type: integer
+          minimum: 0
+          maximum: 100
+        signals:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/TrustSignal"
+    TrustSignal:
+      type: object
+      additionalProperties: false
+      required: [type, source]
+      properties:
+        type:
+          type: string
+          enum: [OUTBOX_TERMINAL_FAILURE, OUTBOX_PUBLISH_CONFIRMATION_UNKNOWN, OUTBOX_PROJECTION_MISMATCH, REGULATED_MUTATION_RECOVERY_REQUIRED, REGULATED_MUTATION_COMMITTED_DEGRADED, EVIDENCE_CONFIRMATION_FAILED, AUDIT_DEGRADATION_UNRESOLVED, EXTERNAL_ANCHOR_GAP, COVERAGE_UNAVAILABLE, TRUST_AUTHORITY_UNAVAILABLE]
+        severity:
+          type: string
+          nullable: true
+          enum: [CRITICAL, HIGH, MEDIUM]
+        source:
+          type: string
+          maxLength: 120
+        fingerprint:
+          type: string
+          nullable: true
+          description: Bounded deterministic fingerprint; not raw payload data.
+        evidenceRefs:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            maxLength: 300
+    TrustIncidentResponse:
+      type: object
+      additionalProperties: false
+      required: [incident_id, type, severity, source, fingerprint, status, first_seen_at, last_seen_at, occurrence_count, evidence_refs]
+      properties:
+        incident_id:
+          type: string
+        type:
+          type: string
+          enum: [OUTBOX_TERMINAL_FAILURE, OUTBOX_PUBLISH_CONFIRMATION_UNKNOWN, OUTBOX_PROJECTION_MISMATCH, REGULATED_MUTATION_RECOVERY_REQUIRED, REGULATED_MUTATION_COMMITTED_DEGRADED, EVIDENCE_CONFIRMATION_FAILED, AUDIT_DEGRADATION_UNRESOLVED, EXTERNAL_ANCHOR_GAP, COVERAGE_UNAVAILABLE, TRUST_AUTHORITY_UNAVAILABLE]
+        severity:
+          type: string
+          enum: [CRITICAL, HIGH, MEDIUM]
+        source:
+          type: string
+        fingerprint:
+          type: string
+          description: Bounded deterministic fingerprint, not raw payload data.
+        status:
+          type: string
+          enum: [OPEN, ACKNOWLEDGED, RESOLVED, FALSE_POSITIVE]
+        first_seen_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+        occurrence_count:
+          type: integer
+          format: int64
+          minimum: 0
+        evidence_refs:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+        acknowledged_by:
+          type: string
+          nullable: true
+        acknowledged_at:
+          type: string
+          format: date-time
+          nullable: true
+        acknowledgement_reason:
+          type: string
+          nullable: true
+          maxLength: 300
+        resolved_by:
+          type: string
+          nullable: true
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolution_reason:
+          type: string
+          nullable: true
+        resolution_evidence:
+          nullable: true
+          $ref: "#/components/schemas/ResolutionEvidenceReference"
     RegulatedMutationRecoveryRunResponse:
       type: object
       additionalProperties: false
@@ -1387,6 +1929,195 @@ components:
         evidence_reference:
           nullable: true
           $ref: "#/components/schemas/ResolutionEvidenceReference"
+    OutboxBacklogResponse:
+      type: object
+      additionalProperties: false
+      required: [pending_count, processing_count, publish_attempted_count, confirmation_unknown_count, failed_retryable_count, failed_terminal_count, recovery_required_count, projection_mismatch_count, oldest_pending_age_seconds]
+      properties:
+        pending_count:
+          type: integer
+          format: int64
+          minimum: 0
+        processing_count:
+          type: integer
+          format: int64
+          minimum: 0
+        publish_attempted_count:
+          type: integer
+          format: int64
+          minimum: 0
+        confirmation_unknown_count:
+          type: integer
+          format: int64
+          minimum: 0
+        failed_retryable_count:
+          type: integer
+          format: int64
+          minimum: 0
+        failed_terminal_count:
+          type: integer
+          format: int64
+          minimum: 0
+        recovery_required_count:
+          type: integer
+          format: int64
+          minimum: 0
+        projection_mismatch_count:
+          type: integer
+          format: int64
+          minimum: 0
+        oldest_pending_age_seconds:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+    OutboxRecoveryRunResponse:
+      type: object
+      additionalProperties: false
+      required: [released_stale_processing, publish_attempted_marked_unknown, projection_repaired, publish_attempted]
+      properties:
+        released_stale_processing:
+          type: integer
+          minimum: 0
+        publish_attempted_marked_unknown:
+          type: integer
+          minimum: 0
+          description: Stale PUBLISH_ATTEMPTED records moved to confirmation-unknown instead of normal retry.
+        projection_repaired:
+          type: integer
+          minimum: 0
+        publish_attempted:
+          type: integer
+          minimum: 0
+    OutboxConfirmationResolutionRequest:
+      type: object
+      additionalProperties: false
+      required: [resolution, reason, evidence_reference]
+      properties:
+        resolution:
+          type: string
+          enum: [PUBLISHED, RECOVERY_REQUIRED]
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 300
+        evidence_reference:
+          $ref: "#/components/schemas/ResolutionEvidenceReference"
+    OutboxRecordResponse:
+      type: object
+      additionalProperties: false
+      required: [event_id, dedupe_key, mutation_command_id, resource_type, resource_id, event_type, payload_hash, status, attempts, last_error, published_at, confirmation_unknown_at, updated_at, resolution_pending, resolution_control_mode, resolution_requested_by, resolution_requested_at, resolution_approved_by, resolution_approved_at]
+      properties:
+        event_id:
+          type: string
+        dedupe_key:
+          type: string
+        mutation_command_id:
+          type: string
+        resource_type:
+          type: string
+          enum: [ALERT]
+        resource_id:
+          type: string
+          nullable: true
+        event_type:
+          type: string
+          enum: [FRAUD_DECISION]
+        payload_hash:
+          type: string
+          description: Stable hash of the stored event payload; the raw payload is not returned by recovery APIs.
+        status:
+          type: string
+          enum: [PENDING, PROCESSING, PUBLISHED, PUBLISH_CONFIRMATION_UNKNOWN, FAILED_RETRYABLE, FAILED_TERMINAL, RECOVERY_REQUIRED]
+        attempts:
+          type: integer
+          minimum: 0
+        last_error:
+          type: string
+          nullable: true
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
+        confirmation_unknown_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolution_pending:
+          type: boolean
+        resolution_control_mode:
+          type: string
+          nullable: true
+          enum: [SINGLE_CONTROL_OPERATOR_ATTESTED, DUAL_CONTROL_REQUESTED, DUAL_CONTROL_APPROVED]
+          description: Outside bank mode this is single-control operator attestation. In bank mode request and approval require distinct authenticated operators.
+        resolution_requested_by:
+          type: string
+          nullable: true
+        resolution_requested_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolution_approved_by:
+          type: string
+          nullable: true
+        resolution_approved_at:
+          type: string
+          format: date-time
+          nullable: true
+    UpdateFraudCaseRequest:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [OPEN, IN_REVIEW, CONFIRMED_FRAUD, FALSE_POSITIVE, CLOSED]
+        analystId:
+          type: string
+          nullable: true
+          maxLength: 120
+          description: Optional frontend-provided hint only; backend principal remains authoritative.
+        decisionReason:
+          type: string
+          nullable: true
+          maxLength: 1000
+        tags:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            maxLength: 80
+    UpdateFraudCaseResponse:
+      type: object
+      additionalProperties: false
+      required: [operation_status, case_id]
+      properties:
+        operation_status:
+          type: string
+          enum: [REJECTED_BEFORE_MUTATION, IN_PROGRESS, RECOVERY_REQUIRED, COMMIT_UNKNOWN, COMMITTED_EVIDENCE_PENDING, COMMITTED_EVIDENCE_CONFIRMED, COMMITTED_EVIDENCE_INCOMPLETE]
+          description: Mandatory operation state. IN_PROGRESS, RECOVERY_REQUIRED, and COMMIT_UNKNOWN must not be interpreted as a committed fraud-case update.
+        command_id:
+          type: string
+          nullable: true
+        idempotency_key_hash:
+          type: string
+          nullable: true
+        case_id:
+          type: string
+        current_case_snapshot:
+          nullable: true
+          $ref: "#/components/schemas/GenericObject"
+        updated_case:
+          nullable: true
+          $ref: "#/components/schemas/GenericObject"
+          description: Present only for committed/evidence-pending committed states. Absent for IN_PROGRESS, RECOVERY_REQUIRED, COMMIT_UNKNOWN, and rejected states.
+        recovery_required_reason:
+          type: string
+          nullable: true
     SubmitAnalystDecisionRequest:
       type: object
       additionalProperties: false
@@ -1435,8 +2166,8 @@ components:
           nullable: true
         operation_status:
           type: string
-          enum: [REJECTED_BEFORE_MUTATION, IN_PROGRESS, RECOVERY_REQUIRED, COMMIT_UNKNOWN, COMMITTED_EVIDENCE_PENDING, COMMITTED_EVIDENCE_INCOMPLETE]
-          description: Mandatory operation state. REJECTED_BEFORE_MUTATION is returned as HTTP 503 with no command response body. IN_PROGRESS, RECOVERY_REQUIRED, and COMMIT_UNKNOWN are returned as HTTP 202 and must not be treated as completed success. COMMITTED_EVIDENCE_PENDING is conservative state before full evidence completion is persisted. COMMITTED_EVIDENCE_INCOMPLETE means the business decision and durable outbox committed while post-commit evidence completion degraded. This is not a rollback claim. COMMITTED_FULLY_ANCHORED is intentionally not exposed until a safe promotion path exists.
+          enum: [REJECTED_BEFORE_MUTATION, IN_PROGRESS, RECOVERY_REQUIRED, COMMIT_UNKNOWN, COMMITTED_EVIDENCE_PENDING, COMMITTED_EVIDENCE_CONFIRMED, COMMITTED_EVIDENCE_INCOMPLETE]
+          description: Mandatory operation state. REJECTED_BEFORE_MUTATION is returned as HTTP 503 with no command response body. IN_PROGRESS, RECOVERY_REQUIRED, and COMMIT_UNKNOWN are returned as HTTP 202 and must not be treated as completed success. COMMITTED_EVIDENCE_PENDING is conservative state before full evidence completion is persisted. COMMITTED_EVIDENCE_CONFIRMED means local commit marker, success audit, and authoritative PUBLISHED transactional outbox evidence are present; it is not external WORM/notarization proof. COMMITTED_EVIDENCE_INCOMPLETE means the business decision and durable outbox committed while post-commit evidence completion degraded. This is not a rollback claim. COMMITTED_FULLY_ANCHORED is intentionally not exposed.
     PagedGenericObject:
       type: object
       required:

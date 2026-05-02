@@ -48,6 +48,14 @@ public class RegulatedMutationCommandDocument {
     private String intentReasonHash;
     @Field("intent_tags_hash")
     private String intentTagsHash;
+    @Field("intent_status")
+    private String intentStatus;
+    @Field("intent_assignee_hash")
+    private String intentAssigneeHash;
+    @Field("intent_notes_hash")
+    private String intentNotesHash;
+    @Field("intent_payload_hash")
+    private String intentPayloadHash;
     private RegulatedMutationState state;
     @Field("execution_status")
     private RegulatedMutationExecutionStatus executionStatus;
@@ -75,6 +83,10 @@ public class RegulatedMutationCommandDocument {
     private String failedAuditId;
     @Field("outbox_event_id")
     private String outboxEventId;
+    @Field("local_commit_marker")
+    private String localCommitMarker;
+    @Field("local_committed_at")
+    private Instant localCommittedAt;
     @Field("created_at")
     private Instant createdAt;
     @Field("updated_at")
@@ -116,6 +128,14 @@ public class RegulatedMutationCommandDocument {
     public void setIntentReasonHash(String intentReasonHash) { this.intentReasonHash = intentReasonHash; }
     public String getIntentTagsHash() { return intentTagsHash; }
     public void setIntentTagsHash(String intentTagsHash) { this.intentTagsHash = intentTagsHash; }
+    public String getIntentStatus() { return intentStatus; }
+    public void setIntentStatus(String intentStatus) { this.intentStatus = intentStatus; }
+    public String getIntentAssigneeHash() { return intentAssigneeHash; }
+    public void setIntentAssigneeHash(String intentAssigneeHash) { this.intentAssigneeHash = intentAssigneeHash; }
+    public String getIntentNotesHash() { return intentNotesHash; }
+    public void setIntentNotesHash(String intentNotesHash) { this.intentNotesHash = intentNotesHash; }
+    public String getIntentPayloadHash() { return intentPayloadHash; }
+    public void setIntentPayloadHash(String intentPayloadHash) { this.intentPayloadHash = intentPayloadHash; }
     public RegulatedMutationState getState() { return state; }
     public void setState(RegulatedMutationState state) { this.state = state; }
     public RegulatedMutationExecutionStatus getExecutionStatus() { return executionStatus; }
@@ -144,6 +164,10 @@ public class RegulatedMutationCommandDocument {
     public void setFailedAuditId(String failedAuditId) { this.failedAuditId = failedAuditId; }
     public String getOutboxEventId() { return outboxEventId; }
     public void setOutboxEventId(String outboxEventId) { this.outboxEventId = outboxEventId; }
+    public String getLocalCommitMarker() { return localCommitMarker; }
+    public void setLocalCommitMarker(String localCommitMarker) { this.localCommitMarker = localCommitMarker; }
+    public Instant getLocalCommittedAt() { return localCommittedAt; }
+    public void setLocalCommittedAt(Instant localCommittedAt) { this.localCommittedAt = localCommittedAt; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

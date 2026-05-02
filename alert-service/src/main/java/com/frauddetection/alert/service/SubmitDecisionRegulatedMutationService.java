@@ -63,7 +63,7 @@ public class SubmitDecisionRegulatedMutationService {
                 AuditAction.SUBMIT_ANALYST_DECISION,
                 current.getCorrelationId(),
                 requestHash,
-                () -> mutationHandler.applyDecision(alertId, request, resultingStatus, actorId, idempotencyKey, requestHash),
+                context -> mutationHandler.applyDecision(alertId, request, resultingStatus, actorId, idempotencyKey, requestHash, context.commandId()),
                 (saved, state) -> response(saved, request, resultingStatus, publicStatus(state)),
                 RegulatedMutationResponseSnapshot::from,
                 RegulatedMutationResponseSnapshot::toSubmitDecisionResponse,
@@ -110,8 +110,9 @@ public class SubmitDecisionRegulatedMutationService {
         return switch (state) {
             case REQUESTED, AUDIT_ATTEMPTED -> SubmitDecisionOperationStatus.IN_PROGRESS;
             case BUSINESS_COMMITTING -> SubmitDecisionOperationStatus.COMMIT_UNKNOWN;
-            case EVIDENCE_PENDING, EVIDENCE_CONFIRMED, COMMITTED, SUCCESS_AUDIT_RECORDED ->
+            case EVIDENCE_PENDING, COMMITTED, SUCCESS_AUDIT_RECORDED ->
                     SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING;
+            case EVIDENCE_CONFIRMED -> SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED;
             case COMMITTED_DEGRADED -> SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE;
             case FAILED, BUSINESS_COMMITTED, SUCCESS_AUDIT_PENDING -> SubmitDecisionOperationStatus.RECOVERY_REQUIRED;
             case REJECTED -> SubmitDecisionOperationStatus.REJECTED_BEFORE_MUTATION;

@@ -2,8 +2,9 @@ package com.frauddetection.alert.service;
 
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.api.UpdateFraudCaseRequest;
+import com.frauddetection.alert.api.UpdateFraudCaseResponse;
+import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.audit.AuditAction;
-import com.frauddetection.alert.audit.AuditMutationRecorder;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
@@ -11,7 +12,15 @@ import com.frauddetection.alert.persistence.FraudCaseRepository;
 import com.frauddetection.alert.persistence.FraudCaseTransactionDocument;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
+import com.frauddetection.alert.regulated.RegulatedMutationCommand;
+import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
+import com.frauddetection.alert.regulated.RegulatedMutationIntent;
+import com.frauddetection.alert.regulated.RegulatedMutationIntentHasher;
+import com.frauddetection.alert.regulated.RegulatedMutationResponseSnapshot;
+import com.frauddetection.alert.regulated.RegulatedMutationState;
+import com.frauddetection.alert.regulated.mutation.fraudcase.FraudCaseUpdateMutationHandler;
 import com.frauddetection.alert.security.principal.AnalystActorResolver;
+import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -36,22 +45,28 @@ public class FraudCaseManagementService {
 
     private final FraudCaseRepository fraudCaseRepository;
     private final ScoredTransactionRepository scoredTransactionRepository;
-    private final AuditMutationRecorder auditMutationRecorder;
     private final AnalystActorResolver analystActorResolver;
     private final AlertServiceMetrics metrics;
+    private final FraudCaseUpdateMutationHandler updateMutationHandler;
+    private final RegulatedMutationCoordinator regulatedMutationCoordinator;
+    private final FraudCaseResponseMapper responseMapper;
 
     public FraudCaseManagementService(
             FraudCaseRepository fraudCaseRepository,
             ScoredTransactionRepository scoredTransactionRepository,
-            AuditMutationRecorder auditMutationRecorder,
             AnalystActorResolver analystActorResolver,
-            AlertServiceMetrics metrics
+            AlertServiceMetrics metrics,
+            FraudCaseUpdateMutationHandler updateMutationHandler,
+            RegulatedMutationCoordinator regulatedMutationCoordinator,
+            FraudCaseResponseMapper responseMapper
     ) {
         this.fraudCaseRepository = fraudCaseRepository;
         this.scoredTransactionRepository = scoredTransactionRepository;
-        this.auditMutationRecorder = auditMutationRecorder;
         this.analystActorResolver = analystActorResolver;
         this.metrics = metrics;
+        this.updateMutationHandler = updateMutationHandler;
+        this.regulatedMutationCoordinator = regulatedMutationCoordinator;
+        this.responseMapper = responseMapper;
     }
 
     public void handleScoredTransaction(TransactionScoredEvent event) {
@@ -97,30 +112,42 @@ public class FraudCaseManagementService {
                 .orElseThrow(() -> new com.frauddetection.alert.exception.AlertNotFoundException(caseId)));
     }
 
-    public FraudCaseDocument updateCase(String caseId, UpdateFraudCaseRequest request) {
+    public UpdateFraudCaseResponse updateCase(String caseId, UpdateFraudCaseRequest request, String idempotencyKey) {
         FraudCaseDocument document = fraudCaseRepository.findById(caseId)
                 .orElseThrow(() -> new com.frauddetection.alert.exception.AlertNotFoundException(caseId));
-        Instant now = Instant.now();
         String actorId = analystActorResolver.resolveActorId(request.analystId(), "UPDATE_FRAUD_CASE", caseId);
         String correlationId = correlationId(document);
-        FraudCaseDocument saved = auditMutationRecorder.record(
-                AuditAction.UPDATE_FRAUD_CASE,
-                AuditResourceType.FRAUD_CASE,
-                document.getCaseId(),
-                correlationId,
+        String requestHash = requestHash(request, actorId);
+        String idempotencyKeyHash = RegulatedMutationIntentHasher.hash(idempotencyKey);
+        RegulatedMutationIntent intent = RegulatedMutationIntentHasher.fraudCaseUpdate(
+                caseId,
                 actorId,
-                () -> {
-                    document.setStatus(request.status());
-                    document.setAnalystId(actorId);
-                    document.setDecisionReason(request.decisionReason());
-                    document.setDecisionTags(request.tags() == null ? List.of() : List.copyOf(request.tags()));
-                    document.setDecidedAt(now);
-                    document.setUpdatedAt(now);
-                    return fraudCaseRepository.save(document);
-                }
+                request.status(),
+                actorId,
+                request.decisionReason(),
+                request.tags(),
+                payload(request, actorId)
         );
-        metrics.recordFraudCaseUpdated();
-        return saved;
+        RegulatedMutationCommand<FraudCaseDocument, UpdateFraudCaseResponse> command = new RegulatedMutationCommand<>(
+                idempotencyKey,
+                actorId,
+                caseId,
+                AuditResourceType.FRAUD_CASE,
+                AuditAction.UPDATE_FRAUD_CASE,
+                correlationId,
+                requestHash,
+                context -> updateMutationHandler.update(caseId, request, actorId),
+                (saved, state) -> committedResponse(saved, idempotencyKeyHash, publicStatus(state)),
+                RegulatedMutationResponseSnapshot::fromUpdateFraudCaseResponse,
+                RegulatedMutationResponseSnapshot::toUpdateFraudCaseResponse,
+                state -> statusResponse(caseId, document, idempotencyKeyHash, state),
+                intent
+        );
+        return regulatedMutationCoordinator.commit(command).response();
+    }
+
+    public UpdateFraudCaseResponse updateCase(String caseId, UpdateFraudCaseRequest request) {
+        return updateCase(caseId, request, null);
     }
 
     private String correlationId(FraudCaseDocument document) {
@@ -129,6 +156,66 @@ public class FraudCaseManagementService {
                 .filter(value -> value != null && !value.isBlank())
                 .findFirst()
                 .orElse(null);
+    }
+
+    private UpdateFraudCaseResponse committedResponse(
+            FraudCaseDocument saved,
+            String idempotencyKeyHash,
+            SubmitDecisionOperationStatus status
+    ) {
+        return new UpdateFraudCaseResponse(
+                status,
+                null,
+                idempotencyKeyHash,
+                saved.getCaseId(),
+                null,
+                responseMapper.toResponse(saved),
+                null
+        );
+    }
+
+    private UpdateFraudCaseResponse statusResponse(
+            String caseId,
+            FraudCaseDocument current,
+            String idempotencyKeyHash,
+            RegulatedMutationState state
+    ) {
+        SubmitDecisionOperationStatus status = publicStatus(state);
+        return new UpdateFraudCaseResponse(
+                status,
+                null,
+                idempotencyKeyHash,
+                caseId,
+                responseMapper.toResponse(current),
+                null,
+                status == SubmitDecisionOperationStatus.RECOVERY_REQUIRED || status == SubmitDecisionOperationStatus.COMMIT_UNKNOWN
+                        ? state.name()
+                        : null
+        );
+    }
+
+    private SubmitDecisionOperationStatus publicStatus(RegulatedMutationState state) {
+        return switch (state) {
+            case REQUESTED, AUDIT_ATTEMPTED -> SubmitDecisionOperationStatus.IN_PROGRESS;
+            case BUSINESS_COMMITTING -> SubmitDecisionOperationStatus.COMMIT_UNKNOWN;
+            case EVIDENCE_PENDING, COMMITTED, SUCCESS_AUDIT_RECORDED ->
+                    SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING;
+            case EVIDENCE_CONFIRMED -> SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED;
+            case COMMITTED_DEGRADED -> SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE;
+            case FAILED, BUSINESS_COMMITTED, SUCCESS_AUDIT_PENDING -> SubmitDecisionOperationStatus.RECOVERY_REQUIRED;
+            case REJECTED -> SubmitDecisionOperationStatus.REJECTED_BEFORE_MUTATION;
+        };
+    }
+
+    private String requestHash(UpdateFraudCaseRequest request, String actorId) {
+        return RegulatedMutationIntentHasher.hash(payload(request, actorId));
+    }
+
+    private String payload(UpdateFraudCaseRequest request, String actorId) {
+        return "status=" + RegulatedMutationIntentHasher.canonicalValue(request.status())
+                + "|analystId=" + RegulatedMutationIntentHasher.canonicalValue(actorId)
+                + "|decisionReason=" + RegulatedMutationIntentHasher.canonicalValue(request.decisionReason())
+                + "|tags=" + RegulatedMutationIntentHasher.canonicalValue(request.tags());
     }
 
     private FraudCaseDocument newCase(String caseKey, TransactionScoredEvent event) {

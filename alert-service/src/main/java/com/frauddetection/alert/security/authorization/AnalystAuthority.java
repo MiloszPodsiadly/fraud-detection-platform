@@ -17,6 +17,13 @@ public final class AnalystAuthority {
     public static final String AUDIT_DEGRADATION_RESOLVE = "audit-degradation:resolve";
     public static final String DECISION_OUTBOX_RECONCILE = "decision-outbox:reconcile";
     public static final String REGULATED_MUTATION_RECOVER = "regulated-mutation:recover";
+    public static final String OUTBOX_INSPECT = "outbox:inspect";
+    public static final String OUTBOX_RECOVER = "outbox:recover";
+    public static final String OUTBOX_RESOLVE = "outbox:resolve";
+    public static final String TRUST_INCIDENT_READ = "trust-incident:read";
+    public static final String TRUST_INCIDENT_REFRESH = "trust-incident:refresh";
+    public static final String TRUST_INCIDENT_ACK = "trust-incident:ack";
+    public static final String TRUST_INCIDENT_RESOLVE = "trust-incident:resolve";
 
     public static final Set<String> ALL = Set.of(
             ALERT_READ,
@@ -31,7 +38,14 @@ public final class AnalystAuthority {
             AUDIT_EXPORT,
             AUDIT_DEGRADATION_RESOLVE,
             DECISION_OUTBOX_RECONCILE,
-            REGULATED_MUTATION_RECOVER
+            REGULATED_MUTATION_RECOVER,
+            OUTBOX_INSPECT,
+            OUTBOX_RECOVER,
+            OUTBOX_RESOLVE,
+            TRUST_INCIDENT_READ,
+            TRUST_INCIDENT_REFRESH,
+            TRUST_INCIDENT_ACK,
+            TRUST_INCIDENT_RESOLVE
     );
 
     private AnalystAuthority() {

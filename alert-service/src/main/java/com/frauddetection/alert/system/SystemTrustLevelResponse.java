@@ -51,6 +51,21 @@ public record SystemTrustLevelResponse(
         @JsonProperty("outbox_failed_terminal_count")
         long outboxFailedTerminalCount,
 
+        @JsonProperty("outbox_pending_count")
+        long outboxPendingCount,
+
+        @JsonProperty("outbox_processing_count")
+        long outboxProcessingCount,
+
+        @JsonProperty("outbox_publish_attempted_count")
+        long outboxPublishAttemptedCount,
+
+        @JsonProperty("outbox_confirmation_unknown_count")
+        long outboxConfirmationUnknownCount,
+
+        @JsonProperty("outbox_projection_mismatch_count")
+        long outboxProjectionMismatchCount,
+
         @JsonProperty("terminal_outbox_failure_count")
         long terminalOutboxFailureCount,
 
@@ -78,6 +93,12 @@ public record SystemTrustLevelResponse(
         @JsonProperty("committed_degraded_count")
         long committedDegradedCount,
 
+        @JsonProperty("evidence_confirmation_pending_count")
+        long evidenceConfirmationPendingCount,
+
+        @JsonProperty("evidence_confirmation_failed_count")
+        long evidenceConfirmationFailedCount,
+
         @JsonProperty("repeated_recovery_failure_count")
         long repeatedRecoveryFailureCount,
 
@@ -85,6 +106,36 @@ public record SystemTrustLevelResponse(
         Long oldestRecoveryRequiredAgeSeconds,
 
         @JsonProperty("reason_code")
-        String reasonCode
+        String reasonCode,
+
+        @JsonProperty("transaction_mode")
+        String transactionMode,
+
+        @JsonProperty("transaction_capability_status")
+        String transactionCapabilityStatus,
+
+        @JsonProperty("outbox_delivery_mode")
+        String outboxDeliveryMode,
+
+        @JsonProperty("evidence_confirmation_mode")
+        String evidenceConfirmationMode,
+
+        @JsonProperty("open_critical_incident_count")
+        long openCriticalIncidentCount,
+
+        @JsonProperty("open_high_incident_count")
+        long openHighIncidentCount,
+
+        @JsonProperty("unacknowledged_critical_incident_count")
+        long unacknowledgedCriticalIncidentCount,
+
+        @JsonProperty("oldest_open_incident_age_seconds")
+        Long oldestOpenIncidentAgeSeconds,
+
+        @JsonProperty("top_incident_types")
+        java.util.List<String> topIncidentTypes,
+
+        @JsonProperty("incident_health_status")
+        String incidentHealthStatus
 ) {
 }

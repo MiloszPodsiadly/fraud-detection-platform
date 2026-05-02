@@ -173,6 +173,14 @@ public class RegulatedMutationRecoveryService {
         return commandRepository.countByState(RegulatedMutationState.COMMITTED_DEGRADED);
     }
 
+    public long evidenceConfirmationPendingCount() {
+        return commandRepository.countByState(RegulatedMutationState.EVIDENCE_PENDING);
+    }
+
+    public long evidenceConfirmationFailedCount() {
+        return commandRepository.countByState(RegulatedMutationState.COMMITTED_DEGRADED);
+    }
+
     public long repeatedRecoveryFailureCount() {
         return commandRepository.countByExecutionStatusAndAttemptCountGreaterThanEqual(
                 RegulatedMutationExecutionStatus.RECOVERY_REQUIRED,

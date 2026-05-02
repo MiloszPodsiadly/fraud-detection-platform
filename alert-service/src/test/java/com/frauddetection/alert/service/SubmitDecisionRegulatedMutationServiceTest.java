@@ -14,6 +14,8 @@ import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.mapper.AlertDocumentMapper;
 import com.frauddetection.alert.mapper.FraudDecisionEventMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
+import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.regulated.MissingIdempotencyKeyException;
@@ -265,6 +267,23 @@ class SubmitDecisionRegulatedMutationServiceTest {
     }
 
     @Test
+    void shouldFailFastWhenDecisionOutboxRepositoryIsMissing() {
+        DecisionOutboxWriter writer = new DecisionOutboxWriter(new FraudDecisionEventMapper());
+        AlertDocument alert = new Fixture().alert();
+
+        assertThatThrownBy(() -> writer.attachPendingOutbox(
+                alert,
+                new AlertDocumentMapper().toDomain(alert),
+                request(),
+                AlertStatus.RESOLVED,
+                "principal-7",
+                "mutation-1"
+        ))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("TransactionalOutboxRecordRepository is required");
+    }
+
+    @Test
     void shouldReturnInProgressWhenDuplicateRequestArrivesDuringActiveLease() {
         Fixture fixture = new Fixture();
         RegulatedMutationCommandDocument existing = fixture.existingCommand(RegulatedMutationState.AUDIT_ATTEMPTED);
@@ -406,6 +425,7 @@ class SubmitDecisionRegulatedMutationServiceTest {
     private static final class Fixture {
         private final AlertRepository alertRepository = mock(AlertRepository.class);
         private final RegulatedMutationCommandRepository commandRepository = mock(RegulatedMutationCommandRepository.class);
+        private final TransactionalOutboxRecordRepository outboxRepository = mock(TransactionalOutboxRecordRepository.class);
         private final MongoTemplate mongoTemplate = mock(MongoTemplate.class);
         private final AuditEventRepository auditEventRepository = mock(AuditEventRepository.class);
         private final AuditService auditService = mock(AuditService.class);
@@ -418,6 +438,8 @@ class SubmitDecisionRegulatedMutationServiceTest {
         private boolean claimReturnsNull;
 
         private SubmitDecisionRegulatedMutationService service() {
+            when(outboxRepository.save(any(TransactionalOutboxRecordDocument.class)))
+                    .thenAnswer(invocation -> invocation.getArgument(0));
             return new SubmitDecisionRegulatedMutationService(
                     alertRepository,
                     new AnalystDecisionStatusMapper(),
@@ -425,7 +447,7 @@ class SubmitDecisionRegulatedMutationServiceTest {
                     new SubmitDecisionMutationHandler(
                             alertRepository,
                             new AlertDocumentMapper(),
-                            new DecisionOutboxWriter(new FraudDecisionEventMapper())
+                            new DecisionOutboxWriter(new FraudDecisionEventMapper(), outboxRepository)
                     ),
                     new MongoRegulatedMutationCoordinator(
                             commandRepository,

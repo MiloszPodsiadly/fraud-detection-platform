@@ -35,6 +35,20 @@ public class ReadAccessAuditService {
     }
 
     public void audit(ReadAccessAuditTarget target, ReadAccessAuditOutcome outcome, int resultCount, String correlationId) {
+        audit(target, outcome, resultCount, correlationId, false);
+    }
+
+    public void auditOrThrow(ReadAccessAuditTarget target, ReadAccessAuditOutcome outcome, int resultCount, String correlationId) {
+        audit(target, outcome, resultCount, correlationId, true);
+    }
+
+    private void audit(
+            ReadAccessAuditTarget target,
+            ReadAccessAuditOutcome outcome,
+            int resultCount,
+            String correlationId,
+            boolean failClosed
+    ) {
         try {
             ReadAccessAuditEvent event = event(target, outcome, resultCount, correlationId);
             repository.save(ReadAccessAuditEventDocument.from(event));
@@ -46,7 +60,11 @@ public class ReadAccessAuditService {
                     .addKeyValue("resourceType", target.resourceType())
                     .addKeyValue("outcome", outcome)
                     .addKeyValue("errorType", exception.getClass().getSimpleName())
-                    .log("Read-access audit persistence failed; sensitive read response was not blocked.");
+                    .addKeyValue("failClosed", failClosed)
+                    .log("Read-access audit persistence failed.");
+            if (failClosed) {
+                throw exception;
+            }
         }
     }
 

@@ -51,6 +51,44 @@ public final class RegulatedMutationIntentHasher {
         );
     }
 
+    public static RegulatedMutationIntent fraudCaseUpdate(
+            String caseId,
+            String actorId,
+            Object status,
+            String assignee,
+            String notes,
+            Iterable<?> tags,
+            Object payload
+    ) {
+        String statusValue = canonicalValue(status);
+        String assigneeHash = hash(assignee);
+        String notesHash = hash(notes);
+        String tagsHash = hash(tags);
+        String payloadHash = hash(payload);
+        String action = AuditAction.UPDATE_FRAUD_CASE.name();
+        String intentHash = hash("resourceId=" + canonicalValue(caseId)
+                + "|action=" + action
+                + "|actorId=" + canonicalValue(actorId)
+                + "|status=" + statusValue
+                + "|assigneeHash=" + assigneeHash
+                + "|notesHash=" + notesHash
+                + "|tagsHash=" + tagsHash
+                + "|payloadHash=" + payloadHash);
+        return new RegulatedMutationIntent(
+                intentHash,
+                caseId,
+                action,
+                actorId,
+                null,
+                null,
+                tagsHash,
+                statusValue,
+                assigneeHash,
+                notesHash,
+                payloadHash
+        );
+    }
+
     public static String canonicalValue(Object value) {
         if (value == null) {
             return "null";
