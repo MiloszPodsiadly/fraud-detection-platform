@@ -74,7 +74,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
             AlertServiceMetrics ignoredMetrics
     ) {
         this(publicationEnabled, publicationRequired, failClosed, bankModeFailClosed, trustAuthorityEnabled, signingRequired,
-                Duration.ofMinutes(10), "OFF", true, true, externalAuditIntegrityService, externalAuditAnchorSink, null, null, null, null);
+                Duration.ofMinutes(10), bankModeFailClosed ? "REQUIRED" : "OFF", true, true, externalAuditIntegrityService, externalAuditAnchorSink, null, null, null, null);
     }
 
     @Autowired
@@ -165,7 +165,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 trustAuthorityEnabled,
                 signingRequired,
                 staleOutboxThreshold,
-                "OFF",
+                bankModeFailClosed ? "REQUIRED" : "OFF",
                 true,
                 true,
                 externalAuditIntegrityService,
@@ -197,6 +197,11 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 live.pendingDegradationResolutionCount(),
                 live.postCommitAuditDegradedResolved(),
                 live.outboxFailedTerminalCount(),
+                live.outboxPendingCount(),
+                live.outboxProcessingCount(),
+                live.outboxPublishAttemptedCount(),
+                live.outboxPublishConfirmationUnknownCount(),
+                live.outboxProjectionMismatchCount(),
                 live.outboxFailedTerminalCount(),
                 live.outboxPublishConfirmationUnknownCount(),
                 live.outboxPublishConfirmationUnknownCount(),
@@ -293,8 +298,11 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 && missingRanges == 0
                 && postCommitDegraded == 0
                 && pendingDegradationResolution == 0
+                && (!bankModeFailClosed || "REQUIRED".equals(transactionMode))
                 && outboxState.failedTerminalCount() == 0
+                && outboxState.projectionMismatchCount() == 0
                 && outboxState.publishConfirmationUnknownCount() == 0
+                && outboxState.publishAttemptedCount() == 0
                 && outboxState.pendingResolutionCount() == 0
                 && !outboxState.stalePending()
                 && regulatedRecoveryRequired == 0
@@ -307,6 +315,9 @@ public class SystemTrustLevelController implements ApplicationRunner {
         }
         if (reasonCode == null) {
             reasonCode = outboxState.reasonCode();
+        }
+        if (reasonCode == null && bankModeFailClosed && !"REQUIRED".equals(transactionMode)) {
+            reasonCode = "TRANSACTION_MODE_OFF_IN_BANK_MODE";
         }
         if (reasonCode == null && pendingDegradationResolution > 0) {
             reasonCode = "AUDIT_DEGRADATION_RESOLUTION_PENDING_APPROVAL";
@@ -334,7 +345,11 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 pendingDegradationResolution,
                 postCommitDegradedResolved,
                 outboxState.failedTerminalCount(),
+                outboxState.pendingCount(),
+                outboxState.processingCount(),
+                outboxState.publishAttemptedCount(),
                 outboxState.publishConfirmationUnknownCount(),
+                outboxState.projectionMismatchCount(),
                 outboxState.pendingResolutionCount(),
                 outboxState.oldestPendingAgeSeconds(),
                 outboxState.oldestAmbiguousAgeSeconds(),
@@ -367,7 +382,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
     private OutboxState outboxState() {
         try {
             if (alertRepository == null) {
-                return new OutboxState(0L, 0L, 0L, null, null, false, null);
+                return new OutboxState(0L, 0L, 0L, 0L, 0L, 0L, 0L, null, null, false, null);
             }
             if (outboxRepository != null) {
                 return transactionalOutboxState();
@@ -397,9 +412,9 @@ public class SystemTrustLevelController implements ApplicationRunner {
             } else if (stalePending) {
                 reason = "OUTBOX_STALE_PENDING";
             }
-            return new OutboxState(failedTerminalCount, unknownCount, pendingResolutionCount, oldestPendingAge, oldestUnknownAge, stalePending, reason);
+            return new OutboxState(0L, 0L, 0L, failedTerminalCount, unknownCount, 0L, pendingResolutionCount, oldestPendingAge, oldestUnknownAge, stalePending, reason);
         } catch (DataAccessException exception) {
-            return new OutboxState(1L, 1L, 1L, null, null, true, "OUTBOX_STATUS_UNAVAILABLE");
+            return new OutboxState(0L, 0L, 0L, 1L, 1L, 1L, 1L, null, null, true, "OUTBOX_STATUS_UNAVAILABLE");
         }
     }
 
@@ -410,7 +425,11 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 TransactionalOutboxStatus.FAILED_RETRYABLE
         );
         long failedTerminalCount = outboxRepository.countByStatus(TransactionalOutboxStatus.FAILED_TERMINAL);
+        long pendingCount = outboxRepository.countByStatus(TransactionalOutboxStatus.PENDING);
+        long processingCount = outboxRepository.countByStatus(TransactionalOutboxStatus.PROCESSING);
+        long publishAttemptedCount = outboxRepository.countByStatus(TransactionalOutboxStatus.PUBLISH_ATTEMPTED);
         long unknownCount = outboxRepository.countByStatus(TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
+        long projectionMismatchCount = outboxRepository.countByProjectionMismatchTrue();
         Long oldestPendingAge = outboxRepository.findTopByStatusInOrderByCreatedAtAsc(pendingStatuses)
                 .map(document -> {
                     Instant created = document.getCreatedAt();
@@ -421,12 +440,16 @@ public class SystemTrustLevelController implements ApplicationRunner {
         String reason = null;
         if (failedTerminalCount > 0) {
             reason = "OUTBOX_TERMINAL_FAILURE";
+        } else if (projectionMismatchCount > 0) {
+            reason = "OUTBOX_PROJECTION_MISMATCH";
+        } else if (publishAttemptedCount > 0) {
+            reason = "OUTBOX_PUBLISH_ATTEMPT_CONFIRMATION_PENDING";
         } else if (unknownCount > 0) {
             reason = "OUTBOX_PUBLISH_CONFIRMATION_UNKNOWN";
         } else if (stalePending) {
             reason = "OUTBOX_STALE_PENDING";
         }
-        return new OutboxState(failedTerminalCount, unknownCount, 0L, oldestPendingAge, null, stalePending, reason);
+        return new OutboxState(pendingCount, processingCount, publishAttemptedCount, failedTerminalCount, unknownCount, projectionMismatchCount, 0L, oldestPendingAge, null, stalePending, reason);
     }
 
     private String outboxDeliveryMode() {
@@ -452,7 +475,11 @@ public class SystemTrustLevelController implements ApplicationRunner {
             long pendingDegradationResolutionCount,
             long postCommitAuditDegradedResolved,
             long outboxFailedTerminalCount,
+            long outboxPendingCount,
+            long outboxProcessingCount,
+            long outboxPublishAttemptedCount,
             long outboxPublishConfirmationUnknownCount,
+            long outboxProjectionMismatchCount,
             long outboxPendingResolutionCount,
             Long outboxOldestPendingAgeSeconds,
             Long outboxOldestAmbiguousAgeSeconds,
@@ -466,8 +493,12 @@ public class SystemTrustLevelController implements ApplicationRunner {
     }
 
     private record OutboxState(
+            long pendingCount,
+            long processingCount,
+            long publishAttemptedCount,
             long failedTerminalCount,
             long publishConfirmationUnknownCount,
+            long projectionMismatchCount,
             long pendingResolutionCount,
             Long oldestPendingAgeSeconds,
             Long oldestAmbiguousAgeSeconds,

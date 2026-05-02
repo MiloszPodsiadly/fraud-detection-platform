@@ -43,6 +43,9 @@ public class DecisionOutboxWriter {
             String mutationCommandId
     ) {
         FraudDecisionEvent event = fraudDecisionEventMapper.toEvent(alertCase, request, resultingStatus, actorId);
+        if (outboxRepository == null) {
+            throw new IllegalStateException("TransactionalOutboxRecordRepository is required for FDP-26 decision outbox writes.");
+        }
         document.setDecisionOutboxEvent(event);
         document.setDecisionOutboxStatus(DecisionOutboxStatus.PENDING);
         document.setDecisionOutboxAttempts(0);
@@ -51,9 +54,7 @@ public class DecisionOutboxWriter {
         document.setDecisionOutboxLastError(null);
         document.setDecisionOutboxFailureReason(null);
         document.setDecisionOutboxPublishedAt(null);
-        if (outboxRepository != null) {
-            outboxRepository.save(record(document, event, mutationCommandId));
-        }
+        outboxRepository.save(record(document, event, mutationCommandId));
         return event;
     }
 

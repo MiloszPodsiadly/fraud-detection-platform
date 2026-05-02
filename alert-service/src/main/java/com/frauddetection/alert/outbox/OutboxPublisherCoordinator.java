@@ -61,8 +61,14 @@ public class OutboxPublisherCoordinator {
                 continue;
             }
             try {
+                if (!markPublishAttempted(record)) {
+                    markFailed(record, TransactionalOutboxStatus.FAILED_RETRYABLE, "PUBLISH_ATTEMPT_MARK_FAILED");
+                    metrics.recordOutboxPublishAttempt("FAILED");
+                    continue;
+                }
                 publisher.publish(record.getPayload());
-                if (markPublished(record)) {
+                if (markOutboxRecordPublished(record)) {
+                    updateAlertProjection(record, DecisionOutboxStatus.PUBLISHED, null, Instant.now());
                     published++;
                     metrics.recordOutboxPublishAttempt("SUCCESS");
                     metrics.recordOutboxDeliveryLatency(age(record));
@@ -73,12 +79,10 @@ public class OutboxPublisherCoordinator {
                     log.warn("Transactional outbox publish confirmation failed: reason=OUTBOX_PUBLISH_CONFIRMATION_FAILED");
                 }
             } catch (RuntimeException exception) {
-                TransactionalOutboxStatus status = record.getAttempts() >= maxAttempts
-                        ? TransactionalOutboxStatus.FAILED_TERMINAL
-                        : TransactionalOutboxStatus.FAILED_RETRYABLE;
-                markFailed(record, status, "PUBLISH_FAILED");
-                metrics.recordOutboxPublishAttempt("FAILED");
-                log.warn("Transactional outbox publish failed: reason=PUBLISH_FAILED");
+                markPublishConfirmationUnknown(record);
+                metrics.recordOutboxPublishAttempt("CONFIRMATION_UNKNOWN");
+                metrics.recordDecisionOutboxPublishConfirmationFailed();
+                log.warn("Transactional outbox publish confirmation unknown: reason=PUBLISH_EXCEPTION_AFTER_ATTEMPT");
             }
         }
         return published;
@@ -114,7 +118,21 @@ public class OutboxPublisherCoordinator {
         );
     }
 
-    private boolean markPublished(TransactionalOutboxRecordDocument record) {
+    private boolean markPublishAttempted(TransactionalOutboxRecordDocument record) {
+        Instant now = Instant.now();
+        Update update = new Update()
+                .set("status", TransactionalOutboxStatus.PUBLISH_ATTEMPTED)
+                .set("publish_attempted_at", now)
+                .set("updated_at", now);
+        try {
+            return mongoTemplate.updateFirst(leasedRecordQuery(record, TransactionalOutboxStatus.PROCESSING), update, TransactionalOutboxRecordDocument.class)
+                    .getModifiedCount() == 1;
+        } catch (DataAccessException exception) {
+            return false;
+        }
+    }
+
+    private boolean markOutboxRecordPublished(TransactionalOutboxRecordDocument record) {
         Instant now = Instant.now();
         Update update = new Update()
                 .set("status", TransactionalOutboxStatus.PUBLISHED)
@@ -122,13 +140,12 @@ public class OutboxPublisherCoordinator {
                 .set("updated_at", now)
                 .unset("lease_owner")
                 .unset("lease_expires_at")
-                .unset("last_error");
+                .unset("last_error")
+                .unset("projection_mismatch")
+                .unset("projection_mismatch_reason");
         try {
-            boolean updated = mongoTemplate.updateFirst(leasedRecordQuery(record), update, TransactionalOutboxRecordDocument.class).getModifiedCount() == 1;
-            if (updated) {
-                updateAlertOutboxStatus(record, DecisionOutboxStatus.PUBLISHED, null, now);
-            }
-            return updated;
+            return mongoTemplate.updateFirst(leasedRecordQuery(record, TransactionalOutboxStatus.PUBLISH_ATTEMPTED), update, TransactionalOutboxRecordDocument.class)
+                    .getModifiedCount() == 1;
         } catch (DataAccessException exception) {
             return false;
         }
@@ -144,8 +161,8 @@ public class OutboxPublisherCoordinator {
                 .unset("lease_owner")
                 .unset("lease_expires_at");
         try {
-            mongoTemplate.updateFirst(leasedRecordQuery(record), update, TransactionalOutboxRecordDocument.class);
-            updateAlertOutboxStatus(record, DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN, "OUTBOX_PUBLISH_CONFIRMATION_FAILED", null);
+            mongoTemplate.updateFirst(leasedRecordQuery(record, TransactionalOutboxStatus.PUBLISH_ATTEMPTED), update, TransactionalOutboxRecordDocument.class);
+            updateAlertProjection(record, DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN, "OUTBOX_PUBLISH_CONFIRMATION_FAILED", null);
         } catch (DataAccessException exception) {
             log.warn("Transactional outbox confirmation-unknown update failed: reason=OUTBOX_CONFIRMATION_UNKNOWN_UPDATE_FAILED");
         }
@@ -159,25 +176,25 @@ public class OutboxPublisherCoordinator {
                 .unset("lease_owner")
                 .unset("lease_expires_at");
         try {
-            mongoTemplate.updateFirst(leasedRecordQuery(record), update, TransactionalOutboxRecordDocument.class);
+            mongoTemplate.updateFirst(leasedRecordQuery(record, TransactionalOutboxStatus.PROCESSING), update, TransactionalOutboxRecordDocument.class);
             String alertStatus = status == TransactionalOutboxStatus.FAILED_TERMINAL
                     ? DecisionOutboxStatus.FAILED_TERMINAL
                     : DecisionOutboxStatus.FAILED_RETRYABLE;
-            updateAlertOutboxStatus(record, alertStatus, reason, null);
+            updateAlertProjection(record, alertStatus, reason, null);
         } catch (DataAccessException exception) {
             log.warn("Transactional outbox status update failed: reason=OUTBOX_STATUS_UPDATE_FAILED");
         }
     }
 
-    private Query leasedRecordQuery(TransactionalOutboxRecordDocument record) {
+    private Query leasedRecordQuery(TransactionalOutboxRecordDocument record, TransactionalOutboxStatus status) {
         return new Query(new Criteria().andOperator(
                 Criteria.where("_id").is(record.getEventId()),
-                Criteria.where("status").is(TransactionalOutboxStatus.PROCESSING),
+                Criteria.where("status").is(status),
                 Criteria.where("lease_owner").is(leaseOwner)
         ));
     }
 
-    private void updateAlertOutboxStatus(
+    void updateAlertProjection(
             TransactionalOutboxRecordDocument record,
             String status,
             String reason,
@@ -199,7 +216,28 @@ public class OutboxPublisherCoordinator {
         } else {
             update.set("decisionOutboxLastError", reason).set("decisionOutboxFailureReason", reason);
         }
-        mongoTemplate.updateFirst(Query.query(Criteria.where("_id").is(record.getResourceId())), update, AlertDocument.class);
+        try {
+            UpdateResult result = mongoTemplate.updateFirst(Query.query(Criteria.where("_id").is(record.getResourceId())), update, AlertDocument.class);
+            if (result.getMatchedCount() == 0) {
+                markProjectionMismatch(record, "ALERT_PROJECTION_NOT_FOUND");
+            }
+        } catch (DataAccessException exception) {
+            markProjectionMismatch(record, "ALERT_PROJECTION_UPDATE_FAILED");
+        }
+    }
+
+    void markProjectionMismatch(TransactionalOutboxRecordDocument record, String reason) {
+        try {
+            Update update = new Update()
+                    .set("projection_mismatch", true)
+                    .set("projection_mismatch_reason", reason)
+                    .set("updated_at", Instant.now());
+            mongoTemplate.updateFirst(Query.query(Criteria.where("_id").is(record.getEventId())), update, TransactionalOutboxRecordDocument.class);
+            metrics.recordOutboxProjectionMismatch(1);
+            log.warn("Transactional outbox projection mismatch: reason={}", reason);
+        } catch (DataAccessException exception) {
+            log.warn("Transactional outbox projection mismatch persistence failed: reason=OUTBOX_PROJECTION_MISMATCH_PERSIST_FAILED");
+        }
     }
 
     private Duration age(TransactionalOutboxRecordDocument record) {

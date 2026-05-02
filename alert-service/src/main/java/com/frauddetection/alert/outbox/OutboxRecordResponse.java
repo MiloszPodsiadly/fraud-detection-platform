@@ -30,7 +30,7 @@ public record OutboxRecordResponse(
         @JsonProperty("updated_at")
         Instant updatedAt
 ) {
-    static OutboxRecordResponse from(TransactionalOutboxRecordDocument document) {
+    public static OutboxRecordResponse from(TransactionalOutboxRecordDocument document) {
         return new OutboxRecordResponse(
                 document.getEventId(),
                 document.getDedupeKey(),

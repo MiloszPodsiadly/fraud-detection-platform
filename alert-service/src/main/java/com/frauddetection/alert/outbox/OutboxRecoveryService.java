@@ -1,14 +1,15 @@
 package com.frauddetection.alert.outbox;
 
 import com.frauddetection.alert.audit.AuditAction;
-import com.frauddetection.alert.audit.AuditEventMetadataSummary;
-import com.frauddetection.alert.audit.AuditOutcome;
-import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
 import com.frauddetection.alert.audit.AuditResourceType;
-import com.frauddetection.alert.audit.AuditService;
-import com.frauddetection.alert.audit.ResolutionEvidenceReference;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.AlertDocument;
+import com.frauddetection.alert.regulated.RegulatedMutationCommand;
+import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
+import com.frauddetection.alert.regulated.RegulatedMutationIntentHasher;
+import com.frauddetection.alert.regulated.RegulatedMutationResponseSnapshot;
+import com.frauddetection.alert.regulated.RegulatedMutationState;
+import com.frauddetection.alert.regulated.mutation.outbox.OutboxConfirmationResolutionMutationHandler;
 import com.frauddetection.alert.service.DecisionOutboxStatus;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -27,7 +28,8 @@ public class OutboxRecoveryService {
     private final TransactionalOutboxRecordRepository repository;
     private final MongoTemplate mongoTemplate;
     private final OutboxPublisherCoordinator publisherCoordinator;
-    private final AuditService auditService;
+    private final RegulatedMutationCoordinator regulatedMutationCoordinator;
+    private final OutboxConfirmationResolutionMutationHandler resolutionMutationHandler;
     private final AlertServiceMetrics metrics;
     private final Duration staleProcessingThreshold;
 
@@ -35,14 +37,16 @@ public class OutboxRecoveryService {
             TransactionalOutboxRecordRepository repository,
             MongoTemplate mongoTemplate,
             OutboxPublisherCoordinator publisherCoordinator,
-            AuditService auditService,
+            RegulatedMutationCoordinator regulatedMutationCoordinator,
+            OutboxConfirmationResolutionMutationHandler resolutionMutationHandler,
             AlertServiceMetrics metrics,
             @Value("${app.outbox.recovery.stale-processing-threshold:PT2M}") Duration staleProcessingThreshold
     ) {
         this.repository = repository;
         this.mongoTemplate = mongoTemplate;
         this.publisherCoordinator = publisherCoordinator;
-        this.auditService = auditService;
+        this.regulatedMutationCoordinator = regulatedMutationCoordinator;
+        this.resolutionMutationHandler = resolutionMutationHandler;
         this.metrics = metrics;
         this.staleProcessingThreshold = staleProcessingThreshold == null ? Duration.ofMinutes(2) : staleProcessingThreshold;
     }
@@ -59,10 +63,12 @@ public class OutboxRecoveryService {
         OutboxBacklogResponse response = new OutboxBacklogResponse(
                 repository.countByStatus(TransactionalOutboxStatus.PENDING),
                 repository.countByStatus(TransactionalOutboxStatus.PROCESSING),
+                repository.countByStatus(TransactionalOutboxStatus.PUBLISH_ATTEMPTED),
                 repository.countByStatus(TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN),
                 repository.countByStatus(TransactionalOutboxStatus.FAILED_RETRYABLE),
                 repository.countByStatus(TransactionalOutboxStatus.FAILED_TERMINAL),
                 repository.countByStatus(TransactionalOutboxStatus.RECOVERY_REQUIRED),
+                repository.countByProjectionMismatchTrue(),
                 oldestPendingAge
         );
         metrics.recordOutboxBacklog(response);
@@ -71,37 +77,39 @@ public class OutboxRecoveryService {
 
     public OutboxRecoveryRunResponse recoverNow() {
         int released = releaseStaleProcessing();
+        int markedUnknown = markStalePublishAttemptedUnknown();
+        int repaired = repairProjectionMismatches();
         int attempted = publisherCoordinator.publishPending(100);
-        return new OutboxRecoveryRunResponse(released, attempted);
+        return new OutboxRecoveryRunResponse(released, markedUnknown, repaired, attempted);
     }
 
     public TransactionalOutboxRecordDocument resolveConfirmation(
             String eventId,
             OutboxConfirmationResolutionRequest request,
-            String actorId
+            String actorId,
+            String idempotencyKey
     ) {
-        TransactionalOutboxRecordDocument record = repository.findById(eventId)
+        String requestHash = RegulatedMutationIntentHasher.hash("eventId=" + eventId
+                + "|resolution=" + request.resolution()
+                + "|reason=" + RegulatedMutationIntentHasher.canonicalValue(request.reason())
+                + "|evidence=" + RegulatedMutationIntentHasher.canonicalValue(request.evidenceReference()));
+        RegulatedMutationCommand<TransactionalOutboxRecordDocument, OutboxRecordResponse> command = new RegulatedMutationCommand<>(
+                idempotencyKey,
+                actorId,
+                eventId,
+                AuditResourceType.DECISION_OUTBOX,
+                AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION,
+                null,
+                requestHash,
+                context -> resolutionMutationHandler.resolve(eventId, request, actorId),
+                (record, state) -> OutboxRecordResponse.from(record),
+                RegulatedMutationResponseSnapshot::from,
+                RegulatedMutationResponseSnapshot::toOutboxRecordResponse,
+                state -> statusResponse(eventId, state),
+                null
+        );
+        return repository.findById(regulatedMutationCoordinator.commit(command).response().eventId())
                 .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND, "unknown outbox event"));
-        if (record.getStatus() != TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN) {
-            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.CONFLICT, "outbox event is not confirmation-unknown");
-        }
-        ResolutionEvidenceReference.require(request.evidenceReference(), "resolution evidence is required");
-        auditResolve(record, actorId, request.resolution());
-        TransactionalOutboxStatus status = request.resolution() == OutboxConfirmationResolution.PUBLISHED
-                ? TransactionalOutboxStatus.PUBLISHED
-                : TransactionalOutboxStatus.RECOVERY_REQUIRED;
-        Instant now = Instant.now();
-        record.setStatus(status);
-        record.setUpdatedAt(now);
-        if (status == TransactionalOutboxStatus.PUBLISHED) {
-            record.setPublishedAt(now);
-        }
-        record.setLeaseOwner(null);
-        record.setLeaseExpiresAt(null);
-        record.setLastError(null);
-        TransactionalOutboxRecordDocument saved = repository.save(record);
-        updateAlert(saved, status);
-        return saved;
     }
 
     private int releaseStaleProcessing() {
@@ -121,21 +129,55 @@ public class OutboxRecoveryService {
         return released;
     }
 
-    private void auditResolve(TransactionalOutboxRecordDocument record, String actorId, OutboxConfirmationResolution resolution) {
-        try {
-            auditService.audit(
-                    AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION,
-                    AuditResourceType.DECISION_OUTBOX,
-                    record.getEventId(),
-                    null,
-                    actorId,
-                    AuditOutcome.SUCCESS,
-                    null,
-                    new AuditEventMetadataSummary(null, resolution.name(), "alert-service", "1.0", null, null, null, null, null)
-            );
-        } catch (RuntimeException exception) {
-            throw new AuditPersistenceUnavailableException();
+    private int markStalePublishAttemptedUnknown() {
+        Instant cutoff = Instant.now().minus(staleProcessingThreshold);
+        List<TransactionalOutboxRecordDocument> stale = repository
+                .findTop100ByStatusAndLeaseExpiresAtBeforeOrderByCreatedAtAsc(TransactionalOutboxStatus.PUBLISH_ATTEMPTED, cutoff);
+        int marked = 0;
+        for (TransactionalOutboxRecordDocument record : stale) {
+            record.setStatus(TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
+            record.setLeaseOwner(null);
+            record.setLeaseExpiresAt(null);
+            record.setLastError("STALE_PUBLISH_ATTEMPT_CONFIRMATION_UNKNOWN");
+            record.setConfirmationUnknownAt(Instant.now());
+            record.setUpdatedAt(Instant.now());
+            repository.save(record);
+            publisherCoordinator.updateAlertProjection(record, DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN, record.getLastError(), null);
+            marked++;
         }
+        return marked;
+    }
+
+    private int repairProjectionMismatches() {
+        int repaired = 0;
+        for (TransactionalOutboxRecordDocument record : repository.findTop100ByProjectionMismatchTrueOrderByCreatedAtAsc()) {
+            updateAlert(record, record.getStatus());
+            record.setProjectionMismatch(false);
+            record.setProjectionMismatchReason(null);
+            record.setUpdatedAt(Instant.now());
+            repository.save(record);
+            repaired++;
+        }
+        metrics.recordOutboxProjectionMismatch(repository.countByProjectionMismatchTrue());
+        return repaired;
+    }
+
+    private OutboxRecordResponse statusResponse(String eventId, RegulatedMutationState state) {
+        return new OutboxRecordResponse(
+                eventId,
+                null,
+                null,
+                AuditResourceType.DECISION_OUTBOX.name(),
+                null,
+                "FRAUD_DECISION",
+                null,
+                state.name(),
+                0,
+                null,
+                null,
+                null,
+                null
+        );
     }
 
     private void updateAlert(TransactionalOutboxRecordDocument record, TransactionalOutboxStatus status) {

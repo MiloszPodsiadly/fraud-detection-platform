@@ -40,6 +40,7 @@ public class AlertServiceMetrics {
     private final AtomicLong outboxProcessing = new AtomicLong(0);
     private final AtomicLong outboxConfirmationUnknown = new AtomicLong(0);
     private final AtomicLong outboxFailedTerminal = new AtomicLong(0);
+    private final AtomicLong outboxProjectionMismatch = new AtomicLong(0);
     private final AtomicLong outboxOldestPendingAgeSeconds = new AtomicLong(0);
     private final AtomicLong evidenceConfirmationPending = new AtomicLong(0);
 
@@ -77,6 +78,7 @@ public class AlertServiceMetrics {
         Gauge.builder("outbox_processing_count", outboxProcessing, AtomicLong::get).register(meterRegistry);
         Gauge.builder("outbox_confirmation_unknown_count", outboxConfirmationUnknown, AtomicLong::get).register(meterRegistry);
         Gauge.builder("outbox_failed_terminal_count", outboxFailedTerminal, AtomicLong::get).register(meterRegistry);
+        Gauge.builder("outbox_projection_mismatch_count", outboxProjectionMismatch, AtomicLong::get).register(meterRegistry);
         Gauge.builder("outbox_oldest_pending_age_seconds", outboxOldestPendingAgeSeconds, AtomicLong::get).register(meterRegistry);
         Gauge.builder("evidence_confirmation_pending_count", evidenceConfirmationPending, AtomicLong::get).register(meterRegistry);
     }
@@ -132,7 +134,13 @@ public class AlertServiceMetrics {
         outboxProcessing.set(Math.max(0L, response.processingCount()));
         outboxConfirmationUnknown.set(Math.max(0L, response.confirmationUnknownCount()));
         outboxFailedTerminal.set(Math.max(0L, response.failedTerminalCount()));
+        outboxProjectionMismatch.set(Math.max(0L, response.projectionMismatchCount()));
         outboxOldestPendingAgeSeconds.set(response.oldestPendingAgeSeconds() == null ? 0L : Math.max(0L, response.oldestPendingAgeSeconds()));
+    }
+
+    public void recordOutboxProjectionMismatch(long mismatchCount) {
+        outboxProjectionMismatch.set(Math.max(0L, mismatchCount));
+        counter("outbox_projection_mismatch_total", "reason", "PROJECTION_UPDATE_FAILED").increment();
     }
 
     public void recordOutboxPublishAttempt(String result) {

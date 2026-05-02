@@ -51,6 +51,21 @@ public record SystemTrustLevelResponse(
         @JsonProperty("outbox_failed_terminal_count")
         long outboxFailedTerminalCount,
 
+        @JsonProperty("outbox_pending_count")
+        long outboxPendingCount,
+
+        @JsonProperty("outbox_processing_count")
+        long outboxProcessingCount,
+
+        @JsonProperty("outbox_publish_attempted_count")
+        long outboxPublishAttemptedCount,
+
+        @JsonProperty("outbox_confirmation_unknown_count")
+        long outboxConfirmationUnknownCount,
+
+        @JsonProperty("outbox_projection_mismatch_count")
+        long outboxProjectionMismatchCount,
+
         @JsonProperty("terminal_outbox_failure_count")
         long terminalOutboxFailureCount,
 

@@ -3,6 +3,7 @@ package com.frauddetection.alert.regulated;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.frauddetection.alert.api.SubmitAnalystDecisionResponse;
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
+import com.frauddetection.alert.outbox.OutboxRecordResponse;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
 
@@ -115,6 +116,54 @@ public record RegulatedMutationResponseSnapshot(
                 decisionEventId,
                 decidedAt,
                 operationStatus
+        );
+    }
+
+    public static RegulatedMutationResponseSnapshot from(OutboxRecordResponse response) {
+        return new RegulatedMutationResponseSnapshot(
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                response.resourceId(),
+                response.eventId(),
+                response.dedupeKey(),
+                response.status(),
+                null,
+                response.attempts(),
+                null,
+                response.publishedAt(),
+                response.lastError(),
+                null,
+                response.confirmationUnknownAt(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+        );
+    }
+
+    public OutboxRecordResponse toOutboxRecordResponse() {
+        return new OutboxRecordResponse(
+                outboxEventId,
+                outboxDedupeKey,
+                null,
+                null,
+                outboxAlertId,
+                null,
+                null,
+                outboxStatus,
+                outboxAttempts == null ? 0 : outboxAttempts,
+                outboxFailureReason,
+                outboxPublishedAt,
+                outboxResolutionRequestedAt,
+                null
         );
     }
 }

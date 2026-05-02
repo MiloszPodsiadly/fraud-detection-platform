@@ -28,6 +28,11 @@ public class AuditEventPublicationStatusLookup {
     }
 
     public Map<String, AuditExternalAnchorStatus> statusesByAuditEventId(List<AuditEventDocument> documents) throws DataAccessException {
+        return evidenceStatusesByAuditEventId(documents).entrySet().stream()
+                .collect(Collectors.toMap(Map.Entry::getKey, entry -> entry.getValue().externalAnchorStatus()));
+    }
+
+    public Map<String, AuditEventExternalEvidenceStatus> evidenceStatusesByAuditEventId(List<AuditEventDocument> documents) throws DataAccessException {
         if (documents == null || documents.isEmpty()) {
             return Map.of();
         }
@@ -57,10 +62,12 @@ public class AuditEventPublicationStatusLookup {
                         document -> {
                             AuditAnchorDocument anchor = anchorsByPosition.get(document.chainPosition());
                             if (anchor == null) {
-                                return AuditExternalAnchorStatus.UNKNOWN;
+                                return new AuditEventExternalEvidenceStatus(AuditExternalAnchorStatus.UNKNOWN, null);
                             }
                             ExternalAuditAnchorPublicationStatusDocument status = statusesByAnchorId.get(anchor.anchorId());
-                            return status == null ? AuditExternalAnchorStatus.UNKNOWN : toExternalAnchorStatus(status.externalPublicationStatus());
+                            return status == null
+                                    ? new AuditEventExternalEvidenceStatus(AuditExternalAnchorStatus.UNKNOWN, null)
+                                    : new AuditEventExternalEvidenceStatus(toExternalAnchorStatus(status.externalPublicationStatus()), status.signatureStatus());
                         },
                         (left, right) -> left
                 ));

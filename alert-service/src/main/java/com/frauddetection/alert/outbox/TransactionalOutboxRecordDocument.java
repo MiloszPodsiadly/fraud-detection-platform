@@ -43,6 +43,12 @@ public class TransactionalOutboxRecordDocument {
     private Instant publishedAt;
     @Field("confirmation_unknown_at")
     private Instant confirmationUnknownAt;
+    @Field("publish_attempted_at")
+    private Instant publishAttemptedAt;
+    @Field("projection_mismatch")
+    private boolean projectionMismatch;
+    @Field("projection_mismatch_reason")
+    private String projectionMismatchReason;
     @Field("created_at")
     private Instant createdAt;
     @Field("updated_at")
@@ -78,6 +84,12 @@ public class TransactionalOutboxRecordDocument {
     public void setPublishedAt(Instant publishedAt) { this.publishedAt = publishedAt; }
     public Instant getConfirmationUnknownAt() { return confirmationUnknownAt; }
     public void setConfirmationUnknownAt(Instant confirmationUnknownAt) { this.confirmationUnknownAt = confirmationUnknownAt; }
+    public Instant getPublishAttemptedAt() { return publishAttemptedAt; }
+    public void setPublishAttemptedAt(Instant publishAttemptedAt) { this.publishAttemptedAt = publishAttemptedAt; }
+    public boolean isProjectionMismatch() { return projectionMismatch; }
+    public void setProjectionMismatch(boolean projectionMismatch) { this.projectionMismatch = projectionMismatch; }
+    public String getProjectionMismatchReason() { return projectionMismatchReason; }
+    public void setProjectionMismatchReason(String projectionMismatchReason) { this.projectionMismatchReason = projectionMismatchReason; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

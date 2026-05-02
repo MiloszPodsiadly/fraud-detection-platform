@@ -1,6 +1,7 @@
 package com.frauddetection.alert.regulated;
 
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
+import com.frauddetection.alert.api.RegulatedMutationPublicStatusProjection;
 import com.frauddetection.alert.audit.AuditDegradationService;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.PostCommitEvidenceIncompleteException;
@@ -158,7 +159,16 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
             RegulatedMutationCommand<R, S> command,
             RegulatedMutationCommandDocument document
     ) {
-        return new RegulatedMutationResult<>(document.getState(), command.responseRestorer().restore(document.getResponseSnapshot()));
+        S restored = command.responseRestorer().restore(document.getResponseSnapshot());
+        return new RegulatedMutationResult<>(document.getState(), authoritativePublicStatus(restored, document));
+    }
+
+    @SuppressWarnings("unchecked")
+    private <S> S authoritativePublicStatus(S restored, RegulatedMutationCommandDocument document) {
+        if (restored instanceof RegulatedMutationPublicStatusProjection<?> response && document.getPublicStatus() != null) {
+            return (S) response.withPublicStatus(document.getPublicStatus());
+        }
+        return restored;
     }
 
     private <R, S> RegulatedMutationCommandDocument createOrLoad(

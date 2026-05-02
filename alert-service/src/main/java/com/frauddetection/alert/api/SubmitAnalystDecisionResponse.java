@@ -14,7 +14,7 @@ public record SubmitAnalystDecisionResponse(
         Instant decidedAt,
         @JsonProperty("operation_status")
         SubmitDecisionOperationStatus operationStatus
-) {
+) implements RegulatedMutationPublicStatusProjection<SubmitAnalystDecisionResponse> {
     public SubmitAnalystDecisionResponse(
             String alertId,
             AnalystDecision decision,
@@ -23,5 +23,10 @@ public record SubmitAnalystDecisionResponse(
             Instant decidedAt
     ) {
         this(alertId, decision, resultingStatus, decisionEventId, decidedAt, SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING);
+    }
+
+    @Override
+    public SubmitAnalystDecisionResponse withPublicStatus(SubmitDecisionOperationStatus status) {
+        return new SubmitAnalystDecisionResponse(alertId, decision, resultingStatus, decisionEventId, decidedAt, status);
     }
 }

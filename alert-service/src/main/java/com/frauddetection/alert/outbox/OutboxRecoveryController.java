@@ -6,6 +6,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -32,9 +33,10 @@ public class OutboxRecoveryController {
     @PostMapping("/{eventId}/resolve-confirmation")
     public OutboxRecordResponse resolveConfirmation(
             @PathVariable String eventId,
+            @RequestHeader(name = "X-Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody OutboxConfirmationResolutionRequest request,
             Authentication authentication
     ) {
-        return OutboxRecordResponse.from(service.resolveConfirmation(eventId, request, authentication == null ? null : authentication.getName()));
+        return OutboxRecordResponse.from(service.resolveConfirmation(eventId, request, authentication == null ? null : authentication.getName(), idempotencyKey));
     }
 }
