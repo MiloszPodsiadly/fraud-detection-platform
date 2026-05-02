@@ -233,6 +233,21 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
+    void trustIncidentRefreshMustUseCoordinatorAndNotManualAudit() throws Exception {
+        String service = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/trust/TrustIncidentService.java"
+        ));
+        String refreshMethod = service.substring(service.indexOf("public TrustIncidentMaterializationResponse refresh("),
+                service.indexOf("public TrustIncidentSummary summary()"));
+
+        assertThat(refreshMethod).contains("regulatedMutationCoordinator.commit(command)");
+        assertThat(refreshMethod).contains("AuditAction.REFRESH_TRUST_INCIDENTS");
+        assertThat(refreshMethod).doesNotContain("auditService");
+        assertThat(refreshMethod).doesNotContain("AuditOutcome.SUCCESS");
+        assertThat(refreshMethod).doesNotContain("AuditOutcome.ATTEMPTED");
+    }
+
+    @Test
     void systemTrustLevelMustNotMaterializeTrustIncidents() throws Exception {
         String source = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/system/SystemTrustLevelController.java"

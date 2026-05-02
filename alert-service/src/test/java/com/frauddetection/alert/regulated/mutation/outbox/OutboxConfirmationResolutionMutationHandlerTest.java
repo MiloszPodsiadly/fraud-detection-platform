@@ -63,6 +63,17 @@ class OutboxConfirmationResolutionMutationHandlerTest {
         assertThat(resolved.getResolutionControlMode()).isEqualTo("SINGLE_CONTROL_OPERATOR_ATTESTED");
     }
 
+    @Test
+    void shouldRejectSingleControlPublishedResolutionInBankMode() {
+        Fixture fixture = fixture(true, false);
+        TransactionalOutboxRecordDocument record = record();
+        when(fixture.repository.findById("event-1")).thenReturn(Optional.of(record));
+
+        assertThatThrownBy(() -> fixture.handler.resolve("event-1", request(), "ops-1"))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("bank mode requires dual-control");
+    }
+
     private Fixture fixture(boolean bankMode, boolean dualControl) {
         TransactionalOutboxRecordRepository repository = mock(TransactionalOutboxRecordRepository.class);
         MongoTemplate mongoTemplate = mock(MongoTemplate.class);

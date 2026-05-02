@@ -1,9 +1,7 @@
 package com.frauddetection.alert.trust;
 
 import com.frauddetection.alert.audit.AuditAction;
-import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
-import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.audit.ResolutionEvidenceReference;
 import com.frauddetection.alert.audit.ResolutionEvidenceType;
 import com.frauddetection.alert.regulated.RegulatedMutationCommand;
@@ -12,6 +10,7 @@ import com.frauddetection.alert.regulated.RegulatedMutationExecutionContext;
 import com.frauddetection.alert.regulated.RegulatedMutationResult;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.alert.regulated.mutation.trustincident.TrustIncidentAcknowledgeMutationHandler;
+import com.frauddetection.alert.regulated.mutation.trustincident.TrustIncidentRefreshMutationHandler;
 import com.frauddetection.alert.regulated.mutation.trustincident.TrustIncidentResolveMutationHandler;
 import org.junit.jupiter.api.Test;
 
@@ -92,25 +91,41 @@ class TrustIncidentServiceTest {
     }
 
     @Test
-    void shouldAuditRefreshBeforeAndAfterMaterialization() {
+    void shouldRouteRefreshThroughRegulatedCoordinator() {
         TrustIncidentRepository repository = mock(TrustIncidentRepository.class);
-        TrustIncidentMaterializer materializer = mock(TrustIncidentMaterializer.class);
-        AuditService auditService = mock(AuditService.class);
+        TrustIncidentRefreshMutationHandler refreshMutationHandler = mock(TrustIncidentRefreshMutationHandler.class);
+        RegulatedMutationCoordinator coordinator = mock(RegulatedMutationCoordinator.class);
         TrustIncidentService service = new TrustIncidentService(
                 repository,
                 new TrustIncidentPolicy(),
-                mock(RegulatedMutationCoordinator.class),
+                coordinator,
                 mock(TrustIncidentAcknowledgeMutationHandler.class),
                 mock(TrustIncidentResolveMutationHandler.class),
-                materializer,
-                auditService
+                refreshMutationHandler
         );
-        when(materializer.materialize(any())).thenReturn(new TrustIncidentMaterializationResponse("AVAILABLE", 1, 1, List.of()));
+        List<TrustSignal> signals = List.of(new TrustSignal("OUTBOX_TERMINAL_FAILURE", TrustIncidentSeverity.CRITICAL, "outbox", "fp", List.of()));
+        TrustIncidentMaterializationResponse materialized = new TrustIncidentMaterializationResponse("AVAILABLE", 1, 1, List.of());
+        when(refreshMutationHandler.refresh(signals)).thenReturn(materialized);
+        when(coordinator.commit(any())).thenAnswer(invocation -> {
+            RegulatedMutationCommand<TrustIncidentMaterializationResponse, TrustIncidentMaterializationResponse> command = invocation.getArgument(0);
+            return new RegulatedMutationResult<>(
+                    RegulatedMutationState.EVIDENCE_PENDING,
+                    command.mutation().execute(new RegulatedMutationExecutionContext("cmd-1"))
+            );
+        });
 
-        service.refresh(List.of(new TrustSignal("OUTBOX_TERMINAL_FAILURE", TrustIncidentSeverity.CRITICAL, "outbox", "fp", List.of())), "ops-1");
+        TrustIncidentMaterializationResponse response = service.refresh(signals, "ops-1", "refresh-1");
 
-        verify(auditService).audit(AuditAction.REFRESH_TRUST_INCIDENTS, AuditResourceType.TRUST_INCIDENT, "trust-incidents", null, "ops-1", AuditOutcome.ATTEMPTED, null);
-        verify(auditService).audit(AuditAction.REFRESH_TRUST_INCIDENTS, AuditResourceType.TRUST_INCIDENT, "trust-incidents", null, "ops-1", AuditOutcome.SUCCESS, null);
+        assertThat(response.status()).isEqualTo("AVAILABLE");
+        @SuppressWarnings("unchecked")
+        org.mockito.ArgumentCaptor<RegulatedMutationCommand<TrustIncidentMaterializationResponse, TrustIncidentMaterializationResponse>> captor =
+                org.mockito.ArgumentCaptor.forClass(RegulatedMutationCommand.class);
+        verify(coordinator).commit(captor.capture());
+        assertThat(captor.getValue().action()).isEqualTo(AuditAction.REFRESH_TRUST_INCIDENTS);
+        assertThat(captor.getValue().resourceType()).isEqualTo(AuditResourceType.TRUST_INCIDENT);
+        assertThat(captor.getValue().resourceId()).isEqualTo("trust-incidents");
+        assertThat(captor.getValue().idempotencyKey()).isEqualTo("refresh-1");
+        verify(refreshMutationHandler).refresh(signals);
     }
 
     private TrustIncidentService service(TrustIncidentRepository repository, RegulatedMutationCoordinator coordinator) {
@@ -120,8 +135,7 @@ class TrustIncidentServiceTest {
                 coordinator,
                 mock(TrustIncidentAcknowledgeMutationHandler.class),
                 mock(TrustIncidentResolveMutationHandler.class),
-                mock(TrustIncidentMaterializer.class),
-                mock(AuditService.class)
+                mock(TrustIncidentRefreshMutationHandler.class)
         );
     }
 

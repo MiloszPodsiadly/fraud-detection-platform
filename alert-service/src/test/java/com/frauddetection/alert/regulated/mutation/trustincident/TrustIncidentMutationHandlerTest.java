@@ -2,13 +2,18 @@ package com.frauddetection.alert.regulated.mutation.trustincident;
 
 import com.frauddetection.alert.audit.ResolutionEvidenceReference;
 import com.frauddetection.alert.audit.ResolutionEvidenceType;
+import com.frauddetection.alert.regulated.RegulatedMutationPartialCommitException;
 import com.frauddetection.alert.trust.TrustIncidentAcknowledgementRequest;
 import com.frauddetection.alert.trust.TrustIncidentDocument;
+import com.frauddetection.alert.trust.TrustIncidentMaterializationException;
+import com.frauddetection.alert.trust.TrustIncidentMaterializationResponse;
+import com.frauddetection.alert.trust.TrustIncidentMaterializer;
 import com.frauddetection.alert.trust.TrustIncidentPolicy;
 import com.frauddetection.alert.trust.TrustIncidentRepository;
 import com.frauddetection.alert.trust.TrustIncidentResolutionRequest;
 import com.frauddetection.alert.trust.TrustIncidentSeverity;
 import com.frauddetection.alert.trust.TrustIncidentStatus;
+import com.frauddetection.alert.trust.TrustSignal;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataAccessResourceFailureException;
 
@@ -31,7 +36,7 @@ class TrustIncidentMutationHandlerTest {
         when(repository.findById("incident-1")).thenReturn(Optional.of(incident));
         when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
-        TrustIncidentDocument saved = new TrustIncidentAcknowledgeMutationHandler(repository, new TrustIncidentPolicy())
+        TrustIncidentDocument saved = new TrustIncidentAcknowledgeMutationHandler(repository, new TrustIncidentPolicy(), false)
                 .acknowledge("incident-1", new TrustIncidentAcknowledgementRequest("operator reviewed"), "ops-1");
 
         assertThat(saved.getStatus()).isEqualTo(TrustIncidentStatus.ACKNOWLEDGED);
@@ -46,13 +51,23 @@ class TrustIncidentMutationHandlerTest {
         when(repository.findById("incident-1")).thenReturn(Optional.of(incident));
         when(repository.save(any())).thenThrow(new DataAccessResourceFailureException("mongo down"));
 
-        assertThatThrownBy(() -> new TrustIncidentAcknowledgeMutationHandler(repository, new TrustIncidentPolicy())
+        assertThatThrownBy(() -> new TrustIncidentAcknowledgeMutationHandler(repository, new TrustIncidentPolicy(), false)
                 .acknowledge("incident-1", new TrustIncidentAcknowledgementRequest("operator reviewed"), "ops-1"))
                 .isInstanceOf(DataAccessResourceFailureException.class);
 
         assertThat(incident.getStatus()).isEqualTo(TrustIncidentStatus.OPEN);
         assertThat(incident.getAcknowledgementReason()).isNull();
         assertThat(incident.getAcknowledgedBy()).isNull();
+    }
+
+    @Test
+    void shouldRequireAcknowledgementReasonInBankMode() {
+        TrustIncidentRepository repository = mock(TrustIncidentRepository.class);
+
+        assertThatThrownBy(() -> new TrustIncidentAcknowledgeMutationHandler(repository, new TrustIncidentPolicy(), true)
+                .acknowledge("incident-1", new TrustIncidentAcknowledgementRequest(" "), "ops-1"))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                .hasMessageContaining("acknowledgement reason is required");
     }
 
     @Test
@@ -69,6 +84,27 @@ class TrustIncidentMutationHandlerTest {
         assertThat(incident.getStatus()).isEqualTo(TrustIncidentStatus.OPEN);
         assertThat(incident.getActiveDedupeKey()).isEqualTo("OUTBOX_TERMINAL_FAILURE:transactional_outbox:fingerprint");
         assertThat(incident.getResolvedBy()).isNull();
+    }
+
+    @Test
+    void shouldMapPartialRefreshFailureToRegulatedPartialCommit() {
+        TrustIncidentMaterializer materializer = mock(TrustIncidentMaterializer.class);
+        TrustIncidentMaterializationResponse partial = new TrustIncidentMaterializationResponse(
+                "PARTIAL",
+                2,
+                1,
+                2,
+                1,
+                1,
+                true,
+                "PERSISTENCE_UNAVAILABLE",
+                List.of(com.frauddetection.alert.trust.TrustIncidentResponse.from(incident()))
+        );
+        when(materializer.materialize(any())).thenThrow(new TrustIncidentMaterializationException(partial, new DataAccessResourceFailureException("mongo down")));
+
+        assertThatThrownBy(() -> new TrustIncidentRefreshMutationHandler(materializer)
+                .refresh(List.of(new TrustSignal("OUTBOX_TERMINAL_FAILURE", TrustIncidentSeverity.CRITICAL, "outbox", "fp", List.of()))))
+                .isInstanceOf(RegulatedMutationPartialCommitException.class);
     }
 
     private TrustIncidentDocument incident() {

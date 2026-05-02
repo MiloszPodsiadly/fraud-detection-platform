@@ -78,11 +78,40 @@ class TrustIncidentMaterializerTest {
         );
 
         assertThatThrownBy(() -> materializer.materialize(List.of(signal())))
-                .isInstanceOf(DataAccessResourceFailureException.class);
+                .isInstanceOf(TrustIncidentMaterializationException.class)
+                .hasCauseInstanceOf(DataAccessResourceFailureException.class);
         assertThat(registry.counter(
                 "trust_incident_materialization_failed_total",
                 "reason", "PERSISTENCE_UNAVAILABLE"
         ).count()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void shouldExposePartialFailureMetadataWhenLaterSignalFails() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        TrustIncidentRepository repository = mock(TrustIncidentRepository.class);
+        MongoTemplate mongoTemplate = mock(MongoTemplate.class);
+        TrustIncidentDocument created = incident(Instant.parse("2026-05-02T10:00:00Z"), 1L);
+        when(mongoTemplate.findAndModify(any(Query.class), any(Update.class), any(FindAndModifyOptions.class), eq(TrustIncidentDocument.class)))
+                .thenReturn(created)
+                .thenThrow(new DataAccessResourceFailureException("mongo down"));
+
+        TrustIncidentMaterializer materializer = new TrustIncidentMaterializer(
+                repository,
+                mongoTemplate,
+                new TrustIncidentPolicy(),
+                new AlertServiceMetrics(registry)
+        );
+
+        assertThatThrownBy(() -> materializer.materialize(List.of(signal(), signal())))
+                .isInstanceOfSatisfying(TrustIncidentMaterializationException.class, exception -> {
+                    assertThat(exception.response().status()).isEqualTo("PARTIAL");
+                    assertThat(exception.response().requestedSignalCount()).isEqualTo(2);
+                    assertThat(exception.response().materializedCount()).isEqualTo(1);
+                    assertThat(exception.response().failedSignalCount()).isEqualTo(1);
+                    assertThat(exception.response().partialFailure()).isTrue();
+                    assertThat(exception.response().failureReason()).isEqualTo("PERSISTENCE_UNAVAILABLE");
+                });
     }
 
     private TrustSignal signal() {
