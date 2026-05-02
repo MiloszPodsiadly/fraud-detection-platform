@@ -129,8 +129,9 @@ Roles describe analyst personas. Authorities are the backend authorization contr
 | `audit-degradation:resolve` | Resolve durable audit degradation events with structured evidence and audit trail. |
 | `decision-outbox:reconcile` | Reconcile unknown decision-outbox publication confirmations with structured evidence. |
 | `trust-incident:read` | Read bounded trust incident operational state. |
-| `trust-incident:ack` | Acknowledge open trust incidents with fail-closed audit. |
-| `trust-incident:resolve` | Resolve trust incidents with reason, structured evidence, and fail-closed audit. |
+| `trust-incident:refresh` | Explicitly materialize current trust signals into durable incidents. |
+| `trust-incident:ack` | Acknowledge open trust incidents through a regulated mutation command. |
+| `trust-incident:resolve` | Resolve trust incidents with reason and structured evidence through a regulated mutation command. |
 | `regulated-mutation:recover` | Run bounded regulated mutation recovery and inspect command state. |
 
 ### Roles
@@ -166,8 +167,9 @@ Roles describe analyst personas. Authorities are the backend authorization contr
 | `GET /api/v1/decision-outbox/unknown-confirmations` | `audit:verify` | Bounded operator list of `PUBLISH_CONFIRMATION_UNKNOWN` outbox rows. |
 | `POST /api/v1/decision-outbox/unknown-confirmations/{alertId}/resolve` | `decision-outbox:reconcile` | Structured-evidence outbox reconciliation. Requires `X-Idempotency-Key` and routes through the regulated command model. `PUBLISHED` requires broker-offset evidence or equivalent broker confirmation. |
 | `GET /api/v1/trust/incidents` | `trust-incident:read` | Bounded open trust incident list; no export, no delete, no bulk actions. |
-| `POST /api/v1/trust/incidents/{incidentId}/ack` | `trust-incident:ack` | Acknowledge an incident; audited fail-closed. |
-| `POST /api/v1/trust/incidents/{incidentId}/resolve` | `trust-incident:resolve` | Resolve or mark false-positive; requires reason and structured evidence; audited fail-closed. |
+| `POST /api/v1/trust/incidents/refresh` | `trust-incident:refresh` or `trust-incident:resolve` | Explicit trust signal materialization; read endpoints do not write incidents. |
+| `POST /api/v1/trust/incidents/{incidentId}/ack` | `trust-incident:ack` | Acknowledge an incident through regulated mutation; requires `X-Idempotency-Key`. |
+| `POST /api/v1/trust/incidents/{incidentId}/resolve` | `trust-incident:resolve` | Resolve or mark false-positive through regulated mutation; requires `X-Idempotency-Key`, reason, and structured evidence. |
 | `GET /api/v1/regulated-mutations/{idempotencyKey}` | `regulated-mutation:recover` or `audit:verify` | Legacy/debug read-only command inspection without payload dump; rate-limited and audit-fail-closed. Avoid in runbooks. |
 | `GET /api/v1/regulated-mutations/by-command/{commandId}` | `regulated-mutation:recover` or `audit:verify` | Preferred read-only command inspection by command id; rate-limited and audited. |
 | `GET /api/v1/regulated-mutations/by-idempotency-hash/{hash}` | `regulated-mutation:recover` or `audit:verify` | Preferred read-only command inspection by SHA-256 idempotency-key hash; rate-limited and audited. |
@@ -275,7 +277,7 @@ Sensitive data intentionally excluded:
 Implementation:
 
 - Controllers do not contain audit logic.
-- Protected analyst decision and fraud-case update paths call `AuditService` before the business repository save. If durable audit persistence fails, the request fails before that protected business write is persisted.
+- Protected regulated analyst decision, fraud-case update, trust incident ACK/RESOLVE, and manual outbox confirmation paths use `RegulatedMutationCoordinator`. The coordinator owns phase audit writes: `ATTEMPTED` before business mutation and `SUCCESS` after the authoritative state save. Mutation handlers do not inject or call `AuditService` directly.
 - Other non-mutating read-access audit records remain best-effort and do not block read responses.
 - `AuditService` builds an `AuditEvent` from the current security principal and falls back to request actor only when no authenticated principal exists.
 - `AuditEventPublisher` is the extension point.

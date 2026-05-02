@@ -367,7 +367,7 @@ paths:
   /api/v1/trust/incidents:
     get:
       summary: List open trust incidents
-      description: Requires trust-incident:read. Returns a bounded operational list of open trust incidents generated from low-cardinality trust signals. No export, delete, update, bulk action, workflow automation, or raw payload access is provided.
+      description: Requires trust-incident:read. Returns a bounded operational list of open trust incidents. This read path does not materialize trust signals or save incident state. No export, delete, update, bulk action, workflow automation, or raw payload access is provided.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -385,16 +385,41 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+  /api/v1/trust/incidents/refresh:
+    post:
+      summary: Materialize trust incidents from current signals
+      description: Requires trust-incident:refresh or trust-incident:resolve. Explicit write path that collects bounded low-cardinality trust signals and atomically materializes active incidents by active dedupe key. GET trust incident and system trust-level paths do not perform this write.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      responses:
+        "200":
+          description: Trust incident materialization completed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrustIncidentMaterializationResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /api/v1/trust/incidents/{incidentId}/ack:
     post:
       summary: Acknowledge trust incident
-      description: Requires trust-incident:ack. Acknowledgement is audited fail-closed; if audit persistence fails the incident state is not changed.
+      description: Requires trust-incident:ack and X-Idempotency-Key. ACK is a regulated mutation: ATTEMPTED audit is recorded before state mutation and SUCCESS audit is owned by the coordinator after the incident state save. The mutation handler does not write AuditService directly.
       security:
         - bearerAuth: []
         - demoAuth: []
       parameters:
         - name: incidentId
           in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+        - name: X-Idempotency-Key
+          in: header
           required: true
           schema:
             type: string
@@ -424,13 +449,20 @@ paths:
   /api/v1/trust/incidents/{incidentId}/resolve:
     post:
       summary: Resolve trust incident
-      description: Requires trust-incident:resolve. Resolution requires a reason and structured evidence and is audited fail-closed. It may mark the incident RESOLVED or FALSE_POSITIVE. No delete, auto-resolve, or workflow automation is provided.
+      description: Requires trust-incident:resolve and X-Idempotency-Key. Resolution requires a reason and structured evidence and is a regulated mutation. It may mark the incident RESOLVED or FALSE_POSITIVE. No delete, auto-resolve, or workflow automation is provided.
       security:
         - bearerAuth: []
         - demoAuth: []
       parameters:
         - name: incidentId
           in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+        - name: X-Idempotency-Key
+          in: header
           required: true
           schema:
             type: string
@@ -917,7 +949,7 @@ paths:
           $ref: "#/components/responses/NotFound"
     patch:
       summary: Update fraud case through regulated mutation coordinator
-      description: Requires fraud-case:update and X-Idempotency-Key. Stores a regulated mutation command with canonical bounded intent fields for case id, actor, UPDATE_FRAUD_CASE, status, assignee hash, notes hash, tags hash, and payload hash. Matching idempotency replay returns the stored snapshot; conflicting key reuse returns 409. No raw fraud-case payloads, customer identifiers, or notes bodies are persisted in command intent.
+      description: Requires fraud-case:update and X-Idempotency-Key. Stores a regulated mutation command with canonical bounded intent fields for case id, backend-resolved actor, UPDATE_FRAUD_CASE, status, assignee hash, notes hash, tags hash, and payload hash. Matching idempotency replay returns the stored snapshot; conflicting key reuse returns 409. Non-terminal states return operation metadata and current_case_snapshot only; updated_case is present only when the mutation has committed. No raw fraud-case payloads, customer identifiers, or notes bodies are persisted in command intent.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -948,7 +980,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/GenericObject"
+                $ref: "#/components/schemas/UpdateFraudCaseResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -1382,6 +1414,27 @@ components:
         false_positive:
           type: boolean
           default: false
+    TrustIncidentMaterializationResponse:
+      type: object
+      additionalProperties: false
+      required: [status, signal_count, incident_count, incidents]
+      properties:
+        status:
+          type: string
+          enum: [AVAILABLE]
+        signal_count:
+          type: integer
+          minimum: 0
+          maximum: 100
+        incident_count:
+          type: integer
+          minimum: 0
+          maximum: 100
+        incidents:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/TrustIncidentResponse"
     TrustIncidentResponse:
       type: object
       additionalProperties: false
@@ -1402,7 +1455,7 @@ components:
           description: Bounded deterministic fingerprint, not raw payload data.
         status:
           type: string
-          enum: [OPEN, ACKNOWLEDGED, MITIGATING, RESOLVED, FALSE_POSITIVE]
+          enum: [OPEN, ACKNOWLEDGED, RESOLVED, FALSE_POSITIVE]
         first_seen_at:
           type: string
           format: date-time
@@ -1425,6 +1478,10 @@ components:
           type: string
           format: date-time
           nullable: true
+        acknowledgement_reason:
+          type: string
+          nullable: true
+          maxLength: 300
         resolved_by:
           type: string
           nullable: true
@@ -1919,6 +1976,33 @@ components:
           items:
             type: string
             maxLength: 80
+    UpdateFraudCaseResponse:
+      type: object
+      additionalProperties: false
+      required: [operation_status, case_id]
+      properties:
+        operation_status:
+          type: string
+          enum: [REJECTED_BEFORE_MUTATION, IN_PROGRESS, RECOVERY_REQUIRED, COMMIT_UNKNOWN, COMMITTED_EVIDENCE_PENDING, COMMITTED_EVIDENCE_CONFIRMED, COMMITTED_EVIDENCE_INCOMPLETE]
+          description: Mandatory operation state. IN_PROGRESS, RECOVERY_REQUIRED, and COMMIT_UNKNOWN must not be interpreted as a committed fraud-case update.
+        command_id:
+          type: string
+          nullable: true
+        idempotency_key_hash:
+          type: string
+          nullable: true
+        case_id:
+          type: string
+        current_case_snapshot:
+          nullable: true
+          $ref: "#/components/schemas/GenericObject"
+        updated_case:
+          nullable: true
+          $ref: "#/components/schemas/GenericObject"
+          description: Present only for committed/evidence-pending committed states. Absent for IN_PROGRESS, RECOVERY_REQUIRED, COMMIT_UNKNOWN, and rejected states.
+        recovery_required_reason:
+          type: string
+          nullable: true
     SubmitAnalystDecisionRequest:
       type: object
       additionalProperties: false
