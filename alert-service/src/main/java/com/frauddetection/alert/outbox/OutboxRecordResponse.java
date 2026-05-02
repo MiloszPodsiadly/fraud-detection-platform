@@ -28,7 +28,19 @@ public record OutboxRecordResponse(
         @JsonProperty("confirmation_unknown_at")
         Instant confirmationUnknownAt,
         @JsonProperty("updated_at")
-        Instant updatedAt
+        Instant updatedAt,
+        @JsonProperty("resolution_pending")
+        boolean resolutionPending,
+        @JsonProperty("resolution_control_mode")
+        String resolutionControlMode,
+        @JsonProperty("resolution_requested_by")
+        String resolutionRequestedBy,
+        @JsonProperty("resolution_requested_at")
+        Instant resolutionRequestedAt,
+        @JsonProperty("resolution_approved_by")
+        String resolutionApprovedBy,
+        @JsonProperty("resolution_approved_at")
+        Instant resolutionApprovedAt
 ) {
     public static OutboxRecordResponse from(TransactionalOutboxRecordDocument document) {
         return new OutboxRecordResponse(
@@ -44,7 +56,13 @@ public record OutboxRecordResponse(
                 document.getLastError(),
                 document.getPublishedAt(),
                 document.getConfirmationUnknownAt(),
-                document.getUpdatedAt()
+                document.getUpdatedAt(),
+                document.isResolutionPending(),
+                document.getResolutionControlMode(),
+                document.getResolutionRequestedBy(),
+                document.getResolutionRequestedAt(),
+                document.getResolutionApprovedBy(),
+                document.getResolutionApprovedAt()
         );
     }
 }

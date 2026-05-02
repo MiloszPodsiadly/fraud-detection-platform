@@ -49,6 +49,9 @@ app:
     recovery:
       enabled: ${OUTBOX_RECOVERY_ENABLED:true}
       stale-processing-threshold: ${OUTBOX_RECOVERY_STALE_PROCESSING_THRESHOLD:PT2M}
+    confirmation:
+      dual-control:
+        enabled: ${OUTBOX_CONFIRMATION_DUAL_CONTROL_ENABLED:false}
     lease-duration: ${OUTBOX_LEASE_DURATION:${APP_ALERT_DECISION_OUTBOX_LEASE_DURATION:PT1M}}
     max-attempts: ${OUTBOX_MAX_ATTEMPTS:${APP_ALERT_DECISION_OUTBOX_MAX_ATTEMPTS:5}}
   evidence-confirmation:

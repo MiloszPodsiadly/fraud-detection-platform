@@ -87,6 +87,25 @@ class RegulatedMutationStartupGuardTest {
     }
 
     @Test
+    void shouldRejectBankModeWhenOutboxConfirmationDualControlIsDisabled() {
+        RegulatedMutationStartupGuard guard = guard(
+                RegulatedMutationTransactionMode.REQUIRED,
+                true,
+                new String[]{"bank"},
+                mock(PlatformTransactionManager.class),
+                true,
+                true,
+                false,
+                true,
+                5
+        );
+
+        assertThatThrownBy(() -> guard.run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("dual-control enabled");
+    }
+
+    @Test
     void shouldRejectRequiredModeWhenTransactionCapabilityProbeFails() {
         PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
         RegulatedMutationTransactionCapabilityProbe probe = mock(RegulatedMutationTransactionCapabilityProbe.class);
@@ -96,6 +115,7 @@ class RegulatedMutationStartupGuardTest {
                 false,
                 new String[]{"local"},
                 transactionManager,
+                true,
                 true,
                 true,
                 true,
@@ -121,6 +141,7 @@ class RegulatedMutationStartupGuardTest {
                 true,
                 true,
                 true,
+                true,
                 5,
                 probe,
                 mock(TransactionalOutboxRecordRepository.class)
@@ -141,6 +162,7 @@ class RegulatedMutationStartupGuardTest {
                 true,
                 true,
                 true,
+                true,
                 5,
                 probe,
                 null
@@ -158,6 +180,7 @@ class RegulatedMutationStartupGuardTest {
             PlatformTransactionManager transactionManager,
             boolean outboxPublisherEnabled,
             boolean outboxRecoveryEnabled,
+            boolean outboxConfirmationDualControlEnabled,
             boolean transactionCapabilityProbeEnabled,
             int maxAttempts
     ) {
@@ -168,11 +191,25 @@ class RegulatedMutationStartupGuardTest {
                 transactionManager,
                 outboxPublisherEnabled,
                 outboxRecoveryEnabled,
+                outboxConfirmationDualControlEnabled,
                 transactionCapabilityProbeEnabled,
                 maxAttempts,
                 mode == RegulatedMutationTransactionMode.REQUIRED ? mock(RegulatedMutationTransactionCapabilityProbe.class) : null,
                 transactionManager == null ? null : mock(TransactionalOutboxRecordRepository.class)
         );
+    }
+
+    private RegulatedMutationStartupGuard guard(
+            RegulatedMutationTransactionMode mode,
+            boolean bankMode,
+            String[] profiles,
+            PlatformTransactionManager transactionManager,
+            boolean outboxPublisherEnabled,
+            boolean outboxRecoveryEnabled,
+            boolean transactionCapabilityProbeEnabled,
+            int maxAttempts
+    ) {
+        return guard(mode, bankMode, profiles, transactionManager, outboxPublisherEnabled, outboxRecoveryEnabled, true, transactionCapabilityProbeEnabled, maxAttempts);
     }
 
     @SuppressWarnings("unchecked")
@@ -183,6 +220,7 @@ class RegulatedMutationStartupGuardTest {
             PlatformTransactionManager transactionManager,
             boolean outboxPublisherEnabled,
             boolean outboxRecoveryEnabled,
+            boolean outboxConfirmationDualControlEnabled,
             boolean transactionCapabilityProbeEnabled,
             int maxAttempts,
             RegulatedMutationTransactionCapabilityProbe probe,
@@ -209,6 +247,7 @@ class RegulatedMutationStartupGuardTest {
                 bankMode,
                 outboxPublisherEnabled,
                 outboxRecoveryEnabled,
+                outboxConfirmationDualControlEnabled,
                 transactionCapabilityProbeEnabled,
                 maxAttempts
         );

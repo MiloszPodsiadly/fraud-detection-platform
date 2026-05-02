@@ -1,6 +1,10 @@
 package com.frauddetection.alert.regulated.mutation.outbox;
 
+import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.audit.AuditOutcome;
+import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.ResolutionEvidenceReference;
+import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.outbox.OutboxConfirmationResolution;
 import com.frauddetection.alert.outbox.OutboxConfirmationResolutionRequest;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
@@ -10,6 +14,7 @@ import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.service.DecisionOutboxStatus;
 import com.mongodb.client.result.UpdateResult;
 import org.springframework.dao.DataAccessException;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -25,13 +30,22 @@ public class OutboxConfirmationResolutionMutationHandler {
 
     private final TransactionalOutboxRecordRepository repository;
     private final MongoTemplate mongoTemplate;
+    private final AuditService auditService;
+    private final boolean bankModeFailClosed;
+    private final boolean dualControlEnabled;
 
     public OutboxConfirmationResolutionMutationHandler(
             TransactionalOutboxRecordRepository repository,
-            MongoTemplate mongoTemplate
+            MongoTemplate mongoTemplate,
+            AuditService auditService,
+            @Value("${app.audit.bank-mode.fail-closed:false}") boolean bankModeFailClosed,
+            @Value("${app.outbox.confirmation.dual-control.enabled:false}") boolean dualControlEnabled
     ) {
         this.repository = repository;
         this.mongoTemplate = mongoTemplate;
+        this.auditService = auditService;
+        this.bankModeFailClosed = bankModeFailClosed;
+        this.dualControlEnabled = dualControlEnabled;
     }
 
     public TransactionalOutboxRecordDocument resolve(String eventId, OutboxConfirmationResolutionRequest request, String actorId) {
@@ -45,7 +59,77 @@ public class OutboxConfirmationResolutionMutationHandler {
         } else {
             ResolutionEvidenceReference.require(request.evidenceReference(), "resolution evidence is required");
         }
+        if (bankModeFailClosed && dualControlEnabled && !record.isResolutionPending()) {
+            return requestResolution(record, request, actorId);
+        }
+        if (bankModeFailClosed && dualControlEnabled) {
+            return approveResolution(record, request, actorId);
+        }
+        record.setResolutionControlMode("SINGLE_CONTROL_OPERATOR_ATTESTED");
+        auditResolution(record, actorId);
+        return applyResolution(record, request, actorId);
+    }
+
+    private TransactionalOutboxRecordDocument requestResolution(
+            TransactionalOutboxRecordDocument record,
+            OutboxConfirmationResolutionRequest request,
+            String actorId
+    ) {
+        auditResolution(record, actorId);
         Instant now = Instant.now();
+        ResolutionEvidenceReference evidence = request.evidenceReference();
+        record.setResolutionPending(true);
+        record.setResolutionControlMode("DUAL_CONTROL_REQUESTED");
+        record.setResolutionRequestedBy(actorId);
+        record.setResolutionRequestedAt(now);
+        record.setResolutionReason(request.reason());
+        record.setResolutionEvidenceType(evidence.type().name());
+        record.setResolutionEvidenceReference(evidence.reference());
+        record.setResolutionEvidenceVerifiedAt(evidence.verifiedAt());
+        record.setResolutionEvidenceVerifiedBy(evidence.verifiedBy());
+        record.setLastError("DUAL_CONTROL_APPROVAL_REQUIRED");
+        record.setUpdatedAt(now);
+        TransactionalOutboxRecordDocument saved = repository.save(record);
+        markAlertResolutionPending(saved, request.reason(), actorId, evidence);
+        return saved;
+    }
+
+    private TransactionalOutboxRecordDocument approveResolution(
+            TransactionalOutboxRecordDocument record,
+            OutboxConfirmationResolutionRequest request,
+            String actorId
+    ) {
+        if (actorId != null && actorId.equals(record.getResolutionRequestedBy())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "dual-control approval requires a distinct actor");
+        }
+        auditResolution(record, actorId);
+        record.setResolutionControlMode("DUAL_CONTROL_APPROVED");
+        record.setResolutionApprovedBy(actorId);
+        record.setResolutionApprovedAt(Instant.now());
+        record.setResolutionPending(false);
+        return applyResolution(record, request, actorId);
+    }
+
+    private TransactionalOutboxRecordDocument applyResolution(
+            TransactionalOutboxRecordDocument record,
+            OutboxConfirmationResolutionRequest request,
+            String actorId
+    ) {
+        Instant now = Instant.now();
+        ResolutionEvidenceReference evidence = request.evidenceReference();
+        if (record.getResolutionControlMode() == null) {
+            record.setResolutionControlMode("SINGLE_CONTROL_OPERATOR_ATTESTED");
+        }
+        record.setResolutionReason(request.reason());
+        record.setResolutionEvidenceType(evidence.type().name());
+        record.setResolutionEvidenceReference(evidence.reference());
+        record.setResolutionEvidenceVerifiedAt(evidence.verifiedAt());
+        record.setResolutionEvidenceVerifiedBy(evidence.verifiedBy());
+        record.setResolutionPending(false);
+        if (record.getResolutionApprovedAt() == null) {
+            record.setResolutionApprovedAt(now);
+            record.setResolutionApprovedBy(actorId);
+        }
         TransactionalOutboxStatus status = request.resolution() == OutboxConfirmationResolution.PUBLISHED
                 ? TransactionalOutboxStatus.PUBLISHED
                 : TransactionalOutboxStatus.RECOVERY_REQUIRED;
@@ -60,6 +144,46 @@ public class OutboxConfirmationResolutionMutationHandler {
         TransactionalOutboxRecordDocument saved = repository.save(record);
         updateAlertProjection(saved, status, request.reason(), actorId, request.evidenceReference());
         return saved;
+    }
+
+    private void auditResolution(TransactionalOutboxRecordDocument record, String actorId) {
+        auditService.audit(
+                AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION,
+                AuditResourceType.DECISION_OUTBOX,
+                record.getEventId(),
+                null,
+                actorId,
+                AuditOutcome.SUCCESS,
+                null
+        );
+    }
+
+    private void markAlertResolutionPending(
+            TransactionalOutboxRecordDocument record,
+            String reason,
+            String actorId,
+            ResolutionEvidenceReference evidence
+    ) {
+        if (record.getResourceId() == null || record.getResourceId().isBlank()) {
+            return;
+        }
+        Update update = new Update()
+                .set("decisionOutboxResolutionPending", true)
+                .set("decisionOutboxResolutionRequestedAt", record.getResolutionRequestedAt())
+                .set("decisionOutboxResolutionRequestedBy", actorId)
+                .set("decisionOutboxResolutionApprovalReason", reason)
+                .set("decisionOutboxResolutionEvidenceType", evidence.type().name())
+                .set("decisionOutboxResolutionEvidenceReference", evidence.reference())
+                .set("decisionOutboxResolutionEvidenceVerifiedAt", evidence.verifiedAt())
+                .set("decisionOutboxResolutionEvidenceVerifiedBy", evidence.verifiedBy());
+        try {
+            UpdateResult result = mongoTemplate.updateFirst(Query.query(Criteria.where("_id").is(record.getResourceId())), update, AlertDocument.class);
+            if (result.getMatchedCount() == 0) {
+                markProjectionMismatch(record, "ALERT_PROJECTION_NOT_FOUND");
+            }
+        } catch (DataAccessException exception) {
+            markProjectionMismatch(record, "ALERT_PROJECTION_UPDATE_FAILED");
+        }
     }
 
     private void updateAlertProjection(

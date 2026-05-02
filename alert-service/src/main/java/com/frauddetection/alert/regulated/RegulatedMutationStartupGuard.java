@@ -23,6 +23,7 @@ public class RegulatedMutationStartupGuard implements ApplicationRunner {
     private final boolean bankModeFailClosed;
     private final boolean outboxPublisherEnabled;
     private final boolean outboxRecoveryEnabled;
+    private final boolean outboxConfirmationDualControlEnabled;
     private final boolean transactionCapabilityProbeEnabled;
     private final int maxAttempts;
 
@@ -35,6 +36,7 @@ public class RegulatedMutationStartupGuard implements ApplicationRunner {
             @Value("${app.audit.bank-mode.fail-closed:false}") boolean bankModeFailClosed,
             @Value("${app.outbox.publisher.enabled:true}") boolean outboxPublisherEnabled,
             @Value("${app.outbox.recovery.enabled:true}") boolean outboxRecoveryEnabled,
+            @Value("${app.outbox.confirmation.dual-control.enabled:false}") boolean outboxConfirmationDualControlEnabled,
             @Value("${app.regulated-mutations.transaction-capability-probe.enabled:true}") boolean transactionCapabilityProbeEnabled,
             @Value("${app.outbox.max-attempts:${app.alert.decision-outbox.max-attempts:5}}") int maxAttempts
     ) {
@@ -46,6 +48,7 @@ public class RegulatedMutationStartupGuard implements ApplicationRunner {
         this.bankModeFailClosed = bankModeFailClosed;
         this.outboxPublisherEnabled = outboxPublisherEnabled;
         this.outboxRecoveryEnabled = outboxRecoveryEnabled;
+        this.outboxConfirmationDualControlEnabled = outboxConfirmationDualControlEnabled;
         this.transactionCapabilityProbeEnabled = transactionCapabilityProbeEnabled;
         this.maxAttempts = maxAttempts;
     }
@@ -78,6 +81,9 @@ public class RegulatedMutationStartupGuard implements ApplicationRunner {
         }
         if (!outboxRecoveryEnabled) {
             throw new IllegalStateException("FDP-26 prod-like/bank mode requires outbox recovery enabled.");
+        }
+        if (!outboxConfirmationDualControlEnabled) {
+            throw new IllegalStateException("FDP-26 bank mode requires outbox confirmation dual-control enabled.");
         }
         if (maxAttempts <= 0) {
             throw new IllegalStateException("FDP-26 prod-like/bank mode requires positive outbox max attempts.");

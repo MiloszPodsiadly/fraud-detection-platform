@@ -49,6 +49,28 @@ public class TransactionalOutboxRecordDocument {
     private boolean projectionMismatch;
     @Field("projection_mismatch_reason")
     private String projectionMismatchReason;
+    @Field("resolution_pending")
+    private boolean resolutionPending;
+    @Field("resolution_control_mode")
+    private String resolutionControlMode;
+    @Field("resolution_requested_by")
+    private String resolutionRequestedBy;
+    @Field("resolution_requested_at")
+    private Instant resolutionRequestedAt;
+    @Field("resolution_reason")
+    private String resolutionReason;
+    @Field("resolution_evidence_type")
+    private String resolutionEvidenceType;
+    @Field("resolution_evidence_reference")
+    private String resolutionEvidenceReference;
+    @Field("resolution_evidence_verified_at")
+    private Instant resolutionEvidenceVerifiedAt;
+    @Field("resolution_evidence_verified_by")
+    private String resolutionEvidenceVerifiedBy;
+    @Field("resolution_approved_by")
+    private String resolutionApprovedBy;
+    @Field("resolution_approved_at")
+    private Instant resolutionApprovedAt;
     @Field("created_at")
     private Instant createdAt;
     @Field("updated_at")
@@ -90,6 +112,28 @@ public class TransactionalOutboxRecordDocument {
     public void setProjectionMismatch(boolean projectionMismatch) { this.projectionMismatch = projectionMismatch; }
     public String getProjectionMismatchReason() { return projectionMismatchReason; }
     public void setProjectionMismatchReason(String projectionMismatchReason) { this.projectionMismatchReason = projectionMismatchReason; }
+    public boolean isResolutionPending() { return resolutionPending; }
+    public void setResolutionPending(boolean resolutionPending) { this.resolutionPending = resolutionPending; }
+    public String getResolutionControlMode() { return resolutionControlMode; }
+    public void setResolutionControlMode(String resolutionControlMode) { this.resolutionControlMode = resolutionControlMode; }
+    public String getResolutionRequestedBy() { return resolutionRequestedBy; }
+    public void setResolutionRequestedBy(String resolutionRequestedBy) { this.resolutionRequestedBy = resolutionRequestedBy; }
+    public Instant getResolutionRequestedAt() { return resolutionRequestedAt; }
+    public void setResolutionRequestedAt(Instant resolutionRequestedAt) { this.resolutionRequestedAt = resolutionRequestedAt; }
+    public String getResolutionReason() { return resolutionReason; }
+    public void setResolutionReason(String resolutionReason) { this.resolutionReason = resolutionReason; }
+    public String getResolutionEvidenceType() { return resolutionEvidenceType; }
+    public void setResolutionEvidenceType(String resolutionEvidenceType) { this.resolutionEvidenceType = resolutionEvidenceType; }
+    public String getResolutionEvidenceReference() { return resolutionEvidenceReference; }
+    public void setResolutionEvidenceReference(String resolutionEvidenceReference) { this.resolutionEvidenceReference = resolutionEvidenceReference; }
+    public Instant getResolutionEvidenceVerifiedAt() { return resolutionEvidenceVerifiedAt; }
+    public void setResolutionEvidenceVerifiedAt(Instant resolutionEvidenceVerifiedAt) { this.resolutionEvidenceVerifiedAt = resolutionEvidenceVerifiedAt; }
+    public String getResolutionEvidenceVerifiedBy() { return resolutionEvidenceVerifiedBy; }
+    public void setResolutionEvidenceVerifiedBy(String resolutionEvidenceVerifiedBy) { this.resolutionEvidenceVerifiedBy = resolutionEvidenceVerifiedBy; }
+    public String getResolutionApprovedBy() { return resolutionApprovedBy; }
+    public void setResolutionApprovedBy(String resolutionApprovedBy) { this.resolutionApprovedBy = resolutionApprovedBy; }
+    public Instant getResolutionApprovedAt() { return resolutionApprovedAt; }
+    public void setResolutionApprovedAt(Instant resolutionApprovedAt) { this.resolutionApprovedAt = resolutionApprovedAt; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
