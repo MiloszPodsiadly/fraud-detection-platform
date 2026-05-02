@@ -3,9 +3,12 @@ package com.frauddetection.alert.regulated;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.frauddetection.alert.api.SubmitAnalystDecisionResponse;
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
+import com.frauddetection.alert.api.UpdateFraudCaseResponse;
+import com.frauddetection.alert.audit.ResolutionEvidenceReference;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.outbox.OutboxRecordResponse;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
+import com.frauddetection.alert.trust.TrustIncidentResponse;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
 
@@ -75,8 +78,44 @@ public record RegulatedMutationResponseSnapshot(
         @JsonProperty("fraud_case_decided_at")
         Instant fraudCaseDecidedAt,
         @JsonProperty("fraud_case_updated_at")
-        Instant fraudCaseUpdatedAt
+        Instant fraudCaseUpdatedAt,
+        @JsonProperty("trust_incident_id")
+        String trustIncidentId,
+        @JsonProperty("trust_incident_type")
+        String trustIncidentType,
+        @JsonProperty("trust_incident_severity")
+        String trustIncidentSeverity,
+        @JsonProperty("trust_incident_source")
+        String trustIncidentSource,
+        @JsonProperty("trust_incident_fingerprint")
+        String trustIncidentFingerprint,
+        @JsonProperty("trust_incident_status")
+        String trustIncidentStatus,
+        @JsonProperty("trust_incident_first_seen_at")
+        Instant trustIncidentFirstSeenAt,
+        @JsonProperty("trust_incident_last_seen_at")
+        Instant trustIncidentLastSeenAt,
+        @JsonProperty("trust_incident_occurrence_count")
+        Long trustIncidentOccurrenceCount,
+        @JsonProperty("trust_incident_evidence_refs")
+        List<String> trustIncidentEvidenceRefs,
+        @JsonProperty("trust_incident_acknowledged_by")
+        String trustIncidentAcknowledgedBy,
+        @JsonProperty("trust_incident_acknowledged_at")
+        Instant trustIncidentAcknowledgedAt,
+        @JsonProperty("trust_incident_acknowledgement_reason")
+        String trustIncidentAcknowledgementReason,
+        @JsonProperty("trust_incident_resolved_by")
+        String trustIncidentResolvedBy,
+        @JsonProperty("trust_incident_resolved_at")
+        Instant trustIncidentResolvedAt,
+        @JsonProperty("trust_incident_resolution_reason")
+        String trustIncidentResolutionReason,
+        @JsonProperty("trust_incident_resolution_evidence")
+        ResolutionEvidenceReference trustIncidentResolutionEvidence
 ) {
+    private static final int ZERO = 0;
+
     public RegulatedMutationResponseSnapshot(
             String alertId,
             AnalystDecision decision,
@@ -87,7 +126,8 @@ public record RegulatedMutationResponseSnapshot(
     ) {
         this(alertId, decision, resultingStatus, decisionEventId, decidedAt, operationStatus,
                 null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     public RegulatedMutationResponseSnapshot(
@@ -123,7 +163,8 @@ public record RegulatedMutationResponseSnapshot(
                 outboxResolutionRequestedAt, outboxResolutionRequestedBy, outboxResolutionEvidenceType,
                 outboxResolutionEvidenceReference, outboxResolutionEvidenceVerifiedAt, outboxResolutionEvidenceVerifiedBy,
                 outboxResolutionApprovedAt, outboxResolutionApprovedBy, outboxResolutionApprovalReason,
-                null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     public static RegulatedMutationResponseSnapshot from(SubmitAnalystDecisionResponse response) {
@@ -169,13 +210,6 @@ public record RegulatedMutationResponseSnapshot(
                 null,
                 response.resolutionApprovedAt(),
                 response.resolutionApprovedBy(),
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
                 null
         );
     }
@@ -190,7 +224,7 @@ public record RegulatedMutationResponseSnapshot(
                 null,
                 null,
                 outboxStatus,
-                outboxAttempts == null ? 0 : outboxAttempts,
+                outboxAttempts == null ? ZERO : outboxAttempts,
                 outboxFailureReason,
                 outboxPublishedAt,
                 outboxResolutionRequestedAt,
@@ -214,7 +248,8 @@ public record RegulatedMutationResponseSnapshot(
                 document.getDecisionReason(),
                 document.getDecisionTags() == null ? List.of() : List.copyOf(document.getDecisionTags()),
                 document.getDecidedAt(),
-                document.getUpdatedAt()
+                document.getUpdatedAt(),
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null
         );
     }
 
@@ -228,5 +263,114 @@ public record RegulatedMutationResponseSnapshot(
         document.setDecidedAt(fraudCaseDecidedAt);
         document.setUpdatedAt(fraudCaseUpdatedAt);
         return document;
+    }
+
+    public static RegulatedMutationResponseSnapshot fromUpdateFraudCaseResponse(UpdateFraudCaseResponse response) {
+        if (response.updatedCase() == null) {
+            return new RegulatedMutationResponseSnapshot(
+                    null, null, null, null, null, response.operationStatus(),
+                    null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+                    response.caseId(),
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null
+            );
+        }
+        return new RegulatedMutationResponseSnapshot(
+                null, null, null, null, null, response.operationStatus(),
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+                response.updatedCase().caseId(),
+                response.updatedCase().status(),
+                response.updatedCase().analystId(),
+                response.updatedCase().decisionReason(),
+                response.updatedCase().decisionTags() == null ? List.of() : List.copyOf(response.updatedCase().decisionTags()),
+                response.updatedCase().decidedAt(),
+                response.updatedCase().updatedAt(),
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null
+        );
+    }
+
+    public UpdateFraudCaseResponse toUpdateFraudCaseResponse() {
+        FraudCaseDocument document = toFraudCaseDocument();
+        com.frauddetection.alert.api.FraudCaseResponse updated = fraudCaseStatus == null ? null : new com.frauddetection.alert.api.FraudCaseResponse(
+                document.getCaseId(),
+                null,
+                null,
+                document.getStatus(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                document.getUpdatedAt(),
+                document.getAnalystId(),
+                document.getDecisionReason(),
+                document.getDecisionTags(),
+                document.getDecidedAt(),
+                List.of(),
+                List.of()
+        );
+        return new UpdateFraudCaseResponse(
+                operationStatus,
+                null,
+                null,
+                fraudCaseId,
+                null,
+                updated,
+                null
+        );
+    }
+
+    public static RegulatedMutationResponseSnapshot fromTrustIncident(TrustIncidentResponse response) {
+        return new RegulatedMutationResponseSnapshot(
+                null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null,
+                response.incidentId(),
+                response.type(),
+                response.severity(),
+                response.source(),
+                response.fingerprint(),
+                response.status(),
+                response.firstSeenAt(),
+                response.lastSeenAt(),
+                response.occurrenceCount(),
+                response.evidenceRefs() == null ? List.of() : List.copyOf(response.evidenceRefs()),
+                response.acknowledgedBy(),
+                response.acknowledgedAt(),
+                response.acknowledgementReason(),
+                response.resolvedBy(),
+                response.resolvedAt(),
+                response.resolutionReason(),
+                response.resolutionEvidence()
+        );
+    }
+
+    public TrustIncidentResponse toTrustIncidentResponse() {
+        return new TrustIncidentResponse(
+                trustIncidentId,
+                trustIncidentType,
+                trustIncidentSeverity,
+                trustIncidentSource,
+                trustIncidentFingerprint,
+                trustIncidentStatus,
+                trustIncidentFirstSeenAt,
+                trustIncidentLastSeenAt,
+                trustIncidentOccurrenceCount == null ? 0L : trustIncidentOccurrenceCount,
+                trustIncidentEvidenceRefs == null ? List.of() : List.copyOf(trustIncidentEvidenceRefs),
+                trustIncidentAcknowledgedBy,
+                trustIncidentAcknowledgedAt,
+                trustIncidentAcknowledgementReason,
+                trustIncidentResolvedBy,
+                trustIncidentResolvedAt,
+                trustIncidentResolutionReason,
+                trustIncidentResolutionEvidence
+        );
     }
 }

@@ -2,6 +2,8 @@ package com.frauddetection.alert.service;
 
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.api.UpdateFraudCaseRequest;
+import com.frauddetection.alert.api.UpdateFraudCaseResponse;
+import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
@@ -18,6 +20,7 @@ import com.frauddetection.alert.regulated.RegulatedMutationResponseSnapshot;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.alert.regulated.mutation.fraudcase.FraudCaseUpdateMutationHandler;
 import com.frauddetection.alert.security.principal.AnalystActorResolver;
+import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -46,6 +49,7 @@ public class FraudCaseManagementService {
     private final AlertServiceMetrics metrics;
     private final FraudCaseUpdateMutationHandler updateMutationHandler;
     private final RegulatedMutationCoordinator regulatedMutationCoordinator;
+    private final FraudCaseResponseMapper responseMapper;
 
     public FraudCaseManagementService(
             FraudCaseRepository fraudCaseRepository,
@@ -53,7 +57,8 @@ public class FraudCaseManagementService {
             AnalystActorResolver analystActorResolver,
             AlertServiceMetrics metrics,
             FraudCaseUpdateMutationHandler updateMutationHandler,
-            RegulatedMutationCoordinator regulatedMutationCoordinator
+            RegulatedMutationCoordinator regulatedMutationCoordinator,
+            FraudCaseResponseMapper responseMapper
     ) {
         this.fraudCaseRepository = fraudCaseRepository;
         this.scoredTransactionRepository = scoredTransactionRepository;
@@ -61,6 +66,7 @@ public class FraudCaseManagementService {
         this.metrics = metrics;
         this.updateMutationHandler = updateMutationHandler;
         this.regulatedMutationCoordinator = regulatedMutationCoordinator;
+        this.responseMapper = responseMapper;
     }
 
     public void handleScoredTransaction(TransactionScoredEvent event) {
@@ -106,12 +112,13 @@ public class FraudCaseManagementService {
                 .orElseThrow(() -> new com.frauddetection.alert.exception.AlertNotFoundException(caseId)));
     }
 
-    public FraudCaseDocument updateCase(String caseId, UpdateFraudCaseRequest request, String idempotencyKey) {
+    public UpdateFraudCaseResponse updateCase(String caseId, UpdateFraudCaseRequest request, String idempotencyKey) {
         FraudCaseDocument document = fraudCaseRepository.findById(caseId)
                 .orElseThrow(() -> new com.frauddetection.alert.exception.AlertNotFoundException(caseId));
         String actorId = analystActorResolver.resolveActorId(request.analystId(), "UPDATE_FRAUD_CASE", caseId);
         String correlationId = correlationId(document);
-        String requestHash = requestHash(request);
+        String requestHash = requestHash(request, actorId);
+        String idempotencyKeyHash = RegulatedMutationIntentHasher.hash(idempotencyKey);
         RegulatedMutationIntent intent = RegulatedMutationIntentHasher.fraudCaseUpdate(
                 caseId,
                 actorId,
@@ -121,7 +128,7 @@ public class FraudCaseManagementService {
                 request.tags(),
                 payload(request, actorId)
         );
-        RegulatedMutationCommand<FraudCaseDocument, FraudCaseDocument> command = new RegulatedMutationCommand<>(
+        RegulatedMutationCommand<FraudCaseDocument, UpdateFraudCaseResponse> command = new RegulatedMutationCommand<>(
                 idempotencyKey,
                 actorId,
                 caseId,
@@ -130,16 +137,16 @@ public class FraudCaseManagementService {
                 correlationId,
                 requestHash,
                 context -> updateMutationHandler.update(caseId, request, actorId),
-                (saved, state) -> saved,
-                RegulatedMutationResponseSnapshot::fromFraudCase,
-                RegulatedMutationResponseSnapshot::toFraudCaseDocument,
-                state -> statusResponse(caseId, request, actorId),
+                (saved, state) -> committedResponse(saved, idempotencyKeyHash, publicStatus(state)),
+                RegulatedMutationResponseSnapshot::fromUpdateFraudCaseResponse,
+                RegulatedMutationResponseSnapshot::toUpdateFraudCaseResponse,
+                state -> statusResponse(caseId, document, idempotencyKeyHash, state),
                 intent
         );
         return regulatedMutationCoordinator.commit(command).response();
     }
 
-    public FraudCaseDocument updateCase(String caseId, UpdateFraudCaseRequest request) {
+    public UpdateFraudCaseResponse updateCase(String caseId, UpdateFraudCaseRequest request) {
         return updateCase(caseId, request, null);
     }
 
@@ -151,18 +158,57 @@ public class FraudCaseManagementService {
                 .orElse(null);
     }
 
-    private FraudCaseDocument statusResponse(String caseId, UpdateFraudCaseRequest request, String actorId) {
-        FraudCaseDocument document = new FraudCaseDocument();
-        document.setCaseId(caseId);
-        document.setStatus(request.status());
-        document.setAnalystId(actorId);
-        document.setDecisionReason(request.decisionReason());
-        document.setDecisionTags(request.tags() == null ? List.of() : List.copyOf(request.tags()));
-        return document;
+    private UpdateFraudCaseResponse committedResponse(
+            FraudCaseDocument saved,
+            String idempotencyKeyHash,
+            SubmitDecisionOperationStatus status
+    ) {
+        return new UpdateFraudCaseResponse(
+                status,
+                null,
+                idempotencyKeyHash,
+                saved.getCaseId(),
+                null,
+                responseMapper.toResponse(saved),
+                null
+        );
     }
 
-    private String requestHash(UpdateFraudCaseRequest request) {
-        return RegulatedMutationIntentHasher.hash(payload(request, request.analystId()));
+    private UpdateFraudCaseResponse statusResponse(
+            String caseId,
+            FraudCaseDocument current,
+            String idempotencyKeyHash,
+            RegulatedMutationState state
+    ) {
+        SubmitDecisionOperationStatus status = publicStatus(state);
+        return new UpdateFraudCaseResponse(
+                status,
+                null,
+                idempotencyKeyHash,
+                caseId,
+                responseMapper.toResponse(current),
+                null,
+                status == SubmitDecisionOperationStatus.RECOVERY_REQUIRED || status == SubmitDecisionOperationStatus.COMMIT_UNKNOWN
+                        ? state.name()
+                        : null
+        );
+    }
+
+    private SubmitDecisionOperationStatus publicStatus(RegulatedMutationState state) {
+        return switch (state) {
+            case REQUESTED, AUDIT_ATTEMPTED -> SubmitDecisionOperationStatus.IN_PROGRESS;
+            case BUSINESS_COMMITTING -> SubmitDecisionOperationStatus.COMMIT_UNKNOWN;
+            case EVIDENCE_PENDING, COMMITTED, SUCCESS_AUDIT_RECORDED ->
+                    SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING;
+            case EVIDENCE_CONFIRMED -> SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED;
+            case COMMITTED_DEGRADED -> SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE;
+            case FAILED, BUSINESS_COMMITTED, SUCCESS_AUDIT_PENDING -> SubmitDecisionOperationStatus.RECOVERY_REQUIRED;
+            case REJECTED -> SubmitDecisionOperationStatus.REJECTED_BEFORE_MUTATION;
+        };
+    }
+
+    private String requestHash(UpdateFraudCaseRequest request, String actorId) {
+        return RegulatedMutationIntentHasher.hash(payload(request, actorId));
     }
 
     private String payload(UpdateFraudCaseRequest request, String actorId) {

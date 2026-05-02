@@ -13,7 +13,6 @@ import com.frauddetection.alert.service.DecisionOutboxStatus;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.trust.TrustIncidentService;
 import com.frauddetection.alert.trust.TrustIncidentSummary;
-import com.frauddetection.alert.trust.TrustSignalCollector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -51,7 +50,6 @@ public class SystemTrustLevelController implements ApplicationRunner {
     private final boolean outboxPublisherEnabled;
     private final boolean evidenceConfirmationEnabled;
     private final TrustIncidentService trustIncidentService;
-    private final TrustSignalCollector trustSignalCollector;
 
     public SystemTrustLevelController(
             boolean publicationEnabled,
@@ -101,7 +99,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
             ObjectProvider<TransactionalOutboxRecordRepository> outboxRepository,
             RegulatedMutationRecoveryService regulatedMutationRecoveryService,
             ObjectProvider<TrustIncidentService> trustIncidentService,
-            ObjectProvider<TrustSignalCollector> trustSignalCollector
+            ObjectProvider<com.frauddetection.alert.trust.TrustSignalCollector> ignoredTrustSignalCollector
     ) {
         this.publicationEnabled = publicationEnabled;
         this.publicationRequired = publicationRequired;
@@ -120,7 +118,6 @@ public class SystemTrustLevelController implements ApplicationRunner {
         this.outboxPublisherEnabled = outboxPublisherEnabled;
         this.evidenceConfirmationEnabled = evidenceConfirmationEnabled;
         this.trustIncidentService = trustIncidentService == null ? null : trustIncidentService.getIfAvailable();
-        this.trustSignalCollector = trustSignalCollector == null ? null : trustSignalCollector.getIfAvailable();
     }
 
     public SystemTrustLevelController(
@@ -410,7 +407,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
             return TrustIncidentSummary.empty();
         }
         try {
-            return trustIncidentService.summary(trustSignalCollector == null ? List.of() : trustSignalCollector.collect());
+            return trustIncidentService.summary();
         } catch (RuntimeException exception) {
             return new TrustIncidentSummary(1L, 0L, 1L, null, List.of("TRUST_INCIDENT_CONTROL_PLANE_UNAVAILABLE"), "CRITICAL");
         }

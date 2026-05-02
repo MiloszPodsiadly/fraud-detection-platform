@@ -26,6 +26,8 @@ public record TrustIncidentResponse(
         String acknowledgedBy,
         @JsonProperty("acknowledged_at")
         Instant acknowledgedAt,
+        @JsonProperty("acknowledgement_reason")
+        String acknowledgementReason,
         @JsonProperty("resolved_by")
         String resolvedBy,
         @JsonProperty("resolved_at")
@@ -49,6 +51,7 @@ public record TrustIncidentResponse(
                 document.getEvidenceRefs() == null ? List.of() : document.getEvidenceRefs(),
                 document.getAcknowledgedBy(),
                 document.getAcknowledgedAt(),
+                document.getAcknowledgementReason(),
                 document.getResolvedBy(),
                 document.getResolvedAt(),
                 document.getResolutionReason(),

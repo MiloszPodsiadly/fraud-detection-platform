@@ -19,6 +19,7 @@ export const AUTHORITIES = Object.freeze({
   OUTBOX_RECOVER: "outbox:recover",
   OUTBOX_RESOLVE: "outbox:resolve",
   TRUST_INCIDENT_READ: "trust-incident:read",
+  TRUST_INCIDENT_REFRESH: "trust-incident:refresh",
   TRUST_INCIDENT_ACK: "trust-incident:ack",
   TRUST_INCIDENT_RESOLVE: "trust-incident:resolve",
 });
@@ -41,6 +42,7 @@ export const AUTHORITY_VALUES = Object.freeze([
   "outbox:recover",
   "outbox:resolve",
   "trust-incident:read",
+  "trust-incident:refresh",
   "trust-incident:ack",
   "trust-incident:resolve",
 ]);

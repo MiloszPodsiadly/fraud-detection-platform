@@ -1,10 +1,6 @@
 package com.frauddetection.alert.regulated.mutation.outbox;
 
-import com.frauddetection.alert.audit.AuditAction;
-import com.frauddetection.alert.audit.AuditOutcome;
-import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.ResolutionEvidenceReference;
-import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.outbox.OutboxConfirmationResolution;
 import com.frauddetection.alert.outbox.OutboxConfirmationResolutionRequest;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
@@ -30,20 +26,17 @@ public class OutboxConfirmationResolutionMutationHandler {
 
     private final TransactionalOutboxRecordRepository repository;
     private final MongoTemplate mongoTemplate;
-    private final AuditService auditService;
     private final boolean bankModeFailClosed;
     private final boolean dualControlEnabled;
 
     public OutboxConfirmationResolutionMutationHandler(
             TransactionalOutboxRecordRepository repository,
             MongoTemplate mongoTemplate,
-            AuditService auditService,
             @Value("${app.audit.bank-mode.fail-closed:false}") boolean bankModeFailClosed,
             @Value("${app.outbox.confirmation.dual-control.enabled:false}") boolean dualControlEnabled
     ) {
         this.repository = repository;
         this.mongoTemplate = mongoTemplate;
-        this.auditService = auditService;
         this.bankModeFailClosed = bankModeFailClosed;
         this.dualControlEnabled = dualControlEnabled;
     }
@@ -66,7 +59,6 @@ public class OutboxConfirmationResolutionMutationHandler {
             return approveResolution(record, request, actorId);
         }
         record.setResolutionControlMode("SINGLE_CONTROL_OPERATOR_ATTESTED");
-        auditResolution(record, actorId);
         return applyResolution(record, request, actorId);
     }
 
@@ -75,7 +67,6 @@ public class OutboxConfirmationResolutionMutationHandler {
             OutboxConfirmationResolutionRequest request,
             String actorId
     ) {
-        auditResolution(record, actorId);
         Instant now = Instant.now();
         ResolutionEvidenceReference evidence = request.evidenceReference();
         record.setResolutionPending(true);
@@ -102,7 +93,6 @@ public class OutboxConfirmationResolutionMutationHandler {
         if (actorId != null && actorId.equals(record.getResolutionRequestedBy())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "dual-control approval requires a distinct actor");
         }
-        auditResolution(record, actorId);
         record.setResolutionControlMode("DUAL_CONTROL_APPROVED");
         record.setResolutionApprovedBy(actorId);
         record.setResolutionApprovedAt(Instant.now());
@@ -144,18 +134,6 @@ public class OutboxConfirmationResolutionMutationHandler {
         TransactionalOutboxRecordDocument saved = repository.save(record);
         updateAlertProjection(saved, status, request.reason(), actorId, request.evidenceReference());
         return saved;
-    }
-
-    private void auditResolution(TransactionalOutboxRecordDocument record, String actorId) {
-        auditService.audit(
-                AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION,
-                AuditResourceType.DECISION_OUTBOX,
-                record.getEventId(),
-                null,
-                actorId,
-                AuditOutcome.SUCCESS,
-                null
-        );
     }
 
     private void markAlertResolutionPending(

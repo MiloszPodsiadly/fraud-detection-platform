@@ -93,6 +93,7 @@ public class AlertSecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/outbox/recovery/run").hasAuthority(AnalystAuthority.OUTBOX_RECOVER)
                         .requestMatchers(HttpMethod.POST, "/api/v1/outbox/{eventId}/resolve-confirmation").hasAuthority(AnalystAuthority.OUTBOX_RESOLVE)
                         .requestMatchers(HttpMethod.GET, "/api/v1/trust/incidents").hasAuthority(AnalystAuthority.TRUST_INCIDENT_READ)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/trust/incidents/refresh").hasAnyAuthority(AnalystAuthority.TRUST_INCIDENT_REFRESH, AnalystAuthority.TRUST_INCIDENT_RESOLVE)
                         .requestMatchers(HttpMethod.POST, "/api/v1/trust/incidents/{incidentId}/ack").hasAuthority(AnalystAuthority.TRUST_INCIDENT_ACK)
                         .requestMatchers(HttpMethod.POST, "/api/v1/trust/incidents/{incidentId}/resolve").hasAuthority(AnalystAuthority.TRUST_INCIDENT_RESOLVE)
                         .requestMatchers(HttpMethod.GET, "/api/v1/regulated-mutations/by-command/{commandId}").hasAnyAuthority(AnalystAuthority.REGULATED_MUTATION_RECOVER, AnalystAuthority.AUDIT_VERIFY)

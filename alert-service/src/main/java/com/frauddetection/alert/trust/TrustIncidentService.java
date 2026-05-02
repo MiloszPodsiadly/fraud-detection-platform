@@ -5,89 +5,145 @@ import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.audit.ResolutionEvidenceReference;
+import com.frauddetection.alert.regulated.RegulatedMutationCommand;
+import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
+import com.frauddetection.alert.regulated.RegulatedMutationIntent;
 import com.frauddetection.alert.regulated.RegulatedMutationIntentHasher;
+import com.frauddetection.alert.regulated.RegulatedMutationResponseSnapshot;
+import com.frauddetection.alert.regulated.RegulatedMutationState;
+import com.frauddetection.alert.regulated.mutation.trustincident.TrustIncidentAcknowledgeMutationHandler;
+import com.frauddetection.alert.regulated.mutation.trustincident.TrustIncidentResolveMutationHandler;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 @Service
 public class TrustIncidentService {
 
     private final TrustIncidentRepository repository;
     private final TrustIncidentPolicy policy;
+    private final RegulatedMutationCoordinator regulatedMutationCoordinator;
+    private final TrustIncidentAcknowledgeMutationHandler acknowledgeMutationHandler;
+    private final TrustIncidentResolveMutationHandler resolveMutationHandler;
+    private final TrustIncidentMaterializer materializer;
     private final AuditService auditService;
 
-    public TrustIncidentService(TrustIncidentRepository repository, TrustIncidentPolicy policy, AuditService auditService) {
+    public TrustIncidentService(
+            TrustIncidentRepository repository,
+            TrustIncidentPolicy policy,
+            RegulatedMutationCoordinator regulatedMutationCoordinator,
+            TrustIncidentAcknowledgeMutationHandler acknowledgeMutationHandler,
+            TrustIncidentResolveMutationHandler resolveMutationHandler,
+            TrustIncidentMaterializer materializer,
+            AuditService auditService
+    ) {
         this.repository = repository;
         this.policy = policy;
+        this.regulatedMutationCoordinator = regulatedMutationCoordinator;
+        this.acknowledgeMutationHandler = acknowledgeMutationHandler;
+        this.resolveMutationHandler = resolveMutationHandler;
+        this.materializer = materializer;
         this.auditService = auditService;
     }
 
-    public List<TrustIncidentResponse> listOpen(List<TrustSignal> signals) {
-        refreshSignals(signals);
+    public List<TrustIncidentResponse> listOpen() {
         return repository.findTop100ByStatusInOrderByUpdatedAtDesc(policy.openStatuses()).stream()
                 .map(TrustIncidentResponse::from)
                 .toList();
     }
 
-    public TrustIncidentResponse acknowledge(String incidentId, TrustIncidentAcknowledgementRequest request, String actorId) {
-        TrustIncidentDocument incident = load(incidentId);
-        if (!policy.openStatuses().contains(incident.getStatus())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "trust incident is not open");
-        }
-        auditService.audit(
+    public TrustIncidentResponse acknowledge(
+            String incidentId,
+            TrustIncidentAcknowledgementRequest request,
+            String actorId,
+            String idempotencyKey
+    ) {
+        TrustIncidentAcknowledgementRequest normalized = request == null
+                ? new TrustIncidentAcknowledgementRequest(null)
+                : request;
+        String requestHash = RegulatedMutationIntentHasher.hash("incidentId=" + RegulatedMutationIntentHasher.canonicalValue(incidentId)
+                + "|actorId=" + RegulatedMutationIntentHasher.canonicalValue(actorId)
+                + "|reason=" + RegulatedMutationIntentHasher.canonicalValue(normalized.reason()));
+        RegulatedMutationCommand<TrustIncidentDocument, TrustIncidentResponse> command = new RegulatedMutationCommand<>(
+                idempotencyKey,
+                actorId,
+                incidentId,
+                AuditResourceType.TRUST_INCIDENT,
                 AuditAction.ACK_TRUST_INCIDENT,
-                AuditResourceType.TRUST_INCIDENT,
-                incidentId,
                 null,
-                actorId,
-                AuditOutcome.SUCCESS,
-                null
+                requestHash,
+                context -> acknowledgeMutationHandler.acknowledge(incidentId, normalized, actorId),
+                (saved, state) -> TrustIncidentResponse.from(saved),
+                RegulatedMutationResponseSnapshot::fromTrustIncident,
+                RegulatedMutationResponseSnapshot::toTrustIncidentResponse,
+                state -> statusResponse(incidentId, state),
+                intent(incidentId, AuditAction.ACK_TRUST_INCIDENT, actorId, TrustIncidentStatus.ACKNOWLEDGED, normalized.reason())
         );
-        Instant now = Instant.now();
-        incident.setStatus(TrustIncidentStatus.ACKNOWLEDGED);
-        incident.setAcknowledgedBy(actorId);
-        incident.setAcknowledgedAt(now);
-        incident.setUpdatedAt(now);
-        return TrustIncidentResponse.from(repository.save(incident));
+        return regulatedMutationCoordinator.commit(command).response();
     }
 
-    public TrustIncidentResponse resolve(String incidentId, TrustIncidentResolutionRequest request, String actorId) {
-        TrustIncidentDocument incident = load(incidentId);
-        if (!policy.openStatuses().contains(incident.getStatus())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "trust incident is not open");
-        }
+    public TrustIncidentResponse resolve(
+            String incidentId,
+            TrustIncidentResolutionRequest request,
+            String actorId,
+            String idempotencyKey
+    ) {
         ResolutionEvidenceReference.require(request.resolutionEvidence(), "resolution evidence is required");
-        auditService.audit(
-                AuditAction.RESOLVE_TRUST_INCIDENT,
-                AuditResourceType.TRUST_INCIDENT,
+        TrustIncidentStatus targetStatus = request.falsePositive() ? TrustIncidentStatus.FALSE_POSITIVE : TrustIncidentStatus.RESOLVED;
+        String requestHash = RegulatedMutationIntentHasher.hash("incidentId=" + RegulatedMutationIntentHasher.canonicalValue(incidentId)
+                + "|actorId=" + RegulatedMutationIntentHasher.canonicalValue(actorId)
+                + "|targetStatus=" + targetStatus.name()
+                + "|reason=" + RegulatedMutationIntentHasher.canonicalValue(request.reason())
+                + "|evidence=" + RegulatedMutationIntentHasher.canonicalValue(request.resolutionEvidence()));
+        RegulatedMutationCommand<TrustIncidentDocument, TrustIncidentResponse> command = new RegulatedMutationCommand<>(
+                idempotencyKey,
+                actorId,
                 incidentId,
+                AuditResourceType.TRUST_INCIDENT,
+                AuditAction.RESOLVE_TRUST_INCIDENT,
+                null,
+                requestHash,
+                context -> resolveMutationHandler.resolve(incidentId, request, actorId),
+                (saved, state) -> TrustIncidentResponse.from(saved),
+                RegulatedMutationResponseSnapshot::fromTrustIncident,
+                RegulatedMutationResponseSnapshot::toTrustIncidentResponse,
+                state -> statusResponse(incidentId, state),
+                intent(incidentId, AuditAction.RESOLVE_TRUST_INCIDENT, actorId, targetStatus, request.reason())
+        );
+        return regulatedMutationCoordinator.commit(command).response();
+    }
+
+    public TrustIncidentMaterializationResponse refresh(List<TrustSignal> signals, String actorId) {
+        auditService.audit(
+                AuditAction.REFRESH_TRUST_INCIDENTS,
+                AuditResourceType.TRUST_INCIDENT,
+                "trust-incidents",
+                null,
+                actorId,
+                AuditOutcome.ATTEMPTED,
+                null
+        );
+        TrustIncidentMaterializationResponse response = materializer.materialize(signals);
+        auditService.audit(
+                AuditAction.REFRESH_TRUST_INCIDENTS,
+                AuditResourceType.TRUST_INCIDENT,
+                "trust-incidents",
                 null,
                 actorId,
                 AuditOutcome.SUCCESS,
                 null
         );
-        Instant now = Instant.now();
-        incident.setStatus(request.falsePositive() ? TrustIncidentStatus.FALSE_POSITIVE : TrustIncidentStatus.RESOLVED);
-        incident.setResolvedBy(actorId);
-        incident.setResolvedAt(now);
-        incident.setResolutionReason(request.reason());
-        incident.setResolutionEvidence(request.resolutionEvidence());
-        incident.setUpdatedAt(now);
-        return TrustIncidentResponse.from(repository.save(incident));
+        return response;
     }
 
-    public TrustIncidentSummary summary(List<TrustSignal> signals) {
-        refreshSignals(signals);
+    public TrustIncidentSummary summary() {
         long critical = repository.countByStatusInAndSeverity(policy.openStatuses(), TrustIncidentSeverity.CRITICAL);
         long high = repository.countByStatusInAndSeverity(policy.openStatuses(), TrustIncidentSeverity.HIGH);
         long unacknowledgedCritical = repository.countByStatusInAndSeverityAndAcknowledgedAtIsNull(
@@ -118,62 +174,57 @@ public class TrustIncidentService {
         );
     }
 
-    public void refreshSignals(List<TrustSignal> signals) {
-        if (signals == null || signals.isEmpty()) {
-            return;
+    private RegulatedMutationIntent intent(
+            String incidentId,
+            AuditAction action,
+            String actorId,
+            TrustIncidentStatus targetStatus,
+            String reason
+    ) {
+        String status = targetStatus.name();
+        String reasonHash = RegulatedMutationIntentHasher.hash(reason);
+        String intentHash = RegulatedMutationIntentHasher.hash("resourceId=" + RegulatedMutationIntentHasher.canonicalValue(incidentId)
+                + "|action=" + action.name()
+                + "|actorId=" + RegulatedMutationIntentHasher.canonicalValue(actorId)
+                + "|status=" + status
+                + "|reasonHash=" + reasonHash);
+        return new RegulatedMutationIntent(
+                intentHash,
+                incidentId,
+                action.name(),
+                actorId,
+                null,
+                reasonHash,
+                null,
+                status,
+                null,
+                reasonHash,
+                null
+        );
+    }
+
+    private TrustIncidentResponse statusResponse(String incidentId, RegulatedMutationState state) {
+        if (state == RegulatedMutationState.REJECTED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "trust incident mutation rejected before state change");
         }
-        signals.forEach(this::upsertSignal);
-    }
-
-    private void upsertSignal(TrustSignal signal) {
-        String fingerprint = signal.fingerprint() == null || signal.fingerprint().isBlank()
-                ? RegulatedMutationIntentHasher.hash(signal.type() + "|" + signal.source())
-                : RegulatedMutationIntentHasher.hash(signal.fingerprint());
-        Instant now = Instant.now();
-        TrustIncidentDocument incident = repository.findFirstByTypeAndSourceAndFingerprintAndStatusInOrderByUpdatedAtDesc(
-                        signal.type(),
-                        signal.source(),
-                        fingerprint,
-                        policy.openStatuses()
-                )
-                .orElseGet(() -> newIncident(signal, fingerprint, now));
-        incident.setLastSeenAt(now);
-        incident.setOccurrenceCount(Math.max(0L, incident.getOccurrenceCount()) + 1L);
-        incident.setEvidenceRefs(mergeEvidence(incident.getEvidenceRefs(), signal.evidenceRefs()));
-        incident.setUpdatedAt(now);
-        repository.save(incident);
-    }
-
-    private TrustIncidentDocument newIncident(TrustSignal signal, String fingerprint, Instant now) {
-        TrustIncidentDocument document = new TrustIncidentDocument();
-        document.setIncidentId(UUID.randomUUID().toString());
-        document.setType(signal.type());
-        document.setSeverity(signal.severity() == null ? policy.severity(signal.type()) : signal.severity());
-        document.setSource(signal.source());
-        document.setFingerprint(fingerprint);
-        document.setStatus(TrustIncidentStatus.OPEN);
-        document.setFirstSeenAt(now);
-        document.setCreatedAt(now);
-        document.setOccurrenceCount(0L);
-        document.setEvidenceRefs(List.of());
-        return document;
-    }
-
-    private List<String> mergeEvidence(List<String> current, List<String> added) {
-        List<String> merged = new ArrayList<>(current == null ? List.of() : current);
-        policy.boundedEvidenceRefs(added).forEach(ref -> {
-            if (!merged.contains(ref) && merged.size() < 10) {
-                merged.add(ref);
-            }
-        });
-        return List.copyOf(merged);
-    }
-
-    private TrustIncidentDocument load(String incidentId) {
-        if (incidentId == null || incidentId.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "trust incident not found");
-        }
-        return repository.findById(incidentId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "trust incident not found"));
+        return new TrustIncidentResponse(
+                incidentId,
+                null,
+                null,
+                null,
+                null,
+                state.name(),
+                null,
+                null,
+                0L,
+                List.of(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+        );
     }
 }

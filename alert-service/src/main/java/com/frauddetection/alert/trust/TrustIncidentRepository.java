@@ -16,6 +16,8 @@ public interface TrustIncidentRepository extends MongoRepository<TrustIncidentDo
             Collection<TrustIncidentStatus> statuses
     );
 
+    Optional<TrustIncidentDocument> findByActiveDedupeKey(String activeDedupeKey);
+
     List<TrustIncidentDocument> findTop100ByStatusInOrderByUpdatedAtDesc(Collection<TrustIncidentStatus> statuses);
 
     long countByStatusInAndSeverity(Collection<TrustIncidentStatus> statuses, TrustIncidentSeverity severity);

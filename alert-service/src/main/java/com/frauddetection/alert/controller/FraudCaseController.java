@@ -3,6 +3,7 @@ package com.frauddetection.alert.controller;
 import com.frauddetection.alert.api.FraudCaseResponse;
 import com.frauddetection.alert.api.PagedResponse;
 import com.frauddetection.alert.api.UpdateFraudCaseRequest;
+import com.frauddetection.alert.api.UpdateFraudCaseResponse;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.service.FraudCaseManagementService;
 import jakarta.validation.Valid;
@@ -55,11 +56,11 @@ public class FraudCaseController {
     }
 
     @PatchMapping("/{caseId}")
-    public FraudCaseResponse updateCase(
+    public UpdateFraudCaseResponse updateCase(
             @PathVariable String caseId,
             @RequestHeader(name = "X-Idempotency-Key", required = true) String idempotencyKey,
             @Valid @RequestBody UpdateFraudCaseRequest request
     ) {
-        return responseMapper.toResponse(fraudCaseManagementService.updateCase(caseId, request, idempotencyKey));
+        return fraudCaseManagementService.updateCase(caseId, request, idempotencyKey);
     }
 }

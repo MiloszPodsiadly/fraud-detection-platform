@@ -3,6 +3,7 @@ package com.frauddetection.alert.trust;
 import com.frauddetection.alert.audit.ResolutionEvidenceReference;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
@@ -20,6 +21,9 @@ public class TrustIncidentDocument {
     private TrustIncidentSeverity severity;
     private String source;
     private String fingerprint;
+    @Indexed(name = "active_dedupe_key_unique_idx", unique = true, sparse = true)
+    @Field("active_dedupe_key")
+    private String activeDedupeKey;
     private TrustIncidentStatus status;
     @Field("first_seen_at")
     private Instant firstSeenAt;
@@ -33,6 +37,8 @@ public class TrustIncidentDocument {
     private String acknowledgedBy;
     @Field("acknowledged_at")
     private Instant acknowledgedAt;
+    @Field("acknowledgement_reason")
+    private String acknowledgementReason;
     @Field("resolved_by")
     private String resolvedBy;
     @Field("resolved_at")
@@ -56,6 +62,8 @@ public class TrustIncidentDocument {
     public void setSource(String source) { this.source = source; }
     public String getFingerprint() { return fingerprint; }
     public void setFingerprint(String fingerprint) { this.fingerprint = fingerprint; }
+    public String getActiveDedupeKey() { return activeDedupeKey; }
+    public void setActiveDedupeKey(String activeDedupeKey) { this.activeDedupeKey = activeDedupeKey; }
     public TrustIncidentStatus getStatus() { return status; }
     public void setStatus(TrustIncidentStatus status) { this.status = status; }
     public Instant getFirstSeenAt() { return firstSeenAt; }
@@ -70,6 +78,8 @@ public class TrustIncidentDocument {
     public void setAcknowledgedBy(String acknowledgedBy) { this.acknowledgedBy = acknowledgedBy; }
     public Instant getAcknowledgedAt() { return acknowledgedAt; }
     public void setAcknowledgedAt(Instant acknowledgedAt) { this.acknowledgedAt = acknowledgedAt; }
+    public String getAcknowledgementReason() { return acknowledgementReason; }
+    public void setAcknowledgementReason(String acknowledgementReason) { this.acknowledgementReason = acknowledgementReason; }
     public String getResolvedBy() { return resolvedBy; }
     public void setResolvedBy(String resolvedBy) { this.resolvedBy = resolvedBy; }
     public Instant getResolvedAt() { return resolvedAt; }

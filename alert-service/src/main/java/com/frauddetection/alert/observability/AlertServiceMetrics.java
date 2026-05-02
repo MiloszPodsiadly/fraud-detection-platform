@@ -178,6 +178,30 @@ public class AlertServiceMetrics {
         counter("fraud.alert.fraud_case.updates", "outcome", "success").increment();
     }
 
+    public void recordTrustIncidentMaterialized(String type, String severity, String result) {
+        counter(
+                "trust_incident_materialized_total",
+                "type", normalizeTrustIncidentType(type),
+                "severity", normalizeTrustIncidentSeverity(severity),
+                "result", normalizeTrustIncidentMaterializationResult(result)
+        ).increment();
+    }
+
+    public void recordTrustIncidentDeduped(String type, String severity) {
+        counter(
+                "trust_incident_deduped_total",
+                "type", normalizeTrustIncidentType(type),
+                "severity", normalizeTrustIncidentSeverity(severity)
+        ).increment();
+    }
+
+    public void recordTrustIncidentMaterializationFailed(String reason) {
+        counter(
+                "trust_incident_materialization_failed_total",
+                "reason", normalizeTrustIncidentMaterializationFailure(reason)
+        ).increment();
+    }
+
     public void recordAuditEventPublished(AuditAction action, AuditOutcome outcome) {
         counter(
                 "fraud.alert.audit.events",
@@ -567,10 +591,51 @@ public class AlertServiceMetrics {
     }
 
     private String normalizePostCommitOperation(String operation) {
-        if ("SUBMIT_ANALYST_DECISION".equals(operation)) {
+        if ("SUBMIT_ANALYST_DECISION".equals(operation)
+                || "UPDATE_FRAUD_CASE".equals(operation)
+                || "RESOLVE_DECISION_OUTBOX_CONFIRMATION".equals(operation)
+                || "ACK_TRUST_INCIDENT".equals(operation)
+                || "RESOLVE_TRUST_INCIDENT".equals(operation)) {
             return operation;
         }
         return "UNKNOWN";
+    }
+
+    private String normalizeTrustIncidentType(String type) {
+        return switch (type) {
+            case "OUTBOX_TERMINAL_FAILURE",
+                 "OUTBOX_PUBLISH_CONFIRMATION_UNKNOWN",
+                 "OUTBOX_PROJECTION_MISMATCH",
+                 "REGULATED_MUTATION_RECOVERY_REQUIRED",
+                 "REGULATED_MUTATION_COMMITTED_DEGRADED",
+                 "EVIDENCE_CONFIRMATION_FAILED",
+                 "AUDIT_DEGRADATION_UNRESOLVED",
+                 "COVERAGE_UNAVAILABLE",
+                 "EXTERNAL_ANCHOR_GAP",
+                 "TRUST_AUTHORITY_UNAVAILABLE" -> type;
+            default -> "UNKNOWN";
+        };
+    }
+
+    private String normalizeTrustIncidentSeverity(String severity) {
+        return switch (severity) {
+            case "CRITICAL", "HIGH", "MEDIUM", "LOW" -> severity;
+            default -> "MEDIUM";
+        };
+    }
+
+    private String normalizeTrustIncidentMaterializationResult(String result) {
+        return switch (result) {
+            case "CREATED", "UPDATED" -> result;
+            default -> "UPDATED";
+        };
+    }
+
+    private String normalizeTrustIncidentMaterializationFailure(String reason) {
+        return switch (reason) {
+            case "PERSISTENCE_UNAVAILABLE", "AUDIT_UNAVAILABLE" -> reason;
+            default -> "PERSISTENCE_UNAVAILABLE";
+        };
     }
 
     private String normalizeRegulatedMutationRecoveryOutcome(String outcome) {

@@ -10,8 +10,7 @@ public class TrustIncidentPolicy {
 
     private static final Set<TrustIncidentStatus> OPEN_STATUSES = Set.of(
             TrustIncidentStatus.OPEN,
-            TrustIncidentStatus.ACKNOWLEDGED,
-            TrustIncidentStatus.MITIGATING
+            TrustIncidentStatus.ACKNOWLEDGED
     );
 
     public Set<TrustIncidentStatus> openStatuses() {
