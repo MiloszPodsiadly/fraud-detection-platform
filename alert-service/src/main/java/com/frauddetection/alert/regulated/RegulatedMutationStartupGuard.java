@@ -2,6 +2,8 @@ package com.frauddetection.alert.regulated;
 
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.trust.TrustIncidentRefreshMode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
@@ -15,6 +17,8 @@ import java.util.Locale;
 
 @Component
 public class RegulatedMutationStartupGuard implements ApplicationRunner {
+
+    private static final Logger log = LoggerFactory.getLogger(RegulatedMutationStartupGuard.class);
 
     private final RegulatedMutationTransactionRunner transactionRunner;
     private final PlatformTransactionManager transactionManager;
@@ -98,5 +102,6 @@ public class RegulatedMutationStartupGuard implements ApplicationRunner {
         if (maxAttempts <= 0) {
             throw new IllegalStateException("FDP-26 prod-like/bank mode requires positive outbox max attempts.");
         }
+        log.info("FDP-26 bank-grade mode active: transaction-mode=REQUIRED, trust-incidents.refresh-mode=ATOMIC, outbox dual-control enabled.");
     }
 }

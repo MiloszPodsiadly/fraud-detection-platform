@@ -27,7 +27,11 @@ public class ReadAccessResultCountExtractor {
         }
         return switch (category) {
             case ALERT_DETAIL, FRAUD_CASE_DETAIL, GOVERNANCE_ADVISORY_DETAIL -> 1;
-            case SCORED_TRANSACTION_LIST, GOVERNANCE_ADVISORY_LIST, GOVERNANCE_ADVISORY_AUDIT_HISTORY, GOVERNANCE_ADVISORY_ANALYTICS -> 0;
+            case SCORED_TRANSACTION_LIST,
+                    GOVERNANCE_ADVISORY_LIST,
+                    GOVERNANCE_ADVISORY_AUDIT_HISTORY,
+                    GOVERNANCE_ADVISORY_ANALYTICS,
+                    PREVIEW_TRUST_INCIDENT_SIGNALS -> 0;
         };
     }
 
