@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: Alert Service API
-  version: FDP-26A
-  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, external anchor verification, bounded evidence export, derived audit trust attestation, public trust key export, governance advisory lifecycle projection, and human-review audit. FDP-20 extends tamper evidence outside the primary database boundary. FDP-22 adds a pluggable object-store external anchor sink boundary, verified external anchor references, and explicit external_immutability_level=NONE|CONFIGURED|ENFORCED; no WORM or full immutability claim is valid unless the adapter verifies infrastructure controls and reports ENFORCED. FDP-23 adds a separate local-first audit trust authority for Ed25519 external anchor hash signatures and public verification key export; the alert-service does not hold the trust authority private key. FDP-24 adds fail-closed posture reporting, durable analyst-decision outbox/idempotency semantics, and publication-status source-of-truth semantics. FDP-25 adds a recoverable regulated mutation state machine for submit-decision writes with canonical intent, idempotent audit phase keys, bounded operational recovery, and rate-limited audited inspection endpoints. FDP-26A adds a REQUIRED local Mongo transaction boundary option for submit-decision local commits plus a separate authoritative transactional outbox record, bounded outbox recovery APIs, and asynchronous evidence confirmation. Audit integrity, trust authority signatures, trust attestation, and FDP-26A transaction mode do not imply certified WORM archive storage, legal notarization, SIEM integration, unbounded export, KMS/HSM signing unless explicitly integrated, distributed ACID across MongoDB/Kafka/external witnesses, exactly-once broker delivery, pre-commit/finalize commit, or final compliance archive.
+  version: FDP-26
+  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, external anchor verification, bounded evidence export, derived audit trust attestation, public trust key export, governance advisory lifecycle projection, and human-review audit. FDP-20 extends tamper evidence outside the primary database boundary. FDP-22 adds a pluggable object-store external anchor sink boundary, verified external anchor references, and explicit external_immutability_level=NONE|CONFIGURED|ENFORCED; no WORM or full immutability claim is valid unless the adapter verifies infrastructure controls and reports ENFORCED. FDP-23 adds a separate local-first audit trust authority for Ed25519 external anchor hash signatures and public verification key export; the alert-service does not hold the trust authority private key. FDP-24 adds fail-closed posture reporting, durable analyst-decision outbox/idempotency semantics, and publication-status source-of-truth semantics. FDP-25 adds a recoverable regulated mutation state machine for submit-decision writes with canonical intent, idempotent audit phase keys, bounded operational recovery, and rate-limited audited inspection endpoints. FDP-26 adds a REQUIRED local Mongo transaction boundary option for supported regulated mutations, regulated fraud-case update, a separate authoritative transactional outbox record, bounded outbox recovery APIs, asynchronous evidence confirmation, bank-mode dual-control for manual outbox confirmation, and a minimal trust incident control plane. Audit integrity, trust authority signatures, trust attestation, and FDP-26 transaction mode do not imply certified WORM archive storage, legal notarization, SIEM integration, unbounded export, KMS/HSM signing unless explicitly integrated, distributed ACID across MongoDB/Kafka/external witnesses, exactly-once broker delivery, pre-commit/finalize commit, or final compliance archive.
 servers:
   - url: http://localhost:8085
 paths:
@@ -349,7 +349,7 @@ paths:
   /system/trust-level:
     get:
       summary: Get deployment trust posture
-      description: Requires audit:verify. Returns bounded live deployment posture for external audit anchoring and FDP-26A local transaction/outbox modes. BEST_EFFORT and FDP24_DEGRADED must not be marketed as FDP-24 healthy fail-closed mode. SIGNED_EXTERNAL means trust-authority signing is enabled and required; it is not WORM, notarization, SIEM, mTLS, or legal trust. FDP24_HEALTHY requires zero unresolved degradations, zero pending degradation resolutions, zero unknown outbox confirmations, zero publish-attempted ambiguity, zero projection mismatches, zero pending outbox resolutions, zero terminal outbox failures, and no regulated mutation recovery/evidence degradation. transaction_mode and transaction_capability_status describe the local Mongo transaction posture only; they are not distributed ACID or exactly-once delivery.
+      description: Requires audit:verify. Returns bounded live deployment posture for external audit anchoring and FDP-26 local transaction/outbox/trust-incident modes. BEST_EFFORT and FDP24_DEGRADED must not be marketed as FDP-24 healthy fail-closed mode. SIGNED_EXTERNAL means trust-authority signing is enabled and required; it is not WORM, notarization, SIEM, mTLS, or legal trust. FDP24_HEALTHY requires zero unresolved degradations, zero pending degradation resolutions, zero unknown outbox confirmations, zero publish-attempted ambiguity, zero projection mismatches, zero pending outbox resolutions, zero terminal outbox failures, no regulated mutation recovery/evidence degradation, and no open/unacknowledged critical trust incidents. transaction_mode and transaction_capability_status describe the local Mongo transaction posture only; they are not distributed ACID or exactly-once delivery.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -364,6 +364,101 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+  /api/v1/trust/incidents:
+    get:
+      summary: List open trust incidents
+      description: Requires trust-incident:read. Returns a bounded operational list of open trust incidents generated from low-cardinality trust signals. No export, delete, update, bulk action, workflow automation, or raw payload access is provided.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      responses:
+        "200":
+          description: Open trust incidents returned.
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 100
+                items:
+                  $ref: "#/components/schemas/TrustIncidentResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/trust/incidents/{incidentId}/ack:
+    post:
+      summary: Acknowledge trust incident
+      description: Requires trust-incident:ack. Acknowledgement is audited fail-closed; if audit persistence fails the incident state is not changed.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: incidentId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TrustIncidentAcknowledgementRequest"
+      responses:
+        "200":
+          description: Trust incident acknowledged.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrustIncidentResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/trust/incidents/{incidentId}/resolve:
+    post:
+      summary: Resolve trust incident
+      description: Requires trust-incident:resolve. Resolution requires a reason and structured evidence and is audited fail-closed. It may mark the incident RESOLVED or FALSE_POSITIVE. No delete, auto-resolve, or workflow automation is provided.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: incidentId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TrustIncidentResolutionRequest"
+      responses:
+        "200":
+          description: Trust incident resolved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrustIncidentResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
   /api/v1/audit/degradations:
     get:
       summary: List unresolved audit degradation events
@@ -480,7 +575,7 @@ paths:
   /api/v1/outbox/recovery/backlog:
     get:
       summary: Inspect transactional outbox recovery backlog
-      description: Requires outbox:inspect. Returns bounded counts for FDP-26A transactional outbox records. Transactional outbox records are authoritative; alert embedded outbox fields are projection/cache. This endpoint is operational metadata only and never returns event payloads, transaction data, customer/account/card identifiers, decision notes, response bodies, raw exception details, or unbounded exports.
+      description: Requires outbox:inspect. Returns bounded counts for FDP-26 transactional outbox records. Transactional outbox records are authoritative; alert embedded outbox fields are projection/cache. This endpoint is operational metadata only and never returns event payloads, transaction data, customer/account/card identifiers, decision notes, response bodies, raw exception details, or unbounded exports.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -734,7 +829,7 @@ paths:
   /api/v1/alerts/{alertId}/decision:
     post:
       summary: Submit analyst decision
-      description: Records an analyst decision through the regulated mutation coordinator. X-Idempotency-Key is required. The coordinator stores a regulated mutation command with canonical intent fields, atomically claims execution with a bounded lease, writes ATTEMPTED audit before business mutation, and when app.regulated-mutations.transaction-mode=REQUIRED wraps the local commit in a Mongo transaction covering command state, alert business write, transactional_outbox_records insert, response snapshot, and local commit marker. Phase audit events use deterministic request ids regulated_command_id:ATTEMPTED, regulated_command_id:SUCCESS, and regulated_command_id:FAILED so recovery can bind existing evidence without duplicate success audit. The same idempotency key and request body replay the stored response snapshot; the same key with a different body returns 409; a missing key returns 400. Kafka publication is asynchronous from authoritative transactional_outbox_records and at-least-once unless consumers dedupe by event id. FraudDecisionEvent carries delivery=AT_LEAST_ONCE and dedupeKey=eventId. operation_status is mandatory: REJECTED_BEFORE_MUTATION maps to HTTP 503 with no command response body; IN_PROGRESS, RECOVERY_REQUIRED, and COMMIT_UNKNOWN map to HTTP 202; COMMITTED_EVIDENCE_PENDING means local SUCCESS audit was recorded and external/outbox evidence promotion remains pending; COMMITTED_EVIDENCE_CONFIRMED means local commit marker, success audit, authoritative PUBLISHED outbox evidence, and any configured external/signature evidence are present; COMMITTED_EVIDENCE_INCOMPLETE means the business decision and outbox committed but local success audit/evidence completion degraded. FDP-26A is a local Mongo ACID boundary plus transactional outbox foundation; it is not distributed ACID across MongoDB, external witnesses, trust-authority signing, and Kafka, and it does not provide exactly-once broker delivery, pre-commit/finalize evidence-gated commit, WORM storage, legal notarization, SIEM integration, or certified archive evidence. SUCCESS audit and external evidence remain outside the local Mongo transaction unless a future phase changes the commit model.
+      description: Records an analyst decision through the regulated mutation coordinator. X-Idempotency-Key is required. The coordinator stores a regulated mutation command with canonical intent fields, atomically claims execution with a bounded lease, writes ATTEMPTED audit before business mutation, and when app.regulated-mutations.transaction-mode=REQUIRED wraps the local commit in a Mongo transaction covering command state, alert business write, transactional_outbox_records insert, response snapshot, and local commit marker. Phase audit events use deterministic request ids regulated_command_id:ATTEMPTED, regulated_command_id:SUCCESS, and regulated_command_id:FAILED so recovery can bind existing evidence without duplicate success audit. The same idempotency key and request body replay the stored response snapshot; the same key with a different body returns 409; a missing key returns 400. Kafka publication is asynchronous from authoritative transactional_outbox_records and at-least-once unless consumers dedupe by event id. FraudDecisionEvent carries delivery=AT_LEAST_ONCE and dedupeKey=eventId. operation_status is mandatory: REJECTED_BEFORE_MUTATION maps to HTTP 503 with no command response body; IN_PROGRESS, RECOVERY_REQUIRED, and COMMIT_UNKNOWN map to HTTP 202; COMMITTED_EVIDENCE_PENDING means local SUCCESS audit was recorded and external/outbox evidence promotion remains pending; COMMITTED_EVIDENCE_CONFIRMED means local commit marker, success audit, authoritative PUBLISHED outbox evidence, and any configured external/signature evidence are present; COMMITTED_EVIDENCE_INCOMPLETE means the business decision and outbox committed but local success audit/evidence completion degraded. FDP-26 is a local Mongo ACID boundary plus transactional outbox foundation; it is not distributed ACID across MongoDB, external witnesses, trust-authority signing, and Kafka, and it does not provide exactly-once broker delivery, pre-commit/finalize evidence-gated commit, WORM storage, legal notarization, SIEM integration, or certified archive evidence. SUCCESS audit and external evidence remain outside the local Mongo transaction unless a future phase changes the commit model.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -820,6 +915,50 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+    patch:
+      summary: Update fraud case through regulated mutation coordinator
+      description: Requires fraud-case:update and X-Idempotency-Key. Stores a regulated mutation command with canonical bounded intent fields for case id, actor, UPDATE_FRAUD_CASE, status, assignee hash, notes hash, tags hash, and payload hash. Matching idempotency replay returns the stored snapshot; conflicting key reuse returns 409. No raw fraud-case payloads, customer identifiers, or notes bodies are persisted in command intent.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateFraudCaseRequest"
+      responses:
+        "200":
+          description: Fraud case update accepted or replayed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericObject"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
   /api/v1/transactions/scored:
     get:
       summary: List scored transaction projections
@@ -1040,7 +1179,7 @@ components:
     SystemTrustLevelResponse:
       type: object
       additionalProperties: false
-      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength, coverage_status, witness_status, signature_policy, required_publication_failures, local_status_unverified, missing_ranges, post_commit_audit_degraded, unresolved_degradation_count, pending_degradation_resolution_count, post_commit_audit_degraded_resolved, outbox_failed_terminal_count, outbox_pending_count, outbox_processing_count, outbox_publish_attempted_count, outbox_confirmation_unknown_count, outbox_projection_mismatch_count, terminal_outbox_failure_count, outbox_publish_confirmation_unknown_count, unknown_outbox_confirmation_count, pending_outbox_resolution_count, outbox_oldest_pending_age_seconds, outbox_oldest_ambiguous_age_seconds, regulated_mutation_recovery_required_count, stale_processing_lease_count, committed_degraded_count, evidence_confirmation_pending_count, evidence_confirmation_failed_count, repeated_recovery_failure_count, oldest_recovery_required_age_seconds, transaction_mode, transaction_capability_status, outbox_delivery_mode, evidence_confirmation_mode]
+      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength, coverage_status, witness_status, signature_policy, required_publication_failures, local_status_unverified, missing_ranges, post_commit_audit_degraded, unresolved_degradation_count, pending_degradation_resolution_count, post_commit_audit_degraded_resolved, outbox_failed_terminal_count, outbox_pending_count, outbox_processing_count, outbox_publish_attempted_count, outbox_confirmation_unknown_count, outbox_projection_mismatch_count, terminal_outbox_failure_count, outbox_publish_confirmation_unknown_count, unknown_outbox_confirmation_count, pending_outbox_resolution_count, outbox_oldest_pending_age_seconds, outbox_oldest_ambiguous_age_seconds, regulated_mutation_recovery_required_count, stale_processing_lease_count, committed_degraded_count, evidence_confirmation_pending_count, evidence_confirmation_failed_count, repeated_recovery_failure_count, oldest_recovery_required_age_seconds, transaction_mode, transaction_capability_status, outbox_delivery_mode, evidence_confirmation_mode, open_critical_incident_count, open_high_incident_count, unacknowledged_critical_incident_count, oldest_open_incident_age_seconds, top_incident_types, incident_health_status]
       properties:
         guarantee_level:
           type: string
@@ -1188,7 +1327,7 @@ components:
         transaction_capability_status:
           type: string
           enum: [LOCAL_MONGO_TRANSACTION_REQUIRED, NON_TRANSACTIONAL_RECOVERABLE_SAGA]
-          description: Interprets transaction_mode for FDP-26A. OFF is a recoverable saga posture, not a regulated local ACID commit boundary.
+          description: Interprets transaction_mode for FDP-26. OFF is a recoverable saga posture, not a regulated local ACID commit boundary.
         outbox_delivery_mode:
           type: string
           enum: [TRANSACTIONAL_OUTBOX_AT_LEAST_ONCE, DISABLED]
@@ -1196,6 +1335,109 @@ components:
         evidence_confirmation_mode:
           type: string
           enum: [ENABLED, DISABLED]
+        open_critical_incident_count:
+          type: integer
+          format: int64
+          minimum: 0
+        open_high_incident_count:
+          type: integer
+          format: int64
+          minimum: 0
+        unacknowledged_critical_incident_count:
+          type: integer
+          format: int64
+          minimum: 0
+        oldest_open_incident_age_seconds:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        top_incident_types:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+        incident_health_status:
+          type: string
+          enum: [HEALTHY, DEGRADED, CRITICAL]
+    TrustIncidentAcknowledgementRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          nullable: true
+          maxLength: 300
+    TrustIncidentResolutionRequest:
+      type: object
+      additionalProperties: false
+      required: [reason, resolution_evidence]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+        resolution_evidence:
+          $ref: "#/components/schemas/ResolutionEvidenceReference"
+        false_positive:
+          type: boolean
+          default: false
+    TrustIncidentResponse:
+      type: object
+      additionalProperties: false
+      required: [incident_id, type, severity, source, fingerprint, status, first_seen_at, last_seen_at, occurrence_count, evidence_refs]
+      properties:
+        incident_id:
+          type: string
+        type:
+          type: string
+          enum: [OUTBOX_TERMINAL_FAILURE, OUTBOX_PUBLISH_CONFIRMATION_UNKNOWN, OUTBOX_PROJECTION_MISMATCH, REGULATED_MUTATION_RECOVERY_REQUIRED, REGULATED_MUTATION_COMMITTED_DEGRADED, EVIDENCE_CONFIRMATION_FAILED, AUDIT_DEGRADATION_UNRESOLVED, EXTERNAL_ANCHOR_GAP, COVERAGE_UNAVAILABLE, TRUST_AUTHORITY_UNAVAILABLE]
+        severity:
+          type: string
+          enum: [CRITICAL, HIGH, MEDIUM]
+        source:
+          type: string
+        fingerprint:
+          type: string
+          description: Bounded deterministic fingerprint, not raw payload data.
+        status:
+          type: string
+          enum: [OPEN, ACKNOWLEDGED, MITIGATING, RESOLVED, FALSE_POSITIVE]
+        first_seen_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+        occurrence_count:
+          type: integer
+          format: int64
+          minimum: 0
+        evidence_refs:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+        acknowledged_by:
+          type: string
+          nullable: true
+        acknowledged_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolved_by:
+          type: string
+          nullable: true
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolution_reason:
+          type: string
+          nullable: true
+        resolution_evidence:
+          nullable: true
+          $ref: "#/components/schemas/ResolutionEvidenceReference"
     RegulatedMutationRecoveryRunResponse:
       type: object
       additionalProperties: false
@@ -1592,7 +1834,7 @@ components:
     OutboxRecordResponse:
       type: object
       additionalProperties: false
-      required: [event_id, dedupe_key, mutation_command_id, resource_type, resource_id, event_type, payload_hash, status, attempts, last_error, published_at, confirmation_unknown_at, updated_at]
+      required: [event_id, dedupe_key, mutation_command_id, resource_type, resource_id, event_type, payload_hash, status, attempts, last_error, published_at, confirmation_unknown_at, updated_at, resolution_pending, resolution_control_mode, resolution_requested_by, resolution_requested_at, resolution_approved_by, resolution_approved_at]
       properties:
         event_id:
           type: string
@@ -1633,6 +1875,50 @@ components:
           type: string
           format: date-time
           nullable: true
+        resolution_pending:
+          type: boolean
+        resolution_control_mode:
+          type: string
+          nullable: true
+          enum: [SINGLE_CONTROL_OPERATOR_ATTESTED, DUAL_CONTROL_REQUESTED, DUAL_CONTROL_APPROVED]
+          description: Outside bank mode this is single-control operator attestation. In bank mode request and approval require distinct authenticated operators.
+        resolution_requested_by:
+          type: string
+          nullable: true
+        resolution_requested_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolution_approved_by:
+          type: string
+          nullable: true
+        resolution_approved_at:
+          type: string
+          format: date-time
+          nullable: true
+    UpdateFraudCaseRequest:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [OPEN, IN_REVIEW, CONFIRMED_FRAUD, FALSE_POSITIVE, CLOSED]
+        analystId:
+          type: string
+          nullable: true
+          maxLength: 120
+          description: Optional frontend-provided hint only; backend principal remains authoritative.
+        decisionReason:
+          type: string
+          nullable: true
+          maxLength: 1000
+        tags:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            maxLength: 80
     SubmitAnalystDecisionRequest:
       type: object
       additionalProperties: false
