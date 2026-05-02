@@ -2,6 +2,8 @@ package com.frauddetection.alert.service;
 
 import com.frauddetection.alert.messaging.FraudDecisionEventPublisher;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
+import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.common.events.contract.FraudDecisionEvent;
@@ -37,19 +39,22 @@ class FraudDecisionOutboxPublisherTest {
         MongoTemplate mongoTemplate = mock(MongoTemplate.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
         FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(repository, publisher, mongoTemplate, metrics, Duration.ofMinutes(1), 5);
-        AlertDocument document = pendingDocument();
-        document.setDecisionOutboxStatus(DecisionOutboxStatus.PROCESSING);
-        document.setDecisionOutboxAttempts(1);
-        when(mongoTemplate.findAndModify(any(Query.class), any(Update.class), any(FindAndModifyOptions.class), eq(AlertDocument.class)))
+        TransactionalOutboxRecordDocument document = pendingOutboxRecord();
+        document.setStatus(TransactionalOutboxStatus.PROCESSING);
+        document.setAttempts(1);
+        when(mongoTemplate.findAndModify(any(Query.class), any(Update.class), any(FindAndModifyOptions.class), eq(TransactionalOutboxRecordDocument.class)))
                 .thenReturn(document)
                 .thenReturn(null);
+        when(mongoTemplate.updateFirst(any(Query.class), any(Update.class), eq(TransactionalOutboxRecordDocument.class)))
+                .thenReturn(UpdateResult.acknowledged(1, 1L, null));
         when(mongoTemplate.updateFirst(any(Query.class), any(Update.class), eq(AlertDocument.class)))
                 .thenReturn(UpdateResult.acknowledged(1, 1L, null));
 
         int published = outboxPublisher.publishPending(100);
 
         assertThat(published).isEqualTo(1);
-        verify(publisher).publish(document.getDecisionOutboxEvent());
+        verify(publisher).publish(document.getPayload());
+        verify(mongoTemplate).updateFirst(any(Query.class), any(Update.class), eq(TransactionalOutboxRecordDocument.class));
         verify(mongoTemplate).updateFirst(any(Query.class), any(Update.class), eq(AlertDocument.class));
     }
 
@@ -60,12 +65,14 @@ class FraudDecisionOutboxPublisherTest {
         MongoTemplate mongoTemplate = mock(MongoTemplate.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
         FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(repository, publisher, mongoTemplate, metrics, Duration.ofMinutes(1), 5);
-        AlertDocument document = pendingDocument();
-        document.setDecisionOutboxStatus(DecisionOutboxStatus.PROCESSING);
-        document.setDecisionOutboxAttempts(1);
-        when(mongoTemplate.findAndModify(any(Query.class), any(Update.class), any(FindAndModifyOptions.class), eq(AlertDocument.class)))
+        TransactionalOutboxRecordDocument document = pendingOutboxRecord();
+        document.setStatus(TransactionalOutboxStatus.PROCESSING);
+        document.setAttempts(1);
+        when(mongoTemplate.findAndModify(any(Query.class), any(Update.class), any(FindAndModifyOptions.class), eq(TransactionalOutboxRecordDocument.class)))
                 .thenReturn(document)
                 .thenReturn(null);
+        when(mongoTemplate.updateFirst(any(Query.class), any(Update.class), eq(TransactionalOutboxRecordDocument.class)))
+                .thenReturn(UpdateResult.acknowledged(1, 1L, null));
         when(mongoTemplate.updateFirst(any(Query.class), any(Update.class), eq(AlertDocument.class)))
                 .thenReturn(UpdateResult.acknowledged(1, 1L, null));
         doThrow(new IllegalStateException("kafka down")).when(publisher).publish(any(FraudDecisionEvent.class));
@@ -73,7 +80,8 @@ class FraudDecisionOutboxPublisherTest {
         int published = outboxPublisher.publishPending(100);
 
         assertThat(published).isZero();
-        assertThat(document.getDecisionOutboxAttempts()).isEqualTo(1);
+        assertThat(document.getAttempts()).isEqualTo(1);
+        verify(mongoTemplate).updateFirst(any(Query.class), any(Update.class), eq(TransactionalOutboxRecordDocument.class));
         verify(mongoTemplate).updateFirst(any(Query.class), any(Update.class), eq(AlertDocument.class));
     }
 
@@ -84,31 +92,42 @@ class FraudDecisionOutboxPublisherTest {
         MongoTemplate mongoTemplate = mock(MongoTemplate.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
         FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(repository, publisher, mongoTemplate, metrics, Duration.ofMinutes(1), 5);
-        AlertDocument document = pendingDocument();
-        document.setDecisionOutboxStatus(DecisionOutboxStatus.PROCESSING);
-        document.setDecisionOutboxAttempts(1);
-        when(mongoTemplate.findAndModify(any(Query.class), any(Update.class), any(FindAndModifyOptions.class), eq(AlertDocument.class)))
+        TransactionalOutboxRecordDocument document = pendingOutboxRecord();
+        document.setStatus(TransactionalOutboxStatus.PROCESSING);
+        document.setAttempts(1);
+        when(mongoTemplate.findAndModify(any(Query.class), any(Update.class), any(FindAndModifyOptions.class), eq(TransactionalOutboxRecordDocument.class)))
                 .thenReturn(document)
                 .thenReturn(null);
+        when(mongoTemplate.updateFirst(any(Query.class), any(Update.class), eq(TransactionalOutboxRecordDocument.class)))
+                .thenReturn(UpdateResult.acknowledged(0, 0L, null))
+                .thenReturn(UpdateResult.acknowledged(1, 1L, null));
         when(mongoTemplate.updateFirst(any(Query.class), any(Update.class), eq(AlertDocument.class)))
-                .thenReturn(UpdateResult.acknowledged(0, 0L, null));
+                .thenReturn(UpdateResult.acknowledged(1, 1L, null));
 
         int published = outboxPublisher.publishPending(100);
 
         assertThat(published).isZero();
-        verify(publisher).publish(document.getDecisionOutboxEvent());
+        verify(publisher).publish(document.getPayload());
         verify(metrics).recordDecisionOutboxPublishConfirmationFailed();
         org.mockito.ArgumentCaptor<Update> updateCaptor = org.mockito.ArgumentCaptor.forClass(Update.class);
-        verify(mongoTemplate, times(2)).updateFirst(any(Query.class), updateCaptor.capture(), eq(AlertDocument.class));
-        assertThat(updateCaptor.getAllValues().get(1).getUpdateObject().toJson())
-                .contains(DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
+        verify(mongoTemplate, times(2)).updateFirst(any(Query.class), updateCaptor.capture(), eq(TransactionalOutboxRecordDocument.class));
+        org.bson.Document setDocument = (org.bson.Document) updateCaptor.getAllValues().get(1).getUpdateObject().get("$set");
+        assertThat(setDocument.get("status")).isEqualTo(TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
     }
 
-    private AlertDocument pendingDocument() {
-        AlertDocument document = new AlertDocument();
-        document.setAlertId("alert-1");
-        document.setDecisionOutboxStatus(DecisionOutboxStatus.PENDING);
-        document.setDecisionOutboxEvent(new FraudDecisionEvent(
+    private TransactionalOutboxRecordDocument pendingOutboxRecord() {
+        TransactionalOutboxRecordDocument document = new TransactionalOutboxRecordDocument();
+        document.setEventId("event-1");
+        document.setDedupeKey("event-1");
+        document.setMutationCommandId("command-1");
+        document.setResourceType("ALERT");
+        document.setResourceId("alert-1");
+        document.setEventType("FRAUD_DECISION");
+        document.setPayloadHash("payload-hash");
+        document.setStatus(TransactionalOutboxStatus.PENDING);
+        document.setCreatedAt(Instant.parse("2026-04-27T10:00:00Z"));
+        document.setUpdatedAt(Instant.parse("2026-04-27T10:00:00Z"));
+        document.setPayload(new FraudDecisionEvent(
                 "event-1",
                 "decision-1",
                 "alert-1",

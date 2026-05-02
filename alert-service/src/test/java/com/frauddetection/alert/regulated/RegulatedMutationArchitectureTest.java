@@ -112,4 +112,39 @@ class RegulatedMutationArchitectureTest {
         assertThat(source).doesNotContain("auditService.audit");
         assertThat(source).doesNotContain("AuditMutationRecorder");
     }
+
+    @Test
+    void requestPathMustNotPublishBrokerEventsDirectly() throws Exception {
+        String serviceSource = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/service/SubmitDecisionRegulatedMutationService.java"
+        ));
+        String coordinatorSource = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/MongoRegulatedMutationCoordinator.java"
+        ));
+        String handlerSource = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/mutation/submitdecision/SubmitDecisionMutationHandler.java"
+        ));
+
+        assertThat(serviceSource).doesNotContain("FraudDecisionEventPublisher");
+        assertThat(coordinatorSource).doesNotContain("FraudDecisionEventPublisher");
+        assertThat(handlerSource).doesNotContain("FraudDecisionEventPublisher");
+        assertThat(serviceSource).doesNotContain(".publish(");
+        assertThat(coordinatorSource).doesNotContain(".publish(");
+        assertThat(handlerSource).doesNotContain(".publish(");
+    }
+
+    @Test
+    void transactionalOutboxPublisherIsTheOnlyBrokerPublishingBoundary() throws Exception {
+        String scheduledWrapper = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/service/FraudDecisionOutboxPublisher.java"
+        ));
+        String coordinator = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/outbox/OutboxPublisherCoordinator.java"
+        ));
+
+        assertThat(scheduledWrapper).contains("OutboxPublisherCoordinator");
+        assertThat(scheduledWrapper).doesNotContain("publisher.publish");
+        assertThat(coordinator).contains("FraudDecisionEventPublisher");
+        assertThat(coordinator).contains("publisher.publish(record.getPayload())");
+    }
 }
