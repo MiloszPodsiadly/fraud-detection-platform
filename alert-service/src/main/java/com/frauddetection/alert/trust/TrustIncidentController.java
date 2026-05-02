@@ -29,9 +29,17 @@ public class TrustIncidentController {
         return service.listOpen();
     }
 
+    @GetMapping("/signals/preview")
+    public TrustSignalPreviewResponse preview() {
+        return TrustSignalPreviewResponse.from(collector.collect());
+    }
+
     @PostMapping("/refresh")
-    public TrustIncidentMaterializationResponse refresh(Authentication authentication) {
-        return service.refresh(collector.collect(), actor(authentication));
+    public TrustIncidentMaterializationResponse refresh(
+            @RequestHeader(name = "X-Idempotency-Key", required = true) String idempotencyKey,
+            Authentication authentication
+    ) {
+        return service.refresh(collector.collect(), actor(authentication), idempotencyKey);
     }
 
     @PostMapping("/{incidentId}/ack")

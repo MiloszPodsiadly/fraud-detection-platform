@@ -5,6 +5,7 @@ import com.frauddetection.alert.trust.TrustIncidentDocument;
 import com.frauddetection.alert.trust.TrustIncidentPolicy;
 import com.frauddetection.alert.trust.TrustIncidentRepository;
 import com.frauddetection.alert.trust.TrustIncidentStatus;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
@@ -16,10 +17,16 @@ public class TrustIncidentAcknowledgeMutationHandler {
 
     private final TrustIncidentRepository repository;
     private final TrustIncidentPolicy policy;
+    private final boolean bankModeFailClosed;
 
-    public TrustIncidentAcknowledgeMutationHandler(TrustIncidentRepository repository, TrustIncidentPolicy policy) {
+    public TrustIncidentAcknowledgeMutationHandler(
+            TrustIncidentRepository repository,
+            TrustIncidentPolicy policy,
+            @Value("${app.audit.bank-mode.fail-closed:false}") boolean bankModeFailClosed
+    ) {
         this.repository = repository;
         this.policy = policy;
+        this.bankModeFailClosed = bankModeFailClosed;
     }
 
     public TrustIncidentDocument acknowledge(
@@ -27,6 +34,9 @@ public class TrustIncidentAcknowledgeMutationHandler {
             TrustIncidentAcknowledgementRequest request,
             String actorId
     ) {
+        if (bankModeFailClosed && (request == null || request.reason() == null || request.reason().isBlank())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "acknowledgement reason is required in bank mode");
+        }
         TrustIncidentDocument incident = loadOpen(incidentId);
         TrustIncidentStatus previousStatus = incident.getStatus();
         String previousAcknowledgedBy = incident.getAcknowledgedBy();

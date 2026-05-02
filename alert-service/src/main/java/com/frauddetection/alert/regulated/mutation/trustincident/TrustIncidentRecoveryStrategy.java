@@ -28,11 +28,16 @@ public class TrustIncidentRecoveryStrategy implements RegulatedMutationRecoveryS
     @Override
     public boolean supports(AuditAction action, AuditResourceType resourceType) {
         return resourceType == AuditResourceType.TRUST_INCIDENT
-                && (action == AuditAction.ACK_TRUST_INCIDENT || action == AuditAction.RESOLVE_TRUST_INCIDENT);
+                && (action == AuditAction.ACK_TRUST_INCIDENT
+                || action == AuditAction.RESOLVE_TRUST_INCIDENT
+                || action == AuditAction.REFRESH_TRUST_INCIDENTS);
     }
 
     @Override
     public Optional<RegulatedMutationResponseSnapshot> reconstructSnapshot(RegulatedMutationCommandDocument command) {
+        if (AuditAction.REFRESH_TRUST_INCIDENTS.name().equals(command.getAction())) {
+            return Optional.ofNullable(command.getResponseSnapshot());
+        }
         return repository.findById(command.getResourceId())
                 .filter(document -> validateDocument(command, document).valid())
                 .map(document -> RegulatedMutationResponseSnapshot.fromTrustIncident(com.frauddetection.alert.trust.TrustIncidentResponse.from(document)));
@@ -40,6 +45,11 @@ public class TrustIncidentRecoveryStrategy implements RegulatedMutationRecoveryS
 
     @Override
     public RecoveryValidationResult validateBusinessState(RegulatedMutationCommandDocument command) {
+        if (AuditAction.REFRESH_TRUST_INCIDENTS.name().equals(command.getAction())) {
+            return command.getResponseSnapshot() == null
+                    ? RecoveryValidationResult.recoveryRequired(BUSINESS_STATE_NOT_RECONSTRUCTABLE)
+                    : RecoveryValidationResult.accepted();
+        }
         return repository.findById(command.getResourceId())
                 .map(document -> validateDocument(command, document))
                 .orElseGet(() -> RecoveryValidationResult.recoveryRequired(BUSINESS_STATE_NOT_RECONSTRUCTABLE));

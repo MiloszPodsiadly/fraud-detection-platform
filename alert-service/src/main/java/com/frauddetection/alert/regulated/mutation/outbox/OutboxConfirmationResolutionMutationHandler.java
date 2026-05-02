@@ -52,6 +52,9 @@ public class OutboxConfirmationResolutionMutationHandler {
         } else {
             ResolutionEvidenceReference.require(request.evidenceReference(), "resolution evidence is required");
         }
+        if (bankModeFailClosed && !dualControlEnabled) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "bank mode requires dual-control outbox confirmation");
+        }
         if (bankModeFailClosed && dualControlEnabled && !record.isResolutionPending()) {
             return requestResolution(record, request, actorId);
         }

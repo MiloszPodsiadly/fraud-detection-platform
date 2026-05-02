@@ -12,7 +12,8 @@ public final class RegulatedMutationDefinitions {
             new RegulatedMutationDefinition(AuditAction.UPDATE_FRAUD_CASE, AuditResourceType.FRAUD_CASE),
             new RegulatedMutationDefinition(AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION, AuditResourceType.DECISION_OUTBOX),
             new RegulatedMutationDefinition(AuditAction.ACK_TRUST_INCIDENT, AuditResourceType.TRUST_INCIDENT),
-            new RegulatedMutationDefinition(AuditAction.RESOLVE_TRUST_INCIDENT, AuditResourceType.TRUST_INCIDENT)
+            new RegulatedMutationDefinition(AuditAction.RESOLVE_TRUST_INCIDENT, AuditResourceType.TRUST_INCIDENT),
+            new RegulatedMutationDefinition(AuditAction.REFRESH_TRUST_INCIDENTS, AuditResourceType.TRUST_INCIDENT)
     );
 
     private RegulatedMutationDefinitions() {

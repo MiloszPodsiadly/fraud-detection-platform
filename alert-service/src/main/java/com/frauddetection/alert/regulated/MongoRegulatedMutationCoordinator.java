@@ -305,14 +305,21 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
             R result = command.mutation().execute(new RegulatedMutationExecutionContext(document.getId()));
             transition(document, RegulatedMutationState.BUSINESS_COMMITTED, null);
             return result;
+        } catch (RegulatedMutationPartialCommitException exception) {
+            auditFailure(command, document, exception, exception.reasonCode());
+            document.setResponseSnapshot(exception.responseSnapshot());
+            document.setDegradationReason(exception.reasonCode());
+            document.setExecutionStatus(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
+            transition(document, RegulatedMutationState.COMMITTED_DEGRADED, exception.reasonCode());
+            throw exception;
         } catch (RuntimeException exception) {
-            auditFailure(command, document, exception);
+            auditFailure(command, document, exception, BUSINESS_WRITE_FAILED);
             document.setDegradationReason(BUSINESS_WRITE_FAILED);
             document.setExecutionStatus(RegulatedMutationExecutionStatus.FAILED);
             transition(document, RegulatedMutationState.FAILED, BUSINESS_WRITE_FAILED);
             throw exception;
         } catch (Error error) {
-            auditFailure(command, document, error);
+            auditFailure(command, document, error, BUSINESS_WRITE_FAILED);
             document.setDegradationReason(BUSINESS_WRITE_FAILED);
             document.setExecutionStatus(RegulatedMutationExecutionStatus.FAILED);
             transition(document, RegulatedMutationState.FAILED, BUSINESS_WRITE_FAILED);
@@ -320,14 +327,19 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
         }
     }
 
-    private <R, S> void auditFailure(RegulatedMutationCommand<R, S> command, RegulatedMutationCommandDocument document, Throwable originalFailure) {
+    private <R, S> void auditFailure(
+            RegulatedMutationCommand<R, S> command,
+            RegulatedMutationCommandDocument document,
+            Throwable originalFailure,
+            String reasonCode
+    ) {
         try {
             document.setFailedAuditId(auditPhaseService.recordPhase(
                     document,
                     command.action(),
                     command.resourceType(),
                     AuditOutcome.FAILED,
-                    BUSINESS_WRITE_FAILED
+                    reasonCode
             ));
         } catch (RuntimeException auditFailure) {
             originalFailure.addSuppressed(auditFailure);

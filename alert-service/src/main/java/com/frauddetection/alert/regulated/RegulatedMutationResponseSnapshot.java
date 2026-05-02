@@ -8,6 +8,7 @@ import com.frauddetection.alert.audit.ResolutionEvidenceReference;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.outbox.OutboxRecordResponse;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
+import com.frauddetection.alert.trust.TrustIncidentMaterializationResponse;
 import com.frauddetection.alert.trust.TrustIncidentResponse;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
@@ -112,7 +113,9 @@ public record RegulatedMutationResponseSnapshot(
         @JsonProperty("trust_incident_resolution_reason")
         String trustIncidentResolutionReason,
         @JsonProperty("trust_incident_resolution_evidence")
-        ResolutionEvidenceReference trustIncidentResolutionEvidence
+        ResolutionEvidenceReference trustIncidentResolutionEvidence,
+        @JsonProperty("trust_incident_materialization")
+        TrustIncidentMaterializationResponse trustIncidentMaterialization
 ) {
     private static final int ZERO = 0;
 
@@ -127,7 +130,8 @@ public record RegulatedMutationResponseSnapshot(
         this(alertId, decision, resultingStatus, decisionEventId, decidedAt, operationStatus,
                 null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
                 null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+                null);
     }
 
     public RegulatedMutationResponseSnapshot(
@@ -164,7 +168,8 @@ public record RegulatedMutationResponseSnapshot(
                 outboxResolutionEvidenceReference, outboxResolutionEvidenceVerifiedAt, outboxResolutionEvidenceVerifiedBy,
                 outboxResolutionApprovedAt, outboxResolutionApprovedBy, outboxResolutionApprovalReason,
                 null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+                null);
     }
 
     public static RegulatedMutationResponseSnapshot from(SubmitAnalystDecisionResponse response) {
@@ -249,7 +254,8 @@ public record RegulatedMutationResponseSnapshot(
                 document.getDecisionTags() == null ? List.of() : List.copyOf(document.getDecisionTags()),
                 document.getDecidedAt(),
                 document.getUpdatedAt(),
-                null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+                null
         );
     }
 
@@ -277,7 +283,8 @@ public record RegulatedMutationResponseSnapshot(
                     null,
                     null,
                     null,
-                    null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null
+                    null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+                    null
             );
         }
         return new RegulatedMutationResponseSnapshot(
@@ -290,7 +297,8 @@ public record RegulatedMutationResponseSnapshot(
                 response.updatedCase().decisionTags() == null ? List.of() : List.copyOf(response.updatedCase().decisionTags()),
                 response.updatedCase().decidedAt(),
                 response.updatedCase().updatedAt(),
-                null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+                null
         );
     }
 
@@ -348,7 +356,20 @@ public record RegulatedMutationResponseSnapshot(
                 response.resolvedBy(),
                 response.resolvedAt(),
                 response.resolutionReason(),
-                response.resolutionEvidence()
+                response.resolutionEvidence(),
+                null
+        );
+    }
+
+    public static RegulatedMutationResponseSnapshot fromTrustIncidentMaterialization(
+            TrustIncidentMaterializationResponse response
+    ) {
+        return new RegulatedMutationResponseSnapshot(
+                null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+                response
         );
     }
 
@@ -372,5 +393,9 @@ public record RegulatedMutationResponseSnapshot(
                 trustIncidentResolutionReason,
                 trustIncidentResolutionEvidence
         );
+    }
+
+    public TrustIncidentMaterializationResponse toTrustIncidentMaterializationResponse() {
+        return trustIncidentMaterialization;
     }
 }

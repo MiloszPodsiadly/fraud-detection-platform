@@ -1,9 +1,7 @@
 package com.frauddetection.alert.trust;
 
 import com.frauddetection.alert.audit.AuditAction;
-import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
-import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.audit.ResolutionEvidenceReference;
 import com.frauddetection.alert.regulated.RegulatedMutationCommand;
 import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
@@ -12,6 +10,7 @@ import com.frauddetection.alert.regulated.RegulatedMutationIntentHasher;
 import com.frauddetection.alert.regulated.RegulatedMutationResponseSnapshot;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.alert.regulated.mutation.trustincident.TrustIncidentAcknowledgeMutationHandler;
+import com.frauddetection.alert.regulated.mutation.trustincident.TrustIncidentRefreshMutationHandler;
 import com.frauddetection.alert.regulated.mutation.trustincident.TrustIncidentResolveMutationHandler;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -23,6 +22,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 public class TrustIncidentService {
@@ -32,8 +32,7 @@ public class TrustIncidentService {
     private final RegulatedMutationCoordinator regulatedMutationCoordinator;
     private final TrustIncidentAcknowledgeMutationHandler acknowledgeMutationHandler;
     private final TrustIncidentResolveMutationHandler resolveMutationHandler;
-    private final TrustIncidentMaterializer materializer;
-    private final AuditService auditService;
+    private final TrustIncidentRefreshMutationHandler refreshMutationHandler;
 
     public TrustIncidentService(
             TrustIncidentRepository repository,
@@ -41,16 +40,14 @@ public class TrustIncidentService {
             RegulatedMutationCoordinator regulatedMutationCoordinator,
             TrustIncidentAcknowledgeMutationHandler acknowledgeMutationHandler,
             TrustIncidentResolveMutationHandler resolveMutationHandler,
-            TrustIncidentMaterializer materializer,
-            AuditService auditService
+            TrustIncidentRefreshMutationHandler refreshMutationHandler
     ) {
         this.repository = repository;
         this.policy = policy;
         this.regulatedMutationCoordinator = regulatedMutationCoordinator;
         this.acknowledgeMutationHandler = acknowledgeMutationHandler;
         this.resolveMutationHandler = resolveMutationHandler;
-        this.materializer = materializer;
-        this.auditService = auditService;
+        this.refreshMutationHandler = refreshMutationHandler;
     }
 
     public List<TrustIncidentResponse> listOpen() {
@@ -120,27 +117,27 @@ public class TrustIncidentService {
         return regulatedMutationCoordinator.commit(command).response();
     }
 
-    public TrustIncidentMaterializationResponse refresh(List<TrustSignal> signals, String actorId) {
-        auditService.audit(
-                AuditAction.REFRESH_TRUST_INCIDENTS,
-                AuditResourceType.TRUST_INCIDENT,
-                "trust-incidents",
-                null,
+    public TrustIncidentMaterializationResponse refresh(List<TrustSignal> signals, String actorId, String idempotencyKey) {
+        List<TrustSignal> safeSignals = signals == null ? List.of() : List.copyOf(signals);
+        String signalHash = signalHash(safeSignals);
+        String requestHash = RegulatedMutationIntentHasher.hash("actorId=" + RegulatedMutationIntentHasher.canonicalValue(actorId)
+                + "|signalHash=" + signalHash);
+        RegulatedMutationCommand<TrustIncidentMaterializationResponse, TrustIncidentMaterializationResponse> command = new RegulatedMutationCommand<>(
+                idempotencyKey,
                 actorId,
-                AuditOutcome.ATTEMPTED,
-                null
-        );
-        TrustIncidentMaterializationResponse response = materializer.materialize(signals);
-        auditService.audit(
-                AuditAction.REFRESH_TRUST_INCIDENTS,
-                AuditResourceType.TRUST_INCIDENT,
                 "trust-incidents",
+                AuditResourceType.TRUST_INCIDENT,
+                AuditAction.REFRESH_TRUST_INCIDENTS,
                 null,
-                actorId,
-                AuditOutcome.SUCCESS,
-                null
+                requestHash,
+                context -> refreshMutationHandler.refresh(safeSignals),
+                (response, state) -> response,
+                RegulatedMutationResponseSnapshot::fromTrustIncidentMaterialization,
+                RegulatedMutationResponseSnapshot::toTrustIncidentMaterializationResponse,
+                state -> materializationStatusResponse(safeSignals.size(), state),
+                refreshIntent(actorId, signalHash)
         );
-        return response;
+        return regulatedMutationCoordinator.commit(command).response();
     }
 
     public TrustIncidentSummary summary() {
@@ -200,6 +197,59 @@ public class TrustIncidentService {
                 null,
                 reasonHash,
                 null
+        );
+    }
+
+    private RegulatedMutationIntent refreshIntent(String actorId, String signalHash) {
+        String intentHash = RegulatedMutationIntentHasher.hash("resourceId=trust-incidents"
+                + "|action=" + AuditAction.REFRESH_TRUST_INCIDENTS.name()
+                + "|actorId=" + RegulatedMutationIntentHasher.canonicalValue(actorId)
+                + "|signalHash=" + signalHash);
+        return new RegulatedMutationIntent(
+                intentHash,
+                "trust-incidents",
+                AuditAction.REFRESH_TRUST_INCIDENTS.name(),
+                actorId,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                signalHash
+        );
+    }
+
+    private String signalHash(List<TrustSignal> signals) {
+        String canonicalSignals = signals.stream()
+                .map(this::canonicalSignal)
+                .sorted()
+                .collect(Collectors.joining(";"));
+        return RegulatedMutationIntentHasher.hash(canonicalSignals);
+    }
+
+    private String canonicalSignal(TrustSignal signal) {
+        String evidenceRefs = signal.evidenceRefs() == null ? "" : signal.evidenceRefs().stream()
+                .sorted()
+                .collect(Collectors.joining(","));
+        return "type=" + RegulatedMutationIntentHasher.canonicalValue(signal.type())
+                + "|severity=" + (signal.severity() == null ? "" : signal.severity().name())
+                + "|source=" + RegulatedMutationIntentHasher.canonicalValue(signal.source())
+                + "|fingerprint=" + RegulatedMutationIntentHasher.canonicalValue(signal.fingerprint())
+                + "|evidenceRefs=" + RegulatedMutationIntentHasher.canonicalValue(evidenceRefs);
+    }
+
+    private TrustIncidentMaterializationResponse materializationStatusResponse(int signalCount, RegulatedMutationState state) {
+        return new TrustIncidentMaterializationResponse(
+                state.name(),
+                signalCount,
+                0,
+                signalCount,
+                0,
+                0,
+                false,
+                state == RegulatedMutationState.COMMITTED_DEGRADED || state == RegulatedMutationState.FAILED ? state.name() : null,
+                List.of()
         );
     }
 

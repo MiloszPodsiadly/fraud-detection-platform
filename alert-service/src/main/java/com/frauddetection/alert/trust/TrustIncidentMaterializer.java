@@ -43,11 +43,37 @@ public class TrustIncidentMaterializer {
         List<TrustSignal> bounded = signals == null ? List.of() : signals.stream()
                 .limit(MAX_SIGNALS_PER_BATCH)
                 .toList();
-        List<TrustIncidentResponse> incidents = bounded.stream()
-                .map(this::materializeSignal)
-                .map(TrustIncidentResponse::from)
-                .toList();
-        return new TrustIncidentMaterializationResponse("AVAILABLE", bounded.size(), incidents.size(), incidents);
+        java.util.ArrayList<TrustIncidentResponse> incidents = new java.util.ArrayList<>();
+        for (TrustSignal signal : bounded) {
+            try {
+                incidents.add(TrustIncidentResponse.from(materializeSignal(signal)));
+            } catch (RuntimeException exception) {
+                int failed = bounded.size() - incidents.size();
+                TrustIncidentMaterializationResponse response = new TrustIncidentMaterializationResponse(
+                        incidents.isEmpty() ? "FAILED" : "PARTIAL",
+                        bounded.size(),
+                        incidents.size(),
+                        bounded.size(),
+                        incidents.size(),
+                        failed,
+                        !incidents.isEmpty(),
+                        "PERSISTENCE_UNAVAILABLE",
+                        List.copyOf(incidents)
+                );
+                throw new TrustIncidentMaterializationException(response, exception);
+            }
+        }
+        return new TrustIncidentMaterializationResponse(
+                "AVAILABLE",
+                bounded.size(),
+                incidents.size(),
+                bounded.size(),
+                incidents.size(),
+                0,
+                false,
+                null,
+                List.copyOf(incidents)
+        );
     }
 
     TrustIncidentDocument materializeSignal(TrustSignal signal) {
