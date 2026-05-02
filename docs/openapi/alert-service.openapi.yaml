@@ -388,7 +388,7 @@ paths:
   /api/v1/trust/incidents/refresh:
     post:
       summary: Materialize trust incidents from current signals
-      description: Requires trust-incident:refresh or trust-incident:resolve and X-Idempotency-Key. Explicit regulated mutation write path that collects bounded low-cardinality trust signals, stores a durable command, writes coordinator-owned phase audits, persists a response snapshot for replay, and atomically materializes active incidents by active dedupe key. Refresh is batch-idempotent best-effort regulated, not all-or-nothing; partial materialization is degraded/recovery state and does not receive a clean SUCCESS audit. GET trust incident, signal preview, and system trust-level paths do not perform this write.
+      description: Requires trust-incident:refresh or trust-incident:resolve and X-Idempotency-Key. Explicit regulated mutation write path that collects bounded low-cardinality trust signals, stores a durable command, writes coordinator-owned phase audits, persists a response snapshot for replay, and atomically materializes active incidents by active dedupe key. app.trust-incidents.refresh-mode=ATOMIC|PARTIAL controls failure semantics. In transaction-mode=REQUIRED or refresh-mode=ATOMIC, a materialization exception is rollback/failure and is not reported as a partial commit. PARTIAL is non-transactional/local compatibility only and reports committed-degraded state only after persisted incidents are verified by active dedupe key. Failed materialization does not receive a clean SUCCESS audit. GET trust incident, signal preview, and system trust-level paths do not perform this write.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1447,7 +1447,7 @@ components:
     TrustIncidentMaterializationResponse:
       type: object
       additionalProperties: false
-      required: [status, signal_count, incident_count, requested_signal_count, materialized_count, failed_signal_count, partial_failure, incidents]
+      required: [status, signal_count, incident_count, requested_signal_count, materialized_count, failed_signal_count, partial_failure, incidents, operation_status, rollback_applied]
       properties:
         status:
           type: string
@@ -1483,6 +1483,23 @@ components:
           maxItems: 100
           items:
             $ref: "#/components/schemas/TrustIncidentResponse"
+        operation_status:
+          type: string
+          description: AVAILABLE for completed refresh, COMMITTED_DEGRADED only for verified non-transactional partial refresh, or the regulated command state for non-terminal replay/status responses.
+          enum: [AVAILABLE, FAILED, REQUESTED, AUDIT_ATTEMPTED, BUSINESS_COMMITTING, BUSINESS_COMMITTED, SUCCESS_AUDIT_PENDING, SUCCESS_AUDIT_RECORDED, EVIDENCE_PENDING, EVIDENCE_CONFIRMED, COMMITTED, COMMITTED_DEGRADED, REJECTED]
+        transaction_mode:
+          type: string
+          nullable: true
+          enum: [OFF, REQUIRED]
+          description: Local regulated mutation transaction mode when available.
+        rollback_applied:
+          type: boolean
+          description: True only when the response represents a rollback/failure state rather than verified persisted partial state.
+        recovery_required_reason:
+          type: string
+          nullable: true
+          enum: [PERSISTENCE_UNAVAILABLE, COMMITTED_DEGRADED, FAILED, TRUST_INCIDENT_REFRESH_PARTIAL_OFF_MODE, TRUST_INCIDENT_REFRESH_ROLLED_BACK]
+          description: Stable non-sensitive reason code for degraded or failed refresh responses.
     TrustSignalPreviewResponse:
       type: object
       additionalProperties: false
