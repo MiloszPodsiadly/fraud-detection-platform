@@ -93,6 +93,12 @@ public record SystemTrustLevelResponse(
         @JsonProperty("committed_degraded_count")
         long committedDegradedCount,
 
+        @JsonProperty("evidence_confirmation_pending_count")
+        long evidenceConfirmationPendingCount,
+
+        @JsonProperty("evidence_confirmation_failed_count")
+        long evidenceConfirmationFailedCount,
+
         @JsonProperty("repeated_recovery_failure_count")
         long repeatedRecoveryFailureCount,
 
@@ -104,6 +110,9 @@ public record SystemTrustLevelResponse(
 
         @JsonProperty("transaction_mode")
         String transactionMode,
+
+        @JsonProperty("transaction_capability_status")
+        String transactionCapabilityStatus,
 
         @JsonProperty("outbox_delivery_mode")
         String outboxDeliveryMode,

@@ -106,7 +106,13 @@ public class MutationEvidenceConfirmationService {
             return new EvidenceDecision(RegulatedMutationState.COMMITTED_DEGRADED, "SUCCESS_AUDIT_MISSING");
         }
         TransactionalOutboxRecordDocument outbox = outboxRepository.findByMutationCommandId(command.getId()).orElse(null);
-        if (outbox == null || outbox.getStatus() != TransactionalOutboxStatus.PUBLISHED) {
+        if (outbox == null) {
+            return new EvidenceDecision(RegulatedMutationState.EVIDENCE_PENDING, "OUTBOX_NOT_PUBLISHED");
+        }
+        if (outbox.getStatus() == TransactionalOutboxStatus.FAILED_TERMINAL) {
+            return new EvidenceDecision(RegulatedMutationState.COMMITTED_DEGRADED, "OUTBOX_FAILED_TERMINAL");
+        }
+        if (outbox.getStatus() != TransactionalOutboxStatus.PUBLISHED) {
             return new EvidenceDecision(RegulatedMutationState.EVIDENCE_PENDING, "OUTBOX_NOT_PUBLISHED");
         }
         if (externalAnchorRequired) {
@@ -117,8 +123,11 @@ public class MutationEvidenceConfirmationService {
         }
         if (signatureRequired) {
             AuditEventExternalEvidenceStatus status = externalEvidenceStatus(command);
-            if (status == null || !status.signatureValid()) {
+            if (status == null || status.signatureStatus() == null || status.signatureStatus().isBlank()) {
                 return new EvidenceDecision(RegulatedMutationState.EVIDENCE_PENDING, "SIGNATURE_UNAVAILABLE");
+            }
+            if (!status.signatureValid()) {
+                return new EvidenceDecision(RegulatedMutationState.COMMITTED_DEGRADED, "SIGNATURE_INVALID");
             }
         }
         return new EvidenceDecision(RegulatedMutationState.EVIDENCE_CONFIRMED, null);

@@ -211,10 +211,13 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 live.regulatedMutationRecoveryRequiredCount(),
                 live.staleProcessingLeaseCount(),
                 live.committedDegradedCount(),
+                live.evidenceConfirmationPendingCount(),
+                live.evidenceConfirmationFailedCount(),
                 live.repeatedRecoveryFailureCount(),
                 live.oldestRecoveryRequiredAgeSeconds(),
                 live.reasonCode(),
                 transactionMode,
+                transactionCapabilityStatus(),
                 outboxDeliveryMode(),
                 evidenceConfirmationEnabled ? "ENABLED" : "DISABLED"
         );
@@ -270,6 +273,8 @@ public class SystemTrustLevelController implements ApplicationRunner {
         long regulatedRecoveryRequired = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.recoveryRequiredCount();
         long staleProcessingLeaseCount = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.staleProcessingLeaseCount();
         long committedDegradedCount = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.committedDegradedCount();
+        long evidenceConfirmationPendingCount = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.evidenceConfirmationPendingCount();
+        long evidenceConfirmationFailedCount = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.evidenceConfirmationFailedCount();
         long repeatedRecoveryFailureCount = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.repeatedRecoveryFailureCount();
         Long oldestRecoveryRequiredAgeSeconds = regulatedMutationRecoveryService == null ? null : regulatedMutationRecoveryService.oldestRecoveryRequiredAgeSeconds();
         OutboxState outboxState = outboxState();
@@ -308,6 +313,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 && regulatedRecoveryRequired == 0
                 && staleProcessingLeaseCount == 0
                 && committedDegradedCount == 0
+                && evidenceConfirmationFailedCount == 0
                 && repeatedRecoveryFailureCount == 0
                 && oldestRecoveryRequiredAgeSeconds == null;
         if (healthy && outboxState.reasonCode() != null) {
@@ -330,6 +336,9 @@ public class SystemTrustLevelController implements ApplicationRunner {
         }
         if (reasonCode == null && committedDegradedCount > 0) {
             reasonCode = "REGULATED_MUTATION_COMMITTED_DEGRADED";
+        }
+        if (reasonCode == null && evidenceConfirmationFailedCount > 0) {
+            reasonCode = "EVIDENCE_CONFIRMATION_FAILED";
         }
         if (reasonCode == null && repeatedRecoveryFailureCount > 0) {
             reasonCode = "REGULATED_MUTATION_REPEATED_RECOVERY_FAILURE";
@@ -356,6 +365,8 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 regulatedRecoveryRequired,
                 staleProcessingLeaseCount,
                 committedDegradedCount,
+                evidenceConfirmationPendingCount,
+                evidenceConfirmationFailedCount,
                 repeatedRecoveryFailureCount,
                 oldestRecoveryRequiredAgeSeconds,
                 reasonCode
@@ -456,6 +467,13 @@ public class SystemTrustLevelController implements ApplicationRunner {
         return outboxPublisherEnabled ? "TRANSACTIONAL_OUTBOX_AT_LEAST_ONCE" : "DISABLED";
     }
 
+    private String transactionCapabilityStatus() {
+        if ("REQUIRED".equals(transactionMode)) {
+            return "LOCAL_MONGO_TRANSACTION_REQUIRED";
+        }
+        return "NON_TRANSACTIONAL_RECOVERABLE_SAGA";
+    }
+
     private long pendingAgeSeconds(AlertDocument document) {
         Instant decidedAt = document.getDecidedAt();
         if (decidedAt == null) {
@@ -486,6 +504,8 @@ public class SystemTrustLevelController implements ApplicationRunner {
             long regulatedMutationRecoveryRequiredCount,
             long staleProcessingLeaseCount,
             long committedDegradedCount,
+            long evidenceConfirmationPendingCount,
+            long evidenceConfirmationFailedCount,
             long repeatedRecoveryFailureCount,
             Long oldestRecoveryRequiredAgeSeconds,
             String reasonCode

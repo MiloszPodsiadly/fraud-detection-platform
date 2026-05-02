@@ -33,7 +33,7 @@ public class OutboxRecoveryController {
     @PostMapping("/{eventId}/resolve-confirmation")
     public OutboxRecordResponse resolveConfirmation(
             @PathVariable String eventId,
-            @RequestHeader(name = "X-Idempotency-Key", required = false) String idempotencyKey,
+            @RequestHeader(name = "X-Idempotency-Key", required = true) String idempotencyKey,
             @Valid @RequestBody OutboxConfirmationResolutionRequest request,
             Authentication authentication
     ) {
