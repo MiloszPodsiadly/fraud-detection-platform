@@ -2,18 +2,23 @@ package com.frauddetection.alert.regulated;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.core.env.Environment;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+@ExtendWith(OutputCaptureExtension.class)
 class RegulatedMutationStartupGuardTest {
 
     @Test
@@ -174,7 +179,51 @@ class RegulatedMutationStartupGuardTest {
     }
 
     @Test
-    void shouldAllowBankModeWithAtomicTrustRefreshAndRequiredTransactions() {
+    void shouldRejectProdProfileWhenTrustIncidentRefreshModeIsPartial() {
+        RegulatedMutationStartupGuard guard = guard(
+                RegulatedMutationTransactionMode.REQUIRED,
+                false,
+                new String[]{"prod"},
+                mock(PlatformTransactionManager.class),
+                true,
+                true,
+                true,
+                true,
+                "PARTIAL",
+                5,
+                mock(RegulatedMutationTransactionCapabilityProbe.class),
+                mock(TransactionalOutboxRecordRepository.class)
+        );
+
+        assertThatThrownBy(() -> guard.run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("refresh-mode=ATOMIC");
+    }
+
+    @Test
+    void shouldRejectProdProfileWhenTransactionsAreOff() {
+        RegulatedMutationStartupGuard guard = guard(
+                RegulatedMutationTransactionMode.OFF,
+                false,
+                new String[]{"prod"},
+                mock(PlatformTransactionManager.class),
+                true,
+                true,
+                true,
+                true,
+                "ATOMIC",
+                5,
+                null,
+                mock(TransactionalOutboxRecordRepository.class)
+        );
+
+        assertThatThrownBy(() -> guard.run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("transaction-mode=REQUIRED");
+    }
+
+    @Test
+    void shouldAllowBankModeWithAtomicTrustRefreshAndRequiredTransactions(CapturedOutput output) {
         RegulatedMutationStartupGuard guard = guard(
                 RegulatedMutationTransactionMode.REQUIRED,
                 true,
@@ -191,6 +240,7 @@ class RegulatedMutationStartupGuardTest {
         );
 
         assertThatCode(() -> guard.run(null)).doesNotThrowAnyException();
+        assertThat(output).contains("FDP-26 bank-grade mode active: transaction-mode=REQUIRED, trust-incidents.refresh-mode=ATOMIC, outbox dual-control enabled.");
     }
 
     @Test

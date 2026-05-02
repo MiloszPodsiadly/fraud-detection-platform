@@ -220,6 +220,14 @@ class RegulatedMutationArchitectureTest {
                     .doesNotContain("auditService.audit");
             assertThat(source).as("regulated mutation handler must not write SUCCESS audit directly: " + handler)
                     .doesNotContain("AuditOutcome.SUCCESS");
+            assertThat(source).as("regulated mutation handler must not publish Kafka directly: " + handler)
+                    .doesNotContain("FraudDecisionEventPublisher")
+                    .doesNotContain("KafkaTemplate")
+                    .doesNotContain(".publish(");
+            assertThat(source).as("regulated mutation handler must not publish external anchors directly: " + handler)
+                    .doesNotContain("ExternalAuditAnchor")
+                    .doesNotContain("ExternalAuditIntegrity")
+                    .doesNotContain("ExternalAuditPublication");
         }
     }
 
@@ -228,15 +236,24 @@ class RegulatedMutationArchitectureTest {
         String service = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/trust/TrustIncidentService.java"
         ));
+        String controller = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/trust/TrustIncidentController.java"
+        ));
         String listMethod = service.substring(service.indexOf("public List<TrustIncidentResponse> listOpen()"),
                 service.indexOf("public TrustIncidentResponse acknowledge("));
         String summaryMethod = service.substring(service.indexOf("public TrustIncidentSummary summary()"),
                 service.indexOf("private RegulatedMutationIntent intent("));
+        String previewMethod = controller.substring(controller.indexOf("public TrustSignalPreviewResponse preview("),
+                controller.indexOf("@PostMapping(\"/refresh\")"));
 
         assertThat(listMethod).doesNotContain("repository.save");
         assertThat(listMethod).doesNotContain("materializer.materialize");
         assertThat(summaryMethod).doesNotContain("repository.save");
         assertThat(summaryMethod).doesNotContain("materializer.materialize");
+        assertThat(previewMethod).doesNotContain("repository.save");
+        assertThat(previewMethod).doesNotContain("materializer.materialize");
+        assertThat(previewMethod).doesNotContain("service.refresh");
+        assertThat(previewMethod).doesNotContain("regulatedMutationCoordinator");
     }
 
     @Test
@@ -277,17 +294,55 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void docsMustNotClaimExactlyOnceOrDistributedAcidForFdp26A() throws Exception {
+    void docsMustNotOverclaimFdp26() throws Exception {
         String readme = Files.readString(Path.of("../README.md"));
         String api = Files.readString(Path.of("../docs/api-surface-v1.md"));
         String security = Files.readString(Path.of("../docs/security-foundation-v1.md"));
         String combined = readme + "\n" + api + "\n" + security;
 
-        assertThat(combined).doesNotContain("provides exactly-once");
-        assertThat(combined).doesNotContain("guarantees exactly-once");
-        assertThat(combined).doesNotContain("provides distributed ACID");
-        assertThat(combined).doesNotContain("guarantees distributed ACID");
+        assertForbiddenPhraseIsContextual(combined, "exactly once");
+        assertForbiddenPhraseIsContextual(combined, "exactly-once");
+        assertForbiddenPhraseIsContextual(combined, "distributed ACID");
+        assertForbiddenPhraseIsContextual(combined, "full ACID");
+        assertForbiddenPhraseIsContextual(combined, "pre-commit finalize implemented");
+        assertForbiddenPhraseIsContextual(combined, "pre-commit/finalize");
+        assertForbiddenPhraseIsContextual(combined, "cannot mutate before evidence");
+        assertForbiddenPhraseIsContextual(combined, "notarized");
+        assertForbiddenPhraseIsContextual(combined, "notarization");
+        assertForbiddenPhraseIsContextual(combined, "WORM");
+        assertForbiddenPhraseIsContextual(combined, "regulator certified");
+        assertForbiddenPhraseIsContextual(combined, "regulator-certified");
         assertThat(combined).contains("not distributed ACID");
         assertThat(combined).contains("does not provide exactly-once");
+    }
+
+    private void assertForbiddenPhraseIsContextual(String source, String phrase) {
+        String lowerSource = source.toLowerCase(java.util.Locale.ROOT);
+        String lowerPhrase = phrase.toLowerCase(java.util.Locale.ROOT);
+        int index = lowerSource.indexOf(lowerPhrase);
+        while (index >= 0) {
+            int start = Math.max(0, index - 220);
+            int end = Math.min(lowerSource.length(), index + lowerPhrase.length() + 220);
+            String context = lowerSource.substring(start, end);
+            assertThat(context)
+                    .as("Forbidden FDP-26 wording must be negated, limited, or future-contextual: " + phrase)
+                    .containsAnyOf(
+                            "does not",
+                            "do not",
+                            "not ",
+                            "no ",
+                            "never",
+                            "must not",
+                            "outside",
+                            "future",
+                            "deferred",
+                            "not implemented",
+                            "unless",
+                            "durability guarantee",
+                            "object lock",
+                            "wording rules"
+                    );
+            index = lowerSource.indexOf(lowerPhrase, index + lowerPhrase.length());
+        }
     }
 }

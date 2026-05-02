@@ -25,6 +25,7 @@ import com.frauddetection.alert.audit.AuditTrustAttestationController;
 import com.frauddetection.alert.audit.AuditTrustAttestationResponse;
 import com.frauddetection.alert.audit.AuditTrustAttestationService;
 import com.frauddetection.alert.audit.AuditTrustLevel;
+import com.frauddetection.alert.audit.read.ReadAccessAuditService;
 import com.frauddetection.alert.audit.external.AuditEvidenceExportController;
 import com.frauddetection.alert.audit.external.AuditEvidenceExportResponse;
 import com.frauddetection.alert.audit.external.AuditEvidenceExportService;
@@ -92,6 +93,7 @@ import com.frauddetection.alert.trust.TrustIncidentController;
 import com.frauddetection.alert.trust.TrustIncidentResponse;
 import com.frauddetection.alert.trust.TrustIncidentService;
 import com.frauddetection.alert.trust.TrustIncidentSummary;
+import com.frauddetection.alert.trust.TrustIncidentPreviewRateLimiter;
 import com.frauddetection.alert.trust.TrustSignalCollector;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
@@ -228,7 +230,13 @@ class AlertSecurityConfigTest {
     private TrustSignalCollector trustSignalCollector;
 
     @MockBean
+    private TrustIncidentPreviewRateLimiter trustIncidentPreviewRateLimiter;
+
+    @MockBean
     private RegulatedMutationInspectionRateLimiter regulatedMutationInspectionRateLimiter;
+
+    @MockBean
+    private ReadAccessAuditService readAccessAuditService;
 
     @MockBean
     private AuditService auditService;
@@ -252,6 +260,7 @@ class AlertSecurityConfigTest {
     void allowCoverageRateLimit() {
         when(externalAuditCoverageRateLimiter.allow(any(), anyInt())).thenReturn(true);
         when(regulatedMutationInspectionRateLimiter.allow(any())).thenReturn(true);
+        when(trustIncidentPreviewRateLimiter.allow(any())).thenReturn(true);
         when(trustSignalCollector.collect()).thenReturn(List.of());
         when(trustIncidentService.listOpen()).thenReturn(List.of());
         when(trustIncidentService.summary()).thenReturn(TrustIncidentSummary.empty());
@@ -344,6 +353,8 @@ class AlertSecurityConfigTest {
                         .content("{\"resolution\":\"PUBLISHED\",\"evidence_reference\":{\"type\":\"BROKER_OFFSET\",\"reference\":\"topic=fraud-decisions,partition=0,offset=42\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/trust/incidents"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/trust/incidents/signals/preview"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(post("/api/v1/trust/incidents/incident-1/ack")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -773,6 +784,9 @@ class AlertSecurityConfigTest {
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/trust/incidents").with(demoUser("FRAUD_OPS_ADMIN")))
                 .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/trust/incidents/signals/preview").with(demoUser("FRAUD_OPS_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.preview").value(true));
         mockMvc.perform(post("/api/v1/trust/incidents/incident-1/ack")
                         .with(demoUser("FRAUD_OPS_ADMIN"))
                         .header("X-Idempotency-Key", "trust-ack-1")
@@ -788,6 +802,8 @@ class AlertSecurityConfigTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.incident_id").value("incident-1"));
         mockMvc.perform(get("/api/v1/trust/incidents").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/trust/incidents/signals/preview").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/regulated-mutations/idem-1").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
                 .andExpect(status().isOk())
@@ -854,6 +870,8 @@ class AlertSecurityConfigTest {
                         .content("{\"resolution\":\"PUBLISHED\",\"evidence_reference\":{\"type\":\"BROKER_OFFSET\",\"reference\":\"topic=fraud-decisions,partition=0,offset=42\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/trust/incidents").with(demoUser("ANALYST")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/trust/incidents/signals/preview").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/regulated-mutations/idem-1").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
@@ -1096,6 +1114,15 @@ class AlertSecurityConfigTest {
         document.setTransactionIds(List.of());
         document.setTransactions(List.of());
         return document;
+    }
+
+    @Test
+    void shouldRateLimitTrustIncidentSignalPreview() throws Exception {
+        when(trustIncidentPreviewRateLimiter.allow(any())).thenReturn(false);
+
+        mockMvc.perform(get("/api/v1/trust/incidents/signals/preview")
+                        .with(demoUser("FRAUD_OPS_ADMIN")))
+                .andExpect(status().isTooManyRequests());
     }
 
     private UpdateFraudCaseResponse updateFraudCaseResponse() {
