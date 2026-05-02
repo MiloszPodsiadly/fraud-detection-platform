@@ -388,10 +388,18 @@ paths:
   /api/v1/trust/incidents/refresh:
     post:
       summary: Materialize trust incidents from current signals
-      description: Requires trust-incident:refresh or trust-incident:resolve. Explicit write path that collects bounded low-cardinality trust signals and atomically materializes active incidents by active dedupe key. GET trust incident and system trust-level paths do not perform this write.
+      description: Requires trust-incident:refresh or trust-incident:resolve and X-Idempotency-Key. Explicit regulated mutation write path that collects bounded low-cardinality trust signals, stores a durable command, writes coordinator-owned phase audits, persists a response snapshot for replay, and atomically materializes active incidents by active dedupe key. Refresh is batch-idempotent best-effort regulated, not all-or-nothing; partial materialization is degraded/recovery state and does not receive a clean SUCCESS audit. GET trust incident, signal preview, and system trust-level paths do not perform this write.
       security:
         - bearerAuth: []
         - demoAuth: []
+      parameters:
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
       responses:
         "200":
           description: Trust incident materialization completed.
@@ -399,6 +407,28 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TrustIncidentMaterializationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/trust/incidents/signals/preview:
+    get:
+      summary: Preview current trust signals
+      description: Requires trust-incident:read. Read-only endpoint that collects current bounded trust signals for operator inspection. It does not materialize incidents, create regulated command state, write mutation audit events, or save TrustIncidentDocument state.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      responses:
+        "200":
+          description: Trust signal preview returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrustSignalPreviewResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -406,7 +436,7 @@ paths:
   /api/v1/trust/incidents/{incidentId}/ack:
     post:
       summary: Acknowledge trust incident
-      description: Requires trust-incident:ack and X-Idempotency-Key. ACK is a regulated mutation: ATTEMPTED audit is recorded before state mutation and SUCCESS audit is owned by the coordinator after the incident state save. The mutation handler does not write AuditService directly.
+      description: Requires trust-incident:ack and X-Idempotency-Key. ACK is a regulated mutation: ATTEMPTED audit is recorded before state mutation and SUCCESS audit is owned by the coordinator after the incident state save. ACK means the operator has seen and accepted ownership; it does not mean mitigation or resolution. In bank fail-closed mode, acknowledgement reason is required. The mutation handler does not write AuditService directly.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1417,11 +1447,11 @@ components:
     TrustIncidentMaterializationResponse:
       type: object
       additionalProperties: false
-      required: [status, signal_count, incident_count, incidents]
+      required: [status, signal_count, incident_count, requested_signal_count, materialized_count, failed_signal_count, partial_failure, incidents]
       properties:
         status:
           type: string
-          enum: [AVAILABLE]
+          enum: [AVAILABLE, PARTIAL, FAILED, REQUESTED, AUDIT_ATTEMPTED, BUSINESS_COMMITTING, BUSINESS_COMMITTED, SUCCESS_AUDIT_PENDING, SUCCESS_AUDIT_RECORDED, EVIDENCE_PENDING, EVIDENCE_CONFIRMED, COMMITTED, COMMITTED_DEGRADED, REJECTED]
         signal_count:
           type: integer
           minimum: 0
@@ -1430,11 +1460,71 @@ components:
           type: integer
           minimum: 0
           maximum: 100
+        requested_signal_count:
+          type: integer
+          minimum: 0
+          maximum: 100
+        materialized_count:
+          type: integer
+          minimum: 0
+          maximum: 100
+        failed_signal_count:
+          type: integer
+          minimum: 0
+          maximum: 100
+        partial_failure:
+          type: boolean
+        failure_reason:
+          type: string
+          nullable: true
+          enum: [PERSISTENCE_UNAVAILABLE, COMMITTED_DEGRADED, FAILED]
         incidents:
           type: array
           maxItems: 100
           items:
             $ref: "#/components/schemas/TrustIncidentResponse"
+    TrustSignalPreviewResponse:
+      type: object
+      additionalProperties: false
+      required: [preview, signal_count, signals]
+      properties:
+        preview:
+          type: boolean
+          enum: [true]
+        signal_count:
+          type: integer
+          minimum: 0
+          maximum: 100
+        signals:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/TrustSignal"
+    TrustSignal:
+      type: object
+      additionalProperties: false
+      required: [type, source]
+      properties:
+        type:
+          type: string
+          enum: [OUTBOX_TERMINAL_FAILURE, OUTBOX_PUBLISH_CONFIRMATION_UNKNOWN, OUTBOX_PROJECTION_MISMATCH, REGULATED_MUTATION_RECOVERY_REQUIRED, REGULATED_MUTATION_COMMITTED_DEGRADED, EVIDENCE_CONFIRMATION_FAILED, AUDIT_DEGRADATION_UNRESOLVED, EXTERNAL_ANCHOR_GAP, COVERAGE_UNAVAILABLE, TRUST_AUTHORITY_UNAVAILABLE]
+        severity:
+          type: string
+          nullable: true
+          enum: [CRITICAL, HIGH, MEDIUM]
+        source:
+          type: string
+          maxLength: 120
+        fingerprint:
+          type: string
+          nullable: true
+          description: Bounded deterministic fingerprint; not raw payload data.
+        evidenceRefs:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            maxLength: 300
     TrustIncidentResponse:
       type: object
       additionalProperties: false
