@@ -11,6 +11,9 @@ import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.regulated.RegulatedMutationRecoveryService;
 import com.frauddetection.alert.service.DecisionOutboxStatus;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.trust.TrustIncidentService;
+import com.frauddetection.alert.trust.TrustIncidentSummary;
+import com.frauddetection.alert.trust.TrustSignalCollector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -47,6 +50,8 @@ public class SystemTrustLevelController implements ApplicationRunner {
     private final String transactionMode;
     private final boolean outboxPublisherEnabled;
     private final boolean evidenceConfirmationEnabled;
+    private final TrustIncidentService trustIncidentService;
+    private final TrustSignalCollector trustSignalCollector;
 
     public SystemTrustLevelController(
             boolean publicationEnabled,
@@ -74,7 +79,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
             AlertServiceMetrics ignoredMetrics
     ) {
         this(publicationEnabled, publicationRequired, failClosed, bankModeFailClosed, trustAuthorityEnabled, signingRequired,
-                Duration.ofMinutes(10), bankModeFailClosed ? "REQUIRED" : "OFF", true, true, externalAuditIntegrityService, externalAuditAnchorSink, null, null, null, null);
+                Duration.ofMinutes(10), bankModeFailClosed ? "REQUIRED" : "OFF", true, true, externalAuditIntegrityService, externalAuditAnchorSink, null, null, null, null, null, null);
     }
 
     @Autowired
@@ -94,7 +99,9 @@ public class SystemTrustLevelController implements ApplicationRunner {
             AuditDegradationService auditDegradationService,
             AlertRepository alertRepository,
             ObjectProvider<TransactionalOutboxRecordRepository> outboxRepository,
-            RegulatedMutationRecoveryService regulatedMutationRecoveryService
+            RegulatedMutationRecoveryService regulatedMutationRecoveryService,
+            ObjectProvider<TrustIncidentService> trustIncidentService,
+            ObjectProvider<TrustSignalCollector> trustSignalCollector
     ) {
         this.publicationEnabled = publicationEnabled;
         this.publicationRequired = publicationRequired;
@@ -112,6 +119,8 @@ public class SystemTrustLevelController implements ApplicationRunner {
         this.transactionMode = transactionMode == null || transactionMode.isBlank() ? "OFF" : transactionMode.trim().toUpperCase();
         this.outboxPublisherEnabled = outboxPublisherEnabled;
         this.evidenceConfirmationEnabled = evidenceConfirmationEnabled;
+        this.trustIncidentService = trustIncidentService == null ? null : trustIncidentService.getIfAvailable();
+        this.trustSignalCollector = trustSignalCollector == null ? null : trustSignalCollector.getIfAvailable();
     }
 
     public SystemTrustLevelController(
@@ -173,7 +182,9 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 auditDegradationService,
                 alertRepository,
                 null,
-                regulatedMutationRecoveryService
+                regulatedMutationRecoveryService,
+                null,
+                null
         );
     }
 
@@ -219,7 +230,13 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 transactionMode,
                 transactionCapabilityStatus(),
                 outboxDeliveryMode(),
-                evidenceConfirmationEnabled ? "ENABLED" : "DISABLED"
+                evidenceConfirmationEnabled ? "ENABLED" : "DISABLED",
+                live.openCriticalIncidentCount(),
+                live.openHighIncidentCount(),
+                live.unacknowledgedCriticalIncidentCount(),
+                live.oldestOpenIncidentAgeSeconds(),
+                live.topIncidentTypes(),
+                live.incidentHealthStatus()
         );
     }
 
@@ -278,6 +295,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
         long repeatedRecoveryFailureCount = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.repeatedRecoveryFailureCount();
         Long oldestRecoveryRequiredAgeSeconds = regulatedMutationRecoveryService == null ? null : regulatedMutationRecoveryService.oldestRecoveryRequiredAgeSeconds();
         OutboxState outboxState = outboxState();
+        TrustIncidentSummary incidentSummary = trustIncidentSummary();
         try {
             coverage = externalAuditIntegrityService.coverage("alert-service", 100);
             coverageStatus = coverage.coverageStatus();
@@ -315,7 +333,9 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 && committedDegradedCount == 0
                 && evidenceConfirmationFailedCount == 0
                 && repeatedRecoveryFailureCount == 0
-                && oldestRecoveryRequiredAgeSeconds == null;
+                && oldestRecoveryRequiredAgeSeconds == null
+                && incidentSummary.openCriticalIncidentCount() == 0
+                && incidentSummary.unacknowledgedCriticalIncidentCount() == 0;
         if (healthy && outboxState.reasonCode() != null) {
             healthy = false;
         }
@@ -343,6 +363,12 @@ public class SystemTrustLevelController implements ApplicationRunner {
         if (reasonCode == null && repeatedRecoveryFailureCount > 0) {
             reasonCode = "REGULATED_MUTATION_REPEATED_RECOVERY_FAILURE";
         }
+        if (reasonCode == null && incidentSummary.unacknowledgedCriticalIncidentCount() > 0) {
+            reasonCode = "TRUST_INCIDENT_UNACKNOWLEDGED_CRITICAL";
+        }
+        if (reasonCode == null && incidentSummary.openCriticalIncidentCount() > 0) {
+            reasonCode = "TRUST_INCIDENT_OPEN_CRITICAL";
+        }
         return new LiveTrustState(
                 healthy,
                 coverageStatus,
@@ -369,8 +395,25 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 evidenceConfirmationFailedCount,
                 repeatedRecoveryFailureCount,
                 oldestRecoveryRequiredAgeSeconds,
-                reasonCode
+                reasonCode,
+                incidentSummary.openCriticalIncidentCount(),
+                incidentSummary.openHighIncidentCount(),
+                incidentSummary.unacknowledgedCriticalIncidentCount(),
+                incidentSummary.oldestOpenIncidentAgeSeconds(),
+                incidentSummary.topIncidentTypes(),
+                incidentSummary.incidentHealthStatus()
         );
+    }
+
+    private TrustIncidentSummary trustIncidentSummary() {
+        if (trustIncidentService == null) {
+            return TrustIncidentSummary.empty();
+        }
+        try {
+            return trustIncidentService.summary(trustSignalCollector == null ? List.of() : trustSignalCollector.collect());
+        } catch (RuntimeException exception) {
+            return new TrustIncidentSummary(1L, 0L, 1L, null, List.of("TRUST_INCIDENT_CONTROL_PLANE_UNAVAILABLE"), "CRITICAL");
+        }
     }
 
     private String witnessStatus() {
@@ -508,7 +551,13 @@ public class SystemTrustLevelController implements ApplicationRunner {
             long evidenceConfirmationFailedCount,
             long repeatedRecoveryFailureCount,
             Long oldestRecoveryRequiredAgeSeconds,
-            String reasonCode
+            String reasonCode,
+            long openCriticalIncidentCount,
+            long openHighIncidentCount,
+            long unacknowledgedCriticalIncidentCount,
+            Long oldestOpenIncidentAgeSeconds,
+            List<String> topIncidentTypes,
+            String incidentHealthStatus
     ) {
     }
 

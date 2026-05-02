@@ -20,6 +20,9 @@ public final class AnalystAuthority {
     public static final String OUTBOX_INSPECT = "outbox:inspect";
     public static final String OUTBOX_RECOVER = "outbox:recover";
     public static final String OUTBOX_RESOLVE = "outbox:resolve";
+    public static final String TRUST_INCIDENT_READ = "trust-incident:read";
+    public static final String TRUST_INCIDENT_ACK = "trust-incident:ack";
+    public static final String TRUST_INCIDENT_RESOLVE = "trust-incident:resolve";
 
     public static final Set<String> ALL = Set.of(
             ALERT_READ,
@@ -37,7 +40,10 @@ public final class AnalystAuthority {
             REGULATED_MUTATION_RECOVER,
             OUTBOX_INSPECT,
             OUTBOX_RECOVER,
-            OUTBOX_RESOLVE
+            OUTBOX_RESOLVE,
+            TRUST_INCIDENT_READ,
+            TRUST_INCIDENT_ACK,
+            TRUST_INCIDENT_RESOLVE
     );
 
     private AnalystAuthority() {

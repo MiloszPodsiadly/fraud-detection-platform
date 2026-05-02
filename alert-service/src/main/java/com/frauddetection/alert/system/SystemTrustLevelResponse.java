@@ -118,6 +118,24 @@ public record SystemTrustLevelResponse(
         String outboxDeliveryMode,
 
         @JsonProperty("evidence_confirmation_mode")
-        String evidenceConfirmationMode
+        String evidenceConfirmationMode,
+
+        @JsonProperty("open_critical_incident_count")
+        long openCriticalIncidentCount,
+
+        @JsonProperty("open_high_incident_count")
+        long openHighIncidentCount,
+
+        @JsonProperty("unacknowledged_critical_incident_count")
+        long unacknowledgedCriticalIncidentCount,
+
+        @JsonProperty("oldest_open_incident_age_seconds")
+        Long oldestOpenIncidentAgeSeconds,
+
+        @JsonProperty("top_incident_types")
+        java.util.List<String> topIncidentTypes,
+
+        @JsonProperty("incident_health_status")
+        String incidentHealthStatus
 ) {
 }

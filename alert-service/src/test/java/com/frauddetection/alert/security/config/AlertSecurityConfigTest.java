@@ -85,6 +85,11 @@ import com.frauddetection.alert.service.DecisionOutboxReconciliationService;
 import com.frauddetection.alert.service.FraudCaseManagementService;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
 import com.frauddetection.alert.system.SystemTrustLevelController;
+import com.frauddetection.alert.trust.TrustIncidentController;
+import com.frauddetection.alert.trust.TrustIncidentResponse;
+import com.frauddetection.alert.trust.TrustIncidentService;
+import com.frauddetection.alert.trust.TrustIncidentSummary;
+import com.frauddetection.alert.trust.TrustSignalCollector;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
 import org.junit.jupiter.api.BeforeEach;
@@ -137,6 +142,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         DecisionOutboxReconciliationController.class,
         RegulatedMutationRecoveryController.class,
         OutboxRecoveryController.class,
+        TrustIncidentController.class,
         SystemTrustLevelController.class,
         GovernanceAdvisoryController.class,
         GovernanceAuditController.class
@@ -213,6 +219,12 @@ class AlertSecurityConfigTest {
     private OutboxRecoveryService outboxRecoveryService;
 
     @MockBean
+    private TrustIncidentService trustIncidentService;
+
+    @MockBean
+    private TrustSignalCollector trustSignalCollector;
+
+    @MockBean
     private RegulatedMutationInspectionRateLimiter regulatedMutationInspectionRateLimiter;
 
     @MockBean
@@ -237,6 +249,29 @@ class AlertSecurityConfigTest {
     void allowCoverageRateLimit() {
         when(externalAuditCoverageRateLimiter.allow(any(), anyInt())).thenReturn(true);
         when(regulatedMutationInspectionRateLimiter.allow(any())).thenReturn(true);
+        when(trustSignalCollector.collect()).thenReturn(List.of());
+        when(trustIncidentService.listOpen(any())).thenReturn(List.of());
+        when(trustIncidentService.summary(any())).thenReturn(TrustIncidentSummary.empty());
+        TrustIncidentResponse incident = new TrustIncidentResponse(
+                "incident-1",
+                "OUTBOX_TERMINAL_FAILURE",
+                "CRITICAL",
+                "transactional_outbox",
+                "fingerprint",
+                "OPEN",
+                Instant.parse("2026-05-02T10:00:00Z"),
+                Instant.parse("2026-05-02T10:00:00Z"),
+                1,
+                List.of("outbox:event-1"),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+        );
+        when(trustIncidentService.acknowledge(eq("incident-1"), any(), any())).thenReturn(incident);
+        when(trustIncidentService.resolve(eq("incident-1"), any(), any())).thenReturn(incident);
     }
 
     @Test
@@ -303,6 +338,16 @@ class AlertSecurityConfigTest {
         mockMvc.perform(post("/api/v1/outbox/event-1/resolve-confirmation")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"resolution\":\"PUBLISHED\",\"evidence_reference\":{\"type\":\"BROKER_OFFSET\",\"reference\":\"topic=fraud-decisions,partition=0,offset=42\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/trust/incidents"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/v1/trust/incidents/incident-1/ack")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/v1/trust/incidents/incident-1/resolve")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"verified\",\"resolution_evidence\":{\"type\":\"RUNBOOK_STEP\",\"reference\":\"runbook-1\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/regulated-mutations/idem-1"))
                 .andExpect(status().isUnauthorized());
@@ -722,6 +767,22 @@ class AlertSecurityConfigTest {
                         .header("X-Idempotency-Key", "outbox-confirm-event-1-denied")
                         .content("{\"resolution\":\"PUBLISHED\",\"reason\":\"broker offset verified\",\"evidence_reference\":{\"type\":\"BROKER_OFFSET\",\"reference\":\"topic=fraud-decisions,partition=0,offset=42\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
                 .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/trust/incidents").with(demoUser("FRAUD_OPS_ADMIN")))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/trust/incidents/incident-1/ack")
+                        .with(demoUser("FRAUD_OPS_ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.incident_id").value("incident-1"));
+        mockMvc.perform(post("/api/v1/trust/incidents/incident-1/resolve")
+                        .with(demoUser("FRAUD_OPS_ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"verified\",\"resolution_evidence\":{\"type\":\"RUNBOOK_STEP\",\"reference\":\"runbook-1\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.incident_id").value("incident-1"));
+        mockMvc.perform(get("/api/v1/trust/incidents").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
+                .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/regulated-mutations/idem-1").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.idempotency_key").doesNotExist())
@@ -785,6 +846,8 @@ class AlertSecurityConfigTest {
                         .with(demoUser("ANALYST"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"resolution\":\"PUBLISHED\",\"evidence_reference\":{\"type\":\"BROKER_OFFSET\",\"reference\":\"topic=fraud-decisions,partition=0,offset=42\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/trust/incidents").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/regulated-mutations/idem-1").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
@@ -956,11 +1019,12 @@ class AlertSecurityConfigTest {
 
     @Test
     void shouldAllowReviewerToUpdateFraudCase() throws Exception {
-        when(fraudCaseManagementService.updateCase(eq("case-1"), any()))
+        when(fraudCaseManagementService.updateCase(eq("case-1"), any(), eq("case-update-1")))
                 .thenReturn(fraudCaseDocument());
 
         mockMvc.perform(patch("/api/v1/fraud-cases/case-1")
                         .with(demoUser("REVIEWER"))
+                        .header("X-Idempotency-Key", "case-update-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(updateFraudCaseRequest())))
                 .andExpect(status().isOk())
@@ -969,11 +1033,12 @@ class AlertSecurityConfigTest {
 
     @Test
     void shouldAllowFraudOpsAdminToUpdateFraudCase() throws Exception {
-        when(fraudCaseManagementService.updateCase(eq("case-1"), any()))
+        when(fraudCaseManagementService.updateCase(eq("case-1"), any(), eq("case-update-1")))
                 .thenReturn(fraudCaseDocument());
 
         mockMvc.perform(patch("/api/v1/fraud-cases/case-1")
                         .with(demoUser("FRAUD_OPS_ADMIN"))
+                        .header("X-Idempotency-Key", "case-update-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(updateFraudCaseRequest())))
                 .andExpect(status().isOk())
