@@ -707,6 +707,11 @@ class AlertSecurityConfigTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.event_id").value("event-1"))
                 .andExpect(jsonPath("$.payload").doesNotExist());
+        mockMvc.perform(post("/api/v1/outbox/event-1/resolve-confirmation")
+                        .with(demoUser("FRAUD_OPS_ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"resolution\":\"PUBLISHED\",\"reason\":\"broker offset verified\",\"evidence_reference\":{\"type\":\"BROKER_OFFSET\",\"reference\":\"topic=fraud-decisions,partition=0,offset=42\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
+                .andExpect(status().isBadRequest());
         mockMvc.perform(get("/api/v1/outbox/recovery/backlog").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
                 .andExpect(status().isForbidden());
         mockMvc.perform(post("/api/v1/outbox/recovery/run").with(authorities(AnalystAuthority.OUTBOX_INSPECT)))

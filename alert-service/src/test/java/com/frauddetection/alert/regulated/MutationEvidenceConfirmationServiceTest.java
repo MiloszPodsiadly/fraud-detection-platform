@@ -107,6 +107,33 @@ class MutationEvidenceConfirmationServiceTest {
     }
 
     @Test
+    void shouldDegradeCommittedCommandWhenOutboxIsTerminallyFailed() {
+        RegulatedMutationCommandRepository commandRepository = mock(RegulatedMutationCommandRepository.class);
+        TransactionalOutboxRecordRepository outboxRepository = mock(TransactionalOutboxRecordRepository.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        MutationEvidenceConfirmationService service = new MutationEvidenceConfirmationService(
+                commandRepository,
+                outboxRepository,
+                metrics,
+                false,
+                false
+        );
+        RegulatedMutationCommandDocument command = committedCommand();
+        when(commandRepository.findTop100ByStateInAndUpdatedAtBefore(any(), any())).thenReturn(List.of(command));
+        when(outboxRepository.findByMutationCommandId("command-1"))
+                .thenReturn(Optional.of(outbox(TransactionalOutboxStatus.FAILED_TERMINAL)));
+
+        int promoted = service.confirmPendingEvidence(100);
+
+        assertThat(promoted).isZero();
+        ArgumentCaptor<RegulatedMutationCommandDocument> captor = ArgumentCaptor.forClass(RegulatedMutationCommandDocument.class);
+        verify(commandRepository).save(captor.capture());
+        assertThat(captor.getValue().getState()).isEqualTo(RegulatedMutationState.COMMITTED_DEGRADED);
+        assertThat(captor.getValue().getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE);
+        assertThat(captor.getValue().getDegradationReason()).isEqualTo("OUTBOX_FAILED_TERMINAL");
+    }
+
+    @Test
     void shouldConfirmWhenExternalAnchorIsRequiredAndPublished() {
         Fixture fixture = new Fixture(true, false);
         RegulatedMutationCommandDocument command = committedCommand();
@@ -164,6 +191,24 @@ class MutationEvidenceConfirmationServiceTest {
         assertThat(promoted).isZero();
         verify(fixture.commandRepository, never()).save(any());
         verify(fixture.metrics).recordEvidenceConfirmationFailed("SIGNATURE_UNAVAILABLE");
+    }
+
+    @Test
+    void shouldDegradeWhenSignatureIsRequiredButInvalid() {
+        Fixture fixture = new Fixture(false, true);
+        RegulatedMutationCommandDocument command = committedCommand();
+        fixture.pending(command);
+        fixture.publishedOutbox();
+        fixture.externalEvidence(new AuditEventExternalEvidenceStatus(AuditExternalAnchorStatus.PUBLISHED, "INVALID"));
+
+        int promoted = fixture.service.confirmPendingEvidence(100);
+
+        assertThat(promoted).isZero();
+        verify(fixture.commandRepository).save(org.mockito.ArgumentMatchers.argThat(saved ->
+                saved.getState() == RegulatedMutationState.COMMITTED_DEGRADED
+                        && saved.getPublicStatus() == SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE
+                        && "SIGNATURE_INVALID".equals(saved.getDegradationReason())));
+        verify(fixture.metrics).recordEvidenceConfirmationFailed("SIGNATURE_INVALID");
     }
 
     private RegulatedMutationCommandDocument committedCommand() {

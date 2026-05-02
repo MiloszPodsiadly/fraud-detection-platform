@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -149,6 +150,29 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
+    void kafkaTemplateMustRemainOutsideBusinessRequestPath() throws Exception {
+        List<Path> javaFiles;
+        try (java.util.stream.Stream<Path> stream = Files.walk(Path.of("src/main/java/com/frauddetection/alert"))) {
+            javaFiles = stream
+                    .filter(path -> path.toString().endsWith(".java"))
+                    .filter(path -> {
+                        String normalized = path.toString().replace('\\', '/');
+                        return !normalized.endsWith("messaging/FraudDecisionEventPublisher.java")
+                                && !normalized.endsWith("config/KafkaConfig.java")
+                                && !normalized.endsWith("config/AlertKafkaConfig.java")
+                                && !normalized.contains("/messaging/");
+                    })
+                    .toList();
+        }
+
+        for (Path path : javaFiles) {
+            assertThat(Files.readString(path))
+                    .as("KafkaTemplate leak in " + path)
+                    .doesNotContain("KafkaTemplate");
+        }
+    }
+
+    @Test
     void transactionalOutboxRecordMustRemainAuthoritativeForDeliveryDecisions() throws Exception {
         String coordinator = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/outbox/OutboxPublisherCoordinator.java"
@@ -183,5 +207,20 @@ class RegulatedMutationArchitectureTest {
         assertThat(writer).contains("TransactionalOutboxRecordRepository");
         assertThat(writer).contains("outboxRepository.save(record");
         assertThat(writer).contains("TransactionalOutboxRecordRepository is required");
+    }
+
+    @Test
+    void docsMustNotClaimExactlyOnceOrDistributedAcidForFdp26A() throws Exception {
+        String readme = Files.readString(Path.of("../README.md"));
+        String api = Files.readString(Path.of("../docs/api-surface-v1.md"));
+        String security = Files.readString(Path.of("../docs/security-foundation-v1.md"));
+        String combined = readme + "\n" + api + "\n" + security;
+
+        assertThat(combined).doesNotContain("provides exactly-once");
+        assertThat(combined).doesNotContain("guarantees exactly-once");
+        assertThat(combined).doesNotContain("provides distributed ACID");
+        assertThat(combined).doesNotContain("guarantees distributed ACID");
+        assertThat(combined).contains("not distributed ACID");
+        assertThat(combined).contains("does not provide exactly-once");
     }
 }

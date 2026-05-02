@@ -61,6 +61,12 @@ class SystemTrustLevelControllerTest {
         assertThat(response.externalAnchorStrength()).isEqualTo("SIGNED_EXTERNAL");
         assertThat(response.coverageStatus()).isEqualTo("HEALTHY");
         assertThat(response.witnessStatus()).isEqualTo("PROVIDER_CAPABILITY_VERIFIED");
+        assertThat(response.transactionMode()).isEqualTo("REQUIRED");
+        assertThat(response.transactionCapabilityStatus()).isEqualTo("LOCAL_MONGO_TRANSACTION_REQUIRED");
+        assertThat(response.outboxDeliveryMode()).isEqualTo("TRANSACTIONAL_OUTBOX_AT_LEAST_ONCE");
+        assertThat(response.evidenceConfirmationMode()).isEqualTo("ENABLED");
+        assertThat(response.evidenceConfirmationPendingCount()).isZero();
+        assertThat(response.evidenceConfirmationFailedCount()).isZero();
     }
 
     @Test
@@ -78,6 +84,7 @@ class SystemTrustLevelControllerTest {
                 false,
                 false,
                 false,
+                false,
                 integrityService,
                 sink,
                 null
@@ -87,6 +94,8 @@ class SystemTrustLevelControllerTest {
 
         assertThat(response.guaranteeLevel()).isEqualTo("BEST_EFFORT");
         assertThat(response.externalAnchorStrength()).isEqualTo("UNSIGNED_EXTERNAL");
+        assertThat(response.transactionMode()).isEqualTo("OFF");
+        assertThat(response.transactionCapabilityStatus()).isEqualTo("NON_TRANSACTIONAL_RECOVERABLE_SAGA");
     }
 
     @Test
@@ -281,6 +290,8 @@ class SystemTrustLevelControllerTest {
                 .thenReturn(Optional.empty());
         when(recoveryService.staleProcessingLeaseCount()).thenReturn(1L);
         when(recoveryService.committedDegradedCount()).thenReturn(2L);
+        when(recoveryService.evidenceConfirmationPendingCount()).thenReturn(4L);
+        when(recoveryService.evidenceConfirmationFailedCount()).thenReturn(2L);
         when(recoveryService.repeatedRecoveryFailureCount()).thenReturn(3L);
         when(recoveryService.oldestRecoveryRequiredAgeSeconds()).thenReturn(120L);
         SystemTrustLevelController controller = new SystemTrustLevelController(
@@ -303,6 +314,8 @@ class SystemTrustLevelControllerTest {
         assertThat(response.guaranteeLevel()).isEqualTo("FDP24_DEGRADED");
         assertThat(response.staleProcessingLeaseCount()).isEqualTo(1L);
         assertThat(response.committedDegradedCount()).isEqualTo(2L);
+        assertThat(response.evidenceConfirmationPendingCount()).isEqualTo(4L);
+        assertThat(response.evidenceConfirmationFailedCount()).isEqualTo(2L);
         assertThat(response.repeatedRecoveryFailureCount()).isEqualTo(3L);
         assertThat(response.oldestRecoveryRequiredAgeSeconds()).isEqualTo(120L);
         assertThat(response.reasonCode()).isEqualTo("REGULATED_MUTATION_STALE_PROCESSING_LEASE");
