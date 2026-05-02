@@ -3,6 +3,8 @@ package com.frauddetection.alert.regulated.mutation.trustincident;
 import com.frauddetection.alert.audit.ResolutionEvidenceReference;
 import com.frauddetection.alert.audit.ResolutionEvidenceType;
 import com.frauddetection.alert.regulated.RegulatedMutationPartialCommitException;
+import com.frauddetection.alert.regulated.RegulatedMutationTransactionMode;
+import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import com.frauddetection.alert.trust.TrustIncidentAcknowledgementRequest;
 import com.frauddetection.alert.trust.TrustIncidentDocument;
 import com.frauddetection.alert.trust.TrustIncidentMaterializationException;
@@ -98,13 +100,81 @@ class TrustIncidentMutationHandlerTest {
                 1,
                 true,
                 "PERSISTENCE_UNAVAILABLE",
-                List.of(com.frauddetection.alert.trust.TrustIncidentResponse.from(incident()))
+                List.of(com.frauddetection.alert.trust.TrustIncidentResponse.from(incident())),
+                "PARTIAL",
+                "OFF",
+                false,
+                "TRUST_INCIDENT_REFRESH_PARTIAL_OFF_MODE"
         );
+        TrustIncidentRepository repository = mock(TrustIncidentRepository.class);
+        when(repository.findByActiveDedupeKey(any())).thenReturn(Optional.of(incident()));
+        RegulatedMutationTransactionRunner transactionRunner = mock(RegulatedMutationTransactionRunner.class);
+        when(transactionRunner.mode()).thenReturn(RegulatedMutationTransactionMode.OFF);
         when(materializer.materialize(any())).thenThrow(new TrustIncidentMaterializationException(partial, new DataAccessResourceFailureException("mongo down")));
 
-        assertThatThrownBy(() -> new TrustIncidentRefreshMutationHandler(materializer)
+        assertThatThrownBy(() -> new TrustIncidentRefreshMutationHandler(materializer, repository, transactionRunner, "PARTIAL")
                 .refresh(List.of(new TrustSignal("OUTBOX_TERMINAL_FAILURE", TrustIncidentSeverity.CRITICAL, "outbox", "fp", List.of()))))
                 .isInstanceOf(RegulatedMutationPartialCommitException.class);
+    }
+
+    @Test
+    void shouldNotMapRequiredTransactionRefreshFailureToPartialCommit() {
+        TrustIncidentMaterializer materializer = mock(TrustIncidentMaterializer.class);
+        TrustIncidentMaterializationResponse partial = new TrustIncidentMaterializationResponse(
+                "PARTIAL",
+                1,
+                1,
+                1,
+                1,
+                0,
+                true,
+                "PERSISTENCE_UNAVAILABLE",
+                List.of(com.frauddetection.alert.trust.TrustIncidentResponse.from(incident())),
+                "PARTIAL",
+                "REQUIRED",
+                true,
+                "TRUST_INCIDENT_REFRESH_ROLLED_BACK"
+        );
+        TrustIncidentRepository repository = mock(TrustIncidentRepository.class);
+        when(repository.findByActiveDedupeKey(any())).thenReturn(Optional.of(incident()));
+        RegulatedMutationTransactionRunner transactionRunner = mock(RegulatedMutationTransactionRunner.class);
+        when(transactionRunner.mode()).thenReturn(RegulatedMutationTransactionMode.REQUIRED);
+        when(materializer.materialize(any())).thenThrow(new TrustIncidentMaterializationException(partial, new DataAccessResourceFailureException("mongo down")));
+
+        assertThatThrownBy(() -> new TrustIncidentRefreshMutationHandler(materializer, repository, transactionRunner, "PARTIAL")
+                .refresh(List.of(new TrustSignal("OUTBOX_TERMINAL_FAILURE", TrustIncidentSeverity.CRITICAL, "outbox", "fp", List.of()))))
+                .isInstanceOf(TrustIncidentMaterializationException.class)
+                .isNotInstanceOf(RegulatedMutationPartialCommitException.class);
+    }
+
+    @Test
+    void shouldNotReportPartialCommitWhenNoPersistedIncidentCanBeVerified() {
+        TrustIncidentMaterializer materializer = mock(TrustIncidentMaterializer.class);
+        TrustIncidentMaterializationResponse partial = new TrustIncidentMaterializationResponse(
+                "PARTIAL",
+                1,
+                1,
+                1,
+                1,
+                0,
+                true,
+                "PERSISTENCE_UNAVAILABLE",
+                List.of(com.frauddetection.alert.trust.TrustIncidentResponse.from(incident())),
+                "PARTIAL",
+                "OFF",
+                false,
+                "TRUST_INCIDENT_REFRESH_PARTIAL_OFF_MODE"
+        );
+        TrustIncidentRepository repository = mock(TrustIncidentRepository.class);
+        when(repository.findByActiveDedupeKey(any())).thenReturn(Optional.empty());
+        RegulatedMutationTransactionRunner transactionRunner = mock(RegulatedMutationTransactionRunner.class);
+        when(transactionRunner.mode()).thenReturn(RegulatedMutationTransactionMode.OFF);
+        when(materializer.materialize(any())).thenThrow(new TrustIncidentMaterializationException(partial, new DataAccessResourceFailureException("mongo down")));
+
+        assertThatThrownBy(() -> new TrustIncidentRefreshMutationHandler(materializer, repository, transactionRunner, "PARTIAL")
+                .refresh(List.of(new TrustSignal("OUTBOX_TERMINAL_FAILURE", TrustIncidentSeverity.CRITICAL, "outbox", "fp", List.of()))))
+                .isInstanceOf(TrustIncidentMaterializationException.class)
+                .isNotInstanceOf(RegulatedMutationPartialCommitException.class);
     }
 
     private TrustIncidentDocument incident() {

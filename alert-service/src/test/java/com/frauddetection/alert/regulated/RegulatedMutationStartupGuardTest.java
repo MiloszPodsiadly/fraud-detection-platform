@@ -130,6 +130,90 @@ class RegulatedMutationStartupGuardTest {
     }
 
     @Test
+    void shouldRejectBankModeWhenTransactionCapabilityProbeIsDisabled() {
+        RegulatedMutationStartupGuard guard = guard(
+                RegulatedMutationTransactionMode.REQUIRED,
+                true,
+                new String[]{"bank"},
+                mock(PlatformTransactionManager.class),
+                true,
+                true,
+                true,
+                false,
+                "ATOMIC",
+                5,
+                mock(RegulatedMutationTransactionCapabilityProbe.class),
+                mock(TransactionalOutboxRecordRepository.class)
+        );
+
+        assertThatThrownBy(() -> guard.run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("transaction capability probe enabled");
+    }
+
+    @Test
+    void shouldRejectBankModeWhenTrustIncidentRefreshModeIsPartial() {
+        RegulatedMutationStartupGuard guard = guard(
+                RegulatedMutationTransactionMode.REQUIRED,
+                true,
+                new String[]{"bank"},
+                mock(PlatformTransactionManager.class),
+                true,
+                true,
+                true,
+                true,
+                "PARTIAL",
+                5,
+                mock(RegulatedMutationTransactionCapabilityProbe.class),
+                mock(TransactionalOutboxRecordRepository.class)
+        );
+
+        assertThatThrownBy(() -> guard.run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("refresh-mode=ATOMIC");
+    }
+
+    @Test
+    void shouldAllowBankModeWithAtomicTrustRefreshAndRequiredTransactions() {
+        RegulatedMutationStartupGuard guard = guard(
+                RegulatedMutationTransactionMode.REQUIRED,
+                true,
+                new String[]{"bank"},
+                mock(PlatformTransactionManager.class),
+                true,
+                true,
+                true,
+                true,
+                "ATOMIC",
+                5,
+                mock(RegulatedMutationTransactionCapabilityProbe.class),
+                mock(TransactionalOutboxRecordRepository.class)
+        );
+
+        assertThatCode(() -> guard.run(null)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void shouldAllowLocalPartialTrustRefreshWithTransactionModeOff() {
+        RegulatedMutationStartupGuard guard = guard(
+                RegulatedMutationTransactionMode.OFF,
+                false,
+                new String[]{"local"},
+                null,
+                true,
+                true,
+                true,
+                true,
+                "PARTIAL",
+                5,
+                null,
+                null
+        );
+
+        assertThatCode(() -> guard.run(null)).doesNotThrowAnyException();
+    }
+
+    @Test
     void shouldRunTransactionCapabilityProbeWhenRequiredModeIsEnabled() {
         PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
         RegulatedMutationTransactionCapabilityProbe probe = mock(RegulatedMutationTransactionCapabilityProbe.class);
@@ -193,6 +277,7 @@ class RegulatedMutationStartupGuardTest {
                 outboxRecoveryEnabled,
                 outboxConfirmationDualControlEnabled,
                 transactionCapabilityProbeEnabled,
+                "ATOMIC",
                 maxAttempts,
                 mode == RegulatedMutationTransactionMode.REQUIRED ? mock(RegulatedMutationTransactionCapabilityProbe.class) : null,
                 transactionManager == null ? null : mock(TransactionalOutboxRecordRepository.class)
@@ -212,6 +297,35 @@ class RegulatedMutationStartupGuardTest {
         return guard(mode, bankMode, profiles, transactionManager, outboxPublisherEnabled, outboxRecoveryEnabled, true, transactionCapabilityProbeEnabled, maxAttempts);
     }
 
+    private RegulatedMutationStartupGuard guard(
+            RegulatedMutationTransactionMode mode,
+            boolean bankMode,
+            String[] profiles,
+            PlatformTransactionManager transactionManager,
+            boolean outboxPublisherEnabled,
+            boolean outboxRecoveryEnabled,
+            boolean outboxConfirmationDualControlEnabled,
+            boolean transactionCapabilityProbeEnabled,
+            int maxAttempts,
+            RegulatedMutationTransactionCapabilityProbe probe,
+            TransactionalOutboxRecordRepository outboxRepository
+    ) {
+        return guard(
+                mode,
+                bankMode,
+                profiles,
+                transactionManager,
+                outboxPublisherEnabled,
+                outboxRecoveryEnabled,
+                outboxConfirmationDualControlEnabled,
+                transactionCapabilityProbeEnabled,
+                "ATOMIC",
+                maxAttempts,
+                probe,
+                outboxRepository
+        );
+    }
+
     @SuppressWarnings("unchecked")
     private RegulatedMutationStartupGuard guard(
             RegulatedMutationTransactionMode mode,
@@ -222,6 +336,7 @@ class RegulatedMutationStartupGuardTest {
             boolean outboxRecoveryEnabled,
             boolean outboxConfirmationDualControlEnabled,
             boolean transactionCapabilityProbeEnabled,
+            String trustIncidentRefreshMode,
             int maxAttempts,
             RegulatedMutationTransactionCapabilityProbe probe,
             TransactionalOutboxRecordRepository outboxRepository
@@ -249,6 +364,7 @@ class RegulatedMutationStartupGuardTest {
                 outboxRecoveryEnabled,
                 outboxConfirmationDualControlEnabled,
                 transactionCapabilityProbeEnabled,
+                trustIncidentRefreshMode,
                 maxAttempts
         );
     }

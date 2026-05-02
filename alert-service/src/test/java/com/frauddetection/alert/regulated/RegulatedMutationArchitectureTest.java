@@ -196,6 +196,7 @@ class RegulatedMutationArchitectureTest {
         assertThat(recovery).contains("RegulatedMutationCoordinator");
         assertThat(recovery).contains("regulatedMutationCoordinator.commit(command)");
         assertThat(recovery).doesNotContain("auditService.audit");
+        assertThat(recovery).doesNotContain("AuditOutcome.SUCCESS");
     }
 
     @Test
@@ -211,8 +212,14 @@ class RegulatedMutationArchitectureTest {
             String source = Files.readString(handler);
             assertThat(source).as("regulated mutation handler must not inject AuditService: " + handler)
                     .doesNotContain("AuditService");
+            assertThat(source).as("regulated mutation handler must not inject AuditEventRepository: " + handler)
+                    .doesNotContain("AuditEventRepository");
+            assertThat(source).as("regulated mutation handler must not inject PersistentAuditEventPublisher: " + handler)
+                    .doesNotContain("PersistentAuditEventPublisher");
             assertThat(source).as("regulated mutation handler must not write phase audit directly: " + handler)
                     .doesNotContain("auditService.audit");
+            assertThat(source).as("regulated mutation handler must not write SUCCESS audit directly: " + handler)
+                    .doesNotContain("AuditOutcome.SUCCESS");
         }
     }
 
