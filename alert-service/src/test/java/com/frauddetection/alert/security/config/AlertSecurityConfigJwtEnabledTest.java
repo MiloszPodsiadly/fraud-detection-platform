@@ -152,11 +152,12 @@ class AlertSecurityConfigJwtEnabledTest {
 
     @Test
     void shouldAllowFraudOpsAdminJwtToOverrideWriteChecks() throws Exception {
-        when(fraudCaseManagementService.updateCase(eq("case-1"), any()))
+        when(fraudCaseManagementService.updateCase(eq("case-1"), any(), eq("case-update-1")))
                 .thenReturn(fraudCaseDocument());
 
         mockMvc.perform(patch("/api/v1/fraud-cases/case-1")
                         .header("Authorization", "Bearer token-admin")
+                        .header("X-Idempotency-Key", "case-update-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(updateFraudCaseRequest())))
                 .andExpect(status().isOk())
@@ -165,11 +166,12 @@ class AlertSecurityConfigJwtEnabledTest {
 
     @Test
     void shouldAllowJwtMappedReviewerToUpdateFraudCase() throws Exception {
-        when(fraudCaseManagementService.updateCase(eq("case-1"), any()))
+        when(fraudCaseManagementService.updateCase(eq("case-1"), any(), eq("case-update-1")))
                 .thenReturn(fraudCaseDocument());
 
         mockMvc.perform(patch("/api/v1/fraud-cases/case-1")
                         .header("Authorization", "Bearer token-reviewer")
+                        .header("X-Idempotency-Key", "case-update-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(updateFraudCaseRequest())))
                 .andExpect(status().isOk())

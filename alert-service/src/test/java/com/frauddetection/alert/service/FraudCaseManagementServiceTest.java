@@ -2,17 +2,20 @@ package com.frauddetection.alert.service;
 
 import com.frauddetection.alert.api.UpdateFraudCaseRequest;
 import com.frauddetection.alert.audit.AuditAction;
-import com.frauddetection.alert.audit.AuditMutationRecorder;
-import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
 import com.frauddetection.alert.audit.AuditResourceType;
-import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.persistence.FraudCaseRepository;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
+import com.frauddetection.alert.regulated.RegulatedMutationCommand;
+import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
+import com.frauddetection.alert.regulated.RegulatedMutationExecutionContext;
+import com.frauddetection.alert.regulated.RegulatedMutationResult;
+import com.frauddetection.alert.regulated.RegulatedMutationState;
+import com.frauddetection.alert.regulated.mutation.fraudcase.FraudCaseUpdateMutationHandler;
 import com.frauddetection.alert.security.principal.AnalystActorResolver;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.model.Money;
@@ -28,7 +31,6 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -42,10 +44,9 @@ class FraudCaseManagementServiceTest {
     void shouldCreateRapidTransferCaseWithGroupedTransactionDetails() {
         FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
         ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
-        AuditService auditService = mock(AuditService.class);
         AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
-        FraudCaseManagementService service = new FraudCaseManagementService(fraudCaseRepository, scoredTransactionRepository, new AuditMutationRecorder(auditService), analystActorResolver, metrics);
+        FraudCaseManagementService service = service(fraudCaseRepository, scoredTransactionRepository, analystActorResolver, metrics, mock(RegulatedMutationCoordinator.class));
 
         var previousTransaction = scoredTransaction("rapid-txn-1", "rapid-customer-1", new BigDecimal("10000.00"));
         var currentEvent = TransactionFixtures.scoredTransaction()
@@ -92,10 +93,9 @@ class FraudCaseManagementServiceTest {
     void shouldBackfillMissingGroupedTransactionsWhenCaseIsRead() {
         FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
         ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
-        AuditService auditService = mock(AuditService.class);
         AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
-        FraudCaseManagementService service = new FraudCaseManagementService(fraudCaseRepository, scoredTransactionRepository, new AuditMutationRecorder(auditService), analystActorResolver, metrics);
+        FraudCaseManagementService service = service(fraudCaseRepository, scoredTransactionRepository, analystActorResolver, metrics, mock(RegulatedMutationCoordinator.class));
 
         FraudCaseDocument storedCase = new FraudCaseDocument();
         storedCase.setCaseId("case-1");
@@ -127,13 +127,13 @@ class FraudCaseManagementServiceTest {
     }
 
     @Test
-    void shouldAuditFraudCaseUpdate() {
+    void shouldSubmitFraudCaseUpdateThroughRegulatedCoordinator() {
         FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
         ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
-        AuditService auditService = mock(AuditService.class);
         AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
-        FraudCaseManagementService service = new FraudCaseManagementService(fraudCaseRepository, scoredTransactionRepository, new AuditMutationRecorder(auditService), analystActorResolver, metrics);
+        RegulatedMutationCoordinator coordinator = mock(RegulatedMutationCoordinator.class);
+        FraudCaseManagementService service = service(fraudCaseRepository, scoredTransactionRepository, analystActorResolver, metrics, coordinator);
 
         FraudCaseDocument storedCase = new FraudCaseDocument();
         storedCase.setCaseId("case-1");
@@ -148,34 +148,30 @@ class FraudCaseManagementServiceTest {
         when(fraudCaseRepository.save(any(FraudCaseDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(analystActorResolver.resolveActorId(eq("analyst-9"), eq("UPDATE_FRAUD_CASE"), eq("case-1")))
                 .thenReturn("principal-9");
+        when(coordinator.commit(any())).thenAnswer(invocation -> {
+            RegulatedMutationCommand<FraudCaseDocument, FraudCaseDocument> command = invocation.getArgument(0);
+            FraudCaseDocument result = command.mutation().execute(new RegulatedMutationExecutionContext("command-1"));
+            return new RegulatedMutationResult<>(RegulatedMutationState.EVIDENCE_PENDING, result);
+        });
 
         FraudCaseDocument updated = service.updateCase("case-1", new UpdateFraudCaseRequest(
                 FraudCaseStatus.CONFIRMED_FRAUD,
                 "analyst-9",
                 "Confirmed after review",
                 List.of("manual-review")
-        ));
+        ), "fraud-case-update-1");
 
         assertThat(updated.getStatus()).isEqualTo(FraudCaseStatus.CONFIRMED_FRAUD);
         assertThat(updated.getAnalystId()).isEqualTo("principal-9");
-        verify(auditService).audit(
-                AuditAction.UPDATE_FRAUD_CASE,
-                AuditResourceType.FRAUD_CASE,
-                "case-1",
-                "corr-rapid-txn-1",
-                "principal-9",
-                AuditOutcome.ATTEMPTED,
-                null
-        );
-        verify(auditService).audit(
-                AuditAction.UPDATE_FRAUD_CASE,
-                AuditResourceType.FRAUD_CASE,
-                "case-1",
-                "corr-rapid-txn-1",
-                "principal-9",
-                AuditOutcome.SUCCESS,
-                null
-        );
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<RegulatedMutationCommand<FraudCaseDocument, FraudCaseDocument>> commandCaptor =
+                ArgumentCaptor.forClass(RegulatedMutationCommand.class);
+        verify(coordinator).commit(commandCaptor.capture());
+        RegulatedMutationCommand<FraudCaseDocument, FraudCaseDocument> command = commandCaptor.getValue();
+        assertThat(command.idempotencyKey()).isEqualTo("fraud-case-update-1");
+        assertThat(command.action()).isEqualTo(AuditAction.UPDATE_FRAUD_CASE);
+        assertThat(command.resourceType()).isEqualTo(AuditResourceType.FRAUD_CASE);
+        assertThat(command.intent().intentHash()).isNotBlank();
         verify(metrics).recordFraudCaseUpdated();
     }
 
@@ -183,10 +179,10 @@ class FraudCaseManagementServiceTest {
     void shouldBlockFraudCaseUpdateWhenDurableAuditFails() {
         FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
         ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
-        AuditService auditService = mock(AuditService.class);
         AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
-        FraudCaseManagementService service = new FraudCaseManagementService(fraudCaseRepository, scoredTransactionRepository, new AuditMutationRecorder(auditService), analystActorResolver, metrics);
+        RegulatedMutationCoordinator coordinator = mock(RegulatedMutationCoordinator.class);
+        FraudCaseManagementService service = service(fraudCaseRepository, scoredTransactionRepository, analystActorResolver, metrics, coordinator);
 
         FraudCaseDocument storedCase = new FraudCaseDocument();
         storedCase.setCaseId("case-1");
@@ -196,26 +192,35 @@ class FraudCaseManagementServiceTest {
         when(fraudCaseRepository.findById("case-1")).thenReturn(Optional.of(storedCase));
         when(analystActorResolver.resolveActorId(eq("analyst-9"), eq("UPDATE_FRAUD_CASE"), eq("case-1")))
                 .thenReturn("principal-9");
-        doThrow(new AuditPersistenceUnavailableException()).when(auditService).audit(
-                AuditAction.UPDATE_FRAUD_CASE,
-                AuditResourceType.FRAUD_CASE,
-                "case-1",
-                "corr-rapid-txn-1",
-                "principal-9",
-                AuditOutcome.ATTEMPTED,
-                null
-        );
+        when(coordinator.commit(any())).thenThrow(new AuditPersistenceUnavailableException());
 
         assertThatThrownBy(() -> service.updateCase("case-1", new UpdateFraudCaseRequest(
                 FraudCaseStatus.CONFIRMED_FRAUD,
                 "analyst-9",
                 "Confirmed after review",
                 List.of("manual-review")
-        ))).isInstanceOf(AuditPersistenceUnavailableException.class);
+        ), "fraud-case-update-1")).isInstanceOf(AuditPersistenceUnavailableException.class);
 
         verify(fraudCaseRepository, never()).save(any(FraudCaseDocument.class));
         verify(metrics, never()).recordFraudCaseUpdated();
         assertThat(storedCase.getStatus()).isEqualTo(FraudCaseStatus.OPEN);
+    }
+
+    private FraudCaseManagementService service(
+            FraudCaseRepository fraudCaseRepository,
+            ScoredTransactionRepository scoredTransactionRepository,
+            AnalystActorResolver analystActorResolver,
+            AlertServiceMetrics metrics,
+            RegulatedMutationCoordinator coordinator
+    ) {
+        return new FraudCaseManagementService(
+                fraudCaseRepository,
+                scoredTransactionRepository,
+                analystActorResolver,
+                metrics,
+                new FraudCaseUpdateMutationHandler(fraudCaseRepository, metrics),
+                coordinator
+        );
     }
 
     private ScoredTransactionDocument scoredTransaction(String transactionId, String customerId, BigDecimal amount) {

@@ -28,6 +28,7 @@ public class RegulatedMutationRecoveryStrategyGuard implements ApplicationRunner
     @Override
     public void run(ApplicationArguments args) {
         List<RegulatedMutationDefinition> missing = RegulatedMutationDefinitions.all().stream()
+                .filter(RegulatedMutationDefinition::requiresRecoveryStrategy)
                 .filter(definition -> recoveryStrategies.stream()
                         .noneMatch(strategy -> strategy.supports(definition.action(), definition.resourceType())))
                 .toList();

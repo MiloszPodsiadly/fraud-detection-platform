@@ -229,6 +229,10 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
         document.setIntentDecision(intent.decision());
         document.setIntentReasonHash(intent.reasonHash());
         document.setIntentTagsHash(intent.tagsHash());
+        document.setIntentStatus(intent.status());
+        document.setIntentAssigneeHash(intent.assigneeHash());
+        document.setIntentNotesHash(intent.notesHash());
+        document.setIntentPayloadHash(intent.payloadHash());
     }
 
     private <R, S> RegulatedMutationCommandDocument claim(RegulatedMutationCommand<R, S> command, String idempotencyKey) {

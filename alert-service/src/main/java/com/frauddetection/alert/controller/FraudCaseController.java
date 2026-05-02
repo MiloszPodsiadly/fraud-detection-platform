@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -54,7 +55,11 @@ public class FraudCaseController {
     }
 
     @PatchMapping("/{caseId}")
-    public FraudCaseResponse updateCase(@PathVariable String caseId, @Valid @RequestBody UpdateFraudCaseRequest request) {
-        return responseMapper.toResponse(fraudCaseManagementService.updateCase(caseId, request));
+    public FraudCaseResponse updateCase(
+            @PathVariable String caseId,
+            @RequestHeader(name = "X-Idempotency-Key", required = true) String idempotencyKey,
+            @Valid @RequestBody UpdateFraudCaseRequest request
+    ) {
+        return responseMapper.toResponse(fraudCaseManagementService.updateCase(caseId, request, idempotencyKey));
     }
 }
