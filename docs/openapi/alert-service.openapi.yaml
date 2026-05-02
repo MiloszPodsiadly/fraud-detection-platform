@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: Alert Service API
-  version: FDP-26
-  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, external anchor verification, bounded evidence export, derived audit trust attestation, public trust key export, governance advisory lifecycle projection, and human-review audit. FDP-20 extends tamper evidence outside the primary database boundary. FDP-22 adds a pluggable object-store external anchor sink boundary, verified external anchor references, and explicit external_immutability_level=NONE|CONFIGURED|ENFORCED; no WORM or full immutability claim is valid unless the adapter verifies infrastructure controls and reports ENFORCED. FDP-23 adds a separate local-first audit trust authority for Ed25519 external anchor hash signatures and public verification key export; the alert-service does not hold the trust authority private key. FDP-24 adds fail-closed posture reporting, durable analyst-decision outbox/idempotency semantics, and publication-status source-of-truth semantics. FDP-25 adds a recoverable regulated mutation state machine for submit-decision writes with canonical intent, idempotent audit phase keys, bounded operational recovery, and rate-limited audited inspection endpoints. FDP-26 adds an optional REQUIRED local Mongo transaction boundary for submit-decision local commits plus a separate transactional outbox source of truth, bounded outbox recovery APIs, and asynchronous evidence confirmation. Audit integrity, trust authority signatures, trust attestation, and FDP-26 transaction mode do not imply certified WORM archive storage, legal notarization, SIEM integration, unbounded export, KMS/HSM signing unless explicitly integrated, distributed ACID across MongoDB/Kafka/external witnesses, exactly-once broker delivery, or final compliance archive.
+  version: FDP-26A
+  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, external anchor verification, bounded evidence export, derived audit trust attestation, public trust key export, governance advisory lifecycle projection, and human-review audit. FDP-20 extends tamper evidence outside the primary database boundary. FDP-22 adds a pluggable object-store external anchor sink boundary, verified external anchor references, and explicit external_immutability_level=NONE|CONFIGURED|ENFORCED; no WORM or full immutability claim is valid unless the adapter verifies infrastructure controls and reports ENFORCED. FDP-23 adds a separate local-first audit trust authority for Ed25519 external anchor hash signatures and public verification key export; the alert-service does not hold the trust authority private key. FDP-24 adds fail-closed posture reporting, durable analyst-decision outbox/idempotency semantics, and publication-status source-of-truth semantics. FDP-25 adds a recoverable regulated mutation state machine for submit-decision writes with canonical intent, idempotent audit phase keys, bounded operational recovery, and rate-limited audited inspection endpoints. FDP-26A adds a REQUIRED local Mongo transaction boundary option for submit-decision local commits plus a separate authoritative transactional outbox record, bounded outbox recovery APIs, and asynchronous evidence confirmation. Audit integrity, trust authority signatures, trust attestation, and FDP-26A transaction mode do not imply certified WORM archive storage, legal notarization, SIEM integration, unbounded export, KMS/HSM signing unless explicitly integrated, distributed ACID across MongoDB/Kafka/external witnesses, exactly-once broker delivery, pre-commit/finalize commit, or final compliance archive.
 servers:
   - url: http://localhost:8085
 paths:
@@ -349,7 +349,7 @@ paths:
   /system/trust-level:
     get:
       summary: Get deployment trust posture
-      description: Requires audit:verify. Returns bounded live deployment posture for external audit anchoring and FDP-26 local transaction/outbox modes. BEST_EFFORT and FDP24_DEGRADED must not be marketed as FDP-24 healthy fail-closed mode. SIGNED_EXTERNAL means trust-authority signing is enabled and required; it is not WORM, notarization, SIEM, mTLS, or legal trust. FDP24_HEALTHY requires zero unresolved degradations, zero pending degradation resolutions, zero unknown outbox confirmations, zero pending outbox resolutions, zero terminal outbox failures, and no regulated mutation recovery/evidence degradation. transaction_mode describes the local Mongo transaction posture only; it is not distributed ACID or exactly-once delivery.
+      description: Requires audit:verify. Returns bounded live deployment posture for external audit anchoring and FDP-26A local transaction/outbox modes. BEST_EFFORT and FDP24_DEGRADED must not be marketed as FDP-24 healthy fail-closed mode. SIGNED_EXTERNAL means trust-authority signing is enabled and required; it is not WORM, notarization, SIEM, mTLS, or legal trust. FDP24_HEALTHY requires zero unresolved degradations, zero pending degradation resolutions, zero unknown outbox confirmations, zero publish-attempted ambiguity, zero projection mismatches, zero pending outbox resolutions, zero terminal outbox failures, and no regulated mutation recovery/evidence degradation. transaction_mode describes the local Mongo transaction posture only; it is not distributed ACID or exactly-once delivery.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -480,7 +480,7 @@ paths:
   /api/v1/outbox/recovery/backlog:
     get:
       summary: Inspect transactional outbox recovery backlog
-      description: Requires outbox:inspect. Returns bounded counts for FDP-26 transactional outbox records. This endpoint is operational metadata only and never returns event payloads, transaction data, customer/account/card identifiers, decision notes, response bodies, raw exception details, or unbounded exports.
+      description: Requires outbox:inspect. Returns bounded counts for FDP-26A transactional outbox records. Transactional outbox records are authoritative; alert embedded outbox fields are projection/cache. This endpoint is operational metadata only and never returns event payloads, transaction data, customer/account/card identifiers, decision notes, response bodies, raw exception details, or unbounded exports.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -498,7 +498,7 @@ paths:
   /api/v1/outbox/recovery/run:
     post:
       summary: Run bounded transactional outbox recovery
-      description: Requires outbox:recover. Releases stale PROCESSING leases and runs a bounded transactional outbox publish pass. Delivery remains at-least-once; this endpoint does not provide exactly-once delivery, direct request-path publishing, workflow automation, rollback, or unbounded repair.
+      description: Requires outbox:recover. Releases stale PROCESSING leases, moves stale PUBLISH_ATTEMPTED records to confirmation-unknown instead of normal retry, repairs bounded projection mismatches, and runs a bounded transactional outbox publish pass. Delivery remains at-least-once; this endpoint does not provide exactly-once delivery, direct request-path publishing, workflow automation, rollback, or unbounded repair.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -516,13 +516,20 @@ paths:
   /api/v1/outbox/{eventId}/resolve-confirmation:
     post:
       summary: Resolve transactional outbox confirmation-unknown state
-      description: Requires outbox:resolve. Resolves a PUBLISH_CONFIRMATION_UNKNOWN transactional outbox record as PUBLISHED or RECOVERY_REQUIRED with mandatory structured evidence. The response contains safe metadata only and does not expose the event payload. Resolution is an operational evidence action, not proof of exactly-once delivery or legal notarization.
+      description: Requires outbox:resolve and X-Idempotency-Key. Resolves a PUBLISH_CONFIRMATION_UNKNOWN transactional outbox record as PUBLISHED or RECOVERY_REQUIRED through the regulated mutation coordinator with mandatory reason and structured evidence. The response contains safe metadata only and does not expose the event payload. Resolution is an operational evidence action, not proof of exactly-once delivery or legal notarization.
       security:
         - bearerAuth: []
         - demoAuth: []
       parameters:
         - name: eventId
           in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+        - name: X-Idempotency-Key
+          in: header
           required: true
           schema:
             type: string
@@ -727,7 +734,7 @@ paths:
   /api/v1/alerts/{alertId}/decision:
     post:
       summary: Submit analyst decision
-      description: Records an analyst decision through the regulated mutation coordinator. X-Idempotency-Key is required. The coordinator stores a regulated mutation command with canonical intent fields, atomically claims execution with a bounded lease, writes ATTEMPTED audit before business mutation, and when app.regulated-mutations.transaction-mode=REQUIRED wraps the local commit in a Mongo transaction covering command state, alert business write, transactional_outbox_records insert, response snapshot, and local commit marker. Phase audit events use deterministic request ids regulated_command_id:ATTEMPTED, regulated_command_id:SUCCESS, and regulated_command_id:FAILED so recovery can bind existing evidence without duplicate success audit. The same idempotency key and request body replay the stored response snapshot; the same key with a different body returns 409; a missing key returns 400. Kafka publication is asynchronous from transactional_outbox_records and at-least-once unless consumers dedupe by event id. FraudDecisionEvent carries delivery=AT_LEAST_ONCE and dedupeKey=eventId. operation_status is mandatory: REJECTED_BEFORE_MUTATION maps to HTTP 503 with no command response body; IN_PROGRESS, RECOVERY_REQUIRED, and COMMIT_UNKNOWN map to HTTP 202; COMMITTED_EVIDENCE_PENDING means local SUCCESS audit was recorded and external/outbox evidence promotion remains pending; COMMITTED_EVIDENCE_CONFIRMED means local commit marker, success audit, and authoritative PUBLISHED outbox evidence are present; COMMITTED_EVIDENCE_INCOMPLETE means the business decision and outbox committed but local success audit/evidence completion degraded. FDP-26 is a local Mongo ACID boundary plus transactional outbox model; it is not distributed ACID across MongoDB, external witnesses, trust-authority signing, and Kafka, and it does not provide exactly-once broker delivery, WORM storage, legal notarization, SIEM integration, or certified archive evidence.
+      description: Records an analyst decision through the regulated mutation coordinator. X-Idempotency-Key is required. The coordinator stores a regulated mutation command with canonical intent fields, atomically claims execution with a bounded lease, writes ATTEMPTED audit before business mutation, and when app.regulated-mutations.transaction-mode=REQUIRED wraps the local commit in a Mongo transaction covering command state, alert business write, transactional_outbox_records insert, response snapshot, and local commit marker. Phase audit events use deterministic request ids regulated_command_id:ATTEMPTED, regulated_command_id:SUCCESS, and regulated_command_id:FAILED so recovery can bind existing evidence without duplicate success audit. The same idempotency key and request body replay the stored response snapshot; the same key with a different body returns 409; a missing key returns 400. Kafka publication is asynchronous from authoritative transactional_outbox_records and at-least-once unless consumers dedupe by event id. FraudDecisionEvent carries delivery=AT_LEAST_ONCE and dedupeKey=eventId. operation_status is mandatory: REJECTED_BEFORE_MUTATION maps to HTTP 503 with no command response body; IN_PROGRESS, RECOVERY_REQUIRED, and COMMIT_UNKNOWN map to HTTP 202; COMMITTED_EVIDENCE_PENDING means local SUCCESS audit was recorded and external/outbox evidence promotion remains pending; COMMITTED_EVIDENCE_CONFIRMED means local commit marker, success audit, authoritative PUBLISHED outbox evidence, and any configured external/signature evidence are present; COMMITTED_EVIDENCE_INCOMPLETE means the business decision and outbox committed but local success audit/evidence completion degraded. FDP-26A is a local Mongo ACID boundary plus transactional outbox foundation; it is not distributed ACID across MongoDB, external witnesses, trust-authority signing, and Kafka, and it does not provide exactly-once broker delivery, pre-commit/finalize evidence-gated commit, WORM storage, legal notarization, SIEM integration, or certified archive evidence. SUCCESS audit and external evidence remain outside the local Mongo transaction unless a future phase changes the commit model.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1033,7 +1040,7 @@ components:
     SystemTrustLevelResponse:
       type: object
       additionalProperties: false
-      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength, coverage_status, witness_status, signature_policy, required_publication_failures, local_status_unverified, missing_ranges, post_commit_audit_degraded, unresolved_degradation_count, pending_degradation_resolution_count, post_commit_audit_degraded_resolved, outbox_failed_terminal_count, terminal_outbox_failure_count, outbox_publish_confirmation_unknown_count, unknown_outbox_confirmation_count, pending_outbox_resolution_count, outbox_oldest_pending_age_seconds, outbox_oldest_ambiguous_age_seconds, regulated_mutation_recovery_required_count, stale_processing_lease_count, committed_degraded_count, repeated_recovery_failure_count, oldest_recovery_required_age_seconds, transaction_mode, outbox_delivery_mode, evidence_confirmation_mode]
+      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength, coverage_status, witness_status, signature_policy, required_publication_failures, local_status_unverified, missing_ranges, post_commit_audit_degraded, unresolved_degradation_count, pending_degradation_resolution_count, post_commit_audit_degraded_resolved, outbox_failed_terminal_count, outbox_pending_count, outbox_processing_count, outbox_publish_attempted_count, outbox_confirmation_unknown_count, outbox_projection_mismatch_count, terminal_outbox_failure_count, outbox_publish_confirmation_unknown_count, unknown_outbox_confirmation_count, pending_outbox_resolution_count, outbox_oldest_pending_age_seconds, outbox_oldest_ambiguous_age_seconds, regulated_mutation_recovery_required_count, stale_processing_lease_count, committed_degraded_count, repeated_recovery_failure_count, oldest_recovery_required_age_seconds, transaction_mode, outbox_delivery_mode, evidence_confirmation_mode]
       properties:
         guarantee_level:
           type: string
@@ -1087,6 +1094,28 @@ components:
           type: integer
           format: int64
           minimum: 0
+        outbox_pending_count:
+          type: integer
+          format: int64
+          minimum: 0
+        outbox_processing_count:
+          type: integer
+          format: int64
+          minimum: 0
+        outbox_publish_attempted_count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Records where a broker publish may have been attempted and must not be blindly retried.
+        outbox_confirmation_unknown_count:
+          type: integer
+          format: int64
+          minimum: 0
+        outbox_projection_mismatch_count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Projection/cache mismatch count; transactional_outbox_records remain authoritative.
         terminal_outbox_failure_count:
           type: integer
           format: int64
@@ -1475,13 +1504,17 @@ components:
     OutboxBacklogResponse:
       type: object
       additionalProperties: false
-      required: [pending_count, processing_count, confirmation_unknown_count, failed_retryable_count, failed_terminal_count, recovery_required_count, oldest_pending_age_seconds]
+      required: [pending_count, processing_count, publish_attempted_count, confirmation_unknown_count, failed_retryable_count, failed_terminal_count, recovery_required_count, projection_mismatch_count, oldest_pending_age_seconds]
       properties:
         pending_count:
           type: integer
           format: int64
           minimum: 0
         processing_count:
+          type: integer
+          format: int64
+          minimum: 0
+        publish_attempted_count:
           type: integer
           format: int64
           minimum: 0
@@ -1501,6 +1534,10 @@ components:
           type: integer
           format: int64
           minimum: 0
+        projection_mismatch_count:
+          type: integer
+          format: int64
+          minimum: 0
         oldest_pending_age_seconds:
           type: integer
           format: int64
@@ -1509,9 +1546,16 @@ components:
     OutboxRecoveryRunResponse:
       type: object
       additionalProperties: false
-      required: [released_stale_processing, publish_attempted]
+      required: [released_stale_processing, publish_attempted_marked_unknown, projection_repaired, publish_attempted]
       properties:
         released_stale_processing:
+          type: integer
+          minimum: 0
+        publish_attempted_marked_unknown:
+          type: integer
+          minimum: 0
+          description: Stale PUBLISH_ATTEMPTED records moved to confirmation-unknown instead of normal retry.
+        projection_repaired:
           type: integer
           minimum: 0
         publish_attempted:
@@ -1520,11 +1564,15 @@ components:
     OutboxConfirmationResolutionRequest:
       type: object
       additionalProperties: false
-      required: [resolution, evidence_reference]
+      required: [resolution, reason, evidence_reference]
       properties:
         resolution:
           type: string
           enum: [PUBLISHED, RECOVERY_REQUIRED]
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 300
         evidence_reference:
           $ref: "#/components/schemas/ResolutionEvidenceReference"
     OutboxRecordResponse:
