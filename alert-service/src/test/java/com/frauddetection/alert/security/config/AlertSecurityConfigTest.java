@@ -3,7 +3,10 @@ package com.frauddetection.alert.security.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
 import com.frauddetection.alert.api.SubmitAnalystDecisionResponse;
+import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
+import com.frauddetection.alert.api.FraudCaseResponse;
 import com.frauddetection.alert.api.UpdateFraudCaseRequest;
+import com.frauddetection.alert.api.UpdateFraudCaseResponse;
 import com.frauddetection.alert.assistant.AnalystCaseSummaryUseCase;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditDegradationEventDocument;
@@ -250,8 +253,8 @@ class AlertSecurityConfigTest {
         when(externalAuditCoverageRateLimiter.allow(any(), anyInt())).thenReturn(true);
         when(regulatedMutationInspectionRateLimiter.allow(any())).thenReturn(true);
         when(trustSignalCollector.collect()).thenReturn(List.of());
-        when(trustIncidentService.listOpen(any())).thenReturn(List.of());
-        when(trustIncidentService.summary(any())).thenReturn(TrustIncidentSummary.empty());
+        when(trustIncidentService.listOpen()).thenReturn(List.of());
+        when(trustIncidentService.summary()).thenReturn(TrustIncidentSummary.empty());
         TrustIncidentResponse incident = new TrustIncidentResponse(
                 "incident-1",
                 "OUTBOX_TERMINAL_FAILURE",
@@ -268,10 +271,11 @@ class AlertSecurityConfigTest {
                 null,
                 null,
                 null,
+                null,
                 null
         );
-        when(trustIncidentService.acknowledge(eq("incident-1"), any(), any())).thenReturn(incident);
-        when(trustIncidentService.resolve(eq("incident-1"), any(), any())).thenReturn(incident);
+        when(trustIncidentService.acknowledge(eq("incident-1"), any(), any(), any())).thenReturn(incident);
+        when(trustIncidentService.resolve(eq("incident-1"), any(), any(), any())).thenReturn(incident);
     }
 
     @Test
@@ -771,12 +775,14 @@ class AlertSecurityConfigTest {
                 .andExpect(status().isOk());
         mockMvc.perform(post("/api/v1/trust/incidents/incident-1/ack")
                         .with(demoUser("FRAUD_OPS_ADMIN"))
+                        .header("X-Idempotency-Key", "trust-ack-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.incident_id").value("incident-1"));
         mockMvc.perform(post("/api/v1/trust/incidents/incident-1/resolve")
                         .with(demoUser("FRAUD_OPS_ADMIN"))
+                        .header("X-Idempotency-Key", "trust-resolve-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"reason\":\"verified\",\"resolution_evidence\":{\"type\":\"RUNBOOK_STEP\",\"reference\":\"runbook-1\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
                 .andExpect(status().isOk())
@@ -1020,7 +1026,7 @@ class AlertSecurityConfigTest {
     @Test
     void shouldAllowReviewerToUpdateFraudCase() throws Exception {
         when(fraudCaseManagementService.updateCase(eq("case-1"), any(), eq("case-update-1")))
-                .thenReturn(fraudCaseDocument());
+                .thenReturn(updateFraudCaseResponse());
 
         mockMvc.perform(patch("/api/v1/fraud-cases/case-1")
                         .with(demoUser("REVIEWER"))
@@ -1028,13 +1034,13 @@ class AlertSecurityConfigTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(updateFraudCaseRequest())))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.caseId").value("case-1"));
+                .andExpect(jsonPath("$.case_id").value("case-1"));
     }
 
     @Test
     void shouldAllowFraudOpsAdminToUpdateFraudCase() throws Exception {
         when(fraudCaseManagementService.updateCase(eq("case-1"), any(), eq("case-update-1")))
-                .thenReturn(fraudCaseDocument());
+                .thenReturn(updateFraudCaseResponse());
 
         mockMvc.perform(patch("/api/v1/fraud-cases/case-1")
                         .with(demoUser("FRAUD_OPS_ADMIN"))
@@ -1042,7 +1048,7 @@ class AlertSecurityConfigTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(updateFraudCaseRequest())))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.caseId").value("case-1"));
+                .andExpect(jsonPath("$.case_id").value("case-1"));
     }
 
     private RequestPostProcessor demoUser(String roles) {
@@ -1090,6 +1096,39 @@ class AlertSecurityConfigTest {
         document.setTransactionIds(List.of());
         document.setTransactions(List.of());
         return document;
+    }
+
+    private UpdateFraudCaseResponse updateFraudCaseResponse() {
+        FraudCaseDocument document = fraudCaseDocument();
+        FraudCaseResponse updated = new FraudCaseResponse(
+                document.getCaseId(),
+                document.getCustomerId(),
+                null,
+                document.getStatus(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of()
+        );
+        return new UpdateFraudCaseResponse(
+                SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING,
+                null,
+                "idem-hash",
+                "case-1",
+                null,
+                updated,
+                null
+        );
     }
 
     private TransactionalOutboxRecordDocument outboxRecord(String eventId, TransactionalOutboxStatus status) {

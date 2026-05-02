@@ -1,11 +1,15 @@
 package com.frauddetection.alert.service;
 
 import com.frauddetection.alert.api.UpdateFraudCaseRequest;
+import com.frauddetection.alert.api.UpdateFraudCaseResponse;
+import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.mapper.AlertResponseMapper;
+import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.persistence.FraudCaseRepository;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
@@ -149,30 +153,118 @@ class FraudCaseManagementServiceTest {
         when(analystActorResolver.resolveActorId(eq("analyst-9"), eq("UPDATE_FRAUD_CASE"), eq("case-1")))
                 .thenReturn("principal-9");
         when(coordinator.commit(any())).thenAnswer(invocation -> {
-            RegulatedMutationCommand<FraudCaseDocument, FraudCaseDocument> command = invocation.getArgument(0);
+            RegulatedMutationCommand<FraudCaseDocument, UpdateFraudCaseResponse> command = invocation.getArgument(0);
             FraudCaseDocument result = command.mutation().execute(new RegulatedMutationExecutionContext("command-1"));
-            return new RegulatedMutationResult<>(RegulatedMutationState.EVIDENCE_PENDING, result);
+            return new RegulatedMutationResult<>(RegulatedMutationState.EVIDENCE_PENDING,
+                    command.responseMapper().response(result, RegulatedMutationState.EVIDENCE_PENDING));
         });
 
-        FraudCaseDocument updated = service.updateCase("case-1", new UpdateFraudCaseRequest(
+        UpdateFraudCaseResponse updated = service.updateCase("case-1", new UpdateFraudCaseRequest(
                 FraudCaseStatus.CONFIRMED_FRAUD,
                 "analyst-9",
                 "Confirmed after review",
                 List.of("manual-review")
         ), "fraud-case-update-1");
 
-        assertThat(updated.getStatus()).isEqualTo(FraudCaseStatus.CONFIRMED_FRAUD);
-        assertThat(updated.getAnalystId()).isEqualTo("principal-9");
+        assertThat(updated.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING);
+        assertThat(updated.updatedCase()).isNotNull();
+        assertThat(updated.updatedCase().status()).isEqualTo(FraudCaseStatus.CONFIRMED_FRAUD);
+        assertThat(updated.updatedCase().analystId()).isEqualTo("principal-9");
         @SuppressWarnings("unchecked")
-        ArgumentCaptor<RegulatedMutationCommand<FraudCaseDocument, FraudCaseDocument>> commandCaptor =
+        ArgumentCaptor<RegulatedMutationCommand<FraudCaseDocument, UpdateFraudCaseResponse>> commandCaptor =
                 ArgumentCaptor.forClass(RegulatedMutationCommand.class);
         verify(coordinator).commit(commandCaptor.capture());
-        RegulatedMutationCommand<FraudCaseDocument, FraudCaseDocument> command = commandCaptor.getValue();
+        RegulatedMutationCommand<FraudCaseDocument, UpdateFraudCaseResponse> command = commandCaptor.getValue();
         assertThat(command.idempotencyKey()).isEqualTo("fraud-case-update-1");
         assertThat(command.action()).isEqualTo(AuditAction.UPDATE_FRAUD_CASE);
         assertThat(command.resourceType()).isEqualTo(AuditResourceType.FRAUD_CASE);
         assertThat(command.intent().intentHash()).isNotBlank();
+        assertThat(command.requestHash()).isEqualTo(command.intent().payloadHash());
         verify(metrics).recordFraudCaseUpdated();
+    }
+
+    @Test
+    void shouldNotReturnTargetBusinessFieldsForInProgressFraudCaseUpdate() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
+        AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        RegulatedMutationCoordinator coordinator = mock(RegulatedMutationCoordinator.class);
+        FraudCaseManagementService service = service(fraudCaseRepository, scoredTransactionRepository, analystActorResolver, metrics, coordinator);
+        FraudCaseDocument storedCase = new FraudCaseDocument();
+        storedCase.setCaseId("case-1");
+        storedCase.setStatus(FraudCaseStatus.OPEN);
+        storedCase.setTransactionIds(List.of());
+        storedCase.setTransactions(List.of());
+
+        when(fraudCaseRepository.findById("case-1")).thenReturn(Optional.of(storedCase));
+        when(analystActorResolver.resolveActorId(eq("analyst-alias"), eq("UPDATE_FRAUD_CASE"), eq("case-1")))
+                .thenReturn("principal-9");
+        when(coordinator.commit(any())).thenAnswer(invocation -> {
+            RegulatedMutationCommand<FraudCaseDocument, UpdateFraudCaseResponse> command = invocation.getArgument(0);
+            return new RegulatedMutationResult<>(
+                    RegulatedMutationState.REQUESTED,
+                    command.statusResponseFactory().response(RegulatedMutationState.REQUESTED)
+            );
+        });
+
+        UpdateFraudCaseResponse response = service.updateCase("case-1", new UpdateFraudCaseRequest(
+                FraudCaseStatus.CONFIRMED_FRAUD,
+                "analyst-alias",
+                "Confirmed after review",
+                List.of("manual-review")
+        ), "fraud-case-update-1");
+
+        assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.IN_PROGRESS);
+        assertThat(response.updatedCase()).isNull();
+        assertThat(response.currentCaseSnapshot()).isNotNull();
+        assertThat(response.currentCaseSnapshot().status()).isEqualTo(FraudCaseStatus.OPEN);
+    }
+
+    @Test
+    void shouldHashFraudCaseRequestUsingResolvedActor() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
+        AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        RegulatedMutationCoordinator coordinator = mock(RegulatedMutationCoordinator.class);
+        FraudCaseManagementService service = service(fraudCaseRepository, scoredTransactionRepository, analystActorResolver, metrics, coordinator);
+        FraudCaseDocument storedCase = new FraudCaseDocument();
+        storedCase.setCaseId("case-1");
+        storedCase.setStatus(FraudCaseStatus.OPEN);
+        storedCase.setTransactionIds(List.of());
+        storedCase.setTransactions(List.of());
+
+        when(fraudCaseRepository.findById("case-1")).thenReturn(Optional.of(storedCase));
+        when(analystActorResolver.resolveActorId(any(), eq("UPDATE_FRAUD_CASE"), eq("case-1")))
+                .thenReturn("principal-9");
+        when(coordinator.commit(any())).thenAnswer(invocation -> {
+            RegulatedMutationCommand<FraudCaseDocument, UpdateFraudCaseResponse> command = invocation.getArgument(0);
+            return new RegulatedMutationResult<>(
+                    RegulatedMutationState.REQUESTED,
+                    command.statusResponseFactory().response(RegulatedMutationState.REQUESTED)
+            );
+        });
+
+        service.updateCase("case-1", new UpdateFraudCaseRequest(
+                FraudCaseStatus.CONFIRMED_FRAUD,
+                "analyst-alias-a",
+                "Confirmed after review",
+                List.of("manual-review")
+        ), "fraud-case-update-1");
+        service.updateCase("case-1", new UpdateFraudCaseRequest(
+                FraudCaseStatus.CONFIRMED_FRAUD,
+                "analyst-alias-b",
+                "Confirmed after review",
+                List.of("manual-review")
+        ), "fraud-case-update-2");
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<RegulatedMutationCommand<FraudCaseDocument, UpdateFraudCaseResponse>> commandCaptor =
+                ArgumentCaptor.forClass(RegulatedMutationCommand.class);
+        verify(coordinator, org.mockito.Mockito.times(2)).commit(commandCaptor.capture());
+        assertThat(commandCaptor.getAllValues().get(0).requestHash())
+                .isEqualTo(commandCaptor.getAllValues().get(1).requestHash());
     }
 
     @Test
@@ -219,7 +311,8 @@ class FraudCaseManagementServiceTest {
                 analystActorResolver,
                 metrics,
                 new FraudCaseUpdateMutationHandler(fraudCaseRepository, metrics),
-                coordinator
+                coordinator,
+                new FraudCaseResponseMapper(new AlertResponseMapper())
         );
     }
 

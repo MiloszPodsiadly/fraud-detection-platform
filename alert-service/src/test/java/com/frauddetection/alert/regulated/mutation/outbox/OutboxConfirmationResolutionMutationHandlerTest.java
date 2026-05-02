@@ -1,6 +1,5 @@
 package com.frauddetection.alert.regulated.mutation.outbox;
 
-import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.audit.ResolutionEvidenceReference;
 import com.frauddetection.alert.audit.ResolutionEvidenceType;
 import com.frauddetection.alert.outbox.OutboxConfirmationResolution;
@@ -70,7 +69,7 @@ class OutboxConfirmationResolutionMutationHandlerTest {
         return new Fixture(
                 repository,
                 mongoTemplate,
-                new OutboxConfirmationResolutionMutationHandler(repository, mongoTemplate, mock(AuditService.class), bankMode, dualControl)
+                new OutboxConfirmationResolutionMutationHandler(repository, mongoTemplate, bankMode, dualControl)
         );
     }
 

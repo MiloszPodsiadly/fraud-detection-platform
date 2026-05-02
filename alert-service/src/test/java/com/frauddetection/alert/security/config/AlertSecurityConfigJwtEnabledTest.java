@@ -3,7 +3,10 @@ package com.frauddetection.alert.security.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
 import com.frauddetection.alert.api.SubmitAnalystDecisionResponse;
+import com.frauddetection.alert.api.FraudCaseResponse;
+import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.api.UpdateFraudCaseRequest;
+import com.frauddetection.alert.api.UpdateFraudCaseResponse;
 import com.frauddetection.alert.assistant.AnalystCaseSummaryUseCase;
 import com.frauddetection.alert.controller.AlertController;
 import com.frauddetection.alert.controller.FraudCaseController;
@@ -153,7 +156,7 @@ class AlertSecurityConfigJwtEnabledTest {
     @Test
     void shouldAllowFraudOpsAdminJwtToOverrideWriteChecks() throws Exception {
         when(fraudCaseManagementService.updateCase(eq("case-1"), any(), eq("case-update-1")))
-                .thenReturn(fraudCaseDocument());
+                .thenReturn(updateFraudCaseResponse());
 
         mockMvc.perform(patch("/api/v1/fraud-cases/case-1")
                         .header("Authorization", "Bearer token-admin")
@@ -161,13 +164,13 @@ class AlertSecurityConfigJwtEnabledTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(updateFraudCaseRequest())))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.caseId").value("case-1"));
+                .andExpect(jsonPath("$.case_id").value("case-1"));
     }
 
     @Test
     void shouldAllowJwtMappedReviewerToUpdateFraudCase() throws Exception {
         when(fraudCaseManagementService.updateCase(eq("case-1"), any(), eq("case-update-1")))
-                .thenReturn(fraudCaseDocument());
+                .thenReturn(updateFraudCaseResponse());
 
         mockMvc.perform(patch("/api/v1/fraud-cases/case-1")
                         .header("Authorization", "Bearer token-reviewer")
@@ -175,7 +178,7 @@ class AlertSecurityConfigJwtEnabledTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(updateFraudCaseRequest())))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.caseId").value("case-1"));
+                .andExpect(jsonPath("$.case_id").value("case-1"));
     }
 
     private org.springframework.security.oauth2.jwt.Jwt jwt(String userId, List<String> groups) {
@@ -215,5 +218,38 @@ class AlertSecurityConfigJwtEnabledTest {
         document.setTransactionIds(List.of());
         document.setTransactions(List.of());
         return document;
+    }
+
+    private UpdateFraudCaseResponse updateFraudCaseResponse() {
+        FraudCaseDocument document = fraudCaseDocument();
+        FraudCaseResponse updated = new FraudCaseResponse(
+                document.getCaseId(),
+                document.getCustomerId(),
+                null,
+                document.getStatus(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of()
+        );
+        return new UpdateFraudCaseResponse(
+                SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING,
+                null,
+                "idem-hash",
+                "case-1",
+                null,
+                updated,
+                null
+        );
     }
 }

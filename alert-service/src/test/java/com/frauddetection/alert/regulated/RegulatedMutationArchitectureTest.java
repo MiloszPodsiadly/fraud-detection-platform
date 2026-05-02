@@ -199,6 +199,51 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
+    void regulatedMutationHandlersMustNotWritePhaseAudits() throws Exception {
+        List<Path> handlers;
+        try (java.util.stream.Stream<Path> stream = Files.walk(Path.of("src/main/java/com/frauddetection/alert/regulated/mutation"))) {
+            handlers = stream
+                    .filter(path -> path.toString().endsWith(".java"))
+                    .toList();
+        }
+
+        for (Path handler : handlers) {
+            String source = Files.readString(handler);
+            assertThat(source).as("regulated mutation handler must not inject AuditService: " + handler)
+                    .doesNotContain("AuditService");
+            assertThat(source).as("regulated mutation handler must not write phase audit directly: " + handler)
+                    .doesNotContain("auditService.audit");
+        }
+    }
+
+    @Test
+    void trustIncidentReadsMustRemainReadOnly() throws Exception {
+        String service = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/trust/TrustIncidentService.java"
+        ));
+        String listMethod = service.substring(service.indexOf("public List<TrustIncidentResponse> listOpen()"),
+                service.indexOf("public TrustIncidentResponse acknowledge("));
+        String summaryMethod = service.substring(service.indexOf("public TrustIncidentSummary summary()"),
+                service.indexOf("private RegulatedMutationIntent intent("));
+
+        assertThat(listMethod).doesNotContain("repository.save");
+        assertThat(listMethod).doesNotContain("materializer.materialize");
+        assertThat(summaryMethod).doesNotContain("repository.save");
+        assertThat(summaryMethod).doesNotContain("materializer.materialize");
+    }
+
+    @Test
+    void systemTrustLevelMustNotMaterializeTrustIncidents() throws Exception {
+        String source = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/system/SystemTrustLevelController.java"
+        ));
+
+        assertThat(source).doesNotContain("materializer.materialize");
+        assertThat(source).doesNotContain("trustSignalCollector.collect()");
+        assertThat(source).contains("trustIncidentService.summary()");
+    }
+
+    @Test
     void decisionOutboxWriterMustPersistTransactionalOutboxRecord() throws Exception {
         String writer = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/service/DecisionOutboxWriter.java"
