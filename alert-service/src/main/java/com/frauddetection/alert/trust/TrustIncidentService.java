@@ -249,7 +249,11 @@ public class TrustIncidentService {
                 0,
                 false,
                 state == RegulatedMutationState.COMMITTED_DEGRADED || state == RegulatedMutationState.FAILED ? state.name() : null,
-                List.of()
+                List.of(),
+                state.name(),
+                null,
+                false,
+                state == RegulatedMutationState.COMMITTED_DEGRADED || state == RegulatedMutationState.FAILED ? state.name() : null
         );
     }
 

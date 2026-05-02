@@ -306,6 +306,13 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
             transition(document, RegulatedMutationState.BUSINESS_COMMITTED, null);
             return result;
         } catch (RegulatedMutationPartialCommitException exception) {
+            if (transactionRunner.mode() == RegulatedMutationTransactionMode.REQUIRED) {
+                auditFailure(command, document, exception, "TRUST_INCIDENT_REFRESH_ROLLED_BACK");
+                document.setDegradationReason("TRUST_INCIDENT_REFRESH_ROLLED_BACK");
+                document.setExecutionStatus(RegulatedMutationExecutionStatus.FAILED);
+                transition(document, RegulatedMutationState.FAILED, "TRUST_INCIDENT_REFRESH_ROLLED_BACK");
+                throw new IllegalStateException("Regulated mutation partial commit is invalid when transaction-mode=REQUIRED.", exception);
+            }
             auditFailure(command, document, exception, exception.reasonCode());
             document.setResponseSnapshot(exception.responseSnapshot());
             document.setDegradationReason(exception.reasonCode());

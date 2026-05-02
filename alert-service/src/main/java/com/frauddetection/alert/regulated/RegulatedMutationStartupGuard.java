@@ -1,6 +1,7 @@
 package com.frauddetection.alert.regulated;
 
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
+import com.frauddetection.alert.trust.TrustIncidentRefreshMode;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
@@ -25,6 +26,7 @@ public class RegulatedMutationStartupGuard implements ApplicationRunner {
     private final boolean outboxRecoveryEnabled;
     private final boolean outboxConfirmationDualControlEnabled;
     private final boolean transactionCapabilityProbeEnabled;
+    private final TrustIncidentRefreshMode trustIncidentRefreshMode;
     private final int maxAttempts;
 
     public RegulatedMutationStartupGuard(
@@ -38,6 +40,7 @@ public class RegulatedMutationStartupGuard implements ApplicationRunner {
             @Value("${app.outbox.recovery.enabled:true}") boolean outboxRecoveryEnabled,
             @Value("${app.outbox.confirmation.dual-control.enabled:false}") boolean outboxConfirmationDualControlEnabled,
             @Value("${app.regulated-mutations.transaction-capability-probe.enabled:true}") boolean transactionCapabilityProbeEnabled,
+            @Value("${app.trust-incidents.refresh-mode:ATOMIC}") String trustIncidentRefreshMode,
             @Value("${app.outbox.max-attempts:${app.alert.decision-outbox.max-attempts:5}}") int maxAttempts
     ) {
         this.transactionRunner = transactionRunner;
@@ -50,6 +53,7 @@ public class RegulatedMutationStartupGuard implements ApplicationRunner {
         this.outboxRecoveryEnabled = outboxRecoveryEnabled;
         this.outboxConfirmationDualControlEnabled = outboxConfirmationDualControlEnabled;
         this.transactionCapabilityProbeEnabled = transactionCapabilityProbeEnabled;
+        this.trustIncidentRefreshMode = TrustIncidentRefreshMode.parse(trustIncidentRefreshMode);
         this.maxAttempts = maxAttempts;
     }
 
@@ -72,6 +76,12 @@ public class RegulatedMutationStartupGuard implements ApplicationRunner {
         }
         if (transactionManager == null) {
             throw new IllegalStateException("FDP-26 transaction-mode=REQUIRED requires a Mongo transaction manager.");
+        }
+        if (!transactionCapabilityProbeEnabled) {
+            throw new IllegalStateException("FDP-26 prod-like/bank mode requires transaction capability probe enabled.");
+        }
+        if (trustIncidentRefreshMode != TrustIncidentRefreshMode.ATOMIC) {
+            throw new IllegalStateException("FDP-26 prod-like/bank mode requires app.trust-incidents.refresh-mode=ATOMIC.");
         }
         if (!outboxPublisherEnabled) {
             throw new IllegalStateException("FDP-26 prod-like/bank mode requires outbox publisher enabled.");

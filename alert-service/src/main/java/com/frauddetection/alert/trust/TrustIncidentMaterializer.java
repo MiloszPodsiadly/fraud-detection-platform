@@ -58,7 +58,11 @@ public class TrustIncidentMaterializer {
                         failed,
                         !incidents.isEmpty(),
                         "PERSISTENCE_UNAVAILABLE",
-                        List.copyOf(incidents)
+                        List.copyOf(incidents),
+                        incidents.isEmpty() ? "FAILED" : "PARTIAL",
+                        null,
+                        false,
+                        "PERSISTENCE_UNAVAILABLE"
                 );
                 throw new TrustIncidentMaterializationException(response, exception);
             }
@@ -72,7 +76,11 @@ public class TrustIncidentMaterializer {
                 0,
                 false,
                 null,
-                List.copyOf(incidents)
+                List.copyOf(incidents),
+                "AVAILABLE",
+                null,
+                false,
+                null
         );
     }
 
