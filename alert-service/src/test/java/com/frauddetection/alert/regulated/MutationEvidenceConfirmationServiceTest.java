@@ -1,10 +1,20 @@
 package com.frauddetection.alert.regulated;
 
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
+import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.audit.AuditEventDocument;
+import com.frauddetection.alert.audit.AuditEventRepository;
+import com.frauddetection.alert.audit.AuditExternalAnchorStatus;
+import com.frauddetection.alert.audit.AuditFailureCategory;
+import com.frauddetection.alert.audit.AuditOutcome;
+import com.frauddetection.alert.audit.AuditResourceType;
+import com.frauddetection.alert.audit.external.AuditEventExternalEvidenceStatus;
+import com.frauddetection.alert.audit.external.AuditEventPublicationStatusLookup;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
+import org.springframework.data.mongodb.core.MongoTemplate;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -96,6 +106,66 @@ class MutationEvidenceConfirmationServiceTest {
         verify(metrics).recordEvidenceConfirmationFailed("OUTBOX_NOT_PUBLISHED");
     }
 
+    @Test
+    void shouldConfirmWhenExternalAnchorIsRequiredAndPublished() {
+        Fixture fixture = new Fixture(true, false);
+        RegulatedMutationCommandDocument command = committedCommand();
+        fixture.pending(command);
+        fixture.publishedOutbox();
+        fixture.externalEvidence(new AuditEventExternalEvidenceStatus(AuditExternalAnchorStatus.PUBLISHED, null));
+
+        int promoted = fixture.service.confirmPendingEvidence(100);
+
+        assertThat(promoted).isEqualTo(1);
+        verify(fixture.commandRepository).save(org.mockito.ArgumentMatchers.argThat(saved ->
+                saved.getPublicStatus() == SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED));
+    }
+
+    @Test
+    void shouldKeepPendingWhenExternalAnchorIsRequiredButMissing() {
+        Fixture fixture = new Fixture(true, false);
+        RegulatedMutationCommandDocument command = committedCommand();
+        fixture.pending(command);
+        fixture.publishedOutbox();
+        fixture.externalEvidence(new AuditEventExternalEvidenceStatus(AuditExternalAnchorStatus.UNKNOWN, null));
+
+        int promoted = fixture.service.confirmPendingEvidence(100);
+
+        assertThat(promoted).isZero();
+        verify(fixture.commandRepository, never()).save(any());
+        verify(fixture.metrics).recordEvidenceConfirmationFailed("EXTERNAL_ANCHOR_MISSING");
+    }
+
+    @Test
+    void shouldConfirmWhenSignatureIsRequiredAndValid() {
+        Fixture fixture = new Fixture(false, true);
+        RegulatedMutationCommandDocument command = committedCommand();
+        fixture.pending(command);
+        fixture.publishedOutbox();
+        fixture.externalEvidence(new AuditEventExternalEvidenceStatus(AuditExternalAnchorStatus.PUBLISHED, "VALID"));
+
+        int promoted = fixture.service.confirmPendingEvidence(100);
+
+        assertThat(promoted).isEqualTo(1);
+        verify(fixture.commandRepository).save(org.mockito.ArgumentMatchers.argThat(saved ->
+                saved.getPublicStatus() == SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED));
+    }
+
+    @Test
+    void shouldKeepPendingWhenSignatureIsRequiredButUnavailable() {
+        Fixture fixture = new Fixture(false, true);
+        RegulatedMutationCommandDocument command = committedCommand();
+        fixture.pending(command);
+        fixture.publishedOutbox();
+        fixture.externalEvidence(new AuditEventExternalEvidenceStatus(AuditExternalAnchorStatus.PUBLISHED, null));
+
+        int promoted = fixture.service.confirmPendingEvidence(100);
+
+        assertThat(promoted).isZero();
+        verify(fixture.commandRepository, never()).save(any());
+        verify(fixture.metrics).recordEvidenceConfirmationFailed("SIGNATURE_UNAVAILABLE");
+    }
+
     private RegulatedMutationCommandDocument committedCommand() {
         RegulatedMutationCommandDocument command = new RegulatedMutationCommandDocument();
         command.setId("command-1");
@@ -115,5 +185,72 @@ class MutationEvidenceConfirmationServiceTest {
         document.setStatus(status);
         document.setCreatedAt(Instant.parse("2026-05-02T10:00:00Z"));
         return document;
+    }
+
+    private AuditEventDocument auditEvent() {
+        return new AuditEventDocument(
+                "audit-success-1",
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                "principal-7",
+                "principal-7",
+                List.of("FRAUD_OPS_ADMIN"),
+                "HUMAN",
+                List.of("decision:write"),
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT,
+                "alert-1",
+                Instant.parse("2026-05-02T10:00:00Z"),
+                "corr-1",
+                "request-1",
+                "alert-service",
+                "source_service:alert-service",
+                7L,
+                AuditOutcome.SUCCESS,
+                AuditFailureCategory.NONE,
+                null,
+                null,
+                "previous",
+                "hash",
+                "SHA-256",
+                "1.0"
+        );
+    }
+
+    private final class Fixture {
+        private final RegulatedMutationCommandRepository commandRepository = mock(RegulatedMutationCommandRepository.class);
+        private final TransactionalOutboxRecordRepository outboxRepository = mock(TransactionalOutboxRecordRepository.class);
+        private final AuditEventRepository auditEventRepository = mock(AuditEventRepository.class);
+        private final AuditEventPublicationStatusLookup publicationStatusLookup = mock(AuditEventPublicationStatusLookup.class);
+        private final MongoTemplate mongoTemplate = mock(MongoTemplate.class);
+        private final AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        private final MutationEvidenceConfirmationService service;
+
+        private Fixture(boolean externalAnchorRequired, boolean signatureRequired) {
+            this.service = new MutationEvidenceConfirmationService(
+                    commandRepository,
+                    outboxRepository,
+                    auditEventRepository,
+                    publicationStatusLookup,
+                    mongoTemplate,
+                    metrics,
+                    externalAnchorRequired,
+                    signatureRequired
+            );
+        }
+
+        private void pending(RegulatedMutationCommandDocument command) {
+            when(commandRepository.findTop100ByStateInAndUpdatedAtBefore(any(), any())).thenReturn(List.of(command));
+        }
+
+        private void publishedOutbox() {
+            when(outboxRepository.findByMutationCommandId("command-1")).thenReturn(Optional.of(outbox(TransactionalOutboxStatus.PUBLISHED)));
+        }
+
+        private void externalEvidence(AuditEventExternalEvidenceStatus status) {
+            AuditEventDocument auditEvent = auditEvent();
+            when(auditEventRepository.findByAuditId("audit-success-1")).thenReturn(Optional.of(auditEvent));
+            when(publicationStatusLookup.evidenceStatusesByAuditEventId(List.of(auditEvent)))
+                    .thenReturn(java.util.Map.of("audit-success-1", status));
+        }
     }
 }

@@ -147,4 +147,41 @@ class RegulatedMutationArchitectureTest {
         assertThat(coordinator).contains("FraudDecisionEventPublisher");
         assertThat(coordinator).contains("publisher.publish(record.getPayload())");
     }
+
+    @Test
+    void transactionalOutboxRecordMustRemainAuthoritativeForDeliveryDecisions() throws Exception {
+        String coordinator = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/outbox/OutboxPublisherCoordinator.java"
+        ));
+        String recovery = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/outbox/OutboxRecoveryService.java"
+        ));
+
+        assertThat(coordinator).doesNotContain("countByDecisionOutboxStatus");
+        assertThat(coordinator).doesNotContain("findTopByDecisionOutboxStatus");
+        assertThat(recovery).contains("TransactionalOutboxRecordRepository");
+        assertThat(recovery).doesNotContain("countByDecisionOutboxStatus");
+    }
+
+    @Test
+    void manualOutboxResolutionMustUseRegulatedMutationCoordinator() throws Exception {
+        String recovery = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/outbox/OutboxRecoveryService.java"
+        ));
+
+        assertThat(recovery).contains("RegulatedMutationCoordinator");
+        assertThat(recovery).contains("regulatedMutationCoordinator.commit(command)");
+        assertThat(recovery).doesNotContain("auditService.audit");
+    }
+
+    @Test
+    void decisionOutboxWriterMustPersistTransactionalOutboxRecord() throws Exception {
+        String writer = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/service/DecisionOutboxWriter.java"
+        ));
+
+        assertThat(writer).contains("TransactionalOutboxRecordRepository");
+        assertThat(writer).contains("outboxRepository.save(record");
+        assertThat(writer).contains("TransactionalOutboxRecordRepository is required");
+    }
 }

@@ -611,9 +611,9 @@ class AlertSecurityConfigTest {
                         Instant.parse("2026-05-01T00:00:00Z")
                 ));
         when(externalAuditAnchorSink.capabilities()).thenReturn(providerCapabilities());
-        when(outboxRecoveryService.backlog()).thenReturn(new OutboxBacklogResponse(1, 0, 0, 0, 0, 0, 5L));
-        when(outboxRecoveryService.recoverNow()).thenReturn(new OutboxRecoveryRunResponse(1, 1));
-        when(outboxRecoveryService.resolveConfirmation(eq("event-1"), any(), any()))
+        when(outboxRecoveryService.backlog()).thenReturn(new OutboxBacklogResponse(1, 0, 0, 0, 0, 0, 0, 0, 5L));
+        when(outboxRecoveryService.recoverNow()).thenReturn(new OutboxRecoveryRunResponse(1, 0, 0, 1));
+        when(outboxRecoveryService.resolveConfirmation(eq("event-1"), any(), any(), any()))
                 .thenReturn(outboxRecord("event-1", TransactionalOutboxStatus.PUBLISHED));
 
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("FRAUD_OPS_ADMIN")))
@@ -702,7 +702,8 @@ class AlertSecurityConfigTest {
         mockMvc.perform(post("/api/v1/outbox/event-1/resolve-confirmation")
                         .with(demoUser("FRAUD_OPS_ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"resolution\":\"PUBLISHED\",\"evidence_reference\":{\"type\":\"BROKER_OFFSET\",\"reference\":\"topic=fraud-decisions,partition=0,offset=42\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
+                        .header("X-Idempotency-Key", "outbox-confirm-event-1")
+                        .content("{\"resolution\":\"PUBLISHED\",\"reason\":\"broker offset verified\",\"evidence_reference\":{\"type\":\"BROKER_OFFSET\",\"reference\":\"topic=fraud-decisions,partition=0,offset=42\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.event_id").value("event-1"))
                 .andExpect(jsonPath("$.payload").doesNotExist());
@@ -713,7 +714,8 @@ class AlertSecurityConfigTest {
         mockMvc.perform(post("/api/v1/outbox/event-1/resolve-confirmation")
                         .with(authorities(AnalystAuthority.OUTBOX_INSPECT))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"resolution\":\"PUBLISHED\",\"evidence_reference\":{\"type\":\"BROKER_OFFSET\",\"reference\":\"topic=fraud-decisions,partition=0,offset=42\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
+                        .header("X-Idempotency-Key", "outbox-confirm-event-1-denied")
+                        .content("{\"resolution\":\"PUBLISHED\",\"reason\":\"broker offset verified\",\"evidence_reference\":{\"type\":\"BROKER_OFFSET\",\"reference\":\"topic=fraud-decisions,partition=0,offset=42\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/regulated-mutations/idem-1").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
                 .andExpect(status().isOk())
