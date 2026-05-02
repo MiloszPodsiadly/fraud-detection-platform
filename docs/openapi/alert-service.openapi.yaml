@@ -349,7 +349,7 @@ paths:
   /system/trust-level:
     get:
       summary: Get deployment trust posture
-      description: Requires audit:verify. Returns bounded live deployment posture for external audit anchoring and FDP-26A local transaction/outbox modes. BEST_EFFORT and FDP24_DEGRADED must not be marketed as FDP-24 healthy fail-closed mode. SIGNED_EXTERNAL means trust-authority signing is enabled and required; it is not WORM, notarization, SIEM, mTLS, or legal trust. FDP24_HEALTHY requires zero unresolved degradations, zero pending degradation resolutions, zero unknown outbox confirmations, zero publish-attempted ambiguity, zero projection mismatches, zero pending outbox resolutions, zero terminal outbox failures, and no regulated mutation recovery/evidence degradation. transaction_mode describes the local Mongo transaction posture only; it is not distributed ACID or exactly-once delivery.
+      description: Requires audit:verify. Returns bounded live deployment posture for external audit anchoring and FDP-26A local transaction/outbox modes. BEST_EFFORT and FDP24_DEGRADED must not be marketed as FDP-24 healthy fail-closed mode. SIGNED_EXTERNAL means trust-authority signing is enabled and required; it is not WORM, notarization, SIEM, mTLS, or legal trust. FDP24_HEALTHY requires zero unresolved degradations, zero pending degradation resolutions, zero unknown outbox confirmations, zero publish-attempted ambiguity, zero projection mismatches, zero pending outbox resolutions, zero terminal outbox failures, and no regulated mutation recovery/evidence degradation. transaction_mode and transaction_capability_status describe the local Mongo transaction posture only; they are not distributed ACID or exactly-once delivery.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1040,7 +1040,7 @@ components:
     SystemTrustLevelResponse:
       type: object
       additionalProperties: false
-      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength, coverage_status, witness_status, signature_policy, required_publication_failures, local_status_unverified, missing_ranges, post_commit_audit_degraded, unresolved_degradation_count, pending_degradation_resolution_count, post_commit_audit_degraded_resolved, outbox_failed_terminal_count, outbox_pending_count, outbox_processing_count, outbox_publish_attempted_count, outbox_confirmation_unknown_count, outbox_projection_mismatch_count, terminal_outbox_failure_count, outbox_publish_confirmation_unknown_count, unknown_outbox_confirmation_count, pending_outbox_resolution_count, outbox_oldest_pending_age_seconds, outbox_oldest_ambiguous_age_seconds, regulated_mutation_recovery_required_count, stale_processing_lease_count, committed_degraded_count, repeated_recovery_failure_count, oldest_recovery_required_age_seconds, transaction_mode, outbox_delivery_mode, evidence_confirmation_mode]
+      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength, coverage_status, witness_status, signature_policy, required_publication_failures, local_status_unverified, missing_ranges, post_commit_audit_degraded, unresolved_degradation_count, pending_degradation_resolution_count, post_commit_audit_degraded_resolved, outbox_failed_terminal_count, outbox_pending_count, outbox_processing_count, outbox_publish_attempted_count, outbox_confirmation_unknown_count, outbox_projection_mismatch_count, terminal_outbox_failure_count, outbox_publish_confirmation_unknown_count, unknown_outbox_confirmation_count, pending_outbox_resolution_count, outbox_oldest_pending_age_seconds, outbox_oldest_ambiguous_age_seconds, regulated_mutation_recovery_required_count, stale_processing_lease_count, committed_degraded_count, evidence_confirmation_pending_count, evidence_confirmation_failed_count, repeated_recovery_failure_count, oldest_recovery_required_age_seconds, transaction_mode, transaction_capability_status, outbox_delivery_mode, evidence_confirmation_mode]
       properties:
         guarantee_level:
           type: string
@@ -1157,6 +1157,16 @@ components:
           format: int64
           minimum: 0
           description: Number of regulated mutation commands committed with degraded evidence. Any value greater than zero degrades deployment trust posture.
+        evidence_confirmation_pending_count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Number of locally committed regulated mutation commands still awaiting asynchronous evidence confirmation.
+        evidence_confirmation_failed_count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Number of regulated mutation commands whose evidence confirmation failed into a degraded committed state. Any value greater than zero degrades deployment trust posture.
         repeated_recovery_failure_count:
           type: integer
           format: int64
@@ -1175,6 +1185,10 @@ components:
           type: string
           enum: [OFF, REQUIRED]
           description: Local regulated mutation transaction mode. REQUIRED is a Mongo local transaction boundary only, not distributed ACID.
+        transaction_capability_status:
+          type: string
+          enum: [LOCAL_MONGO_TRANSACTION_REQUIRED, NON_TRANSACTIONAL_RECOVERABLE_SAGA]
+          description: Interprets transaction_mode for FDP-26A. OFF is a recoverable saga posture, not a regulated local ACID commit boundary.
         outbox_delivery_mode:
           type: string
           enum: [TRANSACTIONAL_OUTBOX_AT_LEAST_ONCE, DISABLED]
