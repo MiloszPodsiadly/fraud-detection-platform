@@ -418,7 +418,7 @@ paths:
   /api/v1/trust/incidents/signals/preview:
     get:
       summary: Preview current trust signals
-      description: Requires trust-incident:read. Read-only endpoint that collects current bounded trust signals for operator inspection. It does not materialize incidents, create regulated command state, write mutation audit events, or save TrustIncidentDocument state.
+      description: Requires trust-incident:read. Read-only endpoint that collects current bounded trust signals for operator inspection. Applies a per-actor/IP in-memory rate limit and records a bounded read-access audit with endpoint_category=PREVIEW_TRUST_INCIDENT_SIGNALS, signal count, actor, and correlation id only. It does not persist raw evidence payloads, response bodies, customer/account/card identifiers, full URLs, materialize incidents, create regulated command state, write mutation audit events, or save TrustIncidentDocument state. In bank/prod mode, audit persistence failure returns no preview data.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -433,6 +433,14 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "429":
+          description: Trust signal preview rate limit exceeded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /api/v1/trust/incidents/{incidentId}/ack:
     post:
       summary: Acknowledge trust incident
