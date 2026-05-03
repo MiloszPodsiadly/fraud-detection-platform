@@ -1,6 +1,7 @@
 package com.frauddetection.alert.trust;
 
 import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.ResolutionEvidenceReference;
 import com.frauddetection.alert.audit.ResolutionEvidenceType;
@@ -12,6 +13,7 @@ import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.alert.regulated.mutation.trustincident.TrustIncidentAcknowledgeMutationHandler;
 import com.frauddetection.alert.regulated.mutation.trustincident.TrustIncidentRefreshMutationHandler;
 import com.frauddetection.alert.regulated.mutation.trustincident.TrustIncidentResolveMutationHandler;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -19,12 +21,15 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+@Tag("failure-injection")
+@Tag("invariant-proof")
 class TrustIncidentServiceTest {
 
     @Test
@@ -126,6 +131,31 @@ class TrustIncidentServiceTest {
         assertThat(captor.getValue().resourceId()).isEqualTo("trust-incidents");
         assertThat(captor.getValue().idempotencyKey()).isEqualTo("refresh-1");
         verify(refreshMutationHandler).refresh(signals);
+    }
+
+    @Test
+    void shouldNotAcknowledgeWhenRegulatedAuditPathIsUnavailable() {
+        TrustIncidentRepository repository = mock(TrustIncidentRepository.class);
+        RegulatedMutationCoordinator coordinator = mock(RegulatedMutationCoordinator.class);
+        TrustIncidentAcknowledgeMutationHandler acknowledgeMutationHandler = mock(TrustIncidentAcknowledgeMutationHandler.class);
+        TrustIncidentService service = new TrustIncidentService(
+                repository,
+                new TrustIncidentPolicy(),
+                coordinator,
+                acknowledgeMutationHandler,
+                mock(TrustIncidentResolveMutationHandler.class),
+                mock(TrustIncidentRefreshMutationHandler.class)
+        );
+        when(coordinator.commit(any())).thenThrow(new AuditPersistenceUnavailableException());
+
+        assertThatThrownBy(() -> service.acknowledge(
+                "incident-1",
+                new TrustIncidentAcknowledgementRequest("seen"),
+                "ops-1",
+                "ack-1"
+        )).isInstanceOf(AuditPersistenceUnavailableException.class);
+
+        verify(acknowledgeMutationHandler, never()).acknowledge(any(), any(), any());
     }
 
     private TrustIncidentService service(TrustIncidentRepository repository, RegulatedMutationCoordinator coordinator) {

@@ -2,12 +2,14 @@ package com.frauddetection.alert.regulated;
 
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
+import com.frauddetection.alert.audit.AuditEventDocument;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.testsupport.base.AbstractIntegrationTest;
 import com.frauddetection.common.testsupport.container.FraudPlatformContainers;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.MongoTransactionManager;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -23,6 +25,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @EnabledIf(value = "#{T(org.testcontainers.DockerClientFactory).instance().isDockerAvailable()}", loadContext = false)
+@Tag("failure-injection")
+@Tag("invariant-proof")
+@Tag("integration")
 class RegulatedMutationTransactionRollbackIntegrationTest extends AbstractIntegrationTest {
 
     private SimpleMongoClientDatabaseFactory mongoClientDatabaseFactory;
@@ -95,6 +100,40 @@ class RegulatedMutationTransactionRollbackIntegrationTest extends AbstractIntegr
         assertThat(restored.getState()).isEqualTo(RegulatedMutationState.AUDIT_ATTEMPTED);
         assertThat(mongoTemplate.count(new Query(), AlertDocument.class)).isZero();
         assertThat(mongoTemplate.count(new Query(), TransactionalOutboxRecordDocument.class)).isZero();
+    }
+
+    @Test
+    void shouldRollbackCommandSnapshotBusinessAndOutboxWithoutSuccessAuditTruth() {
+        RegulatedMutationCommandDocument command = command("command-local-boundary-fail", RegulatedMutationState.AUDIT_ATTEMPTED);
+        mongoTemplate.save(command);
+
+        assertThatThrownBy(() -> runner.runLocalCommit(() -> {
+            command.setState(RegulatedMutationState.SUCCESS_AUDIT_PENDING);
+            command.setResponseSnapshot(new RegulatedMutationResponseSnapshot(
+                    "alert-local-boundary-fail",
+                    com.frauddetection.common.events.enums.AnalystDecision.CONFIRMED_FRAUD,
+                    AlertStatus.RESOLVED,
+                    "event-local-boundary-fail",
+                    Instant.parse("2026-05-02T10:01:00Z"),
+                    com.frauddetection.alert.api.SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING
+            ));
+            command.setLocalCommitMarker("LOCAL_COMMITTED");
+            command.setUpdatedAt(Instant.parse("2026-05-02T10:01:00Z"));
+            mongoTemplate.save(command);
+            mongoTemplate.save(alert("alert-local-boundary-fail", AlertStatus.CLOSED));
+            mongoTemplate.save(outbox("event-local-boundary-fail", "alert-local-boundary-fail"));
+            throw new IllegalStateException("snapshot persistence boundary failed");
+        })).isInstanceOf(IllegalStateException.class);
+
+        RegulatedMutationCommandDocument restored = mongoTemplate.findById("command-local-boundary-fail", RegulatedMutationCommandDocument.class);
+        assertThat(restored).isNotNull();
+        assertThat(restored.getState()).isEqualTo(RegulatedMutationState.AUDIT_ATTEMPTED);
+        assertThat(restored.getResponseSnapshot()).isNull();
+        assertThat(restored.getLocalCommitMarker()).isNull();
+        assertThat(restored.isSuccessAuditRecorded()).isFalse();
+        assertThat(mongoTemplate.count(new Query(), AlertDocument.class)).isZero();
+        assertThat(mongoTemplate.count(new Query(), TransactionalOutboxRecordDocument.class)).isZero();
+        assertThat(mongoTemplate.count(new Query(), AuditEventDocument.class)).isZero();
     }
 
     private AlertDocument alert(String alertId, AlertStatus status) {
