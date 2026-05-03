@@ -8,6 +8,7 @@ import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditPolicy;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import jakarta.servlet.http.HttpServletRequest;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataAccessResourceFailureException;
@@ -32,6 +33,8 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
+@Tag("failure-injection")
+@Tag("invariant-proof")
 class TrustIncidentControllerTest {
 
     private final TrustIncidentService service = mock(TrustIncidentService.class);

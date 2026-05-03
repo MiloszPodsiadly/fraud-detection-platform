@@ -5,6 +5,7 @@ import com.frauddetection.alert.regulated.BankModeStartupGuard;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionCapabilityProbe;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionMode;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.core.env.Environment;
@@ -15,6 +16,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+@Tag("invariant-proof")
 class BankProfileMisconfigurationMatrixTest {
 
     @Test

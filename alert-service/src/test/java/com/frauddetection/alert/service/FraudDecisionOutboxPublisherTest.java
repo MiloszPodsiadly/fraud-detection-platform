@@ -10,6 +10,7 @@ import com.frauddetection.common.events.contract.FraudDecisionEvent;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
 import com.mongodb.client.result.UpdateResult;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -31,6 +32,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
+@Tag("failure-injection")
+@Tag("invariant-proof")
 class FraudDecisionOutboxPublisherTest {
 
     @Test
@@ -92,7 +95,7 @@ class FraudDecisionOutboxPublisherTest {
     }
 
     @Test
-    void shouldExposePublishConfirmationFailureWhenKafkaSucceededButDbMarkPublishedFails() {
+    void shouldMoveToConfirmationUnknownWhenBrokerAcceptedButLocalConfirmationFails() {
         AlertRepository repository = mock(AlertRepository.class);
         FraudDecisionEventPublisher publisher = mock(FraudDecisionEventPublisher.class);
         MongoTemplate mongoTemplate = mock(MongoTemplate.class);

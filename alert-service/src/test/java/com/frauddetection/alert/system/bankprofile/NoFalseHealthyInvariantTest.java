@@ -18,6 +18,7 @@ import com.frauddetection.alert.system.SystemTrustLevelController;
 import com.frauddetection.alert.system.SystemTrustLevelResponse;
 import com.frauddetection.alert.trust.TrustIncidentService;
 import com.frauddetection.alert.trust.TrustIncidentSummary;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.DataAccessResourceFailureException;
@@ -30,6 +31,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+@Tag("failure-injection")
+@Tag("invariant-proof")
 class NoFalseHealthyInvariantTest {
 
     @Test
@@ -79,6 +82,31 @@ class NoFalseHealthyInvariantTest {
         InvariantAssert.noFalseHealthy(response);
         assertThat(response.coverageStatus()).isEqualTo("DEGRADED");
         assertThat(response.reasonCode()).isEqualTo("HEAD_SCAN_PAGINATION_UNSUPPORTED");
+    }
+
+    @Test
+    void shouldNotReportHealthyWhenRequiredExternalWitnessUnavailable() {
+        Fixture fixture = new Fixture();
+        when(fixture.integrityService.coverage("alert-service", 100)).thenReturn(new ExternalAuditAnchorCoverageResponse(
+                "UNAVAILABLE",
+                10,
+                0,
+                10,
+                null,
+                List.of(),
+                false,
+                100,
+                "EXTERNAL_WITNESS_UNAVAILABLE",
+                "External witness is unavailable."
+        ));
+
+        SystemTrustLevelResponse response = fixture.controller().trustLevel();
+
+        InvariantAssert.noFalseHealthy(response);
+        assertThat(response.coverageStatus()).isEqualTo("DEGRADED");
+        assertThat(response.reasonCode()).isEqualTo("EXTERNAL_WITNESS_UNAVAILABLE");
+        assertThat(response.externalAnchorStrength()).isEqualTo("NONE");
+        assertThat(response.guaranteeLevel()).isNotEqualTo("FDP24_HEALTHY");
     }
 
     @Test

@@ -13,6 +13,7 @@ import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.alert.regulated.mutation.trustincident.TrustIncidentAcknowledgeMutationHandler;
 import com.frauddetection.alert.regulated.mutation.trustincident.TrustIncidentRefreshMutationHandler;
 import com.frauddetection.alert.regulated.mutation.trustincident.TrustIncidentResolveMutationHandler;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -27,6 +28,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+@Tag("failure-injection")
+@Tag("invariant-proof")
 class TrustIncidentServiceTest {
 
     @Test

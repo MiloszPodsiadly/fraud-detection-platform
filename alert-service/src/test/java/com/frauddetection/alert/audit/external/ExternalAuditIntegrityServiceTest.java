@@ -5,6 +5,7 @@ import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.audit.AuditAnchorRepository;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataAccessResourceFailureException;
 
@@ -22,6 +23,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+@Tag("failure-injection")
+@Tag("invariant-proof")
 class ExternalAuditIntegrityServiceTest {
 
     private final AuditAnchorRepository anchorRepository = mock(AuditAnchorRepository.class);

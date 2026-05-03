@@ -23,6 +23,7 @@ import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.alert.service.ConflictingIdempotencyKeyException;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -46,6 +47,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+@Tag("failure-injection")
+@Tag("invariant-proof")
 class RegulatedMutationCrashWindowInvariantTest {
 
     @Test
