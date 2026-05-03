@@ -1,36 +1,32 @@
 # FDP-29 Evidence-Gated Finalize Handoff
 
-FDP-29 should address the remaining design gap that FDP-28 intentionally documents instead of hiding: a business mutation can commit before SUCCESS audit evidence is durably complete.
+FDP-29 adds the first evidence-gated finalize runtime path behind disabled-by-default feature flags. The implemented scope is limited to submit analyst decision.
+
+The design addresses the remaining gap that FDP-28 intentionally documents instead of hiding: a regulated business mutation can become visible before all required success evidence is fully ready.
 
 ## Target Guarantee
 
-In regulated mode, no externally visible business mutation should become final unless required audit evidence preconditions are satisfied.
+When `app.regulated-mutations.evidence-gated-finalize.enabled=true`, `app.regulated-mutations.evidence-gated-finalize.submit-decision.enabled=true`, and `app.regulated-mutations.transaction-mode=REQUIRED`, submit-decision uses `EVIDENCE_GATED_FINALIZE_V1`. In that model, no externally visible submit-decision mutation becomes `FINALIZED_VISIBLE` unless required locally verifiable evidence preconditions are satisfied.
 
-## Candidate Model
+## Design Contract
 
-1. Accept a command and persist `PENDING_AUDIT`.
-2. Anchor ATTEMPTED command evidence.
-3. Validate business command and authorization.
-4. Prepare SUCCESS evidence path before final visibility.
-5. Apply business mutation only after required evidence path is available.
-6. Mark command `COMMITTED`.
-7. Emit the domain outbox event from the finalized command state.
-8. If evidence cannot be prepared, mark `REJECTED_AUDIT_EVIDENCE_UNAVAILABLE` and keep business state unchanged.
+- ADR: `docs/adr/FDP-29-evidence-gated-finalize.md`
+- Evidence preconditions: `docs/architecture/FDP-29-evidence-preconditions.md`
+- State machine: `docs/architecture/FDP-29-state-machine.md`
+- Compatibility matrix: `docs/architecture/FDP-29-compatibility-matrix.md`
+- API response contract: `docs/api/FDP-29-api-response-contract.md`
+- Failure windows: `docs/architecture/FDP-29-failure-windows.md`
+- Idempotency replay: `docs/architecture/FDP-29-idempotency-replay.md`
+- Migration and rollout: `docs/architecture/FDP-29-migration-rollout.md`
+- Future test plan: `docs/testing/FDP-29-test-plan.md`
+- Design checklist: `docs/FDP-29-design-checklist.md`
 
-## Required Design Decisions
+## Runtime Boundary
 
-- Where final business visibility is gated: command projection, domain document, or separate finalize table.
-- Whether local Mongo transactions are sufficient for command plus domain state.
-- How external evidence readiness is proven without claiming distributed ACID.
-- How outbox event emission is tied to final command state.
-- How operators inspect rejected or pending commands without leaking payloads.
+FDP-29 preserves FDP-25/FDP-26/FDP-27/FDP-28 compatibility when the feature flags are disabled. It does not migrate fraud-case update, trust incident writes, outbox confirmation resolution, Kafka contracts, scoring, ML model behavior, or UI workflow.
 
-## Out of Scope for FDP-29 Unless Explicitly Approved
+The runtime model stores `mutation_model_version` on command records. Missing or null values are treated as `LEGACY_REGULATED_MUTATION`.
 
-- Broker protocol changes
-- ML scoring/model changes
-- workflow automation
-- legal WORM or SIEM integration claims
-- cross-database distributed transaction claims
+## Non-Claims
 
-FDP-29 should preserve FDP-28's explicit degradation evidence while reducing the post-commit SUCCESS audit gap through a deliberate finalize design.
+FDP-29 does not claim distributed ACID, exactly-once Kafka, external witness writes inside a local transaction, legal notarization, WORM storage, KMS/HSM-backed signing, or process-kill chaos coverage. External evidence confirmation remains asynchronous.
