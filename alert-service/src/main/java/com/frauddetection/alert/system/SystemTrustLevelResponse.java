@@ -6,6 +6,9 @@ public record SystemTrustLevelResponse(
         @JsonProperty("guarantee_level")
         String guaranteeLevel,
 
+        @JsonProperty("bank_profile_status")
+        String bankProfileStatus,
+
         @JsonProperty("publication_enabled")
         boolean publicationEnabled,
 

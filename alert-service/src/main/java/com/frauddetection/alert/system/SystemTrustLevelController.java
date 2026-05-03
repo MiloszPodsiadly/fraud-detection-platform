@@ -1,6 +1,10 @@
 package com.frauddetection.alert.system;
 
 import com.frauddetection.alert.audit.AuditDegradationService;
+import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResourceType;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorCoverageResponse;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorSink;
 import com.frauddetection.alert.audit.external.ExternalWitnessCapabilities;
@@ -13,6 +17,7 @@ import com.frauddetection.alert.service.DecisionOutboxStatus;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.trust.TrustIncidentService;
 import com.frauddetection.alert.trust.TrustIncidentSummary;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -50,6 +55,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
     private final boolean outboxPublisherEnabled;
     private final boolean evidenceConfirmationEnabled;
     private final TrustIncidentService trustIncidentService;
+    private final SensitiveReadAuditService sensitiveReadAuditService;
 
     public SystemTrustLevelController(
             boolean publicationEnabled,
@@ -77,7 +83,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
             AlertServiceMetrics ignoredMetrics
     ) {
         this(publicationEnabled, publicationRequired, failClosed, bankModeFailClosed, trustAuthorityEnabled, signingRequired,
-                Duration.ofMinutes(10), bankModeFailClosed ? "REQUIRED" : "OFF", true, true, externalAuditIntegrityService, externalAuditAnchorSink, null, null, null, null, null, null);
+                Duration.ofMinutes(10), bankModeFailClosed ? "REQUIRED" : "OFF", true, true, externalAuditIntegrityService, externalAuditAnchorSink, null, null, null, null, null, null, null);
     }
 
     @Autowired
@@ -99,7 +105,8 @@ public class SystemTrustLevelController implements ApplicationRunner {
             ObjectProvider<TransactionalOutboxRecordRepository> outboxRepository,
             RegulatedMutationRecoveryService regulatedMutationRecoveryService,
             ObjectProvider<TrustIncidentService> trustIncidentService,
-            ObjectProvider<com.frauddetection.alert.trust.TrustSignalCollector> ignoredTrustSignalCollector
+            ObjectProvider<com.frauddetection.alert.trust.TrustSignalCollector> ignoredTrustSignalCollector,
+            ObjectProvider<SensitiveReadAuditService> sensitiveReadAuditService
     ) {
         this.publicationEnabled = publicationEnabled;
         this.publicationRequired = publicationRequired;
@@ -118,6 +125,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
         this.outboxPublisherEnabled = outboxPublisherEnabled;
         this.evidenceConfirmationEnabled = evidenceConfirmationEnabled;
         this.trustIncidentService = trustIncidentService == null ? null : trustIncidentService.getIfAvailable();
+        this.sensitiveReadAuditService = sensitiveReadAuditService == null ? null : sensitiveReadAuditService.getIfAvailable();
     }
 
     public SystemTrustLevelController(
@@ -181,15 +189,18 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 null,
                 regulatedMutationRecoveryService,
                 null,
+                null,
                 null
         );
     }
 
     @GetMapping("/system/trust-level")
-    public SystemTrustLevelResponse trustLevel() {
+    @AuditedSensitiveRead
+    public SystemTrustLevelResponse trustLevel(HttpServletRequest request) {
         LiveTrustState live = liveTrustState();
-        return new SystemTrustLevelResponse(
+        SystemTrustLevelResponse response = new SystemTrustLevelResponse(
                 guaranteeLevel(live),
+                bankModeFailClosed ? "BANK_PROFILE_ACTIVE" : "NON_BANK_LOCAL_MODE",
                 publicationEnabled,
                 publicationRequired,
                 failClosed,
@@ -235,6 +246,20 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 live.topIncidentTypes(),
                 live.incidentHealthStatus()
         );
+        if (sensitiveReadAuditService != null) {
+            sensitiveReadAuditService.audit(
+                    ReadAccessEndpointCategory.SYSTEM_TRUST_LEVEL,
+                    ReadAccessResourceType.SYSTEM_TRUST_LEVEL,
+                    null,
+                    1,
+                    request
+            );
+        }
+        return response;
+    }
+
+    public SystemTrustLevelResponse trustLevel() {
+        return trustLevel(null);
     }
 
     @Override

@@ -1,5 +1,10 @@
 package com.frauddetection.alert.outbox;
 
+import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResourceType;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -15,14 +20,25 @@ import org.springframework.web.bind.annotation.RestController;
 public class OutboxRecoveryController {
 
     private final OutboxRecoveryService service;
+    private final SensitiveReadAuditService sensitiveReadAuditService;
 
-    public OutboxRecoveryController(OutboxRecoveryService service) {
+    public OutboxRecoveryController(OutboxRecoveryService service, SensitiveReadAuditService sensitiveReadAuditService) {
         this.service = service;
+        this.sensitiveReadAuditService = sensitiveReadAuditService;
     }
 
     @GetMapping("/recovery/backlog")
-    public OutboxBacklogResponse backlog() {
-        return service.backlog();
+    @AuditedSensitiveRead
+    public OutboxBacklogResponse backlog(HttpServletRequest request) {
+        OutboxBacklogResponse response = service.backlog();
+        sensitiveReadAuditService.audit(
+                ReadAccessEndpointCategory.OUTBOX_RECOVERY_BACKLOG,
+                ReadAccessResourceType.OUTBOX_RECOVERY,
+                null,
+                1,
+                request
+        );
+        return response;
     }
 
     @PostMapping("/recovery/run")

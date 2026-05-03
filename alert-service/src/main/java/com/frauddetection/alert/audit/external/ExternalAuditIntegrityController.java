@@ -1,5 +1,9 @@
 package com.frauddetection.alert.audit.external;
 
+import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResourceType;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.servlet.http.HttpServletRequest;
@@ -19,34 +23,42 @@ public class ExternalAuditIntegrityController {
     private final ExternalAuditIntegrityService service;
     private final ExternalAuditCoverageRateLimiter coverageRateLimiter;
     private final AlertServiceMetrics metrics;
+    private final SensitiveReadAuditService sensitiveReadAuditService;
 
     ExternalAuditIntegrityController(
             ExternalAuditIntegrityService service,
             ExternalAuditCoverageRateLimiter coverageRateLimiter
     ) {
-        this(service, coverageRateLimiter, new AlertServiceMetrics(new SimpleMeterRegistry()));
+        this(service, coverageRateLimiter, new AlertServiceMetrics(new SimpleMeterRegistry()), null);
     }
 
     @Autowired
     public ExternalAuditIntegrityController(
             ExternalAuditIntegrityService service,
             ExternalAuditCoverageRateLimiter coverageRateLimiter,
-            AlertServiceMetrics metrics
+            AlertServiceMetrics metrics,
+            SensitiveReadAuditService sensitiveReadAuditService
     ) {
         this.service = service;
         this.coverageRateLimiter = coverageRateLimiter;
         this.metrics = metrics;
+        this.sensitiveReadAuditService = sensitiveReadAuditService;
     }
 
     @GetMapping
+    @AuditedSensitiveRead
     public ExternalAuditIntegrityResponse verifyExternalIntegrity(
             @RequestParam(name = "source_service", required = false) String sourceService,
-            @RequestParam(required = false) Integer limit
+            @RequestParam(required = false) Integer limit,
+            HttpServletRequest request
     ) {
-        return service.verify(sourceService, limit);
+        ExternalAuditIntegrityResponse response = service.verify(sourceService, limit);
+        audit(ReadAccessEndpointCategory.EXTERNAL_AUDIT_INTEGRITY, ReadAccessResourceType.EXTERNAL_AUDIT_INTEGRITY, response.checked(), request);
+        return response;
     }
 
     @GetMapping("/coverage")
+    @AuditedSensitiveRead
     public ExternalAuditAnchorCoverageResponse coverage(
             @RequestParam(name = "source_service", required = false) String sourceService,
             @RequestParam(required = false) Integer limit,
@@ -60,11 +72,24 @@ public class ExternalAuditIntegrityController {
             throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "External audit coverage rate limit exceeded.");
         }
         metrics.recordExternalCoverageRequestCost("ALLOWED", cost);
-        return service.coverage(sourceService, limit, fromPosition);
+        ExternalAuditAnchorCoverageResponse response = service.coverage(sourceService, limit, fromPosition);
+        audit(
+                ReadAccessEndpointCategory.EXTERNAL_AUDIT_COVERAGE,
+                ReadAccessResourceType.EXTERNAL_AUDIT_COVERAGE,
+                response.missingRanges() == null ? 0 : response.missingRanges().size(),
+                request
+        );
+        return response;
     }
 
     ExternalAuditAnchorCoverageResponse coverage(String sourceService, Integer limit, Long fromPosition) {
         return coverage(sourceService, limit, fromPosition, null, null);
+    }
+
+    private void audit(ReadAccessEndpointCategory category, ReadAccessResourceType resourceType, int count, HttpServletRequest request) {
+        if (sensitiveReadAuditService != null) {
+            sensitiveReadAuditService.audit(category, resourceType, null, count, request);
+        }
     }
 
     private String rateLimitIdentity(Authentication authentication, HttpServletRequest request) {

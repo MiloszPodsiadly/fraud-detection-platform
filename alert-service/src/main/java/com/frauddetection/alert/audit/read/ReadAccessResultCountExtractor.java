@@ -31,7 +31,17 @@ public class ReadAccessResultCountExtractor {
                     GOVERNANCE_ADVISORY_LIST,
                     GOVERNANCE_ADVISORY_AUDIT_HISTORY,
                     GOVERNANCE_ADVISORY_ANALYTICS,
-                    PREVIEW_TRUST_INCIDENT_SIGNALS -> 0;
+                    SYSTEM_TRUST_LEVEL,
+                    TRUST_INCIDENT_LIST,
+                    PREVIEW_TRUST_INCIDENT_SIGNALS,
+                    AUDIT_EVENT_LIST,
+                    AUDIT_EVIDENCE_EXPORT,
+                    EXTERNAL_AUDIT_INTEGRITY,
+                    EXTERNAL_AUDIT_COVERAGE,
+                    REGULATED_MUTATION_INSPECTION,
+                    REGULATED_MUTATION_RECOVERY_BACKLOG,
+                    OUTBOX_RECOVERY_BACKLOG,
+                    AUDIT_DEGRADATION_LIST -> 0;
         };
     }
 

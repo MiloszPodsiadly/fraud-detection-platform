@@ -1,7 +1,12 @@
 package com.frauddetection.alert.audit;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResourceType;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -23,17 +28,32 @@ public class AuditDegradationController {
 
     private final AuditDegradationService service;
     private final CurrentAnalystUser currentAnalystUser;
+    private final SensitiveReadAuditService sensitiveReadAuditService;
 
-    public AuditDegradationController(AuditDegradationService service, CurrentAnalystUser currentAnalystUser) {
+    public AuditDegradationController(
+            AuditDegradationService service,
+            CurrentAnalystUser currentAnalystUser,
+            SensitiveReadAuditService sensitiveReadAuditService
+    ) {
         this.service = service;
         this.currentAnalystUser = currentAnalystUser;
+        this.sensitiveReadAuditService = sensitiveReadAuditService;
     }
 
     @GetMapping
-    public AuditDegradationListResponse listUnresolved() {
-        return new AuditDegradationListResponse(
+    @AuditedSensitiveRead
+    public AuditDegradationListResponse listUnresolved(HttpServletRequest request) {
+        AuditDegradationListResponse response = new AuditDegradationListResponse(
                 service.unresolvedEvents().stream().map(AuditDegradationResponse::from).toList()
         );
+        sensitiveReadAuditService.audit(
+                ReadAccessEndpointCategory.AUDIT_DEGRADATION_LIST,
+                ReadAccessResourceType.AUDIT_DEGRADATION,
+                null,
+                response.events().size(),
+                request
+        );
+        return response;
     }
 
     @PostMapping("/{auditId}/resolve")

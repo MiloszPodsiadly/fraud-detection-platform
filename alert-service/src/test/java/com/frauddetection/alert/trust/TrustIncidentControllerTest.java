@@ -5,10 +5,11 @@ import com.frauddetection.alert.audit.read.ReadAccessAuditService;
 import com.frauddetection.alert.audit.read.ReadAccessAuditTarget;
 import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
 import com.frauddetection.alert.audit.read.ReadAccessResourceType;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditPolicy;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.core.env.Environment;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.TestingAuthenticationToken;
@@ -36,7 +37,6 @@ class TrustIncidentControllerTest {
     private final TrustIncidentService service = mock(TrustIncidentService.class);
     private final TrustSignalCollector collector = mock(TrustSignalCollector.class);
     private final ReadAccessAuditService auditService = mock(ReadAccessAuditService.class);
-    private final Environment environment = mock(Environment.class);
     private final HttpServletRequest request = mock(HttpServletRequest.class);
 
     @Test
@@ -74,7 +74,7 @@ class TrustIncidentControllerTest {
         assertThat(target.resourceType()).isEqualTo(ReadAccessResourceType.TRUST_INCIDENT_SIGNAL);
         assertThat(target.resourceId()).isNull();
         assertThat(target.queryHash()).isNull();
-        assertThat(target.size()).isEqualTo(1);
+        assertThat(target.size()).isNull();
         verify(service, never()).listOpen();
         verify(service, never()).refresh(any(), any(), any());
         verifyNoInteractions(service);
@@ -93,7 +93,7 @@ class TrustIncidentControllerTest {
                 .satisfies(exception -> {
                     ResponseStatusException responseStatusException = (ResponseStatusException) exception;
                     assertThat(responseStatusException.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
-                    assertThat(responseStatusException.getReason()).isEqualTo("Trust incident signal preview audit unavailable.");
+                    assertThat(responseStatusException.getReason()).isEqualTo("Sensitive read audit unavailable.");
                 });
 
         verify(auditService).auditOrThrow(any(), eq(ReadAccessAuditOutcome.SUCCESS), eq(1), eq("corr-1"));
@@ -101,12 +101,13 @@ class TrustIncidentControllerTest {
     }
 
     private TrustIncidentController controller(int maxRequestsPerMinute, boolean bankModeFailClosed, String... profiles) {
-        when(environment.getActiveProfiles()).thenReturn(profiles);
         TrustIncidentPreviewRateLimiter rateLimiter = new TrustIncidentPreviewRateLimiter(
                 Clock.fixed(Instant.parse("2026-05-03T10:00:00Z"), ZoneOffset.UTC),
                 maxRequestsPerMinute
         );
-        return new TrustIncidentController(service, collector, rateLimiter, auditService, environment, bankModeFailClosed);
+        SensitiveReadAuditPolicy policy = mock(SensitiveReadAuditPolicy.class);
+        when(policy.failClosed()).thenReturn(bankModeFailClosed);
+        return new TrustIncidentController(service, collector, rateLimiter, new SensitiveReadAuditService(auditService, policy));
     }
 
     private TestingAuthenticationToken auth() {
