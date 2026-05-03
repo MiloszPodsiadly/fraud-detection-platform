@@ -1,6 +1,6 @@
 # FDP-29 State Machine Contract
 
-This is the FDP-29 state machine contract for the feature-flagged submit-decision evidence-gated finalize prototype. It applies only when both evidence-gated finalize flags are enabled for submit-decision.
+This is the FDP-29 state machine contract for the feature-flagged submit-decision local evidence-precondition-gated finalize prototype. It applies only when both evidence-gated finalize flags are enabled for submit-decision.
 
 ## Invariants
 
@@ -62,7 +62,7 @@ This is the FDP-29 state machine contract for the feature-flagged submit-decisio
 - Recovery: Inspect command, aggregate, outbox, and response snapshot.
 - Trust-level impact: Recovery-required if ambiguity remains.
 - Outbox impact: Outbox record is written inside local transaction if finalize commits.
-- Audit/evidence impact: Local success/finalize evidence is written inside or immediately tied to the transaction according to future implementation decision.
+- Audit/evidence impact: In FDP-29 v1, local success audit is written inside the same Mongo transaction as the alert decision, authoritative outbox record, response snapshot, and finalize marker. External anchor publication, Trust Authority signing confirmation, and Kafka delivery remain asynchronous evidence confirmation steps.
 
 ### FINALIZED_VISIBLE
 

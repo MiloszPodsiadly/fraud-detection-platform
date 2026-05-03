@@ -1,10 +1,10 @@
 # FDP-29 API Response Contract
 
-This is the response contract for the FDP-29 feature-flagged submit-decision evidence-gated finalize prototype. It is active only when both evidence-gated finalize flags are enabled for submit-decision.
+This is the response contract for the FDP-29 feature-flagged submit-decision local evidence-precondition-gated finalize prototype. It is active only when both evidence-gated finalize flags are enabled for submit-decision.
 
 Core rule:
 
-> No endpoint returns an updated business resource when state is not `FINALIZED_VISIBLE` or stronger.
+> No endpoint returns an updated business resource when state is not `FINALIZED_EVIDENCE_PENDING_EXTERNAL` or stronger for new FDP-29 submit-decision commands.
 
 ## Common Body Shape
 
@@ -23,7 +23,7 @@ Core rule:
 }
 ```
 
-`current_snapshot` is the pre-finalize/current committed state. `updated_resource` is present only for `FINALIZED_VISIBLE`, `FINALIZED_EVIDENCE_PENDING_EXTERNAL`, or `FINALIZED_EVIDENCE_CONFIRMED`.
+`current_snapshot` is the pre-finalize/current committed state. `updated_resource` is present only for `FINALIZED_EVIDENCE_PENDING_EXTERNAL` or `FINALIZED_EVIDENCE_CONFIRMED` on new FDP-29 submit-decision commands. `FINALIZED_VISIBLE` is accepted only as a compatibility/repair replay state and is mapped to public `FINALIZED_EVIDENCE_PENDING_EXTERNAL`.
 
 ## Status Contract
 

@@ -1,8 +1,8 @@
-# ADR: FDP-29 Evidence-Gated Finalize
+# ADR: FDP-29 Local Evidence-Precondition-Gated Finalize
 
 ## Status
 
-Feature-flagged submit-decision implementation prototype plus design contract. FDP-29 changes runtime behavior only when both `app.regulated-mutations.evidence-gated-finalize.enabled=true` and `app.regulated-mutations.evidence-gated-finalize.submit-decision.enabled=true` are configured. The default remains disabled.
+Feature-flagged submit-decision implementation prototype plus design contract. FDP-29 changes runtime behavior only when both `app.regulated-mutations.evidence-gated-finalize.enabled=true` and `app.regulated-mutations.evidence-gated-finalize.submit-decision.enabled=true` are configured. The default remains disabled. The precise implemented scope is local evidence-precondition-gated finalize, not external finality.
 
 ## Problem
 
@@ -14,7 +14,7 @@ The design question for FDP-29 is:
 
 ## Decision
 
-Regulated mutations should use an evidence-gated finalize model. FDP-29 implements this model only for submit-decision. A mutation may expose updated business state only after locally verifiable evidence preconditions pass. External evidence publication and broker delivery confirmation remain eventual effects and must not be described as part of the local transaction.
+Regulated mutations should use an evidence-gated finalize model. FDP-29 implements this model only for submit-decision. A mutation may expose updated business state only after locally verifiable evidence preconditions pass. External evidence publication, remote signing readiness, witness policy readiness, and broker delivery confirmation remain eventual effects or future target gates and must not be described as part of the local transaction.
 
 Core invariant:
 
@@ -72,6 +72,32 @@ Rejected or recovery states:
 - `REJECTED_EVIDENCE_UNAVAILABLE`
 - `FAILED_BUSINESS_VALIDATION`
 - `FINALIZE_RECOVERY_REQUIRED`
+
+## Current Implementation vs Target Design
+
+FDP-29 v1 currently enforces the following before or inside the local submit-decision finalize path:
+
+- `mutation_model_version=EVIDENCE_GATED_FINALIZE_V1`
+- `app.regulated-mutations.transaction-mode=REQUIRED`
+- startup-verified Mongo transaction capability
+- startup-verified transactional outbox repository
+- startup-verified outbox recovery and submit-decision recovery strategy
+- durable `ATTEMPTED` audit phase before visible mutation
+- deterministic `SUCCESS` audit phase key availability
+- backend-resolved actor/resource/action intent consistency
+- submit-decision business validation against current alert state
+- local Mongo transaction covering alert decision write, authoritative transactional outbox record, response snapshot, success audit write, and local finalize marker
+- durable command state `FINALIZED_EVIDENCE_PENDING_EXTERNAL` for new successful FDP-29 submit-decision commands
+
+The target design may later add stronger pre-finalize gates for:
+
+- external anchor readiness
+- Trust Authority signing readiness
+- external witness policy readiness
+- independent evidence witness availability
+- stronger pre-commit evidence reservation
+
+Those target gates are not claimed by FDP-29 v1 unless implemented and tested in a later FDP.
 
 ## Definition of Visible Business Commit
 
@@ -165,6 +191,12 @@ FDP-29 does not claim:
 Allowed claim:
 
 > FDP-29 implements a disabled-by-default submit-decision prototype where visible local business finalize is gated by locally verifiable evidence preconditions.
+
+Disallowed shorthand:
+
+> FDP-29 provides full evidence-gated commit.
+
+That wording is too broad because external anchors, remote signing, Kafka delivery, WORM storage, and legal proof are outside the local finalize transaction.
 
 ## Consequences
 
