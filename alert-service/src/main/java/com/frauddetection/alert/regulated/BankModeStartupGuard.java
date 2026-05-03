@@ -105,12 +105,12 @@ public class BankModeStartupGuard implements ApplicationRunner {
         require("app.outbox.confirmation.dual-control.enabled", "true", outboxConfirmationDualControlEnabled, "manual outbox confirmation resolution requires dual control.");
         require("app.sensitive-reads.audit.fail-closed", "true", sensitiveReadAuditFailClosed, "sensitive operational reads must fail closed in bank/prod.");
         require("app.outbox.max-attempts", ">0", maxAttempts > 0, "outbox retries must be bounded and positive.");
-        if (externalPublicationEnabled || externalPublicationRequired || externalPublicationFailClosed) {
-            require("app.audit.external-anchoring.sink", "non-local production-capable sink", productionCapableExternalSink(), "local/noop/in-memory external anchor sinks cannot be used in bank/prod.");
-        }
-        if (trustAuthorityEnabled) {
-            require("app.audit.trust-authority.signing-required", "true", trustAuthoritySigningRequired, "enabled trust authority must require signed evidence in bank/prod.");
-        }
+        require("app.audit.external-anchoring.publication.enabled", "true", externalPublicationEnabled, "bank/prod requires FDP-24 external proof publication.");
+        require("app.audit.external-anchoring.publication.required", "true", externalPublicationRequired, "bank/prod requires FDP-24 external proof as a hard dependency.");
+        require("app.audit.external-anchoring.publication.fail-closed", "true", externalPublicationFailClosed, "bank/prod must fail closed when external proof publication is unavailable.");
+        require("app.audit.external-anchoring.sink", "non-local production-capable sink", productionCapableExternalSink(), "disabled/noop/local/same-database external anchor sinks cannot be used in bank/prod.");
+        require("app.audit.trust-authority.enabled", "true", trustAuthorityEnabled, "bank/prod requires signed external evidence.");
+        require("app.audit.trust-authority.signing-required", "true", trustAuthoritySigningRequired, "bank/prod requires Trust Authority signing for external evidence.");
         log.info("FDP-27 bank profile active: transaction-mode=REQUIRED, trust-incidents.refresh-mode=ATOMIC, outbox dual-control and sensitive-read fail-closed enabled.");
     }
 
@@ -127,7 +127,8 @@ public class BankModeStartupGuard implements ApplicationRunner {
         return !externalAnchoringSink.equals("disabled")
                 && !externalAnchoringSink.equals("noop")
                 && !externalAnchoringSink.equals("local-file")
-                && !externalAnchoringSink.equals("in-memory");
+                && !externalAnchoringSink.equals("in-memory")
+                && !externalAnchoringSink.equals("same-database");
     }
 
     private void require(String setting, String required, boolean valid, String reason) {

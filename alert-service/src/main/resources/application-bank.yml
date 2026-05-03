@@ -18,13 +18,19 @@ app:
       fail-closed: true
     external-anchoring:
       publication:
-        enabled: ${AUDIT_EXTERNAL_ANCHORING_PUBLICATION_ENABLED:false}
-        required: ${AUDIT_EXTERNAL_ANCHORING_PUBLICATION_REQUIRED:false}
-        fail-closed: ${AUDIT_EXTERNAL_ANCHORING_PUBLICATION_FAIL_CLOSED:false}
-      sink: ${AUDIT_EXTERNAL_ANCHORING_SINK:disabled}
+        enabled: true
+        required: true
+        fail-closed: true
+      sink: ${AUDIT_EXTERNAL_ANCHORING_SINK}
     trust-authority:
-      enabled: ${AUDIT_TRUST_AUTHORITY_ENABLED:false}
-      signing-required: ${AUDIT_TRUST_AUTHORITY_SIGNING_REQUIRED:false}
+      enabled: true
+      signing-required: true
   sensitive-reads:
     audit:
       fail-closed: true
+  security:
+    jwt:
+      enabled: true
+      required: true
+    demo-auth:
+      enabled: false

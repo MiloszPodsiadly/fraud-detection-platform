@@ -119,6 +119,7 @@ app:
       enabled: ${APP_SECURITY_DEMO_AUTH_ENABLED:false}
     jwt:
       enabled: ${APP_SECURITY_JWT_ENABLED:false}
+      required: ${APP_SECURITY_JWT_REQUIRED:false}
       # Required when APP_SECURITY_JWT_ENABLED=true.
       # Prefer jwk-set-uri for explicit key discovery in local/integration setups.
       issuer-uri: ${APP_SECURITY_JWT_ISSUER_URI:}

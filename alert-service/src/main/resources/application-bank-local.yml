@@ -1,0 +1,19 @@
+app:
+  audit:
+    bank-mode:
+      fail-closed: false
+    external-anchoring:
+      publication:
+        enabled: false
+        required: false
+        fail-closed: false
+      sink: disabled
+    trust-authority:
+      enabled: false
+      signing-required: false
+  security:
+    jwt:
+      enabled: false
+      required: false
+    demo-auth:
+      enabled: true

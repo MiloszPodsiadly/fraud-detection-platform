@@ -21,6 +21,7 @@ class JwtResourceServerSecurityConfigTest {
     void shouldPreferExplicitJwkSetUriButStillRequireMatchingIssuerWhenBothAreConfigured() throws Exception {
         JwtSecurityProperties properties = new JwtSecurityProperties(
                 true,
+                false,
                 "https://issuer.example.test/realms/fraud-detection",
                 "https://jwks.example.test/realms/fraud-detection/protocol/openid-connect/certs",
                 "sub",

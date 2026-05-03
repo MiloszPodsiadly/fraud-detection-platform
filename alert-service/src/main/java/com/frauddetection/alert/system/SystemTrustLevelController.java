@@ -343,6 +343,8 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 && missingRanges == 0
                 && postCommitDegraded == 0
                 && pendingDegradationResolution == 0
+                && (!bankModeFailClosed || (publicationEnabled && publicationRequired && failClosed))
+                && (!bankModeFailClosed || (trustAuthorityEnabled && signingRequired))
                 && (!bankModeFailClosed || "REQUIRED".equals(transactionMode))
                 && outboxState.failedTerminalCount() == 0
                 && outboxState.projectionMismatchCount() == 0
@@ -363,6 +365,12 @@ public class SystemTrustLevelController implements ApplicationRunner {
         }
         if (reasonCode == null) {
             reasonCode = outboxState.reasonCode();
+        }
+        if (reasonCode == null && bankModeFailClosed && !(publicationEnabled && publicationRequired && failClosed)) {
+            reasonCode = "EXTERNAL_ANCHORING_REQUIRED_IN_BANK_MODE";
+        }
+        if (reasonCode == null && bankModeFailClosed && !(trustAuthorityEnabled && signingRequired)) {
+            reasonCode = "TRUST_AUTHORITY_SIGNING_REQUIRED_IN_BANK_MODE";
         }
         if (reasonCode == null && bankModeFailClosed && !"REQUIRED".equals(transactionMode)) {
             reasonCode = "TRANSACTION_MODE_OFF_IN_BANK_MODE";

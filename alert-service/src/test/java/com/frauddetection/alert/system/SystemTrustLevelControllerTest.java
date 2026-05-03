@@ -342,6 +342,58 @@ class SystemTrustLevelControllerTest {
                 .hasMessageContaining("app.audit.bank-mode.fail-closed=true is required");
     }
 
+    @Test
+    void shouldNotReportHealthyWhenBankModeLacksExternalAnchoring() {
+        ExternalAuditIntegrityService integrityService = mock(ExternalAuditIntegrityService.class);
+        ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
+        when(integrityService.coverage("alert-service", 100)).thenReturn(healthyCoverage());
+        when(sink.capabilities()).thenReturn(verifiedCapabilities());
+        SystemTrustLevelController controller = new SystemTrustLevelController(
+                false,
+                false,
+                false,
+                true,
+                true,
+                true,
+                Duration.ofMinutes(10),
+                integrityService,
+                sink,
+                null,
+                null
+        );
+
+        SystemTrustLevelResponse response = controller.trustLevel();
+
+        assertThat(response.guaranteeLevel()).isNotEqualTo("FDP24_HEALTHY");
+        assertThat(response.reasonCode()).isEqualTo("EXTERNAL_ANCHORING_REQUIRED_IN_BANK_MODE");
+    }
+
+    @Test
+    void shouldNotReportHealthyWhenBankModeLacksTrustAuthoritySigning() {
+        ExternalAuditIntegrityService integrityService = mock(ExternalAuditIntegrityService.class);
+        ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
+        when(integrityService.coverage("alert-service", 100)).thenReturn(healthyCoverage());
+        when(sink.capabilities()).thenReturn(verifiedCapabilities());
+        SystemTrustLevelController controller = new SystemTrustLevelController(
+                true,
+                true,
+                true,
+                true,
+                false,
+                false,
+                Duration.ofMinutes(10),
+                integrityService,
+                sink,
+                null,
+                null
+        );
+
+        SystemTrustLevelResponse response = controller.trustLevel();
+
+        assertThat(response.guaranteeLevel()).isNotEqualTo("FDP24_HEALTHY");
+        assertThat(response.reasonCode()).isEqualTo("TRUST_AUTHORITY_SIGNING_REQUIRED_IN_BANK_MODE");
+    }
+
     private ExternalAuditAnchorCoverageResponse healthyCoverage() {
         return new ExternalAuditAnchorCoverageResponse(
                 "AVAILABLE",
