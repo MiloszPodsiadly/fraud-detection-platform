@@ -9,6 +9,7 @@ import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.service.ConflictingIdempotencyKeyException;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
 import org.junit.jupiter.api.Test;
@@ -148,6 +149,50 @@ class EvidenceGatedFinalizeCoordinatorTest {
         assertThat(result.state()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         assertThat(businessWrites).hasValue(0);
         assertThat(fixture.currentCommand.getState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
+    }
+
+    @Test
+    void shouldRejectSameIdempotencyKeyWithDifferentPayloadBeforeBusinessMutation() {
+        Fixture fixture = new Fixture(true);
+        RegulatedMutationCommandDocument existing = evidenceGatedCommand(RegulatedMutationState.EVIDENCE_PREPARED);
+        existing.setRequestHash("different-request-hash");
+        fixture.commandLookup(Optional.of(existing));
+        AtomicInteger businessWrites = new AtomicInteger();
+
+        assertThatThrownBy(() -> fixture.coordinator.commit(command(businessWrites)))
+                .isInstanceOf(ConflictingIdempotencyKeyException.class);
+
+        assertThat(businessWrites).hasValue(0);
+    }
+
+    @Test
+    void shouldRejectSameIdempotencyKeyWithDifferentActorBeforeBusinessMutation() {
+        Fixture fixture = new Fixture(true);
+        RegulatedMutationCommandDocument existing = evidenceGatedCommand(RegulatedMutationState.EVIDENCE_PREPARED);
+        existing.setIntentActorId("different-actor");
+        fixture.commandLookup(Optional.of(existing));
+        AtomicInteger businessWrites = new AtomicInteger();
+
+        assertThatThrownBy(() -> fixture.coordinator.commit(command(businessWrites)))
+                .isInstanceOf(ConflictingIdempotencyKeyException.class);
+
+        assertThat(businessWrites).hasValue(0);
+    }
+
+    @Test
+    void shouldReturnActiveLeaseStatusWithoutDuplicateBusinessMutation() {
+        Fixture fixture = new Fixture(true);
+        RegulatedMutationCommandDocument existing = evidenceGatedCommand(RegulatedMutationState.EVIDENCE_PREPARING);
+        existing.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
+        existing.setLeaseExpiresAt(Instant.now().plusSeconds(60));
+        fixture.commandLookup(Optional.of(existing));
+        AtomicInteger businessWrites = new AtomicInteger();
+
+        RegulatedMutationResult<String> result = fixture.coordinator.commit(command(businessWrites));
+
+        assertThat(result.state()).isEqualTo(RegulatedMutationState.EVIDENCE_PREPARING);
+        assertThat(result.response()).isEqualTo("EVIDENCE_PREPARING");
+        assertThat(businessWrites).hasValue(0);
     }
 
     private RegulatedMutationCommand<String, String> command(AtomicInteger businessWrites) {

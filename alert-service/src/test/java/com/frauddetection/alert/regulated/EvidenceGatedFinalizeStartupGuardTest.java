@@ -13,6 +13,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -109,6 +110,149 @@ class EvidenceGatedFinalizeStartupGuardTest {
                 .hasMessageContaining("app.outbox.recovery.enabled");
     }
 
+    @Test
+    void shouldRejectSubmitDecisionEvidenceGatedFinalizeWhenTransactionManagerIsMissing() {
+        EvidenceGatedFinalizeStartupGuard guard = guard(
+                RegulatedMutationTransactionMode.REQUIRED,
+                true,
+                true,
+                true,
+                true,
+                null,
+                mock(RegulatedMutationTransactionCapabilityProbe.class),
+                mock(TransactionalOutboxRecordRepository.class),
+                List.of(mockSubmitDecisionRecovery())
+        );
+
+        assertThatThrownBy(() -> guard.run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("mongo transaction manager");
+    }
+
+    @Test
+    void shouldRejectSubmitDecisionEvidenceGatedFinalizeWhenProbeIsDisabled() {
+        EvidenceGatedFinalizeStartupGuard guard = guard(
+                RegulatedMutationTransactionMode.REQUIRED,
+                true,
+                true,
+                false,
+                true,
+                mock(PlatformTransactionManager.class),
+                mock(RegulatedMutationTransactionCapabilityProbe.class),
+                mock(TransactionalOutboxRecordRepository.class),
+                List.of(mockSubmitDecisionRecovery())
+        );
+
+        assertThatThrownBy(() -> guard.run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("app.regulated-mutations.transaction-capability-probe.enabled");
+    }
+
+    @Test
+    void shouldRejectSubmitDecisionEvidenceGatedFinalizeWhenProbeBeanIsMissing() {
+        EvidenceGatedFinalizeStartupGuard guard = guard(
+                RegulatedMutationTransactionMode.REQUIRED,
+                true,
+                true,
+                true,
+                true,
+                mock(PlatformTransactionManager.class),
+                null,
+                mock(TransactionalOutboxRecordRepository.class),
+                List.of(mockSubmitDecisionRecovery())
+        );
+
+        assertThatThrownBy(() -> guard.run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("transaction capability probe");
+    }
+
+    @Test
+    void shouldRejectSubmitDecisionEvidenceGatedFinalizeWhenProbeThrows() {
+        RegulatedMutationTransactionCapabilityProbe probe = mock(RegulatedMutationTransactionCapabilityProbe.class);
+        doThrow(new IllegalStateException("probe failed")).when(probe).verify();
+        EvidenceGatedFinalizeStartupGuard guard = guard(
+                RegulatedMutationTransactionMode.REQUIRED,
+                true,
+                true,
+                true,
+                true,
+                mock(PlatformTransactionManager.class),
+                probe,
+                mock(TransactionalOutboxRecordRepository.class),
+                List.of(mockSubmitDecisionRecovery())
+        );
+
+        assertThatThrownBy(() -> guard.run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("probe failed");
+    }
+
+    @Test
+    void shouldRejectSubmitDecisionEvidenceGatedFinalizeWhenOutboxRepositoryIsMissing() {
+        EvidenceGatedFinalizeStartupGuard guard = guard(
+                RegulatedMutationTransactionMode.REQUIRED,
+                true,
+                true,
+                true,
+                true,
+                mock(PlatformTransactionManager.class),
+                mock(RegulatedMutationTransactionCapabilityProbe.class),
+                null,
+                List.of(mockSubmitDecisionRecovery())
+        );
+
+        assertThatThrownBy(() -> guard.run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("TransactionalOutboxRecordRepository");
+    }
+
+    @Test
+    void shouldRejectSubmitDecisionEvidenceGatedFinalizeWhenRecoveryStrategyIsMissing() {
+        EvidenceGatedFinalizeStartupGuard guard = guard(
+                RegulatedMutationTransactionMode.REQUIRED,
+                true,
+                true,
+                true,
+                true,
+                mock(PlatformTransactionManager.class),
+                mock(RegulatedMutationTransactionCapabilityProbe.class),
+                mock(TransactionalOutboxRecordRepository.class),
+                List.of()
+        );
+
+        assertThatThrownBy(() -> guard.run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("submit-decision recovery strategy");
+    }
+
+    @Test
+    void shouldRejectUnsupportedFraudCaseEvidenceGatedFinalizeFlag() {
+        EvidenceGatedFinalizeStartupGuard guard = guardWithUnsupportedMutation(true, false, false);
+
+        assertThatThrownBy(() -> guard.run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("unsupported-mutation");
+    }
+
+    @Test
+    void shouldRejectUnsupportedTrustIncidentEvidenceGatedFinalizeFlag() {
+        EvidenceGatedFinalizeStartupGuard guard = guardWithUnsupportedMutation(false, true, false);
+
+        assertThatThrownBy(() -> guard.run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("unsupported-mutation");
+    }
+
+    @Test
+    void shouldRejectUnsupportedOutboxResolutionEvidenceGatedFinalizeFlag() {
+        EvidenceGatedFinalizeStartupGuard guard = guardWithUnsupportedMutation(false, false, true);
+
+        assertThatThrownBy(() -> guard.run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("unsupported-mutation");
+    }
+
     @SuppressWarnings("unchecked")
     private EvidenceGatedFinalizeStartupGuard guard(
             RegulatedMutationTransactionMode mode,
@@ -145,6 +289,38 @@ class EvidenceGatedFinalizeStartupGuardTest {
                 false,
                 probeEnabled,
                 outboxRecoveryEnabled
+        );
+    }
+
+    @SuppressWarnings("unchecked")
+    private EvidenceGatedFinalizeStartupGuard guardWithUnsupportedMutation(
+            boolean fraudCaseUpdateEnabled,
+            boolean trustIncidentEnabled,
+            boolean outboxResolutionEnabled
+    ) {
+        ObjectProvider<PlatformTransactionManager> transactionManagerProvider = mock(ObjectProvider.class);
+        when(transactionManagerProvider.getIfAvailable()).thenReturn(mock(PlatformTransactionManager.class));
+        ObjectProvider<RegulatedMutationTransactionCapabilityProbe> probeProvider = mock(ObjectProvider.class);
+        when(probeProvider.getIfAvailable()).thenReturn(mock(RegulatedMutationTransactionCapabilityProbe.class));
+        ObjectProvider<TransactionalOutboxRecordRepository> outboxRepositoryProvider = mock(ObjectProvider.class);
+        when(outboxRepositoryProvider.getIfAvailable()).thenReturn(mock(TransactionalOutboxRecordRepository.class));
+        return new EvidenceGatedFinalizeStartupGuard(
+                new RegulatedMutationTransactionRunner(
+                        RegulatedMutationTransactionMode.REQUIRED,
+                        new TransactionTemplate(mock(PlatformTransactionManager.class))
+                ),
+                transactionManagerProvider,
+                probeProvider,
+                outboxRepositoryProvider,
+                List.of(mockSubmitDecisionRecovery()),
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                true,
+                true,
+                fraudCaseUpdateEnabled,
+                trustIncidentEnabled,
+                outboxResolutionEnabled,
+                true,
+                true
         );
     }
 

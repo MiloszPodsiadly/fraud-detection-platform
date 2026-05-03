@@ -316,6 +316,42 @@ class RegulatedMutationArchitectureTest {
         assertThat(combined).contains("does not provide exactly-once");
     }
 
+    @Test
+    void fdp29DocsMustDescribeCurrentLocalScopeAndTargetGaps() throws Exception {
+        String readme = Files.readString(Path.of("../README.md"));
+        String adr = Files.readString(Path.of("../docs/adr/FDP-29-evidence-gated-finalize.md"));
+        String handoff = Files.readString(Path.of("../docs/FDP-29-evidence-gated-finalize-handoff.md"));
+        String preconditions = Files.readString(Path.of("../docs/architecture/FDP-29-evidence-preconditions.md"));
+        String openApi = Files.readString(Path.of("../docs/openapi/alert-service.openapi.yaml"));
+        String combined = readme + "\n" + adr + "\n" + handoff + "\n" + preconditions + "\n" + openApi;
+
+        assertThat(combined).contains("local evidence-precondition-gated finalize");
+        assertThat(combined).contains("Current Implementation vs Target Design");
+        assertThat(combined).contains("LOCAL_EVIDENCE_GATE_V1");
+        assertThat(combined).contains("External anchor readiness");
+        assertThat(combined).contains("Trust Authority signing readiness");
+        assertThat(combined).contains("not part of the current local finalize transaction");
+        assertThat(combined).contains("not distributed ACID");
+    }
+
+    @Test
+    void fdp29DocsMustNotContainPromptDecisionNotes() throws Exception {
+        List<Path> docs;
+        try (java.util.stream.Stream<Path> stream = Files.walk(Path.of("../docs"))) {
+            docs = stream
+                    .filter(path -> path.toString().endsWith(".md"))
+                    .toList();
+        }
+
+        for (Path doc : docs) {
+            String source = Files.readString(doc);
+            assertThat(source).as("project documentation must not contain prompt merge-decision notes: " + doc)
+                    .doesNotContain("Merge Decision")
+                    .doesNotContain("GO: design is internally consistent")
+                    .doesNotContain("NO-GO: reviewers");
+        }
+    }
+
     private void assertForbiddenPhraseIsContextual(String source, String phrase) {
         String lowerSource = source.toLowerCase(java.util.Locale.ROOT);
         String lowerPhrase = phrase.toLowerCase(java.util.Locale.ROOT);
