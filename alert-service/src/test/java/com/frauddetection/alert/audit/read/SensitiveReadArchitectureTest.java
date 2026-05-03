@@ -27,8 +27,21 @@ class SensitiveReadArchitectureTest {
             assertThat(endpoint.source())
                     .as(endpoint.description() + " must declare sensitive read audit")
                     .contains("@AuditedSensitiveRead")
-                    .contains("SensitiveReadAuditService");
+                    .contains("SensitiveReadAuditService")
+                    .contains("sensitiveReadAuditService.audit");
         }
+    }
+
+    @Test
+    void auditedSensitiveReadAnnotationMustBeDocumentedAsMarkerOnly() throws Exception {
+        String annotation = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/audit/read/AuditedSensitiveRead.java"
+        ));
+
+        assertThat(annotation)
+                .contains("Marker-only annotation")
+                .contains("does not execute auditing by itself")
+                .contains("Architecture tests enforce");
     }
 
     @Test

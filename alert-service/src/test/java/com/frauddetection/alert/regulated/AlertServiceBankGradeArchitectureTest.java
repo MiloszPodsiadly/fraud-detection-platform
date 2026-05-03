@@ -18,9 +18,17 @@ class AlertServiceBankGradeArchitectureTest {
                 "transaction-mode: REQUIRED",
                 "refresh-mode: ATOMIC",
                 "fail-closed: true",
+                "external-anchoring:",
+                "sink: ${AUDIT_EXTERNAL_ANCHORING_SINK}",
+                "trust-authority:",
+                "signing-required: true",
+                "jwt:",
+                "required: true",
                 "dual-control:",
                 "enabled: true"
         );
+        assertThat(bank).doesNotContain("AUDIT_EXTERNAL_ANCHORING_PUBLICATION_ENABLED:false");
+        assertThat(bank).doesNotContain("AUDIT_EXTERNAL_ANCHORING_SINK:disabled");
     }
 
     @Test
@@ -67,6 +75,25 @@ class AlertServiceBankGradeArchitectureTest {
         assertContextual(combined, "no mutation before evidence");
         assertThat(combined).contains("does not provide distributed ACID");
         assertThat(combined).contains("does not provide exactly-once Kafka delivery");
+    }
+
+    @Test
+    void sourceOfTruthDocsMustNamePersistentDocumentsAndCollections() throws Exception {
+        String sourceOfTruth = Files.readString(Path.of("../docs/architecture/alert-service-source-of-truth.md"));
+
+        assertThat(sourceOfTruth).contains(
+                "RegulatedMutationCommandDocument",
+                "regulated_mutation_commands",
+                "TransactionalOutboxRecordDocument",
+                "transactional_outbox_records",
+                "TrustIncidentDocument",
+                "trust_incidents",
+                "AuditEventDocument",
+                "audit_events",
+                "ExternalAuditAnchorPublicationStatusDocument",
+                "audit_external_anchor_publication_status"
+        );
+        assertThat(sourceOfTruth).doesNotContain("Authoritative source: `RegulatedMutationCommand`.");
     }
 
     private String readIfExists(String path) throws Exception {
