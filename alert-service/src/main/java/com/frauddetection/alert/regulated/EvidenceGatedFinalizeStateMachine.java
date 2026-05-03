@@ -7,9 +7,22 @@ public final class EvidenceGatedFinalizeStateMachine {
 
     private static final Map<RegulatedMutationState, Set<RegulatedMutationState>> ALLOWED = Map.of(
             RegulatedMutationState.REQUESTED, Set.of(RegulatedMutationState.EVIDENCE_PREPARING, RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE),
-            RegulatedMutationState.EVIDENCE_PREPARING, Set.of(RegulatedMutationState.EVIDENCE_PREPARED, RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE),
-            RegulatedMutationState.EVIDENCE_PREPARED, Set.of(RegulatedMutationState.FINALIZING, RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE),
-            RegulatedMutationState.FINALIZING, Set.of(RegulatedMutationState.FINALIZED_VISIBLE, RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED),
+            RegulatedMutationState.EVIDENCE_PREPARING, Set.of(
+                    RegulatedMutationState.EVIDENCE_PREPARED,
+                    RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE,
+                    RegulatedMutationState.FAILED_BUSINESS_VALIDATION,
+                    RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED
+            ),
+            RegulatedMutationState.EVIDENCE_PREPARED, Set.of(
+                    RegulatedMutationState.FINALIZING,
+                    RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE,
+                    RegulatedMutationState.FAILED_BUSINESS_VALIDATION
+            ),
+            RegulatedMutationState.FINALIZING, Set.of(
+                    RegulatedMutationState.FINALIZED_VISIBLE,
+                    RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                    RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED
+            ),
             RegulatedMutationState.FINALIZED_VISIBLE, Set.of(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL, RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED),
             RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL, Set.of(RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED)
     );

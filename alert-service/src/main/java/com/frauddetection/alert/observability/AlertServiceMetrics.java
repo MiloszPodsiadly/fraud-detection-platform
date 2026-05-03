@@ -43,6 +43,7 @@ public class AlertServiceMetrics {
     private final AtomicLong outboxProjectionMismatch = new AtomicLong(0);
     private final AtomicLong outboxOldestPendingAgeSeconds = new AtomicLong(0);
     private final AtomicLong evidenceConfirmationPending = new AtomicLong(0);
+    private final AtomicInteger evidenceGatedFinalizeSubmitDecisionEnabled = new AtomicInteger(0);
 
     public AlertServiceMetrics(MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
@@ -81,6 +82,9 @@ public class AlertServiceMetrics {
         Gauge.builder("outbox_projection_mismatch_count", outboxProjectionMismatch, AtomicLong::get).register(meterRegistry);
         Gauge.builder("outbox_oldest_pending_age_seconds", outboxOldestPendingAgeSeconds, AtomicLong::get).register(meterRegistry);
         Gauge.builder("evidence_confirmation_pending_count", evidenceConfirmationPending, AtomicLong::get).register(meterRegistry);
+        Gauge.builder("evidence_gated_finalize_enabled", evidenceGatedFinalizeSubmitDecisionEnabled, AtomicInteger::get)
+                .tag("mutation_type", "SUBMIT_ANALYST_DECISION")
+                .register(meterRegistry);
     }
 
     public void recordAnalystDecisionSubmitted() {
@@ -165,6 +169,46 @@ public class AlertServiceMetrics {
                 "evidence_confirmation_failed_total",
                 "reason", normalizeEvidenceConfirmationFailure(reason)
         ).increment();
+    }
+
+    public void recordEvidenceGatedFinalizeStateTransition(Enum<?> from, Enum<?> to, String outcome) {
+        counter(
+                "evidence_gated_finalize_state_transition_total",
+                "from", normalizeEvidenceGatedFinalizeState(from),
+                "to", normalizeEvidenceGatedFinalizeState(to),
+                "outcome", normalizeEvidenceGatedFinalizeOutcome(outcome)
+        ).increment();
+    }
+
+    public void recordEvidenceGatedFinalizeRecoveryRequired(String reason) {
+        counter(
+                "evidence_gated_finalize_recovery_required_total",
+                "reason", normalizeEvidenceGatedFinalizeReason(reason)
+        ).increment();
+    }
+
+    public void recordEvidenceGatedFinalizeRejected(String reason) {
+        counter(
+                "evidence_gated_finalize_rejected_total",
+                "reason", normalizeEvidenceGatedFinalizeReason(reason)
+        ).increment();
+    }
+
+    public void recordEvidenceGatedFinalizeTransactionRollback(String reason) {
+        counter(
+                "evidence_gated_finalize_transaction_rollback_total",
+                "reason", normalizeEvidenceGatedFinalizeReason(reason)
+        ).increment();
+    }
+
+    public void recordEvidenceGatedFinalizeStuckVisible() {
+        counter("evidence_gated_finalize_stuck_visible_total").increment();
+    }
+
+    public void recordEvidenceGatedFinalizeEnabled(String mutationType, boolean enabled) {
+        if ("SUBMIT_ANALYST_DECISION".equals(mutationType)) {
+            evidenceGatedFinalizeSubmitDecisionEnabled.set(enabled ? 1 : 0);
+        }
     }
 
     public void recordExternalCoverageRequestCost(String status, int cost) {
@@ -654,8 +698,39 @@ public class AlertServiceMetrics {
 
     private String normalizeEvidenceConfirmationFailure(String reason) {
         return switch (reason) {
-            case "OUTBOX_NOT_PUBLISHED", "SUCCESS_AUDIT_MISSING", "EXTERNAL_ANCHOR_MISSING", "SIGNATURE_UNAVAILABLE" -> reason;
+            case "OUTBOX_NOT_PUBLISHED", "SUCCESS_AUDIT_MISSING", "EXTERNAL_ANCHOR_MISSING", "SIGNATURE_UNAVAILABLE",
+                 "OUTBOX_FAILED_TERMINAL", "SIGNATURE_INVALID" -> reason;
             default -> "OUTBOX_NOT_PUBLISHED";
+        };
+    }
+
+    private String normalizeEvidenceGatedFinalizeState(Enum<?> state) {
+        if (state == null) {
+            return "UNKNOWN";
+        }
+        return switch (state.name()) {
+            case "REQUESTED", "EVIDENCE_PREPARING", "EVIDENCE_PREPARED", "FINALIZING",
+                 "FINALIZED_VISIBLE", "FINALIZED_EVIDENCE_PENDING_EXTERNAL", "FINALIZED_EVIDENCE_CONFIRMED",
+                 "REJECTED_EVIDENCE_UNAVAILABLE", "FAILED_BUSINESS_VALIDATION", "FINALIZE_RECOVERY_REQUIRED" -> state.name();
+            default -> "UNKNOWN";
+        };
+    }
+
+    private String normalizeEvidenceGatedFinalizeOutcome(String outcome) {
+        return switch (outcome) {
+            case "SUCCESS", "FAILED", "REJECTED", "RECOVERY_REQUIRED" -> outcome;
+            default -> "FAILED";
+        };
+    }
+
+    private String normalizeEvidenceGatedFinalizeReason(String reason) {
+        return switch (reason) {
+            case "ATTEMPTED_AUDIT_UNAVAILABLE", "EVIDENCE_GATED_TRANSACTION_REQUIRED",
+                 "EVIDENCE_GATED_FINALIZE_FAILED", "FINALIZING_RETRY_REQUIRES_RECONCILIATION",
+                 "FINALIZED_VISIBLE_MISSING_PROOF", "SUCCESS_AUDIT_MISSING", "OUTBOX_FAILED_TERMINAL",
+                 "SIGNATURE_INVALID", "BUSINESS_VALIDATION_FAILED", "TRANSACTION_CAPABILITY_UNAVAILABLE",
+                 "OUTBOX_REPOSITORY_UNAVAILABLE", "RECOVERY_STRATEGY_UNAVAILABLE" -> reason;
+            default -> "UNKNOWN";
         };
     }
 

@@ -74,9 +74,9 @@ public class MutationEvidenceConfirmationService {
         int boundedLimit = Math.max(1, Math.min(limit, 100));
         metrics.recordEvidenceConfirmationPending(commands.size());
         for (RegulatedMutationCommandDocument command : commands.stream().limit(boundedLimit).toList()) {
+            boolean evidenceGated = command.mutationModelVersionOrLegacy() == RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1;
             EvidenceDecision decision = decision(command);
             if (decision.state() == RegulatedMutationState.EVIDENCE_CONFIRMED) {
-                boolean evidenceGated = command.mutationModelVersionOrLegacy() == RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1;
                 command.setState(evidenceGated
                         ? RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED
                         : RegulatedMutationState.EVIDENCE_CONFIRMED);
@@ -88,13 +88,20 @@ public class MutationEvidenceConfirmationService {
                 updateAlertOperationStatus(command, command.getPublicStatus());
                 promoted++;
             } else if (decision.state() == RegulatedMutationState.COMMITTED_DEGRADED) {
-                command.setState(RegulatedMutationState.COMMITTED_DEGRADED);
-                command.setPublicStatus(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE);
+                command.setState(evidenceGated
+                        ? RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED
+                        : RegulatedMutationState.COMMITTED_DEGRADED);
+                command.setPublicStatus(evidenceGated
+                        ? SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED
+                        : SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE);
                 command.setDegradationReason(decision.reason());
                 command.setLastError(decision.reason());
                 command.setUpdatedAt(java.time.Instant.now());
                 commandRepository.save(command);
-                updateAlertOperationStatus(command, SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE);
+                updateAlertOperationStatus(command, command.getPublicStatus());
+                if (evidenceGated) {
+                    metrics.recordEvidenceGatedFinalizeRecoveryRequired(decision.reason());
+                }
                 metrics.recordEvidenceConfirmationFailed(decision.reason());
             } else if (decision.reason() != null) {
                 metrics.recordEvidenceConfirmationFailed(decision.reason());

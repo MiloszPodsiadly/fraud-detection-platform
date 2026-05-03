@@ -39,6 +39,8 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
     private final AuditDegradationService auditDegradationService;
     private final AlertServiceMetrics metrics;
     private final RegulatedMutationTransactionRunner transactionRunner;
+    private final RegulatedMutationPublicStatusMapper publicStatusMapper;
+    private final EvidencePreconditionEvaluator evidencePreconditionEvaluator;
     private final boolean bankModeFailClosed;
     private final Duration leaseDuration;
     private final EvidenceGatedFinalizeStateMachine evidenceGatedStateMachine = new EvidenceGatedFinalizeStateMachine();
@@ -59,6 +61,32 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
                 auditDegradationService,
                 metrics,
                 new RegulatedMutationTransactionRunner(RegulatedMutationTransactionMode.OFF, null),
+                new RegulatedMutationPublicStatusMapper(),
+                new EvidencePreconditionEvaluator(),
+                bankModeFailClosed,
+                leaseDuration
+        );
+    }
+
+    public MongoRegulatedMutationCoordinator(
+            RegulatedMutationCommandRepository commandRepository,
+            MongoTemplate mongoTemplate,
+            RegulatedMutationAuditPhaseService auditPhaseService,
+            AuditDegradationService auditDegradationService,
+            AlertServiceMetrics metrics,
+            RegulatedMutationTransactionRunner transactionRunner,
+            boolean bankModeFailClosed,
+            Duration leaseDuration
+    ) {
+        this(
+                commandRepository,
+                mongoTemplate,
+                auditPhaseService,
+                auditDegradationService,
+                metrics,
+                transactionRunner,
+                new RegulatedMutationPublicStatusMapper(),
+                new EvidencePreconditionEvaluator(),
                 bankModeFailClosed,
                 leaseDuration
         );
@@ -72,6 +100,8 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
             AuditDegradationService auditDegradationService,
             AlertServiceMetrics metrics,
             RegulatedMutationTransactionRunner transactionRunner,
+            RegulatedMutationPublicStatusMapper publicStatusMapper,
+            EvidencePreconditionEvaluator evidencePreconditionEvaluator,
             @Value("${app.audit.bank-mode.fail-closed:false}") boolean bankModeFailClosed,
             @Value("${app.regulated-mutation.lease-duration:PT30S}") Duration leaseDuration
     ) {
@@ -81,6 +111,8 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
         this.auditDegradationService = auditDegradationService;
         this.metrics = metrics;
         this.transactionRunner = transactionRunner;
+        this.publicStatusMapper = publicStatusMapper;
+        this.evidencePreconditionEvaluator = evidencePreconditionEvaluator;
         this.bankModeFailClosed = bankModeFailClosed;
         this.leaseDuration = leaseDuration;
     }
@@ -171,8 +203,8 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
 
     @SuppressWarnings("unchecked")
     private <S> S authoritativePublicStatus(S restored, RegulatedMutationCommandDocument document) {
-        if (restored instanceof RegulatedMutationPublicStatusProjection<?> response && document.getPublicStatus() != null) {
-            return (S) response.withPublicStatus(document.getPublicStatus());
+        if (restored instanceof RegulatedMutationPublicStatusProjection<?> response) {
+            return (S) response.withPublicStatus(publicStatusMapper.submitDecisionStatus(document));
         }
         return restored;
     }
@@ -501,6 +533,20 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
         if (document.getExecutionStatus() == RegulatedMutationExecutionStatus.PROCESSING && !leaseExpired(document, Instant.now())) {
             return new RegulatedMutationResult<>(document.getState(), command.statusResponseFactory().response(document.getState()));
         }
+        if (document.getState() == RegulatedMutationState.FINALIZING) {
+            return markEvidenceGatedRecoveryRequired(command, document, "FINALIZING_RETRY_REQUIRES_RECONCILIATION");
+        }
+        if (document.getState() == RegulatedMutationState.FINALIZED_VISIBLE) {
+            if (document.getResponseSnapshot() != null
+                    && document.getLocalCommitMarker() != null
+                    && document.isSuccessAuditRecorded()) {
+                metrics.recordEvidenceGatedFinalizeStuckVisible();
+                evidenceGatedTransition(document, RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL, null);
+                return replay(command, document);
+            }
+            metrics.recordEvidenceGatedFinalizeStuckVisible();
+            return markEvidenceGatedRecoveryRequired(command, document, "FINALIZED_VISIBLE_MISSING_PROOF");
+        }
         if (document.getResponseSnapshot() != null) {
             return replay(command, document);
         }
@@ -537,6 +583,20 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
                 throw exception;
             }
         }
+        EvidencePreconditionResult precondition = evidencePreconditionEvaluator.evaluate(command, document);
+        if (precondition.status() != EvidencePreconditionStatus.PASSED) {
+            document.setDegradationReason(precondition.reasonCode());
+            document.setExecutionStatus(RegulatedMutationExecutionStatus.FAILED);
+            RegulatedMutationState rejectedState = switch (precondition.status()) {
+                case REJECTED_EVIDENCE_UNAVAILABLE -> RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE;
+                case FAILED_BUSINESS_VALIDATION -> RegulatedMutationState.FAILED_BUSINESS_VALIDATION;
+                case FINALIZE_RECOVERY_REQUIRED -> RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED;
+                case PASSED -> throw new IllegalStateException("Unexpected passed precondition.");
+            };
+            evidenceGatedTransition(document, rejectedState, precondition.reasonCode());
+            metrics.recordEvidenceGatedFinalizeRejected(precondition.reasonCode());
+            throw new IllegalStateException("FDP-29 evidence precondition failed: " + precondition.reasonCode());
+        }
         if (document.getState() == RegulatedMutationState.EVIDENCE_PREPARING) {
             evidenceGatedTransition(document, RegulatedMutationState.EVIDENCE_PREPARED, null);
         }
@@ -561,17 +621,38 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
                 document.setLocalCommitMarker("EVIDENCE_GATED_FINALIZED");
                 document.setLocalCommittedAt(Instant.now());
                 document.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
-                evidenceGatedTransition(document, RegulatedMutationState.FINALIZED_VISIBLE, null);
+                evidenceGatedTransition(document, RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL, null);
                 return new LocalCommit<>(result, response, snapshot);
             });
-            evidenceGatedTransition(document, RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL, null);
             return new RegulatedMutationResult<>(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL, localCommit.pendingResponse());
         } catch (RuntimeException exception) {
-            document.setDegradationReason(EVIDENCE_GATED_FINALIZE_FAILED);
-            document.setExecutionStatus(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
-            evidenceGatedTransition(document, RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED, EVIDENCE_GATED_FINALIZE_FAILED);
+            RegulatedMutationCommandDocument persisted = reloadForRecovery(document);
+            persisted.setDegradationReason(EVIDENCE_GATED_FINALIZE_FAILED);
+            persisted.setExecutionStatus(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
+            evidenceGatedTransition(persisted, RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED, EVIDENCE_GATED_FINALIZE_FAILED);
             throw exception;
         }
+    }
+
+    private <R, S> RegulatedMutationResult<S> markEvidenceGatedRecoveryRequired(
+            RegulatedMutationCommand<R, S> command,
+            RegulatedMutationCommandDocument document,
+            String reason
+    ) {
+        document.setDegradationReason(reason);
+        document.setExecutionStatus(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
+        evidenceGatedTransition(document, RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED, reason);
+        metrics.recordEvidenceGatedFinalizeRecoveryRequired(reason);
+        return new RegulatedMutationResult<>(
+                RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
+                command.statusResponseFactory().response(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED)
+        );
+    }
+
+    private RegulatedMutationCommandDocument reloadForRecovery(RegulatedMutationCommandDocument document) {
+        return commandRepository.findById(document.getId())
+                .orElseGet(() -> commandRepository.findByIdempotencyKey(document.getIdempotencyKey())
+                        .orElseThrow(() -> new IllegalStateException("Regulated mutation command unavailable for recovery.")));
     }
 
     private void evidenceGatedTransition(
@@ -579,8 +660,10 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
             RegulatedMutationState state,
             String lastError
     ) {
+        RegulatedMutationState previous = document.getState();
         evidenceGatedStateMachine.requireTransition(document.getState(), state);
         transition(document, state, lastError);
+        metrics.recordEvidenceGatedFinalizeStateTransition(previous, state, lastError == null ? "SUCCESS" : "FAILED");
     }
 
     private boolean isSafeToExecuteBusinessMutation(RegulatedMutationCommandDocument document) {
@@ -596,7 +679,8 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
     private boolean requiresRecoveryWithoutSnapshot(RegulatedMutationCommandDocument document) {
         return switch (document.getState()) {
             case BUSINESS_COMMITTING, BUSINESS_COMMITTED, SUCCESS_AUDIT_PENDING, COMMITTED_DEGRADED, EVIDENCE_PENDING,
-                 EVIDENCE_CONFIRMED, COMMITTED -> document.getResponseSnapshot() == null;
+                 EVIDENCE_CONFIRMED, COMMITTED, FINALIZED_VISIBLE, FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                 FINALIZED_EVIDENCE_CONFIRMED -> document.getResponseSnapshot() == null;
             default -> false;
         };
     }
