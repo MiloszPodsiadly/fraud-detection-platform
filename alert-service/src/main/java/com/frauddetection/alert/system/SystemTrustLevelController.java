@@ -375,6 +375,15 @@ public class SystemTrustLevelController implements ApplicationRunner {
         if (reasonCode == null && bankModeFailClosed && !"REQUIRED".equals(transactionMode)) {
             reasonCode = "TRANSACTION_MODE_OFF_IN_BANK_MODE";
         }
+        if (reasonCode == null && requiredFailures > 0) {
+            reasonCode = "EXTERNAL_PUBLICATION_REQUIRED_FAILURE";
+        }
+        if (reasonCode == null && localStatusUnverified > 0) {
+            reasonCode = "EXTERNAL_ANCHOR_LOCAL_STATUS_UNVERIFIED";
+        }
+        if (reasonCode == null && missingRanges > 0) {
+            reasonCode = "EXTERNAL_ANCHOR_MISSING_RANGE";
+        }
         if (reasonCode == null && pendingDegradationResolution > 0) {
             reasonCode = "AUDIT_DEGRADATION_RESOLUTION_PENDING_APPROVAL";
         }
