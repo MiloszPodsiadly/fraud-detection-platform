@@ -1,0 +1,30 @@
+app:
+  regulated-mutations:
+    transaction-mode: REQUIRED
+    transaction-capability-probe:
+      enabled: true
+  trust-incidents:
+    refresh-mode: ATOMIC
+  outbox:
+    publisher:
+      enabled: true
+    recovery:
+      enabled: true
+    confirmation:
+      dual-control:
+        enabled: true
+  audit:
+    bank-mode:
+      fail-closed: true
+    external-anchoring:
+      publication:
+        enabled: ${AUDIT_EXTERNAL_ANCHORING_PUBLICATION_ENABLED:false}
+        required: ${AUDIT_EXTERNAL_ANCHORING_PUBLICATION_REQUIRED:false}
+        fail-closed: ${AUDIT_EXTERNAL_ANCHORING_PUBLICATION_FAIL_CLOSED:false}
+      sink: ${AUDIT_EXTERNAL_ANCHORING_SINK:disabled}
+    trust-authority:
+      enabled: ${AUDIT_TRUST_AUTHORITY_ENABLED:false}
+      signing-required: ${AUDIT_TRUST_AUTHORITY_SIGNING_REQUIRED:false}
+  sensitive-reads:
+    audit:
+      fail-closed: true

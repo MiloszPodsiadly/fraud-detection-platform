@@ -57,6 +57,10 @@ app:
   evidence-confirmation:
     enabled: ${EVIDENCE_CONFIRMATION_ENABLED:true}
     delay-ms: ${EVIDENCE_CONFIRMATION_DELAY_MS:10000}
+  trust-incidents:
+    refresh-mode: ${TRUST_INCIDENTS_REFRESH_MODE:ATOMIC}
+    preview:
+      max-per-minute: ${TRUST_INCIDENTS_PREVIEW_MAX_PER_MINUTE:30}
   audit:
     bank-mode:
       fail-closed: ${AUDIT_BANK_MODE_FAIL_CLOSED:false}
@@ -107,6 +111,9 @@ app:
         private-key-path: ${AUDIT_TRUST_AUTHORITY_JWT_PRIVATE_KEY_PATH:}
         ttl: ${AUDIT_TRUST_AUTHORITY_JWT_TTL:5m}
         authorities: ${AUDIT_TRUST_AUTHORITY_JWT_AUTHORITIES:AUDIT_ANCHOR AUDIT_INTEGRITY}
+  sensitive-reads:
+    audit:
+      fail-closed: ${SENSITIVE_READS_AUDIT_FAIL_CLOSED:false}
   security:
     demo-auth:
       enabled: ${APP_SECURITY_DEMO_AUTH_ENABLED:false}

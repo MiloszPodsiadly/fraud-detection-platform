@@ -19,11 +19,11 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(OutputCaptureExtension.class)
-class RegulatedMutationStartupGuardTest {
+class BankModeStartupGuardTest {
 
     @Test
     void shouldAllowLocalModeWithoutRequiredTransactions() {
-        RegulatedMutationStartupGuard guard = guard(
+        BankModeStartupGuard guard = guard(
                 RegulatedMutationTransactionMode.OFF,
                 false,
                 new String[]{"local"},
@@ -39,7 +39,7 @@ class RegulatedMutationStartupGuardTest {
 
     @Test
     void shouldRejectBankModeWhenTransactionsAreOff() {
-        RegulatedMutationStartupGuard guard = guard(
+        BankModeStartupGuard guard = guard(
                 RegulatedMutationTransactionMode.OFF,
                 true,
                 new String[]{"local"},
@@ -52,14 +52,14 @@ class RegulatedMutationStartupGuardTest {
 
         assertThatThrownBy(() -> guard.run(null))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("transaction-mode=REQUIRED");
+                .hasMessageContaining("app.regulated-mutations.transaction-mode");
     }
 
     @Test
     void shouldRejectProdProfileWhenTransactionManagerIsMissing() {
-        RegulatedMutationStartupGuard guard = guard(
+        BankModeStartupGuard guard = guard(
                 RegulatedMutationTransactionMode.REQUIRED,
-                false,
+                true,
                 new String[]{"prod"},
                 null,
                 true,
@@ -70,14 +70,14 @@ class RegulatedMutationStartupGuardTest {
 
         assertThatThrownBy(() -> guard.run(null))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("requires a Mongo transaction manager");
+                .hasMessageContaining("mongo transaction manager");
     }
 
     @Test
     void shouldRejectProdProfileWhenOutboxRecoveryIsDisabled() {
-        RegulatedMutationStartupGuard guard = guard(
+        BankModeStartupGuard guard = guard(
                 RegulatedMutationTransactionMode.REQUIRED,
-                false,
+                true,
                 new String[]{"prod"},
                 mock(PlatformTransactionManager.class),
                 true,
@@ -88,12 +88,12 @@ class RegulatedMutationStartupGuardTest {
 
         assertThatThrownBy(() -> guard.run(null))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("outbox recovery enabled");
+                .hasMessageContaining("app.outbox.recovery.enabled");
     }
 
     @Test
     void shouldRejectBankModeWhenOutboxConfirmationDualControlIsDisabled() {
-        RegulatedMutationStartupGuard guard = guard(
+        BankModeStartupGuard guard = guard(
                 RegulatedMutationTransactionMode.REQUIRED,
                 true,
                 new String[]{"bank"},
@@ -107,7 +107,7 @@ class RegulatedMutationStartupGuardTest {
 
         assertThatThrownBy(() -> guard.run(null))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("dual-control enabled");
+                .hasMessageContaining("app.outbox.confirmation.dual-control.enabled");
     }
 
     @Test
@@ -115,7 +115,7 @@ class RegulatedMutationStartupGuardTest {
         PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
         RegulatedMutationTransactionCapabilityProbe probe = mock(RegulatedMutationTransactionCapabilityProbe.class);
         org.mockito.Mockito.doThrow(new IllegalStateException("transactions unavailable")).when(probe).verify();
-        RegulatedMutationStartupGuard guard = guard(
+        BankModeStartupGuard guard = guard(
                 RegulatedMutationTransactionMode.REQUIRED,
                 false,
                 new String[]{"local"},
@@ -136,7 +136,7 @@ class RegulatedMutationStartupGuardTest {
 
     @Test
     void shouldRejectBankModeWhenTransactionCapabilityProbeIsDisabled() {
-        RegulatedMutationStartupGuard guard = guard(
+        BankModeStartupGuard guard = guard(
                 RegulatedMutationTransactionMode.REQUIRED,
                 true,
                 new String[]{"bank"},
@@ -153,12 +153,12 @@ class RegulatedMutationStartupGuardTest {
 
         assertThatThrownBy(() -> guard.run(null))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("transaction capability probe enabled");
+                .hasMessageContaining("app.regulated-mutations.transaction-capability-probe.enabled");
     }
 
     @Test
     void shouldRejectBankModeWhenTrustIncidentRefreshModeIsPartial() {
-        RegulatedMutationStartupGuard guard = guard(
+        BankModeStartupGuard guard = guard(
                 RegulatedMutationTransactionMode.REQUIRED,
                 true,
                 new String[]{"bank"},
@@ -175,14 +175,14 @@ class RegulatedMutationStartupGuardTest {
 
         assertThatThrownBy(() -> guard.run(null))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("refresh-mode=ATOMIC");
+                .hasMessageContaining("app.trust-incidents.refresh-mode");
     }
 
     @Test
     void shouldRejectProdProfileWhenTrustIncidentRefreshModeIsPartial() {
-        RegulatedMutationStartupGuard guard = guard(
+        BankModeStartupGuard guard = guard(
                 RegulatedMutationTransactionMode.REQUIRED,
-                false,
+                true,
                 new String[]{"prod"},
                 mock(PlatformTransactionManager.class),
                 true,
@@ -197,14 +197,14 @@ class RegulatedMutationStartupGuardTest {
 
         assertThatThrownBy(() -> guard.run(null))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("refresh-mode=ATOMIC");
+                .hasMessageContaining("app.trust-incidents.refresh-mode");
     }
 
     @Test
     void shouldRejectProdProfileWhenTransactionsAreOff() {
-        RegulatedMutationStartupGuard guard = guard(
+        BankModeStartupGuard guard = guard(
                 RegulatedMutationTransactionMode.OFF,
-                false,
+                true,
                 new String[]{"prod"},
                 mock(PlatformTransactionManager.class),
                 true,
@@ -219,12 +219,12 @@ class RegulatedMutationStartupGuardTest {
 
         assertThatThrownBy(() -> guard.run(null))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("transaction-mode=REQUIRED");
+                .hasMessageContaining("app.regulated-mutations.transaction-mode");
     }
 
     @Test
     void shouldAllowBankModeWithAtomicTrustRefreshAndRequiredTransactions(CapturedOutput output) {
-        RegulatedMutationStartupGuard guard = guard(
+        BankModeStartupGuard guard = guard(
                 RegulatedMutationTransactionMode.REQUIRED,
                 true,
                 new String[]{"bank"},
@@ -240,12 +240,92 @@ class RegulatedMutationStartupGuardTest {
         );
 
         assertThatCode(() -> guard.run(null)).doesNotThrowAnyException();
-        assertThat(output).contains("FDP-26 bank-grade mode active: transaction-mode=REQUIRED, trust-incidents.refresh-mode=ATOMIC, outbox dual-control enabled.");
+        assertThat(output).contains("FDP-27 bank profile active: transaction-mode=REQUIRED, trust-incidents.refresh-mode=ATOMIC, outbox dual-control and sensitive-read fail-closed enabled.");
+    }
+
+    @Test
+    void shouldRejectBankModeWhenSensitiveReadAuditIsFailOpen() {
+        BankModeStartupGuard guard = guard(
+                RegulatedMutationTransactionMode.REQUIRED,
+                true,
+                new String[]{"bank"},
+                mock(PlatformTransactionManager.class),
+                true,
+                true,
+                true,
+                true,
+                "ATOMIC",
+                5,
+                mock(RegulatedMutationTransactionCapabilityProbe.class),
+                mock(TransactionalOutboxRecordRepository.class),
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                "disabled"
+        );
+
+        assertThatThrownBy(() -> guard.run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("app.sensitive-reads.audit.fail-closed");
+    }
+
+    @Test
+    void shouldRejectBankModeWhenExternalPublicationUsesLocalSink() {
+        BankModeStartupGuard guard = guard(
+                RegulatedMutationTransactionMode.REQUIRED,
+                true,
+                new String[]{"bank"},
+                mock(PlatformTransactionManager.class),
+                true,
+                true,
+                true,
+                true,
+                "ATOMIC",
+                5,
+                mock(RegulatedMutationTransactionCapabilityProbe.class),
+                mock(TransactionalOutboxRecordRepository.class),
+                true,
+                true,
+                true,
+                true,
+                false,
+                false,
+                "local-file"
+        );
+
+        assertThatThrownBy(() -> guard.run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("app.audit.external-anchoring.sink");
+    }
+
+    @Test
+    void shouldRejectProdProfileWhenBankModeFailClosedIsNotEnabled() {
+        BankModeStartupGuard guard = guard(
+                RegulatedMutationTransactionMode.REQUIRED,
+                false,
+                new String[]{"prod"},
+                mock(PlatformTransactionManager.class),
+                true,
+                true,
+                true,
+                true,
+                "ATOMIC",
+                5,
+                mock(RegulatedMutationTransactionCapabilityProbe.class),
+                mock(TransactionalOutboxRecordRepository.class)
+        );
+
+        assertThatThrownBy(() -> guard.run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("app.audit.bank-mode.fail-closed");
     }
 
     @Test
     void shouldAllowLocalPartialTrustRefreshWithTransactionModeOff() {
-        RegulatedMutationStartupGuard guard = guard(
+        BankModeStartupGuard guard = guard(
                 RegulatedMutationTransactionMode.OFF,
                 false,
                 new String[]{"local"},
@@ -267,7 +347,7 @@ class RegulatedMutationStartupGuardTest {
     void shouldRunTransactionCapabilityProbeWhenRequiredModeIsEnabled() {
         PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
         RegulatedMutationTransactionCapabilityProbe probe = mock(RegulatedMutationTransactionCapabilityProbe.class);
-        RegulatedMutationStartupGuard guard = guard(
+        BankModeStartupGuard guard = guard(
                 RegulatedMutationTransactionMode.REQUIRED,
                 false,
                 new String[]{"local"},
@@ -288,7 +368,7 @@ class RegulatedMutationStartupGuardTest {
     @Test
     void shouldSkipTransactionCapabilityProbeWhenTransactionModeIsOff() {
         RegulatedMutationTransactionCapabilityProbe probe = mock(RegulatedMutationTransactionCapabilityProbe.class);
-        RegulatedMutationStartupGuard guard = guard(
+        BankModeStartupGuard guard = guard(
                 RegulatedMutationTransactionMode.OFF,
                 false,
                 new String[]{"local"},
@@ -307,7 +387,7 @@ class RegulatedMutationStartupGuardTest {
     }
 
     @SuppressWarnings("unchecked")
-    private RegulatedMutationStartupGuard guard(
+    private BankModeStartupGuard guard(
             RegulatedMutationTransactionMode mode,
             boolean bankMode,
             String[] profiles,
@@ -334,7 +414,7 @@ class RegulatedMutationStartupGuardTest {
         );
     }
 
-    private RegulatedMutationStartupGuard guard(
+    private BankModeStartupGuard guard(
             RegulatedMutationTransactionMode mode,
             boolean bankMode,
             String[] profiles,
@@ -347,7 +427,7 @@ class RegulatedMutationStartupGuardTest {
         return guard(mode, bankMode, profiles, transactionManager, outboxPublisherEnabled, outboxRecoveryEnabled, true, transactionCapabilityProbeEnabled, maxAttempts);
     }
 
-    private RegulatedMutationStartupGuard guard(
+    private BankModeStartupGuard guard(
             RegulatedMutationTransactionMode mode,
             boolean bankMode,
             String[] profiles,
@@ -372,12 +452,19 @@ class RegulatedMutationStartupGuardTest {
                 "ATOMIC",
                 maxAttempts,
                 probe,
-                outboxRepository
+                outboxRepository,
+                true,
+                false,
+                false,
+                false,
+                false,
+                false,
+                "disabled"
         );
     }
 
     @SuppressWarnings("unchecked")
-    private RegulatedMutationStartupGuard guard(
+    private BankModeStartupGuard guard(
             RegulatedMutationTransactionMode mode,
             boolean bankMode,
             String[] profiles,
@@ -389,7 +476,14 @@ class RegulatedMutationStartupGuardTest {
             String trustIncidentRefreshMode,
             int maxAttempts,
             RegulatedMutationTransactionCapabilityProbe probe,
-            TransactionalOutboxRecordRepository outboxRepository
+            TransactionalOutboxRecordRepository outboxRepository,
+            boolean sensitiveReadAuditFailClosed,
+            boolean externalPublicationEnabled,
+            boolean externalPublicationRequired,
+            boolean externalPublicationFailClosed,
+            boolean trustAuthorityEnabled,
+            boolean trustAuthoritySigningRequired,
+            String externalAnchoringSink
     ) {
         Environment environment = mock(Environment.class);
         when(environment.getActiveProfiles()).thenReturn(profiles);
@@ -403,7 +497,7 @@ class RegulatedMutationStartupGuardTest {
                 mode,
                 transactionManager == null ? null : new TransactionTemplate(transactionManager)
         );
-        return new RegulatedMutationStartupGuard(
+        return new BankModeStartupGuard(
                 runner,
                 provider,
                 outboxProvider,
@@ -414,8 +508,53 @@ class RegulatedMutationStartupGuardTest {
                 outboxRecoveryEnabled,
                 outboxConfirmationDualControlEnabled,
                 transactionCapabilityProbeEnabled,
+                sensitiveReadAuditFailClosed,
+                externalPublicationEnabled,
+                externalPublicationRequired,
+                externalPublicationFailClosed,
+                trustAuthorityEnabled,
+                trustAuthoritySigningRequired,
+                externalAnchoringSink,
                 trustIncidentRefreshMode,
                 maxAttempts
+        );
+    }
+
+    @SuppressWarnings("unchecked")
+    private BankModeStartupGuard guard(
+            RegulatedMutationTransactionMode mode,
+            boolean bankMode,
+            String[] profiles,
+            PlatformTransactionManager transactionManager,
+            boolean outboxPublisherEnabled,
+            boolean outboxRecoveryEnabled,
+            boolean outboxConfirmationDualControlEnabled,
+            boolean transactionCapabilityProbeEnabled,
+            String trustIncidentRefreshMode,
+            int maxAttempts,
+            RegulatedMutationTransactionCapabilityProbe probe,
+            TransactionalOutboxRecordRepository outboxRepository
+    ) {
+        return guard(
+                mode,
+                bankMode,
+                profiles,
+                transactionManager,
+                outboxPublisherEnabled,
+                outboxRecoveryEnabled,
+                outboxConfirmationDualControlEnabled,
+                transactionCapabilityProbeEnabled,
+                trustIncidentRefreshMode,
+                maxAttempts,
+                probe,
+                outboxRepository,
+                true,
+                false,
+                false,
+                false,
+                false,
+                false,
+                "disabled"
         );
     }
 }
