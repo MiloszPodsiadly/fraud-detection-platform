@@ -1,11 +1,11 @@
 # FDP-29 State Machine Contract
 
-This is the future state machine contract for evidence-gated finalize. It is not implemented by FDP-29.
+This is the FDP-29 state machine contract for the feature-flagged submit-decision evidence-gated finalize prototype. It applies only when both evidence-gated finalize flags are enabled for submit-decision.
 
 ## Invariants
 
-1. `FINALIZED_VISIBLE` is impossible before `EVIDENCE_PREPARED`.
-2. `FINALIZED_EVIDENCE_CONFIRMED` is impossible before `FINALIZED_VISIBLE`.
+1. Durable local-visible finalize is impossible before `EVIDENCE_PREPARED`.
+2. `FINALIZED_EVIDENCE_CONFIRMED` is impossible before `FINALIZED_EVIDENCE_PENDING_EXTERNAL`.
 3. `REJECTED_EVIDENCE_UNAVAILABLE` must not mutate visible business state.
 4. `FINALIZE_RECOVERY_REQUIRED` must not be reported as successful business commit.
 5. Idempotent replay must not rerun finalize after `FINALIZING` unless persisted state proves finalization never happened.
@@ -55,7 +55,7 @@ This is the future state machine contract for evidence-gated finalize. It is not
 
 - Meaning: Local Mongo transaction is applying visible business mutation, outbox record, response snapshot, and local finalize marker.
 - Authoritative source: Command state and local transaction.
-- Allowed transitions: `FINALIZED_VISIBLE`, `FINALIZE_RECOVERY_REQUIRED`.
+- Allowed transitions: `FINALIZED_EVIDENCE_PENDING_EXTERNAL`, `FINALIZE_RECOVERY_REQUIRED`.
 - Forbidden transitions: `REJECTED_EVIDENCE_UNAVAILABLE`, `FAILED_BUSINESS_VALIDATION`.
 - API-visible status: `FINALIZING`.
 - Idempotency replay: Must not rerun finalize unless persisted state proves transaction did not commit.
@@ -66,11 +66,11 @@ This is the future state machine contract for evidence-gated finalize. It is not
 
 ### FINALIZED_VISIBLE
 
-- Meaning: Business mutation is visible and local finalize transaction committed.
+- Meaning: Compatibility/repair state for legacy or interrupted FDP-29 commands where the system observes a local visible finalize marker before the command was promoted to `FINALIZED_EVIDENCE_PENDING_EXTERNAL`.
 - Authoritative source: Business aggregate plus command finalize marker.
 - Allowed transitions: `FINALIZED_EVIDENCE_PENDING_EXTERNAL`, `FINALIZE_RECOVERY_REQUIRED` only if local evidence inconsistency is later detected.
 - Forbidden transitions: Pre-finalize states.
-- API-visible status: `FINALIZED_VISIBLE`.
+- API-visible status: `FINALIZED_EVIDENCE_PENDING_EXTERNAL` for FDP-29 submit-decision replay. Clients must not depend on `FINALIZED_VISIBLE` as a stable new-command response.
 - Idempotency replay: Return committed response snapshot; never rerun business mutation.
 - Recovery: Reconstruct response from snapshot or aggregate if strategy permits.
 - Trust-level impact: Healthy only if no required evidence gaps remain.

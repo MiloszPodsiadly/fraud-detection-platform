@@ -6,7 +6,7 @@ The design addresses the remaining gap that FDP-28 intentionally documents inste
 
 ## Target Guarantee
 
-When `app.regulated-mutations.evidence-gated-finalize.enabled=true`, `app.regulated-mutations.evidence-gated-finalize.submit-decision.enabled=true`, and `app.regulated-mutations.transaction-mode=REQUIRED`, submit-decision uses `EVIDENCE_GATED_FINALIZE_V1`. In that model, no externally visible submit-decision mutation becomes `FINALIZED_VISIBLE` unless required locally verifiable evidence preconditions are satisfied.
+When `app.regulated-mutations.evidence-gated-finalize.enabled=true`, `app.regulated-mutations.evidence-gated-finalize.submit-decision.enabled=true`, and `app.regulated-mutations.transaction-mode=REQUIRED`, submit-decision uses `EVIDENCE_GATED_FINALIZE_V1`. In that model, no externally visible submit-decision mutation is finalized unless required locally verifiable evidence preconditions are satisfied. New FDP-29 submit-decision commands persist `FINALIZED_EVIDENCE_PENDING_EXTERNAL` as the durable local-visible state; `FINALIZED_VISIBLE` is compatibility/repair state only.
 
 ## Design Contract
 
@@ -24,6 +24,8 @@ When `app.regulated-mutations.evidence-gated-finalize.enabled=true`, `app.regula
 ## Runtime Boundary
 
 FDP-29 preserves FDP-25/FDP-26/FDP-27/FDP-28 compatibility when the feature flags are disabled. It does not migrate fraud-case update, trust incident writes, outbox confirmation resolution, Kafka contracts, scoring, ML model behavior, or UI workflow.
+
+Startup fails closed if the submit-decision evidence-gated path is enabled without `transaction-mode=REQUIRED`, Mongo transaction capability, transactional outbox repository, outbox recovery, and submit-decision recovery strategy. Runtime checks remain as defense-in-depth.
 
 The runtime model stores `mutation_model_version` on command records. Missing or null values are treated as `LEGACY_REGULATED_MUTATION`.
 

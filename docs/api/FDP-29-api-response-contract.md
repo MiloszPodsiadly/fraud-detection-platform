@@ -1,6 +1,6 @@
 # FDP-29 API Response Contract
 
-This is the future response contract for evidence-gated finalize. It is not active runtime behavior in FDP-29.
+This is the response contract for the FDP-29 feature-flagged submit-decision evidence-gated finalize prototype. It is active only when both evidence-gated finalize flags are enabled for submit-decision.
 
 Core rule:
 
@@ -33,7 +33,7 @@ Core rule:
 | `EVIDENCE_PREPARING` | 202 | No committed updates | No | Yes | Retry after short delay | Same key returns in-progress/preparing | None unless stuck |
 | `EVIDENCE_PREPARED` | 202 | No committed updates | No | Yes | Retry may allow coordinator to finalize | Same key may continue only under safe lease | None |
 | `FINALIZING` | 202 | No committed updates | No | Yes | Retry same key; do not submit new key | Same key must not rerun finalize blindly | Investigate if lease expires |
-| `FINALIZED_VISIBLE` | 200 | Yes | Yes | Optional | No retry required | Same key returns response snapshot | None |
+| `FINALIZED_VISIBLE` | 200 | Yes | Yes | Optional | Compatibility/repair state only | Same key returns response snapshot when persisted by older/interrupted flow | None |
 | `FINALIZED_EVIDENCE_PENDING_EXTERNAL` | 200 | Yes | Yes | Optional | Poll/reconcile evidence if needed | Same key returns response snapshot with pending evidence | Operator may monitor external evidence |
 | `FINALIZED_EVIDENCE_CONFIRMED` | 200 | Yes | Yes | Optional | No retry required | Same key returns final snapshot | None |
 | `REJECTED_EVIDENCE_UNAVAILABLE` | 503 or 202 by endpoint policy | No committed updates | No | Yes when available | Retry after dependency recovery or use new command if policy allows | Same key returns rejection | Restore evidence dependency |
@@ -50,3 +50,4 @@ Core rule:
 - Same idempotency key plus different payload or different actor is rejected as conflict.
 - External evidence pending is not an error if local finalize succeeded and policy allows asynchronous confirmation.
 - External evidence confirmed must be backed by explicit evidence status, not inferred from absence of errors.
+- New FDP-29 submit-decision commands durably persist `FINALIZED_EVIDENCE_PENDING_EXTERNAL` as the local-visible state inside the local Mongo transaction. `FINALIZED_VISIBLE` is retained only for compatibility and repair.

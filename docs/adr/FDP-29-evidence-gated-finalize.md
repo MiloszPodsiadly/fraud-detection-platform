@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed design contract. FDP-29 is design-first and does not change runtime behavior.
+Feature-flagged submit-decision implementation prototype plus design contract. FDP-29 changes runtime behavior only when both `app.regulated-mutations.evidence-gated-finalize.enabled=true` and `app.regulated-mutations.evidence-gated-finalize.submit-decision.enabled=true` are configured. The default remains disabled.
 
 ## Problem
 
@@ -14,7 +14,7 @@ The design question for FDP-29 is:
 
 ## Decision
 
-Future regulated mutations should use an evidence-gated finalize model. A mutation may expose updated business state only after locally verifiable evidence preconditions pass. External evidence publication and broker delivery confirmation remain eventual effects and must not be described as part of the local transaction.
+Regulated mutations should use an evidence-gated finalize model. FDP-29 implements this model only for submit-decision. A mutation may expose updated business state only after locally verifiable evidence preconditions pass. External evidence publication and broker delivery confirmation remain eventual effects and must not be described as part of the local transaction.
 
 Core invariant:
 
@@ -41,8 +41,7 @@ stateDiagram-v2
     REQUESTED --> EVIDENCE_PREPARING
     EVIDENCE_PREPARING --> EVIDENCE_PREPARED
     EVIDENCE_PREPARED --> FINALIZING
-    FINALIZING --> FINALIZED_VISIBLE
-    FINALIZED_VISIBLE --> FINALIZED_EVIDENCE_PENDING_EXTERNAL
+    FINALIZING --> FINALIZED_EVIDENCE_PENDING_EXTERNAL
     FINALIZED_EVIDENCE_PENDING_EXTERNAL --> FINALIZED_EVIDENCE_CONFIRMED
 ```
 
@@ -53,7 +52,7 @@ stateDiagram-v2
     EVIDENCE_PREPARING --> REJECTED_EVIDENCE_UNAVAILABLE
     EVIDENCE_PREPARING --> FAILED_BUSINESS_VALIDATION
     FINALIZING --> FINALIZE_RECOVERY_REQUIRED
-    FINALIZED_VISIBLE --> FINALIZED_EVIDENCE_PENDING_EXTERNAL
+    FINALIZED_VISIBLE --> FINALIZED_EVIDENCE_PENDING_EXTERNAL: legacy/stuck-state repair only
     FINALIZED_EVIDENCE_PENDING_EXTERNAL --> FINALIZED_EVIDENCE_CONFIRMED
 ```
 
@@ -63,9 +62,10 @@ stateDiagram-v2
 2. `EVIDENCE_PREPARING`
 3. `EVIDENCE_PREPARED`
 4. `FINALIZING`
-5. `FINALIZED_VISIBLE`
-6. `FINALIZED_EVIDENCE_PENDING_EXTERNAL`
-7. `FINALIZED_EVIDENCE_CONFIRMED`
+5. `FINALIZED_EVIDENCE_PENDING_EXTERNAL`
+6. `FINALIZED_EVIDENCE_CONFIRMED`
+
+`FINALIZED_VISIBLE` is retained as a compatibility/repair state for previously persisted or interrupted commands. New FDP-29 submit-decision finalization persists `FINALIZED_EVIDENCE_PENDING_EXTERNAL` as the durable local-visible state inside the local Mongo transaction.
 
 Rejected or recovery states:
 
@@ -135,7 +135,7 @@ Local ACID means only Mongo-local writes inside one Mongo transaction. Kafka, ex
 
 ## Compatibility With Existing FDP Statuses
 
-FDP-25/FDP-26/FDP-27/FDP-28 statuses remain valid for legacy commands and replay. Future implementation should map old command states into the new model without changing historical meaning. For example:
+FDP-25/FDP-26/FDP-27/FDP-28 statuses remain valid for legacy commands and replay. FDP-29 maps old command states into the new model without changing historical meaning. For example:
 
 - `COMMITTED_EVIDENCE_PENDING` maps to `FINALIZED_EVIDENCE_PENDING_EXTERNAL`.
 - `COMMITTED_EVIDENCE_INCOMPLETE` and `COMMITTED_DEGRADED` map to finalized-with-degraded-evidence compatibility states, not to `FINALIZED_EVIDENCE_CONFIRMED`.
@@ -164,10 +164,10 @@ FDP-29 does not claim:
 
 Allowed claim:
 
-> FDP-29 defines a future design where visible business commit is gated by locally verifiable evidence preconditions.
+> FDP-29 implements a disabled-by-default submit-decision prototype where visible local business finalize is gated by locally verifiable evidence preconditions.
 
 ## Consequences
 
-Implementation can be reviewed and rejected before runtime code changes. This avoids changing command execution semantics without first agreeing on visibility, evidence, API, idempotency, migration, and recovery contracts.
+Implementation remains intentionally narrow. Fraud-case update, trust incident writes, and outbox confirmation resolution are not migrated to this model by FDP-29.
 
-The future implementation will need additional tests before merge, especially around no-visible-mutation-before-finalize, local transaction rollback, idempotent replay, legacy replay, outbox ambiguity, and external evidence degradation.
+Future hardening should expand direct production-chaos and process-kill coverage, especially around no-visible-mutation-before-finalize, idempotent replay, legacy replay, outbox ambiguity, and external evidence degradation.

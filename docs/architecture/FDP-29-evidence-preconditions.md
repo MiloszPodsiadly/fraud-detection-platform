@@ -1,6 +1,6 @@
 # FDP-29 Evidence Preconditions
 
-This document defines the future preconditions that must be satisfied before a regulated mutation may enter `FINALIZING`.
+This document defines the FDP-29 preconditions that must be satisfied before the feature-flagged submit-decision path may enter `FINALIZING`.
 
 Do not require Kafka publish before finalize. Kafka publication is a downstream outbox effect after the local finalize transaction.
 
@@ -27,4 +27,6 @@ Do not require Kafka publish before finalize. Kafka publication is a downstream 
 
 `FINALIZING` may start only from `EVIDENCE_PREPARED`.
 
-`FINALIZED_VISIBLE` may be persisted only inside the local Mongo transaction that applies the business aggregate mutation, writes the transactional outbox record when required, stores the response snapshot, and stores the local finalize marker.
+New FDP-29 submit-decision commands persist `FINALIZED_EVIDENCE_PENDING_EXTERNAL` inside the local Mongo transaction that applies the business aggregate mutation, writes the transactional outbox record, stores the response snapshot, and stores the local finalize marker.
+
+`FINALIZED_VISIBLE` is retained only as a compatibility/repair state for previously persisted or interrupted commands.
