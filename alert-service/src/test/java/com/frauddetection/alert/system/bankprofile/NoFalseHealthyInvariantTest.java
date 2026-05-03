@@ -8,6 +8,7 @@ import com.frauddetection.alert.audit.external.ExternalImmutabilityLevel;
 import com.frauddetection.alert.audit.external.ExternalWitnessCapabilities;
 import com.frauddetection.alert.audit.external.ExternalWitnessTimestampType;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorCoverageResponse;
+import com.frauddetection.alert.audit.external.ExternalAuditAnchorMissingRange;
 import com.frauddetection.alert.fdp28.InvariantAssert;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
@@ -16,6 +17,7 @@ import com.frauddetection.alert.regulated.RegulatedMutationRecoveryService;
 import com.frauddetection.alert.system.SystemTrustLevelController;
 import com.frauddetection.alert.system.SystemTrustLevelResponse;
 import com.frauddetection.alert.trust.TrustIncidentService;
+import com.frauddetection.alert.trust.TrustIncidentSummary;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.DataAccessResourceFailureException;
@@ -54,6 +56,141 @@ class NoFalseHealthyInvariantTest {
         InvariantAssert.noFalseHealthy(response);
         assertThat(response.reasonCode()).isEqualTo("TRUST_INCIDENT_UNACKNOWLEDGED_CRITICAL");
         assertThat(response.incidentHealthStatus()).isEqualTo("CRITICAL");
+    }
+
+    @Test
+    void shouldNotReportHealthyWhenExternalCoverageIsUnavailable() {
+        Fixture fixture = new Fixture();
+        when(fixture.integrityService.coverage("alert-service", 100)).thenReturn(new ExternalAuditAnchorCoverageResponse(
+                "UNAVAILABLE",
+                10,
+                0,
+                10,
+                null,
+                List.of(),
+                false,
+                100,
+                "HEAD_SCAN_PAGINATION_UNSUPPORTED",
+                "External audit head cannot be proven."
+        ));
+
+        SystemTrustLevelResponse response = fixture.controller().trustLevel();
+
+        InvariantAssert.noFalseHealthy(response);
+        assertThat(response.coverageStatus()).isEqualTo("DEGRADED");
+        assertThat(response.reasonCode()).isEqualTo("HEAD_SCAN_PAGINATION_UNSUPPORTED");
+    }
+
+    @Test
+    void shouldNotReportHealthyWhenExternalCoverageHasMissingRanges() {
+        Fixture fixture = new Fixture();
+        when(fixture.integrityService.coverage("alert-service", 100)).thenReturn(new ExternalAuditAnchorCoverageResponse(
+                "AVAILABLE",
+                10,
+                10,
+                0,
+                null,
+                List.of(new ExternalAuditAnchorMissingRange(4L, 4L)),
+                false,
+                100,
+                "EXTERNAL_RANGE_MISSING",
+                null
+        ));
+
+        SystemTrustLevelResponse response = fixture.controller().trustLevel();
+
+        InvariantAssert.noFalseHealthy(response);
+        assertThat(response.coverageStatus()).isEqualTo("DEGRADED");
+        assertThat(response.missingRanges()).isEqualTo(1);
+    }
+
+    @Test
+    void shouldNotReportHealthyWhenRequiredPublicationFailuresExist() {
+        Fixture fixture = new Fixture();
+        when(fixture.integrityService.coverage("alert-service", 100)).thenReturn(degradedPublicationCoverage(1, 0));
+
+        SystemTrustLevelResponse response = fixture.controller().trustLevel();
+
+        InvariantAssert.noFalseHealthy(response);
+        assertThat(response.requiredPublicationFailures()).isEqualTo(1);
+    }
+
+    @Test
+    void shouldNotReportHealthyWhenLocalStatusIsUnverified() {
+        Fixture fixture = new Fixture();
+        when(fixture.integrityService.coverage("alert-service", 100)).thenReturn(degradedPublicationCoverage(0, 1));
+
+        SystemTrustLevelResponse response = fixture.controller().trustLevel();
+
+        InvariantAssert.noFalseHealthy(response);
+        assertThat(response.localStatusUnverified()).isEqualTo(1);
+    }
+
+    @Test
+    void shouldNotReportHealthyWhenWitnessCapabilitiesAreOnlyDeclared() {
+        Fixture fixture = new Fixture();
+        when(fixture.sink.capabilities()).thenReturn(new ExternalWitnessCapabilities(
+                "OBJECT_STORE",
+                "object-store",
+                "CROSS_ORG",
+                ExternalImmutabilityLevel.CONFIGURED,
+                true,
+                true,
+                false,
+                false,
+                ExternalWitnessTimestampType.APP_OBSERVED,
+                "WEAK",
+                false,
+                false,
+                false,
+                ExternalDurabilityGuarantee.WITNESS_RETENTION
+        ));
+
+        SystemTrustLevelResponse response = fixture.controller().trustLevel();
+
+        assertThat(response.guaranteeLevel()).isEqualTo("FDP24_DEGRADED");
+        assertThat(response.witnessStatus()).isEqualTo("DECLARED_CAPABLE");
+    }
+
+    @Test
+    void shouldNotReportHealthyWhenExternalSignatureStatePreventsValidIntegrity() {
+        Fixture fixture = new Fixture();
+        when(fixture.integrityService.coverage("alert-service", 100)).thenReturn(new ExternalAuditAnchorCoverageResponse(
+                "AVAILABLE",
+                10,
+                9,
+                1,
+                null,
+                List.of(),
+                false,
+                100,
+                "SIGNATURE_UNAVAILABLE_REQUIRED",
+                "Trust Authority signature unavailable."
+        ));
+
+        SystemTrustLevelResponse response = fixture.controller().trustLevel();
+
+        InvariantAssert.noFalseHealthy(response);
+        assertThat(response.reasonCode()).isEqualTo("SIGNATURE_UNAVAILABLE_REQUIRED");
+    }
+
+    @Test
+    void shouldNotReportHealthyWhenOpenCriticalTrustIncidentExists() {
+        Fixture fixture = new Fixture();
+        when(fixture.trustIncidentService.summary()).thenReturn(new TrustIncidentSummary(
+                1L,
+                0L,
+                0L,
+                60L,
+                List.of("OUTBOX_TERMINAL_FAILURE"),
+                "CRITICAL"
+        ));
+
+        SystemTrustLevelResponse response = fixture.controller().trustLevel();
+
+        InvariantAssert.noFalseHealthy(response);
+        assertThat(response.reasonCode()).isEqualTo("TRUST_INCIDENT_OPEN_CRITICAL");
+        assertThat(response.openCriticalIncidentCount()).isEqualTo(1L);
     }
 
     private static final class Fixture {
@@ -141,5 +278,32 @@ class NoFalseHealthyInvariantTest {
                     ExternalDurabilityGuarantee.LEDGER
             );
         }
+    }
+
+    private ExternalAuditAnchorCoverageResponse degradedPublicationCoverage(
+            int requiredPublicationFailures,
+            int localStatusUnverified
+    ) {
+        return new ExternalAuditAnchorCoverageResponse(
+                "AVAILABLE",
+                10,
+                10,
+                0,
+                null,
+                List.of(),
+                false,
+                100,
+                null,
+                null,
+                "DEGRADED",
+                0,
+                null,
+                50,
+                requiredPublicationFailures > 0,
+                requiredPublicationFailures,
+                localStatusUnverified,
+                0,
+                requiredPublicationFailures + localStatusUnverified
+        );
     }
 }

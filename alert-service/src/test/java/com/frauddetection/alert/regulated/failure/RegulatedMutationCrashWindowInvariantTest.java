@@ -10,6 +10,7 @@ import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.fdp28.FailureInjectionPoint;
 import com.frauddetection.alert.fdp28.FailureScenarioRunner;
 import com.frauddetection.alert.fdp28.InvariantAssert;
+import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.regulated.MongoRegulatedMutationCoordinator;
 import com.frauddetection.alert.regulated.RegulatedMutationAuditPhaseService;
@@ -19,6 +20,7 @@ import com.frauddetection.alert.regulated.RegulatedMutationCommandRepository;
 import com.frauddetection.alert.regulated.RegulatedMutationExecutionStatus;
 import com.frauddetection.alert.regulated.RegulatedMutationResponseSnapshot;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
+import com.frauddetection.alert.service.ConflictingIdempotencyKeyException;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
 import org.junit.jupiter.api.Test;
@@ -138,6 +140,128 @@ class RegulatedMutationCrashWindowInvariantTest {
         InvariantAssert.recoveryRequiredIsNotCommitted(existing);
     }
 
+    @Test
+    void shouldReplayCompletedCommandWithoutSecondBusinessMutationOrSuccessAudit() {
+        Fixture fixture = new Fixture();
+        RegulatedMutationCommandDocument existing = fixture.existingCommand(RegulatedMutationState.EVIDENCE_PENDING);
+        existing.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
+        existing.setResponseSnapshot(snapshot("event-1"));
+        existing.setSuccessAuditRecorded(true);
+        fixture.commandLookup(Optional.of(existing));
+        AtomicInteger businessWrites = new AtomicInteger();
+
+        String response = fixture.coordinator.commit(command(
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT,
+                "alert-1",
+                "decision-committed",
+                businessWrites
+        )).response();
+
+        assertThat(response).isEqualTo("RESTORED:COMMITTED_EVIDENCE_PENDING:event-1");
+        assertThat(businessWrites).hasValue(0);
+        assertThat(existing.getResponseSnapshot()).isEqualTo(snapshot("event-1"));
+        verify(fixture.auditService, never()).audit(any(), any(), any(), any(), any(), any(), any(), any(), any());
+        verify(fixture.mongoTemplate, never()).findAndModify(
+                any(Query.class),
+                any(Update.class),
+                any(FindAndModifyOptions.class),
+                eq(RegulatedMutationCommandDocument.class)
+        );
+    }
+
+    @Test
+    void shouldRejectConflictingIdempotencyPayloadWithoutMutationOrAudit() {
+        Fixture fixture = new Fixture();
+        RegulatedMutationCommandDocument existing = fixture.existingCommand(RegulatedMutationState.EVIDENCE_PENDING);
+        existing.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
+        existing.setResponseSnapshot(snapshot("event-1"));
+        existing.setRequestHash("different-request-hash");
+        fixture.commandLookup(Optional.of(existing));
+        AtomicInteger businessWrites = new AtomicInteger();
+
+        assertThatThrownBy(() -> fixture.coordinator.commit(command(
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT,
+                "alert-1",
+                "decision-committed",
+                businessWrites
+        ))).isInstanceOf(ConflictingIdempotencyKeyException.class);
+
+        assertThat(businessWrites).hasValue(0);
+        assertThat(existing.getState()).isEqualTo(RegulatedMutationState.EVIDENCE_PENDING);
+        verify(fixture.auditService, never()).audit(any(), any(), any(), any(), any(), any(), any(), any(), any());
+        verify(fixture.mongoTemplate, never()).findAndModify(
+                any(Query.class),
+                any(Update.class),
+                any(FindAndModifyOptions.class),
+                eq(RegulatedMutationCommandDocument.class)
+        );
+    }
+
+    @Test
+    void shouldRetryOnlySuccessAuditForPendingSnapshotWithoutSecondBusinessMutation() {
+        Fixture fixture = new Fixture();
+        RegulatedMutationCommandDocument existing = fixture.existingCommand(RegulatedMutationState.SUCCESS_AUDIT_PENDING);
+        existing.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
+        existing.setLeaseExpiresAt(Instant.now().minusSeconds(1));
+        existing.setResponseSnapshot(snapshot("event-1"));
+        fixture.commandLookup(Optional.of(existing));
+        AtomicInteger businessWrites = new AtomicInteger();
+
+        String response = fixture.coordinator.commit(command(
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT,
+                "alert-1",
+                "decision-committed",
+                businessWrites
+        )).response();
+
+        assertThat(response).isEqualTo("RESTORED:COMMITTED_EVIDENCE_PENDING:event-1");
+        assertThat(businessWrites).hasValue(0);
+        assertThat(existing.isSuccessAuditRecorded()).isTrue();
+        assertThat(existing.getState()).isEqualTo(RegulatedMutationState.EVIDENCE_PENDING);
+        verify(fixture.auditService).audit(
+                eq(AuditAction.SUBMIT_ANALYST_DECISION),
+                eq(AuditResourceType.ALERT),
+                eq("alert-1"),
+                eq("corr-1"),
+                eq("principal-7"),
+                eq(AuditOutcome.SUCCESS),
+                org.mockito.ArgumentMatchers.isNull(),
+                any(),
+                eq("mutation-1:SUCCESS")
+        );
+    }
+
+    @Test
+    void shouldReturnInProgressForActiveProcessingDuplicateWithoutSecondClaim() {
+        Fixture fixture = new Fixture();
+        RegulatedMutationCommandDocument existing = fixture.existingCommand(RegulatedMutationState.AUDIT_ATTEMPTED);
+        existing.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
+        existing.setLeaseExpiresAt(Instant.now().plusSeconds(30));
+        fixture.commandLookup(Optional.of(existing));
+        AtomicInteger businessWrites = new AtomicInteger();
+
+        String response = fixture.coordinator.commit(command(
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT,
+                "alert-1",
+                "decision-committed",
+                businessWrites
+        )).response();
+
+        assertThat(response).isEqualTo("REQUESTED");
+        assertThat(businessWrites).hasValue(0);
+        verify(fixture.auditService, never()).audit(any(), any(), any(), any(), any(), any(), any(), any(), any());
+        verify(fixture.mongoTemplate, never()).findAndModify(
+                any(Query.class),
+                any(Update.class),
+                any(FindAndModifyOptions.class),
+                eq(RegulatedMutationCommandDocument.class)
+        );
+    }
+
     private RegulatedMutationCommand<String, String> command(
             AuditAction action,
             AuditResourceType resourceType,
@@ -161,16 +285,20 @@ class RegulatedMutationCrashWindowInvariantTest {
                     return result;
                 },
                 (saved, state) -> state.name(),
-                response -> new RegulatedMutationResponseSnapshot(
-                        "alert-1",
-                        AnalystDecision.CONFIRMED_FRAUD,
-                        AlertStatus.RESOLVED,
-                        "event-1",
-                        Instant.parse("2026-05-03T00:00:00Z"),
-                        null
-                ),
-                snapshot -> snapshot == null ? "restored" : snapshot.operationStatus().name(),
+                response -> snapshot("event-1"),
+                snapshot -> snapshot == null ? "restored" : "RESTORED:" + snapshot.operationStatus().name() + ":" + snapshot.decisionEventId(),
                 state -> state.name()
+        );
+    }
+
+    private static RegulatedMutationResponseSnapshot snapshot(String eventId) {
+        return new RegulatedMutationResponseSnapshot(
+                "alert-1",
+                AnalystDecision.CONFIRMED_FRAUD,
+                AlertStatus.RESOLVED,
+                eventId,
+                Instant.parse("2026-05-03T00:00:00Z"),
+                SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING
         );
     }
 
