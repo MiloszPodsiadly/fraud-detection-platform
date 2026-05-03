@@ -1,8 +1,10 @@
 # FDP-28 Invariant Proof Traceability Matrix
 
-FDP-28 is an alert-service invariant proof pack. FDP-28.1 adds targeted concurrency and endpoint-boundary integration proofs. The suite uses modeled failure injection, crash-window semantic tests, unit tests, and targeted Mongo transaction integration tests.
+FDP-28 is an invariant and modeled failure-injection proof pack. FDP-28.1 adds targeted concurrency and endpoint-boundary integration proofs. It includes targeted Mongo/Testcontainers integration proofs for concurrency and local transaction rollback.
 
-FDP-28 does not simulate real JVM death or OS-level process crash. Integration crash tests may be added in FDP-28B. It also does not claim distributed ACID or exactly-once broker delivery.
+FDP-28 does not perform real OS/JVM process kill chaos, Kafka broker chaos, external witness outage chaos, or distributed ACID validation. Full process-kill chaos testing is future FDP-28B/FDP-29 scope. It also does not claim distributed ACID or exactly-once broker delivery.
+
+Authoritative merge CI must run FDP-28 integration tests with Docker/Testcontainers enabled. If Docker is unavailable and integration tests are skipped, the branch is not fully verified.
 
 | Invariant | Why It Matters | Test Class | Test Method | Failure Scenario | Expected State | Remaining Limitation | Future FDP |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -16,7 +18,7 @@ FDP-28 does not simulate real JVM death or OS-level process crash. Integration c
 | Local transaction rollback protects business + outbox | Mongo local transaction must cover business write, outbox write, command marker/snapshot. | `RegulatedMutationTransactionRollbackIntegrationTest` | `shouldRollbackBusinessMutationWhenOutboxWriteFailsInsideRequiredTransaction`; `shouldRollbackCommandSnapshotBusinessAndOutboxWithoutSuccessAuditTruth` | Transaction throws after business/outbox/command writes | Alert unchanged, no outbox record, command restored, no SUCCESS audit | Mongo replica-set integration only, not distributed ACID | FDP-29 |
 | Broker publish failure never becomes false `PUBLISHED` | Kafka publish ambiguity must not become fake delivery. | `FraudDecisionOutboxPublisherTest` | `shouldMarkConfirmationUnknownWhenKafkaPublishFailsAfterPublishAttempt`; `shouldMoveToConfirmationUnknownWhenBrokerAcceptedButLocalConfirmationFails` | Publish throws or mark-published fails after attempt | `PUBLISH_CONFIRMATION_UNKNOWN`, projection not falsely published | Synchronous publisher exception is conservatively ambiguous | FDP-29 |
 | Terminal outbox failure is explicit | Undeliverable local outbox facts must degrade operational trust. | `FraudDecisionOutboxPublisherTest`; `SystemTrustLevelControllerTest`; `NoFalseHealthyInvariantTest` | `shouldMarkMissingPayloadAsTerminalAndNotPublish`; `shouldDowngradeFailClosedWhenOutboxHasTerminalFailure` | Missing payload or terminal failure count | `FAILED_TERMINAL`, trust not healthy | Max-attempt terminalization remains policy-specific | FDP-29 |
-| Publish confirmation unknown is explicit | At-least-once delivery must not claim exactly-once confirmation. | `TransactionalOutboxFailureInjectionTest`; `FraudDecisionOutboxPublisherTest` | `shouldConvertStalePublishAttemptToConfirmationUnknownAndNotPublished`; `shouldExposePublishConfirmationFailureWhenKafkaSucceededButDbMarkPublishedFails` | Stale publish attempted or confirmation persistence failure | `PUBLISH_CONFIRMATION_UNKNOWN`, no false `PUBLISHED` | Manual/dual-control resolution remains operator workflow | FDP-29 |
+| Publish confirmation unknown is explicit | At-least-once delivery must not claim exactly-once confirmation. | `TransactionalOutboxFailureInjectionTest`; `FraudDecisionOutboxPublisherTest` | `shouldConvertStalePublishAttemptToConfirmationUnknownAndNotPublished`; `shouldMoveToConfirmationUnknownWhenBrokerAcceptedButLocalConfirmationFails`; `shouldMarkConfirmationUnknownWhenKafkaPublishFailsAfterPublishAttempt`; `shouldNotMarkUnknownWhenProjectionUpdateFailsAfterOutboxRecordPublished`; `shouldMarkMissingPayloadAsTerminalAndNotPublish`; `shouldNotPublishWhenConcurrentWorkerAlreadyClaimedRecord` | Stale publish attempted, confirmation persistence failure, publish exception, projection mismatch, missing payload, or concurrent worker race | `PUBLISH_CONFIRMATION_UNKNOWN`/`FAILED_TERMINAL` as appropriate, no false `PUBLISHED`, no duplicate publish | Manual/dual-control resolution remains operator workflow | FDP-29 |
 | External evidence unavailable prevents healthy/confirmed | External anchor proof is required for bank healthy status. | `NoFalseHealthyInvariantTest`; `ExternalAuditIntegrityServiceTest` | `shouldNotReportHealthyWhenExternalCoverageIsUnavailable`; `shouldNotReportHealthyWhenRequiredExternalWitnessUnavailable`; `shouldReturnUnavailableCoverageWhenExternalHeadCannotBeProven` | Coverage/head/witness unavailable | Trust degraded, explicit reason code, no confirmed evidence | Real cloud S3/GCS/Azure adapter remains separate | FDP-23/FDP-29 |
 | External evidence gaps prevent healthy | Missing ranges and local unverified statuses must degrade trust. | `NoFalseHealthyInvariantTest`; `ExternalAuditIntegrityServiceTest` | `shouldNotReportHealthyWhenExternalCoverageHasMissingRanges`; `shouldNotReportHealthyWhenRequiredPublicationFailuresExist`; `shouldNotReportHealthyWhenLocalStatusIsUnverified` | Missing range, required failure, local status unverified | Trust not healthy, counts surfaced | Coverage window is bounded | FDP-29 |
 | External tamper/signature invalidity prevents confirmed evidence | Invalid external object or signature cannot be treated as valid. | `ExternalAuditIntegrityServiceTest`; `NoFalseHealthyInvariantTest` | `shouldDetectObjectStoreAnchorMismatchAsInvalid`; `shouldInvalidateUnsignedAndUnavailableSignaturesWhenTrustAuthoritySigningRequired`; `shouldNotReportHealthyWhenExternalSignatureStatePreventsValidIntegrity` | Tamper, unsigned required, signature unavailable | `INVALID`/degraded, no false valid | Trust Authority availability is external dependency | FDP-29 |
@@ -89,11 +91,13 @@ mvn -pl alert-service -am -Dgroups=integration test
 Full FDP-28.1 proof suite:
 
 ```bash
-mvn -pl alert-service -am -Dgroups=failure-injection,invariant-proof test
+mvn -pl alert-service -am -Dgroups=failure-injection,invariant-proof,integration test
 ```
 
-These tags are selection aids only. The normal module test suite remains authoritative before merge.
+These tags are selection aids. The normal module test suite remains authoritative before merge, and the authoritative merge CI must run the FDP-28 tagged proof suite with Docker/Testcontainers available.
+
+Local developer machines may skip Docker/Testcontainers integration tests when Docker is unavailable. The authoritative CI merge gate must provide Docker and run those tests. A green local run without Docker does not equal full FDP-28 proof.
 
 ## Non-Claims
 
-FDP-28.1 is still not full OS/JVM kill chaos, distributed ACID, exactly-once Kafka, legal notarization, or Evidence-Gated Finalize. Those stronger guarantees remain future FDP scope.
+FDP-28.1 is still not full OS/JVM kill chaos, Kafka broker chaos, external witness outage chaos, distributed ACID, exactly-once Kafka, legal notarization, or Evidence-Gated Finalize. Those stronger guarantees remain future FDP scope.
