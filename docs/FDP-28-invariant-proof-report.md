@@ -1,38 +1,38 @@
-# FDP-28 Invariant Proof Report
+# FDP-28 Invariant Proof Traceability Matrix
 
-FDP-28 is an invariant and failure-injection test pack for alert-service. It adds tests and documentation around existing regulated mutation, outbox, audit, and trust-level behavior.
+FDP-28 is an alert-service invariant proof pack. It uses modeled failure injection, crash-window semantic tests, unit tests, and targeted Mongo transaction integration tests.
 
-## Evidence Added
+FDP-28 does not simulate real JVM death or OS-level process crash. Integration crash tests may be added in FDP-28B. It also does not claim distributed ACID or exactly-once broker delivery.
 
-| Area | Evidence |
-| --- | --- |
-| Regulated mutation crash windows | `RegulatedMutationCrashWindowInvariantTest` covers ATTEMPTED audit failure before business write, SUCCESS audit failure after business commit, and committed-without-snapshot recovery-required behavior. |
-| Fraud-case non-terminal response | `FraudCaseMutationInvariantTest` proves non-terminal updates return status/current snapshot, not target committed business fields. |
-| Transactional outbox ambiguity | `TransactionalOutboxFailureInjectionTest` proves stale publish attempts become confirmation-unknown, not published, and projection repair uses authoritative outbox state. |
-| Sensitive read audit failure | `SensitiveReadAuditFailureInjectionTest` proves fail-open local behavior remains observable and fail-closed bank behavior returns explicit 503. |
-| Bank/profile misconfiguration | `BankProfileMisconfigurationMatrixTest` covers unsafe prod/bank startup combinations. |
-| No false healthy | `NoFalseHealthyInvariantTest` proves unavailable outbox/trust incident control-plane state cannot produce `FDP24_HEALTHY`. |
-| Test support | `FailureInjectionPoint`, `FailureScenarioRunner`, `InvariantAssert`, and `CrashWindowTestSupport` provide bounded test-only failure helpers. |
+| Invariant | Why It Matters | Test Class | Test Method | Failure Scenario | Expected State | Remaining Limitation | Future FDP |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| No duplicate business mutation | Retry must not apply a second analyst decision or case update. | `RegulatedMutationCrashWindowInvariantTest` | `shouldReplayCompletedCommandWithoutSecondBusinessMutationOrSuccessAudit` | Same idempotency key, same payload, completed command with snapshot | Replayed response, `businessWrites=0`, no new SUCCESS audit | Modeled unit proof, not process-death chaos | FDP-28B |
+| No idempotency replay mutation | Safe replay must read command truth only. | `RegulatedMutationCrashWindowInvariantTest` | `shouldRetryOnlySuccessAuditForPendingSnapshotWithoutSecondBusinessMutation` | `SUCCESS_AUDIT_PENDING` with snapshot | SUCCESS audit retry only, business mutation not rerun | Does not emulate JVM death between Mongo writes | FDP-28B |
+| Conflicting idempotency rejected | Same key cannot rewrite intent, actor, or resource semantics. | `RegulatedMutationCrashWindowInvariantTest`; `FraudCaseMutationInvariantTest` | `shouldRejectConflictingIdempotencyPayloadWithoutMutationOrAudit`; `shouldBindFraudCaseUpdateIntentToResolvedActorAndIdempotencyKey` | Same key, different request hash | `ConflictingIdempotencyKeyException`, no mutation, no audit phase | HTTP 409 mapping covered by existing API tests, not repeated here | FDP-28B |
+| Active lease duplicate is in-progress | Concurrent retry must not claim or execute twice. | `RegulatedMutationCrashWindowInvariantTest` | `shouldReturnInProgressForActiveProcessingDuplicateWithoutSecondClaim` | Same key during active `PROCESSING` lease | In-progress response, no second claim, no mutation | Unit proof around coordinator mock | FDP-28B |
+| ATTEMPTED failure blocks mutation | Durable attempted evidence is required before business state changes. | `RegulatedMutationCrashWindowInvariantTest` | `shouldRejectFraudCaseMutationBeforeBusinessWriteWhenAttemptedAuditFails` | ATTEMPTED audit write fails | `REJECTED` / `FAILED`, `businessWrites=0` | External anchor publication is separate FDP-24 path | FDP-29 |
+| SUCCESS failure becomes degraded | Post-commit SUCCESS audit failure must be explicit, not hidden. | `RegulatedMutationCrashWindowInvariantTest` | `shouldPersistPostCommitDegradationWhenSubmitDecisionSuccessAuditFails` | SUCCESS audit fails after business mutation | `COMMITTED_DEGRADED`, `COMMITTED_EVIDENCE_INCOMPLETE`, degradation event | Does not prevent the post-commit window transactionally | FDP-29 |
+| Unsafe state without snapshot requires recovery | Ambiguous crash windows must not replay as success. | `RegulatedMutationCrashWindowInvariantTest` | `shouldLeaveRecoveryRequiredWhenCrashWindowHasCommittedStateWithoutSnapshot` | Lease expired after `BUSINESS_COMMITTED` without snapshot | `RECOVERY_REQUIRED`, no mutation rerun | Recovery strategy coverage is action-specific | FDP-29 |
+| Local transaction rollback protects business + outbox | Mongo local transaction must cover business write, outbox write, command marker/snapshot. | `RegulatedMutationTransactionRollbackIntegrationTest` | `shouldRollbackBusinessMutationWhenOutboxWriteFailsInsideRequiredTransaction`; `shouldRollbackCommandSnapshotBusinessAndOutboxWithoutSuccessAuditTruth` | Transaction throws after business/outbox/command writes | Alert unchanged, no outbox record, command restored, no SUCCESS audit | Mongo replica-set integration only, not distributed ACID | FDP-29 |
+| Broker publish failure never becomes false `PUBLISHED` | Kafka publish ambiguity must not become fake delivery. | `FraudDecisionOutboxPublisherTest` | `shouldMarkConfirmationUnknownWhenKafkaPublishFailsAfterPublishAttempt`; `shouldExposePublishConfirmationFailureWhenKafkaSucceededButDbMarkPublishedFails` | Publish throws or mark-published fails after attempt | `PUBLISH_CONFIRMATION_UNKNOWN`, projection not falsely published | Synchronous publisher exception is conservatively ambiguous | FDP-29 |
+| Terminal outbox failure is explicit | Undeliverable local outbox facts must degrade operational trust. | `FraudDecisionOutboxPublisherTest`; `SystemTrustLevelControllerTest`; `NoFalseHealthyInvariantTest` | `shouldMarkMissingPayloadAsTerminalAndNotPublish`; `shouldDowngradeFailClosedWhenOutboxHasTerminalFailure` | Missing payload or terminal failure count | `FAILED_TERMINAL`, trust not healthy | Max-attempt terminalization remains policy-specific | FDP-29 |
+| Publish confirmation unknown is explicit | At-least-once delivery must not claim exactly-once confirmation. | `TransactionalOutboxFailureInjectionTest`; `FraudDecisionOutboxPublisherTest` | `shouldConvertStalePublishAttemptToConfirmationUnknownAndNotPublished`; `shouldExposePublishConfirmationFailureWhenKafkaSucceededButDbMarkPublishedFails` | Stale publish attempted or confirmation persistence failure | `PUBLISH_CONFIRMATION_UNKNOWN`, no false `PUBLISHED` | Manual/dual-control resolution remains operator workflow | FDP-29 |
+| External evidence unavailable prevents healthy/confirmed | External anchor proof is required for bank healthy status. | `NoFalseHealthyInvariantTest`; `ExternalAuditIntegrityServiceTest` | `shouldNotReportHealthyWhenExternalCoverageIsUnavailable`; `shouldReturnUnavailableCoverageWhenExternalHeadCannotBeProven` | Coverage/head unavailable | Trust degraded, explicit reason code | Real cloud S3/GCS/Azure adapter remains separate | FDP-23/FDP-29 |
+| External evidence gaps prevent healthy | Missing ranges and local unverified statuses must degrade trust. | `NoFalseHealthyInvariantTest`; `ExternalAuditIntegrityServiceTest` | `shouldNotReportHealthyWhenExternalCoverageHasMissingRanges`; `shouldNotReportHealthyWhenRequiredPublicationFailuresExist`; `shouldNotReportHealthyWhenLocalStatusIsUnverified` | Missing range, required failure, local status unverified | Trust not healthy, counts surfaced | Coverage window is bounded | FDP-29 |
+| External tamper/signature invalidity prevents confirmed evidence | Invalid external object or signature cannot be treated as valid. | `ExternalAuditIntegrityServiceTest`; `NoFalseHealthyInvariantTest` | `shouldDetectObjectStoreAnchorMismatchAsInvalid`; `shouldInvalidateUnsignedAndUnavailableSignaturesWhenTrustAuthoritySigningRequired`; `shouldNotReportHealthyWhenExternalSignatureStatePreventsValidIntegrity` | Tamper, unsigned required, signature unavailable | `INVALID`/degraded, no false valid | Trust Authority availability is external dependency | FDP-29 |
+| Trust incident duplicate materialization prevented | Repeated signals must not create multiple active truths. | `TrustIncidentMaterializerTest` | `shouldRecordDedupedMetricForExistingIncident` | Same type/source/fingerprint | Deduped materialization metric and deterministic active incident | Concurrent DB race relies on atomic Mongo update semantics | FDP-28B |
+| Trust incident failure does not false-resolve/ack | Operational incident state must not change if audit path is unavailable. | `TrustIncidentServiceTest`; `TrustIncidentMutationHandlerTest` | `shouldNotAcknowledgeWhenRegulatedAuditPathIsUnavailable`; `shouldRejectResolveWhenRepositorySaveFails` | ACK audit path unavailable or resolve save fails | No false ACK/RESOLVE success | End-to-end controller failure path covered separately | FDP-28B |
+| Open critical incident prevents healthy | Control-plane critical incident must downgrade trust. | `NoFalseHealthyInvariantTest`; `TrustIncidentServiceTest` | `shouldNotReportHealthyWhenOpenCriticalTrustIncidentExists`; `shouldSummarizeWithoutWritingIncidents` | Open critical incident exists | Trust degraded, explicit incident counts | Incident severity policy is current local policy | FDP-29 |
+| Sensitive read audit fail-closed in bank mode | Sensitive operational reads must not leak data when read audit is mandatory and unavailable. | `SensitiveReadAuditFailureInjectionTest`; `TrustIncidentControllerTest`; `SensitiveReadAuditServiceTest` | `shouldFailClosedForBankSensitiveReadWhenAuditPersistenceFails`; `shouldFailClosedWhenPreviewAuditFailsInBankMode`; `shouldFailClosedWhenPolicyRequiresAuditPersistence` | Read audit persistence unavailable | 503, no sensitive data response | Some generic response-advice reads are fail-open by configured local policy | FDP-28B |
+| Bank profile unsafe config rejected | Operators must not accidentally run local/dev partial semantics in bank/prod. | `BankProfileMisconfigurationMatrixTest`; `BankModeStartupGuardTest`; `AuthenticationStartupGuardTest` | Matrix plus FDP-27 guard tests | Missing transactions, outbox recovery, dual-control, external publication, trust authority, JWT, or demo-auth disabled incorrectly | Startup fails with explicit setting | Matrix references existing FDP-27 tests for auth-specific cases | FDP-29 |
+| Projection never overrides authoritative source | Alert projection repair must derive from outbox record, not guess success. | `TransactionalOutboxFailureInjectionTest`; `OutboxRecoveryServiceTest` | `shouldRepairProjectionMismatchFromAuthoritativeOutboxRecordOnly`; `shouldRepairProjectionMismatchFromAuthoritativeOutboxRecord` | Projection mismatch | Projection repaired from authoritative outbox record | Does not introduce a separate projection event store | FDP-29 |
+| No distributed ACID / exactly-once overclaim | Docs must not claim stronger guarantees than implemented. | Documentation review | `docs/architecture/alert-service-failure-windows.md`; `docs/FDP-29-evidence-gated-finalize-handoff.md` | Known post-commit window and broker ambiguity | Explicit limitations and FDP-29 handoff | Full pre-commit/finalize model not implemented | FDP-29 |
 
-## Assertions
+## Summary
 
-- ATTEMPTED audit failure prevents business mutation.
-- SUCCESS audit failure after business mutation is durable `COMMITTED_DEGRADED`.
-- `COMMITTED_DEGRADED` is not presented as fully anchored or confirmed.
-- Recovery-required states do not trigger business mutation replay.
-- Outbox publish confirmation ambiguity is explicit.
-- Projection repair does not infer success from the alert projection.
-- Sensitive read audit failure is measured and fail-closed where required.
-- Bank/prod unsafe configuration fails startup.
+FDP-28 proves two core reviewer blockers:
 
-## Non-Claims
+- retry paths do not execute a second authoritative business mutation;
+- local Mongo transaction rollback protects business write, outbox write, and command truth in `REQUIRED` mode.
 
-FDP-28 does not claim:
-
-- distributed ACID across Mongo, audit, outbox, and external anchors
-- exactly-once broker delivery
-- Evidence-Gated Finalize
-- legal/regulatory finality
-- rollback of already committed business state after SUCCESS audit failure
-
-The branch strengthens proof coverage for the current model. It does not change scoring, ML model behavior, Kafka contracts, or governance advisory semantics.
+Remaining production limitation: FDP-28 documents and detects post-commit audit degradation. It does not eliminate that window transactionally.

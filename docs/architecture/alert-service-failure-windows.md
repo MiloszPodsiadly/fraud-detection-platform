@@ -1,6 +1,6 @@
 # Alert Service Failure Windows
 
-FDP-28 documents and tests the current regulated mutation crash windows in alert-service. It does not introduce a new business workflow and it does not implement Evidence-Gated Finalize.
+FDP-28 documents and tests the current regulated mutation crash windows in alert-service with modeled failure injection, invariant proof tests, and targeted transaction integration tests. It does not introduce a new business workflow and it does not implement Evidence-Gated Finalize.
 
 ## Current Model
 
@@ -45,3 +45,5 @@ It does not guarantee that a business mutation can never commit before SUCCESS e
 ## Explicit Limitation
 
 FDP-28 proves and guards the existing failure behavior. It does not eliminate the post-commit SUCCESS audit window transactionally. That is FDP-29 scope.
+
+FDP-28 does not yet simulate real JVM death or OS-level process crash. Integration crash tests may be added in FDP-28B.
