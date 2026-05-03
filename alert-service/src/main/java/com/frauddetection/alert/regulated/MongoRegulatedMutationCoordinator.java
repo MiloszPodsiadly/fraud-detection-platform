@@ -584,14 +584,14 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
             }
         }
         EvidencePreconditionResult precondition = evidencePreconditionEvaluator.evaluate(command, document);
-        if (precondition.status() != EvidencePreconditionStatus.PASSED) {
+        if (precondition.status() != EvidencePreconditionStatus.SATISFIED) {
             document.setDegradationReason(precondition.reasonCode());
             document.setExecutionStatus(RegulatedMutationExecutionStatus.FAILED);
             RegulatedMutationState rejectedState = switch (precondition.status()) {
                 case REJECTED_EVIDENCE_UNAVAILABLE -> RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE;
                 case FAILED_BUSINESS_VALIDATION -> RegulatedMutationState.FAILED_BUSINESS_VALIDATION;
                 case FINALIZE_RECOVERY_REQUIRED -> RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED;
-                case PASSED -> throw new IllegalStateException("Unexpected passed precondition.");
+                case SATISFIED -> throw new IllegalStateException("Unexpected satisfied precondition.");
             };
             evidenceGatedTransition(document, rejectedState, precondition.reasonCode());
             metrics.recordEvidenceGatedFinalizeRejected(precondition.reasonCode());
@@ -630,6 +630,7 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
             persisted.setDegradationReason(EVIDENCE_GATED_FINALIZE_FAILED);
             persisted.setExecutionStatus(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
             evidenceGatedTransition(persisted, RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED, EVIDENCE_GATED_FINALIZE_FAILED);
+            metrics.recordEvidenceGatedFinalizeTransactionRollback(EVIDENCE_GATED_FINALIZE_FAILED);
             throw exception;
         }
     }
