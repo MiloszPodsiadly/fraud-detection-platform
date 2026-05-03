@@ -3,10 +3,15 @@
 ## Required Before Merge
 
 - Bank/prod/staging startup fails closed unless transaction mode is `REQUIRED`.
+- Bank/prod/staging startup fails closed unless FDP-24 external anchoring publication is enabled, required, and fail-closed.
+- Bank/prod/staging rejects `disabled`, `noop`, `local-file`, `in-memory`, and `same-database` external anchor sinks.
+- Bank/prod/staging requires Trust Authority signing for external evidence.
+- Bank/prod/staging requires a `JwtDecoder`, `app.security.jwt.required=true`, and no demo/header auth filter.
 - Transaction capability probe is enabled and passes.
 - Trust incident refresh mode is `ATOMIC`; `PARTIAL` is local/dev only.
 - Outbox publisher, recovery, and dual-control confirmation are enabled.
 - Sensitive operational reads use `SensitiveReadAuditService`.
+- `@AuditedSensitiveRead` is marker-only; controllers must still call `SensitiveReadAuditService`.
 - Sensitive read audit is fail-closed in bank/prod.
 - Operational reads are bounded and do not expose raw payloads, raw idempotency keys, tokens, stack traces, or full URLs.
 - Trust level reports bank profile posture as `BANK_PROFILE_ACTIVE` or `NON_BANK_LOCAL_MODE`.

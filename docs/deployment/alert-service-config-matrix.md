@@ -1,12 +1,15 @@
 # Alert Service Config Matrix
 
-| Profile | Transaction mode | Trust refresh | Outbox publisher | Recovery | Dual control | Sensitive read audit | Bank guard | Trust-level status |
+| Profile | Transaction mode | Trust refresh | External anchoring | Trust Authority signing | Auth | Sensitive read audit | Bank guard | Trust-level status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| local | OFF by default | PARTIAL allowed | optional | optional | optional | best effort unless enabled | not strict | NON_BANK_LOCAL_MODE |
-| test | OFF/REQUIRED by test | PARTIAL allowed | optional | optional | optional | best effort unless enabled | not strict | NON_BANK_LOCAL_MODE |
-| docker-local | OFF/REQUIRED by compose | PARTIAL allowed | optional | optional | optional | best effort unless enabled | not strict | NON_BANK_LOCAL_MODE |
-| staging | REQUIRED | ATOMIC | enabled | enabled | enabled | fail closed | strict | BANK_PROFILE_ACTIVE when bank fail-closed enabled |
-| prod | REQUIRED | ATOMIC | enabled | enabled | enabled | fail closed | strict | BANK_PROFILE_ACTIVE when bank fail-closed enabled |
-| bank | REQUIRED | ATOMIC | enabled | enabled | enabled | fail closed | strict | BANK_PROFILE_ACTIVE |
+| local | OFF by default | PARTIAL allowed | optional | optional | demo or JWT by explicit opt-in | best effort unless enabled | not strict | NON_BANK_LOCAL_MODE |
+| test | OFF/REQUIRED by test | PARTIAL allowed | optional | optional | test-controlled | best effort unless enabled | not strict | NON_BANK_LOCAL_MODE |
+| docker-local | OFF/REQUIRED by compose | PARTIAL allowed | disabled by default | disabled by default | demo or local OIDC override | best effort unless enabled | not strict | NON_BANK_LOCAL_MODE |
+| bank-local | OFF/REQUIRED by explicit smoke config | PARTIAL allowed | disabled allowed | disabled allowed | demo allowed | best effort unless enabled | not strict | NON_BANK_LOCAL_MODE |
+| staging | REQUIRED | ATOMIC | enabled, required, fail-closed | required | JWT required, demo forbidden | fail closed | strict | BANK_PROFILE_ACTIVE when bank fail-closed enabled |
+| prod | REQUIRED | ATOMIC | enabled, required, fail-closed | required | JWT required, demo forbidden | fail closed | strict | BANK_PROFILE_ACTIVE when bank fail-closed enabled |
+| bank | REQUIRED | ATOMIC | enabled, required, fail-closed | required | JWT required, demo forbidden | fail closed | strict | BANK_PROFILE_ACTIVE |
 
-Prod-like profiles must not use local/noop/in-memory external evidence sinks when external publication is enabled or required. FDP-27 is a production closure gate; it does not add KMS/HSM, legal notarization, WORM storage, broker-side verification, or a pre-commit/finalize redesign.
+`bank` means the strict bank-grade runtime closure gate. It requires FDP-24 external anchoring publication to be enabled, required, and fail-closed; the sink must be production-capable and not `disabled`, `noop`, `local-file`, `in-memory`, or `same-database`. `bank-local` is smoke-only and must not be described as regulator-grade.
+
+Prod-like profiles must not use local/noop/in-memory/same-database external evidence sinks. FDP-27 is a production closure gate; it does not add KMS/HSM, legal notarization, WORM storage, broker-side verification, or a pre-commit/finalize redesign.

@@ -4,7 +4,7 @@ FDP-27 treats the following stores as authoritative. API DTOs and trust-level vi
 
 ## Regulated Mutation Lifecycle
 
-Authoritative source: `RegulatedMutationCommand`.
+Authoritative source: `RegulatedMutationCommandDocument` in the `regulated_mutation_commands` collection.
 
 Projection: regulated mutation inspection DTOs.
 
@@ -16,13 +16,13 @@ Projection: response snapshots and cached decision response views.
 
 ## Transactional Outbox
 
-Authoritative source: `transactional_outbox_records`.
+Authoritative source: `TransactionalOutboxRecordDocument` in the `transactional_outbox_records` collection.
 
 Projection: `AlertDocument.decisionOutboxStatus` and related alert-level outbox cache fields.
 
 ## Trust Incidents
 
-Authoritative source: `TrustIncidentDocument`.
+Authoritative source: `TrustIncidentDocument` in the `trust_incidents` collection.
 
 History source: regulated mutation audit events. A dedicated `trust_incident_events` stream is deferred.
 
@@ -31,7 +31,8 @@ History source: regulated mutation audit events. A dedicated `trust_incident_eve
 Authoritative sources:
 
 - durable audit event chain
-- external publication status
+- `AuditEventDocument` in the `audit_events` collection
+- `ExternalAuditAnchorPublicationStatusDocument` in the `audit_external_anchor_publication_status` collection
 - signature verification status
 
 API DTOs are read models over those sources.
