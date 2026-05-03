@@ -174,7 +174,10 @@ public class RegulatedMutationRecoveryService {
     }
 
     public long evidenceConfirmationPendingCount() {
-        return commandRepository.countByState(RegulatedMutationState.EVIDENCE_PENDING);
+        return commandRepository.countByStateIn(List.of(
+                RegulatedMutationState.EVIDENCE_PENDING,
+                RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL
+        ));
     }
 
     public long evidenceConfirmationFailedCount() {
@@ -197,13 +200,14 @@ public class RegulatedMutationRecoveryService {
 
     RegulatedMutationRecoveryResult recover(RegulatedMutationCommandDocument command) {
         RegulatedMutationRecoveryOutcome outcome = switch (command.getState()) {
-            case REQUESTED, AUDIT_ATTEMPTED -> stillPending(command);
-            case BUSINESS_COMMITTING -> recoveryRequired(command);
+            case REQUESTED, AUDIT_ATTEMPTED, EVIDENCE_PREPARING, EVIDENCE_PREPARED -> stillPending(command);
+            case BUSINESS_COMMITTING, FINALIZING, FINALIZE_RECOVERY_REQUIRED -> recoveryRequired(command);
             case BUSINESS_COMMITTED -> recoverBusinessCommitted(command);
             case SUCCESS_AUDIT_PENDING -> recoverSuccessAuditPending(command);
-            case SUCCESS_AUDIT_RECORDED, EVIDENCE_PENDING, EVIDENCE_CONFIRMED, COMMITTED, COMMITTED_DEGRADED ->
+            case SUCCESS_AUDIT_RECORDED, EVIDENCE_PENDING, EVIDENCE_CONFIRMED, COMMITTED, COMMITTED_DEGRADED,
+                 FINALIZED_VISIBLE, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED ->
                     completeIfSnapshotExists(command);
-            case REJECTED, FAILED -> failedTerminal(command);
+            case REJECTED, FAILED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION -> failedTerminal(command);
         };
         return new RegulatedMutationRecoveryResult(
                 command.getIdempotencyKey(),

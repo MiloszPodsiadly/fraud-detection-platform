@@ -41,6 +41,16 @@ management:
 app:
   regulated-mutations:
     transaction-mode: ${REGULATED_MUTATIONS_TRANSACTION_MODE:OFF}
+    evidence-gated-finalize:
+      enabled: ${REGULATED_MUTATIONS_EVIDENCE_GATED_FINALIZE_ENABLED:false}
+      submit-decision:
+        enabled: ${REGULATED_MUTATIONS_EVIDENCE_GATED_FINALIZE_SUBMIT_DECISION_ENABLED:false}
+      fraud-case-update:
+        enabled: ${REGULATED_MUTATIONS_EVIDENCE_GATED_FINALIZE_FRAUD_CASE_UPDATE_ENABLED:false}
+      trust-incident:
+        enabled: ${REGULATED_MUTATIONS_EVIDENCE_GATED_FINALIZE_TRUST_INCIDENT_ENABLED:false}
+      outbox-resolution:
+        enabled: ${REGULATED_MUTATIONS_EVIDENCE_GATED_FINALIZE_OUTBOX_RESOLUTION_ENABLED:false}
     transaction-capability-probe:
       enabled: ${REGULATED_MUTATIONS_TRANSACTION_CAPABILITY_PROBE_ENABLED:true}
   outbox:

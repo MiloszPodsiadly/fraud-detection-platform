@@ -68,7 +68,7 @@ public class MutationEvidenceConfirmationService {
     public int confirmPendingEvidence(int limit) {
         int promoted = 0;
         List<RegulatedMutationCommandDocument> commands = commandRepository.findTop100ByStateInAndUpdatedAtBefore(
-                List.of(RegulatedMutationState.EVIDENCE_PENDING),
+                List.of(RegulatedMutationState.EVIDENCE_PENDING, RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL),
                 java.time.Instant.now().plusSeconds(1)
         );
         int boundedLimit = Math.max(1, Math.min(limit, 100));
@@ -76,11 +76,16 @@ public class MutationEvidenceConfirmationService {
         for (RegulatedMutationCommandDocument command : commands.stream().limit(boundedLimit).toList()) {
             EvidenceDecision decision = decision(command);
             if (decision.state() == RegulatedMutationState.EVIDENCE_CONFIRMED) {
-                command.setState(RegulatedMutationState.EVIDENCE_CONFIRMED);
-                command.setPublicStatus(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED);
+                boolean evidenceGated = command.mutationModelVersionOrLegacy() == RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1;
+                command.setState(evidenceGated
+                        ? RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED
+                        : RegulatedMutationState.EVIDENCE_CONFIRMED);
+                command.setPublicStatus(evidenceGated
+                        ? SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED
+                        : SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED);
                 command.setUpdatedAt(java.time.Instant.now());
                 commandRepository.save(command);
-                updateAlertOperationStatus(command, SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED);
+                updateAlertOperationStatus(command, command.getPublicStatus());
                 promoted++;
             } else if (decision.state() == RegulatedMutationState.COMMITTED_DEGRADED) {
                 command.setState(RegulatedMutationState.COMMITTED_DEGRADED);

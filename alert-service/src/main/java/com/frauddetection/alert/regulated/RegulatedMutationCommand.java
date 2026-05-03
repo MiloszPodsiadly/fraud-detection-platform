@@ -16,8 +16,42 @@ public record RegulatedMutationCommand<R, S>(
         RegulatedMutationResponseSnapshotter<S> responseSnapshotter,
         RegulatedMutationResponseRestorer<S> responseRestorer,
         RegulatedMutationStatusResponseFactory<S> statusResponseFactory,
-        RegulatedMutationIntent intent
+        RegulatedMutationIntent intent,
+        RegulatedMutationModelVersion mutationModelVersion
 ) {
+    public RegulatedMutationCommand(
+            String idempotencyKey,
+            String actorId,
+            String resourceId,
+            AuditResourceType resourceType,
+            AuditAction action,
+            String correlationId,
+            String requestHash,
+            BusinessMutation<R> mutation,
+            RegulatedMutationResponseMapper<R, S> responseMapper,
+            RegulatedMutationResponseSnapshotter<S> responseSnapshotter,
+            RegulatedMutationResponseRestorer<S> responseRestorer,
+            RegulatedMutationStatusResponseFactory<S> statusResponseFactory,
+            RegulatedMutationIntent intent
+    ) {
+        this(
+                idempotencyKey,
+                actorId,
+                resourceId,
+                resourceType,
+                action,
+                correlationId,
+                requestHash,
+                mutation,
+                responseMapper,
+                responseSnapshotter,
+                responseRestorer,
+                statusResponseFactory,
+                intent,
+                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION
+        );
+    }
+
     public RegulatedMutationCommand(
             String idempotencyKey,
             String actorId,
@@ -45,7 +79,8 @@ public record RegulatedMutationCommand<R, S>(
                 responseSnapshotter,
                 responseRestorer,
                 statusResponseFactory,
-                null
+                null,
+                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION
         );
     }
 }

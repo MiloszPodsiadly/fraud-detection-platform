@@ -10,6 +10,8 @@ public record RegulatedMutationCommandInspectionResponse(
         @JsonProperty("idempotency_key_masked")
         String idempotencyKeyMasked,
         String action,
+        @JsonProperty("mutation_model_version")
+        String mutationModelVersion,
         @JsonProperty("resource_type")
         String resourceType,
         @JsonProperty("resource_id")
@@ -36,11 +38,51 @@ public record RegulatedMutationCommandInspectionResponse(
         @JsonProperty("updated_at")
         Instant updatedAt
 ) {
+    public RegulatedMutationCommandInspectionResponse(
+            String idempotencyKeyHash,
+            String idempotencyKeyMasked,
+            String action,
+            String resourceType,
+            String resourceId,
+            String state,
+            String executionStatus,
+            String leaseOwner,
+            Instant leaseExpiresAt,
+            boolean responseSnapshotPresent,
+            String attemptedAuditId,
+            String successAuditId,
+            String failedAuditId,
+            String degradationReason,
+            String lastError,
+            Instant updatedAt
+    ) {
+        this(
+                idempotencyKeyHash,
+                idempotencyKeyMasked,
+                action,
+                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION.name(),
+                resourceType,
+                resourceId,
+                state,
+                executionStatus,
+                leaseOwner,
+                leaseExpiresAt,
+                responseSnapshotPresent,
+                attemptedAuditId,
+                successAuditId,
+                failedAuditId,
+                degradationReason,
+                lastError,
+                updatedAt
+        );
+    }
+
     static RegulatedMutationCommandInspectionResponse from(RegulatedMutationCommandDocument command) {
         return new RegulatedMutationCommandInspectionResponse(
                 idempotencyKeyHash(command),
                 mask(command.getIdempotencyKey()),
                 command.getAction(),
+                command.mutationModelVersionOrLegacy().name(),
                 command.getResourceType(),
                 command.getResourceId(),
                 command.getState() == null ? null : command.getState().name(),
