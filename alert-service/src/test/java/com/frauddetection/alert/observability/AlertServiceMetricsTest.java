@@ -192,4 +192,45 @@ class AlertServiceMetricsTest {
                 .extracting(Tag::getKey)
                 .doesNotContain("actor_id", "resource_id", "audit_event_id", "hash", "path", "exception", "message");
     }
+
+    @Test
+    void shouldUseLowCardinalityEvidenceGatedFinalizeMetricLabels() {
+        metrics.recordEvidenceGatedFinalizeStateTransition(
+                com.frauddetection.alert.regulated.RegulatedMutationState.EVIDENCE_PREPARED,
+                com.frauddetection.alert.regulated.RegulatedMutationState.FINALIZING,
+                "SUCCESS"
+        );
+        metrics.recordEvidenceGatedFinalizeRecoveryRequired("OUTBOX_FAILED_TERMINAL");
+        metrics.recordEvidenceGatedFinalizeRejected("ATTEMPTED_AUDIT_UNAVAILABLE");
+        metrics.recordEvidenceGatedFinalizeTransactionRollback("EVIDENCE_GATED_FINALIZE_FAILED");
+        metrics.recordEvidenceGatedFinalizeStuckVisible();
+        metrics.recordEvidenceGatedFinalizeEnabled("SUBMIT_ANALYST_DECISION", true);
+
+        Meter transition = meterRegistry.get("evidence_gated_finalize_state_transition_total").meter();
+        Meter recovery = meterRegistry.get("evidence_gated_finalize_recovery_required_total").meter();
+        Meter rejected = meterRegistry.get("evidence_gated_finalize_rejected_total").meter();
+        Meter rollback = meterRegistry.get("evidence_gated_finalize_transaction_rollback_total").meter();
+        Meter stuck = meterRegistry.get("evidence_gated_finalize_stuck_visible_total").meter();
+        Meter enabled = meterRegistry.get("evidence_gated_finalize_enabled").meter();
+
+        assertThat(transition.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactlyInAnyOrder("from", "to", "outcome");
+        assertThat(recovery.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactly("reason");
+        assertThat(rejected.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactly("reason");
+        assertThat(rollback.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactly("reason");
+        assertThat(stuck.getId().getTags()).isEmpty();
+        assertThat(enabled.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactly("mutation_type");
+        assertThat(transition.getId().getTags())
+                .extracting(Tag::getKey)
+                .doesNotContain("alert_id", "command_id", "actor_id", "idempotency_key", "exception", "path");
+    }
 }

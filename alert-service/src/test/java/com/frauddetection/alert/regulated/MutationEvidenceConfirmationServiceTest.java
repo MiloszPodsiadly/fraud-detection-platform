@@ -134,6 +134,35 @@ class MutationEvidenceConfirmationServiceTest {
     }
 
     @Test
+    void shouldMapEvidenceGatedTerminalEvidenceFailureToFinalizeRecoveryRequired() {
+        RegulatedMutationCommandRepository commandRepository = mock(RegulatedMutationCommandRepository.class);
+        TransactionalOutboxRecordRepository outboxRepository = mock(TransactionalOutboxRecordRepository.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        MutationEvidenceConfirmationService service = new MutationEvidenceConfirmationService(
+                commandRepository,
+                outboxRepository,
+                metrics,
+                false,
+                false
+        );
+        RegulatedMutationCommandDocument command = committedCommand();
+        command.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        command.setState(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
+        when(commandRepository.findTop100ByStateInAndUpdatedAtBefore(any(), any())).thenReturn(List.of(command));
+        when(outboxRepository.findByMutationCommandId("command-1"))
+                .thenReturn(Optional.of(outbox(TransactionalOutboxStatus.FAILED_TERMINAL)));
+
+        int promoted = service.confirmPendingEvidence(100);
+
+        assertThat(promoted).isZero();
+        verify(commandRepository).save(org.mockito.ArgumentMatchers.argThat(saved ->
+                saved.getState() == RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED
+                        && saved.getPublicStatus() == SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED
+                        && "OUTBOX_FAILED_TERMINAL".equals(saved.getDegradationReason())));
+        verify(metrics).recordEvidenceGatedFinalizeRecoveryRequired("OUTBOX_FAILED_TERMINAL");
+    }
+
+    @Test
     void shouldConfirmWhenExternalAnchorIsRequiredAndPublished() {
         Fixture fixture = new Fixture(true, false);
         RegulatedMutationCommandDocument command = committedCommand();

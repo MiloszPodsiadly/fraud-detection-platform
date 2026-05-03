@@ -58,7 +58,6 @@ class EvidenceGatedFinalizeCoordinatorTest {
                 RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationState.EVIDENCE_PREPARED,
                 RegulatedMutationState.FINALIZING,
-                RegulatedMutationState.FINALIZED_VISIBLE,
                 RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL
         );
         assertThat(fixture.currentCommand.isAttemptedAuditRecorded()).isTrue();
@@ -109,6 +108,48 @@ class EvidenceGatedFinalizeCoordinatorTest {
         verify(fixture.auditService, never()).audit(any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 
+    @Test
+    void shouldNotRerunBusinessMutationWhenRetryFindsFinalizingWithoutProof() {
+        Fixture fixture = new Fixture(true);
+        RegulatedMutationCommandDocument existing = evidenceGatedCommand(RegulatedMutationState.FINALIZING);
+        existing.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
+        existing.setLeaseExpiresAt(Instant.parse("2026-05-01T00:00:00Z"));
+        fixture.commandLookup(Optional.of(existing));
+        AtomicInteger businessWrites = new AtomicInteger();
+
+        RegulatedMutationResult<String> result = fixture.coordinator.commit(command(businessWrites));
+
+        assertThat(result.state()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(businessWrites).hasValue(0);
+        assertThat(fixture.currentCommand.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(fixture.currentCommand.getDegradationReason()).isEqualTo("FINALIZING_RETRY_REQUIRES_RECONCILIATION");
+    }
+
+    @Test
+    void shouldRepairFinalizedVisibleWithProofToPendingExternalWithoutRerunningMutation() {
+        Fixture fixture = new Fixture(true);
+        RegulatedMutationCommandDocument existing = evidenceGatedCommand(RegulatedMutationState.FINALIZED_VISIBLE);
+        existing.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
+        existing.setResponseSnapshot(new RegulatedMutationResponseSnapshot(
+                "alert-1",
+                AnalystDecision.CONFIRMED_FRAUD,
+                AlertStatus.RESOLVED,
+                "event-1",
+                Instant.parse("2026-05-01T00:00:00Z"),
+                SubmitDecisionOperationStatus.FINALIZED_VISIBLE
+        ));
+        existing.setLocalCommitMarker("EVIDENCE_GATED_FINALIZED");
+        existing.setSuccessAuditRecorded(true);
+        fixture.commandLookup(Optional.of(existing));
+        AtomicInteger businessWrites = new AtomicInteger();
+
+        RegulatedMutationResult<String> result = fixture.coordinator.commit(command(businessWrites));
+
+        assertThat(result.state()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
+        assertThat(businessWrites).hasValue(0);
+        assertThat(fixture.currentCommand.getState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
+    }
+
     private RegulatedMutationCommand<String, String> command(AtomicInteger businessWrites) {
         return new RegulatedMutationCommand<>(
                 "idem-1",
@@ -148,6 +189,27 @@ class EvidenceGatedFinalizeCoordinatorTest {
                 ),
                 RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
         );
+    }
+
+    private RegulatedMutationCommandDocument evidenceGatedCommand(RegulatedMutationState state) {
+        RegulatedMutationCommandDocument document = new RegulatedMutationCommandDocument();
+        document.setId("mutation-1");
+        document.setIdempotencyKey("idem-1");
+        document.setActorId("principal-7");
+        document.setResourceId("alert-1");
+        document.setResourceType(AuditResourceType.ALERT.name());
+        document.setAction(AuditAction.SUBMIT_ANALYST_DECISION.name());
+        document.setCorrelationId("corr-1");
+        document.setRequestHash("request-hash-1");
+        document.setIntentHash("intent-hash-1");
+        document.setIntentResourceId("alert-1");
+        document.setIntentAction(AuditAction.SUBMIT_ANALYST_DECISION.name());
+        document.setIntentActorId("principal-7");
+        document.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        document.setState(state);
+        document.setCreatedAt(Instant.parse("2026-05-01T00:00:00Z"));
+        document.setUpdatedAt(Instant.parse("2026-05-01T00:00:00Z"));
+        return document;
     }
 
     private static final class Fixture {
