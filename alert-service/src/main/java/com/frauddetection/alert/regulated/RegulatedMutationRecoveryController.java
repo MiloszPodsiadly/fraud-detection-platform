@@ -1,11 +1,9 @@
 package com.frauddetection.alert.regulated;
 
-import com.frauddetection.alert.audit.AuditAction;
-import com.frauddetection.alert.audit.AuditEventMetadataSummary;
-import com.frauddetection.alert.audit.AuditOutcome;
-import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
-import com.frauddetection.alert.audit.AuditResourceType;
-import com.frauddetection.alert.audit.AuditService;
+import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResourceType;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
@@ -22,16 +20,16 @@ public class RegulatedMutationRecoveryController {
 
     private final RegulatedMutationRecoveryService recoveryService;
     private final RegulatedMutationInspectionRateLimiter inspectionRateLimiter;
-    private final AuditService auditService;
+    private final SensitiveReadAuditService sensitiveReadAuditService;
 
     public RegulatedMutationRecoveryController(
             RegulatedMutationRecoveryService recoveryService,
             RegulatedMutationInspectionRateLimiter inspectionRateLimiter,
-            AuditService auditService
+            SensitiveReadAuditService sensitiveReadAuditService
     ) {
         this.recoveryService = recoveryService;
         this.inspectionRateLimiter = inspectionRateLimiter;
-        this.auditService = auditService;
+        this.sensitiveReadAuditService = sensitiveReadAuditService;
     }
 
     @PostMapping("/recover")
@@ -40,11 +38,21 @@ public class RegulatedMutationRecoveryController {
     }
 
     @GetMapping("/recovery/backlog")
-    public RegulatedMutationRecoveryBacklogResponse backlog() {
-        return recoveryService.backlog();
+    @AuditedSensitiveRead
+    public RegulatedMutationRecoveryBacklogResponse backlog(HttpServletRequest request) {
+        RegulatedMutationRecoveryBacklogResponse response = recoveryService.backlog();
+        sensitiveReadAuditService.audit(
+                ReadAccessEndpointCategory.REGULATED_MUTATION_RECOVERY_BACKLOG,
+                ReadAccessResourceType.REGULATED_MUTATION_RECOVERY,
+                null,
+                1,
+                request
+        );
+        return response;
     }
 
     @GetMapping("/{idempotencyKey}")
+    @AuditedSensitiveRead
     public RegulatedMutationCommandInspectionResponse inspect(
             @PathVariable String idempotencyKey,
             Authentication authentication,
@@ -52,11 +60,12 @@ public class RegulatedMutationRecoveryController {
     ) {
         enforceRateLimit(authentication, request);
         RegulatedMutationCommandInspectionResponse response = recoveryService.inspect(idempotencyKey);
-        auditInspection(response, authentication, "RAW_IDEMPOTENCY_KEY");
+        auditInspection(response, request);
         return response;
     }
 
     @GetMapping("/by-command/{commandId}")
+    @AuditedSensitiveRead
     public RegulatedMutationCommandInspectionResponse inspectByCommandId(
             @PathVariable String commandId,
             Authentication authentication,
@@ -64,11 +73,12 @@ public class RegulatedMutationRecoveryController {
     ) {
         enforceRateLimit(authentication, request);
         RegulatedMutationCommandInspectionResponse response = recoveryService.inspectByCommandId(commandId);
-        auditInspection(response, authentication, "COMMAND_ID");
+        auditInspection(response, request);
         return response;
     }
 
     @GetMapping("/by-idempotency-hash/{hash}")
+    @AuditedSensitiveRead
     public RegulatedMutationCommandInspectionResponse inspectByIdempotencyHash(
             @PathVariable String hash,
             Authentication authentication,
@@ -76,7 +86,7 @@ public class RegulatedMutationRecoveryController {
     ) {
         enforceRateLimit(authentication, request);
         RegulatedMutationCommandInspectionResponse response = recoveryService.inspectByIdempotencyHash(hash);
-        auditInspection(response, authentication, "IDEMPOTENCY_HASH");
+        auditInspection(response, request);
         return response;
     }
 
@@ -93,20 +103,13 @@ public class RegulatedMutationRecoveryController {
         return "ip:" + (request == null ? "unknown" : request.getRemoteAddr());
     }
 
-    private void auditInspection(RegulatedMutationCommandInspectionResponse response, Authentication authentication, String lookupMode) {
-        try {
-            auditService.audit(
-                    AuditAction.INSPECT_REGULATED_MUTATION_COMMAND,
-                    AuditResourceType.REGULATED_MUTATION_COMMAND,
-                    response.idempotencyKeyHash(),
-                    null,
-                    authentication == null ? null : authentication.getName(),
-                    AuditOutcome.SUCCESS,
-                    null,
-                    new AuditEventMetadataSummary(null, lookupMode, "alert-service", "1.0", null, null, null, null, null)
-            );
-        } catch (RuntimeException exception) {
-            throw new AuditPersistenceUnavailableException();
-        }
+    private void auditInspection(RegulatedMutationCommandInspectionResponse response, HttpServletRequest request) {
+        sensitiveReadAuditService.audit(
+                ReadAccessEndpointCategory.REGULATED_MUTATION_INSPECTION,
+                ReadAccessResourceType.REGULATED_MUTATION_COMMAND,
+                response.idempotencyKeyHash(),
+                1,
+                request
+        );
     }
 }

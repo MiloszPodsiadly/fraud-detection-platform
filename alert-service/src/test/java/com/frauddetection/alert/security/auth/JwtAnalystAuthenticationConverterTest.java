@@ -18,6 +18,7 @@ class JwtAnalystAuthenticationConverterTest {
 
     private final JwtSecurityProperties properties = new JwtSecurityProperties(
             true,
+            false,
             null,
             "https://issuer.example.test/.well-known/jwks.json",
             "sub",

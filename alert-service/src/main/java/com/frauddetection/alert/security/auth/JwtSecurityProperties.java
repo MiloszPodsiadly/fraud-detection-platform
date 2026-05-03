@@ -8,6 +8,7 @@ import java.util.Map;
 @ConfigurationProperties(prefix = "app.security.jwt")
 public record JwtSecurityProperties(
         boolean enabled,
+        boolean required,
         String issuerUri,
         String jwkSetUri,
         String userIdClaim,

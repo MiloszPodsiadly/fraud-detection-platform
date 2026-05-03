@@ -214,10 +214,13 @@ FDP-16 is split into explicit production-hardening steps:
 - FDP-21 Audit Trust Attestation Layer: derived trust assessment built on FDP-19 internal integrity and FDP-20 external anchor/export source-of-truth signals.
 - FDP-23 Local-First Trust Authority: a separate local service signs external audit anchor payload hashes with asymmetric key material not held by alert-service, exports public verification keys, and supports offline verification bundles.
 - FDP-26 Regulated Trust Operations & Transactional Outbox Foundation: optional Mongo transaction boundary for regulated submit-decision local commits, regulated fraud-case update, separate durable transactional outbox source of truth, bounded recovery APIs, bank-mode dual-control manual outbox confirmation, and a minimal trust incident control plane.
+- FDP-27 Bank Profile & Production Closure Gate: explicit bank/prod startup guard for regulated mutation, outbox, trust incident, and sensitive-read audit invariants.
 
 FDP-26 provides a local MongoDB ACID boundary only when `app.regulated-mutations.transaction-mode=REQUIRED` and Mongo transactions are available. That boundary covers the command state update, alert business write, transactional outbox record, response snapshot, and local commit marker for supported regulated mutations. Kafka delivery remains asynchronous and at-least-once; external audit witnesses, trust-authority signing, and broker delivery are outside the local transaction.
 
 FDP-26 does not provide distributed ACID across MongoDB/Kafka/external witnesses, exactly-once delivery, pre-commit/finalize evidence-gated commit, legal notarization, WORM storage, SIEM integration, rollback of already committed business state, or regulator-certified archive evidence. Prod-like/bank deployments fail startup unless transaction mode is `REQUIRED`, a transaction manager is configured, transaction capability probe succeeds, transactional outbox repository is present, outbox publisher and recovery are enabled, outbox confirmation dual-control is enabled, and max attempts are positive. Local/dev quickstart keeps `OFF` and single-control operator attestation by default.
+
+FDP-27 strengthens prod-like startup closure. Bank/prod/staging deployments require `app.audit.bank-mode.fail-closed=true`, `app.regulated-mutations.transaction-mode=REQUIRED`, `app.trust-incidents.refresh-mode=ATOMIC`, outbox publisher/recovery/dual-control enabled, transaction capability probing enabled, `app.sensitive-reads.audit.fail-closed=true`, JWT authentication required with demo/header auth disabled, FDP-24 external anchoring enabled/required/fail-closed with a production-capable sink, and Trust Authority signing enabled and required. `application-bank.yml` is strict; local smoke without external anchoring must use local/dev/docker-local or `application-bank-local.yml` and is `NON_BANK_LOCAL_MODE`, not bank-grade. Sensitive operational reads are audited through a central backend policy and fail closed in bank/prod if audit persistence is unavailable. FDP-27 does not provide distributed ACID, does not provide exactly-once Kafka delivery, does not provide WORM storage, does not provide legal notarization, and is not a regulator-certified archive.
 
 Audit Logging v1 records security-relevant analyst write operations in `alert-service`.
 
@@ -1341,6 +1344,12 @@ Security and architecture:
 - [API Error Contract](docs/api-error-contract.md): canonical local REST error envelope for timestamp/status/error/message/details and non-leakage rules.
 - [Operations And Observability v1](docs/operations-observability-v1.md): baseline observability foundation before the local monitoring stack rollout.
 - [Operations And Observability v2](docs/operations-observability-v2.md): current local Prometheus/Grafana runtime guide, ML metrics contract, alert thresholds, and troubleshooting flow.
+- [Alert Service Source Of Truth](docs/architecture/alert-service-source-of-truth.md): FDP-27 authoritative stores and projection boundaries.
+- [Alert Service Write Path Inventory](docs/architecture/alert-service-write-path-inventory.md): FDP-27 mutating path inventory with idempotency, audit, and recovery expectations.
+- [Alert Service Production Runbooks](docs/runbooks/alert-service-production-runbooks.md): FDP-27 operator actions for production trust and recovery conditions.
+- [Alert Service SLOs](docs/observability/alert-service-slo.md): FDP-27 low-cardinality operational thresholds.
+- [Alert Service Config Matrix](docs/deployment/alert-service-config-matrix.md): local/test/docker/staging/prod/bank configuration semantics.
+- [FDP-27 Merge Gate](docs/FDP-27-merge-gate.md): pre-merge invariant checklist and explicit non-goals.
 - [ML Governance And Drift v1](docs/ml-governance-drift-v1.md): bounded runtime governance layer for active model metadata, aggregate profiles, drift status, privacy rules, and incident playbook.
 
 TODO: If future work adds docs for data generation or deployment, keep them as a small set of consolidated feature documents instead of many prompt-sized files.

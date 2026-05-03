@@ -11,6 +11,8 @@ import com.frauddetection.alert.assistant.AnalystCaseSummaryUseCase;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditDegradationEventDocument;
 import com.frauddetection.alert.audit.AuditEventController;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.audit.AuditEventReadResponse;
 import com.frauddetection.alert.audit.AuditEventReadService;
 import com.frauddetection.alert.audit.AuditDegradationController;
@@ -192,6 +194,9 @@ class AlertSecurityConfigTest {
 
     @MockBean
     private AuditEventReadService auditEventReadService;
+
+    @MockBean
+    private SensitiveReadAuditService sensitiveReadAuditService;
 
     @MockBean
     private AuditIntegrityService auditIntegrityService;
@@ -818,13 +823,10 @@ class AlertSecurityConfigTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.idempotency_key").doesNotExist())
                 .andExpect(jsonPath("$.idempotency_key_hash").value("96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b"));
-        verify(auditService, atLeastOnce()).audit(
-                eq(AuditAction.INSPECT_REGULATED_MUTATION_COMMAND),
-                eq(AuditResourceType.REGULATED_MUTATION_COMMAND),
+        verify(sensitiveReadAuditService, atLeastOnce()).audit(
+                eq(ReadAccessEndpointCategory.REGULATED_MUTATION_INSPECTION),
                 any(),
                 any(),
-                any(),
-                eq(AuditOutcome.SUCCESS),
                 any(),
                 any()
         );
@@ -917,13 +919,13 @@ class AlertSecurityConfigTest {
                         null,
                         Instant.parse("2026-05-01T00:00:00Z")
                 ));
-        doThrow(new RuntimeException("audit down")).when(auditService).audit(
-                eq(AuditAction.INSPECT_REGULATED_MUTATION_COMMAND),
-                eq(AuditResourceType.REGULATED_MUTATION_COMMAND),
+        doThrow(new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+                "Sensitive read audit unavailable."
+        )).when(sensitiveReadAuditService).audit(
+                eq(ReadAccessEndpointCategory.REGULATED_MUTATION_INSPECTION),
                 any(),
                 any(),
-                any(),
-                eq(AuditOutcome.SUCCESS),
                 any(),
                 any()
         );
@@ -931,7 +933,7 @@ class AlertSecurityConfigTest {
         mockMvc.perform(get("/api/v1/regulated-mutations/by-command/mutation-1")
                         .with(authorities(AnalystAuthority.AUDIT_VERIFY)))
                 .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.message").value("Audit persistence is unavailable; mutation was not executed."));
+                .andExpect(jsonPath("$.message").value("Sensitive read audit unavailable."));
     }
 
     @Test

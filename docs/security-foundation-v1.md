@@ -432,6 +432,16 @@ Configured internal ML scoring and governance calls use an internal service-auth
 
 See `docs/service-identity-fdp17.md` for the FDP-17 JWT service identity contract and `docs/service-identity-fdp18.md` for the FDP-18 mTLS contract. This is an internal service-auth foundation, not enterprise IAM, not external JWKS discovery, not automated key/certificate rotation, not HSM/KMS integration, not bank-grade certification, and not a replacement for production deployment hardening.
 
+## FDP-27 Bank Profile And Production Closure
+
+FDP-27 adds an alert-service bank/prod startup guard and a central sensitive-read audit policy. Prod-like deployments (`bank`, `prod`, `production`, `staging`, or `app.audit.bank-mode.fail-closed=true`) must fail startup unless regulated mutations use `REQUIRED`, transaction capability probing is enabled, trust incident refresh is `ATOMIC`, outbox publisher/recovery/dual-control are enabled, `app.sensitive-reads.audit.fail-closed=true`, FDP-24 external anchoring publication is enabled/required/fail-closed with a production-capable sink, Trust Authority signing is enabled and required, JWT authentication is required, and demo/header authentication is disabled.
+
+`application-bank.yml` is the strict bank profile. Local smoke tests that need demo auth or disabled external anchoring must use local/dev/docker-local or `bank-local`; those modes are not regulator-grade and must report `NON_BANK_LOCAL_MODE`, not full bank posture.
+
+Sensitive operational reads such as trust level, trust incident listing/preview, audit read, evidence export, external coverage, regulated mutation inspection, outbox backlog, and audit degradation listing are audited through backend policy. In bank/prod, read-audit persistence failure returns no sensitive read data.
+
+FDP-27 does not provide distributed ACID, exactly-once Kafka, WORM storage, legal notarization, KMS/HSM, SIEM, or a regulator-certified archive.
+
 Future sinks can be added behind `AuditEventPublisher`; they are not implemented in FDP-16:
 
 - Kafka audit topic

@@ -1,6 +1,7 @@
 package com.frauddetection.alert.audit;
 
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration;
@@ -39,6 +40,9 @@ class AuditEventControllerTest {
 
     @MockBean
     private AuditEventReadService auditEventReadService;
+
+    @MockBean
+    private SensitiveReadAuditService sensitiveReadAuditService;
 
     @Test
     void shouldReturnStableAuditReadContract() throws Exception {
