@@ -44,6 +44,14 @@ class RegulatedMutationConflictPolicyTest {
     }
 
     @Test
+    void sameRequestHashDoesNotAddNewSemanticFieldComparisonInFdp31() {
+        RegulatedMutationCommandDocument existing = document("request-hash-1", "principal-7");
+        existing.setIntentDecision("legacy-decision-value");
+
+        assertThat(policy.existingOrConflict(existing, command("request-hash-1", "principal-7"))).isSameAs(existing);
+    }
+
+    @Test
     void nullInputsAreRejectedBeforeAnySideEffectCouldExist() {
         assertThatThrownBy(() -> policy.existingOrConflict(null, command("request-hash-1", "principal-7")))
                 .isInstanceOf(IllegalArgumentException.class);

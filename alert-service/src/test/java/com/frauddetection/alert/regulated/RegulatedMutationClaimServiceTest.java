@@ -108,6 +108,44 @@ class RegulatedMutationClaimServiceTest {
     }
 
     @Test
+    void claimDoesNotClaimActiveProcessingLease() {
+        when(mongoTemplate.findAndModify(any(), any(), any(), eq(RegulatedMutationCommandDocument.class)))
+                .thenReturn(null);
+
+        Optional<RegulatedMutationCommandDocument> result = service.claim(command(), "idem-1");
+
+        assertThat(result).isEmpty();
+        String queryJson = capturedQuery().getQueryObject().toString();
+        assertThat(queryJson).contains("execution_status=NEW");
+        assertThat(queryJson).contains("execution_status=PROCESSING");
+        assertThat(queryJson).contains("lease_expires_at");
+    }
+
+    @Test
+    void claimAllowsExpiredProcessingLeaseByQuery() {
+        service.claim(command(), "idem-1");
+
+        String queryJson = capturedQuery().getQueryObject().toString();
+
+        assertThat(queryJson).contains("execution_status=PROCESSING");
+        assertThat(queryJson).contains("lease_expires_at");
+    }
+
+    @Test
+    void claimQueryDoesNotPretendToFenceLaterWrites() {
+        service.claim(command(), "idem-1");
+
+        String queryJson = capturedQuery().getQueryObject().toString();
+        Document update = setDocument();
+
+        assertThat(queryJson).contains("idempotency_key=idem-1");
+        assertThat(queryJson).contains("request_hash=request-hash-1");
+        assertThat(queryJson).doesNotContain("lease_owner=");
+        assertThat(update).containsKeys("execution_status", "lease_owner", "lease_expires_at");
+        assertThat(update).doesNotContainKeys("state", "public_status", "response_snapshot", "success_audit_recorded");
+    }
+
+    @Test
     void claimSetsExecutionStatusProcessing() {
         service.claim(command(), "idem-1");
 

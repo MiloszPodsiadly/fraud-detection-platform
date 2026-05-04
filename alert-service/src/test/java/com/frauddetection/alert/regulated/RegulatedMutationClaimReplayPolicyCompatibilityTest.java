@@ -22,8 +22,12 @@ class RegulatedMutationClaimReplayPolicyCompatibilityTest {
     private static final Instant NOW = Instant.parse("2026-05-04T12:00:00Z");
 
     private final RegulatedMutationConflictPolicy conflictPolicy = new RegulatedMutationConflictPolicy();
-    private final RegulatedMutationReplayResolver replayResolver = new RegulatedMutationReplayResolver(
-            new RegulatedMutationLeasePolicy()
+    private final RegulatedMutationReplayPolicyRegistry replayPolicyRegistry = new RegulatedMutationReplayPolicyRegistry(
+            List.of(
+                    new LegacyRegulatedMutationReplayPolicy(new RegulatedMutationLeasePolicy()),
+                    new EvidenceGatedFinalizeReplayPolicy(new RegulatedMutationLeasePolicy())
+            ),
+            true
     );
 
     @Test
@@ -44,7 +48,7 @@ class RegulatedMutationClaimReplayPolicyCompatibilityTest {
         document.setLeaseOwner("other-worker");
         document.setLeaseExpiresAt(NOW.plusSeconds(30));
 
-        RegulatedMutationReplayDecision decision = replayResolver.resolveLegacy(document, NOW);
+        RegulatedMutationReplayDecision decision = replayPolicyRegistry.resolve(document, NOW);
 
         assertThat(conflictPolicy.existingOrConflict(document, command("idem-1", "request-hash-1", "principal-7")))
                 .isSameAs(document);
@@ -60,7 +64,7 @@ class RegulatedMutationClaimReplayPolicyCompatibilityTest {
         document.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
         document.setLeaseExpiresAt(NOW.plusSeconds(30));
 
-        RegulatedMutationReplayDecision decision = replayResolver.resolveLegacy(document, NOW);
+        RegulatedMutationReplayDecision decision = replayPolicyRegistry.resolve(document, NOW);
 
         assertThat(decision.type()).isEqualTo(RegulatedMutationReplayDecisionType.ACTIVE_IN_PROGRESS);
         assertThat(decision.responseState()).isEqualTo(RegulatedMutationState.REQUESTED);
@@ -73,7 +77,7 @@ class RegulatedMutationClaimReplayPolicyCompatibilityTest {
         document.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
         document.setLeaseExpiresAt(NOW.minusSeconds(1));
 
-        RegulatedMutationReplayDecision decision = replayResolver.resolveLegacy(document, NOW);
+        RegulatedMutationReplayDecision decision = replayPolicyRegistry.resolve(document, NOW);
 
         assertThat(decision.type()).isEqualTo(RegulatedMutationReplayDecisionType.NONE);
     }
@@ -84,7 +88,7 @@ class RegulatedMutationClaimReplayPolicyCompatibilityTest {
         document.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
         document.setLeaseExpiresAt(NOW.minusSeconds(1));
 
-        RegulatedMutationReplayDecision decision = replayResolver.resolveLegacy(document, NOW);
+        RegulatedMutationReplayDecision decision = replayPolicyRegistry.resolve(document, NOW);
 
         assertThat(decision.type()).isEqualTo(RegulatedMutationReplayDecisionType.RECOVERY_REQUIRED_RESPONSE);
         assertThat(decision.responseState()).isEqualTo(RegulatedMutationState.BUSINESS_COMMITTING);
@@ -96,7 +100,7 @@ class RegulatedMutationClaimReplayPolicyCompatibilityTest {
         document.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
         document.setLeaseExpiresAt(NOW.minusSeconds(1));
 
-        RegulatedMutationReplayDecision decision = replayResolver.resolveEvidenceGated(document, NOW);
+        RegulatedMutationReplayDecision decision = replayPolicyRegistry.resolve(document, NOW);
 
         assertThat(decision.type()).isEqualTo(RegulatedMutationReplayDecisionType.FINALIZING_REQUIRES_RECOVERY);
         assertThat(decision.responseState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
@@ -145,9 +149,19 @@ class RegulatedMutationClaimReplayPolicyCompatibilityTest {
         document.setResponseSnapshot(snapshot(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING));
         document.setSuccessAuditRecorded(false);
 
-        assertThat(replayResolver.resolveLegacy(document, NOW).type())
+        assertThat(replayPolicyRegistry.resolve(document, NOW).type())
                 .isEqualTo(RegulatedMutationReplayDecisionType.NONE);
-        assertThat(replayResolver.needsSuccessAuditRetry(document)).isTrue();
+        assertThat(LegacyRegulatedMutationReplayPolicy.needsSuccessAuditRetry(document)).isTrue();
+    }
+
+    @Test
+    void legacyCompletedEvidencePendingWithSnapshotReplays() {
+        RegulatedMutationCommandDocument document = legacyDocument(RegulatedMutationState.EVIDENCE_PENDING);
+        document.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
+        document.setResponseSnapshot(snapshot(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING));
+
+        assertThat(replayPolicyRegistry.resolve(document, NOW).type())
+                .isEqualTo(RegulatedMutationReplayDecisionType.REPLAY_SNAPSHOT);
     }
 
     @Test
@@ -156,7 +170,7 @@ class RegulatedMutationClaimReplayPolicyCompatibilityTest {
         document.setExecutionStatus(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
         document.setResponseSnapshot(snapshot(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING));
 
-        assertThat(replayResolver.resolveLegacy(document, NOW).type())
+        assertThat(replayPolicyRegistry.resolve(document, NOW).type())
                 .isEqualTo(RegulatedMutationReplayDecisionType.RECOVERY_REQUIRED_RESPONSE);
     }
 
@@ -166,7 +180,7 @@ class RegulatedMutationClaimReplayPolicyCompatibilityTest {
         document.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
         document.setResponseSnapshot(snapshot(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE));
 
-        assertThat(replayResolver.resolveLegacy(document, NOW).type())
+        assertThat(replayPolicyRegistry.resolve(document, NOW).type())
                 .isEqualTo(RegulatedMutationReplayDecisionType.REPLAY_SNAPSHOT);
     }
 
@@ -176,8 +190,28 @@ class RegulatedMutationClaimReplayPolicyCompatibilityTest {
         document.setExecutionStatus(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
         document.setResponseSnapshot(snapshot(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL));
 
-        assertThat(replayResolver.resolveEvidenceGated(document, NOW).type())
+        assertThat(replayPolicyRegistry.resolve(document, NOW).type())
                 .isEqualTo(RegulatedMutationReplayDecisionType.RECOVERY_REQUIRED_RESPONSE);
+    }
+
+    @Test
+    void fdp29RejectedEvidenceUnavailableWithSnapshotReturnsRejectedResponse() {
+        RegulatedMutationCommandDocument document = evidenceDocument(RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE);
+        document.setExecutionStatus(RegulatedMutationExecutionStatus.FAILED);
+        document.setResponseSnapshot(snapshot(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL));
+
+        assertThat(replayPolicyRegistry.resolve(document, NOW).type())
+                .isEqualTo(RegulatedMutationReplayDecisionType.REJECTED_RESPONSE);
+    }
+
+    @Test
+    void fdp29FailedBusinessValidationWithSnapshotReturnsRejectedResponse() {
+        RegulatedMutationCommandDocument document = evidenceDocument(RegulatedMutationState.FAILED_BUSINESS_VALIDATION);
+        document.setExecutionStatus(RegulatedMutationExecutionStatus.FAILED);
+        document.setResponseSnapshot(snapshot(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL));
+
+        assertThat(replayPolicyRegistry.resolve(document, NOW).type())
+                .isEqualTo(RegulatedMutationReplayDecisionType.REJECTED_RESPONSE);
     }
 
     @Test
@@ -186,7 +220,7 @@ class RegulatedMutationClaimReplayPolicyCompatibilityTest {
         document.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
         document.setResponseSnapshot(snapshot(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL));
 
-        assertThat(replayResolver.resolveEvidenceGated(document, NOW).type())
+        assertThat(replayPolicyRegistry.resolve(document, NOW).type())
                 .isEqualTo(RegulatedMutationReplayDecisionType.REPLAY_SNAPSHOT);
     }
 
@@ -198,7 +232,7 @@ class RegulatedMutationClaimReplayPolicyCompatibilityTest {
         document.setLocalCommitMarker("EVIDENCE_GATED_FINALIZED");
         document.setSuccessAuditRecorded(true);
 
-        assertThat(replayResolver.resolveEvidenceGated(document, NOW).type())
+        assertThat(replayPolicyRegistry.resolve(document, NOW).type())
                 .isEqualTo(RegulatedMutationReplayDecisionType.FINALIZED_VISIBLE_REPAIRABLE);
     }
 
@@ -207,7 +241,7 @@ class RegulatedMutationClaimReplayPolicyCompatibilityTest {
         RegulatedMutationCommandDocument document = evidenceDocument(RegulatedMutationState.FINALIZED_VISIBLE);
         document.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
 
-        assertThat(replayResolver.resolveEvidenceGated(document, NOW).type())
+        assertThat(replayPolicyRegistry.resolve(document, NOW).type())
                 .isEqualTo(RegulatedMutationReplayDecisionType.FINALIZED_VISIBLE_RECOVERY_REQUIRED);
     }
 
@@ -217,7 +251,7 @@ class RegulatedMutationClaimReplayPolicyCompatibilityTest {
         document.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
         document.setLeaseExpiresAt(NOW.minusSeconds(1));
 
-        RegulatedMutationReplayDecision decision = replayResolver.resolveLegacy(document, NOW);
+        RegulatedMutationReplayDecision decision = replayPolicyRegistry.resolve(document, NOW);
 
         assertThat(decision.type()).isEqualTo(RegulatedMutationReplayDecisionType.RECOVERY_REQUIRED_RESPONSE);
         assertThat(decision.responseState()).isEqualTo(RegulatedMutationState.BUSINESS_COMMITTING);
@@ -230,7 +264,7 @@ class RegulatedMutationClaimReplayPolicyCompatibilityTest {
         document.setLeaseOwner("other-worker");
         document.setLeaseExpiresAt(NOW.plusSeconds(1));
 
-        assertThat(replayResolver.resolveEvidenceGated(document, NOW).type())
+        assertThat(replayPolicyRegistry.resolve(document, NOW).type())
                 .isEqualTo(RegulatedMutationReplayDecisionType.ACTIVE_IN_PROGRESS);
     }
 
@@ -249,6 +283,18 @@ class RegulatedMutationClaimReplayPolicyCompatibilityTest {
         assertThatThrownBy(() -> new RegulatedMutationExecutorRegistry(List.of(legacy, evidence), true).executorFor(document))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("does not support action/resource");
+    }
+
+    @Test
+    void unsupportedReplayModelVersionFailsClosedThroughReplayPolicyRegistry() {
+        RegulatedMutationReplayPolicyRegistry registry = new RegulatedMutationReplayPolicyRegistry(
+                List.of(new LegacyRegulatedMutationReplayPolicy(new RegulatedMutationLeasePolicy())),
+                false
+        );
+
+        assertThatThrownBy(() -> registry.policyFor(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("No regulated mutation replay policy registered");
     }
 
     private RegulatedMutationCommand<String, String> command(String idempotencyKey, String requestHash, String actorId) {
