@@ -90,6 +90,7 @@ Executors may interpret replay decisions into model-specific transitions and res
 
 RECOVERY_REQUIRED must win over responseSnapshot replay.
 FINALIZE_RECOVERY_REQUIRED must win over responseSnapshot replay.
+Rejected terminal states must win over responseSnapshot replay.
 
 ## ACID / Transaction Boundary Statement
 
@@ -108,6 +109,30 @@ No policy component creates a wider transaction boundary or claims distributed A
 - Unsafe expired states return recovery/status decisions instead of rerunning business mutation.
 - Missing command after claim miss remains an explicit missing-idempotency failure.
 
+## Known Limitation: Claim Acquisition Is Not Write Fencing
+
+FDP-31 centralizes claim acquisition.
+FDP-31 does not implement lease-owner write fencing.
+
+Claim acquisition is atomic through Mongo `findAndModify`, including the idempotency key, request hash and claimable execution status conditions.
+Later command transition writes remain behavior-preserving and are not changed by FDP-31.
+
+Therefore, FDP-31 must not be described as solving stale worker write protection.
+This branch does not add fenced transition updates by `commandId`, `leaseOwner` and unexpired lease.
+
+## FDP-32 - Regulated Mutation Lease Fencing & Stale Worker Protection
+
+FDP-32 is the future scope for full stale-worker write protection.
+
+Expected FDP-32 goals:
+
+- fenced command transitions,
+- stale worker write rejection,
+- transition update by `commandId`, `leaseOwner` and unexpired lease,
+- real Mongo concurrency tests,
+- metrics for stale write attempts,
+- no business rerun after lease takeover.
+
 ## Test Matrix
 
 | Test | Coverage |
@@ -119,7 +144,7 @@ No policy component creates a wider transaction boundary or claims distributed A
 | `RegulatedMutationClaimReplayPolicyCompatibilityTest` | Golden behavior-preservation matrix for claim/replay/conflict routing. |
 | `LegacyRegulatedMutationExecutorBehaviorCompatibilityTest` | Legacy executor behavior after extraction. |
 | `EvidenceGatedFinalizeCoordinatorTest` | FDP-29 executor behavior after extraction. |
-| `RegulatedMutationArchitectureTest` | Boundary guards for FDP-31 policy ownership and no review-note docs. |
+| `RegulatedMutationArchitectureTest` | Boundary guards for FDP-31 policy ownership, no overclaiming and project documentation wording. |
 
 ## Risk
 
@@ -132,3 +157,4 @@ The mitigation is direct resolver tests plus golden compatibility tests for reco
 - Add new regulated mutation model executors only after defining explicit action/resource support and regression coverage.
 - Consider a separate concurrent response service only if executor-specific response mapping grows further.
 - Keep FDP-29 production enablement controlled by its existing startup guards and feature flags.
+- Implement lease-owner transition fencing in FDP-32.
