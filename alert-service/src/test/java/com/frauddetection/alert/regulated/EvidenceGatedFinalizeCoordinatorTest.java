@@ -128,6 +128,36 @@ class EvidenceGatedFinalizeCoordinatorTest {
     }
 
     @Test
+    void shouldNotReplayStaleCommittedSnapshotWhenFinalizeRecoveryRequired() {
+        Fixture fixture = new Fixture(true);
+        RegulatedMutationCommandDocument existing = evidenceGatedCommand(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        existing.setExecutionStatus(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
+        existing.setResponseSnapshot(new RegulatedMutationResponseSnapshot(
+                "alert-1",
+                AnalystDecision.CONFIRMED_FRAUD,
+                AlertStatus.RESOLVED,
+                "event-1",
+                Instant.parse("2026-05-01T00:00:00Z"),
+                SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
+        ));
+        existing.setLocalCommitMarker("EVIDENCE_GATED_FINALIZED");
+        existing.setSuccessAuditRecorded(true);
+        existing.setSuccessAuditId("success-audit-1");
+        existing.setOutboxEventId("event-1");
+        fixture.commandLookup(Optional.of(existing));
+        AtomicInteger businessWrites = new AtomicInteger();
+
+        RegulatedMutationResult<String> result = fixture.coordinator.commit(command(businessWrites));
+
+        assertThat(result.state()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(result.response()).isEqualTo("FINALIZE_RECOVERY_REQUIRED");
+        assertThat(result.response()).isNotEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL.name());
+        assertThat(result.response()).isNotEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED.name());
+        assertThat(businessWrites).hasValue(0);
+        assertThat(fixture.currentCommand.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+    }
+
+    @Test
     void shouldRepairFinalizedVisibleWithProofToPendingExternalWithoutRerunningMutation() {
         Fixture fixture = new Fixture(true);
         RegulatedMutationCommandDocument existing = evidenceGatedCommand(RegulatedMutationState.FINALIZED_VISIBLE);

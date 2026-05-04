@@ -32,6 +32,26 @@ import static org.mockito.Mockito.when;
 class MutationEvidenceConfirmationServiceTest {
 
     @Test
+    void shouldTreatZeroAndNegativeLimitAsNoOp() {
+        RegulatedMutationCommandRepository commandRepository = mock(RegulatedMutationCommandRepository.class);
+        TransactionalOutboxRecordRepository outboxRepository = mock(TransactionalOutboxRecordRepository.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        MutationEvidenceConfirmationService service = new MutationEvidenceConfirmationService(
+                commandRepository,
+                outboxRepository,
+                metrics,
+                false,
+                false
+        );
+
+        assertThat(service.confirmPendingEvidence(0)).isZero();
+        assertThat(service.confirmPendingEvidence(-1)).isZero();
+
+        verify(commandRepository, never()).findTop100ByStateInAndUpdatedAtBefore(any(), any());
+        verify(metrics, never()).recordEvidenceConfirmationPending(org.mockito.ArgumentMatchers.anyInt());
+    }
+
+    @Test
     void shouldPromoteCommandOnlyAfterSuccessAuditAndPublishedOutbox() {
         RegulatedMutationCommandRepository commandRepository = mock(RegulatedMutationCommandRepository.class);
         TransactionalOutboxRecordRepository outboxRepository = mock(TransactionalOutboxRecordRepository.class);

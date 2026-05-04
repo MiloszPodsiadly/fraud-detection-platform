@@ -267,6 +267,50 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
+    void localAuditPhaseWriterMustOnlyBeUsedByFdp29CoordinatorPath() throws Exception {
+        List<Path> javaFiles;
+        try (java.util.stream.Stream<Path> stream = Files.walk(Path.of("src/main/java/com/frauddetection/alert"))) {
+            javaFiles = stream
+                    .filter(path -> path.toString().endsWith(".java"))
+                    .filter(path -> !path.toString().replace('\\', '/')
+                            .endsWith("audit/RegulatedMutationLocalAuditPhaseWriter.java"))
+                    .toList();
+        }
+
+        for (Path path : javaFiles) {
+            String normalized = path.toString().replace('\\', '/');
+            String source = Files.readString(path);
+            if (normalized.endsWith("regulated/MongoRegulatedMutationCoordinator.java")) {
+                assertThat(source).contains("RegulatedMutationLocalAuditPhaseWriter");
+                continue;
+            }
+            assertThat(source)
+                    .as("RegulatedMutationLocalAuditPhaseWriter must not leak outside FDP-29 coordinator: " + path)
+                    .doesNotContain("RegulatedMutationLocalAuditPhaseWriter");
+        }
+    }
+
+    @Test
+    void legacyAuditPathsMustContinueUsingPhaseAuditService() throws Exception {
+        String coordinator = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/MongoRegulatedMutationCoordinator.java"
+        ));
+        String writeSuccessAudit = coordinator.substring(
+                coordinator.indexOf("private <R, S> S writeSuccessAudit("),
+                coordinator.indexOf("private <R, S> void recordPostCommitDegraded(")
+        );
+        String retrySuccessAuditOnly = coordinator.substring(
+                coordinator.indexOf("private <R, S> RegulatedMutationResult<S> retrySuccessAuditOnly("),
+                coordinator.indexOf("private <R, S> S writeSuccessAudit(")
+        );
+
+        assertThat(writeSuccessAudit).contains("auditPhaseService.recordPhase");
+        assertThat(writeSuccessAudit).doesNotContain("localSuccessAudit(");
+        assertThat(retrySuccessAuditOnly).contains("auditPhaseService.recordPhase");
+        assertThat(retrySuccessAuditOnly).doesNotContain("localSuccessAudit(");
+    }
+
+    @Test
     void trustIncidentReadsMustRemainReadOnly() throws Exception {
         String service = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/trust/TrustIncidentService.java"
