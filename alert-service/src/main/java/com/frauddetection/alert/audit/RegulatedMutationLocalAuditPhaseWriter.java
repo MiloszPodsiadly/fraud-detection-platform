@@ -1,32 +1,48 @@
 package com.frauddetection.alert.audit;
 
 import com.frauddetection.alert.regulated.RegulatedMutationCommandDocument;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class RegulatedMutationLocalAuditPhaseWriter {
 
-    private static final int MAX_APPEND_ATTEMPTS = 2_000;
-    private static final long LOCK_RETRY_BACKOFF_MILLIS = 5L;
-
     private final AuditEventRepository auditEventRepository;
     private final AuditAnchorRepository auditAnchorRepository;
     private final AuditChainLockRepository lockRepository;
+    private final AlertServiceMetrics metrics;
+    private final LocalAuditPhaseWriterProperties properties;
+
+    @Autowired
+    public RegulatedMutationLocalAuditPhaseWriter(
+            AuditEventRepository auditEventRepository,
+            AuditAnchorRepository auditAnchorRepository,
+            AuditChainLockRepository lockRepository,
+            AlertServiceMetrics metrics,
+            LocalAuditPhaseWriterProperties properties
+    ) {
+        this.auditEventRepository = auditEventRepository;
+        this.auditAnchorRepository = auditAnchorRepository;
+        this.lockRepository = lockRepository;
+        this.metrics = metrics;
+        this.properties = properties == null ? new LocalAuditPhaseWriterProperties() : properties;
+    }
 
     public RegulatedMutationLocalAuditPhaseWriter(
             AuditEventRepository auditEventRepository,
             AuditAnchorRepository auditAnchorRepository,
             AuditChainLockRepository lockRepository
     ) {
-        this.auditEventRepository = auditEventRepository;
-        this.auditAnchorRepository = auditAnchorRepository;
-        this.lockRepository = lockRepository;
+        this(auditEventRepository, auditAnchorRepository, lockRepository, null, new LocalAuditPhaseWriterProperties());
     }
 
     public String recordSuccessPhase(
@@ -34,23 +50,34 @@ public class RegulatedMutationLocalAuditPhaseWriter {
             AuditAction action,
             AuditResourceType resourceType
     ) {
+        long startedAt = System.nanoTime();
         String phaseKey = phaseKey(command, "SUCCESS");
-        for (int attempt = 1; attempt <= MAX_APPEND_ATTEMPTS; attempt++) {
+        for (int attempt = 1; attempt <= properties.getMaxAppendAttempts(); attempt++) {
             try {
                 return auditEventRepository.findByRequestId(phaseKey)
-                        .map(AuditEventDocument::auditId)
-                        .orElseGet(() -> appendLocalSuccess(command, action, resourceType, phaseKey));
+                        .map(document -> {
+                            recordAppend("DUPLICATE_PHASE", startedAt);
+                            return document.auditId();
+                        })
+                        .orElseGet(() -> appendLocalSuccess(command, action, resourceType, phaseKey, startedAt));
             } catch (DuplicateKeyException duplicate) {
                 return auditEventRepository.findByRequestId(phaseKey)
-                        .map(AuditEventDocument::auditId)
+                        .map(document -> {
+                            recordAppend("DUPLICATE_PHASE", startedAt);
+                            return document.auditId();
+                        })
                         .orElseThrow(() -> duplicate);
             } catch (AuditChainConflictException conflict) {
-                if (attempt == MAX_APPEND_ATTEMPTS) {
+                if (attempt == properties.getMaxAppendAttempts() || retryBudgetExhausted(startedAt)) {
+                    recordAppend("CHAIN_CONFLICT_EXHAUSTED", startedAt);
                     throw new AuditPersistenceUnavailableException();
                 }
+                recordAppendAttempt("CHAIN_CONFLICT_RETRY");
+                recordRetry("LOCK_CONFLICT");
                 backoffBeforeRetry();
             }
         }
+        recordAppend("CHAIN_CONFLICT_EXHAUSTED", startedAt);
         throw new AuditPersistenceUnavailableException();
     }
 
@@ -58,10 +85,12 @@ public class RegulatedMutationLocalAuditPhaseWriter {
             RegulatedMutationCommandDocument command,
             AuditAction action,
             AuditResourceType resourceType,
-            String phaseKey
+            String phaseKey,
+            long startedAt
     ) {
         String lockOwner = UUID.randomUUID().toString();
         boolean lockAcquired = false;
+        boolean auditEventInserted = false;
         try {
             lockRepository.acquire(AuditEventDocument.PARTITION_KEY, lockOwner);
             lockAcquired = true;
@@ -98,19 +127,31 @@ public class RegulatedMutationLocalAuditPhaseWriter {
                     previousHash,
                     chainPosition
             ));
+            auditEventInserted = true;
             auditAnchorRepository.insert(AuditAnchorDocument.from(UUID.randomUUID().toString(), document));
+            recordAppend("SUCCESS", startedAt);
             return document.auditId();
         } catch (DuplicateKeyException duplicate) {
             return auditEventRepository.findByRequestId(phaseKey)
-                    .map(AuditEventDocument::auditId)
-                    .orElseThrow(() -> new AuditChainConflictException("Audit chain append raced."));
+                    .map(document -> {
+                        recordAppend("DUPLICATE_PHASE", startedAt);
+                        return document.auditId();
+                    })
+                    .orElseThrow(() -> {
+                        recordAppendAttempt("CHAIN_CONFLICT_RETRY");
+                        recordRetry("DUPLICATE_KEY");
+                        return new AuditChainConflictException("Audit chain append raced.");
+                    });
         } catch (DataAccessException exception) {
+            recordAppend(auditEventInserted ? "ANCHOR_INSERT_FAILED" : "AUDIT_INSERT_FAILED", startedAt);
             throw new AuditPersistenceUnavailableException();
         } finally {
             if (lockAcquired) {
                 try {
                     lockRepository.release(AuditEventDocument.PARTITION_KEY, lockOwner);
                 } catch (DataAccessException ignored) {
+                    recordAppendAttempt("LOCK_RELEASE_FAILED");
+                    recordLockReleaseFailure();
                     // The surrounding Mongo transaction determines whether the local audit write commits.
                 }
             }
@@ -119,10 +160,40 @@ public class RegulatedMutationLocalAuditPhaseWriter {
 
     private void backoffBeforeRetry() {
         try {
-            Thread.sleep(LOCK_RETRY_BACKOFF_MILLIS);
+            Thread.sleep(properties.getBackoffMs());
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             throw new AuditPersistenceUnavailableException();
+        }
+    }
+
+    private boolean retryBudgetExhausted(long startedAt) {
+        long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+        return elapsedMillis + properties.getBackoffMs() > properties.getMaxTotalWaitMs();
+    }
+
+    private void recordAppend(String outcome, long startedAt) {
+        if (metrics != null) {
+            metrics.recordFdp29LocalAuditChainAppend(outcome);
+            metrics.recordFdp29LocalAuditChainAppendDuration(Duration.ofNanos(System.nanoTime() - startedAt));
+        }
+    }
+
+    private void recordAppendAttempt(String outcome) {
+        if (metrics != null) {
+            metrics.recordFdp29LocalAuditChainAppend(outcome);
+        }
+    }
+
+    private void recordRetry(String reason) {
+        if (metrics != null) {
+            metrics.recordFdp29LocalAuditChainRetry(reason);
+        }
+    }
+
+    private void recordLockReleaseFailure() {
+        if (metrics != null) {
+            metrics.recordFdp29LocalAuditChainLockReleaseFailure();
         }
     }
 

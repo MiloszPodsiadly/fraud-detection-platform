@@ -31,8 +31,6 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
     private static final String BUSINESS_WRITE_FAILED = "BUSINESS_WRITE_FAILED";
     private static final String POST_COMMIT_AUDIT_DEGRADED = "POST_COMMIT_AUDIT_DEGRADED";
     private static final String ATTEMPTED_AUDIT_UNAVAILABLE = "ATTEMPTED_AUDIT_UNAVAILABLE";
-    private static final String EVIDENCE_GATED_TRANSACTION_REQUIRED = "EVIDENCE_GATED_TRANSACTION_REQUIRED";
-    private static final String EVIDENCE_GATED_FINALIZE_FAILED = "EVIDENCE_GATED_FINALIZE_FAILED";
 
     private final RegulatedMutationCommandRepository commandRepository;
     private final MongoTemplate mongoTemplate;
@@ -41,11 +39,9 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
     private final AlertServiceMetrics metrics;
     private final RegulatedMutationTransactionRunner transactionRunner;
     private final RegulatedMutationPublicStatusMapper publicStatusMapper;
-    private final EvidencePreconditionEvaluator evidencePreconditionEvaluator;
-    private final RegulatedMutationLocalAuditPhaseWriter localAuditPhaseWriter;
+    private final EvidenceGatedFinalizeExecutor evidenceGatedFinalizeExecutor;
     private final boolean bankModeFailClosed;
     private final Duration leaseDuration;
-    private final EvidenceGatedFinalizeStateMachine evidenceGatedStateMachine = new EvidenceGatedFinalizeStateMachine();
 
     public MongoRegulatedMutationCoordinator(
             RegulatedMutationCommandRepository commandRepository,
@@ -105,8 +101,7 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
             AlertServiceMetrics metrics,
             RegulatedMutationTransactionRunner transactionRunner,
             RegulatedMutationPublicStatusMapper publicStatusMapper,
-            EvidencePreconditionEvaluator evidencePreconditionEvaluator,
-            RegulatedMutationLocalAuditPhaseWriter localAuditPhaseWriter,
+            EvidenceGatedFinalizeExecutor evidenceGatedFinalizeExecutor,
             @Value("${app.audit.bank-mode.fail-closed:false}") boolean bankModeFailClosed,
             @Value("${app.regulated-mutation.lease-duration:PT30S}") Duration leaseDuration
     ) {
@@ -117,10 +112,46 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
         this.metrics = metrics;
         this.transactionRunner = transactionRunner;
         this.publicStatusMapper = publicStatusMapper;
-        this.evidencePreconditionEvaluator = evidencePreconditionEvaluator;
-        this.localAuditPhaseWriter = localAuditPhaseWriter;
+        this.evidenceGatedFinalizeExecutor = evidenceGatedFinalizeExecutor;
         this.bankModeFailClosed = bankModeFailClosed;
         this.leaseDuration = leaseDuration;
+    }
+
+    public MongoRegulatedMutationCoordinator(
+            RegulatedMutationCommandRepository commandRepository,
+            MongoTemplate mongoTemplate,
+            RegulatedMutationAuditPhaseService auditPhaseService,
+            AuditDegradationService auditDegradationService,
+            AlertServiceMetrics metrics,
+            RegulatedMutationTransactionRunner transactionRunner,
+            RegulatedMutationPublicStatusMapper publicStatusMapper,
+            EvidencePreconditionEvaluator evidencePreconditionEvaluator,
+            RegulatedMutationLocalAuditPhaseWriter localAuditPhaseWriter,
+            boolean bankModeFailClosed,
+            Duration leaseDuration
+    ) {
+        this(
+                commandRepository,
+                mongoTemplate,
+                auditPhaseService,
+                auditDegradationService,
+                metrics,
+                transactionRunner,
+                publicStatusMapper,
+                new EvidenceGatedFinalizeExecutor(
+                        commandRepository,
+                        mongoTemplate,
+                        auditPhaseService,
+                        metrics,
+                        transactionRunner,
+                        publicStatusMapper,
+                        evidencePreconditionEvaluator,
+                        localAuditPhaseWriter,
+                        leaseDuration
+                ),
+                bankModeFailClosed,
+                leaseDuration
+        );
     }
 
     @Override
@@ -132,7 +163,7 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
 
         RegulatedMutationCommandDocument document = createOrLoad(command, idempotencyKey);
         if (document.mutationModelVersionOrLegacy() == RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1) {
-            return commitEvidenceGatedFinalize(command, idempotencyKey, document);
+            return evidenceGatedFinalizeExecutor.commit(command, idempotencyKey, document);
         }
         RegulatedMutationResult<S> terminalOrPartial = terminalOrPartialResponse(command, document);
         if (terminalOrPartial != null) {
@@ -504,183 +535,6 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
         document.setLastHeartbeatAt(now);
         document.setLastError(lastError);
         commandRepository.save(document);
-    }
-
-    private <R, S> RegulatedMutationResult<S> commitEvidenceGatedFinalize(
-            RegulatedMutationCommand<R, S> command,
-            String idempotencyKey,
-            RegulatedMutationCommandDocument document
-    ) {
-        RegulatedMutationResult<S> terminal = evidenceGatedTerminalOrStatus(command, document);
-        if (terminal != null) {
-            return terminal;
-        }
-
-        document = claim(command, idempotencyKey);
-        if (document == null) {
-            return concurrentResponse(command, idempotencyKey);
-        }
-
-        if (transactionRunner.mode() != RegulatedMutationTransactionMode.REQUIRED) {
-            document.setDegradationReason(EVIDENCE_GATED_TRANSACTION_REQUIRED);
-            document.setExecutionStatus(RegulatedMutationExecutionStatus.FAILED);
-            evidenceGatedTransition(document, RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE, EVIDENCE_GATED_TRANSACTION_REQUIRED);
-            throw new IllegalStateException("Evidence-gated finalize requires app.regulated-mutations.transaction-mode=REQUIRED.");
-        }
-
-        prepareEvidence(command, document);
-        return finalizeVisibleMutation(command, document);
-    }
-
-    private <R, S> RegulatedMutationResult<S> evidenceGatedTerminalOrStatus(
-            RegulatedMutationCommand<R, S> command,
-            RegulatedMutationCommandDocument document
-    ) {
-        if (document.getExecutionStatus() == RegulatedMutationExecutionStatus.PROCESSING && !leaseExpired(document, Instant.now())) {
-            return new RegulatedMutationResult<>(document.getState(), command.statusResponseFactory().response(document.getState()));
-        }
-        if (document.getState() == RegulatedMutationState.FINALIZING) {
-            return markEvidenceGatedRecoveryRequired(command, document, "FINALIZING_RETRY_REQUIRES_RECONCILIATION");
-        }
-        if (document.getState() == RegulatedMutationState.FINALIZED_VISIBLE) {
-            if (document.getResponseSnapshot() != null
-                    && document.getLocalCommitMarker() != null
-                    && document.isSuccessAuditRecorded()) {
-                metrics.recordEvidenceGatedFinalizeStuckVisible();
-                evidenceGatedTransition(document, RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL, null);
-                return replay(command, document);
-            }
-            metrics.recordEvidenceGatedFinalizeStuckVisible();
-            return markEvidenceGatedRecoveryRequired(command, document, "FINALIZED_VISIBLE_MISSING_PROOF");
-        }
-        if (document.getExecutionStatus() == RegulatedMutationExecutionStatus.RECOVERY_REQUIRED
-                || document.getState() == RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED) {
-            return new RegulatedMutationResult<>(
-                    document.getState(),
-                    command.statusResponseFactory().response(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED)
-            );
-        }
-        if (document.getResponseSnapshot() != null) {
-            return replay(command, document);
-        }
-        if (document.getState() == RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE
-                || document.getState() == RegulatedMutationState.FAILED_BUSINESS_VALIDATION) {
-            return new RegulatedMutationResult<>(document.getState(), command.statusResponseFactory().response(document.getState()));
-        }
-        return null;
-    }
-
-    private <R, S> void prepareEvidence(
-            RegulatedMutationCommand<R, S> command,
-            RegulatedMutationCommandDocument document
-    ) {
-        if (document.getState() == RegulatedMutationState.REQUESTED) {
-            evidenceGatedTransition(document, RegulatedMutationState.EVIDENCE_PREPARING, null);
-        }
-        if (!document.isAttemptedAuditRecorded()) {
-            try {
-                String auditId = auditPhaseService.recordPhase(document, command.action(), command.resourceType(), AuditOutcome.ATTEMPTED, null);
-                document.setAttemptedAuditId(auditId);
-                document.setAttemptedAuditRecorded(true);
-            } catch (RuntimeException exception) {
-                document.setDegradationReason(ATTEMPTED_AUDIT_UNAVAILABLE);
-                document.setExecutionStatus(RegulatedMutationExecutionStatus.FAILED);
-                evidenceGatedTransition(document, RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE, ATTEMPTED_AUDIT_UNAVAILABLE);
-                throw exception;
-            }
-        }
-        EvidencePreconditionResult precondition = evidencePreconditionEvaluator.evaluate(command, document);
-        if (precondition.status() != EvidencePreconditionStatus.SATISFIED) {
-            document.setDegradationReason(precondition.reasonCode());
-            document.setExecutionStatus(RegulatedMutationExecutionStatus.FAILED);
-            RegulatedMutationState rejectedState = switch (precondition.status()) {
-                case REJECTED_EVIDENCE_UNAVAILABLE -> RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE;
-                case FAILED_BUSINESS_VALIDATION -> RegulatedMutationState.FAILED_BUSINESS_VALIDATION;
-                case FINALIZE_RECOVERY_REQUIRED -> RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED;
-                case SATISFIED -> throw new IllegalStateException("Unexpected satisfied precondition.");
-            };
-            evidenceGatedTransition(document, rejectedState, precondition.reasonCode());
-            metrics.recordEvidenceGatedFinalizeRejected(precondition.reasonCode());
-            throw new IllegalStateException("FDP-29 evidence precondition failed: " + precondition.reasonCode());
-        }
-        if (document.getState() == RegulatedMutationState.EVIDENCE_PREPARING) {
-            evidenceGatedTransition(document, RegulatedMutationState.EVIDENCE_PREPARED, null);
-        }
-    }
-
-    private <R, S> RegulatedMutationResult<S> finalizeVisibleMutation(
-            RegulatedMutationCommand<R, S> command,
-            RegulatedMutationCommandDocument document
-    ) {
-        evidenceGatedTransition(document, RegulatedMutationState.FINALIZING, null);
-        try {
-            LocalCommit<R, S> localCommit = transactionRunner.runLocalCommit(() -> {
-                R result = command.mutation().execute(new RegulatedMutationExecutionContext(document.getId()));
-                S response = command.responseMapper().response(result, RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
-                RegulatedMutationResponseSnapshot snapshot = command.responseSnapshotter().snapshot(response);
-                String auditId = localSuccessAudit(command, document);
-                document.setSuccessAuditId(auditId);
-                document.setSuccessAuditRecorded(true);
-                document.setResponseSnapshot(snapshot);
-                document.setOutboxEventId(snapshot.decisionEventId());
-                document.setLocalCommitMarker("EVIDENCE_GATED_FINALIZED");
-                document.setLocalCommittedAt(Instant.now());
-                document.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
-                evidenceGatedTransition(document, RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL, null);
-                return new LocalCommit<>(result, response, snapshot);
-            });
-            return new RegulatedMutationResult<>(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL, localCommit.pendingResponse());
-        } catch (RuntimeException exception) {
-            RegulatedMutationCommandDocument persisted = reloadForRecovery(document);
-            persisted.setDegradationReason(EVIDENCE_GATED_FINALIZE_FAILED);
-            persisted.setExecutionStatus(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
-            evidenceGatedTransition(persisted, RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED, EVIDENCE_GATED_FINALIZE_FAILED);
-            metrics.recordEvidenceGatedFinalizeTransactionRollback(EVIDENCE_GATED_FINALIZE_FAILED);
-            throw exception;
-        }
-    }
-
-    private <R, S> RegulatedMutationResult<S> markEvidenceGatedRecoveryRequired(
-            RegulatedMutationCommand<R, S> command,
-            RegulatedMutationCommandDocument document,
-            String reason
-    ) {
-        document.setDegradationReason(reason);
-        document.setExecutionStatus(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
-        evidenceGatedTransition(document, RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED, reason);
-        metrics.recordEvidenceGatedFinalizeRecoveryRequired(reason);
-        return new RegulatedMutationResult<>(
-                RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
-                command.statusResponseFactory().response(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED)
-        );
-    }
-
-    private RegulatedMutationCommandDocument reloadForRecovery(RegulatedMutationCommandDocument document) {
-        return commandRepository.findById(document.getId())
-                .orElseGet(() -> commandRepository.findByIdempotencyKey(document.getIdempotencyKey())
-                        .orElseThrow(() -> new IllegalStateException("Regulated mutation command unavailable for recovery.")));
-    }
-
-    private <R, S> String localSuccessAudit(
-            RegulatedMutationCommand<R, S> command,
-            RegulatedMutationCommandDocument document
-    ) {
-        if (localAuditPhaseWriter == null) {
-            throw new IllegalStateException("FDP-29 evidence-gated finalize requires a local audit phase writer.");
-        }
-        return localAuditPhaseWriter.recordSuccessPhase(document, command.action(), command.resourceType());
-    }
-
-    private void evidenceGatedTransition(
-            RegulatedMutationCommandDocument document,
-            RegulatedMutationState state,
-            String lastError
-    ) {
-        RegulatedMutationState previous = document.getState();
-        evidenceGatedStateMachine.requireTransition(document.getState(), state);
-        document.setPublicStatus(publicStatusMapper.submitDecisionStatus(state, document.mutationModelVersionOrLegacy()));
-        transition(document, state, lastError);
-        metrics.recordEvidenceGatedFinalizeStateTransition(previous, state, lastError == null ? "SUCCESS" : "FAILED");
     }
 
     private boolean isSafeToExecuteBusinessMutation(RegulatedMutationCommandDocument document) {

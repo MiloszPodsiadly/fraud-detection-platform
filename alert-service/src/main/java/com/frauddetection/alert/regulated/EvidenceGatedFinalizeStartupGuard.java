@@ -1,7 +1,10 @@
 package com.frauddetection.alert.regulated;
 
 import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.audit.AuditChainIndexInitializer;
 import com.frauddetection.alert.audit.AuditResourceType;
+import com.frauddetection.alert.audit.LocalAuditPhaseWriterProperties;
+import com.frauddetection.alert.audit.RegulatedMutationLocalAuditPhaseWriter;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import org.springframework.beans.factory.ObjectProvider;
@@ -20,6 +23,9 @@ public class EvidenceGatedFinalizeStartupGuard implements ApplicationRunner {
     private final PlatformTransactionManager transactionManager;
     private final RegulatedMutationTransactionCapabilityProbe transactionCapabilityProbe;
     private final TransactionalOutboxRecordRepository outboxRepository;
+    private final RegulatedMutationLocalAuditPhaseWriter localAuditPhaseWriter;
+    private final AuditChainIndexInitializer auditChainIndexInitializer;
+    private final LocalAuditPhaseWriterProperties localAuditPhaseWriterProperties;
     private final List<RegulatedMutationRecoveryStrategy> recoveryStrategies;
     private final AlertServiceMetrics metrics;
     private final boolean globalEnabled;
@@ -35,6 +41,9 @@ public class EvidenceGatedFinalizeStartupGuard implements ApplicationRunner {
             ObjectProvider<PlatformTransactionManager> transactionManager,
             ObjectProvider<RegulatedMutationTransactionCapabilityProbe> transactionCapabilityProbe,
             ObjectProvider<TransactionalOutboxRecordRepository> outboxRepository,
+            ObjectProvider<RegulatedMutationLocalAuditPhaseWriter> localAuditPhaseWriter,
+            ObjectProvider<AuditChainIndexInitializer> auditChainIndexInitializer,
+            LocalAuditPhaseWriterProperties localAuditPhaseWriterProperties,
             List<RegulatedMutationRecoveryStrategy> recoveryStrategies,
             AlertServiceMetrics metrics,
             @Value("${app.regulated-mutations.evidence-gated-finalize.enabled:false}") boolean globalEnabled,
@@ -49,6 +58,11 @@ public class EvidenceGatedFinalizeStartupGuard implements ApplicationRunner {
         this.transactionManager = transactionManager.getIfAvailable();
         this.transactionCapabilityProbe = transactionCapabilityProbe.getIfAvailable();
         this.outboxRepository = outboxRepository.getIfAvailable();
+        this.localAuditPhaseWriter = localAuditPhaseWriter.getIfAvailable();
+        this.auditChainIndexInitializer = auditChainIndexInitializer.getIfAvailable();
+        this.localAuditPhaseWriterProperties = localAuditPhaseWriterProperties == null
+                ? new LocalAuditPhaseWriterProperties()
+                : localAuditPhaseWriterProperties;
         this.recoveryStrategies = recoveryStrategies == null ? List.of() : List.copyOf(recoveryStrategies);
         this.metrics = metrics;
         this.globalEnabled = globalEnabled;
@@ -102,6 +116,26 @@ public class EvidenceGatedFinalizeStartupGuard implements ApplicationRunner {
                 outboxRecoveryEnabled,
                 "app.outbox.recovery.enabled",
                 "FDP-29 evidence-gated finalize requires outbox recovery."
+        );
+        require(
+                localAuditPhaseWriter != null,
+                "RegulatedMutationLocalAuditPhaseWriter",
+                "FDP-29 evidence-gated finalize requires a local audit phase writer."
+        );
+        require(
+                localAuditPhaseWriterProperties.validForEvidenceGatedFinalize(),
+                "app.audit.local-phase-writer",
+                "FDP-29 evidence-gated finalize requires finite local audit writer retry config."
+        );
+        require(
+                auditChainIndexInitializer != null,
+                "AuditChainIndexInitializer",
+                "FDP-29 evidence-gated finalize requires audit chain index initializer."
+        );
+        require(
+                auditChainIndexInitializer.hasRequiredUniqueIndexes(),
+                "audit chain unique indexes",
+                "FDP-29 evidence-gated finalize requires unique audit chain indexes."
         );
         if (submitDecisionEnabled) {
             require(

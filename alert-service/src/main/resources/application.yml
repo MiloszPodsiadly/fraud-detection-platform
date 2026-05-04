@@ -74,6 +74,11 @@ app:
   audit:
     bank-mode:
       fail-closed: ${AUDIT_BANK_MODE_FAIL_CLOSED:false}
+    local-phase-writer:
+      max-append-attempts: ${AUDIT_LOCAL_PHASE_WRITER_MAX_APPEND_ATTEMPTS:200}
+      backoff-ms: ${AUDIT_LOCAL_PHASE_WRITER_BACKOFF_MS:5}
+      max-total-wait-ms: ${AUDIT_LOCAL_PHASE_WRITER_MAX_TOTAL_WAIT_MS:1000}
+      allow-long-total-wait: ${AUDIT_LOCAL_PHASE_WRITER_ALLOW_LONG_TOTAL_WAIT:false}
     external-anchoring:
       enabled: ${AUDIT_EXTERNAL_ANCHORING_ENABLED:false}
       publication:

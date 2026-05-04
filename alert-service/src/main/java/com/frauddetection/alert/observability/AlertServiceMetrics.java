@@ -211,6 +211,30 @@ public class AlertServiceMetrics {
         }
     }
 
+    public void recordFdp29LocalAuditChainAppend(String outcome) {
+        counter(
+                "fdp29_local_audit_chain_append_total",
+                "outcome", normalizeFdp29LocalAuditChainAppendOutcome(outcome)
+        ).increment();
+    }
+
+    public void recordFdp29LocalAuditChainRetry(String reason) {
+        counter(
+                "fdp29_local_audit_chain_retry_total",
+                "reason", normalizeFdp29LocalAuditChainRetryReason(reason)
+        ).increment();
+    }
+
+    public void recordFdp29LocalAuditChainAppendDuration(Duration duration) {
+        Timer.builder("fdp29_local_audit_chain_append_duration_ms")
+                .register(meterRegistry)
+                .record(duration == null || duration.isNegative() ? Duration.ZERO : duration);
+    }
+
+    public void recordFdp29LocalAuditChainLockReleaseFailure() {
+        counter("fdp29_local_audit_chain_lock_release_failure_total").increment();
+    }
+
     public void recordExternalCoverageRequestCost(String status, int cost) {
         DistributionSummary.builder("fraud_platform_audit_external_coverage_request_cost")
                 .tag("status", normalizeCoverageRateLimitStatus(status))
@@ -734,6 +758,21 @@ public class AlertServiceMetrics {
                  "ACTOR_INTENT_MISMATCH", "RESOURCE_INTENT_MISMATCH", "ACTION_INTENT_MISMATCH",
                  "SUCCESS_AUDIT_KEY_UNAVAILABLE" -> reason;
             default -> "UNKNOWN";
+        };
+    }
+
+    private String normalizeFdp29LocalAuditChainAppendOutcome(String outcome) {
+        return switch (outcome) {
+            case "SUCCESS", "DUPLICATE_PHASE", "CHAIN_CONFLICT_RETRY", "CHAIN_CONFLICT_EXHAUSTED",
+                 "AUDIT_INSERT_FAILED", "ANCHOR_INSERT_FAILED", "LOCK_RELEASE_FAILED" -> outcome;
+            default -> "CHAIN_CONFLICT_EXHAUSTED";
+        };
+    }
+
+    private String normalizeFdp29LocalAuditChainRetryReason(String reason) {
+        return switch (reason) {
+            case "CHAIN_CONFLICT", "DUPLICATE_KEY", "LOCK_CONFLICT" -> reason;
+            default -> "CHAIN_CONFLICT";
         };
     }
 

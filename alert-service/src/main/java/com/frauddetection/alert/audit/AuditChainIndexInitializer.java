@@ -10,14 +10,14 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.stereotype.Component;
 
 @Component
-class AuditChainIndexInitializer {
+public class AuditChainIndexInitializer {
 
     private static final String PARTITION_KEY = "partition_key";
     private static final String CHAIN_POSITION = "chain_position";
 
     private final MongoTemplate mongoTemplate;
 
-    AuditChainIndexInitializer(MongoTemplate mongoTemplate) {
+    public AuditChainIndexInitializer(MongoTemplate mongoTemplate) {
         this.mongoTemplate = mongoTemplate;
     }
 
@@ -25,6 +25,11 @@ class AuditChainIndexInitializer {
     void ensureIndexes() {
         ensureUniquePositionIndex("audit_events", "audit_partition_chain_position_uidx_v2");
         ensureUniquePositionIndex("audit_chain_anchors", "audit_anchor_partition_chain_position_uidx_v2");
+    }
+
+    public boolean hasRequiredUniqueIndexes() {
+        return hasUniquePositionIndex("audit_events")
+                && hasUniquePositionIndex("audit_chain_anchors");
     }
 
     private void ensureUniquePositionIndex(String collectionName, String indexName) {
@@ -48,6 +53,16 @@ class AuditChainIndexInitializer {
                                 Filters.exists(CHAIN_POSITION)
                         ))
         );
+    }
+
+    private boolean hasUniquePositionIndex(String collectionName) {
+        MongoCollection<Document> collection = mongoTemplate.getCollection(collectionName);
+        for (Document index : collection.listIndexes(Document.class)) {
+            if (hasPartitionPositionKey(index) && Boolean.TRUE.equals(index.getBoolean("unique"))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean hasPartitionPositionKey(Document index) {
