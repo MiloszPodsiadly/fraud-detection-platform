@@ -1,5 +1,7 @@
 package com.frauddetection.alert.regulated;
 
+import com.tngtech.archunit.core.domain.JavaClasses;
+import com.tngtech.archunit.core.importer.ClassFileImporter;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -8,6 +10,7 @@ import java.util.List;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
 class RegulatedMutationArchitectureTest {
 
@@ -507,22 +510,113 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp31MustDeferFencedTransitionsToFdp32() throws Exception {
-        try (Stream<Path> paths = Files.walk(Path.of("src/main/java/com/frauddetection/alert/regulated"))) {
-            List<Path> javaFiles = paths
-                    .filter(path -> path.toString().endsWith(".java"))
-                    .toList();
+    void fdp32ClaimedTransitionsMustUseFencedCommandWriter() throws Exception {
+        String legacyExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationExecutor.java"
+        ));
+        String evidenceExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"
+        ));
+        String writer = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationFencedCommandWriter.java"
+        ));
+        String coordinator = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/MongoRegulatedMutationCoordinator.java"
+        ));
 
-            for (Path path : javaFiles) {
-                String source = Files.readString(path);
-                assertThat(source)
-                        .as("FDP-31 must not introduce fenced transition persistence: " + path)
-                        .doesNotContain("fencedTransition")
-                        .doesNotContain("saveWithLeaseOwner")
-                        .doesNotContain("leaseOwner + unexpired")
-                        .doesNotContain("lease-owner write fencing implemented");
-            }
-        }
+        assertThat(legacyExecutor).contains("RegulatedMutationFencedCommandWriter");
+        assertThat(evidenceExecutor).contains("RegulatedMutationFencedCommandWriter");
+        assertThat(legacyExecutor).contains("fencedCommandWriter.transition");
+        assertThat(evidenceExecutor).contains("fencedCommandWriter.transition");
+        assertThat(legacyExecutor).contains("fencedCommandWriter.validateActiveLease");
+        assertThat(evidenceExecutor).contains("fencedCommandWriter.validateActiveLease");
+        assertThat(writer).contains("lease_owner");
+        assertThat(writer).contains("lease_expires_at");
+        assertThat(writer).contains("state");
+        assertThat(writer).contains("execution_status");
+        assertThat(writer).contains("StaleRegulatedMutationLeaseException");
+        assertThat(coordinator).doesNotContain("RegulatedMutationFencedCommandWriter");
+        assertThat(coordinator).doesNotContain("lease_owner");
+        assertThat(coordinator).doesNotContain("lease_expires_at");
+    }
+
+    @Test
+    void regulatedMutationHandlersMustNotDependOnAuditOrBrokerBoundariesAtTypeLevel() {
+        JavaClasses classes = new ClassFileImporter().importPackages("com.frauddetection.alert");
+
+        noClasses().that().resideInAPackage("..regulated.mutation..")
+                .should().dependOnClassesThat().haveNameMatching(".*\\.audit\\.AuditService")
+                .check(classes);
+        noClasses().that().resideInAPackage("..regulated.mutation..")
+                .should().dependOnClassesThat().haveNameMatching(".*\\.audit\\.AuditEventPublisher")
+                .check(classes);
+        noClasses().that().resideInAPackage("..regulated.mutation..")
+                .should().dependOnClassesThat().haveNameMatching("org\\.springframework\\.kafka\\.core\\.KafkaTemplate")
+                .check(classes);
+    }
+
+    @Test
+    void fdp32ExecutorsMustNotUseRepositorySaveForStateTransitions() throws Exception {
+        String legacyExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationExecutor.java"
+        ));
+        String evidenceExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"
+        ));
+        String writer = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationFencedCommandWriter.java"
+        ));
+
+        assertThat(legacyExecutor).doesNotContain("commandRepository.save(");
+        assertThat(evidenceExecutor).doesNotContain("commandRepository.save(");
+        assertThat(legacyExecutor).contains("fencedCommandWriter.recoveryTransition");
+        assertThat(evidenceExecutor).contains("fencedCommandWriter.recoveryTransition");
+        assertThat(writer).contains("recoveryTransition(");
+        assertThat(writer).contains("Only for non-claimed replay/recovery repair paths");
+        assertThat(writer).contains("Claimed worker transitions must use");
+        assertThat(writer).contains("RegulatedMutationRecoveryWriteConflictException");
+        assertThat(writer).contains("execution_status").contains("PROCESSING");
+    }
+
+    @Test
+    void fdp32AllowedFieldUpdatesMustNotBeGeneralMutationApi() throws Exception {
+        String writer = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationFencedCommandWriter.java"
+        ));
+        String docs = Files.readString(Path.of("../docs/FDP-32-lease-fencing-stale-worker-protection.md"));
+
+        assertThat(writer).contains("PROTECTED_UPDATE_FIELDS");
+        assertThat(writer).contains("\"lease_owner\"");
+        assertThat(writer).contains("\"idempotency_key\"");
+        assertThat(writer).contains("\"request_hash\"");
+        assertThat(writer).contains("\"mutation_model_version\"");
+        assertThat(writer).contains("validateProtectedFieldsUnchanged");
+        assertThat(docs).contains("`allowedFieldUpdates` is not a general document mutation API");
+        assertThat(docs).contains("Identity, lease, ownership, idempotency, request, resource, action, creation, attempt-count, and mutation-model fields are immutable");
+    }
+
+    @Test
+    void fdp32DocsMustDescribeLeaseFencingWithoutReviewNotes() throws Exception {
+        String architecture = Files.readString(Path.of("../docs/FDP-32-lease-fencing-stale-worker-protection.md"));
+        String mergeGate = Files.readString(Path.of("../docs/FDP-32-merge-gate.md"));
+        String combined = architecture + "\n" + mergeGate;
+
+        assertThat(combined).contains("claim acquisition is not write fencing");
+        assertThat(combined).contains("post-claim transitions are fenced");
+        assertThat(combined).contains("command transition fencing is not business-side-effect rollback by itself");
+        assertThat(combined).contains("transaction-mode REQUIRED");
+        assertThat(combined).contains("transaction-mode OFF is compatibility behavior");
+        assertThat(combined).contains("transaction-mode REQUIRED is required for bank-grade stale-worker business-write safety");
+        assertThat(combined).contains("stale worker");
+        assertThat(combined).contains("no silent repository.save after claim");
+        assertThat(combined).contains("does not expand transaction scope");
+        assertThat(combined).contains("no distributed lock");
+        assertThat(combined).contains("Source-string architecture tests are guardrails, not complete architectural proof");
+        assertThat(combined).contains("FDP-32 is merge-safe as lease-owner fenced command transition hardening");
+        assertThat(combined).doesNotContain("Merge Decision");
+        assertThat(combined).doesNotContain("GO:");
+        assertThat(combined).doesNotContain("NO-GO:");
+        assertThat(combined).doesNotContain("reviewer");
     }
 
     @Test

@@ -211,6 +211,85 @@ public class AlertServiceMetrics {
         }
     }
 
+    public void recordRegulatedMutationFencedTransition(
+            Enum<?> modelVersion,
+            Enum<?> fromState,
+            Enum<?> toState,
+            String outcome,
+            String reason
+    ) {
+        counter(
+                "regulated_mutation_fenced_transition_total",
+                "model_version", normalizeRegulatedMutationModelVersion(modelVersion),
+                "state", normalizeRegulatedMutationState(fromState),
+                "outcome", normalizeRegulatedMutationFencingOutcome(outcome),
+                "reason", normalizeRegulatedMutationFencingReason(reason)
+        ).increment();
+    }
+
+    public void recordRegulatedMutationLeaseRemainingAtTransition(
+            Enum<?> modelVersion,
+            Enum<?> state,
+            String outcome,
+            Duration leaseRemaining
+    ) {
+        Timer.builder("regulated_mutation_lease_remaining_at_transition_seconds")
+                .tag("model_version", normalizeRegulatedMutationModelVersion(modelVersion))
+                .tag("state", normalizeRegulatedMutationState(state))
+                .tag("outcome", normalizeRegulatedMutationFencingOutcome(outcome))
+                .register(meterRegistry)
+                .record(leaseRemaining == null || leaseRemaining.isNegative() ? Duration.ZERO : leaseRemaining);
+    }
+
+    public void recordRegulatedMutationTransitionLatency(
+            Enum<?> modelVersion,
+            Enum<?> state,
+            String outcome,
+            Duration latency
+    ) {
+        Timer.builder("regulated_mutation_transition_latency_seconds")
+                .tag("model_version", normalizeRegulatedMutationModelVersion(modelVersion))
+                .tag("state", normalizeRegulatedMutationState(state))
+                .tag("outcome", normalizeRegulatedMutationFencingOutcome(outcome))
+                .register(meterRegistry)
+                .record(latency == null || latency.isNegative() ? Duration.ZERO : latency);
+    }
+
+    public void recordRegulatedMutationStaleWriteRejected(Enum<?> modelVersion, Enum<?> state, String reason) {
+        counter(
+                "regulated_mutation_stale_write_rejected_total",
+                "model_version", normalizeRegulatedMutationModelVersion(modelVersion),
+                "state", normalizeRegulatedMutationState(state),
+                "reason", normalizeRegulatedMutationFencingReason(reason)
+        ).increment();
+    }
+
+    public void recordRegulatedMutationLeaseTakeover(Enum<?> modelVersion, Enum<?> state) {
+        counter(
+                "regulated_mutation_lease_takeover_total",
+                "model_version", normalizeRegulatedMutationModelVersion(modelVersion),
+                "state", normalizeRegulatedMutationState(state)
+        ).increment();
+    }
+
+    public void recordRegulatedMutationRecoveryWriteConflict(Enum<?> modelVersion, Enum<?> state, String reason) {
+        counter(
+                "regulated_mutation_recovery_write_conflict_total",
+                "model_version", normalizeRegulatedMutationModelVersion(modelVersion),
+                "state", normalizeRegulatedMutationState(state),
+                "reason", normalizeRegulatedMutationFencingReason(reason)
+        ).increment();
+    }
+
+    public void recordRegulatedMutationLeaseBudgetWarning(Enum<?> modelVersion, Enum<?> state, String threshold) {
+        counter(
+                "regulated_mutation_lease_budget_warning_total",
+                "model_version", normalizeRegulatedMutationModelVersion(modelVersion),
+                "state", normalizeRegulatedMutationState(state),
+                "threshold", normalizeRegulatedMutationLeaseBudgetThreshold(threshold)
+        ).increment();
+    }
+
     public void recordFdp29LocalAuditChainAppend(String outcome) {
         counter(
                 "fdp29_local_audit_chain_append_total",
@@ -758,6 +837,53 @@ public class AlertServiceMetrics {
                  "ACTOR_INTENT_MISMATCH", "RESOURCE_INTENT_MISMATCH", "ACTION_INTENT_MISMATCH",
                  "SUCCESS_AUDIT_KEY_UNAVAILABLE" -> reason;
             default -> "UNKNOWN";
+        };
+    }
+
+    private String normalizeRegulatedMutationModelVersion(Enum<?> modelVersion) {
+        if (modelVersion == null) {
+            return "UNKNOWN";
+        }
+        return switch (modelVersion.name()) {
+            case "LEGACY_REGULATED_MUTATION", "EVIDENCE_GATED_FINALIZE_V1" -> modelVersion.name();
+            default -> "UNKNOWN";
+        };
+    }
+
+    private String normalizeRegulatedMutationState(Enum<?> state) {
+        if (state == null) {
+            return "UNKNOWN";
+        }
+        return switch (state.name()) {
+            case "REQUESTED", "EVIDENCE_PREPARING", "EVIDENCE_PREPARED", "FINALIZING",
+                 "FINALIZED_VISIBLE", "FINALIZED_EVIDENCE_PENDING_EXTERNAL", "FINALIZED_EVIDENCE_CONFIRMED",
+                 "REJECTED_EVIDENCE_UNAVAILABLE", "FAILED_BUSINESS_VALIDATION", "FINALIZE_RECOVERY_REQUIRED",
+                 "AUDIT_ATTEMPTED", "BUSINESS_COMMITTING", "BUSINESS_COMMITTED", "SUCCESS_AUDIT_PENDING",
+                 "SUCCESS_AUDIT_RECORDED", "EVIDENCE_PENDING", "EVIDENCE_CONFIRMED", "COMMITTED",
+                 "COMMITTED_DEGRADED", "REJECTED", "FAILED" -> state.name();
+            default -> "UNKNOWN";
+        };
+    }
+
+    private String normalizeRegulatedMutationFencingOutcome(String outcome) {
+        return switch (outcome) {
+            case "SUCCESS", "REJECTED" -> outcome;
+            default -> "REJECTED";
+        };
+    }
+
+    private String normalizeRegulatedMutationFencingReason(String reason) {
+        return switch (reason) {
+            case "NONE", "STALE_LEASE_OWNER", "EXPIRED_LEASE", "EXPECTED_STATE_MISMATCH",
+                 "EXPECTED_STATUS_MISMATCH", "COMMAND_NOT_FOUND", "RECOVERY_WRITE_CONFLICT", "UNKNOWN" -> reason;
+            default -> "UNKNOWN";
+        };
+    }
+
+    private String normalizeRegulatedMutationLeaseBudgetThreshold(String threshold) {
+        return switch (threshold) {
+            case "LOW_REMAINING" -> threshold;
+            default -> "LOW_REMAINING";
         };
     }
 

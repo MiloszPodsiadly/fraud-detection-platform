@@ -2,6 +2,8 @@ package com.frauddetection.alert.observability;
 
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditOutcome;
+import com.frauddetection.alert.regulated.RegulatedMutationModelVersion;
+import com.frauddetection.alert.regulated.RegulatedMutationState;
 import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -280,5 +282,88 @@ class AlertServiceMetricsTest {
                 .tag("reason", "CHAIN_CONFLICT")
                 .counter()
                 .count()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void shouldUseLowCardinalityRegulatedMutationFencingMetricLabels() {
+        metrics.recordRegulatedMutationFencedTransition(
+                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                RegulatedMutationState.REQUESTED,
+                RegulatedMutationState.AUDIT_ATTEMPTED,
+                "SUCCESS",
+                "NONE"
+        );
+        metrics.recordRegulatedMutationStaleWriteRejected(
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.FINALIZING,
+                "EXPIRED_LEASE"
+        );
+        metrics.recordRegulatedMutationLeaseTakeover(
+                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                RegulatedMutationState.REQUESTED
+        );
+        metrics.recordRegulatedMutationLeaseRemainingAtTransition(
+                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                RegulatedMutationState.REQUESTED,
+                "SUCCESS",
+                Duration.ofSeconds(3)
+        );
+        metrics.recordRegulatedMutationTransitionLatency(
+                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                RegulatedMutationState.REQUESTED,
+                "SUCCESS",
+                Duration.ofMillis(3)
+        );
+        metrics.recordRegulatedMutationRecoveryWriteConflict(
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.FINALIZING,
+                "RECOVERY_WRITE_CONFLICT"
+        );
+        metrics.recordRegulatedMutationLeaseBudgetWarning(
+                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                RegulatedMutationState.REQUESTED,
+                "LOW_REMAINING"
+        );
+
+        Meter fencedTransition = meterRegistry.get("regulated_mutation_fenced_transition_total").meter();
+        Meter staleWrite = meterRegistry.get("regulated_mutation_stale_write_rejected_total").meter();
+        Meter takeover = meterRegistry.get("regulated_mutation_lease_takeover_total").meter();
+        Meter leaseRemaining = meterRegistry.get("regulated_mutation_lease_remaining_at_transition_seconds").meter();
+        Meter transitionLatency = meterRegistry.get("regulated_mutation_transition_latency_seconds").meter();
+        Meter recoveryConflict = meterRegistry.get("regulated_mutation_recovery_write_conflict_total").meter();
+        Meter leaseBudgetWarning = meterRegistry.get("regulated_mutation_lease_budget_warning_total").meter();
+
+        assertThat(fencedTransition.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactlyInAnyOrder("model_version", "state", "outcome", "reason");
+        assertThat(staleWrite.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactlyInAnyOrder("model_version", "state", "reason");
+        assertThat(takeover.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactlyInAnyOrder("model_version", "state");
+        assertThat(leaseRemaining.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactlyInAnyOrder("model_version", "state", "outcome");
+        assertThat(transitionLatency.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactlyInAnyOrder("model_version", "state", "outcome");
+        assertThat(recoveryConflict.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactlyInAnyOrder("model_version", "state", "reason");
+        assertThat(leaseBudgetWarning.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactlyInAnyOrder("model_version", "state", "threshold");
+
+        assertThat(meterRegistry.getMeters())
+                .allSatisfy(meter -> assertThat(meter.getId().getTags().toString())
+                        .doesNotContain("command_id")
+                        .doesNotContain("alert_id")
+                        .doesNotContain("actor_id")
+                        .doesNotContain("lease_owner")
+                        .doesNotContain("idempotency_key")
+                        .doesNotContain("request_hash")
+                        .doesNotContain("exception")
+                        .doesNotContain("path"));
     }
 }

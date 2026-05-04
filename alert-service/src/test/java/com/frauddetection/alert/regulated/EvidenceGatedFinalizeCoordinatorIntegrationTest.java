@@ -49,6 +49,7 @@ import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory;
 import org.springframework.data.mongodb.core.index.Index;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.data.mongodb.repository.support.MongoRepositoryFactory;
 import org.springframework.test.context.junit.jupiter.EnabledIf;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -152,6 +153,22 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
             AlertServiceMetrics metrics,
             RegulatedMutationLocalAuditPhaseWriter localAuditPhaseWriter
     ) {
+        return coordinator(
+                commandRepository,
+                transactionRunner,
+                metrics,
+                localAuditPhaseWriter,
+                mongoTemplate
+        );
+    }
+
+    private MongoRegulatedMutationCoordinator coordinator(
+            RegulatedMutationCommandRepository commandRepository,
+            RegulatedMutationTransactionRunner transactionRunner,
+            AlertServiceMetrics metrics,
+            RegulatedMutationLocalAuditPhaseWriter localAuditPhaseWriter,
+            MongoTemplate transitionMongoTemplate
+    ) {
         RegulatedMutationAuditPhaseService auditPhaseService = new RegulatedMutationAuditPhaseService(
                 auditEventRepository,
                 new AuditService(new CurrentAnalystUser(), List.of(auditPublisher))
@@ -165,7 +182,7 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         );
         EvidenceGatedFinalizeExecutor evidenceGatedFinalizeExecutor = new EvidenceGatedFinalizeExecutor(
                 commandRepository,
-                mongoTemplate,
+                transitionMongoTemplate,
                 auditPhaseService,
                 metrics,
                 transactionRunner,
@@ -176,7 +193,7 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         );
         return new MongoRegulatedMutationCoordinator(
                 commandRepository,
-                mongoTemplate,
+                transitionMongoTemplate,
                 auditPhaseService,
                 mock(AuditDegradationService.class),
                 metrics,
@@ -388,15 +405,16 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
     @Test
     void shouldRollbackAssignedFinalizeFieldsWhenCommandSaveFailsBeforeTransactionCommit() {
         alertRepository.save(alert("alert-corruption-proof"));
-        RegulatedMutationCommandRepository throwingRepository = throwOnceAfterFinalizedSave(commandRepository);
+        MongoTemplate throwingMongoTemplate = throwOnceOnFinalizedFencedTransition();
         coordinator = coordinator(
-                throwingRepository,
+                commandRepository,
                 new RegulatedMutationTransactionRunner(
                         RegulatedMutationTransactionMode.REQUIRED,
                         new TransactionTemplate(new MongoTransactionManager(databaseFactory))
                 ),
                 new AlertServiceMetrics(new SimpleMeterRegistry()),
-                localAuditPhaseWriter
+                localAuditPhaseWriter,
+                throwingMongoTemplate
         );
         AtomicInteger businessMutations = new AtomicInteger();
         SubmitDecisionMutationHandler handler = new SubmitDecisionMutationHandler(
@@ -672,30 +690,24 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         }
     }
 
-    private RegulatedMutationCommandRepository throwOnceAfterFinalizedSave(
-            RegulatedMutationCommandRepository delegate
-    ) {
+    private MongoTemplate throwOnceOnFinalizedFencedTransition() {
         AtomicBoolean thrown = new AtomicBoolean();
-        return (RegulatedMutationCommandRepository) Proxy.newProxyInstance(
-                RegulatedMutationCommandRepository.class.getClassLoader(),
-                new Class<?>[]{RegulatedMutationCommandRepository.class},
-                (proxy, method, args) -> {
-                    try {
-                        Object result = method.invoke(delegate, args);
-                        if ("save".equals(method.getName())
-                                && args != null
-                                && args.length == 1
-                                && args[0] instanceof RegulatedMutationCommandDocument document
-                                && document.getState() == RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL
-                                && thrown.compareAndSet(false, true)) {
-                            throw new DataAccessResourceFailureException("command final save failed after field assignment");
-                        }
-                        return result;
-                    } catch (InvocationTargetException exception) {
-                        throw exception.getCause();
-                    }
-                }
+        MongoTemplate spy = org.mockito.Mockito.spy(mongoTemplate);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            Update update = invocation.getArgument(1);
+            org.bson.Document set = (org.bson.Document) update.getUpdateObject().get("$set");
+            if (set != null
+                    && set.get("state") == RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL
+                    && thrown.compareAndSet(false, true)) {
+                throw new DataAccessResourceFailureException("command final fenced transition failed after field assignment");
+            }
+            return invocation.callRealMethod();
+        }).when(spy).updateFirst(
+                org.mockito.ArgumentMatchers.any(Query.class),
+                org.mockito.ArgumentMatchers.any(Update.class),
+                org.mockito.ArgumentMatchers.eq(RegulatedMutationCommandDocument.class)
         );
+        return spy;
     }
 
     @SuppressWarnings("unchecked")

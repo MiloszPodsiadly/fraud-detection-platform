@@ -13,6 +13,8 @@ import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.service.ConflictingIdempotencyKeyException;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
+import com.mongodb.client.result.UpdateResult;
+import org.bson.Document;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -358,6 +360,52 @@ class EvidenceGatedFinalizeCoordinatorTest {
                 currentCommand.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
                 currentCommand.setAttemptCount(currentCommand.getAttemptCount() + 1);
                 return currentCommand;
+            });
+            when(mongoTemplate.count(any(Query.class), eq(RegulatedMutationCommandDocument.class))).thenReturn(1L);
+            when(mongoTemplate.updateFirst(
+                    any(Query.class),
+                    any(Update.class),
+                    eq(RegulatedMutationCommandDocument.class)
+            )).thenAnswer(invocation -> {
+                Update update = invocation.getArgument(1);
+                Document set = (Document) update.getUpdateObject().get("$set");
+                currentCommand.setState((RegulatedMutationState) set.get("state"));
+                currentCommand.setExecutionStatus((RegulatedMutationExecutionStatus) set.get("execution_status"));
+                currentCommand.setUpdatedAt((Instant) set.get("updated_at"));
+                currentCommand.setLastHeartbeatAt((Instant) set.get("last_heartbeat_at"));
+                currentCommand.setLastError((String) set.get("last_error"));
+                if (set.containsKey("public_status")) {
+                    currentCommand.setPublicStatus((SubmitDecisionOperationStatus) set.get("public_status"));
+                }
+                if (set.containsKey("degradation_reason")) {
+                    currentCommand.setDegradationReason((String) set.get("degradation_reason"));
+                }
+                if (set.containsKey("attempted_audit_id")) {
+                    currentCommand.setAttemptedAuditId((String) set.get("attempted_audit_id"));
+                }
+                if (set.containsKey("attempted_audit_recorded")) {
+                    currentCommand.setAttemptedAuditRecorded((Boolean) set.get("attempted_audit_recorded"));
+                }
+                if (set.containsKey("success_audit_id")) {
+                    currentCommand.setSuccessAuditId((String) set.get("success_audit_id"));
+                }
+                if (set.containsKey("success_audit_recorded")) {
+                    currentCommand.setSuccessAuditRecorded((Boolean) set.get("success_audit_recorded"));
+                }
+                if (set.containsKey("response_snapshot")) {
+                    currentCommand.setResponseSnapshot((RegulatedMutationResponseSnapshot) set.get("response_snapshot"));
+                }
+                if (set.containsKey("outbox_event_id")) {
+                    currentCommand.setOutboxEventId((String) set.get("outbox_event_id"));
+                }
+                if (set.containsKey("local_commit_marker")) {
+                    currentCommand.setLocalCommitMarker((String) set.get("local_commit_marker"));
+                }
+                if (set.containsKey("local_committed_at")) {
+                    currentCommand.setLocalCommittedAt((Instant) set.get("local_committed_at"));
+                }
+                states.add(currentCommand.getState());
+                return UpdateResult.acknowledged(1, 1L, null);
             });
         }
     }
