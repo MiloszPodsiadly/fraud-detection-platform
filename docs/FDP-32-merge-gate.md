@@ -1,19 +1,62 @@
 # FDP-32 Merge Gate
 
-FDP-32 is merge-ready when the regulated mutation lease-fencing invariant is preserved:
+## Problem
 
-- all post-claim command transitions go through `RegulatedMutationFencedCommandWriter`
-- executors do not use blind repository saves for claimed transitions
-- stale worker transition is rejected after lease takeover
-- current lease owner transition succeeds
-- legacy stale worker cannot mark `SUCCESS_AUDIT_PENDING`
-- FDP-29 stale worker cannot mark `FINALIZED_EVIDENCE_PENDING_EXTERNAL`
-- recovery states are not overwritten by stale workers
-- business mutation is not rerun after stale rejection
-- metrics use bounded labels only
-- FDP-31 claim and replay tests remain green
-- FDP-29 coordinator integration tests remain green
-- feature flags remain unchanged
-- public API statuses remain unchanged
+Regulated mutation command execution must not allow a stale worker to persist command state or execute local business mutation after losing lease ownership.
 
-Production enablement remains separate from this hardening branch.
+## Decision
+
+The merge gate for FDP-32 is the lease-fencing invariant plus pre-mutation active lease validation. Claim acquisition remains separate from write fencing.
+
+## Scope
+
+This gate applies to regulated mutation executors in `alert-service`. It does not change public API statuses, broker contracts, or production feature enablement.
+
+## Components
+
+- `RegulatedMutationClaimService`
+- `RegulatedMutationFencedCommandWriter`
+- `LegacyRegulatedMutationExecutor`
+- `EvidenceGatedFinalizeExecutor`
+- regulated mutation replay policies
+
+## Command Transition Fencing Invariant
+
+All claimed command transitions must use `RegulatedMutationFencedCommandWriter`. Executors must not use `commandRepository.save(...)` for command state transitions.
+
+## Business Mutation Safety Boundary
+
+Executors must validate active lease before invoking `command.mutation().execute(...)`. Command transition fencing is not business-side-effect rollback by itself. Production stale-worker business-write safety requires transaction-mode REQUIRED or an equivalent domain idempotency guard.
+
+## ACID Boundary
+
+FDP-32 relies on the existing local Mongo transaction boundary. Transaction-mode OFF is compatibility behavior and is not a bank-grade stale-worker rollback mode.
+
+## Non-Goals
+
+- no distributed lock
+- no heartbeat extension
+- no process-kill chaos proof
+- no new public statuses
+- no FDP-29 production/bank enablement
+- no Kafka or outbox contract change
+
+## Failure Behavior
+
+Stale lease validation must reject before business mutation. Rejected stale workers must not persist response snapshots, outbox ids, local commit markers, or success audit flags. Conditional recovery write conflicts must fail explicitly.
+
+## Observability
+
+The gate requires bounded metrics for stale write rejection, fenced transition outcome, lease takeover, lease remaining, and transition latency. Metrics must not include business identifiers or raw exception data.
+
+## Test Evidence
+
+Required test evidence includes unit-level writer tests, real Mongo lease takeover tests, executor-path stale worker tests, compatibility replay tests, coordinator rollback tests, and architecture guard tests.
+
+## Production/Bank Enablement Conditions
+
+Production or bank operation requires transaction-mode REQUIRED and separate operational release approval. FDP-32 hardens stale-worker behavior but does not enable FDP-29 production behavior.
+
+## Known Limitations
+
+FDP-32 does not prove behavior under process kill, host pause, distributed partition, or external finality gaps. Those remain operational hardening and chaos-test scope.

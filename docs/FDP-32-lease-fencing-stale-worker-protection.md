@@ -2,48 +2,76 @@
 
 ## Problem
 
-FDP-31 made claim acquisition atomic, but claim acquisition is not write fencing. A worker could claim a regulated mutation command, lose its lease, and later attempt to persist a post-claim state transition after another worker had taken ownership.
+FDP-31 made claim acquisition atomic, but claim acquisition is not write fencing. A worker can claim a regulated mutation command, lose its lease, and later attempt to continue the command after another worker has taken ownership.
 
 ## Decision
 
-All post-claim transitions are fenced by a conditional Mongo update. A transition can be persisted only when the durable command still matches:
+FDP-32 adds command transition fencing and active lease validation before local business mutation execution. Post-claim transitions and recovery transitions are persisted only through conditional Mongo updates with explicit expected-state guards.
+
+## Scope
+
+The scope is limited to regulated mutation execution inside `alert-service`. FDP-32 does not change public API statuses, Kafka contracts, scoring behavior, outbox payload contracts, or FDP-29 production enablement.
+
+## Components
+
+- `RegulatedMutationClaimToken`: durable claim token containing command id, lease owner, lease expiry, mutation model version, and expected execution state.
+- `RegulatedMutationFencedCommandWriter`: shared writer for fenced post-claim transitions, active lease validation, and conditional recovery transitions.
+- `StaleRegulatedMutationLeaseException`: explicit stale lease rejection for owner, expiry, state, status, or missing-command mismatch.
+- `RegulatedMutationRecoveryWriteConflictException`: explicit rejection when a non-claimed recovery transition no longer matches durable command state.
+
+## Command Transition Fencing Invariant
+
+All post-claim transitions are fenced by a conditional Mongo update. A claimed transition can persist only when the durable command still matches:
 
 - `commandId`
 - `leaseOwner`
 - `leaseExpiresAt > now`
 - expected `state`
 - expected `executionStatus`
+- expected `mutationModelVersion`
 
-Fenced update matched count `0` fails closed with `StaleRegulatedMutationLeaseException`. Stale worker writes are rejected. There is no blind retry, no last-writer-wins save, and no silent repository.save after claim.
+Stale workers cannot persist command transitions after losing lease ownership. Recovery repair is also conditional and cannot blind-save over another active worker. There is no silent repository.save after claim.
 
-## Components
+## Business Mutation Safety Boundary
 
-- `RegulatedMutationClaimToken`: durable fencing token returned by successful claim acquisition.
-- `RegulatedMutationFencedCommandWriter`: single component responsible for lease-owner and lease-expiry guarded transition writes.
-- `StaleRegulatedMutationLeaseException`: explicit rejection for stale, expired, mismatched, or missing command transitions.
+FDP-32 validates the active lease immediately before local business mutation execution. This closes the stale business mutation gap for the normal executor path.
 
-## Invariant
-
-A worker that no longer owns the lease cannot persist command state transitions. Post-claim transitions are fenced for both legacy regulated mutation execution and the FDP-29 evidence-gated finalize executor path.
+command transition fencing is not business-side-effect rollback by itself. Full stale-worker business-write rollback requires transaction-mode REQUIRED or an equivalent idempotent domain write with its own guard. Transaction-mode OFF is compatibility behavior and must not be described as bank-grade stale-worker-safe.
 
 ## ACID Boundary
 
-FDP-32 does not expand transaction scope. It makes local command transitions conditional and atomic at the command-document write boundary. It does not introduce distributed locks or distributed ACID guarantees.
+FDP-32 does not expand transaction scope. In bank or production mode, the stale-worker business-write guarantee depends on transaction-mode REQUIRED. Local/dev transaction-mode OFF remains useful for compatibility and quickstart paths, but it is not a production stale-worker rollback guarantee.
 
 ## Non-Goals
 
-- no new mutation type
-- no FDP-29 production enablement
-- no Kafka or outbox contract change
-- no external finality guarantee
 - no distributed lock
-- no process-kill chaos guarantee
+- no process-kill chaos proof
 - no heartbeat extension or lease renewal
 - no public API status change
+- no Kafka/outbox contract change
+- no external finality guarantee
+- no FDP-29 production/bank enablement
+- no claim that transaction-mode OFF prevents all business side effects
 
 ## Failure Behavior
 
-When a fenced transition is rejected, the stale worker does not rerun the business mutation and does not persist stale response snapshots, success audit flags, outbox IDs, or recovery state. The executor reloads durable command state and returns the existing in-progress, replay, or recovery-shaped response using existing public statuses.
+When active lease validation fails, the executor does not execute the business mutation. It does not persist response snapshots, outbox IDs, local commit markers, or success-audit flags from the stale worker. The executor reloads durable command state and returns the existing in-progress, replay, or recovery-shaped response using existing public statuses.
+
+When conditional recovery persistence fails, the recovery write fails closed with an explicit recovery write conflict instead of overwriting current durable state.
+
+## Observability
+
+FDP-32 records low-cardinality metrics for:
+
+- fenced transition outcome
+- stale write rejection reason
+- lease takeover rate
+- lease remaining at transition
+- transition latency
+
+Metric labels are bounded to model version, state, transition outcome, and reason. They must not contain command ids, alert ids, actor ids, idempotency keys, lease owners, request hashes, exception messages, or raw paths.
+
+Recommended dashboards should track stale write rejection rate, lease takeover rate, expired lease rejection count, lease remaining p50/p95/p99, and operations exceeding 70% of lease duration.
 
 ## Test Evidence
 
@@ -51,20 +79,26 @@ Coverage includes:
 
 - claim token creation from persisted lease owner
 - successful fenced transition
+- active lease validation query
 - stale lease owner rejection
 - expired lease rejection
 - expected state mismatch rejection
 - expected execution status mismatch rejection
+- conditional recovery write conflict
 - real Mongo active-claim race
 - real Mongo expired lease takeover
 - stale worker rejection after takeover
-- current lease owner transition success
-- legacy stale `SUCCESS_AUDIT_PENDING` rejection
-- evidence-gated stale `FINALIZED_EVIDENCE_PENDING_EXTERNAL` rejection
-- recovery state not overwritten by stale worker
+- executor-path stale worker prevention before legacy mutation execution
+- executor-path stale worker prevention before FDP-29 finalize mutation execution
+- current lease owner execution success
+- response snapshot, outbox id, local commit marker, and success audit not persisted after pre-mutation lease rejection
 - bounded fencing metrics labels
-- architecture guard for fenced writer ownership
+- architecture guard preventing executor `commandRepository.save(...)` transition backdoors
+
+## Production/Bank Enablement Conditions
+
+Production or bank enablement requires transaction-mode REQUIRED, bank-mode startup guards, active recovery runbooks, and separate release approval for enabling FDP-29 behavior. FDP-32 can harden the disabled/default path, but it does not by itself enable evidence-gated finalize for production.
 
 ## Known Limitations
 
-FDP-32 does not solve process death chaos, external finality, or operator recovery procedures. A worker can still die mid-flow and require existing recovery paths. Heartbeat extension, lease renewal, process-kill chaos testing, and operational dashboards remain future work.
+FDP-32 does not provide distributed ACID, process-kill chaos proof, heartbeat renewal, or external finality. A worker can still die mid-flow and require existing recovery paths. Full process-failure hardening remains a later operational and chaos-testing concern.
