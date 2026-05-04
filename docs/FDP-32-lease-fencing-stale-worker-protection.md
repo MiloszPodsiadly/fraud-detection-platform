@@ -36,11 +36,11 @@ Stale workers cannot persist command transitions after losing lease ownership. R
 
 FDP-32 validates the active lease immediately before local business mutation execution. This closes the stale business mutation gap for the normal executor path.
 
-command transition fencing is not business-side-effect rollback by itself. Full stale-worker business-write rollback requires transaction-mode REQUIRED or an equivalent idempotent domain write with its own guard. Transaction-mode OFF is compatibility behavior and must not be described as bank-grade stale-worker-safe.
+command transition fencing is not business-side-effect rollback by itself. transaction-mode OFF is compatibility behavior and must not be described as bank-grade stale-worker-safe. transaction-mode REQUIRED is required for bank-grade stale-worker business-write safety unless a mutation-specific idempotent domain write guard is explicitly approved.
 
 ## ACID Boundary
 
-FDP-32 does not expand transaction scope. In bank or production mode, the stale-worker business-write guarantee depends on transaction-mode REQUIRED. Local/dev transaction-mode OFF remains useful for compatibility and quickstart paths, but it is not a production stale-worker rollback guarantee.
+FDP-32 does not expand transaction scope. In bank or production mode, the stale-worker business-write guarantee depends on transaction-mode REQUIRED. Local/dev transaction-mode OFF remains useful for compatibility and quickstart paths, but it is not a production stale-worker rollback guarantee and must not be used for bank-grade regulated mutation paths.
 
 ## Non-Goals
 
@@ -68,10 +68,14 @@ FDP-32 records low-cardinality metrics for:
 - lease takeover rate
 - lease remaining at transition
 - transition latency
+- recovery write conflicts
+- lease budget warnings when the remaining lease budget is at or below the configured threshold
 
 Metric labels are bounded to model version, state, transition outcome, and reason. They must not contain command ids, alert ids, actor ids, idempotency keys, lease owners, request hashes, exception messages, or raw paths.
 
-Recommended dashboards should track stale write rejection rate, lease takeover rate, expired lease rejection count, lease remaining p50/p95/p99, and operations exceeding 70% of lease duration.
+Recommended dashboards should track stale write rejection rate, expired lease rejection rate, lease takeover rate, transition latency p95/p99, lease remaining p50/p95/p99, and recovery write conflict count.
+
+Recommended alerts should cover stale write spikes, expired lease spikes, lease remaining below threshold, and any non-zero recovery write conflict count.
 
 ## Test Evidence
 
@@ -97,8 +101,10 @@ Coverage includes:
 
 ## Production/Bank Enablement Conditions
 
-Production or bank enablement requires transaction-mode REQUIRED, bank-mode startup guards, active recovery runbooks, and separate release approval for enabling FDP-29 behavior. FDP-32 can harden the disabled/default path, but it does not by itself enable evidence-gated finalize for production.
+Production or bank enablement requires transaction-mode REQUIRED, bank-mode startup guards, active recovery runbooks, lease duration budget review, dashboards and alerts for the FDP-32 metrics, canary or staging soak, rollback planning, and separate release approval for enabling FDP-29 behavior. FDP-32 can harden the disabled/default path, but it does not by itself enable evidence-gated finalize for production.
 
 ## Known Limitations
 
-FDP-32 does not provide distributed ACID, process-kill chaos proof, heartbeat renewal, or external finality. A worker can still die mid-flow and require existing recovery paths. Full process-failure hardening remains a later operational and chaos-testing concern.
+FDP-32 does not provide distributed ACID, process-kill chaos proof, heartbeat renewal, or external finality. Source-string architecture tests are guardrails, not complete architectural proof; the critical stale-worker behavior is also covered by integration tests. A worker can still die mid-flow and require existing recovery paths. Full process-failure hardening remains a later operational and chaos-testing concern.
+
+`allowedFieldUpdates` is not a general document mutation API. It may only set transition-owned evidence and projection fields such as response snapshots, outbox event ids, local commit markers, success audit ids, degradation reasons, and public status. Identity, lease, ownership, idempotency, request, resource, action, creation, attempt-count, and mutation-model fields are immutable after command creation or claim.
