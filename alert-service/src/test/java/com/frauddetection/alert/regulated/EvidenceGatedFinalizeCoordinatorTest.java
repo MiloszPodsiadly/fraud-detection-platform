@@ -8,6 +8,7 @@ import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.AuditService;
+import com.frauddetection.alert.audit.RegulatedMutationLocalAuditPhaseWriter;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.service.ConflictingIdempotencyKeyException;
 import com.frauddetection.common.events.enums.AlertStatus;
@@ -262,6 +263,7 @@ class EvidenceGatedFinalizeCoordinatorTest {
         private final MongoTemplate mongoTemplate = mock(MongoTemplate.class);
         private final AuditEventRepository auditEventRepository = mock(AuditEventRepository.class);
         private final AuditService auditService = mock(AuditService.class);
+        private final RegulatedMutationLocalAuditPhaseWriter localAuditPhaseWriter = mock(RegulatedMutationLocalAuditPhaseWriter.class);
         private final AuditDegradationService degradationService = mock(AuditDegradationService.class);
         private final AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
         private final List<RegulatedMutationState> states = new ArrayList<>();
@@ -282,10 +284,14 @@ class EvidenceGatedFinalizeCoordinatorTest {
                     degradationService,
                     metrics,
                     runner,
+                    new RegulatedMutationPublicStatusMapper(),
+                    new EvidencePreconditionEvaluator(),
+                    localAuditPhaseWriter,
                     false,
                     Duration.ofSeconds(30)
             );
             when(auditEventRepository.findByRequestId(any())).thenReturn(Optional.empty());
+            when(localAuditPhaseWriter.recordSuccessPhase(any(), any(), any())).thenReturn("success-audit-1");
         }
 
         private void commandLookup(Optional<RegulatedMutationCommandDocument> existing) {

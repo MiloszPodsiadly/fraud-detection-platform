@@ -232,6 +232,41 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
+    void fdp29FinalizeTransactionMustUseLocalAuditWriterOnly() throws Exception {
+        String coordinator = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/MongoRegulatedMutationCoordinator.java"
+        ));
+        String finalizeMethod = coordinator.substring(
+                coordinator.indexOf("private <R, S> RegulatedMutationResult<S> finalizeVisibleMutation("),
+                coordinator.indexOf("private <R, S> RegulatedMutationResult<S> markEvidenceGatedRecoveryRequired(")
+        );
+
+        assertThat(finalizeMethod).contains("localSuccessAudit(command, document)");
+        assertThat(finalizeMethod).doesNotContain("auditPhaseService.recordPhase");
+        assertThat(finalizeMethod).doesNotContain("AuditService");
+        assertThat(finalizeMethod).doesNotContain("AuditEventPublisher");
+        assertThat(finalizeMethod).doesNotContain("ExternalAuditAnchorPublisher");
+        assertThat(finalizeMethod).doesNotContain("FraudDecisionEventPublisher");
+        assertThat(finalizeMethod).doesNotContain("KafkaTemplate");
+        assertThat(finalizeMethod).doesNotContain("SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL");
+    }
+
+    @Test
+    void localAuditPhaseWriterMustNotFanOutToAuditPublishers() throws Exception {
+        String writer = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/audit/RegulatedMutationLocalAuditPhaseWriter.java"
+        ));
+
+        assertThat(writer).contains("AuditEventRepository");
+        assertThat(writer).contains("AuditAnchorRepository");
+        assertThat(writer).doesNotContain("AuditService");
+        assertThat(writer).doesNotContain("AuditEventPublisher");
+        assertThat(writer).doesNotContain("ExternalAuditAnchorPublisher");
+        assertThat(writer).doesNotContain("KafkaTemplate");
+        assertThat(writer).doesNotContain(".publish(");
+    }
+
+    @Test
     void trustIncidentReadsMustRemainReadOnly() throws Exception {
         String service = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/trust/TrustIncidentService.java"

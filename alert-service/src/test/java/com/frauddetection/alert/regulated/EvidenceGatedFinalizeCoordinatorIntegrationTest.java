@@ -5,6 +5,8 @@ import com.frauddetection.alert.api.SubmitAnalystDecisionResponse;
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditActor;
+import com.frauddetection.alert.audit.AuditAnchorRepository;
+import com.frauddetection.alert.audit.AuditChainLockRepository;
 import com.frauddetection.alert.audit.AuditDegradationService;
 import com.frauddetection.alert.audit.AuditEvent;
 import com.frauddetection.alert.audit.AuditEventDocument;
@@ -14,6 +16,7 @@ import com.frauddetection.alert.audit.AuditFailureCategory;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.AuditService;
+import com.frauddetection.alert.audit.RegulatedMutationLocalAuditPhaseWriter;
 import com.frauddetection.alert.mapper.AlertDocumentMapper;
 import com.frauddetection.alert.mapper.FraudDecisionEventMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
@@ -48,12 +51,15 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -72,6 +78,7 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
     private TransactionalOutboxRecordRepository outboxRepository;
     private AuditEventRepository auditEventRepository;
     private LocalMongoAuditPublisher auditPublisher;
+    private RegulatedMutationLocalAuditPhaseWriter localAuditPhaseWriter;
     private MongoRegulatedMutationCoordinator coordinator;
 
     @BeforeEach
@@ -87,13 +94,32 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         outboxRepository = repositoryFactory.getRepository(TransactionalOutboxRecordRepository.class);
         auditEventRepository = new AuditEventRepository(mongoTemplate);
         auditPublisher = new LocalMongoAuditPublisher(mongoTemplate);
+        localAuditPhaseWriter = new RegulatedMutationLocalAuditPhaseWriter(
+                auditEventRepository,
+                new AuditAnchorRepository(mongoTemplate),
+                new AuditChainLockRepository(mongoTemplate)
+        );
 
         RegulatedMutationTransactionRunner transactionRunner = new RegulatedMutationTransactionRunner(
                 RegulatedMutationTransactionMode.REQUIRED,
                 new TransactionTemplate(new MongoTransactionManager(databaseFactory))
         );
         AlertServiceMetrics metrics = new AlertServiceMetrics(new SimpleMeterRegistry());
-        coordinator = new MongoRegulatedMutationCoordinator(
+        coordinator = coordinator(
+                commandRepository,
+                transactionRunner,
+                metrics,
+                localAuditPhaseWriter
+        );
+    }
+
+    private MongoRegulatedMutationCoordinator coordinator(
+            RegulatedMutationCommandRepository commandRepository,
+            RegulatedMutationTransactionRunner transactionRunner,
+            AlertServiceMetrics metrics,
+            RegulatedMutationLocalAuditPhaseWriter localAuditPhaseWriter
+    ) {
+        return new MongoRegulatedMutationCoordinator(
                 commandRepository,
                 mongoTemplate,
                 new RegulatedMutationAuditPhaseService(
@@ -111,6 +137,7 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
                         List.of(new SubmitDecisionRecoveryStrategy(alertRepository)),
                         true
                 ),
+                localAuditPhaseWriter,
                 false,
                 Duration.ofSeconds(30)
         );
@@ -169,6 +196,7 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         assertThat(outboxRepository.count()).isEqualTo(1);
         assertThat(countAudit(command.getId(), RegulatedMutationAuditPhase.ATTEMPTED)).isEqualTo(1);
         assertThat(countAudit(command.getId(), RegulatedMutationAuditPhase.SUCCESS)).isEqualTo(1);
+        assertThat(auditPublisher.successPublishCalls).isZero();
     }
 
     @Test
@@ -216,7 +244,15 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
     @Test
     void shouldRollbackCoordinatorPathWhenSuccessAuditPersistenceFailsInsideFinalize() {
         alertRepository.save(alert("alert-success-audit-fail"));
-        auditPublisher.failSuccess = true;
+        coordinator = coordinator(
+                commandRepository,
+                new RegulatedMutationTransactionRunner(
+                        RegulatedMutationTransactionMode.REQUIRED,
+                        new TransactionTemplate(new MongoTransactionManager(databaseFactory))
+                ),
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                new FailingLocalAuditPhaseWriter()
+        );
         AtomicInteger businessMutations = new AtomicInteger();
         SubmitDecisionMutationHandler handler = new SubmitDecisionMutationHandler(
                 alertRepository,
@@ -250,6 +286,69 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         assertThat(alert.getAnalystDecision()).isNull();
         assertThat(outboxRepository.count()).isZero();
         assertThat(countAudit(command.getId(), RegulatedMutationAuditPhase.SUCCESS)).isZero();
+        assertThat(auditPublisher.successPublishCalls).isZero();
+    }
+
+    @Test
+    void shouldRollbackAssignedFinalizeFieldsWhenCommandSaveFailsBeforeTransactionCommit() {
+        alertRepository.save(alert("alert-corruption-proof"));
+        RegulatedMutationCommandRepository throwingRepository = throwOnceAfterFinalizedSave(commandRepository);
+        coordinator = coordinator(
+                throwingRepository,
+                new RegulatedMutationTransactionRunner(
+                        RegulatedMutationTransactionMode.REQUIRED,
+                        new TransactionTemplate(new MongoTransactionManager(databaseFactory))
+                ),
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                localAuditPhaseWriter
+        );
+        AtomicInteger businessMutations = new AtomicInteger();
+        SubmitDecisionMutationHandler handler = new SubmitDecisionMutationHandler(
+                alertRepository,
+                new AlertDocumentMapper(),
+                new DecisionOutboxWriter(new FraudDecisionEventMapper(), outboxRepository)
+        );
+
+        assertThatThrownBy(() -> coordinator.commit(command(
+                "idem-corruption-proof",
+                "alert-corruption-proof",
+                businessMutations,
+                context -> handler.applyDecision(
+                        "alert-corruption-proof",
+                        request(),
+                        AlertStatus.RESOLVED,
+                        "principal-7",
+                        "idem-corruption-proof",
+                        "request-hash-corruption-proof",
+                        context.commandId(),
+                        SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
+                )
+        ))).isInstanceOf(DataAccessResourceFailureException.class);
+
+        RegulatedMutationCommandDocument command = commandRepository.findByIdempotencyKey("idem-corruption-proof").orElseThrow();
+        AlertDocument alert = alertRepository.findById("alert-corruption-proof").orElseThrow();
+
+        assertThat(alert.getAnalystDecision()).isNull();
+        assertThat(outboxRepository.count()).isZero();
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(command.getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(command.getResponseSnapshot()).isNull();
+        assertThat(command.getOutboxEventId()).isNull();
+        assertThat(command.getLocalCommitMarker()).isNull();
+        assertThat(command.getSuccessAuditId()).isNull();
+        assertThat(command.isSuccessAuditRecorded()).isFalse();
+        assertThat(countAudit(command.getId(), RegulatedMutationAuditPhase.SUCCESS)).isZero();
+
+        RegulatedMutationResult<SubmitAnalystDecisionResponse> replay = coordinator.commit(command(
+                "idem-corruption-proof",
+                "alert-corruption-proof",
+                businessMutations,
+                context -> {
+                    throw new AssertionError("business mutation must not rerun after finalize rollback");
+                }
+        ));
+        assertThat(replay.state()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(businessMutations).hasValue(1);
     }
 
     private RegulatedMutationCommand<AlertDocument, SubmitAnalystDecisionResponse> command(
@@ -341,6 +440,32 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         );
     }
 
+    private RegulatedMutationCommandRepository throwOnceAfterFinalizedSave(
+            RegulatedMutationCommandRepository delegate
+    ) {
+        AtomicBoolean thrown = new AtomicBoolean();
+        return (RegulatedMutationCommandRepository) Proxy.newProxyInstance(
+                RegulatedMutationCommandRepository.class.getClassLoader(),
+                new Class<?>[]{RegulatedMutationCommandRepository.class},
+                (proxy, method, args) -> {
+                    try {
+                        Object result = method.invoke(delegate, args);
+                        if ("save".equals(method.getName())
+                                && args != null
+                                && args.length == 1
+                                && args[0] instanceof RegulatedMutationCommandDocument document
+                                && document.getState() == RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL
+                                && thrown.compareAndSet(false, true)) {
+                            throw new DataAccessResourceFailureException("command final save failed after field assignment");
+                        }
+                        return result;
+                    } catch (InvocationTargetException exception) {
+                        throw exception.getCause();
+                    }
+                }
+        );
+    }
+
     @SuppressWarnings("unchecked")
     private static <T> ObjectProvider<T> provider(T value) {
         ObjectProvider<T> provider = mock(ObjectProvider.class);
@@ -350,7 +475,7 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
 
     private final class LocalMongoAuditPublisher implements AuditEventPublisher {
         private final MongoTemplate mongoTemplate;
-        private boolean failSuccess;
+        private int successPublishCalls;
 
         private LocalMongoAuditPublisher(MongoTemplate mongoTemplate) {
             this.mongoTemplate = mongoTemplate;
@@ -358,8 +483,8 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
 
         @Override
         public void publish(AuditEvent event) {
-            if (failSuccess && event.outcome() == AuditOutcome.SUCCESS) {
-                throw new DataAccessResourceFailureException("success audit failed");
+            if (event.outcome() == AuditOutcome.SUCCESS) {
+                successPublishCalls++;
             }
             long chainPosition = mongoTemplate.count(new Query(), AuditEventDocument.class) + 1L;
             AuditEventDocument document = new AuditEventDocument(
@@ -389,6 +514,21 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
                     "1.0"
             );
             mongoTemplate.insert(document);
+        }
+    }
+
+    private static final class FailingLocalAuditPhaseWriter extends RegulatedMutationLocalAuditPhaseWriter {
+        private FailingLocalAuditPhaseWriter() {
+            super(null, null, null);
+        }
+
+        @Override
+        public String recordSuccessPhase(
+                RegulatedMutationCommandDocument command,
+                AuditAction action,
+                AuditResourceType resourceType
+        ) {
+            throw new DataAccessResourceFailureException("success audit failed");
         }
     }
 }

@@ -201,8 +201,10 @@ class AlertServiceMetricsTest {
                 "SUCCESS"
         );
         metrics.recordEvidenceGatedFinalizeRecoveryRequired("OUTBOX_FAILED_TERMINAL");
+        metrics.recordEvidenceGatedFinalizeRecoveryRequired("alert-123/raw-message");
         metrics.recordEvidenceGatedFinalizeRejected("ATTEMPTED_AUDIT_UNAVAILABLE");
         metrics.recordEvidenceGatedFinalizeTransactionRollback("EVIDENCE_GATED_FINALIZE_FAILED");
+        metrics.recordEvidenceConfirmationFailed("idempotency-key-raw-value");
         metrics.recordEvidenceGatedFinalizeStuckVisible();
         metrics.recordEvidenceGatedFinalizeEnabled("SUBMIT_ANALYST_DECISION", true);
 
@@ -232,5 +234,13 @@ class AlertServiceMetricsTest {
         assertThat(transition.getId().getTags())
                 .extracting(Tag::getKey)
                 .doesNotContain("alert_id", "command_id", "actor_id", "idempotency_key", "exception", "path");
+        assertThat(meterRegistry.get("evidence_gated_finalize_recovery_required_total")
+                .tag("reason", "UNKNOWN")
+                .counter()
+                .count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.get("evidence_confirmation_failed_total")
+                .tag("reason", "UNKNOWN")
+                .counter()
+                .count()).isEqualTo(1.0d);
     }
 }
