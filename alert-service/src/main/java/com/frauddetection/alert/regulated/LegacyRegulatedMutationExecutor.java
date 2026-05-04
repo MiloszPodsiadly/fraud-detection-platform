@@ -70,7 +70,8 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
 
     @Override
     public boolean supports(AuditAction action, AuditResourceType resourceType) {
-        // Legacy executor preserves the pre-split coordinator scope for existing regulated mutation commands.
+        // Broad support is intentional only for LEGACY_REGULATED_MUTATION compatibility.
+        // New model executors must use strict action/resource allowlists instead.
         return action != null && resourceType != null;
     }
 

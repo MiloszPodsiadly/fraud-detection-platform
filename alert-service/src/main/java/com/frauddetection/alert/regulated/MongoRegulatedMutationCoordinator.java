@@ -79,7 +79,7 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
     }
 
     /**
-     * Production constructor. Spring runtime depends on the validated RegulatedMutationExecutorRegistry bean.
+     * Production wiring path. Registry is Spring-managed and startup-validated.
      */
     @Autowired
     public MongoRegulatedMutationCoordinator(
