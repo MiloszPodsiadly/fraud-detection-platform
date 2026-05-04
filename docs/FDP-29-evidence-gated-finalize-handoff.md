@@ -45,6 +45,14 @@ Startup fails closed if the submit-decision evidence-gated path is enabled witho
 
 The runtime model stores `mutation_model_version` on command records. Missing or null values are treated as `LEGACY_REGULATED_MUTATION`.
 
+## Local SUCCESS Audit Writer
+
+`RegulatedMutationLocalAuditPhaseWriter` is a narrow FDP-29 finalize primitive. It writes local `SUCCESS` audit evidence to the authoritative `audit_events` collection with deterministic phase key `commandId:SUCCESS`, appends the local audit chain, and writes the local anchor in the same Mongo transaction as the submit-decision finalize.
+
+It is not a second audit source of truth and not a replacement for `AuditService`. It intentionally does not fan out to structured logs, Kafka, external anchor publishers, or Trust Authority signing. External publication and signature confirmation remain asynchronous.
+
+Concurrency and direct writer tests cover idempotency, no duplicate phase rows, no duplicate chain positions, no duplicate anchors, rollback on anchor failure inside a transaction, and no audit-chain fork under concurrent FDP-29 finalizations.
+
 ## Non-Claims
 
 FDP-29 does not claim distributed ACID, exactly-once Kafka, external witness writes inside a local transaction, legal notarization, WORM storage, KMS/HSM-backed signing, or process-kill chaos coverage. External evidence confirmation remains asynchronous.

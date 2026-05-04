@@ -27,6 +27,10 @@ Only operators with regulated mutation recovery/admin authority may perform reco
 4. Inspect the command response snapshot.
 5. Inspect the local audit phase record for deterministic request id `<command_id>:SUCCESS`.
 
+## Evidence Confirmation Batch Limit
+
+`confirmPendingEvidence(limit)` processes at most `100` commands per call. `limit <= 0` is an explicit no-op and returns `0`; it must not be used as an implicit minimum-one recovery run.
+
 ## Deterministic Outcomes
 
 - If no business mutation, outbox record, response snapshot, local success audit, or local finalize marker exists: keep the command non-success and retry only through an explicit recovery policy.

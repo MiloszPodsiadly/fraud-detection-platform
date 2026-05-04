@@ -58,3 +58,13 @@ New FDP-29 submit-decision commands persist `FINALIZED_EVIDENCE_PENDING_EXTERNAL
 This is intentionally narrower than the target precondition table. External anchor readiness and Trust Authority signing readiness remain post-finalize asynchronous confirmation signals in FDP-29 v1.
 
 The local success audit writer does not call `AuditService`, `AuditEventPublisher`, `ExternalAuditAnchorPublisher`, or Kafka publishers. External audit publication remains post-commit/asynchronous evidence confirmation.
+
+## Local SUCCESS Audit Writer
+
+`RegulatedMutationLocalAuditPhaseWriter` is used only by the FDP-29 submit-decision finalize transaction. It writes the local `SUCCESS` phase to the authoritative `audit_events` collection with deterministic request id `commandId:SUCCESS`, appends the same local audit-chain record model, and writes the matching local anchor record.
+
+It is intentionally not a generic audit service and is not a second source of truth. It does not call `AuditService`, `AuditEventPublisher`, Kafka, external anchor publishers, or Trust Authority clients. Broader use outside the FDP-29 coordinator path requires architecture review.
+
+The local `SUCCESS` phase proves only local durable evidence inside Mongo. It does not provide external finality, legal notarization, WORM storage, distributed ACID, or independent witness proof.
+
+`confirmPendingEvidence(limit)` accepts batch limits from `1` to `100`. A limit of `0` or less is a no-op and returns `0`; it does not process one command implicitly.

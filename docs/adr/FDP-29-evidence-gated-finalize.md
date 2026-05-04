@@ -99,7 +99,15 @@ The target design may later add stronger pre-finalize gates for:
 
 Those target gates are not claimed by FDP-29 v1 unless implemented and tested in a later FDP.
 
-The local success audit writer is intentionally not `AuditService`. It writes only Mongo-local audit event and anchor records with deterministic phase keys and does not fan out to structured logs, external anchor publishers, or Kafka inside the finalize transaction.
+## Local SUCCESS Audit Writer
+
+FDP-29 uses `RegulatedMutationLocalAuditPhaseWriter` only for local `SUCCESS` audit evidence inside the local Mongo finalize transaction. It writes to the same authoritative `audit_events` collection, uses the same deterministic phase key pattern (`commandId:SUCCESS`), and writes the same local audit-chain and local anchor model as the platform audit store.
+
+The writer intentionally does not call `AuditService`, `AuditEventPublisher`, Kafka publishers, or external anchor publishers. External publication, signature checks, and independent witness evidence remain asynchronous and outside local ACID.
+
+This is not a second audit source of truth. It is a narrow local transaction primitive for the FDP-29 submit-decision finalize path only. Any broader use requires architecture review.
+
+Local `SUCCESS` audit inside the transaction is local evidence only. It is not external finality, legal notarization, WORM storage, distributed ACID, or independent witness proof. Integration tests cover concurrent FDP-29 finalizations and prove no duplicate `SUCCESS` phase, duplicate chain position, duplicate anchor, or audit-chain fork for the local writer path.
 
 ## Definition of Visible Business Commit
 
