@@ -86,7 +86,7 @@ FDP-29 v1 currently enforces the following before or inside the local submit-dec
 - deterministic `SUCCESS` audit phase key availability
 - backend-resolved actor/resource/action intent consistency
 - submit-decision business validation against current alert state
-- local Mongo transaction covering alert decision write, authoritative transactional outbox record, response snapshot, success audit write, and local finalize marker
+- local Mongo transaction covering alert decision write, authoritative transactional outbox record, response snapshot, local success audit write through `RegulatedMutationLocalAuditPhaseWriter`, and local finalize marker
 - durable command state `FINALIZED_EVIDENCE_PENDING_EXTERNAL` for new successful FDP-29 submit-decision commands
 
 The target design may later add stronger pre-finalize gates for:
@@ -98,6 +98,8 @@ The target design may later add stronger pre-finalize gates for:
 - stronger pre-commit evidence reservation
 
 Those target gates are not claimed by FDP-29 v1 unless implemented and tested in a later FDP.
+
+The local success audit writer is intentionally not `AuditService`. It writes only Mongo-local audit event and anchor records with deterministic phase keys and does not fan out to structured logs, external anchor publishers, or Kafka inside the finalize transaction.
 
 ## Definition of Visible Business Commit
 

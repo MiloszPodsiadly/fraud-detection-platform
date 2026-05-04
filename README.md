@@ -1350,6 +1350,7 @@ Security and architecture:
 - [Alert Service Source Of Truth](docs/architecture/alert-service-source-of-truth.md): FDP-27 authoritative stores and projection boundaries.
 - [Alert Service Write Path Inventory](docs/architecture/alert-service-write-path-inventory.md): FDP-27 mutating path inventory with idempotency, audit, and recovery expectations.
 - [Alert Service Production Runbooks](docs/runbooks/alert-service-production-runbooks.md): FDP-27 operator actions for production trust and recovery conditions.
+- [FDP-29 Finalize Recovery Runbook](docs/runbooks/FDP-29-finalize-recovery-required.md): operator procedure for `FINALIZING_RETRY_REQUIRES_RECONCILIATION`.
 - [Alert Service SLOs](docs/observability/alert-service-slo.md): FDP-27 low-cardinality operational thresholds.
 - [Alert Service Config Matrix](docs/deployment/alert-service-config-matrix.md): local/test/docker/staging/prod/bank configuration semantics.
 - [FDP-27 Merge Gate](docs/FDP-27-merge-gate.md): pre-merge invariant checklist and explicit non-goals.

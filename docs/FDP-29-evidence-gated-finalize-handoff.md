@@ -18,7 +18,7 @@ The current v1 implementation proves the local path only:
 - transactional outbox repository, outbox recovery, and submit-decision recovery strategy are required
 - actor/resource/action intent matches the backend-resolved command
 - submit-decision business validation passes before visible mutation
-- local finalize transaction writes the alert decision, authoritative outbox record, response snapshot, success audit, and finalize marker together
+- local finalize transaction writes the alert decision, authoritative outbox record, response snapshot, local success audit evidence through `RegulatedMutationLocalAuditPhaseWriter`, and finalize marker together
 
 External anchor readiness, Trust Authority signing readiness, independent witness readiness, Kafka broker delivery, WORM semantics, legal finality, and external evidence confirmation remain outside this local transaction.
 
@@ -29,6 +29,7 @@ External anchor readiness, Trust Authority signing readiness, independent witnes
 - State machine: `docs/architecture/FDP-29-state-machine.md`
 - Compatibility matrix: `docs/architecture/FDP-29-compatibility-matrix.md`
 - API response contract: `docs/api/FDP-29-api-response-contract.md`
+- Finalize recovery runbook: `docs/runbooks/FDP-29-finalize-recovery-required.md`
 - Failure windows: `docs/architecture/FDP-29-failure-windows.md`
 - Idempotency replay: `docs/architecture/FDP-29-idempotency-replay.md`
 - Migration and rollout: `docs/architecture/FDP-29-migration-rollout.md`

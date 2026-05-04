@@ -36,7 +36,7 @@ Each result carries a stable reason code plus bounded checked/skipped preconditi
 
 `FINALIZING` may start only from `EVIDENCE_PREPARED`.
 
-New FDP-29 submit-decision commands persist `FINALIZED_EVIDENCE_PENDING_EXTERNAL` inside the local Mongo transaction that applies the business aggregate mutation, writes the transactional outbox record, stores the response snapshot, and stores the local finalize marker.
+New FDP-29 submit-decision commands persist `FINALIZED_EVIDENCE_PENDING_EXTERNAL` inside the local Mongo transaction that applies the business aggregate mutation, writes the transactional outbox record, stores the response snapshot, writes local success audit evidence through `RegulatedMutationLocalAuditPhaseWriter`, and stores the local finalize marker.
 
 `FINALIZED_VISIBLE` is retained only as a compatibility/repair state for previously persisted or interrupted commands.
 
@@ -56,3 +56,5 @@ New FDP-29 submit-decision commands persist `FINALIZED_EVIDENCE_PENDING_EXTERNAL
 - requested decision is present in the canonical intent
 
 This is intentionally narrower than the target precondition table. External anchor readiness and Trust Authority signing readiness remain post-finalize asynchronous confirmation signals in FDP-29 v1.
+
+The local success audit writer does not call `AuditService`, `AuditEventPublisher`, `ExternalAuditAnchorPublisher`, or Kafka publishers. External audit publication remains post-commit/asynchronous evidence confirmation.
