@@ -10,10 +10,33 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.function.Consumer;
 
 @Service
 public class RegulatedMutationFencedCommandWriter {
+
+    private static final double LEASE_BUDGET_WARNING_REMAINING_RATIO = 0.30d;
+    private static final Set<String> PROTECTED_UPDATE_FIELDS = Set.of(
+            "_id",
+            "id",
+            "idempotency_key",
+            "request_hash",
+            "intent_hash",
+            "actor_id",
+            "intent_actor_id",
+            "lease_owner",
+            "lease_expires_at",
+            "attempt_count",
+            "created_at",
+            "mutation_model_version",
+            "resource_id",
+            "action",
+            "resource_type"
+    );
 
     private final MongoTemplate mongoTemplate;
     private final AlertServiceMetrics metrics;
@@ -44,9 +67,11 @@ public class RegulatedMutationFencedCommandWriter {
                 .set("updated_at", now)
                 .set("last_heartbeat_at", now)
                 .set("last_error", lastError);
+        Map<String, Map<String, Object>> protectedBaseline = protectedFieldBaseline(update);
         if (allowedFieldUpdates != null) {
             allowedFieldUpdates.accept(update);
         }
+        validateProtectedFieldsUnchanged(update, protectedBaseline);
 
         UpdateResult result = mongoTemplate.updateFirst(query, update, RegulatedMutationCommandDocument.class);
         if (result.getMatchedCount() == 0) {
@@ -80,6 +105,7 @@ public class RegulatedMutationFencedCommandWriter {
                     "REJECTED",
                     Duration.between(startedAt, Instant.now())
             );
+            recordLeaseBudgetWarningIfNeeded(claimToken, expectedState, now);
             throw new StaleRegulatedMutationLeaseException(claimToken.commandId(), reason);
         }
         metrics.recordRegulatedMutationFencedTransition(
@@ -101,6 +127,7 @@ public class RegulatedMutationFencedCommandWriter {
                 "SUCCESS",
                 Duration.between(startedAt, Instant.now())
         );
+        recordLeaseBudgetWarningIfNeeded(claimToken, expectedState, now);
     }
 
     public void validateActiveLease(
@@ -136,8 +163,14 @@ public class RegulatedMutationFencedCommandWriter {
                 "SUCCESS",
                 Duration.between(now, claimToken.leaseExpiresAt())
         );
+        recordLeaseBudgetWarningIfNeeded(claimToken, expectedState, now);
     }
 
+    /**
+     * Only for non-claimed replay/recovery repair paths. Claimed worker transitions must use
+     * {@link #transition(RegulatedMutationClaimToken, RegulatedMutationState, RegulatedMutationExecutionStatus,
+     * RegulatedMutationState, RegulatedMutationExecutionStatus, String, Consumer)}.
+     */
     public void recoveryTransition(
             RegulatedMutationCommandDocument document,
             RegulatedMutationState newState,
@@ -156,9 +189,11 @@ public class RegulatedMutationFencedCommandWriter {
                 .set("updated_at", now)
                 .set("last_heartbeat_at", now)
                 .set("last_error", lastError);
+        Map<String, Map<String, Object>> protectedBaseline = protectedFieldBaseline(update);
         if (allowedFieldUpdates != null) {
             allowedFieldUpdates.accept(update);
         }
+        validateProtectedFieldsUnchanged(update, protectedBaseline);
 
         UpdateResult result = mongoTemplate.updateFirst(query, update, RegulatedMutationCommandDocument.class);
         if (result.getMatchedCount() == 0) {
@@ -167,7 +202,75 @@ public class RegulatedMutationFencedCommandWriter {
                     document.getState(),
                     StaleRegulatedMutationLeaseReason.RECOVERY_WRITE_CONFLICT.name()
             );
+            metrics.recordRegulatedMutationRecoveryWriteConflict(
+                    document.mutationModelVersionOrLegacy(),
+                    document.getState(),
+                    StaleRegulatedMutationLeaseReason.RECOVERY_WRITE_CONFLICT.name()
+            );
             throw new RegulatedMutationRecoveryWriteConflictException(document.getId());
+        }
+    }
+
+    private void recordLeaseBudgetWarningIfNeeded(
+            RegulatedMutationClaimToken claimToken,
+            RegulatedMutationState state,
+            Instant now
+    ) {
+        Duration totalLease = Duration.between(claimToken.claimedAt(), claimToken.leaseExpiresAt());
+        Duration remainingLease = Duration.between(now, claimToken.leaseExpiresAt());
+        long totalMillis = totalLease.toMillis();
+        if (totalMillis <= 0 || remainingLease.isNegative()) {
+            metrics.recordRegulatedMutationLeaseBudgetWarning(
+                    claimToken.mutationModelVersion(),
+                    state,
+                    "LOW_REMAINING"
+            );
+            return;
+        }
+        double remainingRatio = (double) remainingLease.toMillis() / (double) totalMillis;
+        if (remainingRatio <= LEASE_BUDGET_WARNING_REMAINING_RATIO) {
+            metrics.recordRegulatedMutationLeaseBudgetWarning(
+                    claimToken.mutationModelVersion(),
+                    state,
+                    "LOW_REMAINING"
+            );
+        }
+    }
+
+    private Map<String, Map<String, Object>> protectedFieldBaseline(Update update) {
+        Map<String, Map<String, Object>> baseline = new HashMap<>();
+        for (Map.Entry<String, Object> operation : update.getUpdateObject().entrySet()) {
+            if (operation.getValue() instanceof org.bson.Document document) {
+                Map<String, Object> fields = new HashMap<>();
+                for (String field : PROTECTED_UPDATE_FIELDS) {
+                    if (document.containsKey(field)) {
+                        fields.put(field, document.get(field));
+                    }
+                }
+                baseline.put(operation.getKey(), fields);
+            }
+        }
+        return baseline;
+    }
+
+    private void validateProtectedFieldsUnchanged(
+            Update update,
+            Map<String, Map<String, Object>> baseline
+    ) {
+        for (Map.Entry<String, Object> operation : update.getUpdateObject().entrySet()) {
+            if (!(operation.getValue() instanceof org.bson.Document document)) {
+                continue;
+            }
+            Map<String, Object> baselineFields = baseline.getOrDefault(operation.getKey(), Map.of());
+            for (String field : PROTECTED_UPDATE_FIELDS) {
+                if (document.containsKey(field)
+                        && (!baselineFields.containsKey(field)
+                        || !Objects.equals(baselineFields.get(field), document.get(field)))) {
+                    throw new IllegalArgumentException(
+                            "Regulated mutation fenced transition update cannot modify protected field: " + field
+                    );
+                }
+            }
         }
     }
 

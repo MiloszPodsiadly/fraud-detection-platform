@@ -220,9 +220,8 @@ public class AlertServiceMetrics {
     ) {
         counter(
                 "regulated_mutation_fenced_transition_total",
-                "modelVersion", normalizeRegulatedMutationModelVersion(modelVersion),
-                "fromState", normalizeRegulatedMutationState(fromState),
-                "toState", normalizeRegulatedMutationState(toState),
+                "model_version", normalizeRegulatedMutationModelVersion(modelVersion),
+                "state", normalizeRegulatedMutationState(fromState),
                 "outcome", normalizeRegulatedMutationFencingOutcome(outcome),
                 "reason", normalizeRegulatedMutationFencingReason(reason)
         ).increment();
@@ -235,7 +234,7 @@ public class AlertServiceMetrics {
             Duration leaseRemaining
     ) {
         Timer.builder("regulated_mutation_lease_remaining_at_transition_seconds")
-                .tag("modelVersion", normalizeRegulatedMutationModelVersion(modelVersion))
+                .tag("model_version", normalizeRegulatedMutationModelVersion(modelVersion))
                 .tag("state", normalizeRegulatedMutationState(state))
                 .tag("outcome", normalizeRegulatedMutationFencingOutcome(outcome))
                 .register(meterRegistry)
@@ -249,7 +248,7 @@ public class AlertServiceMetrics {
             Duration latency
     ) {
         Timer.builder("regulated_mutation_transition_latency_seconds")
-                .tag("modelVersion", normalizeRegulatedMutationModelVersion(modelVersion))
+                .tag("model_version", normalizeRegulatedMutationModelVersion(modelVersion))
                 .tag("state", normalizeRegulatedMutationState(state))
                 .tag("outcome", normalizeRegulatedMutationFencingOutcome(outcome))
                 .register(meterRegistry)
@@ -259,7 +258,7 @@ public class AlertServiceMetrics {
     public void recordRegulatedMutationStaleWriteRejected(Enum<?> modelVersion, Enum<?> state, String reason) {
         counter(
                 "regulated_mutation_stale_write_rejected_total",
-                "modelVersion", normalizeRegulatedMutationModelVersion(modelVersion),
+                "model_version", normalizeRegulatedMutationModelVersion(modelVersion),
                 "state", normalizeRegulatedMutationState(state),
                 "reason", normalizeRegulatedMutationFencingReason(reason)
         ).increment();
@@ -268,8 +267,26 @@ public class AlertServiceMetrics {
     public void recordRegulatedMutationLeaseTakeover(Enum<?> modelVersion, Enum<?> state) {
         counter(
                 "regulated_mutation_lease_takeover_total",
-                "modelVersion", normalizeRegulatedMutationModelVersion(modelVersion),
+                "model_version", normalizeRegulatedMutationModelVersion(modelVersion),
                 "state", normalizeRegulatedMutationState(state)
+        ).increment();
+    }
+
+    public void recordRegulatedMutationRecoveryWriteConflict(Enum<?> modelVersion, Enum<?> state, String reason) {
+        counter(
+                "regulated_mutation_recovery_write_conflict_total",
+                "model_version", normalizeRegulatedMutationModelVersion(modelVersion),
+                "state", normalizeRegulatedMutationState(state),
+                "reason", normalizeRegulatedMutationFencingReason(reason)
+        ).increment();
+    }
+
+    public void recordRegulatedMutationLeaseBudgetWarning(Enum<?> modelVersion, Enum<?> state, String threshold) {
+        counter(
+                "regulated_mutation_lease_budget_warning_total",
+                "model_version", normalizeRegulatedMutationModelVersion(modelVersion),
+                "state", normalizeRegulatedMutationState(state),
+                "threshold", normalizeRegulatedMutationLeaseBudgetThreshold(threshold)
         ).increment();
     }
 
@@ -860,6 +877,13 @@ public class AlertServiceMetrics {
             case "NONE", "STALE_LEASE_OWNER", "EXPIRED_LEASE", "EXPECTED_STATE_MISMATCH",
                  "EXPECTED_STATUS_MISMATCH", "COMMAND_NOT_FOUND", "RECOVERY_WRITE_CONFLICT", "UNKNOWN" -> reason;
             default -> "UNKNOWN";
+        };
+    }
+
+    private String normalizeRegulatedMutationLeaseBudgetThreshold(String threshold) {
+        return switch (threshold) {
+            case "LOW_REMAINING" -> threshold;
+            default -> "LOW_REMAINING";
         };
     }
 
