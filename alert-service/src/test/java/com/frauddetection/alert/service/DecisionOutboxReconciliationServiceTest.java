@@ -17,10 +17,14 @@ import com.frauddetection.alert.regulated.RegulatedMutationAuditPhaseService;
 import com.frauddetection.alert.regulated.RegulatedMutationCommandDocument;
 import com.frauddetection.alert.regulated.RegulatedMutationCommandRepository;
 import com.frauddetection.alert.regulated.RegulatedMutationExecutionStatus;
+import com.frauddetection.alert.regulated.RegulatedMutationResponseSnapshot;
+import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.alert.regulated.mutation.decisionoutbox.DecisionOutboxReconciliationMutationHandler;
 import com.frauddetection.common.events.contract.FraudDecisionEvent;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
+import com.mongodb.client.result.UpdateResult;
+import org.bson.Document;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.mongodb.core.FindAndModifyOptions;
@@ -408,6 +412,15 @@ class DecisionOutboxReconciliationServiceTest {
             current[0].setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
             return current[0];
         });
+        when(mongoTemplate.count(any(Query.class), eq(RegulatedMutationCommandDocument.class))).thenReturn(1L);
+        when(mongoTemplate.updateFirst(
+                any(Query.class),
+                any(Update.class),
+                eq(RegulatedMutationCommandDocument.class)
+        )).thenAnswer(invocation -> {
+            applyUpdate(current[0], invocation.getArgument(1));
+            return UpdateResult.acknowledged(1, 1L, null);
+        });
         return new DecisionOutboxReconciliationService(
                 repository,
                 new MongoRegulatedMutationCoordinator(
@@ -422,6 +435,40 @@ class DecisionOutboxReconciliationServiceTest {
                 new DecisionOutboxReconciliationMutationHandler(repository),
                 bankMode
         );
+    }
+
+    private void applyUpdate(RegulatedMutationCommandDocument command, Update update) {
+        Document set = (Document) update.getUpdateObject().get("$set");
+        if (set == null || command == null) {
+            return;
+        }
+        if (set.containsKey("state")) {
+            command.setState((RegulatedMutationState) set.get("state"));
+        }
+        if (set.containsKey("execution_status")) {
+            command.setExecutionStatus((RegulatedMutationExecutionStatus) set.get("execution_status"));
+        }
+        if (set.containsKey("response_snapshot")) {
+            command.setResponseSnapshot((RegulatedMutationResponseSnapshot) set.get("response_snapshot"));
+        }
+        if (set.containsKey("attempted_audit_id")) {
+            command.setAttemptedAuditId((String) set.get("attempted_audit_id"));
+        }
+        if (set.containsKey("attempted_audit_recorded")) {
+            command.setAttemptedAuditRecorded((Boolean) set.get("attempted_audit_recorded"));
+        }
+        if (set.containsKey("success_audit_id")) {
+            command.setSuccessAuditId((String) set.get("success_audit_id"));
+        }
+        if (set.containsKey("success_audit_recorded")) {
+            command.setSuccessAuditRecorded((Boolean) set.get("success_audit_recorded"));
+        }
+        if (set.containsKey("failed_audit_id")) {
+            command.setFailedAuditId((String) set.get("failed_audit_id"));
+        }
+        if (set.containsKey("degradation_reason")) {
+            command.setDegradationReason((String) set.get("degradation_reason"));
+        }
     }
 
     private ResolutionEvidenceReference brokerEvidence() {

@@ -401,6 +401,7 @@ class LegacyRegulatedMutationExecutorBehaviorCompatibilityTest {
                 currentCommand.setAttemptCount(currentCommand.getAttemptCount() + 1);
                 return currentCommand;
             });
+            when(mongoTemplate.count(any(Query.class), eq(RegulatedMutationCommandDocument.class))).thenReturn(1L);
             when(mongoTemplate.updateFirst(
                     any(Query.class),
                     any(Update.class),

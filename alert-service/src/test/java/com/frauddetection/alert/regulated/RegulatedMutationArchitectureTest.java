@@ -525,6 +525,8 @@ class RegulatedMutationArchitectureTest {
         assertThat(evidenceExecutor).contains("RegulatedMutationFencedCommandWriter");
         assertThat(legacyExecutor).contains("fencedCommandWriter.transition");
         assertThat(evidenceExecutor).contains("fencedCommandWriter.transition");
+        assertThat(legacyExecutor).contains("fencedCommandWriter.validateActiveLease");
+        assertThat(evidenceExecutor).contains("fencedCommandWriter.validateActiveLease");
         assertThat(writer).contains("lease_owner");
         assertThat(writer).contains("lease_expires_at");
         assertThat(writer).contains("state");
@@ -536,18 +538,24 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp32ExecutorsMustDocumentOnlyNonClaimedDirectSaves() throws Exception {
+    void fdp32ExecutorsMustNotUseRepositorySaveForStateTransitions() throws Exception {
         String legacyExecutor = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationExecutor.java"
         ));
         String evidenceExecutor = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"
         ));
+        String writer = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationFencedCommandWriter.java"
+        ));
 
-        assertThat(legacyExecutor).contains("Non-claimed replay/recovery path");
-        assertThat(evidenceExecutor).contains("Non-claimed replay/recovery path");
-        assertThat(legacyExecutor).doesNotContain("commandRepository.save(document);\n    }\n\n    private boolean isSafeToExecuteBusinessMutation");
-        assertThat(evidenceExecutor).contains("claimed worker transitions must use RegulatedMutationFencedCommandWriter");
+        assertThat(legacyExecutor).doesNotContain("commandRepository.save(");
+        assertThat(evidenceExecutor).doesNotContain("commandRepository.save(");
+        assertThat(legacyExecutor).contains("fencedCommandWriter.recoveryTransition");
+        assertThat(evidenceExecutor).contains("fencedCommandWriter.recoveryTransition");
+        assertThat(writer).contains("recoveryTransition(");
+        assertThat(writer).contains("RegulatedMutationRecoveryWriteConflictException");
+        assertThat(writer).contains("execution_status").contains("PROCESSING");
     }
 
     @Test
@@ -558,6 +566,8 @@ class RegulatedMutationArchitectureTest {
 
         assertThat(combined).contains("claim acquisition is not write fencing");
         assertThat(combined).contains("post-claim transitions are fenced");
+        assertThat(combined).contains("command transition fencing is not business-side-effect rollback by itself");
+        assertThat(combined).contains("transaction-mode REQUIRED");
         assertThat(combined).contains("stale worker");
         assertThat(combined).contains("no silent repository.save after claim");
         assertThat(combined).contains("does not expand transaction scope");

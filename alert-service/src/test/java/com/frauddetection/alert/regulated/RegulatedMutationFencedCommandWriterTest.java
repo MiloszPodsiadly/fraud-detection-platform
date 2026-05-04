@@ -58,6 +58,83 @@ class RegulatedMutationFencedCommandWriterTest {
     }
 
     @Test
+    void activeLeaseValidationUsesSameLeaseOwnerExpiryStateAndExecutionStatusFence() {
+        when(mongoTemplate.count(any(Query.class), eq(RegulatedMutationCommandDocument.class))).thenReturn(1L);
+
+        writer.validateActiveLease(
+                token("owner-a", Instant.now().plusSeconds(30)),
+                RegulatedMutationState.REQUESTED,
+                RegulatedMutationExecutionStatus.PROCESSING
+        );
+
+        ArgumentCaptor<Query> captor = ArgumentCaptor.forClass(Query.class);
+        verify(mongoTemplate).count(captor.capture(), eq(RegulatedMutationCommandDocument.class));
+        String queryJson = captor.getValue().getQueryObject().toString();
+        assertThat(queryJson).contains("_id=command-1");
+        assertThat(queryJson).contains("lease_owner=owner-a");
+        assertThat(queryJson).contains("lease_expires_at");
+        assertThat(queryJson).contains("state=REQUESTED");
+        assertThat(queryJson).contains("execution_status=PROCESSING");
+    }
+
+    @Test
+    void activeLeaseValidationRejectsExpiredLeaseBeforeBusinessMutation() {
+        when(mongoTemplate.count(any(Query.class), eq(RegulatedMutationCommandDocument.class))).thenReturn(0L);
+        RegulatedMutationCommandDocument current = current("owner-a", Instant.now().minusSeconds(1));
+        when(mongoTemplate.findById("command-1", RegulatedMutationCommandDocument.class)).thenReturn(current);
+
+        assertThatThrownBy(() -> writer.validateActiveLease(
+                token("owner-a", Instant.now().minusSeconds(1)),
+                RegulatedMutationState.REQUESTED,
+                RegulatedMutationExecutionStatus.PROCESSING
+        ))
+                .isInstanceOf(StaleRegulatedMutationLeaseException.class)
+                .extracting("reason")
+                .isEqualTo(StaleRegulatedMutationLeaseReason.EXPIRED_LEASE);
+    }
+
+    @Test
+    void recoveryTransitionUsesExpectedStateStatusAndNonClaimedRepairFence() {
+        when(mongoTemplate.updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class)))
+                .thenReturn(UpdateResult.acknowledged(1, 1L, null));
+        RegulatedMutationCommandDocument document = current("owner-a", Instant.now().minusSeconds(1));
+        document.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        document.setState(RegulatedMutationState.FINALIZING);
+
+        writer.recoveryTransition(
+                document,
+                RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
+                RegulatedMutationExecutionStatus.RECOVERY_REQUIRED,
+                "FINALIZING_RETRY_REQUIRES_RECONCILIATION",
+                update -> update.set("degradation_reason", "FINALIZING_RETRY_REQUIRES_RECONCILIATION")
+        );
+
+        String queryJson = capturedQuery().getQueryObject().toString();
+        assertThat(queryJson).contains("_id=command-1");
+        assertThat(queryJson).contains("state=FINALIZING");
+        assertThat(queryJson).contains("execution_status=PROCESSING");
+        assertThat(queryJson).contains("lease_expires_at");
+        Document set = setDocument();
+        assertThat(set.get("state")).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(set.get("execution_status")).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
+        assertThat(set.get("degradation_reason")).isEqualTo("FINALIZING_RETRY_REQUIRES_RECONCILIATION");
+    }
+
+    @Test
+    void recoveryTransitionConflictFailsClosed() {
+        when(mongoTemplate.updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class)))
+                .thenReturn(UpdateResult.acknowledged(0, 0L, null));
+
+        assertThatThrownBy(() -> writer.recoveryTransition(
+                current("owner-a", Instant.now().plusSeconds(30)),
+                RegulatedMutationState.FAILED,
+                RegulatedMutationExecutionStatus.RECOVERY_REQUIRED,
+                "RECOVERY_REQUIRED",
+                null
+        )).isInstanceOf(RegulatedMutationRecoveryWriteConflictException.class);
+    }
+
+    @Test
     void staleLeaseOwnerIsRejected() {
         when(mongoTemplate.updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class)))
                 .thenReturn(UpdateResult.acknowledged(0, 0L, null));
@@ -165,6 +242,16 @@ class RegulatedMutationFencedCommandWriterTest {
                 .tag("state", "REQUESTED")
                 .tag("reason", "STALE_LEASE_OWNER")
                 .counter()).isNotNull();
+        assertThat(meterRegistry.find("regulated_mutation_lease_remaining_at_transition_seconds")
+                .tag("modelVersion", "LEGACY_REGULATED_MUTATION")
+                .tag("state", "REQUESTED")
+                .tag("outcome", "REJECTED")
+                .timer()).isNotNull();
+        assertThat(meterRegistry.find("regulated_mutation_transition_latency_seconds")
+                .tag("modelVersion", "LEGACY_REGULATED_MUTATION")
+                .tag("state", "REQUESTED")
+                .tag("outcome", "REJECTED")
+                .timer()).isNotNull();
         assertThat(meterRegistry.getMeters())
                 .allSatisfy(meter -> assertThat(meter.getId().getTags().toString())
                         .doesNotContain("command-1")
