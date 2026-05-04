@@ -307,6 +307,17 @@ class EvidenceGatedFinalizeCoordinatorTest {
                     new TransactionTemplate(new NoopTransactionManager())
             )
                     : new RegulatedMutationTransactionRunner(RegulatedMutationTransactionMode.OFF, null);
+            EvidenceGatedFinalizeExecutor evidenceGatedFinalizeExecutor = new EvidenceGatedFinalizeExecutor(
+                    commandRepository,
+                    mongoTemplate,
+                    new RegulatedMutationAuditPhaseService(auditEventRepository, auditService),
+                    metrics,
+                    runner,
+                    new RegulatedMutationPublicStatusMapper(),
+                    new EvidencePreconditionEvaluator(),
+                    localAuditPhaseWriter,
+                    Duration.ofSeconds(30)
+            );
             coordinator = new MongoRegulatedMutationCoordinator(
                     commandRepository,
                     mongoTemplate,
@@ -315,8 +326,7 @@ class EvidenceGatedFinalizeCoordinatorTest {
                     metrics,
                     runner,
                     new RegulatedMutationPublicStatusMapper(),
-                    new EvidencePreconditionEvaluator(),
-                    localAuditPhaseWriter,
+                    evidenceGatedFinalizeExecutor,
                     false,
                     Duration.ofSeconds(30)
             );
