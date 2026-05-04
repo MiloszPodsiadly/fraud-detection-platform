@@ -278,6 +278,11 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
             RegulatedMutationClaimToken claimToken
     ) {
         transition(document, claimToken, RegulatedMutationState.BUSINESS_COMMITTING, document.getExecutionStatus(), null);
+        fencedCommandWriter.validateActiveLease(
+                claimToken,
+                RegulatedMutationState.BUSINESS_COMMITTING,
+                document.getExecutionStatus()
+        );
         try {
             R result = command.mutation().execute(new RegulatedMutationExecutionContext(document.getId()));
             transition(document, claimToken, RegulatedMutationState.BUSINESS_COMMITTED, document.getExecutionStatus(), null);
@@ -491,9 +496,14 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
             RegulatedMutationCommandDocument document,
             RegulatedMutationState responseState
     ) {
-        document.setExecutionStatus(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
         document.setDegradationReason("RECOVERY_REQUIRED");
-        directRecoveryTransition(document, document.getState(), "RECOVERY_REQUIRED");
+        recoveryTransition(
+                document,
+                document.getState(),
+                RegulatedMutationExecutionStatus.RECOVERY_REQUIRED,
+                "RECOVERY_REQUIRED",
+                update -> update.set("degradation_reason", "RECOVERY_REQUIRED")
+        );
         return new RegulatedMutationResult<>(document.getState(), command.statusResponseFactory().response(responseState));
     }
 
@@ -548,10 +558,15 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
         applyTransition(document, state, executionStatus, lastError);
     }
 
-    private void directRecoveryTransition(RegulatedMutationCommandDocument document, RegulatedMutationState state, String lastError) {
-        applyTransition(document, state, document.getExecutionStatus(), lastError);
-        // Non-claimed replay/recovery path: claimed worker transitions must use RegulatedMutationFencedCommandWriter.
-        commandRepository.save(document);
+    private void recoveryTransition(
+            RegulatedMutationCommandDocument document,
+            RegulatedMutationState state,
+            RegulatedMutationExecutionStatus executionStatus,
+            String lastError,
+            Consumer<Update> allowedFieldUpdates
+    ) {
+        fencedCommandWriter.recoveryTransition(document, state, executionStatus, lastError, allowedFieldUpdates);
+        applyTransition(document, state, executionStatus, lastError);
     }
 
     private void applyTransition(

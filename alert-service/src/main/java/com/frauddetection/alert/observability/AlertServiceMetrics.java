@@ -228,6 +228,34 @@ public class AlertServiceMetrics {
         ).increment();
     }
 
+    public void recordRegulatedMutationLeaseRemainingAtTransition(
+            Enum<?> modelVersion,
+            Enum<?> state,
+            String outcome,
+            Duration leaseRemaining
+    ) {
+        Timer.builder("regulated_mutation_lease_remaining_at_transition_seconds")
+                .tag("modelVersion", normalizeRegulatedMutationModelVersion(modelVersion))
+                .tag("state", normalizeRegulatedMutationState(state))
+                .tag("outcome", normalizeRegulatedMutationFencingOutcome(outcome))
+                .register(meterRegistry)
+                .record(leaseRemaining == null || leaseRemaining.isNegative() ? Duration.ZERO : leaseRemaining);
+    }
+
+    public void recordRegulatedMutationTransitionLatency(
+            Enum<?> modelVersion,
+            Enum<?> state,
+            String outcome,
+            Duration latency
+    ) {
+        Timer.builder("regulated_mutation_transition_latency_seconds")
+                .tag("modelVersion", normalizeRegulatedMutationModelVersion(modelVersion))
+                .tag("state", normalizeRegulatedMutationState(state))
+                .tag("outcome", normalizeRegulatedMutationFencingOutcome(outcome))
+                .register(meterRegistry)
+                .record(latency == null || latency.isNegative() ? Duration.ZERO : latency);
+    }
+
     public void recordRegulatedMutationStaleWriteRejected(Enum<?> modelVersion, Enum<?> state, String reason) {
         counter(
                 "regulated_mutation_stale_write_rejected_total",
@@ -830,7 +858,7 @@ public class AlertServiceMetrics {
     private String normalizeRegulatedMutationFencingReason(String reason) {
         return switch (reason) {
             case "NONE", "STALE_LEASE_OWNER", "EXPIRED_LEASE", "EXPECTED_STATE_MISMATCH",
-                 "EXPECTED_STATUS_MISMATCH", "COMMAND_NOT_FOUND", "UNKNOWN" -> reason;
+                 "EXPECTED_STATUS_MISMATCH", "COMMAND_NOT_FOUND", "RECOVERY_WRITE_CONFLICT", "UNKNOWN" -> reason;
             default -> "UNKNOWN";
         };
     }

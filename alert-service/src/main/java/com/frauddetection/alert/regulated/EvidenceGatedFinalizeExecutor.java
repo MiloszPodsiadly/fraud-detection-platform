@@ -164,7 +164,19 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
                     markRecoveryRequired(command, document, decision.reason());
             case FINALIZED_VISIBLE_REPAIRABLE -> {
                 metrics.recordEvidenceGatedFinalizeStuckVisible();
-                directRecoveryTransition(document, RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL, null);
+                recoveryTransition(
+                        document,
+                        RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                        RegulatedMutationExecutionStatus.COMPLETED,
+                        null,
+                        update -> update.set(
+                                "public_status",
+                                publicStatusMapper.submitDecisionStatus(
+                                        RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                                        document.mutationModelVersionOrLegacy()
+                                )
+                        )
+                );
                 yield replay(command, document);
             }
             case RECOVERY_REQUIRED_RESPONSE -> new RegulatedMutationResult<>(
@@ -250,6 +262,11 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
         transition(document, claimToken, RegulatedMutationState.FINALIZING, document.getExecutionStatus(), null);
         try {
             LocalCommit<R, S> localCommit = transactionRunner.runLocalCommit(() -> {
+                fencedCommandWriter.validateActiveLease(
+                        claimToken,
+                        RegulatedMutationState.FINALIZING,
+                        document.getExecutionStatus()
+                );
                 R result = command.mutation().execute(new RegulatedMutationExecutionContext(document.getId()));
                 S response = command.responseMapper().response(result, RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
                 RegulatedMutationResponseSnapshot snapshot = command.responseSnapshotter().snapshot(response);
@@ -277,6 +294,8 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
                 return new LocalCommit<>(result, response, snapshot);
             });
             return new RegulatedMutationResult<>(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL, localCommit.pendingResponse());
+        } catch (StaleRegulatedMutationLeaseException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             RegulatedMutationCommandDocument persisted = reloadForRecovery(document);
             persisted.setDegradationReason(EVIDENCE_GATED_FINALIZE_FAILED);
@@ -299,8 +318,22 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
             String reason
     ) {
         document.setDegradationReason(reason);
-        document.setExecutionStatus(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
-        directRecoveryTransition(document, RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED, reason);
+        recoveryTransition(
+                document,
+                RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
+                RegulatedMutationExecutionStatus.RECOVERY_REQUIRED,
+                reason,
+                update -> {
+                    update.set("degradation_reason", reason);
+                    update.set(
+                            "public_status",
+                            publicStatusMapper.submitDecisionStatus(
+                                    RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
+                                    document.mutationModelVersionOrLegacy()
+                            )
+                    );
+                }
+        );
         metrics.recordEvidenceGatedFinalizeRecoveryRequired(reason);
         return new RegulatedMutationResult<>(
                 RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
@@ -392,17 +425,18 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
         metrics.recordEvidenceGatedFinalizeStateTransition(previous, state, lastError == null ? "SUCCESS" : "FAILED");
     }
 
-    private void directRecoveryTransition(
+    private void recoveryTransition(
             RegulatedMutationCommandDocument document,
             RegulatedMutationState state,
-            String lastError
+            RegulatedMutationExecutionStatus executionStatus,
+            String lastError,
+            Consumer<Update> allowedFieldUpdates
     ) {
         RegulatedMutationState previous = document.getState();
         stateMachine.requireTransition(document.getState(), state);
+        fencedCommandWriter.recoveryTransition(document, state, executionStatus, lastError, allowedFieldUpdates);
         document.setPublicStatus(publicStatusMapper.submitDecisionStatus(state, document.mutationModelVersionOrLegacy()));
-        applyTransition(document, state, document.getExecutionStatus(), lastError);
-        // Non-claimed replay/recovery path: claimed worker transitions must use RegulatedMutationFencedCommandWriter.
-        commandRepository.save(document);
+        applyTransition(document, state, executionStatus, lastError);
         metrics.recordEvidenceGatedFinalizeStateTransition(previous, state, lastError == null ? "SUCCESS" : "FAILED");
     }
 

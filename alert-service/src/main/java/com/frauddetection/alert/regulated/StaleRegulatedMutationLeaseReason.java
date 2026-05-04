@@ -6,5 +6,6 @@ public enum StaleRegulatedMutationLeaseReason {
     EXPECTED_STATE_MISMATCH,
     EXPECTED_STATUS_MISMATCH,
     COMMAND_NOT_FOUND,
+    RECOVERY_WRITE_CONFLICT,
     UNKNOWN
 }
