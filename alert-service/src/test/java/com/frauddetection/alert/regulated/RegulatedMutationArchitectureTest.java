@@ -232,6 +232,100 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
+    void fdp29FinalizeTransactionMustUseLocalAuditWriterOnly() throws Exception {
+        String executor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"
+        ));
+        String finalizeMethod = executor.substring(
+                executor.indexOf("private <R, S> RegulatedMutationResult<S> finalizeVisibleMutation("),
+                executor.indexOf("private <R, S> RegulatedMutationResult<S> markRecoveryRequired(")
+        );
+
+        assertThat(finalizeMethod).contains("localSuccessAudit(command, document)");
+        assertThat(finalizeMethod).doesNotContain("auditPhaseService.recordPhase");
+        assertThat(finalizeMethod).doesNotContain("AuditService");
+        assertThat(finalizeMethod).doesNotContain("AuditEventPublisher");
+        assertThat(finalizeMethod).doesNotContain("ExternalAuditAnchorPublisher");
+        assertThat(finalizeMethod).doesNotContain("FraudDecisionEventPublisher");
+        assertThat(finalizeMethod).doesNotContain("KafkaTemplate");
+        assertThat(finalizeMethod).doesNotContain("SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL");
+    }
+
+    @Test
+    void fdp29CoordinatorMustDelegateEvidenceGatedFinalizeToExecutor() throws Exception {
+        String coordinator = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/MongoRegulatedMutationCoordinator.java"
+        ));
+
+        assertThat(coordinator).contains("EvidenceGatedFinalizeExecutor");
+        assertThat(coordinator).contains("evidenceGatedFinalizeExecutor.commit(command, idempotencyKey, document)");
+        assertThat(coordinator).doesNotContain("private <R, S> void prepareEvidence(");
+        assertThat(coordinator).doesNotContain("private <R, S> RegulatedMutationResult<S> finalizeVisibleMutation(");
+        assertThat(coordinator).doesNotContain("localSuccessAudit(");
+    }
+
+    @Test
+    void localAuditPhaseWriterMustNotFanOutToAuditPublishers() throws Exception {
+        String writer = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/audit/RegulatedMutationLocalAuditPhaseWriter.java"
+        ));
+
+        assertThat(writer).contains("AuditEventRepository");
+        assertThat(writer).contains("AuditAnchorRepository");
+        assertThat(writer).doesNotContain("AuditService");
+        assertThat(writer).doesNotContain("AuditEventPublisher");
+        assertThat(writer).doesNotContain("ExternalAuditAnchorPublisher");
+        assertThat(writer).doesNotContain("KafkaTemplate");
+        assertThat(writer).doesNotContain(".publish(");
+    }
+
+    @Test
+    void localAuditPhaseWriterMustOnlyBeUsedByFdp29CoordinatorPath() throws Exception {
+        List<Path> javaFiles;
+        try (java.util.stream.Stream<Path> stream = Files.walk(Path.of("src/main/java/com/frauddetection/alert"))) {
+            javaFiles = stream
+                    .filter(path -> path.toString().endsWith(".java"))
+                    .filter(path -> !path.toString().replace('\\', '/')
+                            .endsWith("audit/RegulatedMutationLocalAuditPhaseWriter.java"))
+                    .toList();
+        }
+
+        for (Path path : javaFiles) {
+            String normalized = path.toString().replace('\\', '/');
+            String source = Files.readString(path);
+            if (normalized.endsWith("regulated/MongoRegulatedMutationCoordinator.java")
+                    || normalized.endsWith("regulated/EvidenceGatedFinalizeExecutor.java")
+                    || normalized.endsWith("regulated/EvidenceGatedFinalizeStartupGuard.java")) {
+                assertThat(source).contains("RegulatedMutationLocalAuditPhaseWriter");
+                continue;
+            }
+            assertThat(source)
+                    .as("RegulatedMutationLocalAuditPhaseWriter must not leak outside FDP-29 coordinator: " + path)
+                    .doesNotContain("RegulatedMutationLocalAuditPhaseWriter");
+        }
+    }
+
+    @Test
+    void legacyAuditPathsMustContinueUsingPhaseAuditService() throws Exception {
+        String coordinator = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/MongoRegulatedMutationCoordinator.java"
+        ));
+        String writeSuccessAudit = coordinator.substring(
+                coordinator.indexOf("private <R, S> S writeSuccessAudit("),
+                coordinator.indexOf("private <R, S> void recordPostCommitDegraded(")
+        );
+        String retrySuccessAuditOnly = coordinator.substring(
+                coordinator.indexOf("private <R, S> RegulatedMutationResult<S> retrySuccessAuditOnly("),
+                coordinator.indexOf("private <R, S> S writeSuccessAudit(")
+        );
+
+        assertThat(writeSuccessAudit).contains("auditPhaseService.recordPhase");
+        assertThat(writeSuccessAudit).doesNotContain("localSuccessAudit(");
+        assertThat(retrySuccessAuditOnly).contains("auditPhaseService.recordPhase");
+        assertThat(retrySuccessAuditOnly).doesNotContain("localSuccessAudit(");
+    }
+
+    @Test
     void trustIncidentReadsMustRemainReadOnly() throws Exception {
         String service = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/trust/TrustIncidentService.java"
@@ -314,6 +408,42 @@ class RegulatedMutationArchitectureTest {
         assertForbiddenPhraseIsContextual(combined, "regulator-certified");
         assertThat(combined).contains("not distributed ACID");
         assertThat(combined).contains("does not provide exactly-once");
+    }
+
+    @Test
+    void fdp29DocsMustDescribeCurrentLocalScopeAndTargetGaps() throws Exception {
+        String readme = Files.readString(Path.of("../README.md"));
+        String adr = Files.readString(Path.of("../docs/adr/FDP-29-evidence-gated-finalize.md"));
+        String handoff = Files.readString(Path.of("../docs/FDP-29-evidence-gated-finalize-handoff.md"));
+        String preconditions = Files.readString(Path.of("../docs/architecture/FDP-29-evidence-preconditions.md"));
+        String openApi = Files.readString(Path.of("../docs/openapi/alert-service.openapi.yaml"));
+        String combined = readme + "\n" + adr + "\n" + handoff + "\n" + preconditions + "\n" + openApi;
+
+        assertThat(combined).contains("local evidence-precondition-gated finalize");
+        assertThat(combined).contains("Current Implementation vs Target Design");
+        assertThat(combined).contains("LOCAL_EVIDENCE_GATE_V1");
+        assertThat(combined).contains("External anchor readiness");
+        assertThat(combined).contains("Trust Authority signing readiness");
+        assertThat(combined).contains("not part of the current local finalize transaction");
+        assertThat(combined).contains("not distributed ACID");
+    }
+
+    @Test
+    void fdp29DocsMustNotContainPromptDecisionNotes() throws Exception {
+        List<Path> docs;
+        try (java.util.stream.Stream<Path> stream = Files.walk(Path.of("../docs"))) {
+            docs = stream
+                    .filter(path -> path.toString().endsWith(".md"))
+                    .toList();
+        }
+
+        for (Path doc : docs) {
+            String source = Files.readString(doc);
+            assertThat(source).as("project documentation must not contain prompt merge-decision notes: " + doc)
+                    .doesNotContain("Merge Decision")
+                    .doesNotContain("GO: design is internally consistent")
+                    .doesNotContain("NO-GO: reviewers");
+        }
     }
 
     private void assertForbiddenPhraseIsContextual(String source, String phrase) {

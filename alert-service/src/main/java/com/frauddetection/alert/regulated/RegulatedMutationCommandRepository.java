@@ -33,6 +33,8 @@ public interface RegulatedMutationCommandRepository extends MongoRepository<Regu
 
     long countByState(RegulatedMutationState state);
 
+    long countByStateIn(Collection<RegulatedMutationState> states);
+
     java.util.Optional<RegulatedMutationCommandDocument> findTopByExecutionStatusOrderByUpdatedAtAsc(
             RegulatedMutationExecutionStatus executionStatus
     );

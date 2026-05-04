@@ -31,6 +31,7 @@ public class MutationEvidenceConfirmationService {
     private final AuditEventPublicationStatusLookup publicationStatusLookup;
     private final MongoTemplate mongoTemplate;
     private final AlertServiceMetrics metrics;
+    private final RegulatedMutationPublicStatusMapper publicStatusMapper;
     private final boolean externalAnchorRequired;
     private final boolean signatureRequired;
 
@@ -51,6 +52,7 @@ public class MutationEvidenceConfirmationService {
         this.publicationStatusLookup = publicationStatusLookup;
         this.mongoTemplate = mongoTemplate;
         this.metrics = metrics;
+        this.publicStatusMapper = new RegulatedMutationPublicStatusMapper();
         this.externalAnchorRequired = externalAnchorRequired;
         this.signatureRequired = signatureRequired;
     }
@@ -66,36 +68,92 @@ public class MutationEvidenceConfirmationService {
     }
 
     public int confirmPendingEvidence(int limit) {
+        if (limit <= 0) {
+            return 0;
+        }
         int promoted = 0;
         List<RegulatedMutationCommandDocument> commands = commandRepository.findTop100ByStateInAndUpdatedAtBefore(
-                List.of(RegulatedMutationState.EVIDENCE_PENDING),
+                List.of(
+                        RegulatedMutationState.EVIDENCE_PENDING,
+                        RegulatedMutationState.FINALIZED_VISIBLE,
+                        RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL
+                ),
                 java.time.Instant.now().plusSeconds(1)
         );
-        int boundedLimit = Math.max(1, Math.min(limit, 100));
+        int boundedLimit = Math.min(limit, 100);
         metrics.recordEvidenceConfirmationPending(commands.size());
         for (RegulatedMutationCommandDocument command : commands.stream().limit(boundedLimit).toList()) {
-            EvidenceDecision decision = decision(command);
-            if (decision.state() == RegulatedMutationState.EVIDENCE_CONFIRMED) {
-                command.setState(RegulatedMutationState.EVIDENCE_CONFIRMED);
-                command.setPublicStatus(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED);
-                command.setUpdatedAt(java.time.Instant.now());
-                commandRepository.save(command);
-                updateAlertOperationStatus(command, SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED);
-                promoted++;
-            } else if (decision.state() == RegulatedMutationState.COMMITTED_DEGRADED) {
-                command.setState(RegulatedMutationState.COMMITTED_DEGRADED);
-                command.setPublicStatus(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE);
-                command.setDegradationReason(decision.reason());
-                command.setLastError(decision.reason());
-                command.setUpdatedAt(java.time.Instant.now());
-                commandRepository.save(command);
-                updateAlertOperationStatus(command, SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE);
-                metrics.recordEvidenceConfirmationFailed(decision.reason());
-            } else if (decision.reason() != null) {
-                metrics.recordEvidenceConfirmationFailed(decision.reason());
-            }
+            promoted += command.mutationModelVersionOrLegacy() == RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
+                    ? confirmEvidenceGatedCommand(command)
+                    : confirmLegacyCommand(command);
         }
         return promoted;
+    }
+
+    private int confirmLegacyCommand(RegulatedMutationCommandDocument command) {
+        EvidenceDecision decision = decision(command);
+        if (decision.state() == RegulatedMutationState.EVIDENCE_CONFIRMED) {
+            command.setState(RegulatedMutationState.EVIDENCE_CONFIRMED);
+            command.setPublicStatus(publicStatusMapper.submitDecisionStatus(command));
+            command.setUpdatedAt(java.time.Instant.now());
+            commandRepository.save(command);
+            updateAlertOperationStatus(command, command.getPublicStatus());
+            return 1;
+        }
+        if (decision.state() == RegulatedMutationState.COMMITTED_DEGRADED) {
+            command.setState(RegulatedMutationState.COMMITTED_DEGRADED);
+            command.setPublicStatus(publicStatusMapper.submitDecisionStatus(command));
+            command.setDegradationReason(decision.reason());
+            command.setLastError(decision.reason());
+            command.setUpdatedAt(java.time.Instant.now());
+            commandRepository.save(command);
+            updateAlertOperationStatus(command, command.getPublicStatus());
+            metrics.recordEvidenceConfirmationFailed(decision.reason());
+            return 0;
+        }
+        if (decision.reason() != null) {
+            metrics.recordEvidenceConfirmationFailed(decision.reason());
+        }
+        return 0;
+    }
+
+    private int confirmEvidenceGatedCommand(RegulatedMutationCommandDocument command) {
+        EvidenceDecision decision = decision(command);
+        if (decision.state() == RegulatedMutationState.EVIDENCE_CONFIRMED) {
+            command.setState(RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED);
+            command.setPublicStatus(publicStatusMapper.submitDecisionStatus(command));
+            command.setUpdatedAt(java.time.Instant.now());
+            commandRepository.save(command);
+            updateAlertOperationStatus(command, command.getPublicStatus());
+            return 1;
+        }
+        if (decision.state() == RegulatedMutationState.EVIDENCE_PENDING) {
+            if (command.getState() == RegulatedMutationState.FINALIZED_VISIBLE) {
+                command.setState(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
+                command.setPublicStatus(publicStatusMapper.submitDecisionStatus(command));
+                command.setUpdatedAt(java.time.Instant.now());
+                commandRepository.save(command);
+                updateAlertOperationStatus(command, command.getPublicStatus());
+                metrics.recordEvidenceGatedFinalizeStuckVisible();
+            }
+            if (decision.reason() != null) {
+                metrics.recordEvidenceConfirmationFailed(decision.reason());
+            }
+            return 0;
+        }
+        if (decision.state() == RegulatedMutationState.COMMITTED_DEGRADED
+                || decision.state() == RegulatedMutationState.FAILED) {
+            command.setState(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+            command.setPublicStatus(publicStatusMapper.submitDecisionStatus(command));
+            command.setDegradationReason(decision.reason());
+            command.setLastError(decision.reason());
+            command.setUpdatedAt(java.time.Instant.now());
+            commandRepository.save(command);
+            updateAlertOperationStatus(command, command.getPublicStatus());
+            metrics.recordEvidenceGatedFinalizeRecoveryRequired(decision.reason());
+            metrics.recordEvidenceConfirmationFailed(decision.reason());
+        }
+        return 0;
     }
 
     public EvidenceDecision decision(RegulatedMutationCommandDocument command) {
@@ -107,13 +165,19 @@ public class MutationEvidenceConfirmationService {
         }
         TransactionalOutboxRecordDocument outbox = outboxRepository.findByMutationCommandId(command.getId()).orElse(null);
         if (outbox == null) {
-            return new EvidenceDecision(RegulatedMutationState.EVIDENCE_PENDING, "OUTBOX_NOT_PUBLISHED");
+            if (command.getOutboxEventId() != null && !command.getOutboxEventId().isBlank()) {
+                return new EvidenceDecision(
+                        RegulatedMutationState.COMMITTED_DEGRADED,
+                        "OUTBOX_RECORD_MISSING_AFTER_LOCAL_COMMIT"
+                );
+            }
+            return new EvidenceDecision(RegulatedMutationState.EVIDENCE_PENDING, "OUTBOX_NOT_YET_PUBLISHED");
         }
         if (outbox.getStatus() == TransactionalOutboxStatus.FAILED_TERMINAL) {
             return new EvidenceDecision(RegulatedMutationState.COMMITTED_DEGRADED, "OUTBOX_FAILED_TERMINAL");
         }
         if (outbox.getStatus() != TransactionalOutboxStatus.PUBLISHED) {
-            return new EvidenceDecision(RegulatedMutationState.EVIDENCE_PENDING, "OUTBOX_NOT_PUBLISHED");
+            return new EvidenceDecision(RegulatedMutationState.EVIDENCE_PENDING, "OUTBOX_NOT_YET_PUBLISHED");
         }
         if (externalAnchorRequired) {
             AuditEventExternalEvidenceStatus status = externalEvidenceStatus(command);

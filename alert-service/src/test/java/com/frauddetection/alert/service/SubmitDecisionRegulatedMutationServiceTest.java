@@ -20,10 +20,14 @@ import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.regulated.MissingIdempotencyKeyException;
 import com.frauddetection.alert.regulated.MongoRegulatedMutationCoordinator;
+import com.frauddetection.alert.regulated.RegulatedMutationCommand;
 import com.frauddetection.alert.regulated.RegulatedMutationCommandDocument;
 import com.frauddetection.alert.regulated.RegulatedMutationExecutionStatus;
 import com.frauddetection.alert.regulated.RegulatedMutationCommandRepository;
 import com.frauddetection.alert.regulated.RegulatedMutationAuditPhaseService;
+import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
+import com.frauddetection.alert.regulated.RegulatedMutationModelVersion;
+import com.frauddetection.alert.regulated.RegulatedMutationResult;
 import com.frauddetection.alert.regulated.RegulatedMutationResponseSnapshot;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.alert.regulated.mutation.submitdecision.SubmitDecisionMutationHandler;
@@ -32,6 +36,7 @@ import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
 import com.frauddetection.common.events.enums.RiskLevel;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.mongodb.core.FindAndModifyOptions;
@@ -284,6 +289,35 @@ class SubmitDecisionRegulatedMutationServiceTest {
     }
 
     @Test
+    void shouldPersistEvidenceGatedSubmitDecisionOperationStatusWhenRequested() {
+        Fixture fixture = new Fixture();
+        AlertDocument alert = fixture.alert();
+        when(fixture.alertRepository.findById("alert-1")).thenReturn(Optional.of(alert));
+        when(fixture.alertRepository.save(any(AlertDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(fixture.outboxRepository.save(any(TransactionalOutboxRecordDocument.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        SubmitDecisionMutationHandler handler = new SubmitDecisionMutationHandler(
+                fixture.alertRepository,
+                new AlertDocumentMapper(),
+                new DecisionOutboxWriter(new FraudDecisionEventMapper(), fixture.outboxRepository)
+        );
+
+        handler.applyDecision(
+                "alert-1",
+                request(),
+                AlertStatus.RESOLVED,
+                "principal-7",
+                "idem-1",
+                "request-hash-1",
+                "mutation-1",
+                SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
+        );
+
+        assertThat(alert.getDecisionOperationStatus())
+                .isEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL.name());
+    }
+
+    @Test
     void shouldReturnInProgressWhenDuplicateRequestArrivesDuringActiveLease() {
         Fixture fixture = new Fixture();
         RegulatedMutationCommandDocument existing = fixture.existingCommand(RegulatedMutationState.AUDIT_ATTEMPTED);
@@ -410,6 +444,46 @@ class SubmitDecisionRegulatedMutationServiceTest {
                 any(AuditEventMetadataSummary.class),
                 eq("mutation-1:SUCCESS")
         );
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldUseEvidenceGatedFinalizeModelVersionWhenFeatureFlagEnabled() {
+        AlertRepository alertRepository = mock(AlertRepository.class);
+        com.frauddetection.alert.security.principal.AnalystActorResolver actorResolver =
+                mock(com.frauddetection.alert.security.principal.AnalystActorResolver.class);
+        RegulatedMutationCoordinator coordinator = mock(RegulatedMutationCoordinator.class);
+        AlertDocument alert = new Fixture().alert();
+        when(alertRepository.findById("alert-1")).thenReturn(Optional.of(alert));
+        when(actorResolver.resolveActorId(eq("analyst-7"), eq("SUBMIT_ANALYST_DECISION"), eq("alert-1")))
+                .thenReturn("principal-7");
+        when(coordinator.commit(any())).thenAnswer(invocation -> {
+            RegulatedMutationCommand<AlertDocument, SubmitAnalystDecisionResponse> command = invocation.getArgument(0);
+            return new RegulatedMutationResult<>(
+                    RegulatedMutationState.REQUESTED,
+                    command.statusResponseFactory().response(RegulatedMutationState.REQUESTED)
+            );
+        });
+        SubmitDecisionRegulatedMutationService service = new SubmitDecisionRegulatedMutationService(
+                alertRepository,
+                new AnalystDecisionStatusMapper(),
+                actorResolver,
+                mock(SubmitDecisionMutationHandler.class),
+                coordinator,
+                true,
+                true
+        );
+
+        SubmitAnalystDecisionResponse response = service.submit("alert-1", request(), "idem-1");
+
+        ArgumentCaptor<RegulatedMutationCommand<AlertDocument, SubmitAnalystDecisionResponse>> captor =
+                ArgumentCaptor.forClass(RegulatedMutationCommand.class);
+        verify(coordinator).commit(captor.capture());
+        assertThat(captor.getValue().mutationModelVersion())
+                .isEqualTo(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.IN_PROGRESS);
+        assertThat(response.decision()).isNull();
+        assertThat(response.resultingStatus()).isEqualTo(AlertStatus.OPEN);
     }
 
     private SubmitAnalystDecisionRequest request() {

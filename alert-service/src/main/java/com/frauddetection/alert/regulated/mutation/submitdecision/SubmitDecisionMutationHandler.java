@@ -38,6 +38,28 @@ public class SubmitDecisionMutationHandler {
             String requestHash,
             String mutationCommandId
     ) {
+        return applyDecision(
+                alertId,
+                request,
+                resultingStatus,
+                actorId,
+                idempotencyKey,
+                requestHash,
+                mutationCommandId,
+                SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING
+        );
+    }
+
+    public AlertDocument applyDecision(
+            String alertId,
+            SubmitAnalystDecisionRequest request,
+            AlertStatus resultingStatus,
+            String actorId,
+            String idempotencyKey,
+            String requestHash,
+            String mutationCommandId,
+            SubmitDecisionOperationStatus operationStatus
+    ) {
         AlertDocument document = alertRepository.findById(alertId).orElseThrow(() -> new AlertNotFoundException(alertId));
         document.setAlertStatus(resultingStatus);
         document.setAnalystDecision(request.decision());
@@ -47,7 +69,7 @@ public class SubmitDecisionMutationHandler {
         document.setDecidedAt(Instant.now());
         document.setDecisionIdempotencyKey(normalizeIdempotencyKey(idempotencyKey));
         document.setDecisionIdempotencyRequestHash(requestHash);
-        document.setDecisionOperationStatus(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING.name());
+        document.setDecisionOperationStatus(operationStatus.name());
         decisionOutboxWriter.attachPendingOutbox(
                 document,
                 alertDocumentMapper.toDomain(document),

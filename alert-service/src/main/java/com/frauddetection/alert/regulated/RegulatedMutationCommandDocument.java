@@ -56,6 +56,8 @@ public class RegulatedMutationCommandDocument {
     private String intentNotesHash;
     @Field("intent_payload_hash")
     private String intentPayloadHash;
+    @Field("mutation_model_version")
+    private RegulatedMutationModelVersion mutationModelVersion;
     private RegulatedMutationState state;
     @Field("execution_status")
     private RegulatedMutationExecutionStatus executionStatus;
@@ -136,6 +138,11 @@ public class RegulatedMutationCommandDocument {
     public void setIntentNotesHash(String intentNotesHash) { this.intentNotesHash = intentNotesHash; }
     public String getIntentPayloadHash() { return intentPayloadHash; }
     public void setIntentPayloadHash(String intentPayloadHash) { this.intentPayloadHash = intentPayloadHash; }
+    public RegulatedMutationModelVersion getMutationModelVersion() { return mutationModelVersion; }
+    public void setMutationModelVersion(RegulatedMutationModelVersion mutationModelVersion) { this.mutationModelVersion = mutationModelVersion; }
+    public RegulatedMutationModelVersion mutationModelVersionOrLegacy() {
+        return mutationModelVersion == null ? RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION : mutationModelVersion;
+    }
     public RegulatedMutationState getState() { return state; }
     public void setState(RegulatedMutationState state) { this.state = state; }
     public RegulatedMutationExecutionStatus getExecutionStatus() { return executionStatus; }

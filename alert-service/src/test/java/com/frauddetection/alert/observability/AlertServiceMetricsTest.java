@@ -192,4 +192,93 @@ class AlertServiceMetricsTest {
                 .extracting(Tag::getKey)
                 .doesNotContain("actor_id", "resource_id", "audit_event_id", "hash", "path", "exception", "message");
     }
+
+    @Test
+    void shouldUseLowCardinalityEvidenceGatedFinalizeMetricLabels() {
+        metrics.recordEvidenceGatedFinalizeStateTransition(
+                com.frauddetection.alert.regulated.RegulatedMutationState.EVIDENCE_PREPARED,
+                com.frauddetection.alert.regulated.RegulatedMutationState.FINALIZING,
+                "SUCCESS"
+        );
+        metrics.recordEvidenceGatedFinalizeRecoveryRequired("OUTBOX_FAILED_TERMINAL");
+        metrics.recordEvidenceGatedFinalizeRecoveryRequired("alert-123/raw-message");
+        metrics.recordEvidenceGatedFinalizeRejected("ATTEMPTED_AUDIT_UNAVAILABLE");
+        metrics.recordEvidenceGatedFinalizeTransactionRollback("EVIDENCE_GATED_FINALIZE_FAILED");
+        metrics.recordEvidenceConfirmationFailed("idempotency-key-raw-value");
+        metrics.recordEvidenceGatedFinalizeStuckVisible();
+        metrics.recordEvidenceGatedFinalizeEnabled("SUBMIT_ANALYST_DECISION", true);
+        metrics.recordFdp29LocalAuditChainAppend("SUCCESS");
+        metrics.recordFdp29LocalAuditChainAppend("raw-command-id");
+        metrics.recordFdp29LocalAuditChainRetry("LOCK_CONFLICT");
+        metrics.recordFdp29LocalAuditChainRetry("raw-lock-owner");
+        metrics.recordFdp29LocalAuditChainAppendDuration(Duration.ofMillis(3));
+        metrics.recordFdp29LocalAuditChainLockReleaseFailure();
+
+        Meter transition = meterRegistry.get("evidence_gated_finalize_state_transition_total").meter();
+        Meter recovery = meterRegistry.get("evidence_gated_finalize_recovery_required_total").meter();
+        Meter rejected = meterRegistry.get("evidence_gated_finalize_rejected_total").meter();
+        Meter rollback = meterRegistry.get("evidence_gated_finalize_transaction_rollback_total").meter();
+        Meter stuck = meterRegistry.get("evidence_gated_finalize_stuck_visible_total").meter();
+        Meter enabled = meterRegistry.get("evidence_gated_finalize_enabled").meter();
+        Meter localAuditAppendSuccess = meterRegistry.get("fdp29_local_audit_chain_append_total")
+                .tag("outcome", "SUCCESS")
+                .meter();
+        Meter localAuditAppendUnknown = meterRegistry.get("fdp29_local_audit_chain_append_total")
+                .tag("outcome", "CHAIN_CONFLICT_EXHAUSTED")
+                .meter();
+        Meter localAuditRetry = meterRegistry.get("fdp29_local_audit_chain_retry_total")
+                .tag("reason", "LOCK_CONFLICT")
+                .meter();
+        Meter localAuditAppendDuration = meterRegistry.get("fdp29_local_audit_chain_append_duration_ms").meter();
+        Meter localAuditLockReleaseFailure = meterRegistry.get("fdp29_local_audit_chain_lock_release_failure_total").meter();
+
+        assertThat(transition.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactlyInAnyOrder("from", "to", "outcome");
+        assertThat(recovery.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactly("reason");
+        assertThat(rejected.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactly("reason");
+        assertThat(rollback.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactly("reason");
+        assertThat(stuck.getId().getTags()).isEmpty();
+        assertThat(enabled.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactly("mutation_type");
+        assertThat(localAuditAppendSuccess.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactly("outcome");
+        assertThat(localAuditAppendUnknown.getId().getTags())
+                .extracting(Tag::getValue)
+                .containsExactly("CHAIN_CONFLICT_EXHAUSTED");
+        assertThat(localAuditRetry.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactly("reason");
+        assertThat(localAuditAppendDuration.getId().getTags()).isEmpty();
+        assertThat(localAuditLockReleaseFailure.getId().getTags()).isEmpty();
+        assertThat(transition.getId().getTags())
+                .extracting(Tag::getKey)
+                .doesNotContain("alert_id", "command_id", "actor_id", "idempotency_key", "exception", "path");
+        assertThat(localAuditAppendSuccess.getId().getTags())
+                .extracting(Tag::getKey)
+                .doesNotContain("alert_id", "command_id", "actor_id", "idempotency_key", "exception", "path", "lock_owner");
+        assertThat(localAuditRetry.getId().getTags())
+                .extracting(Tag::getKey)
+                .doesNotContain("alert_id", "command_id", "actor_id", "idempotency_key", "exception", "path", "lock_owner");
+        assertThat(meterRegistry.get("evidence_gated_finalize_recovery_required_total")
+                .tag("reason", "UNKNOWN")
+                .counter()
+                .count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.get("evidence_confirmation_failed_total")
+                .tag("reason", "UNKNOWN")
+                .counter()
+                .count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.get("fdp29_local_audit_chain_retry_total")
+                .tag("reason", "CHAIN_CONFLICT")
+                .counter()
+                .count()).isEqualTo(1.0d);
+    }
 }

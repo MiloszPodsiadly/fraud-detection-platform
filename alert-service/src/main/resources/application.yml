@@ -41,6 +41,16 @@ management:
 app:
   regulated-mutations:
     transaction-mode: ${REGULATED_MUTATIONS_TRANSACTION_MODE:OFF}
+    evidence-gated-finalize:
+      enabled: ${REGULATED_MUTATIONS_EVIDENCE_GATED_FINALIZE_ENABLED:false}
+      submit-decision:
+        enabled: ${REGULATED_MUTATIONS_EVIDENCE_GATED_FINALIZE_SUBMIT_DECISION_ENABLED:false}
+      fraud-case-update:
+        enabled: ${REGULATED_MUTATIONS_EVIDENCE_GATED_FINALIZE_FRAUD_CASE_UPDATE_ENABLED:false}
+      trust-incident:
+        enabled: ${REGULATED_MUTATIONS_EVIDENCE_GATED_FINALIZE_TRUST_INCIDENT_ENABLED:false}
+      outbox-resolution:
+        enabled: ${REGULATED_MUTATIONS_EVIDENCE_GATED_FINALIZE_OUTBOX_RESOLUTION_ENABLED:false}
     transaction-capability-probe:
       enabled: ${REGULATED_MUTATIONS_TRANSACTION_CAPABILITY_PROBE_ENABLED:true}
   outbox:
@@ -64,6 +74,11 @@ app:
   audit:
     bank-mode:
       fail-closed: ${AUDIT_BANK_MODE_FAIL_CLOSED:false}
+    local-phase-writer:
+      max-append-attempts: ${AUDIT_LOCAL_PHASE_WRITER_MAX_APPEND_ATTEMPTS:200}
+      backoff-ms: ${AUDIT_LOCAL_PHASE_WRITER_BACKOFF_MS:5}
+      max-total-wait-ms: ${AUDIT_LOCAL_PHASE_WRITER_MAX_TOTAL_WAIT_MS:1000}
+      allow-long-total-wait: ${AUDIT_LOCAL_PHASE_WRITER_ALLOW_LONG_TOTAL_WAIT:false}
     external-anchoring:
       enabled: ${AUDIT_EXTERNAL_ANCHORING_ENABLED:false}
       publication:

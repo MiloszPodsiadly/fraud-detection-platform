@@ -136,6 +136,59 @@ class RegulatedMutationTransactionRollbackIntegrationTest extends AbstractIntegr
         assertThat(mongoTemplate.count(new Query(), AuditEventDocument.class)).isZero();
     }
 
+    @Test
+    void shouldRecoverFromFreshPersistedCommandAfterEvidenceGatedFinalizeRollback() {
+        RegulatedMutationCommandDocument command = command("command-evidence-finalize-rollback", RegulatedMutationState.FINALIZING);
+        command.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        mongoTemplate.save(command);
+
+        assertThatThrownBy(() -> runner.runLocalCommit(() -> {
+            command.setState(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
+            command.setResponseSnapshot(new RegulatedMutationResponseSnapshot(
+                    "alert-evidence-finalize-rollback",
+                    com.frauddetection.common.events.enums.AnalystDecision.CONFIRMED_FRAUD,
+                    AlertStatus.RESOLVED,
+                    "event-evidence-finalize-rollback",
+                    Instant.parse("2026-05-02T10:01:00Z"),
+                    com.frauddetection.alert.api.SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
+            ));
+            command.setLocalCommitMarker("EVIDENCE_GATED_FINALIZED");
+            command.setSuccessAuditRecorded(true);
+            command.setSuccessAuditId("audit-evidence-finalize-rollback");
+            mongoTemplate.save(command);
+            mongoTemplate.save(alert("alert-evidence-finalize-rollback", AlertStatus.CLOSED));
+            mongoTemplate.save(outbox("event-evidence-finalize-rollback", "alert-evidence-finalize-rollback"));
+            throw new IllegalStateException("finalize transaction failed");
+        })).isInstanceOf(IllegalStateException.class);
+
+        RegulatedMutationCommandDocument persisted = mongoTemplate.findById(
+                "command-evidence-finalize-rollback",
+                RegulatedMutationCommandDocument.class
+        );
+        assertThat(persisted).isNotNull();
+        assertThat(persisted.getState()).isEqualTo(RegulatedMutationState.FINALIZING);
+        assertThat(persisted.getResponseSnapshot()).isNull();
+        assertThat(persisted.getLocalCommitMarker()).isNull();
+        assertThat(persisted.isSuccessAuditRecorded()).isFalse();
+
+        persisted.setState(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        persisted.setExecutionStatus(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
+        persisted.setDegradationReason("EVIDENCE_GATED_FINALIZE_FAILED");
+        mongoTemplate.save(persisted);
+
+        RegulatedMutationCommandDocument recovered = mongoTemplate.findById(
+                "command-evidence-finalize-rollback",
+                RegulatedMutationCommandDocument.class
+        );
+        assertThat(recovered).isNotNull();
+        assertThat(recovered.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(recovered.getResponseSnapshot()).isNull();
+        assertThat(recovered.getLocalCommitMarker()).isNull();
+        assertThat(recovered.isSuccessAuditRecorded()).isFalse();
+        assertThat(mongoTemplate.count(new Query(), AlertDocument.class)).isZero();
+        assertThat(mongoTemplate.count(new Query(), TransactionalOutboxRecordDocument.class)).isZero();
+    }
+
     private AlertDocument alert(String alertId, AlertStatus status) {
         AlertDocument document = new AlertDocument();
         document.setAlertId(alertId);

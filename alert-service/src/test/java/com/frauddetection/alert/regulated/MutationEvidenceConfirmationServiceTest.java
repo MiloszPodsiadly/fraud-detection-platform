@@ -32,6 +32,26 @@ import static org.mockito.Mockito.when;
 class MutationEvidenceConfirmationServiceTest {
 
     @Test
+    void shouldTreatZeroAndNegativeLimitAsNoOp() {
+        RegulatedMutationCommandRepository commandRepository = mock(RegulatedMutationCommandRepository.class);
+        TransactionalOutboxRecordRepository outboxRepository = mock(TransactionalOutboxRecordRepository.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        MutationEvidenceConfirmationService service = new MutationEvidenceConfirmationService(
+                commandRepository,
+                outboxRepository,
+                metrics,
+                false,
+                false
+        );
+
+        assertThat(service.confirmPendingEvidence(0)).isZero();
+        assertThat(service.confirmPendingEvidence(-1)).isZero();
+
+        verify(commandRepository, never()).findTop100ByStateInAndUpdatedAtBefore(any(), any());
+        verify(metrics, never()).recordEvidenceConfirmationPending(org.mockito.ArgumentMatchers.anyInt());
+    }
+
+    @Test
     void shouldPromoteCommandOnlyAfterSuccessAuditAndPublishedOutbox() {
         RegulatedMutationCommandRepository commandRepository = mock(RegulatedMutationCommandRepository.class);
         TransactionalOutboxRecordRepository outboxRepository = mock(TransactionalOutboxRecordRepository.class);
@@ -103,7 +123,7 @@ class MutationEvidenceConfirmationServiceTest {
 
         assertThat(promoted).isZero();
         verify(commandRepository, never()).save(any());
-        verify(metrics).recordEvidenceConfirmationFailed("OUTBOX_NOT_PUBLISHED");
+        verify(metrics).recordEvidenceConfirmationFailed("OUTBOX_NOT_YET_PUBLISHED");
     }
 
     @Test
@@ -131,6 +151,120 @@ class MutationEvidenceConfirmationServiceTest {
         assertThat(captor.getValue().getState()).isEqualTo(RegulatedMutationState.COMMITTED_DEGRADED);
         assertThat(captor.getValue().getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE);
         assertThat(captor.getValue().getDegradationReason()).isEqualTo("OUTBOX_FAILED_TERMINAL");
+    }
+
+    @Test
+    void shouldMapEvidenceGatedTerminalEvidenceFailureToFinalizeRecoveryRequired() {
+        RegulatedMutationCommandRepository commandRepository = mock(RegulatedMutationCommandRepository.class);
+        TransactionalOutboxRecordRepository outboxRepository = mock(TransactionalOutboxRecordRepository.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        MutationEvidenceConfirmationService service = new MutationEvidenceConfirmationService(
+                commandRepository,
+                outboxRepository,
+                metrics,
+                false,
+                false
+        );
+        RegulatedMutationCommandDocument command = committedCommand();
+        command.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        command.setState(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
+        when(commandRepository.findTop100ByStateInAndUpdatedAtBefore(any(), any())).thenReturn(List.of(command));
+        when(outboxRepository.findByMutationCommandId("command-1"))
+                .thenReturn(Optional.of(outbox(TransactionalOutboxStatus.FAILED_TERMINAL)));
+
+        int promoted = service.confirmPendingEvidence(100);
+
+        assertThat(promoted).isZero();
+        verify(commandRepository).save(org.mockito.ArgumentMatchers.argThat(saved ->
+                saved.getState() == RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED
+                        && saved.getPublicStatus() == SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED
+                        && "OUTBOX_FAILED_TERMINAL".equals(saved.getDegradationReason())));
+        verify(metrics).recordEvidenceGatedFinalizeRecoveryRequired("OUTBOX_FAILED_TERMINAL");
+    }
+
+    @Test
+    void shouldMapEvidenceGatedMissingOutboxAfterLocalCommitToFinalizeRecoveryRequired() {
+        RegulatedMutationCommandRepository commandRepository = mock(RegulatedMutationCommandRepository.class);
+        TransactionalOutboxRecordRepository outboxRepository = mock(TransactionalOutboxRecordRepository.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        MutationEvidenceConfirmationService service = new MutationEvidenceConfirmationService(
+                commandRepository,
+                outboxRepository,
+                metrics,
+                false,
+                false
+        );
+        RegulatedMutationCommandDocument command = committedCommand();
+        command.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        command.setState(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
+        command.setOutboxEventId("event-1");
+        when(commandRepository.findTop100ByStateInAndUpdatedAtBefore(any(), any())).thenReturn(List.of(command));
+        when(outboxRepository.findByMutationCommandId("command-1")).thenReturn(Optional.empty());
+
+        int promoted = service.confirmPendingEvidence(100);
+
+        assertThat(promoted).isZero();
+        verify(commandRepository).save(org.mockito.ArgumentMatchers.argThat(saved ->
+                saved.getState() == RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED
+                        && saved.getPublicStatus() == SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED
+                        && "OUTBOX_RECORD_MISSING_AFTER_LOCAL_COMMIT".equals(saved.getDegradationReason())));
+        verify(metrics).recordEvidenceGatedFinalizeRecoveryRequired("OUTBOX_RECORD_MISSING_AFTER_LOCAL_COMMIT");
+    }
+
+    @Test
+    void shouldPromoteEvidenceGatedCommandToFinalizedEvidenceConfirmedOnlyAfterEvidenceDecisionSucceeds() {
+        RegulatedMutationCommandRepository commandRepository = mock(RegulatedMutationCommandRepository.class);
+        TransactionalOutboxRecordRepository outboxRepository = mock(TransactionalOutboxRecordRepository.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        MutationEvidenceConfirmationService service = new MutationEvidenceConfirmationService(
+                commandRepository,
+                outboxRepository,
+                metrics,
+                false,
+                false
+        );
+        RegulatedMutationCommandDocument command = committedCommand();
+        command.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        command.setState(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
+        when(commandRepository.findTop100ByStateInAndUpdatedAtBefore(any(), any())).thenReturn(List.of(command));
+        when(outboxRepository.findByMutationCommandId("command-1"))
+                .thenReturn(Optional.of(outbox(TransactionalOutboxStatus.PUBLISHED)));
+
+        int promoted = service.confirmPendingEvidence(100);
+
+        assertThat(promoted).isEqualTo(1);
+        verify(commandRepository).save(org.mockito.ArgumentMatchers.argThat(saved ->
+                saved.getState() == RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED
+                        && saved.getPublicStatus() == SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED));
+    }
+
+    @Test
+    void shouldRepairEvidenceGatedFinalizedVisibleToPendingExternalWhenEvidenceStillPending() {
+        RegulatedMutationCommandRepository commandRepository = mock(RegulatedMutationCommandRepository.class);
+        TransactionalOutboxRecordRepository outboxRepository = mock(TransactionalOutboxRecordRepository.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        MutationEvidenceConfirmationService service = new MutationEvidenceConfirmationService(
+                commandRepository,
+                outboxRepository,
+                metrics,
+                false,
+                false
+        );
+        RegulatedMutationCommandDocument command = committedCommand();
+        command.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        command.setState(RegulatedMutationState.FINALIZED_VISIBLE);
+        when(commandRepository.findTop100ByStateInAndUpdatedAtBefore(any(), any())).thenReturn(List.of(command));
+        when(outboxRepository.findByMutationCommandId("command-1"))
+                .thenReturn(Optional.of(outbox(TransactionalOutboxStatus.PENDING)));
+
+        int promoted = service.confirmPendingEvidence(100);
+
+        assertThat(promoted).isZero();
+        verify(commandRepository).save(org.mockito.ArgumentMatchers.argThat(saved ->
+                saved.getState() == RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL
+                        && saved.getPublicStatus() == SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL));
+        verify(metrics).recordEvidenceGatedFinalizeStuckVisible();
+        verify(metrics).recordEvidenceConfirmationFailed("OUTBOX_NOT_YET_PUBLISHED");
     }
 
     @Test
@@ -209,6 +343,26 @@ class MutationEvidenceConfirmationServiceTest {
                         && saved.getPublicStatus() == SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE
                         && "SIGNATURE_INVALID".equals(saved.getDegradationReason())));
         verify(fixture.metrics).recordEvidenceConfirmationFailed("SIGNATURE_INVALID");
+    }
+
+    @Test
+    void shouldMapEvidenceGatedInvalidSignatureToFinalizeRecoveryRequired() {
+        Fixture fixture = new Fixture(false, true);
+        RegulatedMutationCommandDocument command = committedCommand();
+        command.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        command.setState(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
+        fixture.pending(command);
+        fixture.publishedOutbox();
+        fixture.externalEvidence(new AuditEventExternalEvidenceStatus(AuditExternalAnchorStatus.PUBLISHED, "INVALID"));
+
+        int promoted = fixture.service.confirmPendingEvidence(100);
+
+        assertThat(promoted).isZero();
+        verify(fixture.commandRepository).save(org.mockito.ArgumentMatchers.argThat(saved ->
+                saved.getState() == RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED
+                        && saved.getPublicStatus() == SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED
+                        && "SIGNATURE_INVALID".equals(saved.getDegradationReason())));
+        verify(fixture.metrics).recordEvidenceGatedFinalizeRecoveryRequired("SIGNATURE_INVALID");
     }
 
     private RegulatedMutationCommandDocument committedCommand() {

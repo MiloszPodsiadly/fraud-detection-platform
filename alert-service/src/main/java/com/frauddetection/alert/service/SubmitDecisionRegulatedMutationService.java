@@ -12,12 +12,16 @@ import com.frauddetection.alert.regulated.RegulatedMutationCommand;
 import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
 import com.frauddetection.alert.regulated.RegulatedMutationIntent;
 import com.frauddetection.alert.regulated.RegulatedMutationIntentHasher;
+import com.frauddetection.alert.regulated.RegulatedMutationModelVersion;
+import com.frauddetection.alert.regulated.RegulatedMutationPublicStatusMapper;
 import com.frauddetection.alert.regulated.RegulatedMutationResponseSnapshot;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.alert.regulated.mutation.submitdecision.SubmitDecisionMutationHandler;
 import com.frauddetection.alert.security.principal.AnalystActorResolver;
 import com.frauddetection.common.events.contract.FraudDecisionEvent;
 import com.frauddetection.common.events.enums.AlertStatus;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -28,6 +32,9 @@ public class SubmitDecisionRegulatedMutationService {
     private final AnalystActorResolver analystActorResolver;
     private final SubmitDecisionMutationHandler mutationHandler;
     private final RegulatedMutationCoordinator regulatedMutationCoordinator;
+    private final RegulatedMutationPublicStatusMapper publicStatusMapper;
+    private final boolean evidenceGatedFinalizeEnabled;
+    private final boolean submitDecisionEvidenceGatedFinalizeEnabled;
 
     public SubmitDecisionRegulatedMutationService(
             AlertRepository alertRepository,
@@ -36,11 +43,43 @@ public class SubmitDecisionRegulatedMutationService {
             SubmitDecisionMutationHandler mutationHandler,
             RegulatedMutationCoordinator regulatedMutationCoordinator
     ) {
+        this(alertRepository, analystDecisionStatusMapper, analystActorResolver, mutationHandler,
+                regulatedMutationCoordinator, new RegulatedMutationPublicStatusMapper(), false, false);
+    }
+
+    public SubmitDecisionRegulatedMutationService(
+            AlertRepository alertRepository,
+            AnalystDecisionStatusMapper analystDecisionStatusMapper,
+            AnalystActorResolver analystActorResolver,
+            SubmitDecisionMutationHandler mutationHandler,
+            RegulatedMutationCoordinator regulatedMutationCoordinator,
+            boolean evidenceGatedFinalizeEnabled,
+            boolean submitDecisionEvidenceGatedFinalizeEnabled
+    ) {
+        this(alertRepository, analystDecisionStatusMapper, analystActorResolver, mutationHandler,
+                regulatedMutationCoordinator, new RegulatedMutationPublicStatusMapper(),
+                evidenceGatedFinalizeEnabled, submitDecisionEvidenceGatedFinalizeEnabled);
+    }
+
+    @Autowired
+    public SubmitDecisionRegulatedMutationService(
+            AlertRepository alertRepository,
+            AnalystDecisionStatusMapper analystDecisionStatusMapper,
+            AnalystActorResolver analystActorResolver,
+            SubmitDecisionMutationHandler mutationHandler,
+            RegulatedMutationCoordinator regulatedMutationCoordinator,
+            RegulatedMutationPublicStatusMapper publicStatusMapper,
+            @Value("${app.regulated-mutations.evidence-gated-finalize.enabled:false}") boolean evidenceGatedFinalizeEnabled,
+            @Value("${app.regulated-mutations.evidence-gated-finalize.submit-decision.enabled:false}") boolean submitDecisionEvidenceGatedFinalizeEnabled
+    ) {
         this.alertRepository = alertRepository;
         this.analystDecisionStatusMapper = analystDecisionStatusMapper;
         this.analystActorResolver = analystActorResolver;
         this.mutationHandler = mutationHandler;
         this.regulatedMutationCoordinator = regulatedMutationCoordinator;
+        this.publicStatusMapper = publicStatusMapper;
+        this.evidenceGatedFinalizeEnabled = evidenceGatedFinalizeEnabled;
+        this.submitDecisionEvidenceGatedFinalizeEnabled = submitDecisionEvidenceGatedFinalizeEnabled;
     }
 
     public SubmitAnalystDecisionResponse submit(String alertId, SubmitAnalystDecisionRequest request, String idempotencyKey) {
@@ -55,6 +94,10 @@ public class SubmitDecisionRegulatedMutationService {
                 request.decisionReason(),
                 request.tags()
         );
+        boolean evidenceGatedFinalize = evidenceGatedFinalizeEnabled && submitDecisionEvidenceGatedFinalizeEnabled;
+        RegulatedMutationModelVersion modelVersion = evidenceGatedFinalize
+                ? RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
+                : RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION;
         RegulatedMutationCommand<AlertDocument, SubmitAnalystDecisionResponse> command = new RegulatedMutationCommand<>(
                 idempotencyKey,
                 actorId,
@@ -63,12 +106,26 @@ public class SubmitDecisionRegulatedMutationService {
                 AuditAction.SUBMIT_ANALYST_DECISION,
                 current.getCorrelationId(),
                 requestHash,
-                context -> mutationHandler.applyDecision(alertId, request, resultingStatus, actorId, idempotencyKey, requestHash, context.commandId()),
-                (saved, state) -> response(saved, request, resultingStatus, publicStatus(state)),
+                context -> mutationHandler.applyDecision(
+                        alertId,
+                        request,
+                        resultingStatus,
+                        actorId,
+                        idempotencyKey,
+                        requestHash,
+                        context.commandId(),
+                        evidenceGatedFinalize
+                                ? SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
+                                : SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING
+                ),
+                (saved, state) -> response(saved, request, resultingStatus, publicStatus(state, modelVersion)),
                 RegulatedMutationResponseSnapshot::from,
                 RegulatedMutationResponseSnapshot::toSubmitDecisionResponse,
-                state -> statusResponse(alertId, request, resultingStatus, publicStatus(state)),
-                intent
+                state -> evidenceGatedFinalize
+                        ? evidenceGatedStatusResponse(current, publicStatus(state, modelVersion))
+                        : statusResponse(alertId, request, resultingStatus, publicStatus(state, modelVersion)),
+                intent,
+                modelVersion
         );
         return regulatedMutationCoordinator.commit(command).response();
     }
@@ -106,17 +163,25 @@ public class SubmitDecisionRegulatedMutationService {
         );
     }
 
-    private SubmitDecisionOperationStatus publicStatus(RegulatedMutationState state) {
-        return switch (state) {
-            case REQUESTED, AUDIT_ATTEMPTED -> SubmitDecisionOperationStatus.IN_PROGRESS;
-            case BUSINESS_COMMITTING -> SubmitDecisionOperationStatus.COMMIT_UNKNOWN;
-            case EVIDENCE_PENDING, COMMITTED, SUCCESS_AUDIT_RECORDED ->
-                    SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING;
-            case EVIDENCE_CONFIRMED -> SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED;
-            case COMMITTED_DEGRADED -> SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE;
-            case FAILED, BUSINESS_COMMITTED, SUCCESS_AUDIT_PENDING -> SubmitDecisionOperationStatus.RECOVERY_REQUIRED;
-            case REJECTED -> SubmitDecisionOperationStatus.REJECTED_BEFORE_MUTATION;
-        };
+    private SubmitAnalystDecisionResponse evidenceGatedStatusResponse(
+            AlertDocument current,
+            SubmitDecisionOperationStatus status
+    ) {
+        return new SubmitAnalystDecisionResponse(
+                current.getAlertId(),
+                current.getAnalystDecision(),
+                current.getAlertStatus(),
+                current.getDecisionOutboxEvent() == null ? null : current.getDecisionOutboxEvent().eventId(),
+                current.getDecidedAt(),
+                status
+        );
+    }
+
+    private SubmitDecisionOperationStatus publicStatus(
+            RegulatedMutationState state,
+            RegulatedMutationModelVersion modelVersion
+    ) {
+        return publicStatusMapper.submitDecisionStatus(state, modelVersion);
     }
 
     private String requestHash(SubmitAnalystDecisionRequest request) {
