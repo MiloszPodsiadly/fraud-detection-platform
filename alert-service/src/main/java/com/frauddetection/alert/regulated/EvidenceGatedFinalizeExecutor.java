@@ -19,7 +19,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Service
-public class EvidenceGatedFinalizeExecutor {
+public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor {
 
     private static final String ATTEMPTED_AUDIT_UNAVAILABLE = "ATTEMPTED_AUDIT_UNAVAILABLE";
     private static final String EVIDENCE_GATED_TRANSACTION_REQUIRED = "EVIDENCE_GATED_TRANSACTION_REQUIRED";
@@ -59,7 +59,13 @@ public class EvidenceGatedFinalizeExecutor {
         this.leaseDuration = leaseDuration;
     }
 
-    public <R, S> RegulatedMutationResult<S> commit(
+    @Override
+    public RegulatedMutationModelVersion modelVersion() {
+        return RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1;
+    }
+
+    @Override
+    public <R, S> RegulatedMutationResult<S> execute(
             RegulatedMutationCommand<R, S> command,
             String idempotencyKey,
             RegulatedMutationCommandDocument document
@@ -83,6 +89,14 @@ public class EvidenceGatedFinalizeExecutor {
 
         prepareEvidence(command, document);
         return finalizeVisibleMutation(command, document);
+    }
+
+    public <R, S> RegulatedMutationResult<S> commit(
+            RegulatedMutationCommand<R, S> command,
+            String idempotencyKey,
+            RegulatedMutationCommandDocument document
+    ) {
+        return execute(command, idempotencyKey, document);
     }
 
     private <R, S> RegulatedMutationResult<S> terminalOrStatus(
