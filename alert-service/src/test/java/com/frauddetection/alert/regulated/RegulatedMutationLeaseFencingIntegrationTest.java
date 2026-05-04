@@ -197,6 +197,31 @@ class RegulatedMutationLeaseFencingIntegrationTest extends AbstractIntegrationTe
         assertThat(persisted.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
     }
 
+    @Test
+    void nonClaimedRecoveryTransitionCannotOverwriteCurrentOwnerAfterLeaseTakeover() throws Exception {
+        mongoTemplate.save(commandDocument("idem-recovery-owner", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION));
+        RegulatedMutationCommand<String, String> command = command("idem-recovery-owner");
+        RegulatedMutationClaimToken workerA = claimService.claim(command, "idem-recovery-owner").orElseThrow();
+        RegulatedMutationCommandDocument staleSnapshot = mongoTemplate.findById("command-idem-recovery-owner", RegulatedMutationCommandDocument.class);
+        sleepPastLease();
+        RegulatedMutationClaimToken workerB = claimService.claim(command, "idem-recovery-owner").orElseThrow();
+
+        assertThatThrownBy(() -> fencedWriter.recoveryTransition(
+                staleSnapshot,
+                RegulatedMutationState.FAILED,
+                RegulatedMutationExecutionStatus.RECOVERY_REQUIRED,
+                "RECOVERY_REQUIRED",
+                update -> update.set("degradation_reason", "RECOVERY_REQUIRED")
+        )).isInstanceOf(RegulatedMutationRecoveryWriteConflictException.class);
+
+        RegulatedMutationCommandDocument persisted = mongoTemplate.findById("command-idem-recovery-owner", RegulatedMutationCommandDocument.class);
+        assertThat(persisted.getLeaseOwner()).isEqualTo(workerB.leaseOwner());
+        assertThat(persisted.getLeaseOwner()).isNotEqualTo(workerA.leaseOwner());
+        assertThat(persisted.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.PROCESSING);
+        assertThat(persisted.getState()).isEqualTo(RegulatedMutationState.REQUESTED);
+        assertThat(persisted.getDegradationReason()).isNull();
+    }
+
     private void sleepPastLease() throws InterruptedException {
         Thread.sleep(220);
     }

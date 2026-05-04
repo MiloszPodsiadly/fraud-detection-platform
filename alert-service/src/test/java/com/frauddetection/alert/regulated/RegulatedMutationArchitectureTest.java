@@ -1,5 +1,7 @@
 package com.frauddetection.alert.regulated;
 
+import com.tngtech.archunit.core.domain.JavaClasses;
+import com.tngtech.archunit.core.importer.ClassFileImporter;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -8,6 +10,7 @@ import java.util.List;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
 class RegulatedMutationArchitectureTest {
 
@@ -538,6 +541,21 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
+    void regulatedMutationHandlersMustNotDependOnAuditOrBrokerBoundariesAtTypeLevel() {
+        JavaClasses classes = new ClassFileImporter().importPackages("com.frauddetection.alert");
+
+        noClasses().that().resideInAPackage("..regulated.mutation..")
+                .should().dependOnClassesThat().haveNameMatching(".*\\.audit\\.AuditService")
+                .check(classes);
+        noClasses().that().resideInAPackage("..regulated.mutation..")
+                .should().dependOnClassesThat().haveNameMatching(".*\\.audit\\.AuditEventPublisher")
+                .check(classes);
+        noClasses().that().resideInAPackage("..regulated.mutation..")
+                .should().dependOnClassesThat().haveNameMatching("org\\.springframework\\.kafka\\.core\\.KafkaTemplate")
+                .check(classes);
+    }
+
+    @Test
     void fdp32ExecutorsMustNotUseRepositorySaveForStateTransitions() throws Exception {
         String legacyExecutor = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationExecutor.java"
@@ -554,8 +572,27 @@ class RegulatedMutationArchitectureTest {
         assertThat(legacyExecutor).contains("fencedCommandWriter.recoveryTransition");
         assertThat(evidenceExecutor).contains("fencedCommandWriter.recoveryTransition");
         assertThat(writer).contains("recoveryTransition(");
+        assertThat(writer).contains("Only for non-claimed replay/recovery repair paths");
+        assertThat(writer).contains("Claimed worker transitions must use");
         assertThat(writer).contains("RegulatedMutationRecoveryWriteConflictException");
         assertThat(writer).contains("execution_status").contains("PROCESSING");
+    }
+
+    @Test
+    void fdp32AllowedFieldUpdatesMustNotBeGeneralMutationApi() throws Exception {
+        String writer = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationFencedCommandWriter.java"
+        ));
+        String docs = Files.readString(Path.of("../docs/FDP-32-lease-fencing-stale-worker-protection.md"));
+
+        assertThat(writer).contains("PROTECTED_UPDATE_FIELDS");
+        assertThat(writer).contains("\"lease_owner\"");
+        assertThat(writer).contains("\"idempotency_key\"");
+        assertThat(writer).contains("\"request_hash\"");
+        assertThat(writer).contains("\"mutation_model_version\"");
+        assertThat(writer).contains("validateProtectedFieldsUnchanged");
+        assertThat(docs).contains("`allowedFieldUpdates` is not a general document mutation API");
+        assertThat(docs).contains("Identity, lease, ownership, idempotency, request, resource, action, creation, attempt-count, and mutation-model fields are immutable");
     }
 
     @Test
@@ -568,10 +605,14 @@ class RegulatedMutationArchitectureTest {
         assertThat(combined).contains("post-claim transitions are fenced");
         assertThat(combined).contains("command transition fencing is not business-side-effect rollback by itself");
         assertThat(combined).contains("transaction-mode REQUIRED");
+        assertThat(combined).contains("transaction-mode OFF is compatibility behavior");
+        assertThat(combined).contains("transaction-mode REQUIRED is required for bank-grade stale-worker business-write safety");
         assertThat(combined).contains("stale worker");
         assertThat(combined).contains("no silent repository.save after claim");
         assertThat(combined).contains("does not expand transaction scope");
         assertThat(combined).contains("no distributed lock");
+        assertThat(combined).contains("Source-string architecture tests are guardrails, not complete architectural proof");
+        assertThat(combined).contains("FDP-32 is merge-safe as lease-owner fenced command transition hardening");
         assertThat(combined).doesNotContain("Merge Decision");
         assertThat(combined).doesNotContain("GO:");
         assertThat(combined).doesNotContain("NO-GO:");

@@ -125,8 +125,10 @@ class RegulatedMutationStaleWorkerExecutorIntegrationTest extends AbstractIntegr
         assertThat(result.state()).isEqualTo(RegulatedMutationState.AUDIT_ATTEMPTED);
         assertThat(businessMutations).hasValue(0);
         assertThat(alert.getAnalystDecision()).isNull();
+        assertThat(outboxRepository.count()).isZero();
         assertThat(persisted.getState()).isEqualTo(RegulatedMutationState.AUDIT_ATTEMPTED);
         assertThat(persisted.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.PROCESSING);
+        assertThat(persisted.getPublicStatus()).isNull();
         assertThat(persisted.getResponseSnapshot()).isNull();
         assertThat(persisted.getOutboxEventId()).isNull();
         assertThat(persisted.getLocalCommitMarker()).isNull();
@@ -172,6 +174,7 @@ class RegulatedMutationStaleWorkerExecutorIntegrationTest extends AbstractIntegr
                 RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED
         );
         assertThat(persisted.getState()).isNotEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
+        assertThat(persisted.getPublicStatus()).isNotEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         assertThat(persisted.getResponseSnapshot()).isNull();
         assertThat(persisted.getOutboxEventId()).isNull();
         assertThat(persisted.getLocalCommitMarker()).isNull();
