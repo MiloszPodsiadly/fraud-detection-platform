@@ -162,13 +162,19 @@ public class MutationEvidenceConfirmationService {
         }
         TransactionalOutboxRecordDocument outbox = outboxRepository.findByMutationCommandId(command.getId()).orElse(null);
         if (outbox == null) {
-            return new EvidenceDecision(RegulatedMutationState.EVIDENCE_PENDING, "OUTBOX_NOT_PUBLISHED");
+            if (command.getOutboxEventId() != null && !command.getOutboxEventId().isBlank()) {
+                return new EvidenceDecision(
+                        RegulatedMutationState.COMMITTED_DEGRADED,
+                        "OUTBOX_RECORD_MISSING_AFTER_LOCAL_COMMIT"
+                );
+            }
+            return new EvidenceDecision(RegulatedMutationState.EVIDENCE_PENDING, "OUTBOX_NOT_YET_PUBLISHED");
         }
         if (outbox.getStatus() == TransactionalOutboxStatus.FAILED_TERMINAL) {
             return new EvidenceDecision(RegulatedMutationState.COMMITTED_DEGRADED, "OUTBOX_FAILED_TERMINAL");
         }
         if (outbox.getStatus() != TransactionalOutboxStatus.PUBLISHED) {
-            return new EvidenceDecision(RegulatedMutationState.EVIDENCE_PENDING, "OUTBOX_NOT_PUBLISHED");
+            return new EvidenceDecision(RegulatedMutationState.EVIDENCE_PENDING, "OUTBOX_NOT_YET_PUBLISHED");
         }
         if (externalAnchorRequired) {
             AuditEventExternalEvidenceStatus status = externalEvidenceStatus(command);
