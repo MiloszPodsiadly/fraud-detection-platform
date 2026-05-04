@@ -10,13 +10,15 @@ The branch changes class boundaries only. It separates command gateway/router re
 
 FDP-30 does not add:
 
+- new business behavior,
 - new business mutation type,
 - FDP-29 production enablement,
+- API contract change,
+- local ACID semantic change,
 - external finality,
 - distributed ACID,
 - exactly-once Kafka delivery,
-- process-kill chaos testing,
-- API contract change.
+- process-kill chaos testing.
 
 ## Architecture After FDP-30
 
@@ -48,11 +50,11 @@ MongoRegulatedMutationCoordinator(
 )
 ```
 
-The `RegulatedMutationExecutorRegistry` bean is the authoritative runtime routing boundary. It validates duplicate executor registrations, missing legacy executor registration, and missing FDP-29 executor registration when evidence-gated finalize is enabled.
+The `RegulatedMutationExecutorRegistry` bean is the authoritative runtime routing boundary. It validates duplicate executor registrations, missing legacy executor registration, missing FDP-29 executor registration when evidence-gated finalize is enabled, and executor support for the command action/resource pair.
 
 `MongoRegulatedMutationCoordinator` still exposes compatibility constructors for focused unit tests and older test fixtures. Those constructors are not production startup/configuration safety checks and must not replace registry bean validation.
 
-FDP-29 startup safety remains owned by `EvidenceGatedFinalizeStartupGuard`; FDP-30 registry routing does not replace transaction capability, local audit writer, outbox, recovery, or audit-chain index guards.
+FDP-29 startup safety remains owned by `EvidenceGatedFinalizeStartupGuard`; FDP-30 registry routing does not replace transaction capability, local audit writer, outbox, recovery, or audit-chain index guards. The registry is not a replacement for FDP-29 startup guard checks.
 
 ## Responsibility Boundaries
 
@@ -81,14 +83,20 @@ FDP-29 startup safety remains owned by `EvidenceGatedFinalizeStartupGuard`; FDP-
 
 ## Behavior-Preservation Contract
 
-| Area | Before FDP-30 | After FDP-30 | Expected behavior | Required tests |
+| Area | Before FDP-30 | After FDP-30 | Expected behavior | Required proof |
 | --- | --- | --- | --- | --- |
-| Legacy null model version | Coordinator legacy flow | `LegacyRegulatedMutationExecutor` | Legacy commands with null `mutation_model_version` route to legacy executor | `MongoRegulatedMutationCoordinatorRoutingTest`, existing legacy regulated mutation tests |
-| Legacy `SUCCESS_AUDIT_PENDING` retry | Coordinator | Legacy executor | No duplicate mutation; success audit retry only | `LegacyRegulatedMutationExecutorBehaviorCompatibilityTest` |
-| Legacy degraded post-commit audit | Coordinator | Legacy executor | Unchanged `COMMITTED_DEGRADED` behavior | `SubmitDecisionRegulatedMutationServiceTest`, `DecisionOutboxReconciliationServiceTest` |
-| FDP-29 local finalize | `EvidenceGatedFinalizeExecutor` via coordinator branch | `EvidenceGatedFinalizeExecutor` via registry | Unchanged | `EvidenceGatedFinalizeCoordinatorIntegrationTest` |
-| FDP-29 local success audit writer | Executor path | Executor path | Unchanged and FDP-29-only | `RegulatedMutationArchitectureTest`, `RegulatedMutationLocalAuditPhaseWriterIntegrationTest` |
+| Null `mutation_model_version` | Coordinator legacy path | Legacy executor | Legacy-compatible | `MongoRegulatedMutationCoordinatorRoutingTest` |
+| Explicit `LEGACY_REGULATED_MUTATION` | Coordinator legacy path | Legacy executor | Legacy-compatible | `MongoRegulatedMutationCoordinatorRoutingTest` |
+| `SUCCESS_AUDIT_PENDING` retry | Coordinator | Legacy executor | No duplicate mutation | `LegacyRegulatedMutationExecutorBehaviorCompatibilityTest` |
+| `RECOVERY_REQUIRED` precedence | Coordinator | Legacy executor | No stale snapshot success | `LegacyRegulatedMutationExecutorBehaviorCompatibilityTest` |
+| `COMMITTED_DEGRADED` | Coordinator | Legacy executor | Unchanged degraded response | `LegacyRegulatedMutationExecutorBehaviorCompatibilityTest` |
+| Active `PROCESSING` lease | Coordinator | Legacy executor | No duplicate mutation | `LegacyRegulatedMutationExecutorBehaviorCompatibilityTest` |
+| Expired `PROCESSING` lease | Coordinator | Legacy executor | Unsafe states enter recovery, not duplicate mutation | `LegacyRegulatedMutationExecutorBehaviorCompatibilityTest` |
+| Same idempotency key, different request | Coordinator | Coordinator/legacy executor conflict handling | Reject before mutation/audit | `LegacyRegulatedMutationExecutorBehaviorCompatibilityTest`, existing service tests |
+| FDP-29 finalize | Coordinator | Evidence executor | Unchanged local finalize | `EvidenceGatedFinalizeCoordinatorIntegrationTest` |
+| Local success audit writer | Coordinator path | Evidence executor path | FDP-29-only | `RegulatedMutationArchitectureTest`, `RegulatedMutationLocalAuditPhaseWriterIntegrationTest` |
 | Executor routing | Hardcoded coordinator branching | Registry by model version | Fail closed | `RegulatedMutationExecutorRegistryTest`, `MongoRegulatedMutationCoordinatorRoutingTest` |
+| Unsupported action/resource | Not separately guarded | Registry support validation | Fail closed; no executor execution | `RegulatedMutationExecutorRegistryTest`, `MongoRegulatedMutationCoordinatorRoutingTest` |
 | Unsupported model version | Not supported | Registry failure | Fail closed; no legacy downgrade | `RegulatedMutationExecutorRegistryTest` |
 | Public API statuses | Unchanged | Unchanged | No contract change | Existing controller/service tests |
 | Kafka/outbox publishing | Async outbox publisher | Unchanged | No request-path publish | `RegulatedMutationArchitectureTest` |
@@ -114,6 +122,8 @@ The registry fails closed when:
 - an executor rejects the action/resource pair for a supported model version.
 
 Null or missing `mutation_model_version` is explicitly legacy-compatible and routes to `LEGACY_REGULATED_MUTATION`.
+
+`supports(action, resourceType)` is an additional safety check after model-version routing. `LegacyRegulatedMutationExecutor` intentionally allows any non-null action/resource pair to preserve legacy compatibility. This broad `supports(action, resourceType)` rule is a legacy-only exception. New model executors must strict-allowlist their action/resource pairs.
 
 ## Compatibility Rules
 
