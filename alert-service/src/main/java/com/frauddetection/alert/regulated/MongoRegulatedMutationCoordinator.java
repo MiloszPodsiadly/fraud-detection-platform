@@ -19,6 +19,10 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
     private final RegulatedMutationCommandRepository commandRepository;
     private final RegulatedMutationExecutorRegistry executorRegistry;
 
+    /**
+     * Compatibility constructor for unit tests and older focused tests.
+     * Production Spring wiring uses the constructor that accepts RegulatedMutationExecutorRegistry.
+     */
     public MongoRegulatedMutationCoordinator(
             RegulatedMutationCommandRepository commandRepository,
             MongoTemplate mongoTemplate,
@@ -30,7 +34,7 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
     ) {
         this(
                 commandRepository,
-                legacyOnlyRegistry(
+                legacyOnlyRegistryForCompatibility(
                         commandRepository,
                         mongoTemplate,
                         auditPhaseService,
@@ -44,6 +48,10 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
         );
     }
 
+    /**
+     * Compatibility constructor for unit tests that need a custom transaction runner.
+     * Production Spring wiring uses the fail-closed RegulatedMutationExecutorRegistry bean.
+     */
     public MongoRegulatedMutationCoordinator(
             RegulatedMutationCommandRepository commandRepository,
             MongoTemplate mongoTemplate,
@@ -56,7 +64,7 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
     ) {
         this(
                 commandRepository,
-                legacyOnlyRegistry(
+                legacyOnlyRegistryForCompatibility(
                         commandRepository,
                         mongoTemplate,
                         auditPhaseService,
@@ -70,6 +78,9 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
         );
     }
 
+    /**
+     * Production constructor. Spring runtime depends on the validated RegulatedMutationExecutorRegistry bean.
+     */
     @Autowired
     public MongoRegulatedMutationCoordinator(
             RegulatedMutationCommandRepository commandRepository,
@@ -79,6 +90,10 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
         this.executorRegistry = executorRegistry;
     }
 
+    /**
+     * Compatibility constructor for tests that provide an explicit FDP-29 executor.
+     * This constructor is not a production startup guard and must not replace registry bean validation.
+     */
     public MongoRegulatedMutationCoordinator(
             RegulatedMutationCommandRepository commandRepository,
             MongoTemplate mongoTemplate,
@@ -93,7 +108,7 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
     ) {
         this(
                 commandRepository,
-                registry(
+                registryForCompatibility(
                         new LegacyRegulatedMutationExecutor(
                                 commandRepository,
                                 mongoTemplate,
@@ -197,7 +212,7 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
         return value.trim();
     }
 
-    private static RegulatedMutationExecutorRegistry legacyOnlyRegistry(
+    private static RegulatedMutationExecutorRegistry legacyOnlyRegistryForCompatibility(
             RegulatedMutationCommandRepository commandRepository,
             MongoTemplate mongoTemplate,
             RegulatedMutationAuditPhaseService auditPhaseService,
@@ -224,7 +239,7 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
         );
     }
 
-    private static RegulatedMutationExecutorRegistry registry(
+    private static RegulatedMutationExecutorRegistry registryForCompatibility(
             LegacyRegulatedMutationExecutor legacyExecutor,
             EvidenceGatedFinalizeExecutor evidenceGatedFinalizeExecutor
     ) {

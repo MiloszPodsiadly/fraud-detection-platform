@@ -3,7 +3,9 @@ package com.frauddetection.alert.regulated;
 import com.frauddetection.alert.api.RegulatedMutationPublicStatusProjection;
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.audit.AuditDegradationService;
+import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditOutcome;
+import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.PostCommitEvidenceIncompleteException;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.service.ConflictingIdempotencyKeyException;
@@ -67,6 +69,12 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
     }
 
     @Override
+    public boolean supports(AuditAction action, AuditResourceType resourceType) {
+        // Legacy executor preserves the pre-split coordinator scope for existing regulated mutation commands.
+        return action != null && resourceType != null;
+    }
+
+    @Override
     public <R, S> RegulatedMutationResult<S> execute(
             RegulatedMutationCommand<R, S> command,
             String idempotencyKey,
@@ -82,14 +90,14 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
             return concurrentResponse(command, idempotencyKey);
         }
 
-        if (document.getResponseSnapshot() != null && !needsSuccessAuditRetry(document)) {
-            return replay(command, document);
-        }
         if (document.getExecutionStatus() == RegulatedMutationExecutionStatus.RECOVERY_REQUIRED) {
             return new RegulatedMutationResult<>(
                     document.getState(),
                     command.statusResponseFactory().response(recoveryState(document))
             );
+        }
+        if (document.getResponseSnapshot() != null && !needsSuccessAuditRetry(document)) {
+            return replay(command, document);
         }
 
         if (document.getState() == RegulatedMutationState.SUCCESS_AUDIT_PENDING && document.getResponseSnapshot() != null) {
@@ -125,11 +133,11 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
         if (document.getExecutionStatus() == RegulatedMutationExecutionStatus.PROCESSING && !leaseExpired(document, Instant.now())) {
             return new RegulatedMutationResult<>(document.getState(), command.statusResponseFactory().response(RegulatedMutationState.REQUESTED));
         }
-        if (document.getResponseSnapshot() != null && !needsSuccessAuditRetry(document)) {
-            return replay(command, document);
-        }
         if (document.getExecutionStatus() == RegulatedMutationExecutionStatus.RECOVERY_REQUIRED) {
             return new RegulatedMutationResult<>(document.getState(), command.statusResponseFactory().response(recoveryState(document)));
+        }
+        if (document.getResponseSnapshot() != null && !needsSuccessAuditRetry(document)) {
+            return replay(command, document);
         }
         if (requiresRecoveryWithoutSnapshot(document)) {
             return markRecoveryRequired(command, document, recoveryState(document));

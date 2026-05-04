@@ -1,5 +1,7 @@
 package com.frauddetection.alert.regulated;
 
+import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.audit.AuditResourceType;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -63,7 +65,14 @@ public class RegulatedMutationExecutorRegistry {
         if (document == null) {
             throw new IllegalArgumentException("Regulated mutation command document is required.");
         }
-        return executorFor(document.mutationModelVersionOrLegacy());
+        RegulatedMutationExecutor executor = executorFor(document.mutationModelVersionOrLegacy());
+        AuditAction action = parseAction(document.getAction());
+        AuditResourceType resourceType = parseResourceType(document.getResourceType());
+        if (!executor.supports(action, resourceType)) {
+            throw new IllegalStateException("Executor " + executor.modelVersion()
+                    + " does not support action/resource " + action + "/" + resourceType + ".");
+        }
+        return executor;
     }
 
     public RegulatedMutationExecutor executorFor(RegulatedMutationModelVersion modelVersion) {
@@ -83,6 +92,28 @@ public class RegulatedMutationExecutorRegistry {
     ) {
         if (!executors.containsKey(modelVersion)) {
             throw new IllegalStateException("Missing regulated mutation executor for model version " + modelVersion + ".");
+        }
+    }
+
+    private static AuditAction parseAction(String value) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalStateException("Regulated mutation command action is required for executor routing.");
+        }
+        try {
+            return AuditAction.valueOf(value);
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalStateException("Unsupported regulated mutation command action for executor routing.", exception);
+        }
+    }
+
+    private static AuditResourceType parseResourceType(String value) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalStateException("Regulated mutation command resource type is required for executor routing.");
+        }
+        try {
+            return AuditResourceType.valueOf(value);
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalStateException("Unsupported regulated mutation command resource type for executor routing.", exception);
         }
     }
 }

@@ -1,7 +1,9 @@
 package com.frauddetection.alert.regulated;
 
 import com.frauddetection.alert.api.RegulatedMutationPublicStatusProjection;
+import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditOutcome;
+import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.RegulatedMutationLocalAuditPhaseWriter;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.service.ConflictingIdempotencyKeyException;
@@ -62,6 +64,12 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
     @Override
     public RegulatedMutationModelVersion modelVersion() {
         return RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1;
+    }
+
+    @Override
+    public boolean supports(AuditAction action, AuditResourceType resourceType) {
+        return action == AuditAction.SUBMIT_ANALYST_DECISION
+                && resourceType == AuditResourceType.ALERT;
     }
 
     @Override
