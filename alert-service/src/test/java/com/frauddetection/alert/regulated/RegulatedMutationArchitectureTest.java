@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -373,6 +374,155 @@ class RegulatedMutationArchitectureTest {
         assertThat(evidenceExecutor).contains("action == AuditAction.SUBMIT_ANALYST_DECISION");
         assertThat(evidenceExecutor).contains("resourceType == AuditResourceType.ALERT");
         assertThat(evidenceExecutor).doesNotContain("return action != null && resourceType != null");
+    }
+
+    @Test
+    void fdp31ExecutorsMustUseSharedClaimConflictAndReplayPolicies() throws Exception {
+        String legacyExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationExecutor.java"
+        ));
+        String evidenceExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"
+        ));
+
+        assertThat(legacyExecutor).doesNotContain("findAndModify(");
+        assertThat(evidenceExecutor).doesNotContain("findAndModify(");
+        assertThat(legacyExecutor).contains("RegulatedMutationClaimService");
+        assertThat(evidenceExecutor).contains("RegulatedMutationClaimService");
+        assertThat(legacyExecutor).contains("RegulatedMutationConflictPolicy");
+        assertThat(evidenceExecutor).contains("RegulatedMutationConflictPolicy");
+        assertThat(legacyExecutor).contains("RegulatedMutationReplayResolver");
+        assertThat(evidenceExecutor).contains("RegulatedMutationReplayResolver");
+        assertThat(legacyExecutor).contains("replayResolver.resolve(document");
+        assertThat(evidenceExecutor).contains("replayResolver.resolve(document");
+        assertThat(legacyExecutor).doesNotContain("private <R, S> RegulatedMutationCommandDocument existingOrConflict");
+        assertThat(evidenceExecutor).doesNotContain("private <R, S> RegulatedMutationCommandDocument existingOrConflict");
+        assertThat(legacyExecutor).doesNotContain("leaseExpired(");
+        assertThat(evidenceExecutor).doesNotContain("leaseExpired(");
+    }
+
+    @Test
+    void fdp31ClaimServiceMustBeOnlyDirectMongoClaimBoundary() throws Exception {
+        String claimService = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationClaimService.java"
+        ));
+
+        assertThat(claimService).contains("findAndModify(");
+        assertThat(claimService).contains("execution_status");
+        assertThat(claimService).contains("lease_expires_at");
+        assertThat(claimService).contains("attempt_count");
+        assertThat(claimService).doesNotContain("command.mutation().execute");
+        assertThat(claimService).doesNotContain("auditPhaseService.recordPhase");
+        assertThat(claimService).doesNotContain("transactionRunner.runLocalCommit");
+        assertThat(claimService).doesNotContain("RegulatedMutationLocalAuditPhaseWriter");
+        assertThat(claimService).doesNotContain("FraudDecisionEventPublisher");
+        assertThat(claimService).doesNotContain("KafkaTemplate");
+    }
+
+    @Test
+    void fdp31ReplayResolverMustRemainPureDecisionLogic() throws Exception {
+        String replayResolver = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationReplayResolver.java"
+        ));
+        String legacyPolicy = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationReplayPolicy.java"
+        ));
+        String evidencePolicy = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeReplayPolicy.java"
+        ));
+        String registry = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationReplayPolicyRegistry.java"
+        ));
+
+        assertThat(replayResolver).contains("policyRegistry.resolve");
+        assertThat(replayResolver).doesNotContain("resolveLegacy");
+        assertThat(replayResolver).doesNotContain("resolveEvidenceGated");
+        assertThat(legacyPolicy).contains("implements RegulatedMutationReplayPolicy");
+        assertThat(evidencePolicy).contains("implements RegulatedMutationReplayPolicy");
+        assertThat(evidencePolicy).contains("FINALIZE_RECOVERY_REQUIRED");
+        assertThat(registry).contains("No regulated mutation replay policy registered");
+        assertThat(registry).contains("Duplicate regulated mutation replay policy");
+        assertThat(replayResolver).doesNotContain("commandRepository.save");
+        assertThat(replayResolver).doesNotContain("mongoTemplate.findAndModify");
+        assertThat(replayResolver).doesNotContain("auditPhaseService.recordPhase");
+        assertThat(replayResolver).doesNotContain("transactionRunner.runLocalCommit");
+        assertThat(replayResolver).doesNotContain("command.mutation().execute");
+        assertThat(legacyPolicy).doesNotContain("commandRepository.save");
+        assertThat(evidencePolicy).doesNotContain("commandRepository.save");
+        assertThat(legacyPolicy).doesNotContain("auditPhaseService.recordPhase");
+        assertThat(evidencePolicy).doesNotContain("auditPhaseService.recordPhase");
+    }
+
+    @Test
+    void fdp31ConflictPolicyMustNotWriteOrExecuteMutation() throws Exception {
+        String conflictPolicy = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationConflictPolicy.java"
+        ));
+
+        assertThat(conflictPolicy).contains("ConflictingIdempotencyKeyException");
+        assertThat(conflictPolicy).doesNotContain("commandRepository.save");
+        assertThat(conflictPolicy).doesNotContain("mongoTemplate");
+        assertThat(conflictPolicy).doesNotContain("findAndModify");
+        assertThat(conflictPolicy).doesNotContain("auditPhaseService");
+        assertThat(conflictPolicy).doesNotContain("command.mutation().execute");
+    }
+
+    @Test
+    void fdp31DocsMustDescribePolicyExtractionWithoutReviewNotes() throws Exception {
+        String source = Files.readString(Path.of("../docs/FDP-31-claim-replay-policy-extraction.md"));
+
+        assertThat(source).contains("behavior-preserving refactor");
+        assertThat(source).contains("no public API status changes");
+        assertThat(source).contains("does not change mutation states");
+        assertThat(source).contains("no transaction boundary changes");
+        assertThat(source).contains("does not add external finality");
+        assertThat(source).contains("RECOVERY_REQUIRED must win over responseSnapshot");
+        assertThat(source).contains("FINALIZE_RECOVERY_REQUIRED must win over responseSnapshot");
+        assertThat(source).contains("Rejected terminal states must win over responseSnapshot replay.");
+        assertThat(source).contains("FDP-29 remains disabled by default");
+        assertThat(source).contains("FDP-32 owns Regulated Mutation Lease Fencing & Stale Worker Protection");
+        assertThat(source).doesNotContain("Merge Decision");
+        assertThat(source).doesNotContain("GO:");
+        assertThat(source).doesNotContain("NO-GO:");
+        assertThat(source).doesNotContain("reviewer");
+    }
+
+    @Test
+    void fdp31DocsMustNotClaimLeaseFencing() throws Exception {
+        String source = Files.readString(Path.of("../docs/FDP-31-claim-replay-policy-extraction.md"));
+
+        assertThat(source).contains("Claim Acquisition Is Not Write Fencing");
+        assertThat(source).contains("FDP-31 does not implement lease-owner write fencing");
+        assertThat(source).contains("claim acquisition is not write fencing");
+        assertThat(source).contains("commandId + leaseOwner + unexpired lease");
+        assertThat(source).contains("FDP-32");
+        assertThat(source).doesNotContain("lease safety solved");
+        assertThat(source).doesNotContain("stale worker writes prevented");
+        assertThat(source).doesNotContain("fenced writes implemented");
+        assertThat(source).doesNotContain("solves stale worker writes");
+        assertThat(source).doesNotContain("prevents all stale writes");
+        assertThat(source).doesNotContain("lease fencing implemented");
+        assertThat(source).doesNotContain("write fencing implemented");
+        assertThat(source).doesNotContain("fully fenced lease");
+    }
+
+    @Test
+    void fdp31MustDeferFencedTransitionsToFdp32() throws Exception {
+        try (Stream<Path> paths = Files.walk(Path.of("src/main/java/com/frauddetection/alert/regulated"))) {
+            List<Path> javaFiles = paths
+                    .filter(path -> path.toString().endsWith(".java"))
+                    .toList();
+
+            for (Path path : javaFiles) {
+                String source = Files.readString(path);
+                assertThat(source)
+                        .as("FDP-31 must not introduce fenced transition persistence: " + path)
+                        .doesNotContain("fencedTransition")
+                        .doesNotContain("saveWithLeaseOwner")
+                        .doesNotContain("leaseOwner + unexpired")
+                        .doesNotContain("lease-owner write fencing implemented");
+            }
+        }
     }
 
     @Test
