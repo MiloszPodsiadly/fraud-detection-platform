@@ -8,20 +8,15 @@ import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.PostCommitEvidenceIncompleteException;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
-import com.frauddetection.alert.service.ConflictingIdempotencyKeyException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Criteria;
-import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.UUID;
 
 @Service
 public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecutor {
@@ -32,14 +27,15 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
     private static final String ATTEMPTED_AUDIT_UNAVAILABLE = "ATTEMPTED_AUDIT_UNAVAILABLE";
 
     private final RegulatedMutationCommandRepository commandRepository;
-    private final MongoTemplate mongoTemplate;
     private final RegulatedMutationAuditPhaseService auditPhaseService;
     private final AuditDegradationService auditDegradationService;
     private final AlertServiceMetrics metrics;
     private final RegulatedMutationTransactionRunner transactionRunner;
     private final RegulatedMutationPublicStatusMapper publicStatusMapper;
     private final boolean bankModeFailClosed;
-    private final Duration leaseDuration;
+    private final RegulatedMutationClaimService claimService;
+    private final RegulatedMutationConflictPolicy conflictPolicy;
+    private final RegulatedMutationReplayResolver replayResolver;
 
     public LegacyRegulatedMutationExecutor(
             RegulatedMutationCommandRepository commandRepository,
@@ -52,15 +48,45 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
             @Value("${app.audit.bank-mode.fail-closed:false}") boolean bankModeFailClosed,
             @Value("${app.regulated-mutation.lease-duration:PT30S}") Duration leaseDuration
     ) {
+        this(
+                commandRepository,
+                mongoTemplate,
+                auditPhaseService,
+                auditDegradationService,
+                metrics,
+                transactionRunner,
+                publicStatusMapper,
+                bankModeFailClosed,
+                new RegulatedMutationClaimService(mongoTemplate, leaseDuration),
+                new RegulatedMutationConflictPolicy(),
+                new RegulatedMutationReplayResolver(new RegulatedMutationLeasePolicy())
+        );
+    }
+
+    @Autowired
+    public LegacyRegulatedMutationExecutor(
+            RegulatedMutationCommandRepository commandRepository,
+            MongoTemplate mongoTemplate,
+            RegulatedMutationAuditPhaseService auditPhaseService,
+            AuditDegradationService auditDegradationService,
+            AlertServiceMetrics metrics,
+            RegulatedMutationTransactionRunner transactionRunner,
+            RegulatedMutationPublicStatusMapper publicStatusMapper,
+            @Value("${app.audit.bank-mode.fail-closed:false}") boolean bankModeFailClosed,
+            RegulatedMutationClaimService claimService,
+            RegulatedMutationConflictPolicy conflictPolicy,
+            RegulatedMutationReplayResolver replayResolver
+    ) {
         this.commandRepository = commandRepository;
-        this.mongoTemplate = mongoTemplate;
         this.auditPhaseService = auditPhaseService;
         this.auditDegradationService = auditDegradationService;
         this.metrics = metrics;
         this.transactionRunner = transactionRunner;
         this.publicStatusMapper = publicStatusMapper;
         this.bankModeFailClosed = bankModeFailClosed;
-        this.leaseDuration = leaseDuration;
+        this.claimService = claimService;
+        this.conflictPolicy = conflictPolicy;
+        this.replayResolver = replayResolver;
     }
 
     @Override
@@ -86,7 +112,7 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
             return terminalOrPartial;
         }
 
-        document = claim(command, idempotencyKey);
+        document = claimService.claim(command, idempotencyKey).orElse(null);
         if (document == null) {
             return concurrentResponse(command, idempotencyKey);
         }
@@ -94,10 +120,10 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
         if (document.getExecutionStatus() == RegulatedMutationExecutionStatus.RECOVERY_REQUIRED) {
             return new RegulatedMutationResult<>(
                     document.getState(),
-                    command.statusResponseFactory().response(recoveryState(document))
+                    command.statusResponseFactory().response(replayResolver.legacyRecoveryState(document))
             );
         }
-        if (document.getResponseSnapshot() != null && !needsSuccessAuditRetry(document)) {
+        if (document.getResponseSnapshot() != null && !replayResolver.needsSuccessAuditRetry(document)) {
             return replay(command, document);
         }
 
@@ -106,7 +132,7 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
         }
 
         if (!isSafeToExecuteBusinessMutation(document)) {
-            return markRecoveryRequired(command, document, recoveryState(document));
+            return markRecoveryRequired(command, document, replayResolver.legacyRecoveryState(document));
         }
 
         if (!document.isAttemptedAuditRecorded()) {
@@ -131,19 +157,17 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
             RegulatedMutationCommand<R, S> command,
             RegulatedMutationCommandDocument document
     ) {
-        if (document.getExecutionStatus() == RegulatedMutationExecutionStatus.PROCESSING && !leaseExpired(document, Instant.now())) {
-            return new RegulatedMutationResult<>(document.getState(), command.statusResponseFactory().response(RegulatedMutationState.REQUESTED));
-        }
-        if (document.getExecutionStatus() == RegulatedMutationExecutionStatus.RECOVERY_REQUIRED) {
-            return new RegulatedMutationResult<>(document.getState(), command.statusResponseFactory().response(recoveryState(document)));
-        }
-        if (document.getResponseSnapshot() != null && !needsSuccessAuditRetry(document)) {
-            return replay(command, document);
-        }
-        if (requiresRecoveryWithoutSnapshot(document)) {
-            return markRecoveryRequired(command, document, recoveryState(document));
-        }
-        return null;
+        RegulatedMutationReplayDecision decision = replayResolver.resolveLegacy(document, Instant.now());
+        return switch (decision.type()) {
+            case NONE -> null;
+            case ACTIVE_IN_PROGRESS -> new RegulatedMutationResult<>(
+                    document.getState(),
+                    command.statusResponseFactory().response(decision.responseState())
+            );
+            case REPLAY_SNAPSHOT -> replay(command, document);
+            case RECOVERY_REQUIRED_RESPONSE -> markRecoveryRequired(command, document, decision.responseState());
+            default -> throw new IllegalStateException("Unsupported legacy replay decision: " + decision.type());
+        };
     }
 
     private <R, S> RegulatedMutationResult<S> replay(
@@ -162,39 +186,9 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
         return restored;
     }
 
-    private <R, S> RegulatedMutationCommandDocument claim(RegulatedMutationCommand<R, S> command, String idempotencyKey) {
-        Instant now = Instant.now();
-        String leaseOwner = UUID.randomUUID().toString();
-        Criteria claimable = new Criteria().orOperator(
-                Criteria.where("execution_status").is(RegulatedMutationExecutionStatus.NEW),
-                new Criteria().andOperator(
-                        Criteria.where("execution_status").is(RegulatedMutationExecutionStatus.PROCESSING),
-                        Criteria.where("lease_expires_at").lte(now)
-                )
-        );
-        Query query = new Query(new Criteria().andOperator(
-                Criteria.where("idempotency_key").is(idempotencyKey),
-                Criteria.where("request_hash").is(command.requestHash()),
-                claimable
-        ));
-        Update update = new Update()
-                .set("execution_status", RegulatedMutationExecutionStatus.PROCESSING)
-                .set("lease_owner", leaseOwner)
-                .set("lease_expires_at", now.plus(leaseDuration))
-                .set("last_heartbeat_at", now)
-                .set("updated_at", now)
-                .inc("attempt_count", 1);
-        return mongoTemplate.findAndModify(
-                query,
-                update,
-                FindAndModifyOptions.options().returnNew(true),
-                RegulatedMutationCommandDocument.class
-        );
-    }
-
     private <R, S> RegulatedMutationResult<S> concurrentResponse(RegulatedMutationCommand<R, S> command, String idempotencyKey) {
         RegulatedMutationCommandDocument current = commandRepository.findByIdempotencyKey(idempotencyKey)
-                .map(existing -> existingOrConflict(existing, command))
+                .map(existing -> conflictPolicy.existingOrConflict(existing, command))
                 .orElseThrow(MissingIdempotencyKeyException::new);
         RegulatedMutationResult<S> terminalOrPartial = terminalOrPartialResponse(command, current);
         if (terminalOrPartial != null) {
@@ -204,17 +198,6 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
                 current.getState(),
                 command.statusResponseFactory().response(RegulatedMutationState.REQUESTED)
         );
-    }
-
-    private <R, S> RegulatedMutationCommandDocument existingOrConflict(
-            RegulatedMutationCommandDocument existing,
-            RegulatedMutationCommand<R, S> command
-    ) {
-        if (!existing.getRequestHash().equals(command.requestHash())
-                || (existing.getIntentActorId() != null && !existing.getIntentActorId().equals(command.actorId()))) {
-            throw new ConflictingIdempotencyKeyException();
-        }
-        return existing;
     }
 
     private <R, S> void writeAttemptedAudit(
@@ -398,31 +381,6 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
     private boolean isSafeToExecuteBusinessMutation(RegulatedMutationCommandDocument document) {
         return document.getState() == RegulatedMutationState.REQUESTED
                 || document.getState() == RegulatedMutationState.AUDIT_ATTEMPTED;
-    }
-
-    private boolean needsSuccessAuditRetry(RegulatedMutationCommandDocument document) {
-        return document.getState() == RegulatedMutationState.SUCCESS_AUDIT_PENDING
-                && !document.isSuccessAuditRecorded();
-    }
-
-    private boolean requiresRecoveryWithoutSnapshot(RegulatedMutationCommandDocument document) {
-        return switch (document.getState()) {
-            case BUSINESS_COMMITTING, BUSINESS_COMMITTED, SUCCESS_AUDIT_PENDING, COMMITTED_DEGRADED, EVIDENCE_PENDING,
-                 EVIDENCE_CONFIRMED, COMMITTED, FINALIZED_VISIBLE, FINALIZED_EVIDENCE_PENDING_EXTERNAL,
-                 FINALIZED_EVIDENCE_CONFIRMED -> document.getResponseSnapshot() == null;
-            default -> false;
-        };
-    }
-
-    private RegulatedMutationState recoveryState(RegulatedMutationCommandDocument document) {
-        if (document.getState() == RegulatedMutationState.BUSINESS_COMMITTING) {
-            return RegulatedMutationState.BUSINESS_COMMITTING;
-        }
-        return RegulatedMutationState.FAILED;
-    }
-
-    private boolean leaseExpired(RegulatedMutationCommandDocument document, Instant now) {
-        return document.getLeaseExpiresAt() == null || !document.getLeaseExpiresAt().isAfter(now);
     }
 
     private record LocalCommit<R, S>(

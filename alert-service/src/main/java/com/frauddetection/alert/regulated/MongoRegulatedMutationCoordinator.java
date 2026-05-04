@@ -2,7 +2,6 @@ package com.frauddetection.alert.regulated;
 
 import com.frauddetection.alert.audit.AuditDegradationService;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
-import com.frauddetection.alert.service.ConflictingIdempotencyKeyException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -18,6 +17,7 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
 
     private final RegulatedMutationCommandRepository commandRepository;
     private final RegulatedMutationExecutorRegistry executorRegistry;
+    private final RegulatedMutationConflictPolicy conflictPolicy;
 
     /**
      * Compatibility constructor for unit tests and older focused tests.
@@ -81,13 +81,22 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
     /**
      * Production wiring path. Registry is Spring-managed and startup-validated.
      */
-    @Autowired
     public MongoRegulatedMutationCoordinator(
             RegulatedMutationCommandRepository commandRepository,
             RegulatedMutationExecutorRegistry executorRegistry
     ) {
+        this(commandRepository, executorRegistry, new RegulatedMutationConflictPolicy());
+    }
+
+    @Autowired
+    public MongoRegulatedMutationCoordinator(
+            RegulatedMutationCommandRepository commandRepository,
+            RegulatedMutationExecutorRegistry executorRegistry,
+            RegulatedMutationConflictPolicy conflictPolicy
+    ) {
         this.commandRepository = commandRepository;
         this.executorRegistry = executorRegistry;
+        this.conflictPolicy = conflictPolicy;
     }
 
     /**
@@ -141,19 +150,8 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
             String idempotencyKey
     ) {
         return commandRepository.findByIdempotencyKey(idempotencyKey)
-                .map(existing -> existingOrConflict(existing, command))
+                .map(existing -> conflictPolicy.existingOrConflict(existing, command))
                 .orElseGet(() -> createCommand(command, idempotencyKey));
-    }
-
-    private <R, S> RegulatedMutationCommandDocument existingOrConflict(
-            RegulatedMutationCommandDocument existing,
-            RegulatedMutationCommand<R, S> command
-    ) {
-        if (!existing.getRequestHash().equals(command.requestHash())
-                || (existing.getIntentActorId() != null && !existing.getIntentActorId().equals(command.actorId()))) {
-            throw new ConflictingIdempotencyKeyException();
-        }
-        return existing;
     }
 
     private <R, S> RegulatedMutationCommandDocument createCommand(RegulatedMutationCommand<R, S> command, String idempotencyKey) {
@@ -178,7 +176,7 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
             return commandRepository.save(document);
         } catch (DuplicateKeyException duplicate) {
             return commandRepository.findByIdempotencyKey(idempotencyKey)
-                    .map(existing -> existingOrConflict(existing, command))
+                    .map(existing -> conflictPolicy.existingOrConflict(existing, command))
                     .orElseThrow(() -> duplicate);
         }
     }
