@@ -32,13 +32,19 @@ class RegulatedMutationClaimServiceTest {
 
     @Test
     void newCommandIsClaimedWhenMongoReturnsDocument() {
-        RegulatedMutationCommandDocument claimed = document(RegulatedMutationExecutionStatus.NEW, null);
+        RegulatedMutationCommandDocument claimed = document(RegulatedMutationExecutionStatus.PROCESSING, Instant.now().plusSeconds(30));
         when(mongoTemplate.findAndModify(any(), any(), any(), eq(RegulatedMutationCommandDocument.class)))
                 .thenReturn(claimed);
 
-        Optional<RegulatedMutationCommandDocument> result = service.claim(command(), "idem-1");
+        Optional<RegulatedMutationClaimToken> result = service.claim(command(), "idem-1");
 
-        assertThat(result).containsSame(claimed);
+        assertThat(result).hasValueSatisfying(token -> {
+            assertThat(token.commandId()).isEqualTo("command-1");
+            assertThat(token.leaseOwner()).isEqualTo("lease-owner-1");
+            assertThat(token.leaseExpiresAt()).isEqualTo(claimed.getLeaseExpiresAt());
+            assertThat(token.expectedInitialState()).isEqualTo(RegulatedMutationState.REQUESTED);
+            assertThat(token.expectedExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.PROCESSING);
+        });
     }
 
     @Test
@@ -102,7 +108,7 @@ class RegulatedMutationClaimServiceTest {
         when(mongoTemplate.findAndModify(any(), any(), any(), eq(RegulatedMutationCommandDocument.class)))
                 .thenReturn(null);
 
-        Optional<RegulatedMutationCommandDocument> result = service.claim(command(), "idem-1");
+        Optional<RegulatedMutationClaimToken> result = service.claim(command(), "idem-1");
 
         assertThat(result).isEmpty();
     }
@@ -112,13 +118,34 @@ class RegulatedMutationClaimServiceTest {
         when(mongoTemplate.findAndModify(any(), any(), any(), eq(RegulatedMutationCommandDocument.class)))
                 .thenReturn(null);
 
-        Optional<RegulatedMutationCommandDocument> result = service.claim(command(), "idem-1");
+        Optional<RegulatedMutationClaimToken> result = service.claim(command(), "idem-1");
 
         assertThat(result).isEmpty();
         String queryJson = capturedQuery().getQueryObject().toString();
         assertThat(queryJson).contains("execution_status=NEW");
         assertThat(queryJson).contains("execution_status=PROCESSING");
         assertThat(queryJson).contains("lease_expires_at");
+    }
+
+    @Test
+    void successfulClaimReturnsDurableTokenFromPersistedDocument() {
+        RegulatedMutationCommandDocument claimed = document(RegulatedMutationExecutionStatus.PROCESSING, Instant.now().plusSeconds(30));
+        claimed.setLeaseOwner("persisted-owner");
+        claimed.setAttemptCount(2);
+        claimed.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        when(mongoTemplate.findAndModify(any(), any(), any(), eq(RegulatedMutationCommandDocument.class)))
+                .thenReturn(claimed);
+
+        Optional<RegulatedMutationClaimToken> result = service.claim(command(), "idem-1");
+
+        assertThat(result).hasValueSatisfying(token -> {
+            assertThat(token.commandId()).isEqualTo("command-1");
+            assertThat(token.leaseOwner()).isEqualTo("persisted-owner");
+            assertThat(token.attemptCount()).isEqualTo(2);
+            assertThat(token.mutationModelVersion()).isEqualTo(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+            assertThat(token.expectedInitialState()).isEqualTo(RegulatedMutationState.REQUESTED);
+            assertThat(token.expectedExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.PROCESSING);
+        });
     }
 
     @Test
@@ -240,8 +267,12 @@ class RegulatedMutationClaimServiceTest {
             Instant leaseExpiresAt
     ) {
         RegulatedMutationCommandDocument document = new RegulatedMutationCommandDocument();
+        document.setId("command-1");
+        document.setLeaseOwner("lease-owner-1");
         document.setExecutionStatus(status);
         document.setLeaseExpiresAt(leaseExpiresAt);
+        document.setState(RegulatedMutationState.REQUESTED);
+        document.setAttemptCount(1);
         return document;
     }
 

@@ -507,22 +507,65 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp31MustDeferFencedTransitionsToFdp32() throws Exception {
-        try (Stream<Path> paths = Files.walk(Path.of("src/main/java/com/frauddetection/alert/regulated"))) {
-            List<Path> javaFiles = paths
-                    .filter(path -> path.toString().endsWith(".java"))
-                    .toList();
+    void fdp32ClaimedTransitionsMustUseFencedCommandWriter() throws Exception {
+        String legacyExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationExecutor.java"
+        ));
+        String evidenceExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"
+        ));
+        String writer = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationFencedCommandWriter.java"
+        ));
+        String coordinator = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/MongoRegulatedMutationCoordinator.java"
+        ));
 
-            for (Path path : javaFiles) {
-                String source = Files.readString(path);
-                assertThat(source)
-                        .as("FDP-31 must not introduce fenced transition persistence: " + path)
-                        .doesNotContain("fencedTransition")
-                        .doesNotContain("saveWithLeaseOwner")
-                        .doesNotContain("leaseOwner + unexpired")
-                        .doesNotContain("lease-owner write fencing implemented");
-            }
-        }
+        assertThat(legacyExecutor).contains("RegulatedMutationFencedCommandWriter");
+        assertThat(evidenceExecutor).contains("RegulatedMutationFencedCommandWriter");
+        assertThat(legacyExecutor).contains("fencedCommandWriter.transition");
+        assertThat(evidenceExecutor).contains("fencedCommandWriter.transition");
+        assertThat(writer).contains("lease_owner");
+        assertThat(writer).contains("lease_expires_at");
+        assertThat(writer).contains("state");
+        assertThat(writer).contains("execution_status");
+        assertThat(writer).contains("StaleRegulatedMutationLeaseException");
+        assertThat(coordinator).doesNotContain("RegulatedMutationFencedCommandWriter");
+        assertThat(coordinator).doesNotContain("lease_owner");
+        assertThat(coordinator).doesNotContain("lease_expires_at");
+    }
+
+    @Test
+    void fdp32ExecutorsMustDocumentOnlyNonClaimedDirectSaves() throws Exception {
+        String legacyExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationExecutor.java"
+        ));
+        String evidenceExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"
+        ));
+
+        assertThat(legacyExecutor).contains("Non-claimed replay/recovery path");
+        assertThat(evidenceExecutor).contains("Non-claimed replay/recovery path");
+        assertThat(legacyExecutor).doesNotContain("commandRepository.save(document);\n    }\n\n    private boolean isSafeToExecuteBusinessMutation");
+        assertThat(evidenceExecutor).contains("claimed worker transitions must use RegulatedMutationFencedCommandWriter");
+    }
+
+    @Test
+    void fdp32DocsMustDescribeLeaseFencingWithoutReviewNotes() throws Exception {
+        String architecture = Files.readString(Path.of("../docs/FDP-32-lease-fencing-stale-worker-protection.md"));
+        String mergeGate = Files.readString(Path.of("../docs/FDP-32-merge-gate.md"));
+        String combined = architecture + "\n" + mergeGate;
+
+        assertThat(combined).contains("claim acquisition is not write fencing");
+        assertThat(combined).contains("post-claim transitions are fenced");
+        assertThat(combined).contains("stale worker");
+        assertThat(combined).contains("no silent repository.save after claim");
+        assertThat(combined).contains("does not expand transaction scope");
+        assertThat(combined).contains("no distributed lock");
+        assertThat(combined).doesNotContain("Merge Decision");
+        assertThat(combined).doesNotContain("GO:");
+        assertThat(combined).doesNotContain("NO-GO:");
+        assertThat(combined).doesNotContain("reviewer");
     }
 
     @Test
