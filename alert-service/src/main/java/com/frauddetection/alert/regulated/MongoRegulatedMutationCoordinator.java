@@ -5,6 +5,7 @@ import com.frauddetection.alert.api.RegulatedMutationPublicStatusProjection;
 import com.frauddetection.alert.audit.AuditDegradationService;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.PostCommitEvidenceIncompleteException;
+import com.frauddetection.alert.audit.RegulatedMutationLocalAuditPhaseWriter;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.service.ConflictingIdempotencyKeyException;
 import org.slf4j.Logger;
@@ -41,6 +42,7 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
     private final RegulatedMutationTransactionRunner transactionRunner;
     private final RegulatedMutationPublicStatusMapper publicStatusMapper;
     private final EvidencePreconditionEvaluator evidencePreconditionEvaluator;
+    private final RegulatedMutationLocalAuditPhaseWriter localAuditPhaseWriter;
     private final boolean bankModeFailClosed;
     private final Duration leaseDuration;
     private final EvidenceGatedFinalizeStateMachine evidenceGatedStateMachine = new EvidenceGatedFinalizeStateMachine();
@@ -63,6 +65,7 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
                 new RegulatedMutationTransactionRunner(RegulatedMutationTransactionMode.OFF, null),
                 new RegulatedMutationPublicStatusMapper(),
                 new EvidencePreconditionEvaluator(),
+                null,
                 bankModeFailClosed,
                 leaseDuration
         );
@@ -87,6 +90,7 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
                 transactionRunner,
                 new RegulatedMutationPublicStatusMapper(),
                 new EvidencePreconditionEvaluator(),
+                null,
                 bankModeFailClosed,
                 leaseDuration
         );
@@ -102,6 +106,7 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
             RegulatedMutationTransactionRunner transactionRunner,
             RegulatedMutationPublicStatusMapper publicStatusMapper,
             EvidencePreconditionEvaluator evidencePreconditionEvaluator,
+            RegulatedMutationLocalAuditPhaseWriter localAuditPhaseWriter,
             @Value("${app.audit.bank-mode.fail-closed:false}") boolean bankModeFailClosed,
             @Value("${app.regulated-mutation.lease-duration:PT30S}") Duration leaseDuration
     ) {
@@ -113,6 +118,7 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
         this.transactionRunner = transactionRunner;
         this.publicStatusMapper = publicStatusMapper;
         this.evidencePreconditionEvaluator = evidencePreconditionEvaluator;
+        this.localAuditPhaseWriter = localAuditPhaseWriter;
         this.bankModeFailClosed = bankModeFailClosed;
         this.leaseDuration = leaseDuration;
     }
@@ -612,10 +618,9 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
                 R result = command.mutation().execute(new RegulatedMutationExecutionContext(document.getId()));
                 S response = command.responseMapper().response(result, RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
                 RegulatedMutationResponseSnapshot snapshot = command.responseSnapshotter().snapshot(response);
-                String auditId = auditPhaseService.recordPhase(document, command.action(), command.resourceType(), AuditOutcome.SUCCESS, null);
+                String auditId = localSuccessAudit(command, document);
                 document.setSuccessAuditId(auditId);
                 document.setSuccessAuditRecorded(true);
-                document.setPublicStatus(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
                 document.setResponseSnapshot(snapshot);
                 document.setOutboxEventId(snapshot.decisionEventId());
                 document.setLocalCommitMarker("EVIDENCE_GATED_FINALIZED");
@@ -656,6 +661,16 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
                         .orElseThrow(() -> new IllegalStateException("Regulated mutation command unavailable for recovery.")));
     }
 
+    private <R, S> String localSuccessAudit(
+            RegulatedMutationCommand<R, S> command,
+            RegulatedMutationCommandDocument document
+    ) {
+        if (localAuditPhaseWriter == null) {
+            throw new IllegalStateException("FDP-29 evidence-gated finalize requires a local audit phase writer.");
+        }
+        return localAuditPhaseWriter.recordSuccessPhase(document, command.action(), command.resourceType());
+    }
+
     private void evidenceGatedTransition(
             RegulatedMutationCommandDocument document,
             RegulatedMutationState state,
@@ -663,6 +678,7 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
     ) {
         RegulatedMutationState previous = document.getState();
         evidenceGatedStateMachine.requireTransition(document.getState(), state);
+        document.setPublicStatus(publicStatusMapper.submitDecisionStatus(state, document.mutationModelVersionOrLegacy()));
         transition(document, state, lastError);
         metrics.recordEvidenceGatedFinalizeStateTransition(previous, state, lastError == null ? "SUCCESS" : "FAILED");
     }
