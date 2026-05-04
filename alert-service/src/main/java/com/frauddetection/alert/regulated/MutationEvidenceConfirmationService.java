@@ -68,6 +68,9 @@ public class MutationEvidenceConfirmationService {
     }
 
     public int confirmPendingEvidence(int limit) {
+        if (limit <= 0) {
+            return 0;
+        }
         int promoted = 0;
         List<RegulatedMutationCommandDocument> commands = commandRepository.findTop100ByStateInAndUpdatedAtBefore(
                 List.of(
@@ -77,7 +80,7 @@ public class MutationEvidenceConfirmationService {
                 ),
                 java.time.Instant.now().plusSeconds(1)
         );
-        int boundedLimit = Math.max(1, Math.min(limit, 100));
+        int boundedLimit = Math.min(limit, 100);
         metrics.recordEvidenceConfirmationPending(commands.size());
         for (RegulatedMutationCommandDocument command : commands.stream().limit(boundedLimit).toList()) {
             promoted += command.mutationModelVersionOrLegacy() == RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1

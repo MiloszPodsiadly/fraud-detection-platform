@@ -553,15 +553,15 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
             metrics.recordEvidenceGatedFinalizeStuckVisible();
             return markEvidenceGatedRecoveryRequired(command, document, "FINALIZED_VISIBLE_MISSING_PROOF");
         }
-        if (document.getResponseSnapshot() != null) {
-            return replay(command, document);
-        }
         if (document.getExecutionStatus() == RegulatedMutationExecutionStatus.RECOVERY_REQUIRED
                 || document.getState() == RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED) {
             return new RegulatedMutationResult<>(
                     document.getState(),
                     command.statusResponseFactory().response(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED)
             );
+        }
+        if (document.getResponseSnapshot() != null) {
+            return replay(command, document);
         }
         if (document.getState() == RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE
                 || document.getState() == RegulatedMutationState.FAILED_BUSINESS_VALIDATION) {

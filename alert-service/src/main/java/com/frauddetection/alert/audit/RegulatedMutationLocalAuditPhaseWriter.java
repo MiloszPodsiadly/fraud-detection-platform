@@ -12,6 +12,9 @@ import java.util.UUID;
 @Service
 public class RegulatedMutationLocalAuditPhaseWriter {
 
+    private static final int MAX_APPEND_ATTEMPTS = 2_000;
+    private static final long LOCK_RETRY_BACKOFF_MILLIS = 5L;
+
     private final AuditEventRepository auditEventRepository;
     private final AuditAnchorRepository auditAnchorRepository;
     private final AuditChainLockRepository lockRepository;
@@ -32,9 +35,23 @@ public class RegulatedMutationLocalAuditPhaseWriter {
             AuditResourceType resourceType
     ) {
         String phaseKey = phaseKey(command, "SUCCESS");
-        return auditEventRepository.findByRequestId(phaseKey)
-                .map(AuditEventDocument::auditId)
-                .orElseGet(() -> appendLocalSuccess(command, action, resourceType, phaseKey));
+        for (int attempt = 1; attempt <= MAX_APPEND_ATTEMPTS; attempt++) {
+            try {
+                return auditEventRepository.findByRequestId(phaseKey)
+                        .map(AuditEventDocument::auditId)
+                        .orElseGet(() -> appendLocalSuccess(command, action, resourceType, phaseKey));
+            } catch (DuplicateKeyException duplicate) {
+                return auditEventRepository.findByRequestId(phaseKey)
+                        .map(AuditEventDocument::auditId)
+                        .orElseThrow(() -> duplicate);
+            } catch (AuditChainConflictException conflict) {
+                if (attempt == MAX_APPEND_ATTEMPTS) {
+                    throw new AuditPersistenceUnavailableException();
+                }
+                backoffBeforeRetry();
+            }
+        }
+        throw new AuditPersistenceUnavailableException();
     }
 
     private String appendLocalSuccess(
@@ -86,7 +103,7 @@ public class RegulatedMutationLocalAuditPhaseWriter {
         } catch (DuplicateKeyException duplicate) {
             return auditEventRepository.findByRequestId(phaseKey)
                     .map(AuditEventDocument::auditId)
-                    .orElseThrow(() -> duplicate);
+                    .orElseThrow(() -> new AuditChainConflictException("Audit chain append raced."));
         } catch (DataAccessException exception) {
             throw new AuditPersistenceUnavailableException();
         } finally {
@@ -97,6 +114,15 @@ public class RegulatedMutationLocalAuditPhaseWriter {
                     // The surrounding Mongo transaction determines whether the local audit write commits.
                 }
             }
+        }
+    }
+
+    private void backoffBeforeRetry() {
+        try {
+            Thread.sleep(LOCK_RETRY_BACKOFF_MILLIS);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new AuditPersistenceUnavailableException();
         }
     }
 
