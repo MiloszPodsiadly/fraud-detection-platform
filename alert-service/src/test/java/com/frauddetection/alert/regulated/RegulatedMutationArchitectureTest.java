@@ -233,12 +233,12 @@ class RegulatedMutationArchitectureTest {
 
     @Test
     void fdp29FinalizeTransactionMustUseLocalAuditWriterOnly() throws Exception {
-        String coordinator = Files.readString(Path.of(
-                "src/main/java/com/frauddetection/alert/regulated/MongoRegulatedMutationCoordinator.java"
+        String executor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"
         ));
-        String finalizeMethod = coordinator.substring(
-                coordinator.indexOf("private <R, S> RegulatedMutationResult<S> finalizeVisibleMutation("),
-                coordinator.indexOf("private <R, S> RegulatedMutationResult<S> markEvidenceGatedRecoveryRequired(")
+        String finalizeMethod = executor.substring(
+                executor.indexOf("private <R, S> RegulatedMutationResult<S> finalizeVisibleMutation("),
+                executor.indexOf("private <R, S> RegulatedMutationResult<S> markRecoveryRequired(")
         );
 
         assertThat(finalizeMethod).contains("localSuccessAudit(command, document)");
@@ -249,6 +249,19 @@ class RegulatedMutationArchitectureTest {
         assertThat(finalizeMethod).doesNotContain("FraudDecisionEventPublisher");
         assertThat(finalizeMethod).doesNotContain("KafkaTemplate");
         assertThat(finalizeMethod).doesNotContain("SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL");
+    }
+
+    @Test
+    void fdp29CoordinatorMustDelegateEvidenceGatedFinalizeToExecutor() throws Exception {
+        String coordinator = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/MongoRegulatedMutationCoordinator.java"
+        ));
+
+        assertThat(coordinator).contains("EvidenceGatedFinalizeExecutor");
+        assertThat(coordinator).contains("evidenceGatedFinalizeExecutor.commit(command, idempotencyKey, document)");
+        assertThat(coordinator).doesNotContain("private <R, S> void prepareEvidence(");
+        assertThat(coordinator).doesNotContain("private <R, S> RegulatedMutationResult<S> finalizeVisibleMutation(");
+        assertThat(coordinator).doesNotContain("localSuccessAudit(");
     }
 
     @Test
@@ -280,7 +293,9 @@ class RegulatedMutationArchitectureTest {
         for (Path path : javaFiles) {
             String normalized = path.toString().replace('\\', '/');
             String source = Files.readString(path);
-            if (normalized.endsWith("regulated/MongoRegulatedMutationCoordinator.java")) {
+            if (normalized.endsWith("regulated/MongoRegulatedMutationCoordinator.java")
+                    || normalized.endsWith("regulated/EvidenceGatedFinalizeExecutor.java")
+                    || normalized.endsWith("regulated/EvidenceGatedFinalizeStartupGuard.java")) {
                 assertThat(source).contains("RegulatedMutationLocalAuditPhaseWriter");
                 continue;
             }
