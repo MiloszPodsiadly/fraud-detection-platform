@@ -109,6 +109,10 @@ This is not a second audit source of truth. It is a narrow local transaction pri
 
 Local `SUCCESS` audit inside the transaction is local evidence only. It is not external finality, legal notarization, WORM storage, distributed ACID, or independent witness proof. Integration tests cover concurrent FDP-29 finalizations and prove no duplicate `SUCCESS` phase, duplicate chain position, duplicate anchor, or audit-chain fork for the local writer path.
 
+The evidence-gated execution body is isolated in `EvidenceGatedFinalizeExecutor`. The shared Mongo coordinator creates or loads commands, validates idempotency, and routes by mutation model version; it does not own FDP-29 evidence preparation or the local finalize transaction body. This boundary is covered by architecture tests to avoid adding more model-specific branches to the shared coordinator.
+
+The local writer retry policy is configurable and bounded. FDP-29 startup fails closed when the writer bean, retry policy, chain index initializer, or required unique indexes are missing or unsafe. Contention and lock-release failures are exposed through low-cardinality operational metrics; those metrics are not compliance evidence.
+
 ## Definition of Visible Business Commit
 
 Visible business commit means a client, downstream consumer, or evidence export can treat the regulated business mutation as committed. It does not include internal pending command storage.

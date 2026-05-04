@@ -59,6 +59,8 @@ This is intentionally narrower than the target precondition table. External anch
 
 The local success audit writer does not call `AuditService`, `AuditEventPublisher`, `ExternalAuditAnchorPublisher`, or Kafka publishers. External audit publication remains post-commit/asynchronous evidence confirmation.
 
+`EvidenceGatedFinalizeExecutor` owns evidence preparation, local precondition evaluation, and the local finalize transaction for FDP-29. The shared Mongo coordinator loads or creates commands and routes evidence-gated commands to that executor by `mutation_model_version`; it does not implement the evidence-gated transaction body directly.
+
 ## Local SUCCESS Audit Writer
 
 `RegulatedMutationLocalAuditPhaseWriter` is used only by the FDP-29 submit-decision finalize transaction. It writes the local `SUCCESS` phase to the authoritative `audit_events` collection with deterministic request id `commandId:SUCCESS`, appends the same local audit-chain record model, and writes the matching local anchor record.
@@ -66,5 +68,23 @@ The local success audit writer does not call `AuditService`, `AuditEventPublishe
 It is intentionally not a generic audit service and is not a second source of truth. It does not call `AuditService`, `AuditEventPublisher`, Kafka, external anchor publishers, or Trust Authority clients. Broader use outside the FDP-29 coordinator path requires architecture review.
 
 The local `SUCCESS` phase proves only local durable evidence inside Mongo. It does not provide external finality, legal notarization, WORM storage, distributed ACID, or independent witness proof.
+
+The writer retry policy is bounded by:
+
+- `app.audit.local-phase-writer.max-append-attempts`
+- `app.audit.local-phase-writer.backoff-ms`
+- `app.audit.local-phase-writer.max-total-wait-ms`
+- `app.audit.local-phase-writer.allow-long-total-wait`
+
+FDP-29 startup fails closed when the writer, retry policy, chain index initializer, or required unique chain indexes are missing or unsafe. This prevents enabling a local finalize path that can silently truncate, fork, or indefinitely wait on the local audit chain.
+
+Writer health is exposed through low-cardinality metrics:
+
+- `fdp29_local_audit_chain_append_total{outcome}`
+- `fdp29_local_audit_chain_retry_total{reason}`
+- `fdp29_local_audit_chain_append_duration_ms`
+- `fdp29_local_audit_chain_lock_release_failure_total`
+
+These metrics are operational signals only. They are not compliance evidence and must not use dynamic labels such as actors, resources, command ids, audit ids, lock owners, paths, or exception messages.
 
 `confirmPendingEvidence(limit)` accepts batch limits from `1` to `100`. A limit of `0` or less is a no-op and returns `0`; it does not process one command implicitly.
