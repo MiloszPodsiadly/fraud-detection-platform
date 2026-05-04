@@ -122,15 +122,25 @@ class RegulatedMutationArchitectureTest {
         String coordinatorSource = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/MongoRegulatedMutationCoordinator.java"
         ));
+        String legacyExecutorSource = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationExecutor.java"
+        ));
+        String evidenceExecutorSource = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"
+        ));
         String handlerSource = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/mutation/submitdecision/SubmitDecisionMutationHandler.java"
         ));
 
         assertThat(serviceSource).doesNotContain("FraudDecisionEventPublisher");
         assertThat(coordinatorSource).doesNotContain("FraudDecisionEventPublisher");
+        assertThat(legacyExecutorSource).doesNotContain("FraudDecisionEventPublisher");
+        assertThat(evidenceExecutorSource).doesNotContain("FraudDecisionEventPublisher");
         assertThat(handlerSource).doesNotContain("FraudDecisionEventPublisher");
         assertThat(serviceSource).doesNotContain(".publish(");
         assertThat(coordinatorSource).doesNotContain(".publish(");
+        assertThat(legacyExecutorSource).doesNotContain(".publish(");
+        assertThat(evidenceExecutorSource).doesNotContain(".publish(");
         assertThat(handlerSource).doesNotContain(".publish(");
     }
 
@@ -252,16 +262,161 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp29CoordinatorMustDelegateEvidenceGatedFinalizeToExecutor() throws Exception {
+    void coordinatorMustRouteThroughExecutorRegistry() throws Exception {
         String coordinator = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/MongoRegulatedMutationCoordinator.java"
         ));
 
-        assertThat(coordinator).contains("EvidenceGatedFinalizeExecutor");
-        assertThat(coordinator).contains("evidenceGatedFinalizeExecutor.commit(command, idempotencyKey, document)");
+        assertThat(coordinator).contains("RegulatedMutationExecutorRegistry");
+        assertThat(coordinator).contains("executorRegistry.executorFor(document).execute(command, idempotencyKey, document)");
         assertThat(coordinator).doesNotContain("private <R, S> void prepareEvidence(");
         assertThat(coordinator).doesNotContain("private <R, S> RegulatedMutationResult<S> finalizeVisibleMutation(");
+        assertThat(coordinator).doesNotContain("command.mutation().execute");
+        assertThat(coordinator).doesNotContain("transactionRunner.runLocalCommit");
+        assertThat(coordinator).doesNotContain("RegulatedMutationLocalAuditPhaseWriter localAuditPhaseWriter");
+        assertThat(coordinator).doesNotContain("auditPhaseService.recordPhase");
+        assertThat(coordinator).doesNotContain("AuditService");
+        assertThat(coordinator).doesNotContain("AuditEventPublisher");
+        assertThat(coordinator).doesNotContain("FraudDecisionEventPublisher");
+        assertThat(coordinator).doesNotContain("OutboxPublisher");
+        assertThat(coordinator).doesNotContain("KafkaTemplate");
         assertThat(coordinator).doesNotContain("localSuccessAudit(");
+    }
+
+    @Test
+    void productionCoordinatorConstructorMustDependOnExecutorRegistry() throws Exception {
+        String coordinator = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/MongoRegulatedMutationCoordinator.java"
+        ));
+
+        assertThat(coordinator).contains("@Autowired");
+        assertThat(coordinator).contains("MongoRegulatedMutationCoordinator(");
+        assertThat(coordinator).contains("RegulatedMutationCommandRepository commandRepository");
+        assertThat(coordinator).contains("RegulatedMutationExecutorRegistry executorRegistry");
+        assertThat(coordinator).contains("Production wiring path. Registry is Spring-managed and startup-validated.");
+        assertThat(coordinator).contains("Compatibility constructor for unit tests");
+        assertThat(coordinator).contains("must not replace registry bean validation");
+    }
+
+    @Test
+    void executorRegistryMustValidateActionResourceSupportForDocumentRouting() throws Exception {
+        String registry = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationExecutorRegistry.java"
+        ));
+        String executorInterface = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationExecutor.java"
+        ));
+        String evidenceExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"
+        ));
+
+        assertThat(executorInterface).contains("boolean supports(AuditAction action, AuditResourceType resourceType)");
+        assertThat(registry).contains("executor.supports(action, resourceType)");
+        assertThat(registry).contains("does not support action/resource");
+        assertThat(evidenceExecutor).contains("action == AuditAction.SUBMIT_ANALYST_DECISION");
+        assertThat(evidenceExecutor).contains("resourceType == AuditResourceType.ALERT");
+    }
+
+    @Test
+    void legacyExecutorMustNotDependOnEvidenceGatedOrExternalFinalizeBoundaries() throws Exception {
+        String legacyExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationExecutor.java"
+        ));
+
+        assertThat(legacyExecutor).doesNotContain("RegulatedMutationLocalAuditPhaseWriter");
+        assertThat(legacyExecutor).doesNotContain("EvidencePreconditionEvaluator");
+        assertThat(legacyExecutor).doesNotContain("EvidenceGatedFinalizeStateMachine");
+        assertThat(legacyExecutor).doesNotContain("FraudDecisionEventPublisher");
+        assertThat(legacyExecutor).doesNotContain("KafkaTemplate");
+        assertThat(legacyExecutor).doesNotContain("ExternalAuditAnchorPublisher");
+        assertThat(legacyExecutor).doesNotContain("ExternalAuditIntegrity");
+        assertThat(legacyExecutor).doesNotContain("ExternalAuditPublication");
+    }
+
+    @Test
+    void evidenceGatedOnlyBoundariesMustRemainFdp29Only() throws Exception {
+        List<Path> javaFiles;
+        try (java.util.stream.Stream<Path> stream = Files.walk(Path.of("src/main/java/com/frauddetection/alert"))) {
+            javaFiles = stream
+                    .filter(path -> path.toString().endsWith(".java"))
+                    .toList();
+        }
+
+        for (Path path : javaFiles) {
+            String normalized = path.toString().replace('\\', '/');
+            String source = Files.readString(path);
+            if (normalized.endsWith("regulated/EvidenceGatedFinalizeExecutor.java")
+                    || normalized.endsWith("regulated/EvidenceGatedFinalizeStartupGuard.java")
+                    || normalized.endsWith("regulated/EvidencePreconditionEvaluator.java")
+                    || normalized.endsWith("regulated/EvidenceGatedFinalizeStateMachine.java")
+                    || normalized.endsWith("audit/RegulatedMutationLocalAuditPhaseWriter.java")) {
+                continue;
+            }
+            assertThat(source)
+                    .as("Evidence-gated helper leaked outside FDP-29 executor/startup boundary: " + path)
+                    .doesNotContain("RegulatedMutationLocalAuditPhaseWriter")
+                    .doesNotContain("EvidencePreconditionEvaluator")
+                    .doesNotContain("EvidenceGatedFinalizeStateMachine");
+        }
+    }
+
+    @Test
+    void broadExecutorSupportsMustRemainLegacyOnly() throws Exception {
+        String legacyExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationExecutor.java"
+        ));
+        String evidenceExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"
+        ));
+
+        assertThat(legacyExecutor).contains("Broad support is intentional only for LEGACY_REGULATED_MUTATION compatibility");
+        assertThat(evidenceExecutor).contains("action == AuditAction.SUBMIT_ANALYST_DECISION");
+        assertThat(evidenceExecutor).contains("resourceType == AuditResourceType.ALERT");
+        assertThat(evidenceExecutor).doesNotContain("return action != null && resourceType != null");
+    }
+
+    @Test
+    void evidenceGatedFinalizeExecutorMustDeclareExecutorModelVersion() throws Exception {
+        String executor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"
+        ));
+
+        assertThat(executor).contains("implements RegulatedMutationExecutor");
+        assertThat(executor).contains("return RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1");
+    }
+
+    @Test
+    void legacyExecutorMustDeclareExecutorModelVersion() throws Exception {
+        String executor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationExecutor.java"
+        ));
+
+        assertThat(executor).contains("implements RegulatedMutationExecutor");
+        assertThat(executor).contains("return RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION");
+    }
+
+    @Test
+    void fdp30DocsMustDescribeArchitectureScopeWithoutReviewNotes() throws Exception {
+        String source = Files.readString(Path.of("../docs/FDP-30-executor-split.md"));
+
+        assertThat(source).contains("# FDP-30 Regulated Mutation Executor Split");
+        assertThat(source).contains("## Scope");
+        assertThat(source).contains("## Non-Goals");
+        assertThat(source).contains("## Production Wiring");
+        assertThat(source).contains("## Behavior-Preservation Contract");
+        assertThat(source).contains("FDP-29 remains disabled by default");
+        assertThat(source).contains("FDP-30 does not change local ACID boundaries");
+        assertThat(source).contains("Null `mutation_model_version`");
+        assertThat(source).contains("`SUCCESS_AUDIT_PENDING` retry");
+        assertThat(source).contains("`RECOVERY_REQUIRED` precedence");
+        assertThat(source).contains("Active `PROCESSING` lease");
+        assertThat(source).contains("broad `supports(action, resourceType)`");
+        assertThat(source).contains("Registry Fail-Closed Behavior");
+        assertThat(source).contains("registry is not a replacement for FDP-29 startup guard");
+        assertThat(source).doesNotContain("Merge Decision");
+        assertThat(source).doesNotContain("GO:");
+        assertThat(source).doesNotContain("NO-GO:");
+        assertThat(source).doesNotContain("reviewer");
     }
 
     @Test
@@ -293,8 +448,7 @@ class RegulatedMutationArchitectureTest {
         for (Path path : javaFiles) {
             String normalized = path.toString().replace('\\', '/');
             String source = Files.readString(path);
-            if (normalized.endsWith("regulated/MongoRegulatedMutationCoordinator.java")
-                    || normalized.endsWith("regulated/EvidenceGatedFinalizeExecutor.java")
+            if (normalized.endsWith("regulated/EvidenceGatedFinalizeExecutor.java")
                     || normalized.endsWith("regulated/EvidenceGatedFinalizeStartupGuard.java")) {
                 assertThat(source).contains("RegulatedMutationLocalAuditPhaseWriter");
                 continue;
@@ -307,22 +461,32 @@ class RegulatedMutationArchitectureTest {
 
     @Test
     void legacyAuditPathsMustContinueUsingPhaseAuditService() throws Exception {
-        String coordinator = Files.readString(Path.of(
-                "src/main/java/com/frauddetection/alert/regulated/MongoRegulatedMutationCoordinator.java"
+        String legacyExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationExecutor.java"
         ));
-        String writeSuccessAudit = coordinator.substring(
-                coordinator.indexOf("private <R, S> S writeSuccessAudit("),
-                coordinator.indexOf("private <R, S> void recordPostCommitDegraded(")
+        String writeSuccessAudit = legacyExecutor.substring(
+                legacyExecutor.indexOf("private <R, S> S writeSuccessAudit("),
+                legacyExecutor.indexOf("private <R, S> void recordPostCommitDegraded(")
         );
-        String retrySuccessAuditOnly = coordinator.substring(
-                coordinator.indexOf("private <R, S> RegulatedMutationResult<S> retrySuccessAuditOnly("),
-                coordinator.indexOf("private <R, S> S writeSuccessAudit(")
+        String retrySuccessAuditOnly = legacyExecutor.substring(
+                legacyExecutor.indexOf("private <R, S> RegulatedMutationResult<S> retrySuccessAuditOnly("),
+                legacyExecutor.indexOf("private <R, S> S writeSuccessAudit(")
         );
 
         assertThat(writeSuccessAudit).contains("auditPhaseService.recordPhase");
         assertThat(writeSuccessAudit).doesNotContain("localSuccessAudit(");
         assertThat(retrySuccessAuditOnly).contains("auditPhaseService.recordPhase");
         assertThat(retrySuccessAuditOnly).doesNotContain("localSuccessAudit(");
+    }
+
+    @Test
+    void legacyExecutorMustNotUseLocalAuditPhaseWriter() throws Exception {
+        String legacyExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationExecutor.java"
+        ));
+
+        assertThat(legacyExecutor).doesNotContain("RegulatedMutationLocalAuditPhaseWriter");
+        assertThat(legacyExecutor).doesNotContain("localSuccessAudit(");
     }
 
     @Test

@@ -152,25 +152,37 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
             AlertServiceMetrics metrics,
             RegulatedMutationLocalAuditPhaseWriter localAuditPhaseWriter
     ) {
+        RegulatedMutationAuditPhaseService auditPhaseService = new RegulatedMutationAuditPhaseService(
+                auditEventRepository,
+                new AuditService(new CurrentAnalystUser(), List.of(auditPublisher))
+        );
+        EvidencePreconditionEvaluator evidencePreconditionEvaluator = new EvidencePreconditionEvaluator(
+                transactionRunner,
+                provider(outboxRepository),
+                provider(alertRepository),
+                List.of(new SubmitDecisionRecoveryStrategy(alertRepository)),
+                true
+        );
+        EvidenceGatedFinalizeExecutor evidenceGatedFinalizeExecutor = new EvidenceGatedFinalizeExecutor(
+                commandRepository,
+                mongoTemplate,
+                auditPhaseService,
+                metrics,
+                transactionRunner,
+                new RegulatedMutationPublicStatusMapper(),
+                evidencePreconditionEvaluator,
+                localAuditPhaseWriter,
+                Duration.ofSeconds(30)
+        );
         return new MongoRegulatedMutationCoordinator(
                 commandRepository,
                 mongoTemplate,
-                new RegulatedMutationAuditPhaseService(
-                        auditEventRepository,
-                        new AuditService(new CurrentAnalystUser(), List.of(auditPublisher))
-                ),
+                auditPhaseService,
                 mock(AuditDegradationService.class),
                 metrics,
                 transactionRunner,
                 new RegulatedMutationPublicStatusMapper(),
-                new EvidencePreconditionEvaluator(
-                        transactionRunner,
-                        provider(outboxRepository),
-                        provider(alertRepository),
-                        List.of(new SubmitDecisionRecoveryStrategy(alertRepository)),
-                        true
-                ),
-                localAuditPhaseWriter,
+                evidenceGatedFinalizeExecutor,
                 false,
                 Duration.ofSeconds(30)
         );
@@ -191,25 +203,37 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
                 false,
                 false
         );
+        RegulatedMutationAuditPhaseService auditPhaseService = new RegulatedMutationAuditPhaseService(
+                auditEventRepository,
+                new AuditService(new CurrentAnalystUser(), List.of(persistentPublisher))
+        );
+        EvidencePreconditionEvaluator evidencePreconditionEvaluator = new EvidencePreconditionEvaluator(
+                transactionRunner,
+                provider(outboxRepository),
+                provider(alertRepository),
+                List.of(new SubmitDecisionRecoveryStrategy(alertRepository)),
+                true
+        );
+        EvidenceGatedFinalizeExecutor evidenceGatedFinalizeExecutor = new EvidenceGatedFinalizeExecutor(
+                commandRepository,
+                mongoTemplate,
+                auditPhaseService,
+                metrics,
+                transactionRunner,
+                new RegulatedMutationPublicStatusMapper(),
+                evidencePreconditionEvaluator,
+                localAuditPhaseWriter,
+                Duration.ofSeconds(30)
+        );
         return new MongoRegulatedMutationCoordinator(
                 commandRepository,
                 mongoTemplate,
-                new RegulatedMutationAuditPhaseService(
-                        auditEventRepository,
-                        new AuditService(new CurrentAnalystUser(), List.of(persistentPublisher))
-                ),
+                auditPhaseService,
                 mock(AuditDegradationService.class),
                 metrics,
                 transactionRunner,
                 new RegulatedMutationPublicStatusMapper(),
-                new EvidencePreconditionEvaluator(
-                        transactionRunner,
-                        provider(outboxRepository),
-                        provider(alertRepository),
-                        List.of(new SubmitDecisionRecoveryStrategy(alertRepository)),
-                        true
-                ),
-                localAuditPhaseWriter,
+                evidenceGatedFinalizeExecutor,
                 false,
                 Duration.ofSeconds(30)
         );
