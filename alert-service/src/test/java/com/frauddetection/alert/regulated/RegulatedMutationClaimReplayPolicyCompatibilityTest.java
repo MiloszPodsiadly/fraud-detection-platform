@@ -54,6 +54,55 @@ class RegulatedMutationClaimReplayPolicyCompatibilityTest {
     }
 
     @Test
+    void activeProcessingLeaseReturnsInProgressAndDoesNotClaim() {
+        AtomicInteger businessWrites = new AtomicInteger();
+        RegulatedMutationCommandDocument document = legacyDocument(RegulatedMutationState.AUDIT_ATTEMPTED);
+        document.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
+        document.setLeaseExpiresAt(NOW.plusSeconds(30));
+
+        RegulatedMutationReplayDecision decision = replayResolver.resolveLegacy(document, NOW);
+
+        assertThat(decision.type()).isEqualTo(RegulatedMutationReplayDecisionType.ACTIVE_IN_PROGRESS);
+        assertThat(decision.responseState()).isEqualTo(RegulatedMutationState.REQUESTED);
+        assertThat(businessWrites).hasValue(0);
+    }
+
+    @Test
+    void expiredProcessingLeaseOnSafeStateAllowsClaimDecision() {
+        RegulatedMutationCommandDocument document = legacyDocument(RegulatedMutationState.AUDIT_ATTEMPTED);
+        document.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
+        document.setLeaseExpiresAt(NOW.minusSeconds(1));
+
+        RegulatedMutationReplayDecision decision = replayResolver.resolveLegacy(document, NOW);
+
+        assertThat(decision.type()).isEqualTo(RegulatedMutationReplayDecisionType.NONE);
+    }
+
+    @Test
+    void expiredProcessingLeaseOnUnsafeLegacyStateRequiresRecovery() {
+        RegulatedMutationCommandDocument document = legacyDocument(RegulatedMutationState.BUSINESS_COMMITTING);
+        document.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
+        document.setLeaseExpiresAt(NOW.minusSeconds(1));
+
+        RegulatedMutationReplayDecision decision = replayResolver.resolveLegacy(document, NOW);
+
+        assertThat(decision.type()).isEqualTo(RegulatedMutationReplayDecisionType.RECOVERY_REQUIRED_RESPONSE);
+        assertThat(decision.responseState()).isEqualTo(RegulatedMutationState.BUSINESS_COMMITTING);
+    }
+
+    @Test
+    void expiredProcessingLeaseOnFdp29FinalizingRequiresRecovery() {
+        RegulatedMutationCommandDocument document = evidenceDocument(RegulatedMutationState.FINALIZING);
+        document.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
+        document.setLeaseExpiresAt(NOW.minusSeconds(1));
+
+        RegulatedMutationReplayDecision decision = replayResolver.resolveEvidenceGated(document, NOW);
+
+        assertThat(decision.type()).isEqualTo(RegulatedMutationReplayDecisionType.FINALIZING_REQUIRES_RECOVERY);
+        assertThat(decision.responseState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+    }
+
+    @Test
     void existingSameKeyDifferentPayloadConflictsBeforeMutationOrAudit() {
         RegulatedMutationCommandDocument document = legacyDocument(RegulatedMutationState.REQUESTED);
         document.setRequestHash("different-request-hash");

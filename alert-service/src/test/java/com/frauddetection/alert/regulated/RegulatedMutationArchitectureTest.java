@@ -455,11 +455,26 @@ class RegulatedMutationArchitectureTest {
         assertThat(source).contains("no transaction boundary changes");
         assertThat(source).contains("RECOVERY_REQUIRED must win over responseSnapshot");
         assertThat(source).contains("FINALIZE_RECOVERY_REQUIRED must win over responseSnapshot");
+        assertThat(source).contains("Rejected terminal states must win over responseSnapshot replay.");
         assertThat(source).contains("FDP-29 remains disabled by default");
         assertThat(source).doesNotContain("Merge Decision");
         assertThat(source).doesNotContain("GO:");
         assertThat(source).doesNotContain("NO-GO:");
         assertThat(source).doesNotContain("reviewer");
+    }
+
+    @Test
+    void fdp31DocsMustNotClaimLeaseFencing() throws Exception {
+        String source = Files.readString(Path.of("../docs/FDP-31-claim-replay-policy-extraction.md"));
+
+        assertThat(source).contains("Claim Acquisition Is Not Write Fencing");
+        assertThat(source).contains("FDP-31 does not implement lease-owner write fencing");
+        assertThat(source).contains("FDP-32");
+        assertThat(source).doesNotContain("solves stale worker writes");
+        assertThat(source).doesNotContain("prevents all stale writes");
+        assertThat(source).doesNotContain("lease fencing implemented");
+        assertThat(source).doesNotContain("write fencing implemented");
+        assertThat(source).doesNotContain("fully fenced lease");
     }
 
     @Test

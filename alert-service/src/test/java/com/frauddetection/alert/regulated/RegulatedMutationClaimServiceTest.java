@@ -18,6 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -38,6 +39,46 @@ class RegulatedMutationClaimServiceTest {
         Optional<RegulatedMutationCommandDocument> result = service.claim(command(), "idem-1");
 
         assertThat(result).containsSame(claimed);
+    }
+
+    @Test
+    void nullCommandRejected() {
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.claim(null, "idem-1"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Regulated mutation command is required.");
+
+        verifyNoInteractions(mongoTemplate);
+    }
+
+    @Test
+    void nullIdempotencyKeyRejected() {
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.claim(command(), null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Regulated mutation idempotency key is required.");
+
+        verifyNoInteractions(mongoTemplate);
+    }
+
+    @Test
+    void blankIdempotencyKeyRejected() {
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.claim(command(), "  "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Regulated mutation idempotency key is required.");
+
+        verifyNoInteractions(mongoTemplate);
+    }
+
+    @Test
+    void validClaimStillBuildsSameFindAndModifyQuery() {
+        service.claim(command(), "idem-1");
+
+        Query query = capturedQuery();
+        String queryJson = query.getQueryObject().toString();
+        assertThat(queryJson).contains("idempotency_key=idem-1");
+        assertThat(queryJson).contains("request_hash=request-hash-1");
+        assertThat(queryJson).contains("execution_status=NEW");
+        assertThat(queryJson).contains("execution_status=PROCESSING");
+        assertThat(queryJson).contains("lease_expires_at");
     }
 
     @Test
