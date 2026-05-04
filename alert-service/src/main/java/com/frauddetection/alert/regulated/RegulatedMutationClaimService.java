@@ -1,5 +1,7 @@
 package com.frauddetection.alert.regulated;
 
+import com.frauddetection.alert.observability.AlertServiceMetrics;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -18,16 +20,27 @@ public class RegulatedMutationClaimService {
 
     private final MongoTemplate mongoTemplate;
     private final Duration leaseDuration;
+    private final AlertServiceMetrics metrics;
 
     public RegulatedMutationClaimService(
             MongoTemplate mongoTemplate,
             @Value("${app.regulated-mutation.lease-duration:PT30S}") Duration leaseDuration
     ) {
-        this.mongoTemplate = mongoTemplate;
-        this.leaseDuration = leaseDuration;
+        this(mongoTemplate, leaseDuration, null);
     }
 
-    public <R, S> Optional<RegulatedMutationCommandDocument> claim(
+    @Autowired
+    public RegulatedMutationClaimService(
+            MongoTemplate mongoTemplate,
+            @Value("${app.regulated-mutation.lease-duration:PT30S}") Duration leaseDuration,
+            AlertServiceMetrics metrics
+    ) {
+        this.mongoTemplate = mongoTemplate;
+        this.leaseDuration = leaseDuration;
+        this.metrics = metrics;
+    }
+
+    public <R, S> Optional<RegulatedMutationClaimToken> claim(
             RegulatedMutationCommand<R, S> command,
             String idempotencyKey
     ) {
@@ -59,11 +72,39 @@ public class RegulatedMutationClaimService {
                 .set("last_heartbeat_at", now)
                 .set("updated_at", now)
                 .inc("attempt_count", 1);
-        return Optional.ofNullable(mongoTemplate.findAndModify(
+        RegulatedMutationCommandDocument claimed = mongoTemplate.findAndModify(
                 query,
                 update,
                 FindAndModifyOptions.options().returnNew(true),
                 RegulatedMutationCommandDocument.class
+        );
+        if (claimed == null) {
+            return Optional.empty();
+        }
+        if (claimed.getLeaseOwner() == null || claimed.getLeaseOwner().isBlank()) {
+            claimed.setLeaseOwner(leaseOwner);
+        }
+        if (claimed.getLeaseExpiresAt() == null) {
+            claimed.setLeaseExpiresAt(now.plus(leaseDuration));
+        }
+        if (claimed.getExecutionStatus() == null) {
+            claimed.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
+        }
+        if (metrics != null && claimed.getAttemptCount() > 1) {
+            metrics.recordRegulatedMutationLeaseTakeover(
+                    claimed.mutationModelVersionOrLegacy(),
+                    claimed.getState()
+            );
+        }
+        return Optional.of(new RegulatedMutationClaimToken(
+                claimed.getId(),
+                claimed.getLeaseOwner(),
+                claimed.getLeaseExpiresAt(),
+                now,
+                claimed.getAttemptCount(),
+                claimed.mutationModelVersionOrLegacy(),
+                claimed.getState(),
+                claimed.getExecutionStatus()
         ));
     }
 }
