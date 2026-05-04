@@ -376,6 +376,93 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
+    void fdp31ExecutorsMustUseSharedClaimConflictAndReplayPolicies() throws Exception {
+        String legacyExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationExecutor.java"
+        ));
+        String evidenceExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"
+        ));
+
+        assertThat(legacyExecutor).doesNotContain("findAndModify(");
+        assertThat(evidenceExecutor).doesNotContain("findAndModify(");
+        assertThat(legacyExecutor).contains("RegulatedMutationClaimService");
+        assertThat(evidenceExecutor).contains("RegulatedMutationClaimService");
+        assertThat(legacyExecutor).contains("RegulatedMutationConflictPolicy");
+        assertThat(evidenceExecutor).contains("RegulatedMutationConflictPolicy");
+        assertThat(legacyExecutor).contains("RegulatedMutationReplayResolver");
+        assertThat(evidenceExecutor).contains("RegulatedMutationReplayResolver");
+        assertThat(legacyExecutor).doesNotContain("private <R, S> RegulatedMutationCommandDocument existingOrConflict");
+        assertThat(evidenceExecutor).doesNotContain("private <R, S> RegulatedMutationCommandDocument existingOrConflict");
+        assertThat(legacyExecutor).doesNotContain("leaseExpired(");
+        assertThat(evidenceExecutor).doesNotContain("leaseExpired(");
+    }
+
+    @Test
+    void fdp31ClaimServiceMustBeOnlyDirectMongoClaimBoundary() throws Exception {
+        String claimService = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationClaimService.java"
+        ));
+
+        assertThat(claimService).contains("findAndModify(");
+        assertThat(claimService).contains("execution_status");
+        assertThat(claimService).contains("lease_expires_at");
+        assertThat(claimService).contains("attempt_count");
+        assertThat(claimService).doesNotContain("command.mutation().execute");
+        assertThat(claimService).doesNotContain("auditPhaseService.recordPhase");
+        assertThat(claimService).doesNotContain("transactionRunner.runLocalCommit");
+        assertThat(claimService).doesNotContain("RegulatedMutationLocalAuditPhaseWriter");
+        assertThat(claimService).doesNotContain("FraudDecisionEventPublisher");
+        assertThat(claimService).doesNotContain("KafkaTemplate");
+    }
+
+    @Test
+    void fdp31ReplayResolverMustRemainPureDecisionLogic() throws Exception {
+        String replayResolver = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationReplayResolver.java"
+        ));
+
+        assertThat(replayResolver).contains("resolveLegacy");
+        assertThat(replayResolver).contains("resolveEvidenceGated");
+        assertThat(replayResolver).contains("FINALIZE_RECOVERY_REQUIRED");
+        assertThat(replayResolver).doesNotContain("commandRepository.save");
+        assertThat(replayResolver).doesNotContain("mongoTemplate.findAndModify");
+        assertThat(replayResolver).doesNotContain("auditPhaseService.recordPhase");
+        assertThat(replayResolver).doesNotContain("transactionRunner.runLocalCommit");
+        assertThat(replayResolver).doesNotContain("command.mutation().execute");
+    }
+
+    @Test
+    void fdp31ConflictPolicyMustNotWriteOrExecuteMutation() throws Exception {
+        String conflictPolicy = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationConflictPolicy.java"
+        ));
+
+        assertThat(conflictPolicy).contains("ConflictingIdempotencyKeyException");
+        assertThat(conflictPolicy).doesNotContain("commandRepository.save");
+        assertThat(conflictPolicy).doesNotContain("mongoTemplate");
+        assertThat(conflictPolicy).doesNotContain("findAndModify");
+        assertThat(conflictPolicy).doesNotContain("auditPhaseService");
+        assertThat(conflictPolicy).doesNotContain("command.mutation().execute");
+    }
+
+    @Test
+    void fdp31DocsMustDescribePolicyExtractionWithoutReviewNotes() throws Exception {
+        String source = Files.readString(Path.of("../docs/FDP-31-claim-replay-policy-extraction.md"));
+
+        assertThat(source).contains("behavior-preserving refactor");
+        assertThat(source).contains("no public API status changes");
+        assertThat(source).contains("no transaction boundary changes");
+        assertThat(source).contains("RECOVERY_REQUIRED must win over responseSnapshot");
+        assertThat(source).contains("FINALIZE_RECOVERY_REQUIRED must win over responseSnapshot");
+        assertThat(source).contains("FDP-29 remains disabled by default");
+        assertThat(source).doesNotContain("Merge Decision");
+        assertThat(source).doesNotContain("GO:");
+        assertThat(source).doesNotContain("NO-GO:");
+        assertThat(source).doesNotContain("reviewer");
+    }
+
+    @Test
     void evidenceGatedFinalizeExecutorMustDeclareExecutorModelVersion() throws Exception {
         String executor = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"
