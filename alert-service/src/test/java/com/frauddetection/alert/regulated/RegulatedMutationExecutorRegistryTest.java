@@ -4,6 +4,7 @@ import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditResourceType;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -146,6 +147,28 @@ class RegulatedMutationExecutorRegistryTest {
                 .hasMessageContaining("Unsupported regulated mutation command resource type");
     }
 
+    @Test
+    void legacyExecutorBroadSupportIsCompatibilityOnly() {
+        LegacyRegulatedMutationExecutor legacy = legacyExecutor();
+
+        assertThat(legacy.supports(AuditAction.SUBMIT_ANALYST_DECISION, AuditResourceType.ALERT)).isTrue();
+        assertThat(legacy.supports(AuditAction.UPDATE_FRAUD_CASE, AuditResourceType.FRAUD_CASE)).isTrue();
+        assertThat(legacy.supports(AuditAction.REFRESH_TRUST_INCIDENTS, AuditResourceType.TRUST_INCIDENT)).isTrue();
+        assertThat(legacy.supports(null, AuditResourceType.ALERT)).isFalse();
+        assertThat(legacy.supports(AuditAction.SUBMIT_ANALYST_DECISION, null)).isFalse();
+    }
+
+    @Test
+    void evidenceGatedFinalizeExecutorStrictlySupportsSubmitDecisionAlertOnly() {
+        EvidenceGatedFinalizeExecutor evidence = evidenceGatedExecutor();
+
+        assertThat(evidence.supports(AuditAction.SUBMIT_ANALYST_DECISION, AuditResourceType.ALERT)).isTrue();
+        assertThat(evidence.supports(AuditAction.UPDATE_FRAUD_CASE, AuditResourceType.FRAUD_CASE)).isFalse();
+        assertThat(evidence.supports(AuditAction.REFRESH_TRUST_INCIDENTS, AuditResourceType.TRUST_INCIDENT)).isFalse();
+        assertThat(evidence.supports(AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION, AuditResourceType.DECISION_OUTBOX)).isFalse();
+        assertThat(evidence.supports(AuditAction.SUBMIT_ANALYST_DECISION, AuditResourceType.FRAUD_CASE)).isFalse();
+    }
+
     private RegulatedMutationExecutor executor(RegulatedMutationModelVersion modelVersion) {
         RegulatedMutationExecutor executor = mock(RegulatedMutationExecutor.class);
         when(executor.modelVersion()).thenReturn(modelVersion);
@@ -163,5 +186,33 @@ class RegulatedMutationExecutorRegistryTest {
         document.setAction(action.name());
         document.setResourceType(resourceType.name());
         return document;
+    }
+
+    private LegacyRegulatedMutationExecutor legacyExecutor() {
+        return new LegacyRegulatedMutationExecutor(
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                false,
+                Duration.ofSeconds(30)
+        );
+    }
+
+    private EvidenceGatedFinalizeExecutor evidenceGatedExecutor() {
+        return new EvidenceGatedFinalizeExecutor(
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                Duration.ofSeconds(30)
+        );
     }
 }

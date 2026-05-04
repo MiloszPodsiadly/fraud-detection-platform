@@ -275,6 +275,11 @@ class RegulatedMutationArchitectureTest {
         assertThat(coordinator).doesNotContain("transactionRunner.runLocalCommit");
         assertThat(coordinator).doesNotContain("RegulatedMutationLocalAuditPhaseWriter localAuditPhaseWriter");
         assertThat(coordinator).doesNotContain("auditPhaseService.recordPhase");
+        assertThat(coordinator).doesNotContain("AuditService");
+        assertThat(coordinator).doesNotContain("AuditEventPublisher");
+        assertThat(coordinator).doesNotContain("FraudDecisionEventPublisher");
+        assertThat(coordinator).doesNotContain("OutboxPublisher");
+        assertThat(coordinator).doesNotContain("KafkaTemplate");
         assertThat(coordinator).doesNotContain("localSuccessAudit(");
     }
 
@@ -288,7 +293,7 @@ class RegulatedMutationArchitectureTest {
         assertThat(coordinator).contains("MongoRegulatedMutationCoordinator(");
         assertThat(coordinator).contains("RegulatedMutationCommandRepository commandRepository");
         assertThat(coordinator).contains("RegulatedMutationExecutorRegistry executorRegistry");
-        assertThat(coordinator).contains("Production constructor. Spring runtime depends on the validated RegulatedMutationExecutorRegistry bean.");
+        assertThat(coordinator).contains("Production wiring path. Registry is Spring-managed and startup-validated.");
         assertThat(coordinator).contains("Compatibility constructor for unit tests");
         assertThat(coordinator).contains("must not replace registry bean validation");
     }
@@ -310,6 +315,64 @@ class RegulatedMutationArchitectureTest {
         assertThat(registry).contains("does not support action/resource");
         assertThat(evidenceExecutor).contains("action == AuditAction.SUBMIT_ANALYST_DECISION");
         assertThat(evidenceExecutor).contains("resourceType == AuditResourceType.ALERT");
+    }
+
+    @Test
+    void legacyExecutorMustNotDependOnEvidenceGatedOrExternalFinalizeBoundaries() throws Exception {
+        String legacyExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationExecutor.java"
+        ));
+
+        assertThat(legacyExecutor).doesNotContain("RegulatedMutationLocalAuditPhaseWriter");
+        assertThat(legacyExecutor).doesNotContain("EvidencePreconditionEvaluator");
+        assertThat(legacyExecutor).doesNotContain("EvidenceGatedFinalizeStateMachine");
+        assertThat(legacyExecutor).doesNotContain("FraudDecisionEventPublisher");
+        assertThat(legacyExecutor).doesNotContain("KafkaTemplate");
+        assertThat(legacyExecutor).doesNotContain("ExternalAuditAnchorPublisher");
+        assertThat(legacyExecutor).doesNotContain("ExternalAuditIntegrity");
+        assertThat(legacyExecutor).doesNotContain("ExternalAuditPublication");
+    }
+
+    @Test
+    void evidenceGatedOnlyBoundariesMustRemainFdp29Only() throws Exception {
+        List<Path> javaFiles;
+        try (java.util.stream.Stream<Path> stream = Files.walk(Path.of("src/main/java/com/frauddetection/alert"))) {
+            javaFiles = stream
+                    .filter(path -> path.toString().endsWith(".java"))
+                    .toList();
+        }
+
+        for (Path path : javaFiles) {
+            String normalized = path.toString().replace('\\', '/');
+            String source = Files.readString(path);
+            if (normalized.endsWith("regulated/EvidenceGatedFinalizeExecutor.java")
+                    || normalized.endsWith("regulated/EvidenceGatedFinalizeStartupGuard.java")
+                    || normalized.endsWith("regulated/EvidencePreconditionEvaluator.java")
+                    || normalized.endsWith("regulated/EvidenceGatedFinalizeStateMachine.java")
+                    || normalized.endsWith("audit/RegulatedMutationLocalAuditPhaseWriter.java")) {
+                continue;
+            }
+            assertThat(source)
+                    .as("Evidence-gated helper leaked outside FDP-29 executor/startup boundary: " + path)
+                    .doesNotContain("RegulatedMutationLocalAuditPhaseWriter")
+                    .doesNotContain("EvidencePreconditionEvaluator")
+                    .doesNotContain("EvidenceGatedFinalizeStateMachine");
+        }
+    }
+
+    @Test
+    void broadExecutorSupportsMustRemainLegacyOnly() throws Exception {
+        String legacyExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationExecutor.java"
+        ));
+        String evidenceExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"
+        ));
+
+        assertThat(legacyExecutor).contains("Broad support is intentional only for LEGACY_REGULATED_MUTATION compatibility");
+        assertThat(evidenceExecutor).contains("action == AuditAction.SUBMIT_ANALYST_DECISION");
+        assertThat(evidenceExecutor).contains("resourceType == AuditResourceType.ALERT");
+        assertThat(evidenceExecutor).doesNotContain("return action != null && resourceType != null");
     }
 
     @Test
@@ -343,9 +406,13 @@ class RegulatedMutationArchitectureTest {
         assertThat(source).contains("## Behavior-Preservation Contract");
         assertThat(source).contains("FDP-29 remains disabled by default");
         assertThat(source).contains("FDP-30 does not change local ACID boundaries");
-        assertThat(source).contains("Legacy null model version");
-        assertThat(source).contains("Legacy `SUCCESS_AUDIT_PENDING` retry");
+        assertThat(source).contains("Null `mutation_model_version`");
+        assertThat(source).contains("`SUCCESS_AUDIT_PENDING` retry");
+        assertThat(source).contains("`RECOVERY_REQUIRED` precedence");
+        assertThat(source).contains("Active `PROCESSING` lease");
+        assertThat(source).contains("broad `supports(action, resourceType)`");
         assertThat(source).contains("Registry Fail-Closed Behavior");
+        assertThat(source).contains("registry is not a replacement for FDP-29 startup guard");
         assertThat(source).doesNotContain("Merge Decision");
         assertThat(source).doesNotContain("GO:");
         assertThat(source).doesNotContain("NO-GO:");

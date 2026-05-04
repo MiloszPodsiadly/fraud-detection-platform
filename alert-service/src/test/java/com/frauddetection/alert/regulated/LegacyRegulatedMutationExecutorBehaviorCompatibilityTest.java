@@ -6,6 +6,7 @@ import com.frauddetection.alert.audit.AuditDegradationService;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.service.ConflictingIdempotencyKeyException;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
 import org.junit.jupiter.api.Test;
@@ -125,6 +126,124 @@ class LegacyRegulatedMutationExecutorBehaviorCompatibilityTest {
     }
 
     @Test
+    void shouldReplayCommittedDegradedAsIncompleteWithoutSuccessReclassification() {
+        Fixture fixture = new Fixture(RegulatedMutationTransactionMode.OFF);
+        RegulatedMutationCommandDocument existing = commandDocument(RegulatedMutationState.COMMITTED_DEGRADED);
+        existing.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
+        existing.setResponseSnapshot(snapshot(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE));
+        existing.setPublicStatus(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE);
+        existing.setDegradationReason("POST_COMMIT_AUDIT_DEGRADED");
+        fixture.commandLookup(existing);
+        AtomicInteger businessWrites = new AtomicInteger();
+
+        RegulatedMutationResult<String> result = fixture.executor.execute(
+                command(businessWrites),
+                "idem-1",
+                existing
+        );
+
+        assertThat(result.state()).isEqualTo(RegulatedMutationState.COMMITTED_DEGRADED);
+        assertThat(result.response()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE.name());
+        assertThat(result.response()).isNotEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING.name());
+        assertThat(result.response()).isNotEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED.name());
+        assertThat(businessWrites).hasValue(0);
+        verify(fixture.mongoTemplate, never()).findAndModify(
+                any(Query.class),
+                any(Update.class),
+                any(FindAndModifyOptions.class),
+                eq(RegulatedMutationCommandDocument.class)
+        );
+    }
+
+    @Test
+    void shouldReturnInProgressForActiveProcessingLeaseWithoutStealingLease() {
+        Fixture fixture = new Fixture(RegulatedMutationTransactionMode.OFF);
+        RegulatedMutationCommandDocument existing = commandDocument(RegulatedMutationState.AUDIT_ATTEMPTED);
+        existing.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
+        existing.setLeaseExpiresAt(Instant.now().plusSeconds(60));
+        fixture.commandLookup(existing);
+        AtomicInteger businessWrites = new AtomicInteger();
+
+        RegulatedMutationResult<String> result = fixture.executor.execute(
+                command(businessWrites),
+                "idem-1",
+                existing
+        );
+
+        assertThat(result.state()).isEqualTo(RegulatedMutationState.AUDIT_ATTEMPTED);
+        assertThat(result.response()).isEqualTo(RegulatedMutationState.REQUESTED.name());
+        assertThat(businessWrites).hasValue(0);
+        verify(fixture.mongoTemplate, never()).findAndModify(
+                any(Query.class),
+                any(Update.class),
+                any(FindAndModifyOptions.class),
+                eq(RegulatedMutationCommandDocument.class)
+        );
+    }
+
+    @Test
+    void shouldNotRerunUnsafeBusinessCommitStateAfterExpiredProcessingLease() {
+        Fixture fixture = new Fixture(RegulatedMutationTransactionMode.OFF);
+        RegulatedMutationCommandDocument existing = commandDocument(RegulatedMutationState.BUSINESS_COMMITTING);
+        existing.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
+        existing.setLeaseExpiresAt(Instant.now().minusSeconds(60));
+        fixture.commandLookup(existing);
+        AtomicInteger businessWrites = new AtomicInteger();
+
+        RegulatedMutationResult<String> result = fixture.executor.execute(
+                command(businessWrites),
+                "idem-1",
+                existing
+        );
+
+        assertThat(result.state()).isEqualTo(RegulatedMutationState.BUSINESS_COMMITTING);
+        assertThat(result.response()).isEqualTo(RegulatedMutationState.BUSINESS_COMMITTING.name());
+        assertThat(businessWrites).hasValue(0);
+        assertThat(fixture.currentCommand.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
+        assertThat(fixture.currentCommand.getDegradationReason()).isEqualTo("RECOVERY_REQUIRED");
+        verify(fixture.mongoTemplate, never()).findAndModify(
+                any(Query.class),
+                any(Update.class),
+                any(FindAndModifyOptions.class),
+                eq(RegulatedMutationCommandDocument.class)
+        );
+    }
+
+    @Test
+    void shouldRejectSameIdempotencyKeyWithDifferentRequestHashBeforeMutationOrAudit() {
+        Fixture fixture = new Fixture(RegulatedMutationTransactionMode.OFF);
+        RegulatedMutationCommandDocument existing = commandDocument(RegulatedMutationState.REQUESTED);
+        existing.setRequestHash("different-request-hash");
+        existing.setExecutionStatus(RegulatedMutationExecutionStatus.NEW);
+        fixture.commandLookup(existing);
+        fixture.claimUnavailable();
+        AtomicInteger businessWrites = new AtomicInteger();
+
+        assertThatThrownBy(() -> fixture.executor.execute(command(businessWrites), "idem-1", existing))
+                .isInstanceOf(ConflictingIdempotencyKeyException.class);
+
+        assertThat(businessWrites).hasValue(0);
+        verify(fixture.auditPhaseService, never()).recordPhase(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void shouldRejectSameIdempotencyKeyWithDifferentActorBeforeMutationOrAudit() {
+        Fixture fixture = new Fixture(RegulatedMutationTransactionMode.OFF);
+        RegulatedMutationCommandDocument existing = commandDocument(RegulatedMutationState.REQUESTED);
+        existing.setIntentActorId("different-actor");
+        existing.setExecutionStatus(RegulatedMutationExecutionStatus.NEW);
+        fixture.commandLookup(existing);
+        fixture.claimUnavailable();
+        AtomicInteger businessWrites = new AtomicInteger();
+
+        assertThatThrownBy(() -> fixture.executor.execute(command(businessWrites), "idem-1", existing))
+                .isInstanceOf(ConflictingIdempotencyKeyException.class);
+
+        assertThat(businessWrites).hasValue(0);
+        verify(fixture.auditPhaseService, never()).recordPhase(any(), any(), any(), any(), any());
+    }
+
+    @Test
     void shouldFailRequiredTransactionPartialCommitWithoutCommittedPublicStatus() {
         Fixture fixture = new Fixture(RegulatedMutationTransactionMode.REQUIRED);
         RegulatedMutationCommandDocument existing = commandDocument(RegulatedMutationState.REQUESTED);
@@ -230,6 +349,7 @@ class LegacyRegulatedMutationExecutorBehaviorCompatibilityTest {
         private final List<RegulatedMutationState> states = new ArrayList<>();
         private final LegacyRegulatedMutationExecutor executor;
         private RegulatedMutationCommandDocument currentCommand;
+        private boolean claimUnavailable;
 
         private Fixture(RegulatedMutationTransactionMode transactionMode) {
             RegulatedMutationTransactionRunner transactionRunner = transactionMode == RegulatedMutationTransactionMode.REQUIRED
@@ -272,10 +392,17 @@ class LegacyRegulatedMutationExecutorBehaviorCompatibilityTest {
                     any(FindAndModifyOptions.class),
                     eq(RegulatedMutationCommandDocument.class)
             )).thenAnswer(invocation -> {
+                if (claimUnavailable) {
+                    return null;
+                }
                 currentCommand.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
                 currentCommand.setAttemptCount(currentCommand.getAttemptCount() + 1);
                 return currentCommand;
             });
+        }
+
+        private void claimUnavailable() {
+            claimUnavailable = true;
         }
     }
 

@@ -69,6 +69,30 @@ class MongoRegulatedMutationCoordinatorRoutingTest {
     }
 
     @Test
+    void explicitLegacyModelVersionRoutesToLegacyExecutor() {
+        RegulatedMutationExecutor legacy = executor(
+                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                "legacy"
+        );
+        Fixture fixture = new Fixture(legacy);
+        fixture.noExistingCommand();
+        AtomicInteger businessWrites = new AtomicInteger();
+
+        RegulatedMutationResult<String> result = fixture.coordinator.commit(command(
+                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT,
+                businessWrites
+        ));
+
+        assertThat(result.response()).isEqualTo("legacy");
+        assertThat(businessWrites).hasValue(0);
+        verify(legacy).execute(any(), eq("idem-1"), any());
+        assertThat(fixture.saved.getMutationModelVersion())
+                .isEqualTo(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
+    }
+
+    @Test
     void evidenceGatedModelRoutesToEvidenceGatedExecutor() {
         RegulatedMutationExecutor legacy = executor(
                 RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
