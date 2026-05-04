@@ -31,6 +31,13 @@ public class RegulatedMutationClaimService {
             RegulatedMutationCommand<R, S> command,
             String idempotencyKey
     ) {
+        if (command == null) {
+            throw new IllegalArgumentException("Regulated mutation command is required.");
+        }
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new IllegalArgumentException("Regulated mutation idempotency key is required.");
+        }
+
         Instant now = Instant.now();
         String leaseOwner = UUID.randomUUID().toString();
         Criteria claimable = new Criteria().orOperator(

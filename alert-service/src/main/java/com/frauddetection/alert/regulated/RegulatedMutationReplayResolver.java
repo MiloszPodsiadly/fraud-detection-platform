@@ -84,17 +84,17 @@ public class RegulatedMutationReplayResolver {
                     "FINALIZE_RECOVERY_REQUIRED"
             );
         }
-        if (document.getResponseSnapshot() != null) {
-            return RegulatedMutationReplayDecision.of(
-                    RegulatedMutationReplayDecisionType.REPLAY_SNAPSHOT,
-                    document.getState(),
-                    null
-            );
-        }
         if (document.getState() == RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE
                 || document.getState() == RegulatedMutationState.FAILED_BUSINESS_VALIDATION) {
             return RegulatedMutationReplayDecision.of(
                     RegulatedMutationReplayDecisionType.REJECTED_RESPONSE,
+                    document.getState(),
+                    null
+            );
+        }
+        if (document.getResponseSnapshot() != null) {
+            return RegulatedMutationReplayDecision.of(
+                    RegulatedMutationReplayDecisionType.REPLAY_SNAPSHOT,
                     document.getState(),
                     null
             );
