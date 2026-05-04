@@ -216,6 +216,8 @@ class SubmitDecisionRegulatedMutationServiceTest {
         RegulatedMutationCommandDocument existing = new RegulatedMutationCommandDocument();
         existing.setIdempotencyKey("idem-1");
         existing.setRequestHash("ef884a0e375de07e11b89639ead3cccb2256434e2adc707a0fe377ab5f13b7ad");
+        existing.setResourceType(AuditResourceType.ALERT.name());
+        existing.setAction(AuditAction.SUBMIT_ANALYST_DECISION.name());
         existing.setState(RegulatedMutationState.EVIDENCE_PENDING);
         existing.setResponseSnapshot(new RegulatedMutationResponseSnapshot(
                 "alert-1",
