@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 
 @Service
 public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecutor {
@@ -59,7 +60,7 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
                 bankModeFailClosed,
                 new RegulatedMutationClaimService(mongoTemplate, leaseDuration),
                 new RegulatedMutationConflictPolicy(),
-                new RegulatedMutationReplayResolver(new RegulatedMutationLeasePolicy())
+                new RegulatedMutationReplayResolver(compatibilityReplayPolicyRegistry())
         );
     }
 
@@ -120,10 +121,10 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
         if (document.getExecutionStatus() == RegulatedMutationExecutionStatus.RECOVERY_REQUIRED) {
             return new RegulatedMutationResult<>(
                     document.getState(),
-                    command.statusResponseFactory().response(replayResolver.legacyRecoveryState(document))
+                    command.statusResponseFactory().response(LegacyRegulatedMutationReplayPolicy.legacyRecoveryState(document))
             );
         }
-        if (document.getResponseSnapshot() != null && !replayResolver.needsSuccessAuditRetry(document)) {
+        if (document.getResponseSnapshot() != null && !LegacyRegulatedMutationReplayPolicy.needsSuccessAuditRetry(document)) {
             return replay(command, document);
         }
 
@@ -132,7 +133,7 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
         }
 
         if (!isSafeToExecuteBusinessMutation(document)) {
-            return markRecoveryRequired(command, document, replayResolver.legacyRecoveryState(document));
+            return markRecoveryRequired(command, document, LegacyRegulatedMutationReplayPolicy.legacyRecoveryState(document));
         }
 
         if (!document.isAttemptedAuditRecorded()) {
@@ -157,7 +158,7 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
             RegulatedMutationCommand<R, S> command,
             RegulatedMutationCommandDocument document
     ) {
-        RegulatedMutationReplayDecision decision = replayResolver.resolveLegacy(document, Instant.now());
+        RegulatedMutationReplayDecision decision = replayResolver.resolve(document, Instant.now());
         return switch (decision.type()) {
             case NONE -> null;
             case ACTIVE_IN_PROGRESS -> new RegulatedMutationResult<>(
@@ -388,5 +389,16 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
             S pendingResponse,
             RegulatedMutationResponseSnapshot pendingSnapshot
     ) {
+    }
+
+    private static RegulatedMutationReplayPolicyRegistry compatibilityReplayPolicyRegistry() {
+        RegulatedMutationLeasePolicy leasePolicy = new RegulatedMutationLeasePolicy();
+        return new RegulatedMutationReplayPolicyRegistry(
+                List.of(
+                        new LegacyRegulatedMutationReplayPolicy(leasePolicy),
+                        new EvidenceGatedFinalizeReplayPolicy(leasePolicy)
+                ),
+                true
+        );
     }
 }

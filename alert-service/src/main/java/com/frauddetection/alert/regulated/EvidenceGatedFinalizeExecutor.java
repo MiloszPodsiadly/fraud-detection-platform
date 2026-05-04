@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 
 @Service
 public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor {
@@ -55,7 +56,7 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
                 localAuditPhaseWriter,
                 new RegulatedMutationClaimService(mongoTemplate, leaseDuration),
                 new RegulatedMutationConflictPolicy(),
-                new RegulatedMutationReplayResolver(new RegulatedMutationLeasePolicy())
+                new RegulatedMutationReplayResolver(compatibilityReplayPolicyRegistry())
         );
     }
 
@@ -135,7 +136,7 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
             RegulatedMutationCommand<R, S> command,
             RegulatedMutationCommandDocument document
     ) {
-        RegulatedMutationReplayDecision decision = replayResolver.resolveEvidenceGated(document, Instant.now());
+        RegulatedMutationReplayDecision decision = replayResolver.resolve(document, Instant.now());
         return switch (decision.type()) {
             case NONE -> null;
             case ACTIVE_IN_PROGRESS, REJECTED_RESPONSE -> new RegulatedMutationResult<>(
@@ -310,5 +311,16 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
             S pendingResponse,
             RegulatedMutationResponseSnapshot pendingSnapshot
     ) {
+    }
+
+    private static RegulatedMutationReplayPolicyRegistry compatibilityReplayPolicyRegistry() {
+        RegulatedMutationLeasePolicy leasePolicy = new RegulatedMutationLeasePolicy();
+        return new RegulatedMutationReplayPolicyRegistry(
+                List.of(
+                        new LegacyRegulatedMutationReplayPolicy(leasePolicy),
+                        new EvidenceGatedFinalizeReplayPolicy(leasePolicy)
+                ),
+                true
+        );
     }
 }
