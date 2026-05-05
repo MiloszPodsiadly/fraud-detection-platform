@@ -4,7 +4,7 @@
 
 FDP-34 adopts the FDP-33 bounded lease-renewal primitive at explicit regulated mutation executor checkpoints. The goal is to reduce false stale-worker takeover during bounded local work while preserving the FDP-32 owner-fenced transition model.
 
-Renewal preserves ownership, not progress. A successful checkpoint renewal only proves that the current worker still owns the command lease within the configured budget. It does not prove that business mutation, evidence preparation, audit, outbox publication, or external finality completed.
+Renewal preserves ownership, not progress. Checkpoint renewal preserves bounded lease ownership. It does not prove business progress. A successful checkpoint renewal only proves that the current worker still owns the command lease within the configured FDP-33 budget. It does not prove that business mutation, evidence preparation, audit, outbox publication, or external finality completed.
 
 ## Invariant
 
@@ -31,6 +31,7 @@ A safe checkpoint must not be:
 - a public endpoint
 - a progress signal
 - a retry around non-idempotent external side effects
+- inside non-idempotent external side-effect execution
 - a transaction-boundary change
 
 No generic heartbeat system is introduced. No automatic infinite renewal loop is introduced.
@@ -40,7 +41,7 @@ No generic heartbeat system is introduced. No automatic infinite renewal loop is
 | Model version | Durable state | Execution status | Approved checkpoints |
 | --- | --- | --- | --- |
 | `LEGACY_REGULATED_MUTATION` | `REQUESTED` | `PROCESSING` | `BEFORE_ATTEMPTED_AUDIT` |
-| `LEGACY_REGULATED_MUTATION` | `AUDIT_ATTEMPTED` | `PROCESSING` | `AFTER_ATTEMPTED_AUDIT`, `BEFORE_LEGACY_BUSINESS_COMMIT` |
+| `LEGACY_REGULATED_MUTATION` | `AUDIT_ATTEMPTED` | `PROCESSING` | `BEFORE_LEGACY_BUSINESS_COMMIT` |
 | `LEGACY_REGULATED_MUTATION` | `BUSINESS_COMMITTING` | `PROCESSING` | `BEFORE_LEGACY_BUSINESS_COMMIT` |
 | `LEGACY_REGULATED_MUTATION` | `BUSINESS_COMMITTED` | `PROCESSING` | `BEFORE_SUCCESS_AUDIT_RETRY` |
 | `LEGACY_REGULATED_MUTATION` | `SUCCESS_AUDIT_PENDING` | `PROCESSING` | `BEFORE_SUCCESS_AUDIT_RETRY` |
@@ -66,11 +67,15 @@ Required failure behavior:
 - model or execution status mismatch: stop immediately; treat as deployment/state skew
 - unsupported checkpoint: stop immediately; caller is outside the reviewed policy table
 
+After failed checkpoint renewal the executor must not continue to business or evidence mutation, local finalize transaction, outbox write, success audit write, response snapshot write, or post-checkpoint command transition. Checkpoint renewal failure is a lease/checkpoint failure, not audit evidence failure, and must not be mapped to post-commit audit degradation.
+
 ## ACID Boundary
 
 FDP-34 does not expand transaction scope. Checkpoint renewal updates lease metadata through the FDP-33 owner-fenced primitive and must not run as a substitute for local business transaction safety.
 
 Transaction-mode `REQUIRED` is still required for bank-grade stale-worker business-write safety. Transaction-mode `OFF` remains compatibility/local behavior and is not a bank-grade guarantee.
+
+Production executors require the Spring-managed `RegulatedMutationCheckpointRenewalService`. `disabled()` is only for compatibility and unit-test constructors.
 
 ## SOLID Boundary
 
@@ -89,13 +94,15 @@ FDP-34 emits low-cardinality checkpoint metrics only:
 
 Metric labels must not include command ids, alert ids, actor ids, lease owners, idempotency keys, request hashes, resource ids, exception messages, URLs, paths, or tokens.
 
+`regulated_mutation_checkpoint_no_progress_total` means blocked, failed, or explicit no-progress classification. It is not emitted for a normal successful checkpoint renewal.
+
 ## Merge Gate
 
-Merge requires explicit checkpoint policy tests, fail-closed service tests, executor failure-behavior tests, low-cardinality metric tests, architecture guards, FDP-32 stale-worker regression, FDP-33 renewal regression, and FDP-29 integration regression.
+Merge requires explicit checkpoint policy tests, fail-closed service tests, executor failure-behavior tests, real Mongo executor-path tests for legacy and FDP-29 checkpoints, success/stale/expired/budget paths, no mutation after failed checkpoint, no audit degradation misclassification, low-cardinality metric tests, architecture guards, FDP-32 stale-worker regression, FDP-33 renewal regression, and FDP-29 integration regression.
 
 ## Production Gate
 
-FDP-34 is not production or bank enablement by itself. Production or bank operation requires transaction-mode `REQUIRED`, lease duration budget review, renewal budget review, dashboards, alerts, runbook drill, canary or staging soak, rollback plan, and separate operational approval.
+FDP-34 is not production or bank enablement by itself. Production or bank operation requires transaction-mode `REQUIRED`, positive checkpoint-renewal extension within the FDP-33 single-extension and total-duration budgets, lease duration budget review, renewal budget review, dashboards, alerts, runbook drill, canary or staging soak, rollback plan, and separate operational approval.
 
 ## Non-Goals
 
