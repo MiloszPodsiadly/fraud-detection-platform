@@ -16,9 +16,12 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -29,9 +32,16 @@ class RegulatedMutationLeaseRenewalServiceTest {
     private final MongoTemplate mongoTemplate = mock(MongoTemplate.class);
     private final RegulatedMutationLeaseRenewalPolicy policy =
             new RegulatedMutationLeaseRenewalPolicy(Duration.ofSeconds(30), Duration.ofMinutes(2), 3);
+    private final RegulatedMutationLeaseRenewalFailureHandler failureHandler =
+            new RegulatedMutationLeaseRenewalFailureHandler(
+                    mongoTemplate,
+                    policy,
+                    new RegulatedMutationPublicStatusMapper()
+            );
     private final RegulatedMutationLeaseRenewalService service = new RegulatedMutationLeaseRenewalService(
             mongoTemplate,
             policy,
+            failureHandler,
             new AlertServiceMetrics(new SimpleMeterRegistry()),
             Clock.fixed(NOW, ZoneOffset.UTC)
     );
@@ -43,7 +53,7 @@ class RegulatedMutationLeaseRenewalServiceTest {
         when(mongoTemplate.updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class)))
                 .thenReturn(UpdateResult.acknowledged(1, 1L, null));
 
-        service.renew(token(), Duration.ofSeconds(40), "unit");
+        service.renew(token(), Duration.ofSeconds(40));
 
         String query = capturedQuery().getQueryObject().toString();
         assertThat(query)
@@ -82,6 +92,133 @@ class RegulatedMutationLeaseRenewalServiceTest {
         );
     }
 
+    @Test
+    void invalidExtensionThrowsRenewalExceptionWithoutBudgetRecoveryUpdate() {
+        when(mongoTemplate.findById("command-1", RegulatedMutationCommandDocument.class))
+                .thenReturn(document());
+
+        assertThatThrownBy(() -> service.renew(token(), Duration.ZERO))
+                .isInstanceOf(RegulatedMutationLeaseRenewalException.class)
+                .extracting("reason")
+                .isEqualTo(RegulatedMutationLeaseRenewalReason.INVALID_EXTENSION);
+
+        verify(mongoTemplate, never()).updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class));
+    }
+
+    @Test
+    void commandNotFoundThrowsRenewalExceptionWithoutBudgetRecoveryUpdate() {
+        when(mongoTemplate.findById("command-1", RegulatedMutationCommandDocument.class))
+                .thenReturn(null);
+
+        assertThatThrownBy(() -> service.renew(token(), Duration.ofSeconds(40)))
+                .isInstanceOf(RegulatedMutationLeaseRenewalException.class)
+                .extracting("reason")
+                .isEqualTo(RegulatedMutationLeaseRenewalReason.COMMAND_NOT_FOUND);
+
+        verify(mongoTemplate, never()).updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class));
+    }
+
+    @Test
+    void terminalRaceAfterRenewalUpdateRejectsWithoutRecoveryWrite() {
+        when(mongoTemplate.findById("command-1", RegulatedMutationCommandDocument.class))
+                .thenReturn(
+                        document(),
+                        document(
+                                RegulatedMutationState.COMMITTED,
+                                RegulatedMutationExecutionStatus.PROCESSING,
+                                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION
+                        )
+                );
+        when(mongoTemplate.updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class)))
+                .thenReturn(UpdateResult.acknowledged(0, 0L, null));
+
+        assertThatThrownBy(() -> service.renew(token(), Duration.ofSeconds(40)))
+                .isInstanceOf(RegulatedMutationLeaseRenewalException.class)
+                .extracting("reason")
+                .isEqualTo(RegulatedMutationLeaseRenewalReason.TERMINAL_STATE);
+
+        verify(mongoTemplate, times(1)).updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class));
+    }
+
+    @Test
+    void recoveryRaceAfterRenewalUpdateRejectsWithoutRecoveryWrite() {
+        when(mongoTemplate.findById("command-1", RegulatedMutationCommandDocument.class))
+                .thenReturn(
+                        document(),
+                        document(
+                                RegulatedMutationState.FAILED,
+                                RegulatedMutationExecutionStatus.RECOVERY_REQUIRED,
+                                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION
+                        )
+                );
+        when(mongoTemplate.updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class)))
+                .thenReturn(UpdateResult.acknowledged(0, 0L, null));
+
+        assertThatThrownBy(() -> service.renew(token(), Duration.ofSeconds(40)))
+                .isInstanceOf(RegulatedMutationLeaseRenewalException.class)
+                .extracting("reason")
+                .isEqualTo(RegulatedMutationLeaseRenewalReason.RECOVERY_STATE);
+
+        verify(mongoTemplate, times(1)).updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class));
+    }
+
+    @Test
+    void expiredRaceAfterRenewalUpdateThrowsStaleLease() {
+        RegulatedMutationCommandDocument expired = document();
+        expired.setLeaseExpiresAt(NOW.minusMillis(1));
+        when(mongoTemplate.findById("command-1", RegulatedMutationCommandDocument.class))
+                .thenReturn(document(), expired);
+        when(mongoTemplate.updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class)))
+                .thenReturn(UpdateResult.acknowledged(0, 0L, null));
+
+        assertThatThrownBy(() -> service.renew(token(), Duration.ofSeconds(40)))
+                .isInstanceOf(StaleRegulatedMutationLeaseException.class)
+                .extracting("reason")
+                .isEqualTo(StaleRegulatedMutationLeaseReason.EXPIRED_LEASE);
+
+        verify(mongoTemplate, times(1)).updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class));
+    }
+
+    @Test
+    void modelVersionRaceAfterRenewalUpdateRejectsWithoutRecoveryWrite() {
+        when(mongoTemplate.findById("command-1", RegulatedMutationCommandDocument.class))
+                .thenReturn(
+                        document(),
+                        document(
+                                RegulatedMutationState.EVIDENCE_PREPARING,
+                                RegulatedMutationExecutionStatus.PROCESSING,
+                                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
+                        )
+                );
+        when(mongoTemplate.updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class)))
+                .thenReturn(UpdateResult.acknowledged(0, 0L, null));
+
+        assertThatThrownBy(() -> service.renew(token(), Duration.ofSeconds(40)))
+                .isInstanceOf(RegulatedMutationLeaseRenewalException.class)
+                .extracting("reason")
+                .isEqualTo(RegulatedMutationLeaseRenewalReason.MODEL_VERSION_MISMATCH);
+
+        verify(mongoTemplate, times(1)).updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class));
+    }
+
+    @Test
+    void sameOwnerRaceThatAlreadyAdvancedLastRenewalSlotDoesNotMarkRecoveryRequired() {
+        RegulatedMutationCommandDocument before = document();
+        before.setLeaseRenewalCount(2);
+        RegulatedMutationCommandDocument afterRace = document();
+        afterRace.setLeaseRenewalCount(3);
+        afterRace.setLeaseExpiresAt(NOW.plusSeconds(30));
+        when(mongoTemplate.findById("command-1", RegulatedMutationCommandDocument.class))
+                .thenReturn(before, afterRace);
+        when(mongoTemplate.updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class)))
+                .thenReturn(UpdateResult.acknowledged(0, 0L, null));
+
+        assertThatThrownBy(() -> service.renew(token(), Duration.ofSeconds(40)))
+                .isInstanceOf(RegulatedMutationLeaseRenewalBudgetExceededException.class);
+
+        verify(mongoTemplate, times(1)).updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class));
+    }
+
     private Query capturedQuery() {
         ArgumentCaptor<Query> captor = ArgumentCaptor.forClass(Query.class);
         verify(mongoTemplate).updateFirst(
@@ -103,14 +240,26 @@ class RegulatedMutationLeaseRenewalServiceTest {
     }
 
     private RegulatedMutationCommandDocument document() {
+        return document(
+                RegulatedMutationState.REQUESTED,
+                RegulatedMutationExecutionStatus.PROCESSING,
+                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION
+        );
+    }
+
+    private RegulatedMutationCommandDocument document(
+            RegulatedMutationState state,
+            RegulatedMutationExecutionStatus status,
+            RegulatedMutationModelVersion modelVersion
+    ) {
         RegulatedMutationCommandDocument document = new RegulatedMutationCommandDocument();
         document.setId("command-1");
         document.setLeaseOwner("owner-1");
         document.setLeaseExpiresAt(NOW.plusSeconds(5));
         document.setLeaseBudgetStartedAt(NOW);
-        document.setMutationModelVersion(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
-        document.setState(RegulatedMutationState.REQUESTED);
-        document.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
+        document.setMutationModelVersion(modelVersion);
+        document.setState(state);
+        document.setExecutionStatus(status);
         return document;
     }
 

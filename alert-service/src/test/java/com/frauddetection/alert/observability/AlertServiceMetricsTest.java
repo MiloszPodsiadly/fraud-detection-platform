@@ -2,6 +2,7 @@ package com.frauddetection.alert.observability;
 
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditOutcome;
+import com.frauddetection.alert.regulated.RegulatedMutationLeaseRenewalReason;
 import com.frauddetection.alert.regulated.RegulatedMutationModelVersion;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
 import io.micrometer.core.instrument.Meter;
@@ -352,6 +353,13 @@ class AlertServiceMetricsTest {
                 RegulatedMutationState.FINALIZING,
                 "raw alert-123 actor-456 exception"
         );
+        for (RegulatedMutationLeaseRenewalReason reason : RegulatedMutationLeaseRenewalReason.values()) {
+            metrics.recordRegulatedMutationLeaseRenewalRejected(
+                    RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                    RegulatedMutationState.REQUESTED,
+                    reason.name()
+            );
+        }
         metrics.recordRegulatedMutationLeaseRenewalBudgetExceeded(
                 RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
                 RegulatedMutationState.REQUESTED
@@ -382,6 +390,15 @@ class AlertServiceMetricsTest {
         Meter renewalBudgetRemaining = meterRegistry.get("regulated_mutation_lease_renewal_budget_remaining_seconds").meter();
         Meter renewalExtension = meterRegistry.get("regulated_mutation_lease_renewal_extension_seconds").meter();
         Meter renewalRejected = meterRegistry.get("regulated_mutation_lease_renewal_rejected_total").meter();
+        Meter renewalInvalidExtension = meterRegistry.get("regulated_mutation_lease_renewal_rejected_total")
+                .tag("reason", "INVALID_EXTENSION")
+                .meter();
+        Meter renewalCommandNotFound = meterRegistry.get("regulated_mutation_lease_renewal_rejected_total")
+                .tag("reason", "COMMAND_NOT_FOUND")
+                .meter();
+        Meter renewalUnknownRejected = meterRegistry.get("regulated_mutation_lease_renewal_rejected_total")
+                .tag("reason", "UNKNOWN")
+                .meter();
         Meter renewalBudgetExceeded = meterRegistry.get("regulated_mutation_lease_renewal_budget_exceeded_total").meter();
         Meter singleExtensionCapped = meterRegistry.get("regulated_mutation_lease_renewal_single_extension_capped_total").meter();
         Meter totalBudgetCapped = meterRegistry.get("regulated_mutation_lease_renewal_total_budget_capped_total").meter();
@@ -422,6 +439,15 @@ class AlertServiceMetricsTest {
         assertThat(renewalRejected.getId().getTags())
                 .extracting(Tag::getKey)
                 .containsExactlyInAnyOrder("model_version", "state", "reason");
+        assertThat(renewalInvalidExtension.getId().getTags())
+                .extracting(Tag::getValue)
+                .contains("INVALID_EXTENSION");
+        assertThat(renewalCommandNotFound.getId().getTags())
+                .extracting(Tag::getValue)
+                .contains("COMMAND_NOT_FOUND");
+        assertThat(renewalUnknownRejected.getId().getTags())
+                .extracting(Tag::getValue)
+                .contains("UNKNOWN");
         assertThat(renewalBudgetExceeded.getId().getTags())
                 .extracting(Tag::getKey)
                 .containsExactlyInAnyOrder("model_version", "state");

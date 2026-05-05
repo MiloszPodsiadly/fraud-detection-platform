@@ -620,6 +620,21 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
+    void fdp33LeaseRenewalMustStayOutOfPublicApiAndPublishingBoundariesAtTypeLevel() {
+        JavaClasses classes = new ClassFileImporter().importPackages("com.frauddetection.alert");
+
+        noClasses().that().resideInAnyPackage("..controller..", "..api..")
+                .should().dependOnClassesThat().haveNameMatching(".*RegulatedMutationLeaseRenewal.*")
+                .check(classes);
+        noClasses().that().resideInAnyPackage("..outbox..", "..messaging..", "..regulated.mutation..")
+                .should().dependOnClassesThat().haveNameMatching(".*RegulatedMutationLeaseRenewalService")
+                .check(classes);
+        noClasses().that().haveNameMatching(".*RegulatedMutationLeaseRenewal(Service|Policy|FailureHandler)")
+                .should().dependOnClassesThat().haveNameMatching(".*(AuditService|AuditEventPublisher|FraudDecisionEventPublisher|KafkaTemplate|TransactionalOutboxRecordRepository|AlertRepository).*")
+                .check(classes);
+    }
+
+    @Test
     void fdp33LeaseRenewalMustOnlyUpdateLeaseMetadata() throws Exception {
         String service = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationLeaseRenewalService.java"
@@ -648,12 +663,47 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
+    void fdp33BudgetExceededRecoveryHandlerMustOnlyMarkRecoveryFields() throws Exception {
+        String handler = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationLeaseRenewalFailureHandler.java"
+        ));
+
+        assertThat(handler).contains("mongoTemplate.updateFirst");
+        assertThat(handler).contains("\"_id\"");
+        assertThat(handler).contains("\"lease_owner\"");
+        assertThat(handler).contains("\"lease_expires_at\"");
+        assertThat(handler).contains("\"execution_status\"");
+        assertThat(handler).contains("\"state\"");
+        assertThat(handler).contains("mutation_model_version");
+        assertThat(handler).contains(".set(\"execution_status\"");
+        assertThat(handler).contains(".set(\"degradation_reason\"");
+        assertThat(handler).contains(".set(\"last_error\"");
+        assertThat(handler).contains(".set(\"updated_at\"");
+        assertThat(handler).contains(".set(\"last_heartbeat_at\"");
+        assertThat(handler)
+                .doesNotContain("\"idempotency_key\"")
+                .doesNotContain("\"request_hash\"")
+                .doesNotContain("\"actor_id\"")
+                .doesNotContain("\"resource_id\"")
+                .doesNotContain("\"action\"")
+                .doesNotContain("\"resource_type\"")
+                .doesNotContain("\"response_snapshot\"")
+                .doesNotContain("\"outbox_event_id\"")
+                .doesNotContain("\"local_commit_marker\"")
+                .doesNotContain("\"success_audit_id\"")
+                .doesNotContain("\"success_audit_recorded\"");
+    }
+
+    @Test
     void fdp33LeaseRenewalMustStayAwayFromBrokerOutboxAuditAndBusinessBoundaries() throws Exception {
         String service = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationLeaseRenewalService.java"
         ));
         String policy = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationLeaseRenewalPolicy.java"
+        ));
+        String handler = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationLeaseRenewalFailureHandler.java"
         ));
 
         assertThat(service)
@@ -670,6 +720,14 @@ class RegulatedMutationArchitectureTest {
                 .doesNotContain("AuditService")
                 .doesNotContain("TransactionalOutbox")
                 .doesNotContain("KafkaTemplate");
+        assertThat(handler)
+                .doesNotContain("KafkaTemplate")
+                .doesNotContain("FraudDecisionEventPublisher")
+                .doesNotContain("TransactionalOutbox")
+                .doesNotContain("ExternalAudit")
+                .doesNotContain("AuditService")
+                .doesNotContain("AuditEventPublisher")
+                .doesNotContain("AlertRepository");
     }
 
     @Test
@@ -717,17 +775,30 @@ class RegulatedMutationArchitectureTest {
     void fdp33DocsMustDescribeBoundedRenewalWithoutReviewNotes() throws Exception {
         String runbook = Files.readString(Path.of("../docs/FDP-33-lease-renewal-operational-readiness.md"));
         String mergeGate = Files.readString(Path.of("../docs/FDP-33-merge-gate.md"));
-        String combined = runbook + "\n" + mergeGate;
+        String operatorRunbook = Files.readString(Path.of("../docs/runbooks/FDP-33-lease-renewal-runbook.md"));
+        String combined = runbook + "\n" + mergeGate + "\n" + operatorRunbook;
 
         assertThat(combined).contains("owner-fenced");
         assertThat(combined).contains("bounded");
         assertThat(combined).contains("lease_expires_at > now");
+        assertThat(combined).contains("Renewal Caller Contract");
         assertThat(combined).contains("Missing renewal metadata is backward compatible");
+        assertThat(combined).contains("LEASE_RENEWAL_BUDGET_EXCEEDED");
+        assertThat(combined).contains("INVALID_EXTENSION");
+        assertThat(combined).contains("COMMAND_NOT_FOUND");
+        assertThat(combined).contains("MODEL_VERSION_MISMATCH");
+        assertThat(combined).contains("EXECUTION_STATUS_MISMATCH");
         assertThat(combined).contains("does not enable FDP-29 production mode");
         assertThat(combined).contains("no distributed lock");
         assertThat(combined).contains("no public heartbeat endpoint");
         assertThat(combined).contains("does not provide external finality");
         assertThat(combined).contains("cannot create infinite `PROCESSING`");
+        assertThat(combined).contains("Do not manually rewrite lease_owner.");
+        assertThat(combined).contains("Do not manually extend expired leases.");
+        assertThat(combined).contains("Do not mark evidence confirmed manually.");
+        assertThat(combined).contains("Do not edit business aggregate directly.");
+        assertThat(combined).contains("Do not submit a new idempotency key");
+        assertThat(combined).contains("Do not disable fencing/renewal guards to clear backlog.");
         assertThat(combined).doesNotContain("Merge Decision");
         assertThat(combined).doesNotContain("GO:");
         assertThat(combined).doesNotContain("NO-GO:");

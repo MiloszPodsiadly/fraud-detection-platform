@@ -61,6 +61,49 @@ class RegulatedMutationLeaseRenewalPolicyTest {
     }
 
     @Test
+    void missingCommandRejectsWithCommandNotFound() {
+        RegulatedMutationLeaseRenewalDecision decision = policy.evaluate(
+                token(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION),
+                null,
+                Duration.ofSeconds(40),
+                NOW
+        );
+
+        assertThat(decision.type()).isEqualTo(RegulatedMutationLeaseRenewalDecisionType.REJECTED);
+        assertThat(decision.reason()).isEqualTo(RegulatedMutationLeaseRenewalReason.COMMAND_NOT_FOUND);
+    }
+
+    @Test
+    void nullRequestedExtensionRejectsWithInvalidExtension() {
+        RegulatedMutationLeaseRenewalDecision decision = policy.evaluate(
+                token(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION),
+                document(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION, RegulatedMutationState.REQUESTED,
+                        RegulatedMutationExecutionStatus.PROCESSING),
+                null,
+                NOW
+        );
+
+        assertThat(decision.type()).isEqualTo(RegulatedMutationLeaseRenewalDecisionType.REJECTED);
+        assertThat(decision.reason()).isEqualTo(RegulatedMutationLeaseRenewalReason.INVALID_EXTENSION);
+    }
+
+    @Test
+    void zeroOrNegativeRequestedExtensionRejectsWithInvalidExtension() {
+        for (Duration extension : Set.of(Duration.ZERO, Duration.ofMillis(-1))) {
+            RegulatedMutationLeaseRenewalDecision decision = policy.evaluate(
+                    token(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION),
+                    document(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION, RegulatedMutationState.REQUESTED,
+                            RegulatedMutationExecutionStatus.PROCESSING),
+                    extension,
+                    NOW
+            );
+
+            assertThat(decision.type()).isEqualTo(RegulatedMutationLeaseRenewalDecisionType.REJECTED);
+            assertThat(decision.reason()).isEqualTo(RegulatedMutationLeaseRenewalReason.INVALID_EXTENSION);
+        }
+    }
+
+    @Test
     void nonProcessingExecutionStatusRejectsRenewal() {
         RegulatedMutationLeaseRenewalDecision decision = policy.evaluate(
                 token(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION),
@@ -158,6 +201,7 @@ class RegulatedMutationLeaseRenewalPolicyTest {
         );
 
         assertThat(decision.type()).isEqualTo(RegulatedMutationLeaseRenewalDecisionType.BUDGET_EXCEEDED);
+        assertThat(decision.reason()).isEqualTo(RegulatedMutationLeaseRenewalReason.BUDGET_EXCEEDED);
     }
 
     private RegulatedMutationCommandDocument document(
