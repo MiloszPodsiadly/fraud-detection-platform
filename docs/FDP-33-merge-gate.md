@@ -1,6 +1,16 @@
 # FDP-33 Merge Gate
 
-FDP-33 is merge-safe only as bounded owner-fenced lease renewal for regulated mutation commands. It is not production enablement for FDP-29 and not an external-finality claim.
+FDP-33 is merge-safe only as primitive + readiness: bounded owner-fenced lease renewal for regulated mutation commands, durable budget-exceeded recovery, operational runbook, and low-cardinality metrics. It is not production enablement for FDP-29 and not an external-finality claim.
+
+## Merge-Safe Scope
+
+- bounded owner-fenced renewal primitive
+- durable budget-exceeded recovery
+- operational runbook
+- low-cardinality metrics
+- no public heartbeat endpoint
+- no automatic scheduler
+- no transaction boundary change
 
 ## Merge Requirements
 
@@ -19,6 +29,7 @@ FDP-33 is merge-safe only as bounded owner-fenced lease renewal for regulated mu
 - bank/prod startup guard rejects unsafe renewal budget configuration
 - metrics use low-cardinality labels only
 - operational runbook exists at `docs/runbooks/FDP-33-lease-renewal-runbook.md`
+- observability dashboard contract exists at `docs/observability/FDP-33-lease-renewal-dashboard.md`
 - FDP-32 stale-worker and fencing tests pass
 - FDP-31 claim and replay tests pass
 - FDP-29 integration tests pass
@@ -31,6 +42,7 @@ FDP-33 is merge-safe only as bounded owner-fenced lease renewal for regulated mu
 
 Production or bank operation requires:
 
+- separate production/bank gate
 - transaction-mode `REQUIRED`
 - lease duration budget reviewed
 - renewal budget configured
@@ -38,11 +50,23 @@ Production or bank operation requires:
 - alerts for stale owner, expired lease, budget exceeded, non-renewable state, and repeated takeover
 - canary or staging soak
 - operator drill performed
+- safe checkpoint review if renewal is wired into executors
 - rollback plan
 
 ## Required Verification
 
-Run the focused FDP-33 pack:
+Required tests before merge:
+
+- `RegulatedMutationLeaseRenewalPolicyTest`
+- `RegulatedMutationLeaseRenewalServiceTest`
+- `RegulatedMutationLeaseRenewalIntegrationTest`
+- `RegulatedMutationLeaseRenewalStartupGuardTest`
+- `AlertServiceMetricsTest`
+- `RegulatedMutationArchitectureTest`
+- FDP-32 stale-worker fencing tests
+- FDP-29 integration tests
+
+Required CI command:
 
 ```bash
 mvn "-Dmaven.repo.local=$PWD\.m2repo" "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=RegulatedMutationLeaseRenewalPolicyTest,RegulatedMutationLeaseRenewalServiceTest,RegulatedMutationLeaseRenewalIntegrationTest,RegulatedMutationLeaseRenewalStartupGuardTest,AlertServiceMetricsTest,RegulatedMutationArchitectureTest" test
@@ -54,8 +78,6 @@ Run the full alert-service test suite:
 mvn "-Dmaven.repo.local=$PWD\.m2repo" -pl alert-service -am test
 ```
 
-Paste Docker/Testcontainers E2E Output Here before production or bank enablement. Merge verification may rely on Maven/Testcontainers; production enablement still requires separate operational soak.
-
 ## Non-Goals
 
 - no distributed lock
@@ -63,5 +85,7 @@ Paste Docker/Testcontainers E2E Output Here before production or bank enablement
 - no external finality
 - no process-kill chaos proof
 - no public heartbeat endpoint
+- no public heartbeat API
 - no new mutation types
 - no automatic heartbeat scheduler
+- no FDP-29 production enablement

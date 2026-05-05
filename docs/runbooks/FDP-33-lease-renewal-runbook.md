@@ -13,6 +13,28 @@ This runbook covers regulated mutation lease-renewal rejections. Renewal is an i
 
 Required authority for any recovery action is fraud operations lead plus platform on-call. Bank-mode recovery also requires the bank-mode release owner.
 
+## Worker stuck but renewing
+
+Symptom: command remains PROCESSING, lease keeps extending, no state progress.
+Impact: ownership is preserved but business progress may be stalled.
+Safe operator action: inspect command timeline, state transitions, leaseRenewalCount, lastHeartbeatAt, updatedAt, degradationReason, related audit/outbox status.
+Forbidden action: do not manually extend lease, do not manually rewrite lease_owner, do not submit a new idempotency key, do not edit business aggregate directly, do not mark evidence confirmed.
+Required authority: regulated mutation operator + incident commander for bank/prod.
+Audit requirement: operator inspection/action must be audited.
+Retry/rollback guidance: allow budget to fail closed or use approved recovery workflow; do not bypass fencing.
+Escalation: repeated renewal without state progress over threshold opens trust incident.
+
+## Budget exceeded flood
+
+Symptom: BUDGET_EXCEEDED / LEASE_RENEWAL_BUDGET_EXCEEDED count spikes.
+Impact: commands are moved to recovery-required/fail-closed posture.
+Safe operator action: inspect slow dependency, DB latency, audit chain contention, outbox latency, executor path.
+Forbidden action: do not increase budget blindly in prod/bank without config review.
+Required authority: SRE + regulated mutation owner + security/compliance if bank profile.
+Audit requirement: config changes and manual recovery must be audited.
+Rollback guidance: revert config or disable feature flag if applicable; do not bypass claim/fencing.
+Escalation: sustained flood triggers incident.
+
 ## STALE_OWNER
 
 Symptom: renewal rejection reason `STALE_OWNER`.

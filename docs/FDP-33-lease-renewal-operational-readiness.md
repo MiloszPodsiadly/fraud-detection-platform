@@ -10,6 +10,14 @@ FDP-33 adds an internal, owner-fenced, bounded lease renewal primitive for regul
 
 No public heartbeat endpoint is introduced. No scheduler or automatic infinite renewal loop is introduced. Current executors do not have to heartbeat unless a later mutation path proves a safe checkpoint is needed.
 
+## Runtime Adoption Contract
+
+FDP-33 introduces a bounded, owner-fenced renewal primitive and operational readiness around that primitive. FDP-33 does not add an automatic heartbeat scheduler and does not automatically call renewal from current executors.
+
+future runtime adoption must add explicit safe checkpoints with tests. A safe checkpoint must sit before or after bounded local work, not during non-idempotent external side effects. Any future executor renewal call must use the current `RegulatedMutationClaimToken` and must stop immediately if renewal is rejected.
+
+Renewal preserves ownership only; it does not prove business progress. Lease renewal is not a guarantee of progress; it only preserves ownership under bounded time.
+
 ## Renewal Caller Contract
 
 Renewal is a private worker checkpoint API. A worker may call it only after it owns a valid claim token and only after a durable checkpoint that is safe to retry. It is not a progress signal for public callers, controllers, UI flows, analysts, operators, Kafka consumers outside the regulated mutation executor boundary, or recovery scripts.
@@ -55,6 +63,18 @@ Legacy regulated mutation renewal is limited to active processing states:
 - `SUCCESS_AUDIT_PENDING`
 
 `REQUESTED` is renewable for legacy compatibility because the legacy executor may hold the claim before the first durable phase transition. `BUSINESS_COMMITTED` is renewable because the business aggregate has already been written but success audit/outbox follow-up may still need a bounded worker lease. Neither state permits renewal after terminal command status, public finality, or recovery status.
+
+## Legacy Renewable State Justification
+
+Legacy renewal does not imply business success and must not be used as idle queue parking. For legacy model budget exhaustion, renewal preserves state for compatibility but `execution_status=RECOVERY_REQUIRED` is authoritative. Recovery status wins over `responseSnapshot`; execution_status and recovery precedence remain authoritative.
+
+| State | Why renewable | Risk | Guardrail | Test evidence |
+| --- | --- | --- | --- | --- |
+| `REQUESTED` | Renewable only after claim while worker prepares first durable phase; budget-bounded; renewal mutates lease metadata only. | Idle queue parking if a worker renews without progress. | No automatic scheduler; safe checkpoint review required before runtime adoption. | `RegulatedMutationLeaseRenewalPolicyTest`, `RegulatedMutationLeaseRenewalIntegrationTest` |
+| `AUDIT_ATTEMPTED` | Worker may be between attempted audit and business work; budget-bounded. | Attempted audit can be mistaken for business success. | Renewal never changes response snapshots, outbox ids, audit ids, state, or public status. | `RegulatedMutationLeaseRenewalPolicyTest`, `RegulatedMutationArchitectureTest` |
+| `BUSINESS_COMMITTING` | Critical local business transaction window; renewal reduces false stale recovery. | Business write may be ambiguous if the process stalls. | Budget exhaustion and expired unsafe replay move to recovery-required handling. | `RegulatedMutationClaimReplayPolicyCompatibilityTest` |
+| `BUSINESS_COMMITTED` | Compatibility window for legacy post-business success audit/outbox follow-up; execution_status and recovery precedence remain authoritative. | Snapshot replay could hide recovery if status precedence regresses. | `RECOVERY_REQUIRED` wins over response snapshot and returns recovery response. | `RegulatedMutationClaimReplayPolicyCompatibilityTest` |
+| `SUCCESS_AUDIT_PENDING` | Worker may retry success audit without rerunning business mutation. | Renewal could hide success-audit contention. | Bounded renewal count and budget-exceeded recovery. | `RegulatedMutationLeaseRenewalIntegrationTest`, `RegulatedMutationClaimReplayPolicyCompatibilityTest` |
 
 Evidence-gated finalize renewal is limited to active FDP-29 worker states:
 
