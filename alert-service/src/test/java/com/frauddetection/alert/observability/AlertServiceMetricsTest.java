@@ -524,4 +524,50 @@ class AlertServiceMetricsTest {
                         .doesNotContain("exception")
                         .doesNotContain("path"));
     }
+
+    @Test
+    void shouldCoverEveryRegulatedMutationCheckpointMetricLabel() {
+        assertThat(java.util.List.of(
+                RegulatedMutationRenewalCheckpoint.BEFORE_ATTEMPTED_AUDIT,
+                RegulatedMutationRenewalCheckpoint.BEFORE_LEGACY_BUSINESS_COMMIT,
+                RegulatedMutationRenewalCheckpoint.BEFORE_SUCCESS_AUDIT_RETRY,
+                RegulatedMutationRenewalCheckpoint.BEFORE_EVIDENCE_PREPARATION,
+                RegulatedMutationRenewalCheckpoint.BEFORE_EVIDENCE_GATED_FINALIZE,
+                RegulatedMutationRenewalCheckpoint.AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE
+        )).containsExactlyInAnyOrder(RegulatedMutationRenewalCheckpoint.values());
+
+        for (RegulatedMutationRenewalCheckpoint checkpoint : RegulatedMutationRenewalCheckpoint.values()) {
+            metrics.recordRegulatedMutationCheckpointRenewal(
+                    RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                    checkpoint,
+                    "BLOCKED",
+                    RegulatedMutationLeaseRenewalReason.NON_RENEWABLE_STATE.name()
+            );
+            metrics.recordRegulatedMutationCheckpointRenewalBlocked(
+                    RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                    checkpoint,
+                    RegulatedMutationLeaseRenewalReason.NON_RENEWABLE_STATE.name()
+            );
+            metrics.recordRegulatedMutationCheckpointNoProgress(
+                    RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                    checkpoint,
+                    RegulatedMutationLeaseRenewalReason.NON_RENEWABLE_STATE.name()
+            );
+        }
+
+        for (RegulatedMutationRenewalCheckpoint checkpoint : RegulatedMutationRenewalCheckpoint.values()) {
+            assertThat(meterRegistry.get("regulated_mutation_checkpoint_renewal_total")
+                    .tag("checkpoint", checkpoint.name())
+                    .counter()
+                    .count()).isEqualTo(1.0d);
+            assertThat(meterRegistry.get("regulated_mutation_checkpoint_renewal_blocked_total")
+                    .tag("checkpoint", checkpoint.name())
+                    .counter()
+                    .count()).isEqualTo(1.0d);
+            assertThat(meterRegistry.get("regulated_mutation_checkpoint_no_progress_total")
+                    .tag("checkpoint", checkpoint.name())
+                    .counter()
+                    .count()).isEqualTo(1.0d);
+        }
+    }
 }
