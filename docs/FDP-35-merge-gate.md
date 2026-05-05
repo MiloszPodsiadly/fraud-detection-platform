@@ -1,39 +1,76 @@
 # FDP-35 Merge Gate
 
-FDP-35 may merge only as a production-readiness proof branch. It must not introduce new regulated mutation semantics.
+## Scope
 
-## Required Checks
+FDP-35 is readiness/proof only. FDP-35 provides production-readiness evidence for the existing regulated mutation safety model.
 
-- Docker/Testcontainers E2E proof suite green.
-- Controller/API recovery response tests green.
-- Modeled restart/recovery proof green.
-- FDP-29, FDP-32, FDP-33, and FDP-34 regression tests remain green.
-- Recovery runbook has filled sample output.
-- Dashboard specifications exist.
-- Alert threshold specifications exist.
-- Rollback plan exists and is validated by tests or explicit documented checks.
-- No production enablement config changed.
+FDP-35 provides modeled restart/recovery proof in CI. It recreates durable post-crash states and verifies replay/recovery/API behavior against the same Mongo-backed command state. It does not claim real OS/JVM/container kill chaos proof unless an explicit kill/restart test is added.
 
-## Hard No Claims
+## Non-Goals
 
-- No real process kill proof unless a test actually kills and restarts the process.
-- No external finality.
-- No distributed lock.
-- No distributed ACID.
-- No WORM/legal notarization/KMS claim.
-- No automatic FDP-29 production enablement.
+- no new mutation semantics
+- no FDP-29 production enablement
+- no scheduler/heartbeat expansion
+- no Kafka/outbox semantic changes
+- no external finality
+- no distributed ACID
+- no real OS/JVM/container kill proof unless a `real-chaos`/`docker-chaos` job exists and passes
 
-## No New Semantics Gate
+True OS/JVM/container process termination chaos remains future scope unless explicitly implemented and run in CI.
 
-- `SubmitDecisionOperationStatus` values unchanged.
-- `RegulatedMutationState` values unchanged.
-- `RegulatedMutationModelVersion` values unchanged.
-- No public heartbeat endpoint.
-- Controllers do not call lease renewal or checkpoint renewal services.
-- Kafka/outbox publisher contracts unchanged.
-- Readiness tests do not call external anchor or Trust Authority clients.
+## Required CI
 
-## Approval Decision
+- `fdp35-production-readiness` green
+- `regulated-mutation-regression` green
+- no skipped Docker/Testcontainers readiness proof
+- surefire reports uploaded for both jobs
 
-Approve only if all required checks are green and the branch remains proof/readiness only.
+| Invariant | Required CI job | Test class/method | Artifact |
+| --- | --- | --- | --- |
+| no false success after modeled restart | `fdp35-production-readiness` | `RegulatedMutationRestartRecoveryProofTest.crashAfterBusinessCommitBeforeSuccessAuditLegacyRequiresOnlyExplicitRecoveryOrAuditRetry` | `fdp35-production-readiness-test-reports` |
+| recovery beats stale snapshot | `fdp35-production-readiness` | `RegulatedMutationProductionReadinessE2ETest.recoveryStateBeatsSnapshotE2E` | `fdp35-production-readiness-test-reports` |
+| FINALIZE_RECOVERY_REQUIRED beats stale snapshot | `regulated-mutation-regression` | `EvidenceGatedFinalizeCoordinatorTest.shouldNotReplayStaleCommittedSnapshotWhenFinalizeRecoveryRequired` | `regulated-mutation-regression-test-reports` |
+| checkpoint renewal is not progress | `fdp35-production-readiness` | `RegulatedMutationProductionReadinessE2ETest.checkpointRenewalIsNotProgressE2E` | `fdp35-production-readiness-test-reports` |
+| long-running PROCESSING is observable | `fdp35-production-readiness` | `RegulatedMutationProductionReadinessE2ETest.longRunningProcessingIsObservableE2E` | `fdp35-production-readiness-test-reports` |
+| rollback disables new risky behavior without hiding recovery | `regulated-mutation-regression` | `RegulatedMutationRollbackReadinessTest.rollbackKeepsRecoveryCommandsVisible` | `regulated-mutation-regression-test-reports` |
+| Docker/Testcontainers proof is green | `fdp35-production-readiness` | `RegulatedMutationProductionReadinessE2ETest.legacySubmitDecisionHappyPathE2E` | `fdp35-production-readiness-test-reports` |
+| FDP-29/FDP-32/FDP-33/FDP-34 regressions are green | `regulated-mutation-regression` | `EvidenceGatedFinalizeCoordinatorIntegrationTest.shouldFinalizeSubmitDecisionThroughRealMongoCoordinatorPath`; `RegulatedMutationLeaseFencingIntegrationTest.nonClaimedRecoveryTransitionCannotOverwriteCurrentOwnerAfterLeaseTakeover`; `RegulatedMutationLeaseRenewalIntegrationTest.concurrentRenewalAtLastAllowedSlotAllowsOnlyOneSuccess`; `RegulatedMutationStaleWorkerExecutorIntegrationTest.legacyCheckpointBudgetExceededStopsBeforeBusinessMutationThroughRealMongoExecutorPath` | `regulated-mutation-regression-test-reports` |
 
+## Required Proof Matrix
+
+Every FDP-35 invariant must map to an exact test class and method in `docs/testing/FDP-35-regression-proof-matrix.md`.
+
+## Required Docs
+
+- dashboard thresholds concrete
+- rollback plan executable
+- recovery drill includes filled sample output marked as sample
+- modeled restart wording present
+- placeholder output removed
+
+## Required API Safety
+
+- inspection response safe
+- no raw idempotency key
+- no raw request, intent, or payload hash
+- no raw lease owner
+- no raw exception text or path
+- inspection endpoint remains authority-gated, audited fail-closed, and rate-limited
+
+## Required Config Guarantee
+
+- no production enablement flags changed by FDP-35
+- all risky features disabled by default
+- rollback disables new paths without disabling fencing or recovery visibility
+
+## Final Allowed Claim
+
+FDP-35 provides production-readiness evidence for the existing regulated mutation safety model.
+
+FDP-35 must prove readiness, not claim enablement.
+
+Modeled restart/recovery, controller recovery behavior, Docker/Testcontainers readiness, rollback, dashboard, alert, and operator drill evidence are covered.
+
+## Forbidden Claim
+
+FDP-35 enables production/bank mode.

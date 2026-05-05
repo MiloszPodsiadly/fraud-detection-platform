@@ -2,6 +2,53 @@
 
 This operator drill is for regulated mutation recovery. It uses sample values only and contains no secrets.
 
+FDP-35 provides modeled restart/recovery proof in CI. It does not claim real OS/JVM/container kill chaos proof unless an explicit kill/restart test is added. True OS/JVM/container process termination chaos remains future scope unless explicitly implemented and run in CI.
+
+## Operator Control
+
+- Owner: Fraud Platform On-call.
+- Approver: Fraud Platform Incident Lead.
+- Required authority: `regulated-mutation:recover` or `audit:verify`.
+- Dual-control requirement: manual state repair, rollback approval, FDP-29 flag disablement, and lease budget changes require a second approver.
+- Escalation: T+5m triage, T+15m incident lead, T+30m rollback decision, T+60m post-incident review.
+
+## Audit Record Template
+
+- command reference: command id or idempotency hash only
+- operator identity:
+- reason code:
+- action taken:
+- evidence checked:
+- approver identity:
+- timestamp:
+- confirm no raw idempotency key, raw payload, or customer-sensitive data:
+
+## Forbidden Actions
+
+- no manual business aggregate edit
+- no raw idempotency key in ticket
+- no lease owner rewrite
+- no evidence confirmed without authoritative evidence
+- no new idempotency key for the same mutation unless approved recovery says so
+
+## Post-Incident Validation
+
+- recovery backlog stable/decreasing
+- no false success responses
+- no `FINALIZE_RECOVERY_REQUIRED` hidden
+- dashboard green
+- outbox ambiguity addressed
+- no high-cardinality labels/log leaks
+
+## Rollback Approval Matrix
+
+| Action | Approver | Second approver |
+| --- | --- | --- |
+| disable checkpoint renewal | Fraud Platform Incident Lead | SRE Lead |
+| disable FDP-29 feature flags | Fraud Platform Owner | Compliance/Operations approver |
+| approve extended soak | SRE Lead | Fraud Platform Owner |
+| close incident | Incident Lead | Fraud Platform Owner |
+
 ## Drill 1: FINALIZE_RECOVERY_REQUIRED
 
 - Precondition: FDP-29 command enters `FINALIZE_RECOVERY_REQUIRED`.
@@ -79,4 +126,3 @@ safe_action: escalated to recovery owner
 forbidden_actions_confirmed_not_taken: true
 result: PASS
 ```
-

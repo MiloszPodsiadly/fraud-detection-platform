@@ -1,15 +1,23 @@
 # FDP-35 Regulated Mutation Alert Thresholds
 
-All alert labels must remain low-cardinality. Do not include commandId, alertId, actorId, leaseOwner, idempotencyKey, requestHash, resourceId, exception message, raw path, token, or key material.
+All alert labels must remain low-cardinality. Do not use command id, alert id, actor id, lease owner, idempotency key, request hash, resource id, exception message, token, or path as metric labels.
 
-| Alert | Signal | Suggested threshold | Severity | Safe operator action | Forbidden action | Dashboard panel | Runbook |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Stale write rejection spike | `regulated_mutation_stale_write_rejected_total` rate | > 5/min for 10m | Warning | Inspect current owner and recent deploys | Rewrite lease owner | Stale worker/fencing | `docs/runbooks/FDP-35-regulated-mutation-recovery-drill.md` |
-| Expired lease rejection spike | stale rejection reason `EXPIRED_LEASE` | > 3/min for 10m | Warning | Inspect long-running PROCESSING and host latency | Increase lease blindly | Long-running PROCESSING | same |
-| Renewal budget exceeded spike | `regulated_mutation_lease_renewal_budget_exceeded_total` | > 0 for bank/prod | Critical | Inspect affected command state and business evidence | Raise budget without review | Lease renewal/checkpoint adoption | same |
-| Long-running PROCESSING | PROCESSING age bucket | > configured stuck threshold | Critical | Inspect renewal count, lease expiry, and backlog | Submit new idempotency key | Long-running PROCESSING | same |
-| Pending external evidence age | `FINALIZED_EVIDENCE_PENDING_EXTERNAL` age | > agreed external SLA | Warning | Inspect outbox/evidence confirmation | Mark confirmed manually | Outbox/evidence pending | same |
-| Recovery-required count | recovery backlog count | > 0 sustained 15m | Critical | Run recovery drill | Expose stale snapshot as success | Recovery states | same |
-| Outbox confirmation unknown spike | `PUBLISH_CONFIRMATION_UNKNOWN` count/rate | > 0 sustained 15m | Critical | Use outbox recovery and dual control | Re-publish manually outside runbook | Outbox/evidence pending | same |
-| No-progress checkpoint spike | `regulated_mutation_checkpoint_no_progress_total` | > 0 sustained 10m | Warning | Inspect checkpoint reason and lease budget | Treat renewal as business progress | Lease renewal/checkpoint adoption | same |
+Do not include command id, alert id, actor id, lease owner, idempotency key, request hash, resource id, exception message, token, or path in metric labels.
 
+Priority mapping: `P2` means warning requires triage during the active support window; `P1` means critical incident response and incident-lead ownership.
+
+Window notation: `5m` means 5 minutes, `10m` means 10 minutes, `15m` means 15 minutes, and escalation to rollback review must happen by 30 minutes when recovery backlog or false-success ambiguity grows.
+
+| Signal | Metric | P2 warning | P1 critical | Window | Operator action |
+| --- | --- | --- | --- | --- | --- |
+| stale owner rejection spike | `regulated_mutation_fenced_write_rejected_total{reason="STALE_OWNER"}` or `regulated_mutation_stale_write_rejected_total{reason="STALE_LEASE_OWNER"}` | `> 5` | `> 20` | `5m` | Inspect recent deploys, current owner, and lease takeover timeline; do not rewrite `lease_owner`. |
+| expired lease rejection spike | `regulated_mutation_lease_renewal_rejected_total{reason="EXPIRED_LEASE"}` or stale rejection reason `EXPIRED_LEASE` | `> 1` | `> 5` | `5m` | Inspect long-running PROCESSING and host latency; do not extend expired leases manually. |
+| budget exceeded | `regulated_mutation_lease_renewal_budget_exceeded_total` | `> 0` | `>= 3` | warning `5m`, critical `15m` | Run recovery drill and inspect checkpoint adoption; do not increase budget blindly. |
+| long-running PROCESSING | `regulated_mutation_processing_age_seconds` or backlog-derived age | `p95 > configured lease duration * 2` | `max age > min(max total lease duration, 10m)` | `10m` | Inspect renewal count vs state transitions; checkpoint renewal is not progress. |
+| repeated takeover | `regulated_mutation_claim_takeover_total` | `> 3` | `> 10` | `10m` | Inspect worker restarts and latency; do not bypass fencing. |
+| FINALIZE_RECOVERY_REQUIRED | `evidence_gated_finalize_recovery_required_total` | `> 0` | `>= 3` | warning `5m`, critical `15m` | Follow FDP-29/FDP-35 recovery runbook; do not mark evidence confirmed manually. |
+| checkpoint renewal failure | `regulated_mutation_checkpoint_renewal_total{outcome="FAILED"}` | `> 0` | `> 5` | warning `5m`, critical `15m` | Investigate checkpoint reason and durable command state; no hidden retry-as-success. |
+| checkpoint renewal treated as progress guard | dashboard panel: processing age vs renewal count | renewal count increases while no state transition for `> configured lease duration * 2` | renewal count increases while no state transition for `> min(max total lease duration, 10m)` | `10m` | Treat as stuck processing until proven otherwise. |
+| inspection endpoint failures | `regulated_mutation_inspection_failed_total` or sensitive-read audit failure counter | `> 0` | any fail-closed audit persistence failure | `5m` | Verify audit persistence and recovery authority path before allowing inspection use. |
+
+FDP-35 provides modeled restart/recovery proof in CI. It does not claim real OS/JVM/container kill chaos proof unless an explicit kill/restart test is added.

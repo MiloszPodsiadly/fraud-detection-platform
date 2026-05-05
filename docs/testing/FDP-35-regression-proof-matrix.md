@@ -1,28 +1,44 @@
 # FDP-35 Regression Proof Matrix
 
+FDP-35 must prove readiness, not claim enablement. Every row below maps one invariant to exact automated proof.
+
 | Invariant | Source FDP | Test class | Test method | Expected result | Remaining limitation |
 | --- | --- | --- | --- | --- | --- |
-| Local evidence-precondition-gated finalize | FDP-29 | `EvidenceGatedFinalizeCoordinatorIntegrationTest` | `shouldFinalizeSubmitDecisionThroughRealMongoCoordinatorPath` | Local finalize reaches pending external state with snapshot/outbox/audit | No external finality claim |
-| No false external finality | FDP-29 | `EvidenceGatedFinalizeCoordinatorTest` | recovery/finalize replay tests | Pending external is not confirmed external | External witness not modeled |
-| Rollback-safe finalize | FDP-29 | `EvidenceGatedFinalizeCoordinatorIntegrationTest` | rollback failure tests | Failed finalize rolls back business/outbox/success audit | Mongo transaction model only |
-| Local SUCCESS audit in transaction | FDP-29 | `RegulatedMutationLocalAuditPhaseWriterIntegrationTest` | local audit tests | Success audit persisted locally | External anchor separate |
-| FINALIZE_RECOVERY_REQUIRED beats stale snapshot | FDP-29 | `EvidenceGatedFinalizeCoordinatorIntegrationTest` | recovery replay tests | Recovery state wins | Requires operator recovery |
-| Stale owner cannot write command transition | FDP-32 | `RegulatedMutationLeaseFencingIntegrationTest` | stale owner tests | Stale write rejected | Covered for tested paths |
-| Expired lease rejected | FDP-32 | `RegulatedMutationFencedCommandWriterTest` | expired lease tests | Fenced writer rejects stale/expired owner | Writer-level proof |
-| No mutation after stale takeover | FDP-32 | `RegulatedMutationStaleWorkerExecutorIntegrationTest` | stale takeover tests | Business mutation count remains zero | Scenario based |
-| Fenced writer conditional update | FDP-32 | `RegulatedMutationFencedCommandWriterTest` | transition guard tests | Command state changes only with active owner lease | Mongo conditional update proof |
-| Owner-fenced renewal | FDP-33 | `RegulatedMutationLeaseRenewalIntegrationTest` | renewal owner tests | Only current owner renews | Mongo integration proof |
-| Budget exceeded durable recovery | FDP-33 | `RegulatedMutationLeaseRenewalIntegrationTest` | budget tests | Recovery-required state durable | Existing policy limits apply |
-| Invalid extension not budget exceeded | FDP-33 | `RegulatedMutationLeaseRenewalPolicyTest` | invalid extension tests | Validation failure is distinct | Policy-unit proof |
-| Terminal/recovery states cannot renew | FDP-33 | `RegulatedMutationLeaseRenewalServiceTest` | terminal/recovery tests | Renewal rejected | Service-level proof |
-| Metrics bounded | FDP-33 | `AlertServiceMetricsTest` | lease renewal label tests | Low-cardinality labels only | Does not validate dashboard rendering |
-| Checkpoint renewal only at approved checkpoints | FDP-34 | `RegulatedMutationSafeCheckpointPolicyTest` | checkpoint policy tests | Unapproved checkpoints rejected | Policy table proof |
-| Renewal failure stops execution | FDP-34 | `RegulatedMutationStaleWorkerExecutorIntegrationTest` | checkpoint budget tests | No later mutation after failed checkpoint | Executor-path proof |
-| No mutation after failed checkpoint | FDP-34 | `RegulatedMutationStaleWorkerExecutorIntegrationTest` | checkpoint failure tests | Business/outbox/audit absent | Scenario based |
-| Checkpoint renewal is not progress | FDP-34 | `AlertServiceMetricsTest` | checkpoint no-progress tests | No-progress metric is separate | Metrics proof |
-| No generic heartbeat | FDP-34 | `RegulatedMutationArchitectureTest` | heartbeat/renewal guards | No public heartbeat endpoint | Source/type guard |
-| Restart/recovery proof | FDP-35 | `RegulatedMutationRestartRecoveryProofTest` | modeled crash tests | Crash-like durable states do not false-succeed | Modeled, not kill -9 |
-| API recovery behavior | FDP-35 | `AlertControllerTest` and recovery controller tests | recovery API tests | Recovery/pending states not exposed as committed success | Controller-level proof |
-| Dashboards/alerts/runbooks | FDP-35 | `RegulatedMutationArchitectureTest` | docs guard | Operator specs exist and stay low-cardinality | Docs/spec proof |
-| Rollback plan | FDP-35 | `RegulatedMutationCheckpointRenewalWiringTest` and docs guard | rollback tests/docs | Feature flags/model versions remain compatible | Operational plan proof |
+| Local evidence-precondition-gated finalize | FDP-29 | `EvidenceGatedFinalizeCoordinatorIntegrationTest` | `shouldFinalizeSubmitDecisionThroughRealMongoCoordinatorPath` | Local finalize reaches pending external state with snapshot, outbox, and audit evidence | No external finality claim |
+| No false external finality | FDP-29 | `EvidenceGatedFinalizeCoordinatorTest` | `shouldNotReplayStaleCommittedSnapshotWhenFinalizeRecoveryRequired` | Recovery state wins over stale committed snapshot | External witness not modeled |
+| Rollback-safe finalize when outbox fails | FDP-29 | `EvidenceGatedFinalizeCoordinatorIntegrationTest` | `shouldRollbackCoordinatorPathWhenOutboxWriteFailsInsideFinalize` | Finalize business/outbox/success audit state rolls back | Mongo transaction model only |
+| Rollback-safe finalize when success audit fails | FDP-29 | `EvidenceGatedFinalizeCoordinatorIntegrationTest` | `shouldRollbackCoordinatorPathWhenSuccessAuditPersistenceFailsInsideFinalize` | Success audit failure does not expose false finality | Mongo transaction model only |
+| Finalize command save rollback | FDP-29 | `EvidenceGatedFinalizeCoordinatorIntegrationTest` | `shouldRollbackAssignedFinalizeFieldsWhenCommandSaveFailsBeforeTransactionCommit` | Assigned finalize fields do not leak after failed save | Mongo transaction model only |
+| Stale owner cannot write command transition | FDP-32 | `RegulatedMutationLeaseFencingIntegrationTest` | `expiredLeaseCanBeTakenOverAndStaleWorkerCannotWriteAfterTakeover` | Stale write rejected after takeover | Covered for tested paths |
+| Recovery state cannot be overwritten by stale worker | FDP-32 | `RegulatedMutationLeaseFencingIntegrationTest` | `recoveryStateCannotBeOverwrittenByStaleWorker` | Recovery-required command remains recovery-required | Covered for tested paths |
+| Non-claimed recovery repair cannot overwrite current owner | FDP-32 | `RegulatedMutationLeaseFencingIntegrationTest` | `nonClaimedRecoveryTransitionCannotOverwriteCurrentOwnerAfterLeaseTakeover` | Current lease owner and processing state remain intact | Covered for tested path |
+| Expired lease rejected before business mutation | FDP-32 | `RegulatedMutationFencedCommandWriterTest` | `activeLeaseValidationRejectsExpiredLeaseBeforeBusinessMutation` | Fenced writer rejects expired owner | Writer-level proof |
+| Protected transition fields cannot be mutated | FDP-32 | `RegulatedMutationFencedCommandWriterTest` | `allowedFieldUpdatesCannotMutateLeaseOwner` | `allowedFieldUpdates` cannot change owner fields | Representative protected field proof |
+| Owner-fenced renewal | FDP-33 | `RegulatedMutationLeaseRenewalIntegrationTest` | `staleOwnerCannotRenewAfterTakeover` | Only current owner renews | Mongo integration proof |
+| Budget exceeded durable recovery | FDP-33 | `RegulatedMutationLeaseRenewalIntegrationTest` | `budgetExhaustionRejectsRenewal` | Renewal budget exhaustion becomes explicit recovery | Existing policy limits apply |
+| Concurrent last-slot renewal is race-safe | FDP-33 | `RegulatedMutationLeaseRenewalIntegrationTest` | `concurrentRenewalAtLastAllowedSlotAllowsOnlyOneSuccess` | One renewal wins; loser does not produce false recovery | Race modeled through concurrent Mongo updates |
+| Terminal and recovery states cannot renew | FDP-33 | `RegulatedMutationLeaseRenewalServiceTest` | `recoveryRaceAfterRenewalUpdateRejectsWithoutRecoveryWrite` | Renewal rejected without recovery side effect | Service-level proof |
+| Same-owner retry does not force recovery | FDP-33 | `RegulatedMutationLeaseRenewalServiceTest` | `sameOwnerRaceThatAlreadyAdvancedLastRenewalSlotDoesNotMarkRecoveryRequired` | Already-advanced renewal slot is not misclassified as budget failure | Service-level proof |
+| Checkpoint renewal only at approved checkpoints | FDP-34 | `RegulatedMutationSafeCheckpointPolicyTest` | `allowsOnlyApprovedLegacyCheckpointPairs` | Legacy unapproved checkpoints rejected | Policy table proof |
+| Evidence-gated checkpoint policy is explicit | FDP-34 | `RegulatedMutationSafeCheckpointPolicyTest` | `allowsOnlyApprovedEvidenceGatedCheckpointPairs` | Evidence-gated unapproved checkpoints rejected | Policy table proof |
+| Terminal/recovery checkpoint pairs rejected first | FDP-34 | `RegulatedMutationSafeCheckpointPolicyTest` | `rejectsCriticalRecoveryAndTerminalStatesBeforeRenewableLookingPairs` | Recovery states cannot be renewed through checkpoint path | Policy table proof |
+| Legacy checkpoint failure stops execution before mutation | FDP-34 | `RegulatedMutationStaleWorkerExecutorIntegrationTest` | `legacyCheckpointBudgetExceededStopsBeforeBusinessMutationThroughRealMongoExecutorPath` | Business mutation, outbox, and audit are absent | Real Mongo executor-path proof |
+| Evidence-gated checkpoint failure stops execution before finalize | FDP-34 | `RegulatedMutationStaleWorkerExecutorIntegrationTest` | `evidenceGatedCheckpointBudgetExceededStopsBeforeFinalizeMutationThroughRealMongoExecutorPath` | Finalize mutation, outbox, and success audit are absent | Real Mongo executor-path proof |
+| Checkpoint renewal is not progress | FDP-34 | `RegulatedMutationProductionReadinessE2ETest` | `checkpointRenewalIsNotProgressE2E` | Renewal metadata does not satisfy business progress | Testcontainers proof |
+| Checkpoint metrics use bounded labels | FDP-34 | `AlertServiceMetricsTest` | `shouldCoverEveryRegulatedMutationCheckpointMetricLabel` | No IDs, hashes, paths, or raw errors in labels | Does not validate dashboard rendering |
+| No generic heartbeat endpoint | FDP-34 | `RegulatedMutationArchitectureTest` | `fdp35ReadinessMustNotExposeHeartbeatOrRenewalControllerSemantics` | No public heartbeat or renewal controller semantics | Source guard |
+| Modeled restart before attempted audit | FDP-35 | `RegulatedMutationRestartRecoveryProofTest` | `crashAfterClaimBeforeAttemptedAuditDoesNotReturnSuccess` | Modeled post-crash state does not false-succeed | Modeled restart, not process kill |
+| Modeled restart after business commit | FDP-35 | `RegulatedMutationRestartRecoveryProofTest` | `crashAfterBusinessCommitBeforeSuccessAuditLegacyRequiresOnlyExplicitRecoveryOrAuditRetry` | Recovery/audit retry is explicit | Modeled restart, not process kill |
+| FDP-29 local commit does not claim confirmation | FDP-35 | `RegulatedMutationRestartRecoveryProofTest` | `crashAfterFdp29LocalCommitBeforeExternalConfirmationDoesNotClaimConfirmedFinality` | Pending external is not represented as confirmed | External finality not proven |
+| Recovery beats stale snapshot E2E | FDP-35 | `RegulatedMutationProductionReadinessE2ETest` | `recoveryStateBeatsSnapshotE2E` | Recovery state wins in Testcontainers scenario | Does not kill a real process |
+| Long-running processing is observable | FDP-35 | `RegulatedMutationProductionReadinessE2ETest` | `longRunningProcessingIsObservableE2E` | Long-running processing is visible without success claim | Operator action still required |
+| API recovery response is not committed success | FDP-35 | `AlertControllerTest` | `apiDoesNotExposeUpdatedResourceForRecoveryRequiredLegacy` | Recovery response has no committed business result | Controller-level proof |
+| API finalize recovery response is not committed success | FDP-35 | `AlertControllerTest` | `apiDoesNotExposeUpdatedResourceForFinalizeRecoveryRequired` | Finalize recovery response has no finalized business result | Controller-level proof |
+| API budget recovery is explicit | FDP-35 | `AlertControllerTest` | `budgetExceededRecovery_mustNotReturnCommittedSuccess` | Budget recovery does not return committed status | Controller-level proof |
+| API stale checkpoint failure is explicit | FDP-35 | `AlertControllerTest` | `staleCheckpointFailure_mustBeExplicitAndNotSuccessful` | Commit unknown is not success | Controller-level proof |
+| Recovery inspection is safe | FDP-35 | `RegulatedMutationRecoveryControllerTest` | `inspectionEndpointNeverReturnsRawSensitiveFieldsOrExceptionText` | No raw owner, hashes, idempotency, request hash, path, token, or raw error leaks | Controller serialization proof |
+| Rollback keeps FDP-32 fencing active | FDP-35 | `RegulatedMutationRollbackReadinessTest` | `disablingCheckpointRenewalDoesNotDisableFdp32Fencing` | Stale owner remains rejected after checkpoint rollback | Rollback modeled through disabled service |
+| Rollback budget shrink produces recovery, not success | FDP-35 | `RegulatedMutationRollbackReadinessTest` | `shrinkingRenewalBudgetCreatesExplicitRecoveryNotFalseSuccess` | Recovery state is durable and no success evidence is written | Unit-level rollback proof |
+| Rollback keeps recovery commands visible | FDP-35 | `RegulatedMutationRollbackReadinessTest` | `rollbackKeepsRecoveryCommandsVisible` | Recovery backlog and inspection still surface commands safely | Service-level proof |
+| Rollback does not enable production or schedulers | FDP-35 | `RegulatedMutationRollbackReadinessTest` | `rollbackDoesNotChangeProductionEnablementFlagsOrCreateSchedulers` | No production flag flip or scheduler creation | Source/config proof |
 

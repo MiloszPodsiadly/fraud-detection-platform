@@ -26,6 +26,10 @@ FDP-35 proves readiness through Docker/Testcontainers E2E tests, modeled restart
 
 The restart proof is modeled restart/recovery proof. It seeds durable Mongo states a real process death could leave behind and verifies replay/recovery behavior. It is not a real OS process termination test and must not be described as a real process-kill chaos proof.
 
+FDP-35 provides modeled restart/recovery proof in CI. It recreates durable post-crash states and verifies replay/recovery/API behavior against the same Mongo-backed command state. It does not claim real OS/JVM/container kill chaos proof unless an explicit kill/restart test is added.
+
+True OS/JVM/container process termination chaos remains future scope unless explicitly implemented and run in CI.
+
 ## Non Goals
 
 - No new mutation types.
@@ -35,6 +39,7 @@ The restart proof is modeled restart/recovery proof. It seeds durable Mongo stat
 - No external finality claim.
 - No distributed lock claim.
 - No distributed ACID claim.
+- No real OS/JVM/container kill proof unless a dedicated explicit chaos job is implemented and green.
 - No state machine rewrite.
 - No WORM, legal notarization, or KMS claim.
 

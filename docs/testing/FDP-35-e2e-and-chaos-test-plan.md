@@ -1,6 +1,10 @@
 # FDP-35 E2E And Modeled Chaos Test Plan
 
-FDP-35 proof tests validate existing regulated mutation behavior under production-readiness scenarios. They use Docker/Testcontainers where required and modeled durable states for restart/recovery proof.
+FDP-35 is a production-readiness proof branch. It proves readiness evidence for the existing regulated mutation safety model and does not enable production or bank mode.
+
+FDP-35 provides modeled restart/recovery proof in CI. It recreates durable post-crash states and verifies replay/recovery/API behavior against the same Mongo-backed command state. It does not claim real OS/JVM/container kill chaos proof unless an explicit kill/restart test is added.
+
+True OS/JVM/container process termination chaos remains future scope unless explicitly implemented and run in CI.
 
 ## Test Tags
 
@@ -11,16 +15,11 @@ FDP-35 proof tests validate existing regulated mutation behavior under productio
 
 ## Commands
 
-Run only the FDP-35 proof suite:
+Run the FDP-35 readiness and regression jobs locally:
 
 ```bash
 mvn -B -pl alert-service -am -Dgroups=production-readiness,e2e,recovery-proof,integration test
-```
-
-Run the full regulated mutation regression suite:
-
-```bash
-mvn -B -pl alert-service -am -Dgroups=failure-injection,invariant-proof,integration,production-readiness,e2e,recovery-proof test
+mvn -B -pl alert-service -am -Dtest=EvidenceGatedFinalizeCoordinatorIntegrationTest,EvidenceGatedFinalizeCoordinatorTest,RegulatedMutationLeaseFencingIntegrationTest,RegulatedMutationLeaseRenewalIntegrationTest,RegulatedMutationCheckpointRenewalExecutionTest,RegulatedMutationStaleWorkerExecutorIntegrationTest,RegulatedMutationRecoveryControllerTest,RegulatedMutationRollbackReadinessTest test
 ```
 
 Run full alert-service tests:
@@ -42,15 +41,13 @@ mvn -B -pl alert-service -am test
 - Modeled crash during FDP-29 finalize before commit.
 - Modeled crash after FDP-29 local commit before external confirmation.
 - Modeled crash with recovery state and stale snapshot.
+- Rollback keeps recovery commands visible.
+- Inspection response remains safe and bounded.
 
-## Expected Output Placeholder
+## CI Output
 
-```text
-Tests run: <n>, Failures: 0, Errors: 0, Skipped: <n>
-BUILD SUCCESS
-```
+CI output must be copied from the workflow run into the branch description after execution. This repository document intentionally does not include sample success output.
 
 ## Limitations
 
-These tests do not use real kill -9. They are modeled restart/recovery proof based on durable Mongo states that a process death could leave behind.
-
+These tests use Docker/Testcontainers and durable Mongo state modeling. They do not terminate the alert-service JVM or container. Real process/container kill chaos is future/optional scope and must run under an explicit `real-chaos`/`docker-chaos` profile before any real kill proof claim is allowed.
