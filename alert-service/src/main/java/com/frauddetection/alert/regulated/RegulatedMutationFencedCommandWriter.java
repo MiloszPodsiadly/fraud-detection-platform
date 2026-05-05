@@ -2,12 +2,14 @@ package com.frauddetection.alert.regulated;
 
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.mongodb.client.result.UpdateResult;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
@@ -40,10 +42,17 @@ public class RegulatedMutationFencedCommandWriter {
 
     private final MongoTemplate mongoTemplate;
     private final AlertServiceMetrics metrics;
+    private final Clock clock;
 
+    @Autowired
     public RegulatedMutationFencedCommandWriter(MongoTemplate mongoTemplate, AlertServiceMetrics metrics) {
+        this(mongoTemplate, metrics, Clock.systemUTC());
+    }
+
+    RegulatedMutationFencedCommandWriter(MongoTemplate mongoTemplate, AlertServiceMetrics metrics, Clock clock) {
         this.mongoTemplate = mongoTemplate;
         this.metrics = metrics;
+        this.clock = clock == null ? Clock.systemUTC() : clock;
     }
 
     public void transition(
@@ -58,7 +67,7 @@ public class RegulatedMutationFencedCommandWriter {
         if (claimToken == null) {
             throw new IllegalArgumentException("Regulated mutation fenced transition requires claim token.");
         }
-        Instant now = Instant.now();
+        Instant now = clock.instant();
         Instant startedAt = now;
         Query query = activeLeaseQuery(claimToken, expectedState, expectedExecutionStatus, now);
         Update update = new Update()
@@ -103,7 +112,7 @@ public class RegulatedMutationFencedCommandWriter {
                     claimToken.mutationModelVersion(),
                     expectedState,
                     "REJECTED",
-                    Duration.between(startedAt, Instant.now())
+                    Duration.between(startedAt, clock.instant())
             );
             recordLeaseBudgetWarningIfNeeded(claimToken, expectedState, now);
             throw new StaleRegulatedMutationLeaseException(claimToken.commandId(), reason);
@@ -125,7 +134,7 @@ public class RegulatedMutationFencedCommandWriter {
                 claimToken.mutationModelVersion(),
                 expectedState,
                 "SUCCESS",
-                Duration.between(startedAt, Instant.now())
+                Duration.between(startedAt, clock.instant())
         );
         recordLeaseBudgetWarningIfNeeded(claimToken, expectedState, now);
     }
@@ -138,7 +147,7 @@ public class RegulatedMutationFencedCommandWriter {
         if (claimToken == null) {
             throw new IllegalArgumentException("Regulated mutation lease validation requires claim token.");
         }
-        Instant now = Instant.now();
+        Instant now = clock.instant();
         long matches = mongoTemplate.count(
                 activeLeaseQuery(claimToken, expectedState, expectedExecutionStatus, now),
                 RegulatedMutationCommandDocument.class
@@ -181,7 +190,7 @@ public class RegulatedMutationFencedCommandWriter {
         if (document == null || document.getId() == null || document.getId().isBlank()) {
             throw new IllegalArgumentException("Regulated mutation recovery transition requires persisted command document.");
         }
-        Instant now = Instant.now();
+        Instant now = clock.instant();
         Query query = recoveryQuery(document, now);
         Update update = new Update()
                 .set("state", newState)
