@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Consumer;
 
 @Service
@@ -70,6 +71,7 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
         );
     }
 
+    // Compatibility/unit-test constructor only. Production wiring must use Spring-managed checkpoint renewal service.
     public LegacyRegulatedMutationExecutor(
             RegulatedMutationCommandRepository commandRepository,
             MongoTemplate mongoTemplate,
@@ -102,6 +104,7 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
     }
 
     @Autowired
+    // Compatibility/unit-test constructor only. Production wiring must use Spring-managed checkpoint renewal service.
     public LegacyRegulatedMutationExecutor(
             RegulatedMutationCommandRepository commandRepository,
             MongoTemplate mongoTemplate,
@@ -128,9 +131,10 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
         this.conflictPolicy = conflictPolicy;
         this.replayResolver = replayResolver;
         this.fencedCommandWriter = fencedCommandWriter;
-        this.checkpointRenewalService = checkpointRenewalService == null
-                ? RegulatedMutationCheckpointRenewalService.disabled()
-                : checkpointRenewalService;
+        this.checkpointRenewalService = Objects.requireNonNull(
+                checkpointRenewalService,
+                "FDP-34 production wiring requires checkpoint renewal service."
+        );
     }
 
     @Override
@@ -356,6 +360,10 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
                     }
             );
             throw exception;
+        } catch (RegulatedMutationCheckpointRenewalException
+                 | RegulatedMutationLeaseRenewalException
+                 | StaleRegulatedMutationLeaseException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             auditFailure(command, document, exception, BUSINESS_WRITE_FAILED);
             document.setDegradationReason(BUSINESS_WRITE_FAILED);
@@ -448,6 +456,10 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
             );
             transition(document, claimToken, RegulatedMutationState.EVIDENCE_PENDING, RegulatedMutationExecutionStatus.COMPLETED, null);
             return new RegulatedMutationResult<>(RegulatedMutationState.EVIDENCE_PENDING, response);
+        } catch (RegulatedMutationCheckpointRenewalException
+                 | RegulatedMutationLeaseRenewalException
+                 | StaleRegulatedMutationLeaseException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             document.setPublicStatus(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE);
             document.setDegradationReason(POST_COMMIT_AUDIT_DEGRADED);
@@ -495,6 +507,10 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
             );
             transition(document, claimToken, RegulatedMutationState.EVIDENCE_PENDING, RegulatedMutationExecutionStatus.COMPLETED, null);
             return null;
+        } catch (RegulatedMutationCheckpointRenewalException
+                 | RegulatedMutationLeaseRenewalException
+                 | StaleRegulatedMutationLeaseException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             S incompleteResponse = command.responseMapper().response(result, RegulatedMutationState.COMMITTED_DEGRADED);
             RegulatedMutationResponseSnapshot incomplete = command.responseSnapshotter().snapshot(incompleteResponse);

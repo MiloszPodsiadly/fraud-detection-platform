@@ -2,7 +2,6 @@ package com.frauddetection.alert.regulated;
 
 public enum RegulatedMutationRenewalCheckpoint {
     BEFORE_ATTEMPTED_AUDIT,
-    AFTER_ATTEMPTED_AUDIT,
     BEFORE_LEGACY_BUSINESS_COMMIT,
     BEFORE_SUCCESS_AUDIT_RETRY,
     BEFORE_EVIDENCE_PREPARATION,

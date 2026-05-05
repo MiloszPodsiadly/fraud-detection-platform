@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Consumer;
 
 @Service
@@ -66,6 +67,7 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
         );
     }
 
+    // Compatibility/unit-test constructor only. Production wiring must use Spring-managed checkpoint renewal service.
     public EvidenceGatedFinalizeExecutor(
             RegulatedMutationCommandRepository commandRepository,
             MongoTemplate mongoTemplate,
@@ -98,6 +100,7 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
     }
 
     @Autowired
+    // Compatibility/unit-test constructor only. Production wiring must use Spring-managed checkpoint renewal service.
     public EvidenceGatedFinalizeExecutor(
             RegulatedMutationCommandRepository commandRepository,
             MongoTemplate mongoTemplate,
@@ -124,9 +127,10 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
         this.conflictPolicy = conflictPolicy;
         this.replayResolver = replayResolver;
         this.fencedCommandWriter = fencedCommandWriter;
-        this.checkpointRenewalService = checkpointRenewalService == null
-                ? RegulatedMutationCheckpointRenewalService.disabled()
-                : checkpointRenewalService;
+        this.checkpointRenewalService = Objects.requireNonNull(
+                checkpointRenewalService,
+                "FDP-34 production wiring requires checkpoint renewal service."
+        );
     }
 
     @Override

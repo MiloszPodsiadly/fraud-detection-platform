@@ -1036,7 +1036,7 @@ public class AlertServiceMetrics {
             return "UNKNOWN";
         }
         return switch (checkpoint.name()) {
-            case "BEFORE_ATTEMPTED_AUDIT", "AFTER_ATTEMPTED_AUDIT", "BEFORE_LEGACY_BUSINESS_COMMIT",
+            case "BEFORE_ATTEMPTED_AUDIT", "BEFORE_LEGACY_BUSINESS_COMMIT",
                  "BEFORE_SUCCESS_AUDIT_RETRY", "BEFORE_EVIDENCE_PREPARATION",
                  "BEFORE_EVIDENCE_GATED_FINALIZE", "AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE" -> checkpoint.name();
             default -> "UNKNOWN";

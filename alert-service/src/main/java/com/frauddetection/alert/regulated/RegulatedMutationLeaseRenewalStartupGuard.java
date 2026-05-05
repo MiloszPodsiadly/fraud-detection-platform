@@ -19,6 +19,7 @@ public class RegulatedMutationLeaseRenewalStartupGuard implements ApplicationRun
     private final Duration maxSingleExtension;
     private final Duration maxTotalLeaseDuration;
     private final Duration maxAllowedTotalDuration;
+    private final Duration checkpointRenewalExtension;
     private final int maxRenewalCount;
 
     public RegulatedMutationLeaseRenewalStartupGuard(
@@ -28,6 +29,7 @@ public class RegulatedMutationLeaseRenewalStartupGuard implements ApplicationRun
             @Value("${app.regulated-mutations.lease-renewal.max-single-extension:PT30S}") Duration maxSingleExtension,
             @Value("${app.regulated-mutations.lease-renewal.max-total-lease-duration:PT2M}") Duration maxTotalLeaseDuration,
             @Value("${app.regulated-mutations.lease-renewal.max-allowed-total-duration:PT10M}") Duration maxAllowedTotalDuration,
+            @Value("${app.regulated-mutations.checkpoint-renewal.extension:PT30S}") Duration checkpointRenewalExtension,
             @Value("${app.regulated-mutations.lease-renewal.max-renewal-count:3}") int maxRenewalCount
     ) {
         this.environment = environment;
@@ -36,6 +38,7 @@ public class RegulatedMutationLeaseRenewalStartupGuard implements ApplicationRun
         this.maxSingleExtension = maxSingleExtension;
         this.maxTotalLeaseDuration = maxTotalLeaseDuration;
         this.maxAllowedTotalDuration = maxAllowedTotalDuration;
+        this.checkpointRenewalExtension = checkpointRenewalExtension;
         this.maxRenewalCount = maxRenewalCount;
     }
 
@@ -52,11 +55,19 @@ public class RegulatedMutationLeaseRenewalStartupGuard implements ApplicationRun
                 "bank/prod lease renewal total duration must be positive.");
         require("app.regulated-mutations.lease-renewal.max-allowed-total-duration", "positive", positive(maxAllowedTotalDuration),
                 "bank/prod lease renewal safe maximum must be positive.");
+        require("app.regulated-mutations.checkpoint-renewal.extension", "positive", positive(checkpointRenewalExtension),
+                "bank/prod checkpoint renewal extension must be positive.");
         require("app.regulated-mutations.lease-renewal.max-renewal-count", ">=1", maxRenewalCount >= 1,
                 "bank/prod lease renewal count must not imply no durable renewal path.");
         require("app.regulated-mutations.lease-renewal.max-total-lease-duration", ">= app.regulated-mutation.lease-duration",
                 maxTotalLeaseDuration.compareTo(leaseDuration) >= 0,
                 "bank/prod total renewal budget must cover at least the base lease duration.");
+        require("app.regulated-mutations.checkpoint-renewal.extension", "<= max-single-extension",
+                checkpointRenewalExtension.compareTo(maxSingleExtension) <= 0,
+                "bank/prod checkpoint renewal extension must fit within the single-renewal budget.");
+        require("app.regulated-mutations.checkpoint-renewal.extension", "<= max-total-lease-duration",
+                checkpointRenewalExtension.compareTo(maxTotalLeaseDuration) <= 0,
+                "bank/prod checkpoint renewal extension must fit within the total renewal budget.");
         require("app.regulated-mutations.lease-renewal.max-single-extension", "<= max-total-lease-duration",
                 maxSingleExtension.compareTo(maxTotalLeaseDuration) <= 0,
                 "bank/prod single renewal extension must not exceed the total budget.");

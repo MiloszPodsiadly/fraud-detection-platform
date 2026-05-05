@@ -66,13 +66,6 @@ public class RegulatedMutationCheckpointRenewalService {
         return checkpoint(claimToken, document, RegulatedMutationRenewalCheckpoint.BEFORE_ATTEMPTED_AUDIT);
     }
 
-    public RegulatedMutationCheckpointRenewalDecision afterAttemptedAudit(
-            RegulatedMutationClaimToken claimToken,
-            RegulatedMutationCommandDocument document
-    ) {
-        return checkpoint(claimToken, document, RegulatedMutationRenewalCheckpoint.AFTER_ATTEMPTED_AUDIT);
-    }
-
     public RegulatedMutationCheckpointRenewalDecision beforeLegacyBusinessCommit(
             RegulatedMutationClaimToken claimToken,
             RegulatedMutationCommandDocument document
@@ -140,7 +133,6 @@ public class RegulatedMutationCheckpointRenewalService {
             RegulatedMutationLeaseRenewalDecision renewal = leaseRenewalService.renew(claimToken, requestedExtension);
             document.setLeaseExpiresAt(renewal.newLeaseExpiresAt());
             recordRenewed(modelVersion, checkpoint, startedAt);
-            metrics.recordRegulatedMutationCheckpointNoProgress(modelVersion, checkpoint, "NONE");
             return RegulatedMutationCheckpointRenewalDecision.renewed(checkpoint, renewal.newLeaseExpiresAt());
         } catch (RegulatedMutationLeaseRenewalBudgetExceededException exception) {
             recordFailed(modelVersion, checkpoint, RegulatedMutationLeaseRenewalReason.BUDGET_EXCEEDED, startedAt);

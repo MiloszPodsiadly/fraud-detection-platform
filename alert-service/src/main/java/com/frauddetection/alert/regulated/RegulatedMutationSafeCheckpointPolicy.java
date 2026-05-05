@@ -40,7 +40,7 @@ public class RegulatedMutationSafeCheckpointPolicy {
             RegulatedMutationRenewalCheckpoint checkpoint
     ) {
         if (checkpoint == null) {
-            return RegulatedMutationLeaseRenewalReason.UNKNOWN;
+            return RegulatedMutationLeaseRenewalReason.UNSUPPORTED_CHECKPOINT;
         }
         if (executionStatus == RegulatedMutationExecutionStatus.RECOVERY_REQUIRED || RECOVERY_STATES.contains(state)) {
             return RegulatedMutationLeaseRenewalReason.RECOVERY_STATE;
@@ -87,7 +87,6 @@ public class RegulatedMutationSafeCheckpointPolicy {
                 RegulatedMutationRenewalCheckpoint.BEFORE_ATTEMPTED_AUDIT
         ));
         legacy.put(RegulatedMutationState.AUDIT_ATTEMPTED, Set.of(
-                RegulatedMutationRenewalCheckpoint.AFTER_ATTEMPTED_AUDIT,
                 RegulatedMutationRenewalCheckpoint.BEFORE_LEGACY_BUSINESS_COMMIT
         ));
         legacy.put(RegulatedMutationState.BUSINESS_COMMITTING, Set.of(
