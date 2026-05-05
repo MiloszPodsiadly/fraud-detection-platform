@@ -10,6 +10,12 @@ FDP-33 adds an internal, owner-fenced, bounded lease renewal primitive for regul
 
 No public heartbeat endpoint is introduced. No scheduler or automatic infinite renewal loop is introduced. Current executors do not have to heartbeat unless a later mutation path proves a safe checkpoint is needed.
 
+## Renewal Caller Contract
+
+Renewal is a private worker checkpoint API. A worker may call it only after it owns a valid claim token and only after a durable checkpoint that is safe to retry. It is not a progress signal for public callers, controllers, UI flows, analysts, operators, Kafka consumers outside the regulated mutation executor boundary, or recovery scripts.
+
+A renewal caller must pass the original claim token and a positive requested extension. It must not derive a fresh command id, lease owner, model version, or state from request input. It must treat every rejection as authoritative and stop using the rejected token. A caller must never renew after terminal success, visible recovery, outbox publication, audit success, or failed business validation.
+
 ## Lease Renewal Invariant
 
 A renewal may extend `lease_expires_at` only when all of these are true:
@@ -36,6 +42,8 @@ Requested extensions above `max-single-extension` are capped. Extensions beyond 
 
 Missing renewal metadata is backward compatible. Missing `lease_renewal_count` means `0`. Missing `lease_budget_started_at` falls back to the claim token `claimedAt`, then command `createdAt`, then current time.
 
+Direct budget exhaustion is durable. If the current owner is still active but the configured count or total time budget is exhausted, FDP-33 marks the command `RECOVERY_REQUIRED` with degradation reason `LEASE_RENEWAL_BUDGET_EXCEEDED`. For `EVIDENCE_GATED_FINALIZE_V1`, the state is moved to `FINALIZE_RECOVERY_REQUIRED` and public status is set to `FINALIZE_RECOVERY_REQUIRED`. For legacy commands, the existing processing state is preserved and only execution status and recovery metadata are changed. A same-owner concurrent renewal loser whose peer already advanced the lease does not rewrite the command into recovery just because the peer consumed the final slot.
+
 ## Renewable States
 
 Legacy regulated mutation renewal is limited to active processing states:
@@ -45,6 +53,8 @@ Legacy regulated mutation renewal is limited to active processing states:
 - `BUSINESS_COMMITTING`
 - `BUSINESS_COMMITTED`
 - `SUCCESS_AUDIT_PENDING`
+
+`REQUESTED` is renewable for legacy compatibility because the legacy executor may hold the claim before the first durable phase transition. `BUSINESS_COMMITTED` is renewable because the business aggregate has already been written but success audit/outbox follow-up may still need a bounded worker lease. Neither state permits renewal after terminal command status, public finality, or recovery status.
 
 Evidence-gated finalize renewal is limited to active FDP-29 worker states:
 
@@ -56,6 +66,8 @@ Terminal, rejected, finalized, committed, failed, and recovery states are not re
 
 ## Failure Modes
 
+- invalid extension: rejected before any Mongo update
+- command not found: rejected before any Mongo update
 - stale owner: rejected and treated as stale lease
 - expired lease: rejected and treated as expired lease
 - non-renewable state: rejected
@@ -63,7 +75,8 @@ Terminal, rejected, finalized, committed, failed, and recovery states are not re
 - recovery state: rejected
 - model version mismatch: rejected
 - execution status mismatch: rejected
-- budget exceeded: rejected with budget-exceeded failure
+- budget exceeded: rejected with budget-exceeded failure and durable recovery marking for direct budget exhaustion
+- unknown reason: normalized to `UNKNOWN` for metrics
 
 ## Metrics
 
@@ -104,33 +117,7 @@ Recommended alerts:
 
 ## Runbooks
 
-### STALE_OWNER Renewal Rejection
-
-Confirm whether another worker took over after lease expiry. Inspect the regulated command by command id or idempotency hash. The old worker must stop using its claim token. Do not manually rewrite `lease_owner`.
-
-### EXPIRED_LEASE Renewal Rejection
-
-Confirm worker latency and lease duration budget. If the command remains claimable, allow normal takeover or recovery. Do not extend expired leases manually.
-
-### BUDGET_EXCEEDED
-
-Inspect mutation duration and retry behavior. A budget-exceeded renewal means FDP-33 prevented infinite `PROCESSING`. Move the command through normal recovery if the worker cannot finish inside the configured budget.
-
-### NON_RENEWABLE_STATE
-
-Confirm the command state. Renewal is valid only in explicitly active states. Terminal, recovery, finalized, and committed states should move through replay or recovery behavior, not heartbeat.
-
-### Repeated Lease Takeover
-
-Check worker health, GC pauses, Mongo latency, and configured lease duration. Repeated takeover is an operational signal, not a reason to disable fencing.
-
-### Long-Running PROCESSING Command
-
-Check remaining renewal budget, current state, and worker logs. If the command is stuck near budget exhaustion, prepare recovery handling instead of increasing the budget without review.
-
-### FINALIZE_RECOVERY_REQUIRED After Failed Renewal
-
-Treat recovery-required state as authoritative. Renewal does not override recovery. Use the regulated mutation recovery runbook and do not attempt to heartbeat a recovery command.
+Use `docs/runbooks/FDP-33-lease-renewal-runbook.md` for per-reason operator handling. The runbook covers `STALE_OWNER`, `EXPIRED_LEASE`, `BUDGET_EXCEEDED`, `INVALID_EXTENSION`, `COMMAND_NOT_FOUND`, `NON_RENEWABLE_STATE`, `TERMINAL_STATE`, `RECOVERY_STATE`, `MODEL_VERSION_MISMATCH`, `EXECUTION_STATUS_MISMATCH`, and `UNKNOWN`.
 
 ## Production And Bank Enablement Gate
 
