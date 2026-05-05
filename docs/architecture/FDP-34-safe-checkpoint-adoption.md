@@ -36,6 +36,14 @@ A safe checkpoint must not be:
 
 No generic heartbeat system is introduced. No automatic infinite renewal loop is introduced.
 
+## Checkpoint Before ATTEMPTED Audit
+
+`LEGACY_REGULATED_MUTATION` allows exactly one explicit `REQUESTED` + `PROCESSING` checkpoint: `BEFORE_ATTEMPTED_AUDIT`.
+
+This checkpoint is ownership-only. It is allowed only because the worker has already claimed the command and the durable command has `execution_status=PROCESSING`. It does not record `ATTEMPTED` audit, imply attempted-audit completion, imply business progress, create a response snapshot, write an outbox event id, record success audit, or create any local commit marker.
+
+`BEFORE_ATTEMPTED_AUDIT` must remain a single explicit checkpoint before the attempted audit write. It must not become a loop, idle parking mechanism, scheduler, public heartbeat, or generic pre-work renewal pattern. If this checkpoint fails, execution stops before attempted audit and before any business mutation.
+
 ## Approved Checkpoint Policy
 
 | Model version | Durable state | Execution status | Approved checkpoints |
@@ -69,13 +77,15 @@ Required failure behavior:
 
 After failed checkpoint renewal the executor must not continue to business or evidence mutation, local finalize transaction, outbox write, success audit write, response snapshot write, or post-checkpoint command transition. Checkpoint renewal failure is a lease/checkpoint failure, not audit evidence failure, and must not be mapped to post-commit audit degradation.
 
+A successful renewal does not mean `ATTEMPTED` audit completed, business mutation completed, outbox written, success audit recorded, evidence prepared, local finalize completed, external confirmation completed, Kafka delivered, or legal/auditor finality reached.
+
 ## ACID Boundary
 
 FDP-34 does not expand transaction scope. Checkpoint renewal updates lease metadata through the FDP-33 owner-fenced primitive and must not run as a substitute for local business transaction safety.
 
 Transaction-mode `REQUIRED` is still required for bank-grade stale-worker business-write safety. Transaction-mode `OFF` remains compatibility/local behavior and is not a bank-grade guarantee.
 
-Production executors require the Spring-managed `RegulatedMutationCheckpointRenewalService`. `disabled()` is only for compatibility and unit-test constructors.
+Production executors require the Spring-managed enabled `RegulatedMutationCheckpointRenewalService`. `disabled()` is only for compatibility and unit-test constructors and is not production behavior.
 
 ## SOLID Boundary
 
@@ -102,7 +112,7 @@ Merge requires explicit checkpoint policy tests, fail-closed service tests, exec
 
 ## Production Gate
 
-FDP-34 is not production or bank enablement by itself. Production or bank operation requires transaction-mode `REQUIRED`, positive checkpoint-renewal extension within the FDP-33 single-extension and total-duration budgets, lease duration budget review, renewal budget review, dashboards, alerts, runbook drill, canary or staging soak, rollback plan, and separate operational approval.
+FDP-34 is safe checkpoint adoption only. It is not production or bank enablement by itself. Production or bank operation requires transaction-mode `REQUIRED` for bank-grade stale-worker business-write safety, positive checkpoint-renewal extension within the FDP-33 single-extension and total-duration budgets, lease duration budget review, renewal budget review, dashboard for checkpoint failure/no-progress, dashboard for long-running `PROCESSING` despite renewals, alert on `BUDGET_EXCEEDED`, alert on `STALE_OWNER` and `EXPIRED_LEASE` spikes, operator drill, canary or staging soak, rollback plan to disable checkpoint adoption or renewal config safely, and separate operational approval.
 
 ## Non-Goals
 

@@ -1,6 +1,6 @@
 # FDP-34 Merge Gate
 
-FDP-34 is merge-safe only as explicit safe checkpoint adoption of the FDP-33 bounded renewal primitive. It is not a generic heartbeat system, production enablement, bank enablement, external-finality claim, or distributed lock.
+FDP-34 is merge-safe only as explicit safe checkpoint adoption of the FDP-33 bounded renewal primitive. Renewal preserves bounded ownership, not progress. It is not a generic heartbeat system, production enablement, bank enablement, external-finality claim, or distributed lock.
 
 ## Merge Requirements
 
@@ -13,6 +13,8 @@ FDP-34 is merge-safe only as explicit safe checkpoint adoption of the FDP-33 bou
 - no evidence finalize mutation after failed checkpoint
 - no outbox or success audit continuation after failed checkpoint
 - checkpoint renewal failure is not classified as post-commit audit degradation
+- successful renewal is not treated as ATTEMPTED audit completed, business mutation completed, outbox written, success audit recorded, evidence prepared, local finalize completed, external confirmation completed, Kafka delivered, or legal/auditor finality reached
+- checkpoint failure stops execution immediately with no further mutation/outbox/audit/snapshot/transition
 - budget exceeded remains durable recovery
 - checkpoint-renewal extension is positive and within FDP-33 renewal budget
 - production executors require the Spring-managed checkpoint renewal service
@@ -56,7 +58,7 @@ mvn "-Dmaven.repo.local=$PWD\.m2repo" -pl alert-service -am test
 
 ## Production And Bank Gate
 
-FDP-34 does not enable production or bank behavior by itself. Production or bank operation requires transaction-mode `REQUIRED`, positive checkpoint-renewal extension within FDP-33 `max-single-extension` and `max-total-lease-duration`, lease duration budget review, renewal budget review, dashboards, alerts, runbook drill, canary or staging soak, rollback plan, and separate operational approval.
+FDP-34 does not enable production or bank behavior by itself. Production or bank operation requires transaction-mode `REQUIRED` for bank-grade stale-worker business-write safety, positive checkpoint-renewal extension within FDP-33 `max-single-extension` and `max-total-lease-duration`, lease duration budget review, renewal budget review, dashboard for checkpoint failure/no-progress, dashboard for long-running `PROCESSING` despite renewals, alert on `BUDGET_EXCEEDED`, alert on `STALE_OWNER` and `EXPIRED_LEASE` spikes, operator drill, canary or staging soak, rollback plan to disable checkpoint adoption or renewal config safely, and separate operational approval.
 
 ## Non-Goals
 
