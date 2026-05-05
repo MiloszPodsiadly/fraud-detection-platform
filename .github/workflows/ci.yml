@@ -115,6 +115,35 @@ jobs:
       - name: Run FDP-28 proof suite with Testcontainers
         run: mvn -B -pl alert-service -am -Dgroups=failure-injection,invariant-proof,integration test
 
+  fdp35-production-readiness:
+    name: FDP-35 Production Readiness Proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Verify Docker is available for Testcontainers
+        run: docker version
+
+      - name: Run FDP-35 proof suite
+        run: mvn -B -pl alert-service -am -Dgroups=production-readiness,e2e,recovery-proof,integration test
+
+      - name: Upload FDP-35 test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fdp35-production-readiness-test-reports
+          path: alert-service/target/surefire-reports/
+
   docker:
     name: Docker Compose Build
     runs-on: ubuntu-latest
@@ -124,6 +153,7 @@ jobs:
       - ml
       - frontend
       - fdp28-proof
+      - fdp35-production-readiness
 
     steps:
       - name: Checkout
