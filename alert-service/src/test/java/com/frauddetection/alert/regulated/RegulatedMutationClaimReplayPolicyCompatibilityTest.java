@@ -175,6 +175,33 @@ class RegulatedMutationClaimReplayPolicyCompatibilityTest {
     }
 
     @Test
+    void legacyBudgetExceededRecoveryWinsOverSnapshotForEveryRenewableState() {
+        for (RegulatedMutationState state : List.of(
+                RegulatedMutationState.REQUESTED,
+                RegulatedMutationState.AUDIT_ATTEMPTED,
+                RegulatedMutationState.BUSINESS_COMMITTING,
+                RegulatedMutationState.BUSINESS_COMMITTED,
+                RegulatedMutationState.SUCCESS_AUDIT_PENDING
+        )) {
+            RegulatedMutationCommandDocument document = legacyDocument(state);
+            document.setExecutionStatus(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
+            document.setLastError(RegulatedMutationLeaseRenewalFailureHandler.BUDGET_EXCEEDED_REASON);
+            document.setDegradationReason(RegulatedMutationLeaseRenewalFailureHandler.BUDGET_EXCEEDED_REASON);
+            document.setResponseSnapshot(snapshot(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED));
+            document.setSuccessAuditRecorded(state == RegulatedMutationState.SUCCESS_AUDIT_PENDING);
+
+            RegulatedMutationReplayDecision decision = replayPolicyRegistry.resolve(document, NOW);
+
+            assertThat(decision.type()).as(state.name())
+                    .isEqualTo(RegulatedMutationReplayDecisionType.RECOVERY_REQUIRED_RESPONSE);
+            assertThat(decision.reason()).as(state.name())
+                    .isEqualTo(RegulatedMutationLeaseRenewalFailureHandler.BUDGET_EXCEEDED_REASON);
+            assertThat(decision.responseState()).as(state.name())
+                    .isNotEqualTo(RegulatedMutationState.EVIDENCE_CONFIRMED);
+        }
+    }
+
+    @Test
     void legacyCommittedDegradedWithSnapshotRemainsDegradedReplay() {
         RegulatedMutationCommandDocument document = legacyDocument(RegulatedMutationState.COMMITTED_DEGRADED);
         document.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);

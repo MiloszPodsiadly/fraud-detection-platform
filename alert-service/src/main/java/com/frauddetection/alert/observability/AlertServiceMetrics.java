@@ -290,6 +290,80 @@ public class AlertServiceMetrics {
         ).increment();
     }
 
+    public void recordRegulatedMutationLeaseRenewal(
+            Enum<?> modelVersion,
+            Enum<?> state,
+            String outcome,
+            String reason
+    ) {
+        counter(
+                "regulated_mutation_lease_renewal_total",
+                "model_version", normalizeRegulatedMutationModelVersion(modelVersion),
+                "state", normalizeRegulatedMutationState(state),
+                "outcome", normalizeRegulatedMutationLeaseRenewalOutcome(outcome),
+                "reason", normalizeRegulatedMutationLeaseRenewalReason(reason)
+        ).increment();
+    }
+
+    public void recordRegulatedMutationLeaseRenewalBudgetRemaining(
+            Enum<?> modelVersion,
+            Enum<?> state,
+            Duration remaining
+    ) {
+        DistributionSummary.builder("regulated_mutation_lease_renewal_budget_remaining_seconds")
+                .tag("model_version", normalizeRegulatedMutationModelVersion(modelVersion))
+                .tag("state", normalizeRegulatedMutationState(state))
+                .register(meterRegistry)
+                .record(Math.max(0.0d, remaining == null ? 0.0d : remaining.toMillis() / 1000.0d));
+    }
+
+    public void recordRegulatedMutationLeaseRenewalExtension(
+            Enum<?> modelVersion,
+            Enum<?> state,
+            String outcome,
+            Duration extension
+    ) {
+        DistributionSummary.builder("regulated_mutation_lease_renewal_extension_seconds")
+                .tag("model_version", normalizeRegulatedMutationModelVersion(modelVersion))
+                .tag("state", normalizeRegulatedMutationState(state))
+                .tag("outcome", normalizeRegulatedMutationLeaseRenewalOutcome(outcome))
+                .register(meterRegistry)
+                .record(Math.max(0.0d, extension == null ? 0.0d : extension.toMillis() / 1000.0d));
+    }
+
+    public void recordRegulatedMutationLeaseRenewalRejected(Enum<?> modelVersion, Enum<?> state, String reason) {
+        counter(
+                "regulated_mutation_lease_renewal_rejected_total",
+                "model_version", normalizeRegulatedMutationModelVersion(modelVersion),
+                "state", normalizeRegulatedMutationState(state),
+                "reason", normalizeRegulatedMutationLeaseRenewalReason(reason)
+        ).increment();
+    }
+
+    public void recordRegulatedMutationLeaseRenewalBudgetExceeded(Enum<?> modelVersion, Enum<?> state) {
+        counter(
+                "regulated_mutation_lease_renewal_budget_exceeded_total",
+                "model_version", normalizeRegulatedMutationModelVersion(modelVersion),
+                "state", normalizeRegulatedMutationState(state)
+        ).increment();
+    }
+
+    public void recordRegulatedMutationLeaseRenewalSingleExtensionCapped(Enum<?> modelVersion, Enum<?> state) {
+        counter(
+                "regulated_mutation_lease_renewal_single_extension_capped_total",
+                "model_version", normalizeRegulatedMutationModelVersion(modelVersion),
+                "state", normalizeRegulatedMutationState(state)
+        ).increment();
+    }
+
+    public void recordRegulatedMutationLeaseRenewalTotalBudgetCapped(Enum<?> modelVersion, Enum<?> state) {
+        counter(
+                "regulated_mutation_lease_renewal_total_budget_capped_total",
+                "model_version", normalizeRegulatedMutationModelVersion(modelVersion),
+                "state", normalizeRegulatedMutationState(state)
+        ).increment();
+    }
+
     public void recordFdp29LocalAuditChainAppend(String outcome) {
         counter(
                 "fdp29_local_audit_chain_append_total",
@@ -884,6 +958,23 @@ public class AlertServiceMetrics {
         return switch (threshold) {
             case "LOW_REMAINING" -> threshold;
             default -> "LOW_REMAINING";
+        };
+    }
+
+    private String normalizeRegulatedMutationLeaseRenewalOutcome(String outcome) {
+        return switch (outcome) {
+            case "SUCCESS", "REJECTED", "BUDGET_EXCEEDED", "FAILED" -> outcome;
+            default -> "FAILED";
+        };
+    }
+
+    private String normalizeRegulatedMutationLeaseRenewalReason(String reason) {
+        return switch (reason) {
+            case "NONE", "INVALID_EXTENSION", "COMMAND_NOT_FOUND", "STALE_OWNER", "EXPIRED_LEASE",
+                 "NON_RENEWABLE_STATE", "TERMINAL_STATE", "RECOVERY_STATE",
+                 "MODEL_VERSION_MISMATCH", "EXECUTION_STATUS_MISMATCH",
+                 "BUDGET_EXCEEDED", "UNKNOWN" -> reason;
+            default -> "UNKNOWN";
         };
     }
 

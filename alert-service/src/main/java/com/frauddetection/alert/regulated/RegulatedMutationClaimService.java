@@ -10,6 +10,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
@@ -21,12 +22,13 @@ public class RegulatedMutationClaimService {
     private final MongoTemplate mongoTemplate;
     private final Duration leaseDuration;
     private final AlertServiceMetrics metrics;
+    private final Clock clock;
 
     public RegulatedMutationClaimService(
             MongoTemplate mongoTemplate,
             @Value("${app.regulated-mutation.lease-duration:PT30S}") Duration leaseDuration
     ) {
-        this(mongoTemplate, leaseDuration, null);
+        this(mongoTemplate, leaseDuration, null, Clock.systemUTC());
     }
 
     @Autowired
@@ -35,9 +37,19 @@ public class RegulatedMutationClaimService {
             @Value("${app.regulated-mutation.lease-duration:PT30S}") Duration leaseDuration,
             AlertServiceMetrics metrics
     ) {
+        this(mongoTemplate, leaseDuration, metrics, Clock.systemUTC());
+    }
+
+    RegulatedMutationClaimService(
+            MongoTemplate mongoTemplate,
+            Duration leaseDuration,
+            AlertServiceMetrics metrics,
+            Clock clock
+    ) {
         this.mongoTemplate = mongoTemplate;
         this.leaseDuration = leaseDuration;
         this.metrics = metrics;
+        this.clock = clock == null ? Clock.systemUTC() : clock;
     }
 
     public <R, S> Optional<RegulatedMutationClaimToken> claim(
@@ -51,7 +63,7 @@ public class RegulatedMutationClaimService {
             throw new IllegalArgumentException("Regulated mutation idempotency key is required.");
         }
 
-        Instant now = Instant.now();
+        Instant now = clock.instant();
         String leaseOwner = UUID.randomUUID().toString();
         Criteria claimable = new Criteria().orOperator(
                 Criteria.where("execution_status").is(RegulatedMutationExecutionStatus.NEW),
@@ -70,6 +82,9 @@ public class RegulatedMutationClaimService {
                 .set("lease_owner", leaseOwner)
                 .set("lease_expires_at", now.plus(leaseDuration))
                 .set("last_heartbeat_at", now)
+                .set("lease_renewal_count", 0)
+                .set("lease_budget_started_at", now)
+                .set("last_lease_renewed_at", null)
                 .set("updated_at", now)
                 .inc("attempt_count", 1);
         RegulatedMutationCommandDocument claimed = mongoTemplate.findAndModify(

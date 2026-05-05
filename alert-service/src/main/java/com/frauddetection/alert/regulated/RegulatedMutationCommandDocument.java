@@ -69,6 +69,12 @@ public class RegulatedMutationCommandDocument {
     private int attemptCount;
     @Field("last_heartbeat_at")
     private Instant lastHeartbeatAt;
+    @Field("lease_renewal_count")
+    private Integer leaseRenewalCount;
+    @Field("lease_budget_started_at")
+    private Instant leaseBudgetStartedAt;
+    @Field("last_lease_renewed_at")
+    private Instant lastLeaseRenewedAt;
     @Field("public_status")
     private SubmitDecisionOperationStatus publicStatus;
     @Field("response_snapshot")
@@ -155,6 +161,13 @@ public class RegulatedMutationCommandDocument {
     public void setAttemptCount(int attemptCount) { this.attemptCount = attemptCount; }
     public Instant getLastHeartbeatAt() { return lastHeartbeatAt; }
     public void setLastHeartbeatAt(Instant lastHeartbeatAt) { this.lastHeartbeatAt = lastHeartbeatAt; }
+    public Integer getLeaseRenewalCount() { return leaseRenewalCount; }
+    public void setLeaseRenewalCount(Integer leaseRenewalCount) { this.leaseRenewalCount = leaseRenewalCount; }
+    public int leaseRenewalCountOrZero() { return leaseRenewalCount == null ? 0 : leaseRenewalCount; }
+    public Instant getLeaseBudgetStartedAt() { return leaseBudgetStartedAt; }
+    public void setLeaseBudgetStartedAt(Instant leaseBudgetStartedAt) { this.leaseBudgetStartedAt = leaseBudgetStartedAt; }
+    public Instant getLastLeaseRenewedAt() { return lastLeaseRenewedAt; }
+    public void setLastLeaseRenewedAt(Instant lastLeaseRenewedAt) { this.lastLeaseRenewedAt = lastLeaseRenewedAt; }
     public SubmitDecisionOperationStatus getPublicStatus() { return publicStatus; }
     public void setPublicStatus(SubmitDecisionOperationStatus publicStatus) { this.publicStatus = publicStatus; }
     public RegulatedMutationResponseSnapshot getResponseSnapshot() { return responseSnapshot; }
