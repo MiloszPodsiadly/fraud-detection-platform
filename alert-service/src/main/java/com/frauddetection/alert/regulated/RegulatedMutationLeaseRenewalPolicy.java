@@ -70,10 +70,10 @@ public class RegulatedMutationLeaseRenewalPolicy {
             throw new IllegalArgumentException("Regulated mutation lease renewal requires claim token.");
         }
         if (document == null) {
-            return RegulatedMutationLeaseRenewalDecision.rejected(RegulatedMutationLeaseRenewalReason.UNKNOWN);
+            return RegulatedMutationLeaseRenewalDecision.rejected(RegulatedMutationLeaseRenewalReason.COMMAND_NOT_FOUND);
         }
         if (requestedExtension == null || !requestedExtension.isPositive()) {
-            return RegulatedMutationLeaseRenewalDecision.budgetExceeded();
+            return RegulatedMutationLeaseRenewalDecision.rejected(RegulatedMutationLeaseRenewalReason.INVALID_EXTENSION);
         }
         if (now == null) {
             throw new IllegalArgumentException("Regulated mutation lease renewal policy requires now.");

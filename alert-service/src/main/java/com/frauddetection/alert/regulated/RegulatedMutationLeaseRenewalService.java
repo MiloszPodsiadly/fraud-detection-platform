@@ -18,6 +18,7 @@ public class RegulatedMutationLeaseRenewalService {
 
     private final MongoTemplate mongoTemplate;
     private final RegulatedMutationLeaseRenewalPolicy policy;
+    private final RegulatedMutationLeaseRenewalFailureHandler failureHandler;
     private final AlertServiceMetrics metrics;
     private final Clock clock;
 
@@ -25,27 +26,29 @@ public class RegulatedMutationLeaseRenewalService {
     public RegulatedMutationLeaseRenewalService(
             MongoTemplate mongoTemplate,
             RegulatedMutationLeaseRenewalPolicy policy,
+            RegulatedMutationLeaseRenewalFailureHandler failureHandler,
             AlertServiceMetrics metrics
     ) {
-        this(mongoTemplate, policy, metrics, Clock.systemUTC());
+        this(mongoTemplate, policy, failureHandler, metrics, Clock.systemUTC());
     }
 
     RegulatedMutationLeaseRenewalService(
             MongoTemplate mongoTemplate,
             RegulatedMutationLeaseRenewalPolicy policy,
+            RegulatedMutationLeaseRenewalFailureHandler failureHandler,
             AlertServiceMetrics metrics,
             Clock clock
     ) {
         this.mongoTemplate = mongoTemplate;
         this.policy = policy;
+        this.failureHandler = failureHandler;
         this.metrics = metrics;
         this.clock = clock == null ? Clock.systemUTC() : clock;
     }
 
     public RegulatedMutationLeaseRenewalDecision renew(
             RegulatedMutationClaimToken claimToken,
-            Duration requestedExtension,
-            String context
+            Duration requestedExtension
     ) {
         if (claimToken == null) {
             throw new IllegalArgumentException("Regulated mutation lease renewal requires claim token.");
@@ -63,6 +66,7 @@ public class RegulatedMutationLeaseRenewalService {
         );
         if (decision.type() != RegulatedMutationLeaseRenewalDecisionType.RENEW) {
             recordRejection(claimToken, current, decision);
+            markBudgetExceededRecoveryIfNeeded(claimToken, current, decision, now);
             throwException(claimToken, decision);
         }
 
@@ -88,11 +92,54 @@ public class RegulatedMutationLeaseRenewalService {
                     now
             );
             recordRejection(claimToken, afterRace, raceDecision);
+            if (!sameOwnerRenewalRaceAlreadyAdvanced(current, afterRace, raceDecision, now)) {
+                markBudgetExceededRecoveryIfNeeded(claimToken, afterRace, raceDecision, now);
+            }
             throwException(claimToken, raceDecision);
         }
 
         recordSuccess(claimToken, current, decision);
         return decision;
+    }
+
+    private boolean sameOwnerRenewalRaceAlreadyAdvanced(
+            RegulatedMutationCommandDocument beforeUpdate,
+            RegulatedMutationCommandDocument afterRace,
+            RegulatedMutationLeaseRenewalDecision raceDecision,
+            Instant now
+    ) {
+        if (raceDecision.type() != RegulatedMutationLeaseRenewalDecisionType.BUDGET_EXCEEDED
+                || beforeUpdate == null
+                || afterRace == null
+                || now == null) {
+            return false;
+        }
+        return afterRace.getLeaseOwner() != null
+                && afterRace.getLeaseOwner().equals(beforeUpdate.getLeaseOwner())
+                && afterRace.getState() == beforeUpdate.getState()
+                && afterRace.getExecutionStatus() == RegulatedMutationExecutionStatus.PROCESSING
+                && afterRace.getLeaseExpiresAt() != null
+                && beforeUpdate.getLeaseExpiresAt() != null
+                && afterRace.getLeaseExpiresAt().isAfter(now)
+                && afterRace.getLeaseExpiresAt().isAfter(beforeUpdate.getLeaseExpiresAt())
+                && afterRace.leaseRenewalCountOrZero() > beforeUpdate.leaseRenewalCountOrZero()
+                && afterRace.mutationModelVersionOrLegacy() == beforeUpdate.mutationModelVersionOrLegacy()
+                && policy.isRenewable(
+                        afterRace.mutationModelVersionOrLegacy(),
+                        afterRace.getState(),
+                        afterRace.getExecutionStatus()
+                );
+    }
+
+    private void markBudgetExceededRecoveryIfNeeded(
+            RegulatedMutationClaimToken claimToken,
+            RegulatedMutationCommandDocument current,
+            RegulatedMutationLeaseRenewalDecision decision,
+            Instant now
+    ) {
+        if (decision.type() == RegulatedMutationLeaseRenewalDecisionType.BUDGET_EXCEEDED) {
+            failureHandler.markBudgetExceededRecovery(claimToken, current, now);
+        }
     }
 
     private Query renewalQuery(

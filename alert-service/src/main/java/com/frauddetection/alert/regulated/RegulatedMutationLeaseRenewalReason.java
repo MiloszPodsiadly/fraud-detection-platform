@@ -2,6 +2,8 @@ package com.frauddetection.alert.regulated;
 
 public enum RegulatedMutationLeaseRenewalReason {
     NONE,
+    INVALID_EXTENSION,
+    COMMAND_NOT_FOUND,
     STALE_OWNER,
     EXPIRED_LEASE,
     NON_RENEWABLE_STATE,
