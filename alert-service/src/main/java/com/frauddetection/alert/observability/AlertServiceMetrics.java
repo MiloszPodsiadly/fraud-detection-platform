@@ -364,6 +364,59 @@ public class AlertServiceMetrics {
         ).increment();
     }
 
+    public void recordRegulatedMutationCheckpointRenewal(
+            Enum<?> modelVersion,
+            Enum<?> checkpoint,
+            String outcome,
+            String reason
+    ) {
+        counter(
+                "regulated_mutation_checkpoint_renewal_total",
+                "model_version", normalizeRegulatedMutationModelVersion(modelVersion),
+                "checkpoint", normalizeRegulatedMutationCheckpoint(checkpoint),
+                "outcome", normalizeRegulatedMutationCheckpointOutcome(outcome),
+                "reason", normalizeRegulatedMutationLeaseRenewalReason(reason)
+        ).increment();
+    }
+
+    public void recordRegulatedMutationCheckpointRenewalBlocked(
+            Enum<?> modelVersion,
+            Enum<?> checkpoint,
+            String reason
+    ) {
+        counter(
+                "regulated_mutation_checkpoint_renewal_blocked_total",
+                "model_version", normalizeRegulatedMutationModelVersion(modelVersion),
+                "checkpoint", normalizeRegulatedMutationCheckpoint(checkpoint),
+                "reason", normalizeRegulatedMutationLeaseRenewalReason(reason)
+        ).increment();
+    }
+
+    public void recordRegulatedMutationCheckpointDuration(
+            Enum<?> modelVersion,
+            Enum<?> checkpoint,
+            Duration duration
+    ) {
+        Timer.builder("regulated_mutation_checkpoint_duration_seconds")
+                .tag("model_version", normalizeRegulatedMutationModelVersion(modelVersion))
+                .tag("checkpoint", normalizeRegulatedMutationCheckpoint(checkpoint))
+                .register(meterRegistry)
+                .record(duration == null || duration.isNegative() ? Duration.ZERO : duration);
+    }
+
+    public void recordRegulatedMutationCheckpointNoProgress(
+            Enum<?> modelVersion,
+            Enum<?> checkpoint,
+            String reason
+    ) {
+        counter(
+                "regulated_mutation_checkpoint_no_progress_total",
+                "model_version", normalizeRegulatedMutationModelVersion(modelVersion),
+                "checkpoint", normalizeRegulatedMutationCheckpoint(checkpoint),
+                "reason", normalizeRegulatedMutationLeaseRenewalReason(reason)
+        ).increment();
+    }
+
     public void recordFdp29LocalAuditChainAppend(String outcome) {
         counter(
                 "fdp29_local_audit_chain_append_total",
@@ -972,9 +1025,28 @@ public class AlertServiceMetrics {
         return switch (reason) {
             case "NONE", "INVALID_EXTENSION", "COMMAND_NOT_FOUND", "STALE_OWNER", "EXPIRED_LEASE",
                  "NON_RENEWABLE_STATE", "TERMINAL_STATE", "RECOVERY_STATE",
-                 "MODEL_VERSION_MISMATCH", "EXECUTION_STATUS_MISMATCH",
+                 "MODEL_VERSION_MISMATCH", "EXECUTION_STATUS_MISMATCH", "UNSUPPORTED_CHECKPOINT",
                  "BUDGET_EXCEEDED", "UNKNOWN" -> reason;
             default -> "UNKNOWN";
+        };
+    }
+
+    private String normalizeRegulatedMutationCheckpoint(Enum<?> checkpoint) {
+        if (checkpoint == null) {
+            return "UNKNOWN";
+        }
+        return switch (checkpoint.name()) {
+            case "BEFORE_ATTEMPTED_AUDIT", "AFTER_ATTEMPTED_AUDIT", "BEFORE_LEGACY_BUSINESS_COMMIT",
+                 "BEFORE_SUCCESS_AUDIT_RETRY", "BEFORE_EVIDENCE_PREPARATION",
+                 "BEFORE_EVIDENCE_GATED_FINALIZE", "AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE" -> checkpoint.name();
+            default -> "UNKNOWN";
+        };
+    }
+
+    private String normalizeRegulatedMutationCheckpointOutcome(String outcome) {
+        return switch (outcome) {
+            case "RENEWED", "SKIPPED", "BLOCKED", "FAILED" -> outcome;
+            default -> "FAILED";
         };
     }
 

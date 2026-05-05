@@ -40,6 +40,7 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
     private final RegulatedMutationConflictPolicy conflictPolicy;
     private final RegulatedMutationReplayResolver replayResolver;
     private final RegulatedMutationFencedCommandWriter fencedCommandWriter;
+    private final RegulatedMutationCheckpointRenewalService checkpointRenewalService;
 
     public LegacyRegulatedMutationExecutor(
             RegulatedMutationCommandRepository commandRepository,
@@ -64,7 +65,39 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
                 new RegulatedMutationClaimService(mongoTemplate, leaseDuration),
                 new RegulatedMutationConflictPolicy(),
                 new RegulatedMutationReplayResolver(compatibilityReplayPolicyRegistry()),
-                new RegulatedMutationFencedCommandWriter(mongoTemplate, metrics)
+                new RegulatedMutationFencedCommandWriter(mongoTemplate, metrics),
+                RegulatedMutationCheckpointRenewalService.disabled()
+        );
+    }
+
+    public LegacyRegulatedMutationExecutor(
+            RegulatedMutationCommandRepository commandRepository,
+            MongoTemplate mongoTemplate,
+            RegulatedMutationAuditPhaseService auditPhaseService,
+            AuditDegradationService auditDegradationService,
+            AlertServiceMetrics metrics,
+            RegulatedMutationTransactionRunner transactionRunner,
+            RegulatedMutationPublicStatusMapper publicStatusMapper,
+            @Value("${app.audit.bank-mode.fail-closed:false}") boolean bankModeFailClosed,
+            RegulatedMutationClaimService claimService,
+            RegulatedMutationConflictPolicy conflictPolicy,
+            RegulatedMutationReplayResolver replayResolver,
+            RegulatedMutationFencedCommandWriter fencedCommandWriter
+    ) {
+        this(
+                commandRepository,
+                mongoTemplate,
+                auditPhaseService,
+                auditDegradationService,
+                metrics,
+                transactionRunner,
+                publicStatusMapper,
+                bankModeFailClosed,
+                claimService,
+                conflictPolicy,
+                replayResolver,
+                fencedCommandWriter,
+                RegulatedMutationCheckpointRenewalService.disabled()
         );
     }
 
@@ -81,7 +114,8 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
             RegulatedMutationClaimService claimService,
             RegulatedMutationConflictPolicy conflictPolicy,
             RegulatedMutationReplayResolver replayResolver,
-            RegulatedMutationFencedCommandWriter fencedCommandWriter
+            RegulatedMutationFencedCommandWriter fencedCommandWriter,
+            RegulatedMutationCheckpointRenewalService checkpointRenewalService
     ) {
         this.commandRepository = commandRepository;
         this.auditPhaseService = auditPhaseService;
@@ -94,6 +128,9 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
         this.conflictPolicy = conflictPolicy;
         this.replayResolver = replayResolver;
         this.fencedCommandWriter = fencedCommandWriter;
+        this.checkpointRenewalService = checkpointRenewalService == null
+                ? RegulatedMutationCheckpointRenewalService.disabled()
+                : checkpointRenewalService;
     }
 
     @Override
@@ -145,6 +182,7 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
             }
 
             if (!document.isAttemptedAuditRecorded()) {
+                checkpointRenewalService.beforeAttemptedAudit(claimToken, document);
                 writeAttemptedAudit(command, document, claimToken);
             }
             RegulatedMutationCommandDocument claimedDocument = document;
@@ -277,6 +315,7 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
             RegulatedMutationCommandDocument document,
             RegulatedMutationClaimToken claimToken
     ) {
+        checkpointRenewalService.beforeLegacyBusinessCommit(claimToken, document);
         transition(document, claimToken, RegulatedMutationState.BUSINESS_COMMITTING, document.getExecutionStatus(), null);
         fencedCommandWriter.validateActiveLease(
                 claimToken,
@@ -395,6 +434,7 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
     ) {
         S response = command.responseRestorer().restore(document.getResponseSnapshot());
         try {
+            checkpointRenewalService.beforeSuccessAuditRetry(claimToken, document);
             String auditId = auditPhaseService.recordPhase(document, command.action(), command.resourceType(), AuditOutcome.SUCCESS, null);
             document.setSuccessAuditId(auditId);
             document.setSuccessAuditRecorded(true);
@@ -441,6 +481,7 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
             RegulatedMutationResponseSnapshot pendingSnapshot
     ) {
         try {
+            checkpointRenewalService.beforeSuccessAuditRetry(claimToken, document);
             String auditId = auditPhaseService.recordPhase(document, command.action(), command.resourceType(), AuditOutcome.SUCCESS, null);
             document.setSuccessAuditId(auditId);
             document.setSuccessAuditRecorded(true);
