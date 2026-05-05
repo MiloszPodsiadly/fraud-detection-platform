@@ -1,27 +1,19 @@
 package com.frauddetection.alert.regulated;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.EnumMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 @Component
 public class RegulatedMutationLeaseRenewalPolicy {
 
-    private static final Set<RegulatedMutationState> LEGACY_RENEWABLE_STATES = Set.of(
-            RegulatedMutationState.REQUESTED,
-            RegulatedMutationState.AUDIT_ATTEMPTED,
-            RegulatedMutationState.BUSINESS_COMMITTING,
-            RegulatedMutationState.BUSINESS_COMMITTED,
-            RegulatedMutationState.SUCCESS_AUDIT_PENDING
-    );
-    private static final Set<RegulatedMutationState> EVIDENCE_GATED_RENEWABLE_STATES = Set.of(
-            RegulatedMutationState.EVIDENCE_PREPARING,
-            RegulatedMutationState.EVIDENCE_PREPARED,
-            RegulatedMutationState.FINALIZING
-    );
     private static final Set<RegulatedMutationState> RECOVERY_STATES = Set.of(
             RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
             RegulatedMutationState.FAILED
@@ -43,14 +35,17 @@ public class RegulatedMutationLeaseRenewalPolicy {
     private final Duration maxSingleExtension;
     private final Duration maxTotalLeaseDuration;
     private final int maxRenewalCount;
+    private final Map<RegulatedMutationModelVersion, RegulatedMutationLeaseRenewalModelPolicy> modelPolicies;
 
-    public RegulatedMutationLeaseRenewalPolicy(
+    @Autowired
+    RegulatedMutationLeaseRenewalPolicy(
             @Value("${app.regulated-mutations.lease-renewal.max-single-extension:PT30S}")
             Duration maxSingleExtension,
             @Value("${app.regulated-mutations.lease-renewal.max-total-lease-duration:PT2M}")
             Duration maxTotalLeaseDuration,
             @Value("${app.regulated-mutations.lease-renewal.max-renewal-count:3}")
-            int maxRenewalCount
+            int maxRenewalCount,
+            List<RegulatedMutationLeaseRenewalModelPolicy> modelPolicies
     ) {
         this.maxSingleExtension = positive(maxSingleExtension, "maxSingleExtension");
         this.maxTotalLeaseDuration = positive(maxTotalLeaseDuration, "maxTotalLeaseDuration");
@@ -58,6 +53,18 @@ public class RegulatedMutationLeaseRenewalPolicy {
             throw new IllegalArgumentException("maxRenewalCount must not be negative.");
         }
         this.maxRenewalCount = maxRenewalCount;
+        this.modelPolicies = modelPolicies(modelPolicies);
+    }
+
+    RegulatedMutationLeaseRenewalPolicy(
+            Duration maxSingleExtension,
+            Duration maxTotalLeaseDuration,
+            int maxRenewalCount
+    ) {
+        this(maxSingleExtension, maxTotalLeaseDuration, maxRenewalCount, List.of(
+                new LegacyLeaseRenewalModelPolicy(),
+                new EvidenceGatedLeaseRenewalModelPolicy()
+        ));
     }
 
     public RegulatedMutationLeaseRenewalDecision evaluate(
@@ -140,10 +147,22 @@ public class RegulatedMutationLeaseRenewalPolicy {
         }
         RegulatedMutationModelVersion effectiveModel =
                 modelVersion == null ? RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION : modelVersion;
-        return switch (effectiveModel) {
-            case LEGACY_REGULATED_MUTATION -> LEGACY_RENEWABLE_STATES.contains(state);
-            case EVIDENCE_GATED_FINALIZE_V1 -> EVIDENCE_GATED_RENEWABLE_STATES.contains(state);
-        };
+        RegulatedMutationLeaseRenewalModelPolicy modelPolicy = modelPolicies.get(effectiveModel);
+        return modelPolicy != null && modelPolicy.isRenewableState(state);
+    }
+
+    public RegulatedMutationState recoveryStateForBudgetExceeded(
+            RegulatedMutationModelVersion modelVersion,
+            RegulatedMutationState currentState
+    ) {
+        RegulatedMutationModelVersion effectiveModel =
+                modelVersion == null ? RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION : modelVersion;
+        RegulatedMutationLeaseRenewalModelPolicy modelPolicy = modelPolicies.get(effectiveModel);
+        if (modelPolicy == null) {
+            throw new IllegalArgumentException("No regulated mutation lease renewal model policy registered for "
+                    + effectiveModel);
+        }
+        return modelPolicy.recoveryStateForBudgetExceeded(currentState);
     }
 
     public boolean isRecoveryState(RegulatedMutationState state) {
@@ -188,5 +207,31 @@ public class RegulatedMutationLeaseRenewalPolicy {
             throw new IllegalArgumentException(name + " must be positive.");
         }
         return duration;
+    }
+
+    private Map<RegulatedMutationModelVersion, RegulatedMutationLeaseRenewalModelPolicy> modelPolicies(
+            List<RegulatedMutationLeaseRenewalModelPolicy> policies
+    ) {
+        if (policies == null || policies.isEmpty()) {
+            throw new IllegalArgumentException("Regulated mutation lease renewal model policies are required.");
+        }
+        Map<RegulatedMutationModelVersion, RegulatedMutationLeaseRenewalModelPolicy> byVersion =
+                new EnumMap<>(RegulatedMutationModelVersion.class);
+        for (RegulatedMutationLeaseRenewalModelPolicy policy : policies) {
+            if (policy == null || policy.modelVersion() == null) {
+                throw new IllegalArgumentException("Regulated mutation lease renewal model policy version is required.");
+            }
+            if (byVersion.putIfAbsent(policy.modelVersion(), policy) != null) {
+                throw new IllegalArgumentException("Duplicate regulated mutation lease renewal model policy: "
+                        + policy.modelVersion());
+            }
+        }
+        for (RegulatedMutationModelVersion modelVersion : RegulatedMutationModelVersion.values()) {
+            if (!byVersion.containsKey(modelVersion)) {
+                throw new IllegalArgumentException("Missing regulated mutation lease renewal model policy: "
+                        + modelVersion);
+            }
+        }
+        return Map.copyOf(byVersion);
     }
 }

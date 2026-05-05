@@ -31,7 +31,7 @@ public class LegacyRegulatedMutationReplayPolicy implements RegulatedMutationRep
             return RegulatedMutationReplayDecision.of(
                     RegulatedMutationReplayDecisionType.RECOVERY_REQUIRED_RESPONSE,
                     legacyRecoveryState(document),
-                    "RECOVERY_REQUIRED"
+                    recoveryReason(document)
             );
         }
         if (document.getResponseSnapshot() != null && !needsSuccessAuditRetry(document)) {
@@ -70,5 +70,11 @@ public class LegacyRegulatedMutationReplayPolicy implements RegulatedMutationRep
             return RegulatedMutationState.BUSINESS_COMMITTING;
         }
         return RegulatedMutationState.FAILED;
+    }
+
+    private static String recoveryReason(RegulatedMutationCommandDocument document) {
+        return document.getLastError() == null || document.getLastError().isBlank()
+                ? "RECOVERY_REQUIRED"
+                : document.getLastError();
     }
 }

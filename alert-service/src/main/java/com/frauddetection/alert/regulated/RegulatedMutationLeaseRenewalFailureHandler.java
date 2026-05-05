@@ -40,16 +40,14 @@ public class RegulatedMutationLeaseRenewalFailureHandler {
             );
         }
         RegulatedMutationModelVersion modelVersion = current.mutationModelVersionOrLegacy();
-        RegulatedMutationState recoveryState = modelVersion == RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
-                ? RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED
-                : current.getState();
+        RegulatedMutationState recoveryState = policy.recoveryStateForBudgetExceeded(modelVersion, current.getState());
         Update update = new Update()
                 .set("execution_status", RegulatedMutationExecutionStatus.RECOVERY_REQUIRED)
                 .set("degradation_reason", BUDGET_EXCEEDED_REASON)
                 .set("last_error", BUDGET_EXCEEDED_REASON)
                 .set("updated_at", now)
                 .set("last_heartbeat_at", now);
-        if (modelVersion == RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1) {
+        if (recoveryState != current.getState()) {
             update.set("state", recoveryState)
                     .set("public_status", publicStatusMapper.submitDecisionStatus(recoveryState, modelVersion));
         }
