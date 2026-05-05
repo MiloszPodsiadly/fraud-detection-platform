@@ -4,6 +4,7 @@ import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.regulated.RegulatedMutationLeaseRenewalReason;
 import com.frauddetection.alert.regulated.RegulatedMutationModelVersion;
+import com.frauddetection.alert.regulated.RegulatedMutationRenewalCheckpoint;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
 import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.Tag;
@@ -372,6 +373,33 @@ class AlertServiceMetricsTest {
                 RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
                 RegulatedMutationState.REQUESTED
         );
+        metrics.recordRegulatedMutationCheckpointRenewal(
+                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                RegulatedMutationRenewalCheckpoint.BEFORE_LEGACY_BUSINESS_COMMIT,
+                "RENEWED",
+                "NONE"
+        );
+        metrics.recordRegulatedMutationCheckpointRenewal(
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationRenewalCheckpoint.BEFORE_EVIDENCE_GATED_FINALIZE,
+                "FAILED",
+                "raw alert-123 actor-456 exception"
+        );
+        metrics.recordRegulatedMutationCheckpointRenewalBlocked(
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationRenewalCheckpoint.BEFORE_EVIDENCE_GATED_FINALIZE,
+                "NON_RENEWABLE_STATE"
+        );
+        metrics.recordRegulatedMutationCheckpointDuration(
+                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                RegulatedMutationRenewalCheckpoint.BEFORE_LEGACY_BUSINESS_COMMIT,
+                Duration.ofMillis(2)
+        );
+        metrics.recordRegulatedMutationCheckpointNoProgress(
+                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                RegulatedMutationRenewalCheckpoint.BEFORE_LEGACY_BUSINESS_COMMIT,
+                "NONE"
+        );
 
         Meter fencedTransition = meterRegistry.get("regulated_mutation_fenced_transition_total").meter();
         Meter staleWrite = meterRegistry.get("regulated_mutation_stale_write_rejected_total").meter();
@@ -402,6 +430,16 @@ class AlertServiceMetricsTest {
         Meter renewalBudgetExceeded = meterRegistry.get("regulated_mutation_lease_renewal_budget_exceeded_total").meter();
         Meter singleExtensionCapped = meterRegistry.get("regulated_mutation_lease_renewal_single_extension_capped_total").meter();
         Meter totalBudgetCapped = meterRegistry.get("regulated_mutation_lease_renewal_total_budget_capped_total").meter();
+        Meter checkpointRenewal = meterRegistry.get("regulated_mutation_checkpoint_renewal_total")
+                .tag("outcome", "RENEWED")
+                .meter();
+        Meter checkpointRenewalUnknown = meterRegistry.get("regulated_mutation_checkpoint_renewal_total")
+                .tag("outcome", "FAILED")
+                .tag("reason", "UNKNOWN")
+                .meter();
+        Meter checkpointBlocked = meterRegistry.get("regulated_mutation_checkpoint_renewal_blocked_total").meter();
+        Meter checkpointDuration = meterRegistry.get("regulated_mutation_checkpoint_duration_seconds").meter();
+        Meter checkpointNoProgress = meterRegistry.get("regulated_mutation_checkpoint_no_progress_total").meter();
 
         assertThat(fencedTransition.getId().getTags())
                 .extracting(Tag::getKey)
@@ -457,6 +495,21 @@ class AlertServiceMetricsTest {
         assertThat(totalBudgetCapped.getId().getTags())
                 .extracting(Tag::getKey)
                 .containsExactlyInAnyOrder("model_version", "state");
+        assertThat(checkpointRenewal.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactlyInAnyOrder("model_version", "checkpoint", "outcome", "reason");
+        assertThat(checkpointRenewalUnknown.getId().getTags())
+                .extracting(Tag::getValue)
+                .contains("UNKNOWN");
+        assertThat(checkpointBlocked.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactlyInAnyOrder("model_version", "checkpoint", "reason");
+        assertThat(checkpointDuration.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactlyInAnyOrder("model_version", "checkpoint");
+        assertThat(checkpointNoProgress.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactlyInAnyOrder("model_version", "checkpoint", "reason");
 
         assertThat(meterRegistry.getMeters())
                 .allSatisfy(meter -> assertThat(meter.getId().getTags().toString())
