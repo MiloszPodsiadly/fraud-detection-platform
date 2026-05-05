@@ -741,6 +741,146 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
+    void fdp35MustNotAddRegulatedMutationPublicSemantics() throws Exception {
+        String statuses = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/api/SubmitDecisionOperationStatus.java"
+        ));
+        String states = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationState.java"
+        ));
+        String modelVersions = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationModelVersion.java"
+        ));
+
+        assertThat(enumValues(statuses)).containsExactly(
+                "REJECTED_BEFORE_MUTATION",
+                "IN_PROGRESS",
+                "RECOVERY_REQUIRED",
+                "COMMIT_UNKNOWN",
+                "EVIDENCE_PREPARING",
+                "EVIDENCE_PREPARED",
+                "FINALIZING",
+                "FINALIZED_VISIBLE",
+                "FINALIZED_EVIDENCE_PENDING_EXTERNAL",
+                "FINALIZED_EVIDENCE_CONFIRMED",
+                "REJECTED_EVIDENCE_UNAVAILABLE",
+                "FAILED_BUSINESS_VALIDATION",
+                "FINALIZE_RECOVERY_REQUIRED",
+                "COMMITTED_EVIDENCE_PENDING",
+                "COMMITTED_EVIDENCE_CONFIRMED",
+                "COMMITTED_EVIDENCE_INCOMPLETE"
+        );
+        assertThat(enumValues(states)).containsExactly(
+                "REQUESTED",
+                "EVIDENCE_PREPARING",
+                "EVIDENCE_PREPARED",
+                "FINALIZING",
+                "FINALIZED_VISIBLE",
+                "FINALIZED_EVIDENCE_PENDING_EXTERNAL",
+                "FINALIZED_EVIDENCE_CONFIRMED",
+                "REJECTED_EVIDENCE_UNAVAILABLE",
+                "FAILED_BUSINESS_VALIDATION",
+                "FINALIZE_RECOVERY_REQUIRED",
+                "AUDIT_ATTEMPTED",
+                "BUSINESS_COMMITTING",
+                "BUSINESS_COMMITTED",
+                "SUCCESS_AUDIT_PENDING",
+                "SUCCESS_AUDIT_RECORDED",
+                "EVIDENCE_PENDING",
+                "EVIDENCE_CONFIRMED",
+                "COMMITTED",
+                "COMMITTED_DEGRADED",
+                "REJECTED",
+                "FAILED"
+        );
+        assertThat(enumValues(modelVersions)).containsExactly(
+                "LEGACY_REGULATED_MUTATION",
+                "EVIDENCE_GATED_FINALIZE_V1"
+        );
+    }
+
+    @Test
+    void fdp35ReadinessMustNotExposeHeartbeatOrRenewalControllerSemantics() throws Exception {
+        List<Path> controllers;
+        try (Stream<Path> stream = Files.walk(Path.of("src/main/java/com/frauddetection/alert"))) {
+            controllers = stream
+                    .filter(path -> path.toString().endsWith("Controller.java"))
+                    .toList();
+        }
+
+        for (Path controller : controllers) {
+            String source = Files.readString(controller);
+            assertThat(source)
+                    .as("controller must not expose heartbeat/renewal semantics: " + controller)
+                    .doesNotContain("RegulatedMutationLeaseRenewalService")
+                    .doesNotContain("RegulatedMutationCheckpointRenewalService")
+                    .doesNotContain("heartbeat")
+                    .doesNotContain("renewLease")
+                    .doesNotContain("checkpoint-renew")
+                    .doesNotContain("/renew")
+                    .doesNotContain("/heartbeat");
+        }
+    }
+
+    @Test
+    void fdp35ReadinessTestsMustNotCallExternalAnchorOrTrustAuthority() throws Exception {
+        List<Path> readinessTests;
+        try (Stream<Path> stream = Files.walk(Path.of("src/test/java/com/frauddetection/alert"))) {
+            readinessTests = stream
+                    .filter(path -> path.toString().endsWith(".java"))
+                    .filter(path -> {
+                        String name = path.getFileName().toString();
+                        return name.contains("ProductionReadiness")
+                                || name.contains("RestartRecoveryProof")
+                                || name.contains("RecoveryControllerTest");
+                    })
+                    .toList();
+        }
+
+        for (Path test : readinessTests) {
+            String source = Files.readString(test);
+            assertThat(source)
+                    .as("FDP-35 proof tests must not depend on external finality: " + test)
+                    .doesNotContain("ExternalAuditAnchorPublisher")
+                    .doesNotContain("AuditTrustAuthorityClient")
+                    .doesNotContain("HttpAuditTrustAuthorityClient")
+                    .doesNotContain("TrustAuthority");
+        }
+    }
+
+    @Test
+    void fdp35DocsMustPreserveProofOnlyLowCardinalityClaims() throws Exception {
+        String combined = Files.readString(Path.of("../docs/architecture/FDP-35-production-readiness-chaos-recovery-proof.md"))
+                + Files.readString(Path.of("../docs/FDP-35-merge-gate.md"))
+                + Files.readString(Path.of("../docs/testing/FDP-35-e2e-and-chaos-test-plan.md"))
+                + Files.readString(Path.of("../docs/testing/FDP-35-regression-proof-matrix.md"))
+                + Files.readString(Path.of("../docs/observability/FDP-35-regulated-mutation-dashboard-spec.md"))
+                + Files.readString(Path.of("../docs/observability/FDP-35-regulated-mutation-alert-thresholds.md"))
+                + Files.readString(Path.of("../docs/runbooks/FDP-35-regulated-mutation-recovery-drill.md"))
+                + Files.readString(Path.of("../docs/operations/FDP-35-regulated-mutation-rollback-plan.md"));
+
+        assertThat(combined).contains("production-readiness proof branch");
+        assertThat(combined).contains("modeled restart/recovery proof");
+        assertThat(combined).contains("not a real OS process termination test");
+        assertThat(combined).contains("No new public API statuses");
+        assertThat(combined).contains("Checkpoint renewal must not be treated as business progress");
+        assertThat(combined).contains("Do not include commandId, alertId, actorId, leaseOwner, idempotencyKey, requestHash, resourceId");
+        assertThat(combined).doesNotContain("kill -9 chaos proof");
+        assertThat(combined).doesNotContain("fully production ready");
+        assertThat(combined).doesNotContain("external finality guaranteed");
+    }
+
+    private List<String> enumValues(String source) {
+        int open = source.indexOf('{');
+        int close = source.lastIndexOf('}');
+        return Stream.of(source.substring(open + 1, close).split(","))
+                .map(value -> value.replaceAll("//.*", "").trim())
+                .filter(value -> !value.isBlank())
+                .map(value -> value.replaceAll("[;\\s].*", ""))
+                .toList();
+    }
+
+    @Test
     void fdp33LeaseRenewalModelPolicySeamMustOwnModelStateTables() throws Exception {
         String policy = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationLeaseRenewalPolicy.java"

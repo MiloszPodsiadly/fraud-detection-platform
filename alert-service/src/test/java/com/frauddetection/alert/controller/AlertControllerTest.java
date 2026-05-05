@@ -24,6 +24,7 @@ import com.frauddetection.common.events.model.LocationInfo;
 import com.frauddetection.common.events.model.MerchantInfo;
 import com.frauddetection.common.events.model.Money;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration;
 import org.springframework.boot.autoconfigure.security.servlet.SecurityFilterAutoConfiguration;
@@ -59,6 +60,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 )
 @AutoConfigureMockMvc(addFilters = false)
 @Import({AlertResponseMapper.class, AlertServiceExceptionHandler.class})
+@Tag("production-readiness")
+@Tag("integration")
 class AlertControllerTest {
 
     @Autowired
@@ -150,6 +153,50 @@ class AlertControllerTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.operation_status").value("IN_PROGRESS"));
+    }
+
+    @Test
+    void apiDoesNotExposeUpdatedResourceForRecoveryRequiredLegacy() throws Exception {
+        when(alertManagementUseCase.submitDecision(org.mockito.ArgumentMatchers.eq("alert-1"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("idem-1")))
+                .thenReturn(new SubmitAnalystDecisionResponse(
+                        "alert-1",
+                        AnalystDecision.CONFIRMED_FRAUD,
+                        AlertStatus.RESOLVED,
+                        null,
+                        null,
+                        SubmitDecisionOperationStatus.RECOVERY_REQUIRED
+                ));
+
+        mockMvc.perform(post("/api/v1/alerts/alert-1/decision")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "idem-1")
+                        .content(objectMapper.writeValueAsString(decisionRequest())))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.operation_status").value("RECOVERY_REQUIRED"))
+                .andExpect(jsonPath("$.operation_status").value(org.hamcrest.Matchers.not("COMMITTED_EVIDENCE_PENDING")))
+                .andExpect(jsonPath("$.operation_status").value(org.hamcrest.Matchers.not("COMMITTED_EVIDENCE_CONFIRMED")));
+    }
+
+    @Test
+    void apiDoesNotExposeUpdatedResourceForFinalizeRecoveryRequired() throws Exception {
+        when(alertManagementUseCase.submitDecision(org.mockito.ArgumentMatchers.eq("alert-1"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("idem-1")))
+                .thenReturn(new SubmitAnalystDecisionResponse(
+                        "alert-1",
+                        AnalystDecision.CONFIRMED_FRAUD,
+                        AlertStatus.RESOLVED,
+                        null,
+                        null,
+                        SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED
+                ));
+
+        mockMvc.perform(post("/api/v1/alerts/alert-1/decision")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "idem-1")
+                        .content(objectMapper.writeValueAsString(decisionRequest())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.operation_status").value("FINALIZE_RECOVERY_REQUIRED"))
+                .andExpect(jsonPath("$.operation_status").value(org.hamcrest.Matchers.not("FINALIZED_EVIDENCE_PENDING_EXTERNAL")))
+                .andExpect(jsonPath("$.operation_status").value(org.hamcrest.Matchers.not("FINALIZED_EVIDENCE_CONFIRMED")));
     }
 
     @Test
@@ -248,6 +295,16 @@ class AlertControllerTest {
                 null,
                 List.of(),
                 null
+        );
+    }
+
+    private SubmitAnalystDecisionRequest decisionRequest() {
+        return new SubmitAnalystDecisionRequest(
+                "analyst-1",
+                AnalystDecision.CONFIRMED_FRAUD,
+                "Manual confirmation",
+                List.of("kyc", "velocity"),
+                Map.of()
         );
     }
 
