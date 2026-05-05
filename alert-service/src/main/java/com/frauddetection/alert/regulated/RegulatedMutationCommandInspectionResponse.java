@@ -19,8 +19,10 @@ public record RegulatedMutationCommandInspectionResponse(
         String state,
         @JsonProperty("execution_status")
         String executionStatus,
-        @JsonProperty("lease_owner")
-        String leaseOwner,
+        @JsonProperty("lease_owner_present")
+        boolean leaseOwnerPresent,
+        @JsonProperty("lease_owner_hash")
+        String leaseOwnerHash,
         @JsonProperty("lease_expires_at")
         Instant leaseExpiresAt,
         @JsonProperty("lease_renewal_count")
@@ -35,8 +37,8 @@ public record RegulatedMutationCommandInspectionResponse(
         String failedAuditId,
         @JsonProperty("degradation_reason")
         String degradationReason,
-        @JsonProperty("last_error")
-        String lastError,
+        @JsonProperty("last_error_code")
+        String lastErrorCode,
         @JsonProperty("updated_at")
         Instant updatedAt
 ) {
@@ -67,7 +69,8 @@ public record RegulatedMutationCommandInspectionResponse(
                 resourceId,
                 state,
                 executionStatus,
-                leaseOwner,
+                leaseOwner != null && !leaseOwner.isBlank(),
+                safeLeaseOwnerHash(leaseOwner),
                 leaseExpiresAt,
                 0,
                 responseSnapshotPresent,
@@ -75,7 +78,7 @@ public record RegulatedMutationCommandInspectionResponse(
                 successAuditId,
                 failedAuditId,
                 degradationReason,
-                lastError,
+                safeErrorCode(lastError),
                 updatedAt
         );
     }
@@ -108,7 +111,8 @@ public record RegulatedMutationCommandInspectionResponse(
                 resourceId,
                 state,
                 executionStatus,
-                leaseOwner,
+                leaseOwner != null && !leaseOwner.isBlank(),
+                safeLeaseOwnerHash(leaseOwner),
                 leaseExpiresAt,
                 leaseRenewalCount,
                 responseSnapshotPresent,
@@ -116,9 +120,13 @@ public record RegulatedMutationCommandInspectionResponse(
                 successAuditId,
                 failedAuditId,
                 degradationReason,
-                lastError,
+                safeErrorCode(lastError),
                 updatedAt
         );
+    }
+
+    public String lastError() {
+        return lastErrorCode;
     }
 
     static RegulatedMutationCommandInspectionResponse from(RegulatedMutationCommandDocument command) {
@@ -131,7 +139,8 @@ public record RegulatedMutationCommandInspectionResponse(
                 command.getResourceId(),
                 command.getState() == null ? null : command.getState().name(),
                 command.getExecutionStatus() == null ? null : command.getExecutionStatus().name(),
-                command.getLeaseOwner(),
+                command.getLeaseOwner() != null && !command.getLeaseOwner().isBlank(),
+                safeLeaseOwnerHash(command.getLeaseOwner()),
                 command.getLeaseExpiresAt(),
                 command.leaseRenewalCountOrZero(),
                 command.getResponseSnapshot() != null,
@@ -139,7 +148,7 @@ public record RegulatedMutationCommandInspectionResponse(
                 command.getSuccessAuditId(),
                 command.getFailedAuditId(),
                 command.getDegradationReason(),
-                command.getLastError(),
+                safeErrorCode(command.getLastError()),
                 command.getUpdatedAt()
         );
     }
@@ -160,5 +169,23 @@ public record RegulatedMutationCommandInspectionResponse(
             return "..." + normalized.substring(Math.max(0, normalized.length() - 4));
         }
         return normalized.substring(0, 6) + "..." + normalized.substring(normalized.length() - 4);
+    }
+
+    private static String safeLeaseOwnerHash(String leaseOwner) {
+        if (leaseOwner == null || leaseOwner.isBlank()) {
+            return null;
+        }
+        return RegulatedMutationIntentHasher.hash("leaseOwner=" + leaseOwner.trim());
+    }
+
+    private static String safeErrorCode(String lastError) {
+        if (lastError == null || lastError.isBlank()) {
+            return null;
+        }
+        String normalized = lastError.trim();
+        if (normalized.matches("^[A-Z0-9_]{1,80}$")) {
+            return normalized;
+        }
+        return "UNSAFE_ERROR_REDACTED";
     }
 }
