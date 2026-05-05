@@ -10,8 +10,10 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -24,10 +26,14 @@ import static org.mockito.Mockito.when;
 
 class RegulatedMutationClaimServiceTest {
 
+    private static final Instant NOW = Instant.parse("2026-05-05T10:00:00Z");
+
     private final MongoTemplate mongoTemplate = mock(MongoTemplate.class);
     private final RegulatedMutationClaimService service = new RegulatedMutationClaimService(
             mongoTemplate,
-            Duration.ofSeconds(30)
+            Duration.ofSeconds(30),
+            null,
+            Clock.fixed(NOW, ZoneOffset.UTC)
     );
 
     @Test
@@ -188,11 +194,9 @@ class RegulatedMutationClaimServiceTest {
 
     @Test
     void claimSetsLeaseExpiration() {
-        Instant before = Instant.now();
-
         service.claim(command(), "idem-1");
 
-        assertThat((Instant) setDocument().get("lease_expires_at")).isAfter(before);
+        assertThat((Instant) setDocument().get("lease_expires_at")).isEqualTo(NOW.plusSeconds(30));
     }
 
     @Test
@@ -200,8 +204,8 @@ class RegulatedMutationClaimServiceTest {
         service.claim(command(), "idem-1");
 
         Document set = setDocument();
-        assertThat((Instant) set.get("last_heartbeat_at")).isNotNull();
-        assertThat((Instant) set.get("updated_at")).isNotNull();
+        assertThat((Instant) set.get("last_heartbeat_at")).isEqualTo(NOW);
+        assertThat((Instant) set.get("updated_at")).isEqualTo(NOW);
     }
 
     @Test
@@ -209,6 +213,17 @@ class RegulatedMutationClaimServiceTest {
         service.claim(command(), "idem-1");
 
         assertThat(incDocument().get("attempt_count")).isEqualTo(1);
+    }
+
+    @Test
+    void claimInitializesRenewalBudgetMetadataForCurrentOwner() {
+        service.claim(command(), "idem-1");
+
+        Document set = setDocument();
+        assertThat(set.get("lease_renewal_count")).isEqualTo(0);
+        assertThat(set.get("lease_budget_started_at")).isEqualTo(NOW);
+        assertThat(set).containsKey("last_lease_renewed_at");
+        assertThat(set.get("last_lease_renewed_at")).isNull();
     }
 
     @Test

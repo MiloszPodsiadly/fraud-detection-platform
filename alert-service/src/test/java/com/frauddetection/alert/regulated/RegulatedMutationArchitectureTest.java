@@ -596,6 +596,100 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
+    void fdp33LeaseRenewalMustNotBePublicApiOrControllerDependency() throws Exception {
+        List<Path> javaFiles;
+        try (Stream<Path> stream = Files.walk(Path.of("src/main/java/com/frauddetection/alert"))) {
+            javaFiles = stream
+                    .filter(path -> path.toString().endsWith(".java"))
+                    .toList();
+        }
+
+        for (Path path : javaFiles) {
+            String normalized = path.toString().replace('\\', '/');
+            if (!normalized.endsWith("Controller.java")) {
+                continue;
+            }
+            String source = Files.readString(path);
+            assertThat(source)
+                    .as("controllers must not expose or depend on FDP-33 lease renewal: " + path)
+                    .doesNotContain("RegulatedMutationLeaseRenewalService")
+                    .doesNotContain("lease-renew")
+                    .doesNotContain("renewLease")
+                    .doesNotContain("/renew");
+        }
+    }
+
+    @Test
+    void fdp33LeaseRenewalMustOnlyUpdateLeaseMetadata() throws Exception {
+        String service = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationLeaseRenewalService.java"
+        ));
+
+        assertThat(service).contains("mongoTemplate.updateFirst");
+        assertThat(service).contains("\"lease_expires_at\"");
+        assertThat(service).contains("\"last_heartbeat_at\"");
+        assertThat(service).contains("\"last_lease_renewed_at\"");
+        assertThat(service).contains("\"lease_budget_started_at\"");
+        assertThat(service).contains("\"lease_renewal_count\"");
+        assertThat(service)
+                .doesNotContain("\"idempotency_key\"")
+                .doesNotContain("\"request_hash\"")
+                .doesNotContain("\"actor_id\"")
+                .doesNotContain("\"resource_id\"")
+                .doesNotContain("\"action\"")
+                .doesNotContain("\"resource_type\"")
+                .doesNotContain("\"response_snapshot\"")
+                .doesNotContain("\"outbox_event_id\"")
+                .doesNotContain("\"local_commit_marker\"")
+                .doesNotContain("\"success_audit_id\"")
+                .doesNotContain("\"public_status\"")
+                .doesNotContain(".set(\"state\"")
+                .doesNotContain(".set(\"execution_status\"");
+    }
+
+    @Test
+    void fdp33LeaseRenewalMustStayAwayFromBrokerOutboxAuditAndBusinessBoundaries() throws Exception {
+        String service = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationLeaseRenewalService.java"
+        ));
+        String policy = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationLeaseRenewalPolicy.java"
+        ));
+
+        assertThat(service)
+                .doesNotContain("KafkaTemplate")
+                .doesNotContain("FraudDecisionEventPublisher")
+                .doesNotContain("TransactionalOutbox")
+                .doesNotContain("ExternalAudit")
+                .doesNotContain("AuditService")
+                .doesNotContain("AuditEventPublisher")
+                .doesNotContain("recoveryTransition(");
+        assertThat(policy)
+                .doesNotContain("MongoTemplate")
+                .doesNotContain("AlertRepository")
+                .doesNotContain("AuditService")
+                .doesNotContain("TransactionalOutbox")
+                .doesNotContain("KafkaTemplate");
+    }
+
+    @Test
+    void fdp33ExecutorsMustNotRenewLeasesDirectlyOrUpdateLeaseExpiryWithMongo() throws Exception {
+        String legacyExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationExecutor.java"
+        ));
+        String evidenceExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"
+        ));
+
+        assertThat(legacyExecutor)
+                .doesNotContain("RegulatedMutationLeaseRenewalService")
+                .doesNotContain(".set(\"lease_expires_at\"");
+        assertThat(evidenceExecutor)
+                .doesNotContain("RegulatedMutationLeaseRenewalService")
+                .doesNotContain(".set(\"lease_expires_at\"");
+    }
+
+    @Test
     void fdp32DocsMustDescribeLeaseFencingWithoutReviewNotes() throws Exception {
         String architecture = Files.readString(Path.of("../docs/FDP-32-lease-fencing-stale-worker-protection.md"));
         String mergeGate = Files.readString(Path.of("../docs/FDP-32-merge-gate.md"));
@@ -613,6 +707,27 @@ class RegulatedMutationArchitectureTest {
         assertThat(combined).contains("no distributed lock");
         assertThat(combined).contains("Source-string architecture tests are guardrails, not complete architectural proof");
         assertThat(combined).contains("FDP-32 is merge-safe as lease-owner fenced command transition hardening");
+        assertThat(combined).doesNotContain("Merge Decision");
+        assertThat(combined).doesNotContain("GO:");
+        assertThat(combined).doesNotContain("NO-GO:");
+        assertThat(combined).doesNotContain("reviewer");
+    }
+
+    @Test
+    void fdp33DocsMustDescribeBoundedRenewalWithoutReviewNotes() throws Exception {
+        String runbook = Files.readString(Path.of("../docs/FDP-33-lease-renewal-operational-readiness.md"));
+        String mergeGate = Files.readString(Path.of("../docs/FDP-33-merge-gate.md"));
+        String combined = runbook + "\n" + mergeGate;
+
+        assertThat(combined).contains("owner-fenced");
+        assertThat(combined).contains("bounded");
+        assertThat(combined).contains("lease_expires_at > now");
+        assertThat(combined).contains("Missing renewal metadata is backward compatible");
+        assertThat(combined).contains("does not enable FDP-29 production mode");
+        assertThat(combined).contains("no distributed lock");
+        assertThat(combined).contains("no public heartbeat endpoint");
+        assertThat(combined).contains("does not provide external finality");
+        assertThat(combined).contains("cannot create infinite `PROCESSING`");
         assertThat(combined).doesNotContain("Merge Decision");
         assertThat(combined).doesNotContain("GO:");
         assertThat(combined).doesNotContain("NO-GO:");
