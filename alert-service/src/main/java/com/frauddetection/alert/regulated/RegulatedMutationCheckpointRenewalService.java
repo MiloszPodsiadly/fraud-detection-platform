@@ -59,6 +59,10 @@ public class RegulatedMutationCheckpointRenewalService {
         return new RegulatedMutationCheckpointRenewalService(null, null, null, Duration.ZERO, Clock.systemUTC(), false);
     }
 
+    boolean isEnabledForTesting() {
+        return enabled;
+    }
+
     public RegulatedMutationCheckpointRenewalDecision beforeAttemptedAudit(
             RegulatedMutationClaimToken claimToken,
             RegulatedMutationCommandDocument document

@@ -122,10 +122,10 @@ public class RegulatedMutationLeaseRenewalService {
                 && current.getExecutionStatus() == RegulatedMutationExecutionStatus.PROCESSING
                 && current.getLeaseExpiresAt() != null
                 && current.getLeaseExpiresAt().isAfter(now)
-                && current.getLeaseExpiresAt().isAfter(claimToken.leaseExpiresAt())
                 && current.getLastLeaseRenewedAt() != null
-                && !current.getLastLeaseRenewedAt().isBefore(claimToken.claimedAt())
+                && (claimToken.claimedAt() == null || !current.getLastLeaseRenewedAt().isBefore(claimToken.claimedAt()))
                 && current.leaseRenewalCountOrZero() >= policy.maxRenewalCount()
+                && current.leaseRenewalCountOrZero() > 0
                 && current.mutationModelVersionOrLegacy() == claimToken.mutationModelVersion()
                 && policy.isRenewable(
                         current.mutationModelVersionOrLegacy(),
