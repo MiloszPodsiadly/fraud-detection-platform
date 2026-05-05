@@ -23,6 +23,8 @@ public record RegulatedMutationCommandInspectionResponse(
         String leaseOwner,
         @JsonProperty("lease_expires_at")
         Instant leaseExpiresAt,
+        @JsonProperty("lease_renewal_count")
+        int leaseRenewalCount,
         @JsonProperty("response_snapshot_present")
         boolean responseSnapshotPresent,
         @JsonProperty("attempted_audit_id")
@@ -67,6 +69,48 @@ public record RegulatedMutationCommandInspectionResponse(
                 executionStatus,
                 leaseOwner,
                 leaseExpiresAt,
+                0,
+                responseSnapshotPresent,
+                attemptedAuditId,
+                successAuditId,
+                failedAuditId,
+                degradationReason,
+                lastError,
+                updatedAt
+        );
+    }
+
+    public RegulatedMutationCommandInspectionResponse(
+            String idempotencyKeyHash,
+            String idempotencyKeyMasked,
+            String action,
+            String resourceType,
+            String resourceId,
+            String state,
+            String executionStatus,
+            String leaseOwner,
+            Instant leaseExpiresAt,
+            int leaseRenewalCount,
+            boolean responseSnapshotPresent,
+            String attemptedAuditId,
+            String successAuditId,
+            String failedAuditId,
+            String degradationReason,
+            String lastError,
+            Instant updatedAt
+    ) {
+        this(
+                idempotencyKeyHash,
+                idempotencyKeyMasked,
+                action,
+                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION.name(),
+                resourceType,
+                resourceId,
+                state,
+                executionStatus,
+                leaseOwner,
+                leaseExpiresAt,
+                leaseRenewalCount,
                 responseSnapshotPresent,
                 attemptedAuditId,
                 successAuditId,
@@ -89,6 +133,7 @@ public record RegulatedMutationCommandInspectionResponse(
                 command.getExecutionStatus() == null ? null : command.getExecutionStatus().name(),
                 command.getLeaseOwner(),
                 command.getLeaseExpiresAt(),
+                command.leaseRenewalCountOrZero(),
                 command.getResponseSnapshot() != null,
                 command.getAttemptedAuditId(),
                 command.getSuccessAuditId(),
