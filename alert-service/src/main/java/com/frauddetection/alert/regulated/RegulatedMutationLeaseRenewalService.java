@@ -66,7 +66,9 @@ public class RegulatedMutationLeaseRenewalService {
         );
         if (decision.type() != RegulatedMutationLeaseRenewalDecisionType.RENEW) {
             recordRejection(claimToken, current, decision);
-            markBudgetExceededRecoveryIfNeeded(claimToken, current, decision, now);
+            if (!sameOwnerRenewalAlreadyAdvancedFromClaim(claimToken, current, decision, now)) {
+                markBudgetExceededRecoveryIfNeeded(claimToken, current, decision, now);
+            }
             throwException(claimToken, decision);
         }
 
@@ -100,6 +102,36 @@ public class RegulatedMutationLeaseRenewalService {
 
         recordSuccess(claimToken, current, decision);
         return decision;
+    }
+
+    private boolean sameOwnerRenewalAlreadyAdvancedFromClaim(
+            RegulatedMutationClaimToken claimToken,
+            RegulatedMutationCommandDocument current,
+            RegulatedMutationLeaseRenewalDecision decision,
+            Instant now
+    ) {
+        if (decision.type() != RegulatedMutationLeaseRenewalDecisionType.BUDGET_EXCEEDED
+                || claimToken == null
+                || current == null
+                || now == null) {
+            return false;
+        }
+        return current.getLeaseOwner() != null
+                && current.getLeaseOwner().equals(claimToken.leaseOwner())
+                && current.getState() == claimToken.expectedInitialState()
+                && current.getExecutionStatus() == RegulatedMutationExecutionStatus.PROCESSING
+                && current.getLeaseExpiresAt() != null
+                && current.getLeaseExpiresAt().isAfter(now)
+                && current.getLeaseExpiresAt().isAfter(claimToken.leaseExpiresAt())
+                && current.getLastLeaseRenewedAt() != null
+                && !current.getLastLeaseRenewedAt().isBefore(claimToken.claimedAt())
+                && current.leaseRenewalCountOrZero() >= policy.maxRenewalCount()
+                && current.mutationModelVersionOrLegacy() == claimToken.mutationModelVersion()
+                && policy.isRenewable(
+                        current.mutationModelVersionOrLegacy(),
+                        current.getState(),
+                        current.getExecutionStatus()
+                );
     }
 
     private boolean sameOwnerRenewalRaceAlreadyAdvanced(
