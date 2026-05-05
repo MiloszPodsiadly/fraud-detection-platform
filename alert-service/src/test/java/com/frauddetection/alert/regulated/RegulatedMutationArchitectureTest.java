@@ -781,6 +781,230 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
+    void fdp34CheckpointRenewalMustNotBeSchedulerPublicApiOrBoundaryLeak() throws Exception {
+        String service = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationCheckpointRenewalService.java"
+        ));
+        String policy = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationSafeCheckpointPolicy.java"
+        ));
+        List<Path> javaFiles;
+        try (Stream<Path> stream = Files.walk(Path.of("src/main/java/com/frauddetection/alert"))) {
+            javaFiles = stream
+                    .filter(path -> path.toString().endsWith(".java"))
+                    .toList();
+        }
+
+        assertThat(service)
+                .contains("beforeAttemptedAudit")
+                .contains("beforeLegacyBusinessCommit")
+                .contains("beforeEvidenceGatedFinalize")
+                .contains("leaseRenewalService.renew")
+                .doesNotContain("@Scheduled")
+                .doesNotContain("TaskScheduler")
+                .doesNotContain("ScheduledExecutorService")
+                .doesNotContain("while (true)")
+                .doesNotContain("Thread.sleep")
+                .doesNotContain("Flux.interval")
+                .doesNotContain("Timer")
+                .doesNotContain("KafkaTemplate")
+                .doesNotContain("FraudDecisionEventPublisher")
+                .doesNotContain("TransactionalOutboxRecordRepository")
+                .doesNotContain("AuditService")
+                .doesNotContain("AuditEventPublisher")
+                .doesNotContain("AlertRepository")
+                .doesNotContain("TrustAuthority")
+                .doesNotContain("ExternalAnchorPublisher")
+                .doesNotContain("command.mutation().execute");
+        assertThat(policy).contains("RegulatedMutationRenewalCheckpoint");
+        assertThat(policy).contains("BEFORE_ATTEMPTED_AUDIT");
+        assertThat(policy).contains("AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE");
+        assertThat(policy).doesNotContain("AFTER_ATTEMPTED_AUDIT");
+
+        for (Path path : javaFiles) {
+            String normalized = path.toString().replace('\\', '/');
+            if (!normalized.endsWith("Controller.java")) {
+                continue;
+            }
+            String source = Files.readString(path);
+            assertThat(source)
+                    .as("controllers must not expose FDP-34 checkpoint renewal: " + path)
+                    .doesNotContain("RegulatedMutationCheckpointRenewalService")
+                    .doesNotContain("RegulatedMutationLeaseRenewalService")
+                    .doesNotContain("heartbeat")
+                    .doesNotContain("checkpoint-renew")
+                    .doesNotContain("/renew");
+        }
+    }
+
+    @Test
+    void fdp34ExecutorsMustUseNamedCheckpointMethodsInsteadOfDirectRenewal() throws Exception {
+        String legacyExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationExecutor.java"
+        ));
+        String evidenceExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"
+        ));
+
+        assertThat(legacyExecutor)
+                .contains("checkpointRenewalService.beforeAttemptedAudit")
+                .contains("checkpointRenewalService.beforeLegacyBusinessCommit")
+                .contains("checkpointRenewalService.beforeSuccessAuditRetry")
+                .doesNotContain("leaseRenewalService.renew")
+                .doesNotContain("RegulatedMutationLeaseRenewalService");
+        assertThat(evidenceExecutor)
+                .contains("checkpointRenewalService.beforeEvidencePreparation")
+                .contains("checkpointRenewalService.afterEvidencePreparedBeforeFinalize")
+                .contains("checkpointRenewalService.beforeEvidenceGatedFinalize")
+                .doesNotContain("leaseRenewalService.renew")
+                .doesNotContain("RegulatedMutationLeaseRenewalService");
+    }
+
+    @Test
+    void fdp34EveryCheckpointMustHavePolicyDocsRunbookAndMetricCoverage() throws Exception {
+        String policyTest = Files.readString(Path.of(
+                "src/test/java/com/frauddetection/alert/regulated/RegulatedMutationSafeCheckpointPolicyTest.java"
+        ));
+        String architecture = Files.readString(Path.of("../docs/architecture/FDP-34-safe-checkpoint-adoption.md"));
+        String runbook = Files.readString(Path.of("../docs/runbooks/FDP-34-safe-checkpoint-renewal-runbook.md"));
+        String metricsTest = Files.readString(Path.of(
+                "src/test/java/com/frauddetection/alert/observability/AlertServiceMetricsTest.java"
+        ));
+
+        for (RegulatedMutationRenewalCheckpoint checkpoint : RegulatedMutationRenewalCheckpoint.values()) {
+            assertThat(policyTest).as("policy test coverage for " + checkpoint).contains(checkpoint.name());
+            assertThat(architecture).as("architecture docs coverage for " + checkpoint).contains(checkpoint.name());
+            assertThat(runbook).as("runbook coverage for " + checkpoint).contains(checkpoint.name());
+            assertThat(metricsTest).as("metrics label coverage for " + checkpoint).contains(checkpoint.name());
+        }
+    }
+
+    @Test
+    void fdp34SafeCheckpointPolicyMustRemainExplicitWithoutWildcardAllows() throws Exception {
+        String policy = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationSafeCheckpointPolicy.java"
+        ));
+
+        assertThat(policy).contains("new EnumMap<>(RegulatedMutationState.class)");
+        assertThat(policy).contains("legacy.put(RegulatedMutationState.REQUESTED");
+        assertThat(policy).contains("evidence.put(RegulatedMutationState.FINALIZING");
+        assertThat(policy)
+                .doesNotContain("RegulatedMutationState.values()")
+                .doesNotContain("RegulatedMutationRenewalCheckpoint.values()")
+                .doesNotContain("return true;")
+                .doesNotContain("Set.copyOf(EnumSet.allOf");
+    }
+
+    @Test
+    void fdp34CheckpointRenewalServiceMustRemainNarrowOwnershipAdapter() throws Exception {
+        String service = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationCheckpointRenewalService.java"
+        ));
+
+        assertThat(service).contains("leaseRenewalService.renew");
+        assertThat(service)
+                .doesNotContain("command.mutation().execute")
+                .doesNotContain("auditPhaseService")
+                .doesNotContain("commandRepository.save")
+                .doesNotContain("TransactionalOutboxRecordRepository")
+                .doesNotContain("AlertRepository")
+                .doesNotContain("KafkaTemplate")
+                .doesNotContain("FraudDecisionEventPublisher")
+                .doesNotContain("ExternalAudit")
+                .doesNotContain("TrustAuthority")
+                .doesNotContain("Anchor");
+    }
+
+    @Test
+    void fdp34DisabledCheckpointRenewalMustStayOutOfProductionBeanGraph() throws Exception {
+        String service = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationCheckpointRenewalService.java"
+        ));
+        String legacyExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationExecutor.java"
+        ));
+        String evidenceExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"
+        ));
+        String wiringTest = Files.readString(Path.of(
+                "src/test/java/com/frauddetection/alert/regulated/RegulatedMutationCheckpointRenewalWiringTest.java"
+        ));
+
+        assertThat(service).contains("boolean isEnabledForTesting()");
+        assertThat(legacyExecutor).contains("Production wiring must use Spring-managed checkpoint renewal service");
+        assertThat(evidenceExecutor).contains("Production wiring must use Spring-managed checkpoint renewal service");
+        assertThat(wiringTest).contains("productionExecutorsUseEnabledSpringManagedCheckpointRenewalService");
+        assertThat(wiringTest).contains("isEnabledForTesting()).isTrue()");
+        assertThat(legacyExecutor.substring(legacyExecutor.indexOf("@Autowired")))
+                .doesNotContain("RegulatedMutationCheckpointRenewalService.disabled()");
+        assertThat(evidenceExecutor.substring(evidenceExecutor.indexOf("@Autowired")))
+                .doesNotContain("RegulatedMutationCheckpointRenewalService.disabled()");
+    }
+
+    @Test
+    void fdp34SuccessAuditCheckpointFailuresMustNotBecomeAuditDegradation() throws Exception {
+        String legacyExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationExecutor.java"
+        ));
+
+        assertThat(legacyExecutor).contains("checkpointRenewalService.beforeSuccessAuditRetry");
+        assertThat(legacyExecutor).contains("RegulatedMutationCheckpointRenewalException");
+        assertThat(legacyExecutor).contains("RegulatedMutationLeaseRenewalException");
+        assertThat(legacyExecutor).contains("StaleRegulatedMutationLeaseException");
+        assertThat(legacyExecutor).contains("throw exception;");
+        assertThat(legacyExecutor.indexOf("checkpointRenewalService.beforeSuccessAuditRetry"))
+                .isLessThan(legacyExecutor.indexOf("recordPostCommitDegraded(command, document)"));
+    }
+
+    @Test
+    void fdp34ProductionWiringMustNotSilentlyDisableCheckpointRenewal() throws Exception {
+        String legacyExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationExecutor.java"
+        ));
+        String evidenceExecutor = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"
+        ));
+
+        assertThat(legacyExecutor).contains("Objects.requireNonNull");
+        assertThat(evidenceExecutor).contains("Objects.requireNonNull");
+        assertThat(legacyExecutor).contains("Compatibility/unit-test constructor only");
+        assertThat(evidenceExecutor).contains("Compatibility/unit-test constructor only");
+        assertThat(legacyExecutor).doesNotContain("checkpointRenewalService == null");
+        assertThat(evidenceExecutor).doesNotContain("checkpointRenewalService == null");
+    }
+
+    @Test
+    void fdp34DocsMustDescribeCheckpointAdoptionWithoutReviewNotes() throws Exception {
+        String architecture = Files.readString(Path.of("../docs/architecture/FDP-34-safe-checkpoint-adoption.md"));
+        String checkpoints = Files.readString(Path.of("../docs/architecture/FDP-34-safe-checkpoints.md"));
+        String runbook = Files.readString(Path.of("../docs/runbooks/FDP-34-safe-checkpoint-renewal-runbook.md"));
+        String mergeGate = Files.readString(Path.of("../docs/FDP-34-merge-gate.md"));
+        String combined = architecture + "\n" + checkpoints + "\n" + runbook + "\n" + mergeGate;
+
+        assertThat(combined).contains("Renewal preserves ownership, not progress");
+        assertThat(combined).contains("Checkpoint renewal preserves bounded lease ownership. It does not prove business progress");
+        assertThat(combined).contains("No generic heartbeat system");
+        assertThat(combined).contains("No automatic infinite renewal loop");
+        assertThat(combined).contains("Checkpoint renewal failure stops execution");
+        assertThat(combined).contains("BEFORE_ATTEMPTED_AUDIT");
+        assertThat(combined).contains("BEFORE_LEGACY_BUSINESS_COMMIT");
+        assertThat(combined).contains("BEFORE_EVIDENCE_GATED_FINALIZE");
+        assertThat(combined).contains("not emitted for a normal successful checkpoint renewal");
+        assertThat(combined).contains("Production executors require");
+        assertThat(combined).contains("checkpoint-renewal extension");
+        assertThat(combined).contains("Worker renewing but not progressing");
+        assertThat(combined).contains("do not bypass checkpoint renewal");
+        assertThat(combined).contains("do not increase lease budget blindly");
+        assertThat(combined).contains("no public heartbeat endpoint");
+        assertThat(combined).contains("no distributed lock");
+        assertThat(combined).contains("does not enable production or bank behavior by itself");
+        assertThat(combined).doesNotContain("Merge Decision");
+        assertThat(combined).doesNotContain("GO:");
+        assertThat(combined).doesNotContain("NO-GO:");
+        assertThat(combined).doesNotContain("reviewer");
+    }
+
+    @Test
     void fdp32DocsMustDescribeLeaseFencingWithoutReviewNotes() throws Exception {
         String architecture = Files.readString(Path.of("../docs/FDP-32-lease-fencing-stale-worker-protection.md"));
         String mergeGate = Files.readString(Path.of("../docs/FDP-32-merge-gate.md"));

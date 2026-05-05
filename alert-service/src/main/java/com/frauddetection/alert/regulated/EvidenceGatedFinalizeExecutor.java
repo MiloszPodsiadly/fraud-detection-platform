@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Consumer;
 
 @Service
@@ -35,6 +36,7 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
     private final RegulatedMutationConflictPolicy conflictPolicy;
     private final RegulatedMutationReplayResolver replayResolver;
     private final RegulatedMutationFencedCommandWriter fencedCommandWriter;
+    private final RegulatedMutationCheckpointRenewalService checkpointRenewalService;
     private final EvidenceGatedFinalizeStateMachine stateMachine = new EvidenceGatedFinalizeStateMachine();
 
     public EvidenceGatedFinalizeExecutor(
@@ -60,11 +62,12 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
                 new RegulatedMutationClaimService(mongoTemplate, leaseDuration),
                 new RegulatedMutationConflictPolicy(),
                 new RegulatedMutationReplayResolver(compatibilityReplayPolicyRegistry()),
-                new RegulatedMutationFencedCommandWriter(mongoTemplate, metrics)
+                new RegulatedMutationFencedCommandWriter(mongoTemplate, metrics),
+                RegulatedMutationCheckpointRenewalService.disabled()
         );
     }
 
-    @Autowired
+    // Compatibility/unit-test constructor only. Production wiring must use Spring-managed checkpoint renewal service.
     public EvidenceGatedFinalizeExecutor(
             RegulatedMutationCommandRepository commandRepository,
             MongoTemplate mongoTemplate,
@@ -79,6 +82,40 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
             RegulatedMutationReplayResolver replayResolver,
             RegulatedMutationFencedCommandWriter fencedCommandWriter
     ) {
+        this(
+                commandRepository,
+                mongoTemplate,
+                auditPhaseService,
+                metrics,
+                transactionRunner,
+                publicStatusMapper,
+                evidencePreconditionEvaluator,
+                localAuditPhaseWriter,
+                claimService,
+                conflictPolicy,
+                replayResolver,
+                fencedCommandWriter,
+                RegulatedMutationCheckpointRenewalService.disabled()
+        );
+    }
+
+    @Autowired
+    // Compatibility/unit-test constructor only. Production wiring must use Spring-managed checkpoint renewal service.
+    public EvidenceGatedFinalizeExecutor(
+            RegulatedMutationCommandRepository commandRepository,
+            MongoTemplate mongoTemplate,
+            RegulatedMutationAuditPhaseService auditPhaseService,
+            AlertServiceMetrics metrics,
+            RegulatedMutationTransactionRunner transactionRunner,
+            RegulatedMutationPublicStatusMapper publicStatusMapper,
+            EvidencePreconditionEvaluator evidencePreconditionEvaluator,
+            RegulatedMutationLocalAuditPhaseWriter localAuditPhaseWriter,
+            RegulatedMutationClaimService claimService,
+            RegulatedMutationConflictPolicy conflictPolicy,
+            RegulatedMutationReplayResolver replayResolver,
+            RegulatedMutationFencedCommandWriter fencedCommandWriter,
+            RegulatedMutationCheckpointRenewalService checkpointRenewalService
+    ) {
         this.commandRepository = commandRepository;
         this.auditPhaseService = auditPhaseService;
         this.metrics = metrics;
@@ -90,6 +127,10 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
         this.conflictPolicy = conflictPolicy;
         this.replayResolver = replayResolver;
         this.fencedCommandWriter = fencedCommandWriter;
+        this.checkpointRenewalService = Objects.requireNonNull(
+                checkpointRenewalService,
+                "FDP-34 production wiring requires checkpoint renewal service."
+        );
     }
 
     @Override
@@ -195,6 +236,9 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
         if (document.getState() == RegulatedMutationState.REQUESTED) {
             transition(document, claimToken, RegulatedMutationState.EVIDENCE_PREPARING, document.getExecutionStatus(), null);
         }
+        if (document.getState() == RegulatedMutationState.EVIDENCE_PREPARING) {
+            checkpointRenewalService.beforeEvidencePreparation(claimToken, document);
+        }
         if (!document.isAttemptedAuditRecorded()) {
             try {
                 String auditId = auditPhaseService.recordPhase(document, command.action(), command.resourceType(), AuditOutcome.ATTEMPTED, null);
@@ -239,6 +283,9 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
         if (document.getState() == RegulatedMutationState.EVIDENCE_PREPARING) {
             transition(document, claimToken, RegulatedMutationState.EVIDENCE_PREPARED, document.getExecutionStatus(), null);
         }
+        if (document.getState() == RegulatedMutationState.EVIDENCE_PREPARED) {
+            checkpointRenewalService.afterEvidencePreparedBeforeFinalize(claimToken, document);
+        }
     }
 
     private RegulatedMutationCommandDocument claimedDocument(
@@ -260,6 +307,7 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
             RegulatedMutationClaimToken claimToken
     ) {
         transition(document, claimToken, RegulatedMutationState.FINALIZING, document.getExecutionStatus(), null);
+        checkpointRenewalService.beforeEvidenceGatedFinalize(claimToken, document);
         try {
             LocalCommit<R, S> localCommit = transactionRunner.runLocalCommit(() -> {
                 fencedCommandWriter.validateActiveLease(

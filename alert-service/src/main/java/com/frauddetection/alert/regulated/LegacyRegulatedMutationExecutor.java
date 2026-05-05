@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Consumer;
 
 @Service
@@ -40,6 +41,7 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
     private final RegulatedMutationConflictPolicy conflictPolicy;
     private final RegulatedMutationReplayResolver replayResolver;
     private final RegulatedMutationFencedCommandWriter fencedCommandWriter;
+    private final RegulatedMutationCheckpointRenewalService checkpointRenewalService;
 
     public LegacyRegulatedMutationExecutor(
             RegulatedMutationCommandRepository commandRepository,
@@ -64,11 +66,12 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
                 new RegulatedMutationClaimService(mongoTemplate, leaseDuration),
                 new RegulatedMutationConflictPolicy(),
                 new RegulatedMutationReplayResolver(compatibilityReplayPolicyRegistry()),
-                new RegulatedMutationFencedCommandWriter(mongoTemplate, metrics)
+                new RegulatedMutationFencedCommandWriter(mongoTemplate, metrics),
+                RegulatedMutationCheckpointRenewalService.disabled()
         );
     }
 
-    @Autowired
+    // Compatibility/unit-test constructor only. Production wiring must use Spring-managed checkpoint renewal service.
     public LegacyRegulatedMutationExecutor(
             RegulatedMutationCommandRepository commandRepository,
             MongoTemplate mongoTemplate,
@@ -83,6 +86,40 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
             RegulatedMutationReplayResolver replayResolver,
             RegulatedMutationFencedCommandWriter fencedCommandWriter
     ) {
+        this(
+                commandRepository,
+                mongoTemplate,
+                auditPhaseService,
+                auditDegradationService,
+                metrics,
+                transactionRunner,
+                publicStatusMapper,
+                bankModeFailClosed,
+                claimService,
+                conflictPolicy,
+                replayResolver,
+                fencedCommandWriter,
+                RegulatedMutationCheckpointRenewalService.disabled()
+        );
+    }
+
+    @Autowired
+    // Compatibility/unit-test constructor only. Production wiring must use Spring-managed checkpoint renewal service.
+    public LegacyRegulatedMutationExecutor(
+            RegulatedMutationCommandRepository commandRepository,
+            MongoTemplate mongoTemplate,
+            RegulatedMutationAuditPhaseService auditPhaseService,
+            AuditDegradationService auditDegradationService,
+            AlertServiceMetrics metrics,
+            RegulatedMutationTransactionRunner transactionRunner,
+            RegulatedMutationPublicStatusMapper publicStatusMapper,
+            @Value("${app.audit.bank-mode.fail-closed:false}") boolean bankModeFailClosed,
+            RegulatedMutationClaimService claimService,
+            RegulatedMutationConflictPolicy conflictPolicy,
+            RegulatedMutationReplayResolver replayResolver,
+            RegulatedMutationFencedCommandWriter fencedCommandWriter,
+            RegulatedMutationCheckpointRenewalService checkpointRenewalService
+    ) {
         this.commandRepository = commandRepository;
         this.auditPhaseService = auditPhaseService;
         this.auditDegradationService = auditDegradationService;
@@ -94,6 +131,10 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
         this.conflictPolicy = conflictPolicy;
         this.replayResolver = replayResolver;
         this.fencedCommandWriter = fencedCommandWriter;
+        this.checkpointRenewalService = Objects.requireNonNull(
+                checkpointRenewalService,
+                "FDP-34 production wiring requires checkpoint renewal service."
+        );
     }
 
     @Override
@@ -145,6 +186,7 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
             }
 
             if (!document.isAttemptedAuditRecorded()) {
+                checkpointRenewalService.beforeAttemptedAudit(claimToken, document);
                 writeAttemptedAudit(command, document, claimToken);
             }
             RegulatedMutationCommandDocument claimedDocument = document;
@@ -277,6 +319,7 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
             RegulatedMutationCommandDocument document,
             RegulatedMutationClaimToken claimToken
     ) {
+        checkpointRenewalService.beforeLegacyBusinessCommit(claimToken, document);
         transition(document, claimToken, RegulatedMutationState.BUSINESS_COMMITTING, document.getExecutionStatus(), null);
         fencedCommandWriter.validateActiveLease(
                 claimToken,
@@ -316,6 +359,10 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
                         setFailedAudit(update, document);
                     }
             );
+            throw exception;
+        } catch (RegulatedMutationCheckpointRenewalException
+                 | RegulatedMutationLeaseRenewalException
+                 | StaleRegulatedMutationLeaseException exception) {
             throw exception;
         } catch (RuntimeException exception) {
             auditFailure(command, document, exception, BUSINESS_WRITE_FAILED);
@@ -395,6 +442,7 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
     ) {
         S response = command.responseRestorer().restore(document.getResponseSnapshot());
         try {
+            checkpointRenewalService.beforeSuccessAuditRetry(claimToken, document);
             String auditId = auditPhaseService.recordPhase(document, command.action(), command.resourceType(), AuditOutcome.SUCCESS, null);
             document.setSuccessAuditId(auditId);
             document.setSuccessAuditRecorded(true);
@@ -408,6 +456,10 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
             );
             transition(document, claimToken, RegulatedMutationState.EVIDENCE_PENDING, RegulatedMutationExecutionStatus.COMPLETED, null);
             return new RegulatedMutationResult<>(RegulatedMutationState.EVIDENCE_PENDING, response);
+        } catch (RegulatedMutationCheckpointRenewalException
+                 | RegulatedMutationLeaseRenewalException
+                 | StaleRegulatedMutationLeaseException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             document.setPublicStatus(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE);
             document.setDegradationReason(POST_COMMIT_AUDIT_DEGRADED);
@@ -441,6 +493,7 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
             RegulatedMutationResponseSnapshot pendingSnapshot
     ) {
         try {
+            checkpointRenewalService.beforeSuccessAuditRetry(claimToken, document);
             String auditId = auditPhaseService.recordPhase(document, command.action(), command.resourceType(), AuditOutcome.SUCCESS, null);
             document.setSuccessAuditId(auditId);
             document.setSuccessAuditRecorded(true);
@@ -454,6 +507,10 @@ public class LegacyRegulatedMutationExecutor implements RegulatedMutationExecuto
             );
             transition(document, claimToken, RegulatedMutationState.EVIDENCE_PENDING, RegulatedMutationExecutionStatus.COMPLETED, null);
             return null;
+        } catch (RegulatedMutationCheckpointRenewalException
+                 | RegulatedMutationLeaseRenewalException
+                 | StaleRegulatedMutationLeaseException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             S incompleteResponse = command.responseMapper().response(result, RegulatedMutationState.COMMITTED_DEGRADED);
             RegulatedMutationResponseSnapshot incomplete = command.responseSnapshotter().snapshot(incompleteResponse);
