@@ -398,7 +398,7 @@ class AlertServiceMetricsTest {
         metrics.recordRegulatedMutationCheckpointNoProgress(
                 RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
                 RegulatedMutationRenewalCheckpoint.BEFORE_LEGACY_BUSINESS_COMMIT,
-                "NONE"
+                "NON_RENEWABLE_STATE"
         );
 
         Meter fencedTransition = meterRegistry.get("regulated_mutation_fenced_transition_total").meter();

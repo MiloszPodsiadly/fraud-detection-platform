@@ -1,6 +1,7 @@
 package com.frauddetection.alert.regulated;
 
 import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.audit.AuditDegradationService;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.RegulatedMutationLocalAuditPhaseWriter;
@@ -18,6 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -86,6 +88,138 @@ class RegulatedMutationCheckpointRenewalExecutionTest {
         verify(fixture.localAuditPhaseWriter, never()).recordSuccessPhase(any(), any(), any());
     }
 
+    @Test
+    void legacyCheckpointFailureBeforeSuccessAuditDoesNotBecomeAuditDegradation() {
+        Fixture fixture = new Fixture();
+        RegulatedMutationCommandDocument document = fixture.document(
+                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                RegulatedMutationState.AUDIT_ATTEMPTED
+        );
+        document.setAttemptedAuditRecorded(true);
+        when(fixture.commandRepository.findById("command-1")).thenReturn(Optional.of(document));
+        when(fixture.commandRepository.findByIdempotencyKey("idem-1")).thenReturn(Optional.of(document));
+        when(fixture.claimService.claim(any(), eq("idem-1"))).thenReturn(Optional.of(fixture.token(
+                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                RegulatedMutationState.AUDIT_ATTEMPTED
+        )));
+        when(fixture.replayResolver.resolve(any(), any())).thenReturn(RegulatedMutationReplayDecision.none());
+        when(fixture.checkpointRenewalService.beforeSuccessAuditRetry(any(), any()))
+                .thenThrow(new RegulatedMutationLeaseRenewalBudgetExceededException("command-1"));
+        AtomicInteger businessMutations = new AtomicInteger();
+
+        assertThatThrownBy(() -> fixture.legacyExecutor().execute(command(businessMutations), "idem-1", document))
+                .isInstanceOf(RegulatedMutationLeaseRenewalBudgetExceededException.class);
+
+        assertThat(businessMutations).hasValue(1);
+        verify(fixture.auditPhaseService, never()).recordPhase(any(), any(), any(), eq(AuditOutcome.SUCCESS), any());
+        verify(fixture.auditDegradationService, never()).recordPostCommitDegraded(any(), any(), any(), any(), any());
+        assertThat(document.getState()).isEqualTo(RegulatedMutationState.SUCCESS_AUDIT_PENDING);
+        assertThat(document.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.PROCESSING);
+    }
+
+    @Test
+    void legacyRetryCheckpointFailureDoesNotBecomeAuditDegradation() {
+        Fixture fixture = new Fixture();
+        RegulatedMutationCommandDocument document = fixture.document(
+                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                RegulatedMutationState.SUCCESS_AUDIT_PENDING
+        );
+        document.setResponseSnapshot(snapshot());
+        when(fixture.commandRepository.findById("command-1")).thenReturn(Optional.of(document));
+        when(fixture.commandRepository.findByIdempotencyKey("idem-1")).thenReturn(Optional.of(document));
+        when(fixture.claimService.claim(any(), eq("idem-1"))).thenReturn(Optional.of(fixture.token(
+                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                RegulatedMutationState.SUCCESS_AUDIT_PENDING
+        )));
+        when(fixture.replayResolver.resolve(any(), any())).thenReturn(RegulatedMutationReplayDecision.none());
+        when(fixture.checkpointRenewalService.beforeSuccessAuditRetry(any(), any()))
+                .thenThrow(new RegulatedMutationCheckpointRenewalException(
+                        RegulatedMutationRenewalCheckpoint.BEFORE_SUCCESS_AUDIT_RETRY,
+                        RegulatedMutationLeaseRenewalReason.STALE_OWNER
+                ));
+
+        assertThatThrownBy(() -> fixture.legacyExecutor().execute(command(new AtomicInteger()), "idem-1", document))
+                .isInstanceOf(RegulatedMutationCheckpointRenewalException.class);
+
+        verify(fixture.auditPhaseService, never()).recordPhase(any(), any(), any(), eq(AuditOutcome.SUCCESS), any());
+        verify(fixture.auditDegradationService, never()).recordPostCommitDegraded(any(), any(), any(), any(), any());
+        assertThat(document.getState()).isEqualTo(RegulatedMutationState.SUCCESS_AUDIT_PENDING);
+        assertThat(document.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.PROCESSING);
+    }
+
+    @Test
+    void realSuccessAuditFailureStillRecordsPostCommitDegradation() {
+        Fixture fixture = new Fixture();
+        RegulatedMutationCommandDocument document = fixture.document(
+                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                RegulatedMutationState.AUDIT_ATTEMPTED
+        );
+        document.setAttemptedAuditRecorded(true);
+        when(fixture.commandRepository.findById("command-1")).thenReturn(Optional.of(document));
+        when(fixture.commandRepository.findByIdempotencyKey("idem-1")).thenReturn(Optional.of(document));
+        when(fixture.claimService.claim(any(), eq("idem-1"))).thenReturn(Optional.of(fixture.token(
+                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                RegulatedMutationState.AUDIT_ATTEMPTED
+        )));
+        when(fixture.replayResolver.resolve(any(), any())).thenReturn(RegulatedMutationReplayDecision.none());
+        when(fixture.auditPhaseService.recordPhase(any(), any(), any(), eq(AuditOutcome.SUCCESS), isNull()))
+                .thenThrow(new IllegalStateException("audit store unavailable"));
+
+        RegulatedMutationResult<String> result = fixture.legacyExecutor().execute(command(new AtomicInteger()), "idem-1", document);
+
+        assertThat(result.state()).isEqualTo(RegulatedMutationState.COMMITTED_DEGRADED);
+        assertThat(document.getState()).isEqualTo(RegulatedMutationState.COMMITTED_DEGRADED);
+        assertThat(document.getDegradationReason()).isEqualTo("POST_COMMIT_AUDIT_DEGRADED");
+        verify(fixture.auditDegradationService).recordPostCommitDegraded(
+                eq(AuditAction.SUBMIT_ANALYST_DECISION),
+                eq(AuditResourceType.ALERT),
+                eq("alert-1"),
+                eq("POST_COMMIT_AUDIT_DEGRADED"),
+                eq("command-1")
+        );
+    }
+
+    @Test
+    void productionExecutorsRejectMissingCheckpointRenewalService() {
+        Fixture fixture = new Fixture();
+
+        assertThatThrownBy(() -> new LegacyRegulatedMutationExecutor(
+                fixture.commandRepository,
+                fixture.mongoTemplate,
+                fixture.auditPhaseService,
+                fixture.auditDegradationService,
+                fixture.metrics,
+                new RegulatedMutationTransactionRunner(RegulatedMutationTransactionMode.OFF, null),
+                new RegulatedMutationPublicStatusMapper(),
+                false,
+                fixture.claimService,
+                new RegulatedMutationConflictPolicy(),
+                fixture.replayResolver,
+                fixture.fencedCommandWriter,
+                null
+        ))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessageContaining("production wiring requires checkpoint renewal service");
+
+        assertThatThrownBy(() -> new EvidenceGatedFinalizeExecutor(
+                fixture.commandRepository,
+                fixture.mongoTemplate,
+                fixture.auditPhaseService,
+                fixture.metrics,
+                new RegulatedMutationTransactionRunner(RegulatedMutationTransactionMode.REQUIRED, null),
+                new RegulatedMutationPublicStatusMapper(),
+                fixture.evidencePreconditionEvaluator,
+                fixture.localAuditPhaseWriter,
+                fixture.claimService,
+                new RegulatedMutationConflictPolicy(),
+                fixture.replayResolver,
+                fixture.fencedCommandWriter,
+                null
+        ))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessageContaining("production wiring requires checkpoint renewal service");
+    }
+
     private RegulatedMutationCommand<String, String> command(AtomicInteger businessMutations) {
         return new RegulatedMutationCommand<>(
                 "idem-1",
@@ -117,6 +251,7 @@ class RegulatedMutationCheckpointRenewalExecutionTest {
         private final RegulatedMutationCommandRepository commandRepository = mock(RegulatedMutationCommandRepository.class);
         private final MongoTemplate mongoTemplate = mock(MongoTemplate.class);
         private final RegulatedMutationAuditPhaseService auditPhaseService = mock(RegulatedMutationAuditPhaseService.class);
+        private final AuditDegradationService auditDegradationService = mock(AuditDegradationService.class);
         private final AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
         private final RegulatedMutationClaimService claimService = mock(RegulatedMutationClaimService.class);
         private final RegulatedMutationReplayResolver replayResolver = mock(RegulatedMutationReplayResolver.class);
@@ -131,7 +266,7 @@ class RegulatedMutationCheckpointRenewalExecutionTest {
                     commandRepository,
                     mongoTemplate,
                     auditPhaseService,
-                    mock(com.frauddetection.alert.audit.AuditDegradationService.class),
+                    auditDegradationService,
                     metrics,
                     new RegulatedMutationTransactionRunner(RegulatedMutationTransactionMode.OFF, null),
                     new RegulatedMutationPublicStatusMapper(),
@@ -193,5 +328,16 @@ class RegulatedMutationCheckpointRenewalExecutionTest {
                     RegulatedMutationExecutionStatus.PROCESSING
             );
         }
+    }
+
+    private RegulatedMutationResponseSnapshot snapshot() {
+        return new RegulatedMutationResponseSnapshot(
+                "alert-1",
+                null,
+                null,
+                "event-1",
+                Instant.parse("2026-05-05T08:00:00Z"),
+                null
+        );
     }
 }

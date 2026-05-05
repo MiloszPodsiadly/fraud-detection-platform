@@ -53,6 +53,7 @@ class RegulatedMutationCheckpointRenewalServiceTest {
                 .tag("outcome", "RENEWED")
                 .counter()
                 .count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.find("regulated_mutation_checkpoint_no_progress_total").counter()).isNull();
     }
 
     @Test
@@ -66,6 +67,11 @@ class RegulatedMutationCheckpointRenewalServiceTest {
 
         verifyNoInteractions(leaseRenewalService);
         assertThat(meterRegistry.get("regulated_mutation_checkpoint_renewal_blocked_total")
+                .tag("checkpoint", "BEFORE_LEGACY_BUSINESS_COMMIT")
+                .tag("reason", "NON_RENEWABLE_STATE")
+                .counter()
+                .count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.get("regulated_mutation_checkpoint_no_progress_total")
                 .tag("checkpoint", "BEFORE_LEGACY_BUSINESS_COMMIT")
                 .tag("reason", "NON_RENEWABLE_STATE")
                 .counter()
@@ -85,6 +91,11 @@ class RegulatedMutationCheckpointRenewalServiceTest {
         assertThat(meterRegistry.get("regulated_mutation_checkpoint_renewal_total")
                 .tag("checkpoint", "BEFORE_LEGACY_BUSINESS_COMMIT")
                 .tag("outcome", "FAILED")
+                .tag("reason", "BUDGET_EXCEEDED")
+                .counter()
+                .count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.get("regulated_mutation_checkpoint_no_progress_total")
+                .tag("checkpoint", "BEFORE_LEGACY_BUSINESS_COMMIT")
                 .tag("reason", "BUDGET_EXCEEDED")
                 .counter()
                 .count()).isEqualTo(1.0d);

@@ -15,9 +15,6 @@ class RegulatedMutationSafeCheckpointPolicyTest {
                 RegulatedMutationRenewalCheckpoint.BEFORE_ATTEMPTED_AUDIT);
         assertAllowed(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
                 RegulatedMutationState.AUDIT_ATTEMPTED,
-                RegulatedMutationRenewalCheckpoint.AFTER_ATTEMPTED_AUDIT);
-        assertAllowed(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.AUDIT_ATTEMPTED,
                 RegulatedMutationRenewalCheckpoint.BEFORE_LEGACY_BUSINESS_COMMIT);
         assertAllowed(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
                 RegulatedMutationState.BUSINESS_COMMITTING,
@@ -73,6 +70,49 @@ class RegulatedMutationSafeCheckpointPolicyTest {
                 RegulatedMutationExecutionStatus.COMPLETED,
                 RegulatedMutationRenewalCheckpoint.BEFORE_LEGACY_BUSINESS_COMMIT,
                 RegulatedMutationLeaseRenewalReason.EXECUTION_STATUS_MISMATCH);
+    }
+
+    @Test
+    void rejectsCriticalRecoveryAndTerminalStatesBeforeRenewableLookingPairs() {
+        assertRejected(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
+                RegulatedMutationExecutionStatus.PROCESSING,
+                RegulatedMutationRenewalCheckpoint.BEFORE_EVIDENCE_GATED_FINALIZE,
+                RegulatedMutationLeaseRenewalReason.RECOVERY_STATE);
+        assertRejected(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
+                RegulatedMutationExecutionStatus.RECOVERY_REQUIRED,
+                RegulatedMutationRenewalCheckpoint.BEFORE_EVIDENCE_GATED_FINALIZE,
+                RegulatedMutationLeaseRenewalReason.RECOVERY_STATE);
+        assertRejected(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                RegulatedMutationState.AUDIT_ATTEMPTED,
+                RegulatedMutationExecutionStatus.RECOVERY_REQUIRED,
+                RegulatedMutationRenewalCheckpoint.BEFORE_LEGACY_BUSINESS_COMMIT,
+                RegulatedMutationLeaseRenewalReason.RECOVERY_STATE);
+        assertRejected(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.FINALIZED_VISIBLE,
+                RegulatedMutationExecutionStatus.PROCESSING,
+                RegulatedMutationRenewalCheckpoint.BEFORE_EVIDENCE_GATED_FINALIZE,
+                RegulatedMutationLeaseRenewalReason.TERMINAL_STATE);
+        assertRejected(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                RegulatedMutationExecutionStatus.PROCESSING,
+                RegulatedMutationRenewalCheckpoint.BEFORE_EVIDENCE_GATED_FINALIZE,
+                RegulatedMutationLeaseRenewalReason.TERMINAL_STATE);
+        assertRejected(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                RegulatedMutationState.COMMITTED_DEGRADED,
+                RegulatedMutationExecutionStatus.PROCESSING,
+                RegulatedMutationRenewalCheckpoint.BEFORE_SUCCESS_AUDIT_RETRY,
+                RegulatedMutationLeaseRenewalReason.TERMINAL_STATE);
+    }
+
+    @Test
+    void nullCheckpointIsUnsupportedCheckpoint() {
+        assertRejected(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                RegulatedMutationState.REQUESTED,
+                RegulatedMutationExecutionStatus.PROCESSING,
+                null,
+                RegulatedMutationLeaseRenewalReason.UNSUPPORTED_CHECKPOINT);
     }
 
     @Test

@@ -36,6 +36,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -214,7 +215,222 @@ class RegulatedMutationStaleWorkerExecutorIntegrationTest extends AbstractIntegr
         assertThat(persisted.isSuccessAuditRecorded()).isTrue();
     }
 
+    @Test
+    void legacyCheckpointRenewalCompletesThroughRealMongoExecutorPath() {
+        commandRepository.save(commandDocument(
+                "idem-legacy-checkpoint-ok",
+                "alert-legacy-checkpoint-ok",
+                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION
+        ));
+        alertRepository.save(alert("alert-legacy-checkpoint-ok"));
+        AtomicInteger businessMutations = new AtomicInteger();
+
+        RegulatedMutationResult<String> result = legacyExecutor(
+                new RegulatedMutationFencedCommandWriter(mongoTemplate, metrics),
+                checkpointRenewalService(3)
+        ).execute(
+                command("idem-legacy-checkpoint-ok", "alert-legacy-checkpoint-ok", businessMutations),
+                "idem-legacy-checkpoint-ok",
+                commandRepository.findByIdempotencyKey("idem-legacy-checkpoint-ok").orElseThrow()
+        );
+
+        RegulatedMutationCommandDocument persisted = commandRepository.findByIdempotencyKey("idem-legacy-checkpoint-ok")
+                .orElseThrow();
+        assertThat(result.state()).isEqualTo(RegulatedMutationState.EVIDENCE_PENDING);
+        assertThat(businessMutations).hasValue(1);
+        assertThat(persisted.leaseRenewalCountOrZero()).isGreaterThanOrEqualTo(1);
+        assertThat(persisted.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.COMPLETED);
+        assertThat(persisted.getResponseSnapshot()).isNotNull();
+        assertThat(persisted.getOutboxEventId()).isNotNull();
+        assertThat(persisted.getLocalCommitMarker()).isEqualTo("LOCAL_COMMITTED");
+        assertThat(persisted.isSuccessAuditRecorded()).isTrue();
+    }
+
+    @Test
+    void legacyCheckpointBudgetExceededStopsBeforeBusinessMutationThroughRealMongoExecutorPath() {
+        commandRepository.save(commandDocument(
+                "idem-legacy-checkpoint-budget",
+                "alert-legacy-checkpoint-budget",
+                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION
+        ));
+        alertRepository.save(alert("alert-legacy-checkpoint-budget"));
+        AtomicInteger businessMutations = new AtomicInteger();
+
+        assertThatThrownBy(() -> legacyExecutor(
+                new RegulatedMutationFencedCommandWriter(mongoTemplate, metrics),
+                checkpointRenewalService(0)
+        ).execute(
+                command("idem-legacy-checkpoint-budget", "alert-legacy-checkpoint-budget", businessMutations),
+                "idem-legacy-checkpoint-budget",
+                commandRepository.findByIdempotencyKey("idem-legacy-checkpoint-budget").orElseThrow()
+        )).isInstanceOf(RegulatedMutationLeaseRenewalBudgetExceededException.class);
+
+        RegulatedMutationCommandDocument persisted = commandRepository.findByIdempotencyKey("idem-legacy-checkpoint-budget")
+                .orElseThrow();
+        AlertDocument alert = alertRepository.findById("alert-legacy-checkpoint-budget").orElseThrow();
+        assertThat(businessMutations).hasValue(0);
+        assertThat(alert.getAnalystDecision()).isNull();
+        assertThat(persisted.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
+        assertThat(persisted.getDegradationReason()).isEqualTo(RegulatedMutationLeaseRenewalFailureHandler.BUDGET_EXCEEDED_REASON);
+        assertThat(persisted.getResponseSnapshot()).isNull();
+        assertThat(persisted.getOutboxEventId()).isNull();
+        assertThat(persisted.getLocalCommitMarker()).isNull();
+        assertThat(persisted.isSuccessAuditRecorded()).isFalse();
+    }
+
+    @Test
+    void legacyCheckpointStaleOwnerStopsBeforeBusinessMutationThroughRealMongoExecutorPath() {
+        commandRepository.save(commandDocument(
+                "idem-legacy-checkpoint-stale",
+                "alert-legacy-checkpoint-stale",
+                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION
+        ));
+        alertRepository.save(alert("alert-legacy-checkpoint-stale"));
+        AtomicInteger businessMutations = new AtomicInteger();
+        RegulatedMutationCommand<AlertDocument, String> command = command(
+                "idem-legacy-checkpoint-stale",
+                "alert-legacy-checkpoint-stale",
+                businessMutations
+        );
+        TakeoverAfterTransitionWriter writer = new TakeoverAfterTransitionWriter(mongoTemplate, metrics);
+        writer.afterLegacyAttemptedTransition(() -> takeOverLease(command, "idem-legacy-checkpoint-stale"));
+
+        RegulatedMutationResult<String> result = legacyExecutor(writer, checkpointRenewalService(3)).execute(
+                command,
+                "idem-legacy-checkpoint-stale",
+                commandRepository.findByIdempotencyKey("idem-legacy-checkpoint-stale").orElseThrow()
+        );
+
+        RegulatedMutationCommandDocument persisted = commandRepository.findByIdempotencyKey("idem-legacy-checkpoint-stale")
+                .orElseThrow();
+        AlertDocument alert = alertRepository.findById("alert-legacy-checkpoint-stale").orElseThrow();
+        assertThat(result.state()).isEqualTo(RegulatedMutationState.AUDIT_ATTEMPTED);
+        assertThat(businessMutations).hasValue(0);
+        assertThat(alert.getAnalystDecision()).isNull();
+        assertThat(persisted.getState()).isEqualTo(RegulatedMutationState.AUDIT_ATTEMPTED);
+        assertThat(persisted.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.PROCESSING);
+        assertThat(persisted.getResponseSnapshot()).isNull();
+        assertThat(persisted.getOutboxEventId()).isNull();
+        assertThat(persisted.getLocalCommitMarker()).isNull();
+        assertThat(persisted.isSuccessAuditRecorded()).isFalse();
+    }
+
+    @Test
+    void evidenceGatedCheckpointRenewalCompletesFinalizeThroughRealMongoExecutorPath() {
+        commandRepository.save(commandDocument(
+                "idem-fdp29-checkpoint-ok",
+                "alert-fdp29-checkpoint-ok",
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
+        ));
+        alertRepository.save(alert("alert-fdp29-checkpoint-ok"));
+        AtomicInteger businessMutations = new AtomicInteger();
+
+        RegulatedMutationResult<String> result = evidenceExecutor(
+                new RegulatedMutationFencedCommandWriter(mongoTemplate, metrics),
+                checkpointRenewalService(3)
+        ).execute(
+                command("idem-fdp29-checkpoint-ok", "alert-fdp29-checkpoint-ok", businessMutations,
+                        RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1),
+                "idem-fdp29-checkpoint-ok",
+                commandRepository.findByIdempotencyKey("idem-fdp29-checkpoint-ok").orElseThrow()
+        );
+
+        RegulatedMutationCommandDocument persisted = commandRepository.findByIdempotencyKey("idem-fdp29-checkpoint-ok")
+                .orElseThrow();
+        assertThat(result.state()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
+        assertThat(businessMutations).hasValue(1);
+        assertThat(persisted.leaseRenewalCountOrZero()).isGreaterThanOrEqualTo(1);
+        assertThat(persisted.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.COMPLETED);
+        assertThat(persisted.getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
+        assertThat(persisted.getResponseSnapshot()).isNotNull();
+        assertThat(persisted.getOutboxEventId()).isNotNull();
+        assertThat(persisted.getLocalCommitMarker()).isEqualTo("EVIDENCE_GATED_FINALIZED");
+        assertThat(persisted.isSuccessAuditRecorded()).isTrue();
+    }
+
+    @Test
+    void evidenceGatedCheckpointBudgetExceededStopsBeforeFinalizeMutationThroughRealMongoExecutorPath() {
+        commandRepository.save(commandDocument(
+                "idem-fdp29-checkpoint-budget",
+                "alert-fdp29-checkpoint-budget",
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
+        ));
+        alertRepository.save(alert("alert-fdp29-checkpoint-budget"));
+        AtomicInteger businessMutations = new AtomicInteger();
+
+        assertThatThrownBy(() -> evidenceExecutor(
+                new RegulatedMutationFencedCommandWriter(mongoTemplate, metrics),
+                checkpointRenewalService(0)
+        ).execute(
+                command("idem-fdp29-checkpoint-budget", "alert-fdp29-checkpoint-budget", businessMutations,
+                        RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1),
+                "idem-fdp29-checkpoint-budget",
+                commandRepository.findByIdempotencyKey("idem-fdp29-checkpoint-budget").orElseThrow()
+        )).isInstanceOf(RegulatedMutationLeaseRenewalBudgetExceededException.class);
+
+        RegulatedMutationCommandDocument persisted = commandRepository.findByIdempotencyKey("idem-fdp29-checkpoint-budget")
+                .orElseThrow();
+        AlertDocument alert = alertRepository.findById("alert-fdp29-checkpoint-budget").orElseThrow();
+        assertThat(businessMutations).hasValue(0);
+        assertThat(alert.getAnalystDecision()).isNull();
+        assertThat(persisted.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(persisted.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
+        assertThat(persisted.getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(persisted.getDegradationReason()).isEqualTo(RegulatedMutationLeaseRenewalFailureHandler.BUDGET_EXCEEDED_REASON);
+        assertThat(persisted.getResponseSnapshot()).isNull();
+        assertThat(persisted.getOutboxEventId()).isNull();
+        assertThat(persisted.getLocalCommitMarker()).isNull();
+        assertThat(persisted.isSuccessAuditRecorded()).isFalse();
+        verify(localAuditPhaseWriter, never()).recordSuccessPhase(any(), any(), any());
+    }
+
+    @Test
+    void evidenceGatedCheckpointStaleOwnerStopsBeforeFinalizeMutationThroughRealMongoExecutorPath() {
+        commandRepository.save(commandDocument(
+                "idem-fdp29-checkpoint-stale",
+                "alert-fdp29-checkpoint-stale",
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
+        ));
+        alertRepository.save(alert("alert-fdp29-checkpoint-stale"));
+        AtomicInteger businessMutations = new AtomicInteger();
+        RegulatedMutationCommand<AlertDocument, String> command = command(
+                "idem-fdp29-checkpoint-stale",
+                "alert-fdp29-checkpoint-stale",
+                businessMutations,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
+        );
+        TakeoverAfterTransitionWriter writer = new TakeoverAfterTransitionWriter(mongoTemplate, metrics);
+        writer.afterEvidencePrepared(() -> takeOverLease(command, "idem-fdp29-checkpoint-stale"));
+
+        RegulatedMutationResult<String> result = evidenceExecutor(writer, checkpointRenewalService(3)).execute(
+                command,
+                "idem-fdp29-checkpoint-stale",
+                commandRepository.findByIdempotencyKey("idem-fdp29-checkpoint-stale").orElseThrow()
+        );
+
+        RegulatedMutationCommandDocument persisted = commandRepository.findByIdempotencyKey("idem-fdp29-checkpoint-stale")
+                .orElseThrow();
+        AlertDocument alert = alertRepository.findById("alert-fdp29-checkpoint-stale").orElseThrow();
+        assertThat(result.state()).isEqualTo(RegulatedMutationState.EVIDENCE_PREPARED);
+        assertThat(businessMutations).hasValue(0);
+        assertThat(alert.getAnalystDecision()).isNull();
+        assertThat(persisted.getState()).isEqualTo(RegulatedMutationState.EVIDENCE_PREPARED);
+        assertThat(persisted.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.PROCESSING);
+        assertThat(persisted.getResponseSnapshot()).isNull();
+        assertThat(persisted.getOutboxEventId()).isNull();
+        assertThat(persisted.getLocalCommitMarker()).isNull();
+        assertThat(persisted.isSuccessAuditRecorded()).isFalse();
+        verify(localAuditPhaseWriter, never()).recordSuccessPhase(any(), any(), any());
+    }
+
     private LegacyRegulatedMutationExecutor legacyExecutor(RegulatedMutationFencedCommandWriter writer) {
+        return legacyExecutor(writer, RegulatedMutationCheckpointRenewalService.disabled());
+    }
+
+    private LegacyRegulatedMutationExecutor legacyExecutor(
+            RegulatedMutationFencedCommandWriter writer,
+            RegulatedMutationCheckpointRenewalService checkpointRenewalService
+    ) {
         return new LegacyRegulatedMutationExecutor(
                 commandRepository,
                 mongoTemplate,
@@ -227,11 +443,19 @@ class RegulatedMutationStaleWorkerExecutorIntegrationTest extends AbstractIntegr
                 claimService,
                 new RegulatedMutationConflictPolicy(),
                 new RegulatedMutationReplayResolver(replayPolicyRegistry(true)),
-                writer
+                writer,
+                checkpointRenewalService
         );
     }
 
     private EvidenceGatedFinalizeExecutor evidenceExecutor(RegulatedMutationFencedCommandWriter writer) {
+        return evidenceExecutor(writer, RegulatedMutationCheckpointRenewalService.disabled());
+    }
+
+    private EvidenceGatedFinalizeExecutor evidenceExecutor(
+            RegulatedMutationFencedCommandWriter writer,
+            RegulatedMutationCheckpointRenewalService checkpointRenewalService
+    ) {
         return new EvidenceGatedFinalizeExecutor(
                 commandRepository,
                 mongoTemplate,
@@ -244,7 +468,32 @@ class RegulatedMutationStaleWorkerExecutorIntegrationTest extends AbstractIntegr
                 claimService,
                 new RegulatedMutationConflictPolicy(),
                 new RegulatedMutationReplayResolver(replayPolicyRegistry(true)),
-                writer
+                writer,
+                checkpointRenewalService
+        );
+    }
+
+    private RegulatedMutationCheckpointRenewalService checkpointRenewalService(int maxRenewalCount) {
+        RegulatedMutationLeaseRenewalPolicy policy = new RegulatedMutationLeaseRenewalPolicy(
+                Duration.ofMillis(900),
+                Duration.ofSeconds(3),
+                maxRenewalCount
+        );
+        return new RegulatedMutationCheckpointRenewalService(
+                new RegulatedMutationSafeCheckpointPolicy(),
+                new RegulatedMutationLeaseRenewalService(
+                        mongoTemplate,
+                        policy,
+                        new RegulatedMutationLeaseRenewalFailureHandler(
+                                mongoTemplate,
+                                policy,
+                                new RegulatedMutationPublicStatusMapper()
+                        ),
+                        metrics
+                ),
+                metrics,
+                Duration.ofMillis(900),
+                java.time.Clock.systemUTC()
         );
     }
 
@@ -261,7 +510,7 @@ class RegulatedMutationStaleWorkerExecutorIntegrationTest extends AbstractIntegr
 
     private void takeOverLease(RegulatedMutationCommand<AlertDocument, String> command, String idempotencyKey) {
         try {
-            Thread.sleep(650);
+            Thread.sleep(1050);
             assertThat(claimService.claim(command, idempotencyKey)).isPresent();
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
@@ -368,7 +617,11 @@ class RegulatedMutationStaleWorkerExecutorIntegrationTest extends AbstractIntegr
     }
 
     private static final class TakeoverAfterTransitionWriter extends RegulatedMutationFencedCommandWriter {
+        private Runnable afterLegacyAttemptedTransition = () -> {
+        };
         private Runnable afterBusinessCommitting = () -> {
+        };
+        private Runnable afterEvidencePrepared = () -> {
         };
         private Runnable afterFinalizing = () -> {
         };
@@ -377,8 +630,16 @@ class RegulatedMutationStaleWorkerExecutorIntegrationTest extends AbstractIntegr
             super(mongoTemplate, metrics);
         }
 
+        private void afterLegacyAttemptedTransition(Runnable callback) {
+            this.afterLegacyAttemptedTransition = callback;
+        }
+
         private void afterBusinessCommitting(Runnable callback) {
             this.afterBusinessCommitting = callback;
+        }
+
+        private void afterEvidencePrepared(Runnable callback) {
+            this.afterEvidencePrepared = callback;
         }
 
         private void afterFinalizing(Runnable callback) {
@@ -404,8 +665,14 @@ class RegulatedMutationStaleWorkerExecutorIntegrationTest extends AbstractIntegr
                     lastError,
                     allowedFieldUpdates
             );
+            if (newState == RegulatedMutationState.AUDIT_ATTEMPTED) {
+                afterLegacyAttemptedTransition.run();
+            }
             if (newState == RegulatedMutationState.BUSINESS_COMMITTING) {
                 afterBusinessCommitting.run();
+            }
+            if (newState == RegulatedMutationState.EVIDENCE_PREPARED) {
+                afterEvidencePrepared.run();
             }
             if (newState == RegulatedMutationState.FINALIZING) {
                 afterFinalizing.run();
