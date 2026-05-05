@@ -9,11 +9,13 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.time.Instant;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -52,6 +54,10 @@ class RegulatedMutationRecoveryControllerTest {
                 .andExpect(jsonPath("$.execution_status").value("PROCESSING"))
                 .andExpect(jsonPath("$.lease_expires_at").exists())
                 .andExpect(jsonPath("$.lease_renewal_count").value(1))
+                .andExpect(jsonPath("$.lease_owner").doesNotExist())
+                .andExpect(jsonPath("$.lease_owner_present").value(true))
+                .andExpect(jsonPath("$.lease_owner_hash").exists())
+                .andExpect(jsonPath("$.lease_owner_hash").value(not("owner-1")))
                 .andExpect(jsonPath("$.degradation_reason").value("LONG_RUNNING_PROCESSING"))
                 .andExpect(jsonPath("$.idempotency_key_masked").value("idem-l...ning"))
                 .andExpect(jsonPath("$.idempotency_key_masked").value(not("idem-long-running")));
@@ -90,6 +96,48 @@ class RegulatedMutationRecoveryControllerTest {
                 .andExpect(jsonPath("$.response_snapshot_present").value(false))
                 .andExpect(jsonPath("$.attempted_audit_id").doesNotExist())
                 .andExpect(jsonPath("$.success_audit_id").doesNotExist());
+    }
+
+    @Test
+    void inspectionEndpointNeverReturnsRawSensitiveFieldsOrExceptionText() throws Exception {
+        RegulatedMutationRecoveryService service = mock(RegulatedMutationRecoveryService.class);
+        when(service.inspect("idem-sensitive")).thenReturn(new RegulatedMutationCommandInspectionResponse(
+                "raw-request-hash-must-not-appear",
+                "idem-s...tive",
+                "SUBMIT_ANALYST_DECISION",
+                "ALERT",
+                "alert-sensitive",
+                "BUSINESS_COMMITTING",
+                "RECOVERY_REQUIRED",
+                "raw-owner-sensitive",
+                Instant.parse("2026-05-05T18:15:00Z"),
+                2,
+                true,
+                "attempted-audit",
+                null,
+                null,
+                "RECOVERY_REQUIRED",
+                "raw exception at /api/v1/regulated-mutations token=secret",
+                Instant.parse("2026-05-05T18:00:00Z")
+        ));
+
+        mockMvc(service)
+                .perform(get("/api/v1/regulated-mutations/idem-sensitive")
+                        .principal(new TestingAuthenticationToken("ops-admin", "n/a", "FRAUD_OPS_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.idempotency_key").doesNotExist())
+                .andExpect(jsonPath("$.request_hash").doesNotExist())
+                .andExpect(jsonPath("$.intent_hash").doesNotExist())
+                .andExpect(jsonPath("$.payload_hash").doesNotExist())
+                .andExpect(jsonPath("$.lease_owner").doesNotExist())
+                .andExpect(jsonPath("$.lease_owner_present").value(true))
+                .andExpect(jsonPath("$.lease_owner_hash").exists())
+                .andExpect(jsonPath("$.lease_owner_hash").value(not("raw-owner-sensitive")))
+                .andExpect(jsonPath("$.last_error").doesNotExist())
+                .andExpect(jsonPath("$.last_error_code").value("UNSAFE_ERROR_REDACTED"))
+                .andExpect(content().string(not(containsString("raw exception"))))
+                .andExpect(content().string(not(containsString("/api/v1"))))
+                .andExpect(content().string(not(containsString("token=secret"))));
     }
 
     private MockMvc mockMvc(RegulatedMutationRecoveryService service) {

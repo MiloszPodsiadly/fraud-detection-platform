@@ -850,24 +850,89 @@ class RegulatedMutationArchitectureTest {
 
     @Test
     void fdp35DocsMustPreserveProofOnlyLowCardinalityClaims() throws Exception {
-        String combined = Files.readString(Path.of("../docs/architecture/FDP-35-production-readiness-chaos-recovery-proof.md"))
-                + Files.readString(Path.of("../docs/FDP-35-merge-gate.md"))
-                + Files.readString(Path.of("../docs/testing/FDP-35-e2e-and-chaos-test-plan.md"))
-                + Files.readString(Path.of("../docs/testing/FDP-35-regression-proof-matrix.md"))
-                + Files.readString(Path.of("../docs/observability/FDP-35-regulated-mutation-dashboard-spec.md"))
-                + Files.readString(Path.of("../docs/observability/FDP-35-regulated-mutation-alert-thresholds.md"))
-                + Files.readString(Path.of("../docs/runbooks/FDP-35-regulated-mutation-recovery-drill.md"))
-                + Files.readString(Path.of("../docs/operations/FDP-35-regulated-mutation-rollback-plan.md"));
+        String combined = combinedFdp35Docs();
 
-        assertThat(combined).contains("production-readiness proof branch");
-        assertThat(combined).contains("modeled restart/recovery proof");
-        assertThat(combined).contains("not a real OS process termination test");
-        assertThat(combined).contains("No new public API statuses");
-        assertThat(combined).contains("Checkpoint renewal must not be treated as business progress");
-        assertThat(combined).contains("Do not include commandId, alertId, actorId, leaseOwner, idempotencyKey, requestHash, resourceId");
-        assertThat(combined).doesNotContain("kill -9 chaos proof");
-        assertThat(combined).doesNotContain("fully production ready");
-        assertThat(combined).doesNotContain("external finality guaranteed");
+        assertContainsRequiredFdp35Wording(combined);
+        assertDoesNotContainForbiddenClaims(
+                combined,
+                "Production enabled.",
+                "Bank certified.",
+                "Real process-kill chaos proven.",
+                "External finality proven.",
+                "Distributed ACID achieved.",
+                "kill -9 chaos proof",
+                "fully production ready",
+                "external finality guaranteed"
+        );
+        assertThat(combined).contains("Do not include command id, alert id, actor id, lease owner, idempotency key, request hash, resource id");
+    }
+
+    @Test
+    void fdp35InspectionResponseMustNotExposeUnsafeFields() throws Exception {
+        String response = readMainSource("regulated/RegulatedMutationCommandInspectionResponse.java");
+
+        assertInspectionDtoDoesNotExposeUnsafeFields(response);
+    }
+
+    @Test
+    void fdp35CiMustBlockReadinessAndRegressionJobs() throws Exception {
+        String ci = Files.readString(Path.of("../.github/workflows/ci.yml"));
+
+        assertCiJobContainsRequiredTestGroups(ci);
+    }
+
+    @Test
+    void fdp35DocsMustNotUsePlaceholderOutput() throws Exception {
+        assertThat(combinedFdp35Docs())
+                .doesNotContain("TBD")
+                .doesNotContain("TODO")
+                .doesNotContain("Tests run: X")
+                .doesNotContain("Failures: X")
+                .doesNotContain("paste fake")
+                .doesNotContain("Paste CI output here");
+    }
+
+    @Test
+    void fdp35DashboardThresholdsMustUseConcreteValues() throws Exception {
+        String thresholds = readDoc("observability/FDP-35-regulated-mutation-alert-thresholds.md");
+        String dashboard = readDoc("observability/FDP-35-regulated-mutation-dashboard-spec.md");
+
+        assertThat(thresholds)
+                .contains("P1")
+                .contains("P2")
+                .contains("> 0")
+                .contains(">= 3")
+                .contains("5 minutes")
+                .contains("10 minutes")
+                .contains("15 minutes")
+                .contains("30 minutes");
+        assertThat(dashboard)
+                .contains("Threshold overlays")
+                .contains("FDP-35-regulated-mutation-alert-thresholds.md");
+    }
+
+    @Test
+    void fdp35ProofMatrixMustMapExactTestMethods() throws Exception {
+        String matrix = readDoc("testing/FDP-35-regression-proof-matrix.md");
+
+        assertThat(matrix)
+                .contains("FDP-35 must prove readiness, not claim enablement.")
+                .contains("EvidenceGatedFinalizeCoordinatorIntegrationTest` | `shouldFinalizeSubmitDecisionThroughRealMongoCoordinatorPath")
+                .contains("EvidenceGatedFinalizeCoordinatorTest` | `shouldNotReplayStaleCommittedSnapshotWhenFinalizeRecoveryRequired")
+                .contains("RegulatedMutationLeaseFencingIntegrationTest` | `expiredLeaseCanBeTakenOverAndStaleWorkerCannotWriteAfterTakeover")
+                .contains("RegulatedMutationLeaseRenewalIntegrationTest` | `concurrentRenewalAtLastAllowedSlotAllowsOnlyOneSuccess")
+                .contains("RegulatedMutationStaleWorkerExecutorIntegrationTest` | `legacyCheckpointBudgetExceededStopsBeforeBusinessMutationThroughRealMongoExecutorPath")
+                .contains("RegulatedMutationRestartRecoveryProofTest` | `crashAfterFdp29LocalCommitBeforeExternalConfirmationDoesNotClaimConfirmedFinality")
+                .contains("AlertControllerTest` | `budgetExceededRecovery_mustNotReturnCommittedSuccess")
+                .contains("RegulatedMutationRecoveryControllerTest` | `inspectionEndpointNeverReturnsRawSensitiveFieldsOrExceptionText")
+                .contains("RegulatedMutationRollbackReadinessTest` | `rollbackKeepsRecoveryCommandsVisible");
+        assertThat(matrix)
+                .doesNotContain("recovery/finalize replay tests")
+                .doesNotContain("rollback failure tests")
+                .doesNotContain("local audit tests")
+                .doesNotContain("heartbeat/renewal guards")
+                .doesNotContain("recovery API tests")
+                .doesNotContain("rollback tests/docs");
     }
 
     private List<String> enumValues(String source) {
@@ -878,6 +943,77 @@ class RegulatedMutationArchitectureTest {
                 .filter(value -> !value.isBlank())
                 .map(value -> value.replaceAll("[;\\s].*", ""))
                 .toList();
+    }
+
+    private String readMainSource(String relativePath) throws Exception {
+        return Files.readString(Path.of("src/main/java/com/frauddetection/alert/" + relativePath));
+    }
+
+    private String readDoc(String relativePath) throws Exception {
+        return Files.readString(Path.of("../docs/" + relativePath));
+    }
+
+    private String combinedFdp35Docs() throws Exception {
+        return readDoc("architecture/FDP-35-production-readiness-chaos-recovery-proof.md")
+                + readDoc("FDP-35-merge-gate.md")
+                + readDoc("testing/FDP-35-e2e-and-chaos-test-plan.md")
+                + readDoc("testing/FDP-35-regression-proof-matrix.md")
+                + readDoc("observability/FDP-35-regulated-mutation-dashboard-spec.md")
+                + readDoc("observability/FDP-35-regulated-mutation-alert-thresholds.md")
+                + readDoc("runbooks/FDP-35-regulated-mutation-recovery-drill.md")
+                + readDoc("runbooks/FDP-35-regulated-mutation-recovery-drill-runbook.md")
+                + readDoc("operations/FDP-35-regulated-mutation-rollback-plan.md");
+    }
+
+    private void assertDoesNotContainForbiddenClaims(String source, String... forbiddenClaims) {
+        String normalized = source.toLowerCase();
+        for (String forbiddenClaim : forbiddenClaims) {
+            assertThat(normalized)
+                    .as("forbidden FDP-35 claim must be absent: " + forbiddenClaim)
+                    .doesNotContain(forbiddenClaim.toLowerCase());
+        }
+    }
+
+    private void assertContainsRequiredFdp35Wording(String source) {
+        assertThat(source)
+                .contains("production-readiness proof branch")
+                .contains("modeled restart/recovery proof")
+                .contains("not a real OS process termination test")
+                .contains("No new public API statuses")
+                .contains("Checkpoint renewal must not be treated as business progress")
+                .contains("FDP-35 must prove readiness, not claim enablement.")
+                .contains("Modeled restart/recovery, controller recovery behavior, Docker/Testcontainers readiness, rollback, dashboard, alert, and operator drill evidence are covered.");
+    }
+
+    private void assertInspectionDtoDoesNotExposeUnsafeFields(String source) {
+        assertThat(source)
+                .contains("@JsonProperty(\"lease_owner_present\")")
+                .contains("@JsonProperty(\"lease_owner_hash\")")
+                .contains("@JsonProperty(\"last_error_code\")")
+                .contains("safeLeaseOwnerHash")
+                .contains("safeErrorCode")
+                .doesNotContain("@JsonProperty(\"lease_owner\")")
+                .doesNotContain("@JsonProperty(\"last_error\")")
+                .doesNotContain("@JsonProperty(\"idempotency_key\")")
+                .doesNotContain("@JsonProperty(\"request_hash\")")
+                .doesNotContain("@JsonProperty(\"intent_hash\")")
+                .doesNotContain("@JsonProperty(\"payload_hash\")");
+    }
+
+    private void assertCiJobContainsRequiredTestGroups(String source) {
+        assertThat(source)
+                .contains("fdp35-production-readiness")
+                .contains("regulated-mutation-regression")
+                .contains("-Dgroups=production-readiness,e2e,recovery-proof,integration")
+                .contains("EvidenceGatedFinalizeCoordinatorIntegrationTest")
+                .contains("RegulatedMutationLeaseFencingIntegrationTest")
+                .contains("RegulatedMutationLeaseRenewalIntegrationTest")
+                .contains("RegulatedMutationCheckpointRenewalExecutionTest")
+                .contains("RegulatedMutationStaleWorkerExecutorIntegrationTest")
+                .contains("RegulatedMutationRecoveryControllerTest")
+                .contains("RegulatedMutationRollbackReadinessTest")
+                .contains("RegulatedMutationArchitectureTest")
+                .contains("- regulated-mutation-regression");
     }
 
     @Test

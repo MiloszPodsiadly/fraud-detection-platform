@@ -813,15 +813,22 @@ class AlertSecurityConfigTest {
         mockMvc.perform(get("/api/v1/regulated-mutations/idem-1").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.idempotency_key").doesNotExist())
+                .andExpect(jsonPath("$.request_hash").doesNotExist())
+                .andExpect(jsonPath("$.intent_hash").doesNotExist())
+                .andExpect(jsonPath("$.payload_hash").doesNotExist())
+                .andExpect(jsonPath("$.lease_owner").doesNotExist())
+                .andExpect(jsonPath("$.last_error").doesNotExist())
                 .andExpect(jsonPath("$.idempotency_key_hash").value("96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b"))
                 .andExpect(jsonPath("$.idempotency_key_masked").value("...em-1"));
         mockMvc.perform(get("/api/v1/regulated-mutations/by-command/mutation-1").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.idempotency_key").doesNotExist())
+                .andExpect(jsonPath("$.lease_owner").doesNotExist())
                 .andExpect(jsonPath("$.idempotency_key_hash").value("96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b"));
         mockMvc.perform(get("/api/v1/regulated-mutations/by-idempotency-hash/96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.idempotency_key").doesNotExist())
+                .andExpect(jsonPath("$.lease_owner").doesNotExist())
                 .andExpect(jsonPath("$.idempotency_key_hash").value("96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b"));
         verify(sensitiveReadAuditService, atLeastOnce()).audit(
                 eq(ReadAccessEndpointCategory.REGULATED_MUTATION_INSPECTION),

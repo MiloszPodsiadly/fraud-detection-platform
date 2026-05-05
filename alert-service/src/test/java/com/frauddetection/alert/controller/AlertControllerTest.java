@@ -160,8 +160,8 @@ class AlertControllerTest {
         when(alertManagementUseCase.submitDecision(org.mockito.ArgumentMatchers.eq("alert-1"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("idem-1")))
                 .thenReturn(new SubmitAnalystDecisionResponse(
                         "alert-1",
-                        AnalystDecision.CONFIRMED_FRAUD,
-                        AlertStatus.RESOLVED,
+                        null,
+                        null,
                         null,
                         null,
                         SubmitDecisionOperationStatus.RECOVERY_REQUIRED
@@ -173,6 +173,8 @@ class AlertControllerTest {
                         .content(objectMapper.writeValueAsString(decisionRequest())))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.operation_status").value("RECOVERY_REQUIRED"))
+                .andExpect(jsonPath("$.resultingStatus").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.decisionEventId").value(org.hamcrest.Matchers.nullValue()))
                 .andExpect(jsonPath("$.operation_status").value(org.hamcrest.Matchers.not("COMMITTED_EVIDENCE_PENDING")))
                 .andExpect(jsonPath("$.operation_status").value(org.hamcrest.Matchers.not("COMMITTED_EVIDENCE_CONFIRMED")));
     }
@@ -182,8 +184,8 @@ class AlertControllerTest {
         when(alertManagementUseCase.submitDecision(org.mockito.ArgumentMatchers.eq("alert-1"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("idem-1")))
                 .thenReturn(new SubmitAnalystDecisionResponse(
                         "alert-1",
-                        AnalystDecision.CONFIRMED_FRAUD,
-                        AlertStatus.RESOLVED,
+                        null,
+                        null,
                         null,
                         null,
                         SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED
@@ -195,8 +197,76 @@ class AlertControllerTest {
                         .content(objectMapper.writeValueAsString(decisionRequest())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.operation_status").value("FINALIZE_RECOVERY_REQUIRED"))
+                .andExpect(jsonPath("$.resultingStatus").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.decisionEventId").value(org.hamcrest.Matchers.nullValue()))
                 .andExpect(jsonPath("$.operation_status").value(org.hamcrest.Matchers.not("FINALIZED_EVIDENCE_PENDING_EXTERNAL")))
                 .andExpect(jsonPath("$.operation_status").value(org.hamcrest.Matchers.not("FINALIZED_EVIDENCE_CONFIRMED")));
+    }
+
+    @Test
+    void budgetExceededRecovery_mustNotReturnCommittedSuccess() throws Exception {
+        when(alertManagementUseCase.submitDecision(org.mockito.ArgumentMatchers.eq("alert-1"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("idem-budget")))
+                .thenReturn(new SubmitAnalystDecisionResponse(
+                        "alert-1",
+                        null,
+                        null,
+                        null,
+                        null,
+                        SubmitDecisionOperationStatus.RECOVERY_REQUIRED
+                ));
+
+        mockMvc.perform(post("/api/v1/alerts/alert-1/decision")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "idem-budget")
+                        .content(objectMapper.writeValueAsString(decisionRequest())))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.operation_status").value("RECOVERY_REQUIRED"))
+                .andExpect(jsonPath("$.decisionEventId").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.operation_status").value(org.hamcrest.Matchers.not("COMMITTED_EVIDENCE_PENDING")));
+    }
+
+    @Test
+    void staleCheckpointFailure_mustBeExplicitAndNotSuccessful() throws Exception {
+        when(alertManagementUseCase.submitDecision(org.mockito.ArgumentMatchers.eq("alert-1"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("idem-stale")))
+                .thenReturn(new SubmitAnalystDecisionResponse(
+                        "alert-1",
+                        null,
+                        null,
+                        null,
+                        null,
+                        SubmitDecisionOperationStatus.COMMIT_UNKNOWN
+                ));
+
+        mockMvc.perform(post("/api/v1/alerts/alert-1/decision")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "idem-stale")
+                        .content(objectMapper.writeValueAsString(decisionRequest())))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.operation_status").value("COMMIT_UNKNOWN"))
+                .andExpect(jsonPath("$.resultingStatus").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.operation_status").value(org.hamcrest.Matchers.not("COMMITTED_EVIDENCE_CONFIRMED")));
+    }
+
+    @Test
+    void longRunningProcessing_mustBeObservableNotSuccessful() throws Exception {
+        when(alertManagementUseCase.submitDecision(org.mockito.ArgumentMatchers.eq("alert-1"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("idem-processing")))
+                .thenReturn(new SubmitAnalystDecisionResponse(
+                        "alert-1",
+                        null,
+                        null,
+                        null,
+                        null,
+                        SubmitDecisionOperationStatus.IN_PROGRESS
+                ));
+
+        mockMvc.perform(post("/api/v1/alerts/alert-1/decision")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "idem-processing")
+                        .content(objectMapper.writeValueAsString(decisionRequest())))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.operation_status").value("IN_PROGRESS"))
+                .andExpect(jsonPath("$.decisionEventId").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.operation_status").value(org.hamcrest.Matchers.not("COMMITTED_EVIDENCE_PENDING")));
     }
 
     @Test
