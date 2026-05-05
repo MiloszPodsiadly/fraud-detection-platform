@@ -630,7 +630,7 @@ class RegulatedMutationArchitectureTest {
                 .should().dependOnClassesThat().haveNameMatching(".*RegulatedMutationLeaseRenewalService")
                 .check(classes);
         noClasses().that().haveNameMatching(".*RegulatedMutationLeaseRenewal(Service|Policy|FailureHandler)")
-                .should().dependOnClassesThat().haveNameMatching(".*(AuditService|AuditEventPublisher|FraudDecisionEventPublisher|KafkaTemplate|TransactionalOutboxRecordRepository|AlertRepository).*")
+                .should().dependOnClassesThat().haveNameMatching(".*(AuditService|AuditEventPublisher|FraudDecisionEventPublisher|KafkaTemplate|TransactionalOutboxRecordRepository|AlertRepository|TrustAuthority|ExternalAnchorPublisher).*")
                 .check(classes);
     }
 
@@ -680,6 +680,7 @@ class RegulatedMutationArchitectureTest {
         assertThat(handler).contains(".set(\"last_error\"");
         assertThat(handler).contains(".set(\"updated_at\"");
         assertThat(handler).contains(".set(\"last_heartbeat_at\"");
+        assertThat(handler).contains("publicStatusMapper.submitDecisionStatus");
         assertThat(handler)
                 .doesNotContain("\"idempotency_key\"")
                 .doesNotContain("\"request_hash\"")
@@ -713,13 +714,18 @@ class RegulatedMutationArchitectureTest {
                 .doesNotContain("ExternalAudit")
                 .doesNotContain("AuditService")
                 .doesNotContain("AuditEventPublisher")
-                .doesNotContain("recoveryTransition(");
+                .doesNotContain("recoveryTransition(")
+                .doesNotContain("AlertRepository")
+                .doesNotContain("TrustAuthority")
+                .doesNotContain("ExternalAnchorPublisher")
+                .doesNotContain("command.mutation().execute");
         assertThat(policy)
                 .doesNotContain("MongoTemplate")
                 .doesNotContain("AlertRepository")
                 .doesNotContain("AuditService")
                 .doesNotContain("TransactionalOutbox")
-                .doesNotContain("KafkaTemplate");
+                .doesNotContain("KafkaTemplate")
+                .doesNotContain("command.mutation().execute");
         assertThat(handler)
                 .doesNotContain("KafkaTemplate")
                 .doesNotContain("FraudDecisionEventPublisher")
@@ -727,7 +733,34 @@ class RegulatedMutationArchitectureTest {
                 .doesNotContain("ExternalAudit")
                 .doesNotContain("AuditService")
                 .doesNotContain("AuditEventPublisher")
-                .doesNotContain("AlertRepository");
+                .doesNotContain("AlertRepository")
+                .doesNotContain("TrustAuthority")
+                .doesNotContain("ExternalAnchorPublisher")
+                .doesNotContain("RegulatedMutationLeaseRenewalService")
+                .doesNotContain("command.mutation().execute");
+    }
+
+    @Test
+    void fdp33LeaseRenewalModelPolicySeamMustOwnModelStateTables() throws Exception {
+        String policy = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationLeaseRenewalPolicy.java"
+        ));
+        String legacy = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/LegacyLeaseRenewalModelPolicy.java"
+        ));
+        String evidence = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedLeaseRenewalModelPolicy.java"
+        ));
+
+        assertThat(policy).contains("RegulatedMutationLeaseRenewalModelPolicy");
+        assertThat(policy).contains("Duplicate regulated mutation lease renewal model policy");
+        assertThat(policy).contains("Missing regulated mutation lease renewal model policy");
+        assertThat(policy).doesNotContain("LEGACY_RENEWABLE_STATES");
+        assertThat(policy).doesNotContain("EVIDENCE_GATED_RENEWABLE_STATES");
+        assertThat(legacy).contains("RegulatedMutationState.REQUESTED");
+        assertThat(legacy).contains("RegulatedMutationState.BUSINESS_COMMITTED");
+        assertThat(evidence).contains("RegulatedMutationState.FINALIZING");
+        assertThat(evidence).contains("RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED");
     }
 
     @Test
@@ -776,18 +809,49 @@ class RegulatedMutationArchitectureTest {
         String runbook = Files.readString(Path.of("../docs/FDP-33-lease-renewal-operational-readiness.md"));
         String mergeGate = Files.readString(Path.of("../docs/FDP-33-merge-gate.md"));
         String operatorRunbook = Files.readString(Path.of("../docs/runbooks/FDP-33-lease-renewal-runbook.md"));
-        String combined = runbook + "\n" + mergeGate + "\n" + operatorRunbook;
+        String dashboard = Files.readString(Path.of("../docs/observability/FDP-33-lease-renewal-dashboard.md"));
+        String combined = runbook + "\n" + mergeGate + "\n" + operatorRunbook + "\n" + dashboard;
 
         assertThat(combined).contains("owner-fenced");
         assertThat(combined).contains("bounded");
         assertThat(combined).contains("lease_expires_at > now");
         assertThat(combined).contains("Renewal Caller Contract");
+        assertThat(combined).contains("Runtime Adoption Contract");
+        assertThat(combined).contains("Lease renewal is not a guarantee of progress");
+        assertThat(combined).contains("does not automatically call renewal from current executors");
+        assertThat(combined).contains("future runtime adoption must add explicit safe checkpoints");
         assertThat(combined).contains("Missing renewal metadata is backward compatible");
         assertThat(combined).contains("LEASE_RENEWAL_BUDGET_EXCEEDED");
+        assertThat(combined).contains("Recovery status wins over `responseSnapshot`");
+        assertThat(combined).contains("Legacy Renewable State Justification");
+        assertThat(combined).contains("must not be used as idle queue parking");
+        assertThat(combined).contains("execution_status and recovery precedence remain authoritative");
+        assertThat(combined).contains("REQUESTED");
+        assertThat(combined).contains("AUDIT_ATTEMPTED");
+        assertThat(combined).contains("BUSINESS_COMMITTING");
+        assertThat(combined).contains("BUSINESS_COMMITTED");
+        assertThat(combined).contains("SUCCESS_AUDIT_PENDING");
         assertThat(combined).contains("INVALID_EXTENSION");
         assertThat(combined).contains("COMMAND_NOT_FOUND");
         assertThat(combined).contains("MODEL_VERSION_MISMATCH");
         assertThat(combined).contains("EXECUTION_STATUS_MISMATCH");
+        assertThat(combined).contains("processing duration p95/p99");
+        assertThat(combined).contains("commands renewing but not progressing");
+        assertThat(combined).contains("Renewal can preserve ownership but cannot prove progress");
+        assertThat(combined).contains("command id");
+        assertThat(combined).contains("alert id");
+        assertThat(combined).contains("actor id");
+        assertThat(combined).contains("lease owner");
+        assertThat(combined).contains("idempotency key");
+        assertThat(combined).contains("request hash");
+        assertThat(combined).contains("resource id");
+        assertThat(combined).contains("exception message");
+        assertThat(combined).contains("raw path");
+        assertThat(combined).contains("token");
+        assertThat(combined).contains("Worker stuck but renewing");
+        assertThat(combined).contains("Budget exceeded flood");
+        assertThat(combined).contains("do not increase budget blindly");
+        assertThat(combined).contains("do not bypass fencing");
         assertThat(combined).contains("does not enable FDP-29 production mode");
         assertThat(combined).contains("no distributed lock");
         assertThat(combined).contains("no public heartbeat endpoint");

@@ -4,9 +4,11 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class RegulatedMutationLeaseRenewalPolicyTest {
 
@@ -58,6 +60,48 @@ class RegulatedMutationLeaseRenewalPolicyTest {
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING
         )).isTrue();
+    }
+
+    @Test
+    void duplicateModelPolicyFailsConstruction() {
+        assertThatThrownBy(() -> new RegulatedMutationLeaseRenewalPolicy(
+                Duration.ofSeconds(30),
+                Duration.ofMinutes(2),
+                3,
+                List.of(
+                        new LegacyLeaseRenewalModelPolicy(),
+                        new LegacyLeaseRenewalModelPolicy(),
+                        new EvidenceGatedLeaseRenewalModelPolicy()
+                )
+        ))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Duplicate regulated mutation lease renewal model policy")
+                .hasMessageContaining("LEGACY_REGULATED_MUTATION");
+    }
+
+    @Test
+    void missingLegacyModelPolicyFailsConstruction() {
+        assertThatThrownBy(() -> new RegulatedMutationLeaseRenewalPolicy(
+                Duration.ofSeconds(30),
+                Duration.ofMinutes(2),
+                3,
+                List.of(new EvidenceGatedLeaseRenewalModelPolicy())
+        ))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Missing regulated mutation lease renewal model policy")
+                .hasMessageContaining("LEGACY_REGULATED_MUTATION");
+    }
+
+    @Test
+    void modelPoliciesOwnRecoveryStateForBudgetExceeded() {
+        assertThat(policy.recoveryStateForBudgetExceeded(
+                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                RegulatedMutationState.BUSINESS_COMMITTED
+        )).isEqualTo(RegulatedMutationState.BUSINESS_COMMITTED);
+        assertThat(policy.recoveryStateForBudgetExceeded(
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.FINALIZING
+        )).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
     }
 
     @Test
