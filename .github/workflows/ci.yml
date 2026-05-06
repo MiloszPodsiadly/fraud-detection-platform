@@ -148,7 +148,7 @@ jobs:
             alert-service/target/failsafe-reports/
 
   fdp36-real-chaos:
-    name: FDP-36 Real Docker Chaos Proof
+    name: FDP-36 Real Alert-Service Kill Proof
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -166,8 +166,22 @@ jobs:
       - name: Verify Docker is available for Testcontainers
         run: docker version
 
-      - name: Run FDP-36 real chaos suite
-        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dgroups=real-chaos,docker-chaos,integration" "-Dtest=RegulatedMutationRealChaosIT,RegulatedMutationRealChaosEvidenceIntegrityIT" test
+      - name: Run FDP-36 real alert-service kill suite
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dgroups=real-chaos,docker-chaos,service-chaos,integration" "-Dtest=RegulatedMutationRealAlertServiceChaosIT,RegulatedMutationRealAlertServiceEvidenceIntegrityIT" test
+
+      - name: Print FDP-36 chaos evidence summary
+        if: always()
+        run: |
+          echo "killed target: actual alert-service JVM/process"
+          echo "restarted target: actual alert-service JVM/process"
+          echo "scenario count: $(find alert-service/target/surefire-reports -name 'TEST-RegulatedMutationRealAlertService*.xml' -print0 | xargs -0 grep -h '<testcase ' | wc -l)"
+          echo "proof levels covered: REAL_ALERT_SERVICE_KILL, REAL_ALERT_SERVICE_RESTART_API_PROOF"
+          if [ -f alert-service/target/fdp36-chaos/evidence-summary.md ]; then
+            cat alert-service/target/fdp36-chaos/evidence-summary.md
+          else
+            echo "missing alert-service/target/fdp36-chaos/evidence-summary.md"
+            exit 1
+          fi
 
       - name: Upload FDP-36 real chaos reports
         if: always()
@@ -178,6 +192,7 @@ jobs:
           path: |
             alert-service/target/surefire-reports/
             alert-service/target/failsafe-reports/
+            alert-service/target/fdp36-chaos/
 
   regulated-mutation-regression:
     name: Regulated Mutation Regression Gate

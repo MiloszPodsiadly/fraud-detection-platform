@@ -7,7 +7,9 @@ This runbook records test/dev real chaos drill output. It is sample operational 
 - drill owner
 - approver
 - test environment
-- Docker image/tag
+- killed process
+- restarted process
+- proof level
 - Mongo/Testcontainers instance
 - crash window selected
 - kill timestamp
@@ -42,7 +44,9 @@ This is sample test/dev output, not production evidence.
 | drill owner | platform-test |
 | approver | platform-owner |
 | test environment | local Testcontainers |
-| Docker image/tag | alpine:3.20 test process container |
+| killed process | actual alert-service JVM/process running `com.frauddetection.alert.AlertServiceApplication` |
+| restarted process | actual alert-service JVM/process running `com.frauddetection.alert.AlertServiceApplication` |
+| proof level | `REAL_ALERT_SERVICE_KILL`, `REAL_ALERT_SERVICE_RESTART_API_PROOF` |
 | Mongo/Testcontainers instance | mongo:7.0 replica-set container |
 | crash window selected | legacy BUSINESS_COMMITTING |
 | kill timestamp | 2026-05-06T08:00:00Z |
@@ -58,5 +62,6 @@ This is sample test/dev output, not production evidence.
 | operator decision | inspect and recover, do not replay with a new key |
 | rollback needed? | no |
 | final status | PASS |
-| lessons learned | recovery state remained explicit after real container kill/restart |
+| lessons learned | recovery state remained explicit after real alert-service kill/restart |
 
+Documentation must not call dummy-container proof real service chaos. If the killed target is not alert-service, classify the result as `DUMMY_CONTAINER_DURABLE_STATE_PROOF` or `MODELED_DURABLE_STATE_PROOF`, not FDP-36 GO evidence.

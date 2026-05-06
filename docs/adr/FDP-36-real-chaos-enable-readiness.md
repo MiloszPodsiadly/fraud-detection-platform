@@ -2,18 +2,30 @@
 
 FDP-36 provides real Docker/container kill-restart proof for selected regulated mutation crash windows. It does not change regulated mutation semantics.
 
+The killed process is the actual alert-service JVM/process running regulated mutation recovery and inspection endpoints.
+
 ## Scope
 
 FDP-36 is a proof and operations branch. It verifies that existing regulated mutation safety mechanisms survive selected real Docker/container kill-restart windows with durable Mongo state preserved across restart.
 
 FDP-35 provides modeled restart/recovery proof in CI. FDP-36 provides real container kill/restart proof for selected windows.
 
+## Proof Level Taxonomy
+
+- `REAL_ALERT_SERVICE_KILL`: the killed process is the actual `alert-service` JVM/process.
+- `REAL_ALERT_SERVICE_RESTART_API_PROOF`: post-restart verification uses the restarted `alert-service` HTTP API.
+- `DUMMY_CONTAINER_DURABLE_STATE_PROOF`: durable state is inspected after killing an unrelated dummy process; this is not real service chaos.
+- `MODELED_DURABLE_STATE_PROOF`: durable Mongo state is seeded or modeled without killing the actual service process.
+- `API_PERSISTED_STATE_PROOF`: controller/API behavior is proven with persisted-state fixtures, but without process kill.
+
+Documentation must not call dummy-container proof real service chaos. A row may claim `REAL_ALERT_SERVICE_KILL` only when the killed target is `alert-service`.
+
 ## Boundaries
 
 FDP-36 changes are limited to:
 
 - test harness code under `alert-service/src/test`
-- real-chaos and docker-chaos tagged tests
+- real-chaos, docker-chaos, and service-chaos tagged tests
 - CI orchestration
 - architecture guards
 - documentation, proof matrix, and runbooks
@@ -39,9 +51,9 @@ Runtime code remains clean. Executors, coordinators, domain handlers, transactio
 
 FDP-36 merge requires:
 
-- real Docker/container chaos test green
+- real Docker/container chaos test green against actual `alert-service`
 - Mongo durable state survives restart
-- recovery or inspection API is explicit after restart
+- recovery or inspection API is called through restarted `alert-service`
 - no false committed success
 - no false finalized confirmed
 - no duplicate mutation
@@ -52,9 +64,8 @@ FDP-36 merge requires:
 
 ## Allowed Claim
 
-FDP-36 may claim real Docker/container kill-restart proof for selected regulated mutation windows covered by the proof matrix.
+FDP-36 may claim real alert-service JVM/process kill-restart proof for selected regulated mutation windows covered by the proof matrix.
 
 ## Forbidden Claim
 
 FDP-36 must not claim production enabled, production certified, external finality, distributed ACID, distributed lock, exactly-once Kafka, WORM/legal notarization, runtime chaos hook requirement, automatic bank enablement, or FDP-29 auto-enabled behavior.
-
