@@ -2,7 +2,7 @@
 
 This checklist records whether FDP-37 evidence is ready for enablement review. It does not enable production mode.
 
-## Decision Values
+Allowed decisions:
 
 - `NOT_READY`
 - `READY_WITH_LIMITATIONS`
@@ -12,41 +12,41 @@ There is no production-enabled decision value. `READY_FOR_ENABLEMENT_REVIEW` is 
 
 READY_FOR_ENABLEMENT_REVIEW is not production enablement.
 
-## Required Fields
+## Required Inputs
 
-| Field | Required evidence |
+| Item | Evidence |
 | --- | --- |
-| Owner | Named release owner |
-| Reviewer | Named technical reviewer |
-| Approver | Named approver |
-| Dual-control approval | Required where bank/release policy requires it |
-| CI run id | GitHub Actions run id |
-| FDP-37 production-image chaos | `fdp37-production-image-chaos` green |
-| Regulated mutation regression | `regulated-mutation-regression` green |
-| FDP-36 proof link | `fdp36-real-chaos` artifact link |
-| FDP-35 proof link | `fdp35-production-readiness` artifact link |
-| Rollback validation | `RegulatedMutationProductionImageRollbackIT` green |
+| FDP-37 production-image chaos | `fdp37-production-image-chaos` green on `ubuntu-latest` |
+| Current commit image | proof summary contains `fdp37-alert-service:${GITHUB_SHA}`, commit SHA, and digest/id |
+| Required test execution | Surefire XML for required FDP-37 classes exists with zero skips |
+| REQUIRED transaction-mode row | evidence summary contains `transaction_mode=REQUIRED` |
+| Rollback validation | `target/fdp37-chaos/fdp37-rollback-validation.md` uploaded |
+| Regression gate | `regulated-mutation-regression` green |
+| Prior chaos/readiness gates | `fdp36-real-chaos` and `fdp35-production-readiness` green |
 | Dashboard readiness | `docs/ops/FDP-37-dashboard-and-alert-thresholds.md` reviewed |
-| Alert threshold readiness | concrete thresholds reviewed |
-| Operator drill status | dry run complete or explicitly scheduled |
-| Production flags | currently disabled unless separate release/config PR enables them |
+| Config review | separate production config review remains required |
+| Release/config PR | separate approval required before any production or bank enablement |
 | Final decision | one of `NOT_READY`, `READY_WITH_LIMITATIONS`, `READY_FOR_ENABLEMENT_REVIEW` |
+
+## Non-Claim Confirmation
+
+The reviewer must confirm:
+
+- FDP-37 is production-image durable crash-window proof, not production config certification.
+- FDP-37 uses explicit CI/test configuration against Testcontainers dependencies.
+- FDP-37 does not certify production networking, secrets, Kafka delivery, external finality, distributed ACID, or bank operation.
+- Live in-flight production-image chaos is optional/future scope unless a separate fixture job makes it non-skippable. A skipped live in-flight test is not counted as proof.
 
 ## Sample Filled Output
 
-| Field | Value |
+| Item | Result |
 | --- | --- |
-| Owner | release-owner |
-| Reviewer | regulated-mutation-reviewer |
-| Approver | bank-change-approver |
-| CI run id | `TO_BE_FILLED_BY_CI` |
 | FDP-37 production-image chaos | `PASS` |
-| Regulated mutation regression | `PASS` |
-| Rollback validation | `PASS` |
-| Dashboard readiness | `PASS` |
-| Alert threshold readiness | `PASS` |
-| Operator drill status | `SCHEDULED` |
-| Production flags | `DISABLED` |
+| Required test skips | `0` |
+| Current commit image evidence | `PASS` |
+| REQUIRED transaction-mode proof | `PASS` |
+| Rollback validation artifact | `PASS` |
+| Config review complete | `PENDING_SEPARATE_RELEASE_REVIEW` |
 | Final decision | `READY_FOR_ENABLEMENT_REVIEW` |
 
-FDP-37 does not enable FDP-29. Any production or bank enablement requires a separate release/config PR.
+FDP-37 does not enable FDP-29. Any production or bank enablement requires a separate release/config PR and human approval.

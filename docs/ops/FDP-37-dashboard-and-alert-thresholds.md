@@ -2,17 +2,27 @@
 
 FDP-37 release review requires dashboards and alerts for regulated mutation restart safety. Labels must stay low-cardinality: `model_version`, `state`, `outcome`, `reason`, `checkpoint`, and `threshold` are allowed. Do not use command id, alert id, actor id, idempotency key, lease owner, raw exception, request path, or token labels.
 
-| Alert | Metric | Threshold | Severity | Owner | Runbook | Safe operator action | Forbidden action |
+## Runtime Thresholds
+
+| Signal | Metric | Threshold | Severity | Owner | Runbook | Safe action | Forbidden action |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | stale owner spike | `regulated_mutation_stale_write_rejected_total` | `increase(...[5m]) >= 5` | warning | fraud-platform-oncall | FDP-37 recovery drill | inspect recovery queue and lease budget | manually edit lease owner |
 | expired lease spike | `regulated_mutation_stale_write_rejected_total{reason="EXPIRED_LEASE"}` | `increase(...[5m]) >= 3` | warning | fraud-platform-oncall | FDP-37 recovery drill | run bounded recovery endpoint | replay with new idempotency key |
-| lease budget exceeded | `regulated_mutation_checkpoint_renewal_blocked_total{reason="BUDGET_EXCEEDED"}` | `increase(...[10m]) >= 1` | critical | regulated-mutation-owner | FDP-34 checkpoint runbook | pause enablement review and inspect checkpoint budget | increase lease budget in production without review |
+| recovery conflict | `regulated_mutation_recovery_write_conflict_total` | `increase(...[5m]) > 0` | critical | fraud-platform-oncall | FDP-37 recovery drill | inspect command and preserve fencing | force command completion |
 | long-running processing age | `regulated_mutation_recovery_processing_oldest_age_seconds` | `> 120s for 5m` | warning | fraud-platform-oncall | FDP-37 recovery drill | inspect in-progress commands | mark completed manually |
-| repeated takeover | `regulated_mutation_lease_takeover_total` | `increase(...[10m]) >= 3` | warning | regulated-mutation-owner | FDP-32 lease fencing runbook | inspect worker health and lease duration | disable fencing |
-| finalize recovery required | `regulated_mutation_recovery_required_total` | `> 0 for 5m` | critical | regulated-mutation-owner | FDP-29 recovery runbook | keep pending evidence state; do not force external finality | force evidence confirmed |
-| checkpoint renewal failed | `regulated_mutation_checkpoint_renewal_total{outcome="FAILED"}` | `increase(...[10m]) >= 1` | warning | regulated-mutation-owner | FDP-34 checkpoint runbook | check lease renewal policy and Mongo health | bypass checkpoint renewal |
-| production image chaos job failed | GitHub Actions `fdp37-production-image-chaos` | any failed required run | critical | release-owner | FDP-37 merge gate | block merge and review artifact | merge with missing proof summary |
-| duplicate outbox invariant failed | FDP-37 proof artifact invariant | any duplicate outbox row | critical | release-owner | FDP-37 proof pack | stop enablement review and investigate | delete duplicate rows manually |
-| duplicate SUCCESS audit invariant failed | FDP-37 proof artifact invariant | any duplicate SUCCESS audit | critical | release-owner | FDP-37 proof pack | stop enablement review and investigate | edit audit chain |
+| checkpoint renewal blocked | `regulated_mutation_checkpoint_renewal_blocked_total` | `increase(...[10m]) >= 3` | warning | fraud-platform-oncall | checkpoint renewal runbook | review checkpoint budget | disable fencing |
+| low lease budget | `regulated_mutation_lease_budget_warning_total` | `increase(...[5m]) >= 3` | warning | fraud-platform-oncall | lease budget review | tune lease budget through release/config PR | change runtime state by hand |
 
-Dashboard panels should show stale rejections, lease takeovers, recovery-required count, processing age, checkpoint renewal outcomes, transition latency, and FDP-37 CI proof status.
+## Release-Gate Thresholds
+
+| Signal | Source | Threshold | Severity | Owner | Safe action | Forbidden action |
+| --- | --- | --- | --- | --- | --- | --- |
+| production image chaos job failed | GitHub Actions `fdp37-production-image-chaos` | any failed required run | critical | release-owner | block merge and review artifact | merge with missing proof summary |
+| required FDP-37 test skipped | Surefire XML | any required skipped test | critical | release-owner | block merge | count skipped test as proof |
+| missing image provenance | proof summary | missing SHA, tag, digest/id, or killed container id | critical | release-owner | rebuild proof image from current commit | use stale local image as merge evidence |
+| duplicate outbox invariant failed | FDP-37 proof artifact invariant | any duplicate outbox row | critical | release-owner | stop enablement review and investigate | delete duplicate rows manually |
+| duplicate SUCCESS audit invariant failed | FDP-37 proof artifact invariant | any duplicate SUCCESS audit | critical | release-owner | stop enablement review and investigate | edit audit chain |
+
+Dashboard panels should show stale rejections, lease takeovers, recovery-required count, processing age, checkpoint renewal outcomes, transition latency, FDP-37 CI proof status, image provenance status, and rollback validation status.
+
+FDP-37 uses Linux CI host networking for Testcontainers dependency access. This dashboard/runbook does not certify production Docker Compose networking.

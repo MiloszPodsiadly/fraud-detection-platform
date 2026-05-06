@@ -1,38 +1,55 @@
 # FDP-37 Merge Gate
 
-FDP-37 is mergeable only as production-image chaos proof and release-gate evidence. It is not production enablement.
+FDP-37 is mergeable only as production-image durable crash-window chaos proof and release-gate evidence. It is not production enablement.
 
 ## Required CI
 
-- `fdp37-production-image-chaos` must be green.
-- `fdp36-real-chaos` must be green.
+- `fdp37-production-image-chaos` must be green on `ubuntu-latest`.
 - `regulated-mutation-regression` must be green.
+- `fdp36-real-chaos` must be green.
 - `fdp35-production-readiness` must be green.
 - Docker must be available; no Docker skip is acceptable for the required FDP-37 job.
-- `alert-service/target/fdp37-chaos/fdp37-proof-summary.md` must exist.
-- `alert-service/target/fdp37-chaos/fdp37-proof-summary.json` must exist.
-- `PRODUCTION_IMAGE_CONTAINER_KILL` must appear in the FDP-37 evidence artifact.
 
-## Required Proof
+## Required Proof Artifacts
 
-- killed target is the production-like `alert-service` Docker image/container
-- killed image is not dummy, alpine, busybox, or sleep container
-- restarted container id differs from killed container id
-- restarted image serves recovery/inspection API verification
-- regulated mutation outbox/audit counts remain bounded
-- no false committed success is reported
-- no false external evidence confirmation is reported
+- `alert-service/target/fdp37-chaos/fdp37-proof-summary.md`
+- `alert-service/target/fdp37-chaos/fdp37-proof-summary.json`
+- `alert-service/target/fdp37-chaos/evidence-summary.md`
+- `alert-service/target/fdp37-chaos/fdp37-rollback-validation.md`
+- `alert-service/target/fdp37-chaos/fdp37-rollback-validation.json`
+
+The proof summary must contain:
+
+- `fdp37-alert-service:${GITHUB_SHA}`
+- current commit SHA
+- image digest or image id
+- masked killed container id
+- masked restarted container id
+- `network_mode: host`
+- `live_in_flight_proof_executed: false`
+- `READY_FOR_ENABLEMENT_REVIEW is not production enablement`
+
+The evidence summary must contain:
+
+- `PRODUCTION_IMAGE_CONTAINER_KILL`
+- `PRODUCTION_IMAGE_RESTART_API_PROOF`
+- `transaction_mode=REQUIRED`
+- no unrelated placeholder image evidence
+
+## Required Tests
+
+The FDP-37 CI job must fail if any required class XML is missing or skipped:
+
+- `RegulatedMutationProductionImageChaosIT`
+- `RegulatedMutationProductionImageEvidenceIntegrityIT`
+- `RegulatedMutationProductionImageConfigParityIT`
+- `RegulatedMutationProductionImageRollbackIT`
+- `RegulatedMutationProductionImageRequiredTransactionChaosIT`
+
+`RegulatedMutationProductionImageLiveInFlightKillIT` is optional fixture-gated future scope. A skipped live in-flight test is not counted as proof and is not part of the required FDP-37 merge gate.
 
 ## Non-Claims
 
-FDP-37 does not provide:
+FDP-37 does not provide production config certification, Docker Compose topology proof, production secrets validation, production Kafka delivery certification, external finality, distributed ACID, Kafka exactly-once delivery, legal notarization, bank certification, or production enablement.
 
-- production enablement
-- bank certification
-- external finality
-- distributed ACID
-- distributed lock
-- Kafka exactly-once
-- automatic FDP-29 enablement
-
-`READY_FOR_ENABLEMENT_REVIEW` is not production enablement. Production or bank enablement requires a separate release/config PR.
+`READY_FOR_ENABLEMENT_REVIEW` is not production enablement. Production or bank enablement requires a separate release/config PR and human approval.
