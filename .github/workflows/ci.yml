@@ -229,6 +229,67 @@ jobs:
             alert-service/target/failsafe-reports/
             alert-service/target/fdp36-chaos/
 
+  fdp37-production-image-chaos:
+    name: FDP-37 Production Image Chaos Proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs:
+      - fdp36-real-chaos
+      - regulated-mutation-regression
+      - fdp35-production-readiness
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Verify Docker is available for production-image chaos
+        run: docker version
+
+      - name: Build alert-service production-like image
+        run: docker build -f deployment/Dockerfile.backend --build-arg MODULE_NAME=alert-service -t fdp37-alert-service:${GITHUB_SHA} .
+
+      - name: Run FDP-37 production image chaos suite
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp37.alert-service.image=fdp37-alert-service:${GITHUB_SHA}" "-Dgroups=fdp37,production-image-chaos,docker-chaos,integration" "-Dtest=RegulatedMutationProductionImageChaosIT,RegulatedMutationProductionImageEvidenceIntegrityIT,RegulatedMutationProductionImageConfigParityIT,RegulatedMutationProductionImageRollbackIT,RegulatedMutationProductionImageLiveInFlightKillIT" test
+
+      - name: Verify FDP-37 proof artifacts
+        if: always()
+        run: |
+          SUMMARY_MD=alert-service/target/fdp37-chaos/fdp37-proof-summary.md
+          SUMMARY_JSON=alert-service/target/fdp37-chaos/fdp37-proof-summary.json
+          EVIDENCE=alert-service/target/fdp37-chaos/evidence-summary.md
+          test -f "$SUMMARY_MD"
+          test -f "$SUMMARY_JSON"
+          test -f "$EVIDENCE"
+          grep -q 'fdp37-alert-service' "$SUMMARY_MD"
+          grep -q 'PRODUCTION_IMAGE_CONTAINER_KILL' "$EVIDENCE"
+          grep -q 'READY_FOR_ENABLEMENT_REVIEW is not production enablement' "$SUMMARY_MD"
+          if grep -Eiq 'alpine|busybox|dummy' "$SUMMARY_MD" "$EVIDENCE"; then
+            echo "FDP-37 production-image chaos cannot use dummy/alpine/busybox images"
+            exit 1
+          fi
+          echo "FDP-37 killed image/container evidence:"
+          cat "$EVIDENCE"
+          echo
+          cat "$SUMMARY_MD"
+
+      - name: Upload FDP-37 production image chaos artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fdp37-production-image-chaos-reports
+          if-no-files-found: error
+          path: |
+            alert-service/target/surefire-reports/
+            alert-service/target/failsafe-reports/
+            alert-service/target/fdp37-chaos/
+
   regulated-mutation-regression:
     name: Regulated Mutation Regression Gate
     runs-on: ubuntu-latest
@@ -272,6 +333,7 @@ jobs:
       - fdp28-proof
       - fdp35-production-readiness
       - fdp36-real-chaos
+      - fdp37-production-image-chaos
       - regulated-mutation-regression
 
     steps:
