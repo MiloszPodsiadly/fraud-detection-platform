@@ -1,0 +1,42 @@
+# Dockerfile.alert-service-fdp38-fixture builds the FDP-38 test-fixture image.
+FROM maven:3.9.9-eclipse-temurin-21 AS build
+
+WORKDIR /workspace
+
+COPY pom.xml .
+COPY common-events/pom.xml common-events/pom.xml
+COPY common-test-support/pom.xml common-test-support/pom.xml
+COPY transaction-ingest-service/pom.xml transaction-ingest-service/pom.xml
+COPY transaction-simulator-service/pom.xml transaction-simulator-service/pom.xml
+COPY feature-enricher-service/pom.xml feature-enricher-service/pom.xml
+COPY fraud-scoring-service/pom.xml fraud-scoring-service/pom.xml
+COPY alert-service/pom.xml alert-service/pom.xml
+COPY audit-trust-authority/pom.xml audit-trust-authority/pom.xml
+
+COPY common-events/src common-events/src
+COPY common-test-support/src common-test-support/src
+COPY transaction-ingest-service/src transaction-ingest-service/src
+COPY transaction-simulator-service/src transaction-simulator-service/src
+COPY feature-enricher-service/src feature-enricher-service/src
+COPY fraud-scoring-service/src fraud-scoring-service/src
+COPY alert-service/src alert-service/src
+COPY audit-trust-authority/src audit-trust-authority/src
+
+RUN mvn -q -pl alert-service -am -DskipTests install
+RUN mvn -q -pl alert-service -DskipTests dependency:copy-dependencies -DincludeScope=test -DoutputDirectory=/workspace/alert-service/target/dependency
+
+FROM eclipse-temurin:21-jre
+
+WORKDIR /app
+
+COPY --from=build /workspace/alert-service/target/classes /app/classes
+COPY --from=build /workspace/alert-service/target/test-classes /app/test-classes
+COPY --from=build /workspace/alert-service/target/dependency /app/dependency
+COPY --from=build /workspace/common-events/target/classes /app/common-events-classes
+COPY --from=build /workspace/common-test-support/target/classes /app/common-test-support-classes
+
+USER 10001:10001
+
+EXPOSE 8080
+
+ENTRYPOINT ["java", "-cp", "/app/classes:/app/test-classes:/app/common-events-classes:/app/common-test-support-classes:/app/dependency/*", "com.frauddetection.alert.AlertServiceApplication"]
