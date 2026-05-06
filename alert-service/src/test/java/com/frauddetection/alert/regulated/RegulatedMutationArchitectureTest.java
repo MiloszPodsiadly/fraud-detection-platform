@@ -15,6 +15,17 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 class RegulatedMutationArchitectureTest {
 
     @Test
+    void mainReadmeMustContainExactMaintainerContactBlock() throws Exception {
+        String readme = Files.readString(Path.of("../README.md")).replace("\r\n", "\n");
+
+        assertThat(readme).contains(
+                "Milosz Podsiadly  \n"
+                        + "[m.podsiadly99@gmail.com](mailto:m.podsiadly99@gmail.com)  \n"
+                        + "[GitHub - MiloszPodsiadly](https://github.com/MiloszPodsiadly)"
+        );
+    }
+
+    @Test
     void alertManagementServiceMustNotOrchestrateRegulatedDecisionMutationDirectly() throws Exception {
         String source = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/service/AlertManagementService.java"
@@ -1666,6 +1677,173 @@ class RegulatedMutationArchitectureTest {
         }
     }
 
+    @Test
+    void fdp36ChaosHarnessMustStayOutsideRuntimeSource() throws Exception {
+        assertThat(Files.exists(Path.of("src/main/java/com/frauddetection/alert/regulated/chaos/RegulatedMutationDockerChaosHarness.java")))
+                .isFalse();
+        assertThat(Files.exists(Path.of("src/test/java/com/frauddetection/alert/regulated/chaos/RegulatedMutationDockerChaosHarness.java")))
+                .isFalse();
+        assertThat(Files.exists(Path.of("src/test/java/com/frauddetection/alert/regulated/chaos/RegulatedMutationAlertServiceProcessChaosHarness.java")))
+                .isTrue();
+        String harness = Files.readString(Path.of("src/test/java/com/frauddetection/alert/regulated/chaos/RegulatedMutationAlertServiceProcessChaosHarness.java"));
+        assertThat(harness)
+                .contains("ALERT_SERVICE_MAIN_CLASS")
+                .contains("com.frauddetection.alert.AlertServiceApplication")
+                .contains("ALERT_SERVICE_TARGET_NAME")
+                .contains("alert-service")
+                .contains("destroyForcibly")
+                .contains("REAL_ALERT_SERVICE_KILL")
+                .contains("/api/v1/regulated-mutations/recover")
+                .contains("/api/v1/regulated-mutations/by-command/")
+                .doesNotContain("DockerImageName.parse(\"alpine:3.20\")")
+                .doesNotContain("while true; do sleep 1; done");
+
+        List<Path> runtimeFiles;
+        try (Stream<Path> stream = Files.walk(Path.of("src/main/java/com/frauddetection/alert"))) {
+            runtimeFiles = stream.filter(path -> path.toString().endsWith(".java")).toList();
+        }
+
+        for (Path path : runtimeFiles) {
+            String source = Files.readString(path);
+            assertThat(source)
+                    .as("FDP-36 chaos harness must not leak into runtime source: " + path)
+                    .doesNotContain("RegulatedMutationDockerChaosHarness")
+                    .doesNotContain("RegulatedMutationAlertServiceProcessChaosHarness")
+                    .doesNotContain("RegulatedMutationChaosScenario")
+                    .doesNotContain("RegulatedMutationProofLevel")
+                    .doesNotContain("Process.destroyForcibly")
+                    .doesNotContain("service-chaos")
+                    .doesNotContain("docker-chaos")
+                    .doesNotContain("real-chaos")
+                    .doesNotContain("in-flight-chaos")
+                    .doesNotContain("killContainer")
+                    .doesNotContain("stopContainer")
+                    .doesNotContain("process kill")
+                    .doesNotContain("test chaos hook");
+        }
+    }
+
+    @Test
+    void fdp36ExecutorsCoordinatorsAndPoliciesMustNotContainChaosCode() throws Exception {
+        List<Path> protectedRuntimeFiles = List.of(
+                Path.of("src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationExecutor.java"),
+                Path.of("src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"),
+                Path.of("src/main/java/com/frauddetection/alert/regulated/MongoRegulatedMutationCoordinator.java"),
+                Path.of("src/main/java/com/frauddetection/alert/regulated/RegulatedMutationClaimService.java"),
+                Path.of("src/main/java/com/frauddetection/alert/regulated/RegulatedMutationReplayResolver.java"),
+                Path.of("src/main/java/com/frauddetection/alert/regulated/RegulatedMutationFencedCommandWriter.java"),
+                Path.of("src/main/java/com/frauddetection/alert/regulated/RegulatedMutationLeaseRenewalPolicy.java"),
+                Path.of("src/main/java/com/frauddetection/alert/regulated/RegulatedMutationSafeCheckpointPolicy.java")
+        );
+
+        for (Path path : protectedRuntimeFiles) {
+            String source = Files.readString(path);
+            assertThat(source)
+                    .as("Runtime regulated mutation path must not contain FDP-36 chaos code: " + path)
+                    .doesNotContain("chaos")
+                    .doesNotContain("killContainer")
+                    .doesNotContain("stopContainer")
+                    .doesNotContain("DockerClientFactory")
+                    .doesNotContain("@Tag(\"real-chaos\")")
+                    .doesNotContain("@Tag(\"docker-chaos\")");
+        }
+    }
+
+    @Test
+    void fdp36DocsMustDescribeRealChaosWithoutEnablementOverclaims() throws Exception {
+        String adr = Files.readString(Path.of("../docs/adr/FDP-36-real-chaos-enable-readiness.md"));
+        String mergeGate = Files.readString(Path.of("../docs/FDP-36-merge-gate.md"));
+        String checklist = Files.readString(Path.of("../docs/FDP-36-enablement-decision-checklist.md"));
+        String matrix = Files.readString(Path.of("../docs/testing/FDP-36-real-chaos-proof-matrix.md"));
+        String runbook = Files.readString(Path.of("../docs/runbooks/FDP-36-real-chaos-recovery-drill-runbook.md"));
+        String combined = adr + "\n" + mergeGate + "\n" + checklist + "\n" + matrix + "\n" + runbook;
+
+        assertThat(combined).contains("FDP-36 provides real alert-service JVM/process kill-restart proof over selected durable crash-window states. It does not change regulated mutation semantics.");
+        assertThat(combined).contains("FDP-36 kills and restarts the real alert-service JVM/process. Most crash windows are durable-state crash-window proofs, not live in-flight instruction-boundary kills.");
+        assertThat(combined).contains("Docker/Testcontainers are infrastructure dependencies, not the killed alert-service image.");
+        assertThat(combined).contains("The real-chaos proof kills the actual alert-service JVM/process running regulated mutation execution, recovery, and inspection endpoints.");
+        assertThat(combined).contains("REAL_ALERT_SERVICE_KILL");
+        assertThat(combined).contains("REAL_ALERT_SERVICE_RESTART_API_PROOF");
+        assertThat(combined).contains("LIVE_IN_FLIGHT_REQUEST_KILL");
+        assertThat(combined).contains("MODELED_DURABLE_STATE_PROOF");
+        assertThat(combined).contains("Proof Level vs Non-Claimed Chaos Level");
+        assertThat(combined).contains("Documentation must not call dummy-container proof real service chaos.");
+        assertThat(combined).contains("FDP-35 provides modeled restart/recovery proof");
+        assertThat(combined).contains("FDP-36 proof code is test-only. No runtime hooks are introduced.");
+        assertThat(combined).contains("Full alert-service image container chaos is future scope");
+        assertThat(combined).contains("READY_FOR_ENABLEMENT_REVIEW is not production enablement.");
+        assertThat(combined).contains("no runtime chaos hooks in executors, coordinators, or domain services");
+        assertThat(combined).contains("no FDP-29 production-mode enablement");
+        assertFdp36ForbiddenPhraseIsContextual(combined, "production enabled");
+        assertFdp36ForbiddenPhraseIsContextual(combined, "production certified");
+        assertFdp36ForbiddenPhraseIsContextual(combined, "external finality");
+        assertFdp36ForbiddenPhraseIsContextual(combined, "distributed ACID");
+        assertFdp36ForbiddenPhraseIsContextual(combined, "distributed lock");
+        assertFdp36ForbiddenPhraseIsContextual(combined, "exactly-once Kafka");
+        assertFdp36ForbiddenPhraseIsContextual(combined, "WORM");
+        assertFdp36ForbiddenPhraseIsContextual(combined, "legal notarization");
+        assertFdp36ForbiddenPhraseIsContextual(combined, "KMS/HSM");
+        assertFdp36ForbiddenPhraseIsContextual(combined, "automatic bank enablement");
+        assertFdp36ForbiddenPhraseIsContextual(combined, "FDP-29 auto-enabled");
+    }
+
+    @Test
+    void fdp36ProofMatrixRowsMustMapToConcreteTestsAndCiJobs() throws Exception {
+        String matrix = Files.readString(Path.of("../docs/testing/FDP-36-real-chaos-proof-matrix.md"));
+
+        assertThat(matrix).contains("Proof Level");
+        assertThat(matrix).contains("State Reach Method");
+        assertThat(matrix).contains("Runtime In-Flight Kill?");
+        assertThat(matrix).contains("Exact Claim");
+        assertThat(matrix).contains("durable-state-seeded while real alert-service is running");
+        assertThat(matrix).contains("real alert-service JVM restart proof over selected durable crash-window state");
+        assertThat(matrix).contains("No FDP-36 row currently claims full live in-flight instruction-boundary kill.");
+        assertThat(matrix).contains("RegulatedMutationRealAlertServiceChaosIT");
+        assertThat(matrix).contains("RegulatedMutationRealAlertServiceEvidenceIntegrityIT");
+        assertThat(matrix).contains("RegulatedMutationLiveInFlightKillIT");
+        assertThat(matrix).contains("RegulatedMutationPostRestartApiBehaviorTest");
+        assertThat(matrix).contains("fdp36-real-chaos");
+        assertThat(matrix).contains("REAL_ALERT_SERVICE_KILL");
+        assertThat(matrix).contains("REAL_ALERT_SERVICE_RESTART_API_PROOF");
+        assertThat(matrix).contains("LIVE_IN_FLIGHT_REQUEST_KILL");
+        assertThat(matrix.lines()
+                .filter(line -> line.contains("REAL_ALERT_SERVICE_KILL"))
+                .toList())
+                .allSatisfy(line -> assertThat(line).contains("actual alert-service"));
+        assertThat(matrix).doesNotContain("NOT_COVERED_IN_FDP36");
+        assertThat(matrix.lines()
+                .filter(line -> line.startsWith("| "))
+                .filter(line -> !line.contains("---"))
+                .filter(line -> !line.contains("Crash window"))
+                .filter(line -> !line.contains("Invariant |"))
+                .toList())
+                .allSatisfy(line -> assertThat(line)
+                        .contains("`")
+                        .doesNotContain("|  |"));
+    }
+
+    @Test
+    void fdp36CiMustContainRequiredRealChaosJobAndArtifacts() throws Exception {
+        String ci = Files.readString(Path.of("../.github/workflows/ci.yml"));
+
+        assertThat(ci).contains("fdp36-real-chaos:");
+        assertThat(ci).contains("Run FDP-36 real alert-service kill suite");
+        assertThat(ci).contains("docker version");
+        assertThat(ci).contains("-Dgroups=real-chaos,docker-chaos,service-chaos,integration");
+        assertThat(ci).contains("-Dtest=RegulatedMutationRealAlertServiceChaosIT,RegulatedMutationRealAlertServiceEvidenceIntegrityIT");
+        assertThat(ci).contains("RegulatedMutationLiveInFlightKillIT");
+        assertThat(ci).contains("killed target: actual alert-service JVM/process");
+        assertThat(ci).contains("Docker/Testcontainers are infrastructure dependencies, not the killed alert-service image.");
+        assertThat(ci).contains("FDP-36 real chaos is not sufficient without regulated-mutation-regression.");
+        assertThat(ci).contains("fdp36-proof-summary.md");
+        assertThat(ci).contains("REAL_ALERT_SERVICE_KILL, REAL_ALERT_SERVICE_RESTART_API_PROOF, LIVE_IN_FLIGHT_REQUEST_KILL");
+        assertThat(ci).contains("alert-service/target/fdp36-chaos/");
+        assertThat(ci).contains("fdp36-real-chaos-test-reports");
+        assertThat(ci).contains("if-no-files-found: ignore");
+        assertThat(ci).contains("regulated-mutation-regression");
+        assertThat(ci).contains("RegulatedMutationPostRestartApiBehaviorTest");
+    }
+
     private void assertForbiddenPhraseIsContextual(String source, String phrase) {
         String lowerSource = source.toLowerCase(java.util.Locale.ROOT);
         String lowerPhrase = phrase.toLowerCase(java.util.Locale.ROOT);
@@ -1691,6 +1869,34 @@ class RegulatedMutationArchitectureTest {
                             "durability guarantee",
                             "object lock",
                             "wording rules"
+                    );
+            index = lowerSource.indexOf(lowerPhrase, index + lowerPhrase.length());
+        }
+    }
+
+    private void assertFdp36ForbiddenPhraseIsContextual(String source, String phrase) {
+        String lowerSource = source.toLowerCase(java.util.Locale.ROOT);
+        String lowerPhrase = phrase.toLowerCase(java.util.Locale.ROOT);
+        int index = lowerSource.indexOf(lowerPhrase);
+        while (index >= 0) {
+            int start = Math.max(0, index - 220);
+            int end = Math.min(lowerSource.length(), index + lowerPhrase.length() + 220);
+            String context = lowerSource.substring(start, end);
+            assertThat(context)
+                    .as("FDP-36 forbidden wording must be negated, forbidden, or future-review contextual: " + phrase)
+                    .containsAnyOf(
+                            "does not",
+                            "do not",
+                            "not ",
+                            "no ",
+                            "never",
+                            "must not",
+                            "without",
+                            "forbidden",
+                            "non-goal",
+                            "future",
+                            "review",
+                            "not production enablement"
                     );
             index = lowerSource.indexOf(lowerPhrase, index + lowerPhrase.length());
         }

@@ -147,6 +147,88 @@ jobs:
             alert-service/target/surefire-reports/
             alert-service/target/failsafe-reports/
 
+  fdp36-real-chaos:
+    name: FDP-36 Real Alert-Service Kill Proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Verify Docker is available for Testcontainers
+        run: docker version
+
+      - name: Run FDP-36 real alert-service kill suite
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dgroups=real-chaos,docker-chaos,service-chaos,integration" "-Dtest=RegulatedMutationRealAlertServiceChaosIT,RegulatedMutationRealAlertServiceEvidenceIntegrityIT,RegulatedMutationLiveInFlightKillIT" test
+
+      - name: Generate FDP-36 proof summary
+        if: always()
+        run: |
+          mkdir -p alert-service/target/fdp36-chaos
+          SUMMARY=alert-service/target/fdp36-chaos/fdp36-proof-summary.md
+          TESTCASE_COUNT=$(find alert-service/target/surefire-reports -name 'TEST-RegulatedMutation*IT.xml' -print0 2>/dev/null | xargs -0 grep -h '<testcase ' 2>/dev/null | wc -l | tr -d ' ')
+          KILLED_IDS=$(grep -ho 'killed_process=[0-9][0-9]*' alert-service/target/fdp36-chaos/evidence-summary.md 2>/dev/null | cut -d= -f2 | sort -u | paste -sd ',' -)
+          RESTARTED_IDS=$(grep -ho 'restarted_process=[0-9][0-9]*' alert-service/target/fdp36-chaos/evidence-summary.md 2>/dev/null | cut -d= -f2 | sort -u | paste -sd ',' -)
+          {
+            echo "# FDP-36 Proof Summary"
+            echo
+            echo "- commit_sha: ${GITHUB_SHA:-local}"
+            echo "- run_timestamp_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- killed_target_name: actual alert-service JVM/process"
+            echo "- killed_process_ids: ${KILLED_IDS:-NOT_RECORDED}"
+            echo "- restarted_process_ids: ${RESTARTED_IDS:-NOT_RECORDED}"
+            echo "- proof_levels: REAL_ALERT_SERVICE_KILL, REAL_ALERT_SERVICE_RESTART_API_PROOF, LIVE_IN_FLIGHT_REQUEST_KILL"
+            echo "- scenario_count: ${TESTCASE_COUNT}"
+            echo "- test_classes_executed: RegulatedMutationRealAlertServiceChaosIT, RegulatedMutationRealAlertServiceEvidenceIntegrityIT, RegulatedMutationLiveInFlightKillIT"
+            echo "- surefire_xml_report_paths: alert-service/target/surefire-reports/TEST-RegulatedMutationRealAlertServiceChaosIT.xml, alert-service/target/surefire-reports/TEST-RegulatedMutationRealAlertServiceEvidenceIntegrityIT.xml, alert-service/target/surefire-reports/TEST-RegulatedMutationLiveInFlightKillIT.xml"
+            echo "- final_status: ${{ job.status }}"
+            echo
+            echo "killed target: actual alert-service JVM/process"
+            echo "Docker/Testcontainers are infrastructure dependencies, not the killed alert-service image."
+            echo "FDP-36 real chaos is not sufficient without regulated-mutation-regression."
+          } > "$SUMMARY"
+
+      - name: Print FDP-36 chaos evidence summary
+        if: always()
+        run: |
+          echo "killed target: actual alert-service JVM/process"
+          echo "Docker/Testcontainers are infrastructure dependencies, not the killed alert-service image."
+          echo "FDP-36 real chaos is not sufficient without regulated-mutation-regression."
+          echo "restarted target: actual alert-service JVM/process"
+          echo "scenario count: $(find alert-service/target/surefire-reports -name 'TEST-RegulatedMutationRealAlertService*.xml' -print0 | xargs -0 grep -h '<testcase ' | wc -l)"
+          echo "proof levels covered: REAL_ALERT_SERVICE_KILL, REAL_ALERT_SERVICE_RESTART_API_PROOF, LIVE_IN_FLIGHT_REQUEST_KILL"
+          if [ -f alert-service/target/fdp36-chaos/fdp36-proof-summary.md ]; then
+            cat alert-service/target/fdp36-chaos/fdp36-proof-summary.md
+          else
+            echo "missing alert-service/target/fdp36-chaos/fdp36-proof-summary.md"
+            exit 1
+          fi
+          if [ -f alert-service/target/fdp36-chaos/evidence-summary.md ]; then
+            cat alert-service/target/fdp36-chaos/evidence-summary.md
+          else
+            echo "missing alert-service/target/fdp36-chaos/evidence-summary.md"
+            exit 1
+          fi
+
+      - name: Upload FDP-36 real chaos reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fdp36-real-chaos-test-reports
+          if-no-files-found: ignore
+          path: |
+            alert-service/target/surefire-reports/
+            alert-service/target/failsafe-reports/
+            alert-service/target/fdp36-chaos/
+
   regulated-mutation-regression:
     name: Regulated Mutation Regression Gate
     runs-on: ubuntu-latest
@@ -167,7 +249,7 @@ jobs:
         run: docker version
 
       - name: Run regulated mutation regression suite
-        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=EvidenceGatedFinalizeCoordinatorIntegrationTest,EvidenceGatedFinalizeCoordinatorTest,RegulatedMutationLeaseFencingIntegrationTest,RegulatedMutationFencedCommandWriterTest,RegulatedMutationLeaseRenewalIntegrationTest,RegulatedMutationLeaseRenewalServiceTest,RegulatedMutationSafeCheckpointPolicyTest,RegulatedMutationCheckpointRenewalExecutionTest,RegulatedMutationStaleWorkerExecutorIntegrationTest,RegulatedMutationRecoveryServiceTest,RegulatedMutationRecoveryControllerTest,RegulatedMutationRollbackReadinessTest,AlertControllerTest,AlertServiceMetricsTest,RegulatedMutationArchitectureTest" test
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=EvidenceGatedFinalizeCoordinatorIntegrationTest,EvidenceGatedFinalizeCoordinatorTest,RegulatedMutationLeaseFencingIntegrationTest,RegulatedMutationFencedCommandWriterTest,RegulatedMutationLeaseRenewalIntegrationTest,RegulatedMutationLeaseRenewalServiceTest,RegulatedMutationSafeCheckpointPolicyTest,RegulatedMutationCheckpointRenewalExecutionTest,RegulatedMutationStaleWorkerExecutorIntegrationTest,RegulatedMutationRecoveryServiceTest,RegulatedMutationRecoveryControllerTest,RegulatedMutationRollbackReadinessTest,RegulatedMutationPostRestartApiBehaviorTest,AlertControllerTest,AlertServiceMetricsTest,RegulatedMutationArchitectureTest" test
 
       - name: Upload regulated mutation regression reports
         if: always()
@@ -189,6 +271,7 @@ jobs:
       - frontend
       - fdp28-proof
       - fdp35-production-readiness
+      - fdp36-real-chaos
       - regulated-mutation-regression
 
     steps:

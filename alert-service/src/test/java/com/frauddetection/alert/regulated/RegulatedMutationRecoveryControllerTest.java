@@ -12,7 +12,9 @@ import java.time.Instant;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -153,11 +155,57 @@ class RegulatedMutationRecoveryControllerTest {
                 .andExpect(content().string(not(containsString("token=secret"))));
     }
 
+    @Test
+    void inspectionEndpointAuditsReadWithoutRawResourceIdentifiers() throws Exception {
+        RegulatedMutationRecoveryService service = mock(RegulatedMutationRecoveryService.class);
+        SensitiveReadAuditService auditService = mock(SensitiveReadAuditService.class);
+        when(service.inspectByCommandId("command-sensitive")).thenReturn(new RegulatedMutationCommandInspectionResponse(
+                "96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b",
+                "idem-s...tive",
+                "SUBMIT_ANALYST_DECISION",
+                "ALERT",
+                "alert-sensitive",
+                "BUSINESS_COMMITTING",
+                "PROCESSING",
+                "raw-owner-sensitive",
+                Instant.parse("2026-05-05T18:15:00Z"),
+                2,
+                false,
+                "attempted-audit",
+                null,
+                null,
+                null,
+                null,
+                Instant.parse("2026-05-05T18:00:00Z")
+        ));
+
+        mockMvc(service, auditService)
+                .perform(get("/api/v1/regulated-mutations/by-command/command-sensitive")
+                        .principal(new TestingAuthenticationToken("ops-admin", "n/a", "FRAUD_OPS_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.resource_id").doesNotExist())
+                .andExpect(jsonPath("$.resource_id_hash").exists())
+                .andExpect(jsonPath("$.resource_id_hash").value(not("alert-sensitive")))
+                .andExpect(content().string(not(containsString("raw-owner-sensitive"))));
+
+        verify(auditService).audit(
+                eq(com.frauddetection.alert.audit.read.ReadAccessEndpointCategory.REGULATED_MUTATION_INSPECTION),
+                eq(com.frauddetection.alert.audit.read.ReadAccessResourceType.REGULATED_MUTATION_COMMAND),
+                eq("96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b"),
+                eq(1),
+                any()
+        );
+    }
+
     private MockMvc mockMvc(RegulatedMutationRecoveryService service) {
+        return mockMvc(service, mock(SensitiveReadAuditService.class));
+    }
+
+    private MockMvc mockMvc(RegulatedMutationRecoveryService service, SensitiveReadAuditService auditService) {
         RegulatedMutationRecoveryController controller = new RegulatedMutationRecoveryController(
                 service,
                 new RegulatedMutationInspectionRateLimiter(30),
-                mock(SensitiveReadAuditService.class)
+                auditService
         );
         return MockMvcBuilders.standaloneSetup(controller)
                 .defaultRequest(get("/").with(request -> {
