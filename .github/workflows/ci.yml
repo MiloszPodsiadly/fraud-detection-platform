@@ -253,10 +253,15 @@ jobs:
         run: docker version
 
       - name: Build alert-service production-like image
-        run: docker build -f deployment/Dockerfile.backend --build-arg MODULE_NAME=alert-service -t fdp37-alert-service:${GITHUB_SHA} .
+        run: |
+          docker build -f deployment/Dockerfile.backend --build-arg MODULE_NAME=alert-service -t fdp37-alert-service:${GITHUB_SHA} .
+          IMAGE_DIGEST_OR_ID=$(docker image inspect fdp37-alert-service:${GITHUB_SHA} --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}')
+          echo "FDP37_ALERT_SERVICE_IMAGE=fdp37-alert-service:${GITHUB_SHA}" >> "$GITHUB_ENV"
+          echo "FDP37_ALERT_SERVICE_IMAGE_DIGEST=${IMAGE_DIGEST_OR_ID}" >> "$GITHUB_ENV"
+          echo "Built FDP-37 image fdp37-alert-service:${GITHUB_SHA} with digest/id ${IMAGE_DIGEST_OR_ID}"
 
       - name: Run FDP-37 production image chaos suite
-        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp37.alert-service.image=fdp37-alert-service:${GITHUB_SHA}" "-Dgroups=fdp37,production-image-chaos,docker-chaos,integration" "-Dtest=RegulatedMutationProductionImageChaosIT,RegulatedMutationProductionImageEvidenceIntegrityIT,RegulatedMutationProductionImageConfigParityIT,RegulatedMutationProductionImageRollbackIT,RegulatedMutationProductionImageLiveInFlightKillIT" test
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp37.alert-service.image=${FDP37_ALERT_SERVICE_IMAGE}" "-Dfdp37.alert-service.image-digest=${FDP37_ALERT_SERVICE_IMAGE_DIGEST}" "-Dgroups=fdp37,production-image-chaos,docker-chaos,integration" "-Dtest=RegulatedMutationProductionImageChaosIT,RegulatedMutationProductionImageEvidenceIntegrityIT,RegulatedMutationProductionImageConfigParityIT,RegulatedMutationProductionImageRollbackIT,RegulatedMutationProductionImageRequiredTransactionChaosIT" test
 
       - name: Verify FDP-37 proof artifacts
         if: always()
@@ -264,12 +269,83 @@ jobs:
           SUMMARY_MD=alert-service/target/fdp37-chaos/fdp37-proof-summary.md
           SUMMARY_JSON=alert-service/target/fdp37-chaos/fdp37-proof-summary.json
           EVIDENCE=alert-service/target/fdp37-chaos/evidence-summary.md
+          ROLLBACK_MD=alert-service/target/fdp37-chaos/fdp37-rollback-validation.md
+          ROLLBACK_JSON=alert-service/target/fdp37-chaos/fdp37-rollback-validation.json
           test -f "$SUMMARY_MD"
           test -f "$SUMMARY_JSON"
           test -f "$EVIDENCE"
-          grep -q 'fdp37-alert-service' "$SUMMARY_MD"
+          test -f "$ROLLBACK_MD"
+          test -f "$ROLLBACK_JSON"
+          python - <<'PY'
+          import json
+          import os
+          import pathlib
+          import sys
+          import xml.etree.ElementTree as ET
+
+          reports = pathlib.Path("alert-service/target/surefire-reports")
+          required = [
+              "RegulatedMutationProductionImageChaosIT",
+              "RegulatedMutationProductionImageEvidenceIntegrityIT",
+              "RegulatedMutationProductionImageConfigParityIT",
+              "RegulatedMutationProductionImageRollbackIT",
+              "RegulatedMutationProductionImageRequiredTransactionChaosIT",
+          ]
+          for class_name in required:
+              report = reports / f"TEST-com.frauddetection.alert.regulated.{class_name}.xml"
+              if not report.exists():
+                  print(f"Missing required FDP-37 Surefire XML: {report}", file=sys.stderr)
+                  sys.exit(1)
+              root = ET.parse(report).getroot()
+              skipped = int(root.attrib.get("skipped", "0"))
+              tests = int(root.attrib.get("tests", "0"))
+              if tests <= 0 or skipped > 0:
+                  print(f"FDP-37 required test class did not fully execute: {class_name} tests={tests} skipped={skipped}", file=sys.stderr)
+                  sys.exit(1)
+
+          summary = json.loads(pathlib.Path("alert-service/target/fdp37-chaos/fdp37-proof-summary.json").read_text())
+          expected_sha = os.environ["GITHUB_SHA"]
+          expected_image = f"fdp37-alert-service:{expected_sha}"
+          checks = {
+              "commit_sha": summary.get("commit_sha") == expected_sha,
+              "image_name": expected_image in summary.get("image_name", ""),
+              "image_digest_or_id": summary.get("image_digest_or_id") not in (None, "", "LOCAL_IMAGE_DIGEST_NOT_PROVIDED"),
+              "killed_container_id_masked": summary.get("killed_container_id_masked") not in (None, "", "absent"),
+              "restarted_container_id_masked": summary.get("restarted_container_id_masked") not in (None, "", "absent"),
+              "scenario_count": int(summary.get("scenario_count", 0)) >= 5,
+              "final_result": summary.get("final_result") == "PASS",
+              "live_in_flight_proof_executed": summary.get("live_in_flight_proof_executed") is False,
+          }
+          failed = [name for name, ok in checks.items() if not ok]
+          if failed:
+              print(f"FDP-37 proof summary failed checks: {failed}", file=sys.stderr)
+              sys.exit(1)
+
+          rollback = json.loads(pathlib.Path("alert-service/target/fdp37-chaos/fdp37-rollback-validation.json").read_text())
+          rollback_required = [
+              "checkpoint_renewal_can_be_disabled_without_disabling_fencing",
+              "FDP32_fencing_remains_active",
+              "recovery_commands_visible_after_rollback",
+              "API_returns_recovery_or_in_progress_after_rollback",
+              "no_new_success_claims_after_rollback",
+          ]
+          if any(rollback.get(name) is not True for name in rollback_required):
+              print("FDP-37 rollback validation artifact is incomplete or false", file=sys.stderr)
+              sys.exit(1)
+          PY
+          grep -q "fdp37-alert-service:${GITHUB_SHA}" "$SUMMARY_MD"
+          grep -q "${GITHUB_SHA}" "$SUMMARY_MD"
           grep -q 'PRODUCTION_IMAGE_CONTAINER_KILL' "$EVIDENCE"
+          grep -q 'PRODUCTION_IMAGE_RESTART_API_PROOF' "$EVIDENCE"
+          grep -q 'transaction_mode=REQUIRED' "$EVIDENCE"
+          grep -q 'network_mode=host' "$EVIDENCE"
           grep -q 'READY_FOR_ENABLEMENT_REVIEW is not production enablement' "$SUMMARY_MD"
+          grep -q 'live_in_flight_proof_executed: `false`' "$SUMMARY_MD"
+          grep -q 'no_new_success_claims_after_rollback: `true`' "$ROLLBACK_MD"
+          if grep -R 'LIVE_IN_FLIGHT_REQUEST_KILL' docs/FDP-37-*.md docs/adr/FDP-37-*.md docs/testing/FDP-37-*.md docs/ops/FDP-37-*.md; then
+            echo "FDP-37 docs cannot claim live in-flight proof unless the required artifact contains LIVE_IN_FLIGHT_REQUEST_KILL"
+            exit 1
+          fi
           if grep -Eiq 'alpine|busybox|dummy' "$SUMMARY_MD" "$EVIDENCE"; then
             echo "FDP-37 production-image chaos cannot use dummy/alpine/busybox images"
             exit 1
