@@ -27,7 +27,9 @@ Threshold overlays must match the concrete values in `FDP-35-regulated-mutation-
 
 The checkpoint renewal panel must compare processing age against renewal count. Renewal count increasing without state transition is an investigation signal, not business progress.
 
-FDP-35 provides modeled restart/recovery proof in CI. It does not claim real OS/JVM/container kill chaos proof unless an explicit kill/restart test is added.
+FDP-35 provides modeled restart/recovery proof in CI. It verifies durable post-crash command states, replay policy, recovery API behavior, and operator visibility. It does not claim real OS/JVM/container process-kill chaos unless an explicit real-chaos job is implemented and run.
+
+True OS/JVM/container termination chaos remains future scope unless explicitly implemented.
 
 ## Runbook Link
 

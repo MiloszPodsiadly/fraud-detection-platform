@@ -853,32 +853,25 @@ class RegulatedMutationArchitectureTest {
         String combined = combinedFdp35Docs();
 
         assertContainsRequiredFdp35Wording(combined);
-        assertDoesNotContainForbiddenClaims(
-                combined,
-                "Production enabled.",
-                "Bank certified.",
-                "Real process-kill chaos proven.",
-                "External finality proven.",
-                "Distributed ACID achieved.",
-                "kill -9 chaos proof",
-                "fully production ready",
-                "external finality guaranteed"
-        );
+        assertNoForbiddenProcessKillOverclaim(combined);
+        assertNoProductionEnablementOverclaim(combined);
         assertThat(combined).contains("Do not include command id, alert id, actor id, lease owner, idempotency key, request hash, resource id");
     }
 
     @Test
     void fdp35InspectionResponseMustNotExposeUnsafeFields() throws Exception {
-        String response = readMainSource("regulated/RegulatedMutationCommandInspectionResponse.java");
+        String response = readSource("src/main/java/com/frauddetection/alert/regulated/RegulatedMutationCommandInspectionResponse.java");
+        String openApi = readSource("../docs/openapi/alert-service.openapi.yaml");
 
-        assertInspectionDtoDoesNotExposeUnsafeFields(response);
+        assertInspectionDtoNoUnsafeFields(response);
+        assertInspectionSchemaNoUnsafeFields(openApi);
     }
 
     @Test
     void fdp35CiMustBlockReadinessAndRegressionJobs() throws Exception {
         String ci = Files.readString(Path.of("../.github/workflows/ci.yml"));
 
-        assertCiJobContainsRequiredTestGroups(ci);
+        assertCiContainsRequiredFdp35Jobs(ci);
     }
 
     @Test
@@ -897,15 +890,7 @@ class RegulatedMutationArchitectureTest {
         String thresholds = readDoc("observability/FDP-35-regulated-mutation-alert-thresholds.md");
         String dashboard = readDoc("observability/FDP-35-regulated-mutation-dashboard-spec.md");
 
-        assertThat(thresholds)
-                .contains("P1")
-                .contains("P2")
-                .contains("> 0")
-                .contains(">= 3")
-                .contains("5 minutes")
-                .contains("10 minutes")
-                .contains("15 minutes")
-                .contains("30 minutes");
+        assertDocsHaveConcreteThresholds(thresholds);
         assertThat(dashboard)
                 .contains("Threshold overlays")
                 .contains("FDP-35-regulated-mutation-alert-thresholds.md");
@@ -917,15 +902,25 @@ class RegulatedMutationArchitectureTest {
 
         assertThat(matrix)
                 .contains("FDP-35 must prove readiness, not claim enablement.")
+                .contains("| Invariant | Test class | Test method | Type | CI job | Failure meaning | Allowed production claim | Forbidden production claim |")
                 .contains("EvidenceGatedFinalizeCoordinatorIntegrationTest` | `shouldFinalizeSubmitDecisionThroughRealMongoCoordinatorPath")
                 .contains("EvidenceGatedFinalizeCoordinatorTest` | `shouldNotReplayStaleCommittedSnapshotWhenFinalizeRecoveryRequired")
                 .contains("RegulatedMutationLeaseFencingIntegrationTest` | `expiredLeaseCanBeTakenOverAndStaleWorkerCannotWriteAfterTakeover")
                 .contains("RegulatedMutationLeaseRenewalIntegrationTest` | `concurrentRenewalAtLastAllowedSlotAllowsOnlyOneSuccess")
                 .contains("RegulatedMutationStaleWorkerExecutorIntegrationTest` | `legacyCheckpointBudgetExceededStopsBeforeBusinessMutationThroughRealMongoExecutorPath")
                 .contains("RegulatedMutationRestartRecoveryProofTest` | `crashAfterFdp29LocalCommitBeforeExternalConfirmationDoesNotClaimConfirmedFinality")
-                .contains("AlertControllerTest` | `budgetExceededRecovery_mustNotReturnCommittedSuccess")
+                .contains("AlertControllerTest` | `recoveryRequiredWithSnapshot_mustNotReplayCommittedSuccess")
+                .contains("AlertControllerTest` | `finalizeRecoveryRequiredWithSnapshot_mustNotReplayFinalizedSuccess")
+                .contains("AlertControllerTest` | `renewalBudgetExceededRecovery_mustReturnExplicitRecovery")
+                .contains("AlertControllerTest` | `staleCheckpointFailure_mustNotReturnSuccess")
+                .contains("AlertControllerTest` | `longRunningProcessing_mustBeObservableNotSuccess")
+                .contains("AlertControllerTest` | `expiredProcessingWithoutProof_mustNotReturnCommittedSuccess")
                 .contains("RegulatedMutationRecoveryControllerTest` | `inspectionEndpointNeverReturnsRawSensitiveFieldsOrExceptionText")
-                .contains("RegulatedMutationRollbackReadinessTest` | `rollbackKeepsRecoveryCommandsVisible");
+                .contains("RegulatedMutationRollbackReadinessTest` | `disablingCheckpointRenewal_doesNotDisableFencing")
+                .contains("RegulatedMutationRollbackReadinessTest` | `shrinkingRenewalBudget_doesNotCreateFalseSuccess")
+                .contains("RegulatedMutationRollbackReadinessTest` | `rollbackKeepsRecoveryCommandsVisible")
+                .contains("RegulatedMutationRollbackReadinessTest` | `rollbackDoesNotEnableFdp29Production")
+                .contains("RegulatedMutationRollbackReadinessTest` | `rollbackApiSmoke_doesNotHideRecovery");
         assertThat(matrix)
                 .doesNotContain("recovery/finalize replay tests")
                 .doesNotContain("rollback failure tests")
@@ -945,8 +940,8 @@ class RegulatedMutationArchitectureTest {
                 .toList();
     }
 
-    private String readMainSource(String relativePath) throws Exception {
-        return Files.readString(Path.of("src/main/java/com/frauddetection/alert/" + relativePath));
+    private String readSource(String path) throws Exception {
+        return Files.readString(Path.of(path));
     }
 
     private String readDoc(String relativePath) throws Exception {
@@ -965,33 +960,68 @@ class RegulatedMutationArchitectureTest {
                 + readDoc("operations/FDP-35-regulated-mutation-rollback-plan.md");
     }
 
-    private void assertDoesNotContainForbiddenClaims(String source, String... forbiddenClaims) {
+    private void assertNoForbiddenTerms(String source, String category, String... forbiddenClaims) {
         String normalized = source.toLowerCase();
         for (String forbiddenClaim : forbiddenClaims) {
             assertThat(normalized)
-                    .as("forbidden FDP-35 claim must be absent: " + forbiddenClaim)
+                    .as("forbidden FDP-35 " + category + " term must be absent: " + forbiddenClaim)
                     .doesNotContain(forbiddenClaim.toLowerCase());
         }
+    }
+
+    private void assertNoForbiddenProcessKillOverclaim(String source) {
+        // Modeled restart proof must not drift into real process/container kill claims.
+        assertNoForbiddenTerms(
+                source,
+                "process-kill overclaim",
+                "Real process-kill chaos proven.",
+                "real process-kill proof",
+                "OS kill chaos proven",
+                "JVM kill chaos proven",
+                "container kill proof",
+                "kill -9 chaos proof"
+        );
+    }
+
+    private void assertNoProductionEnablementOverclaim(String source) {
+        // FDP-35 proves readiness evidence only; it does not enable production/bank operation.
+        assertNoForbiddenTerms(
+                source,
+                "production enablement overclaim",
+                "Production enabled.",
+                "Bank certified.",
+                "production certified",
+                "bank enabled",
+                "External finality proven.",
+                "Distributed ACID achieved.",
+                "fully production ready",
+                "external finality guaranteed"
+        );
     }
 
     private void assertContainsRequiredFdp35Wording(String source) {
         assertThat(source)
                 .contains("production-readiness proof branch")
-                .contains("modeled restart/recovery proof")
-                .contains("not a real OS process termination test")
+                .contains("FDP-35 provides modeled restart/recovery proof in CI. It verifies durable post-crash command states, replay policy, recovery API behavior, and operator visibility. It does not claim real OS/JVM/container process-kill chaos unless an explicit real-chaos job is implemented and run.")
+                .contains("True OS/JVM/container termination chaos remains future scope unless explicitly implemented.")
                 .contains("No new public API statuses")
                 .contains("Checkpoint renewal must not be treated as business progress")
                 .contains("FDP-35 must prove readiness, not claim enablement.")
                 .contains("Modeled restart/recovery, controller recovery behavior, Docker/Testcontainers readiness, rollback, dashboard, alert, and operator drill evidence are covered.");
     }
 
-    private void assertInspectionDtoDoesNotExposeUnsafeFields(String source) {
+    private void assertInspectionDtoNoUnsafeFields(String source) {
+        // Inspection response may expose bounded booleans/hashes, never raw identifiers or raw errors.
         assertThat(source)
+                .contains("@JsonProperty(\"resource_id_present\")")
+                .contains("@JsonProperty(\"resource_id_hash\")")
                 .contains("@JsonProperty(\"lease_owner_present\")")
                 .contains("@JsonProperty(\"lease_owner_hash\")")
                 .contains("@JsonProperty(\"last_error_code\")")
+                .contains("safeResourceIdHash")
                 .contains("safeLeaseOwnerHash")
                 .contains("safeErrorCode")
+                .doesNotContain("@JsonProperty(\"resource_id\")")
                 .doesNotContain("@JsonProperty(\"lease_owner\")")
                 .doesNotContain("@JsonProperty(\"last_error\")")
                 .doesNotContain("@JsonProperty(\"idempotency_key\")")
@@ -1000,10 +1030,26 @@ class RegulatedMutationArchitectureTest {
                 .doesNotContain("@JsonProperty(\"payload_hash\")");
     }
 
-    private void assertCiJobContainsRequiredTestGroups(String source) {
+    private void assertInspectionSchemaNoUnsafeFields(String source) {
+        String schema = source.substring(source.indexOf("RegulatedMutationCommandInspectionResponse:"));
+        schema = schema.substring(0, schema.indexOf("AuditDegradationListResponse:"));
+        assertThat(schema)
+                .contains("resource_id_present:")
+                .contains("resource_id_hash:")
+                .contains("lease_owner_present:")
+                .contains("lease_owner_hash:")
+                .contains("last_error_code:")
+                .doesNotContain("resource_id:")
+                .doesNotContain("lease_owner:")
+                .doesNotContain("last_error:");
+    }
+
+    private void assertCiContainsRequiredFdp35Jobs(String source) {
+        // Both jobs must block Docker build and publish reports for CI triage.
         assertThat(source)
                 .contains("fdp35-production-readiness")
                 .contains("regulated-mutation-regression")
+                .contains("docker version")
                 .contains("-Dgroups=production-readiness,e2e,recovery-proof,integration")
                 .contains("EvidenceGatedFinalizeCoordinatorIntegrationTest")
                 .contains("RegulatedMutationLeaseFencingIntegrationTest")
@@ -1013,7 +1059,23 @@ class RegulatedMutationArchitectureTest {
                 .contains("RegulatedMutationRecoveryControllerTest")
                 .contains("RegulatedMutationRollbackReadinessTest")
                 .contains("RegulatedMutationArchitectureTest")
-                .contains("- regulated-mutation-regression");
+                .contains("- regulated-mutation-regression")
+                .contains("alert-service/target/surefire-reports/")
+                .contains("alert-service/target/failsafe-reports/");
+    }
+
+    private void assertDocsHaveConcreteThresholds(String source) {
+        assertThat(source)
+                .contains("P1")
+                .contains("P2")
+                .contains("> 0")
+                .contains(">= 3")
+                .contains("5 minutes")
+                .contains("10 minutes")
+                .contains("15 minutes")
+                .contains("30 minutes")
+                .contains("warning")
+                .contains("critical");
     }
 
     @Test

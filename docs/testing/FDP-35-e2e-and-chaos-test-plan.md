@@ -2,9 +2,9 @@
 
 FDP-35 is a production-readiness proof branch. It proves readiness evidence for the existing regulated mutation safety model and does not enable production or bank mode.
 
-FDP-35 provides modeled restart/recovery proof in CI. It recreates durable post-crash states and verifies replay/recovery/API behavior against the same Mongo-backed command state. It does not claim real OS/JVM/container kill chaos proof unless an explicit kill/restart test is added.
+FDP-35 provides modeled restart/recovery proof in CI. It verifies durable post-crash command states, replay policy, recovery API behavior, and operator visibility. It does not claim real OS/JVM/container process-kill chaos unless an explicit real-chaos job is implemented and run.
 
-True OS/JVM/container process termination chaos remains future scope unless explicitly implemented and run in CI.
+True OS/JVM/container termination chaos remains future scope unless explicitly implemented.
 
 ## Test Tags
 
@@ -50,4 +50,4 @@ CI output must be copied from the workflow run into the branch description after
 
 ## Limitations
 
-These tests use Docker/Testcontainers and durable Mongo state modeling. They do not terminate the alert-service JVM or container. Real process/container kill chaos is future/optional scope and must run under an explicit `real-chaos`/`docker-chaos` profile before any real kill proof claim is allowed.
+These tests use Docker/Testcontainers and durable Mongo state modeling. They do not terminate the alert-service JVM or container. True process/container termination chaos is future/optional scope and must run under an explicit `real-chaos`/`docker-chaos` profile before any real-chaos evidence claim is allowed.

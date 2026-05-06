@@ -24,11 +24,11 @@ FDP-35 is a production-readiness proof branch for regulated mutation execution. 
 
 FDP-35 proves readiness through Docker/Testcontainers E2E tests, modeled restart/recovery tests, controller/API recovery behavior tests, dashboard and alert specifications, operator drill runbooks, rollback validation, and CI test discovery.
 
-The restart proof is modeled restart/recovery proof. It seeds durable Mongo states a real process death could leave behind and verifies replay/recovery behavior. It is not a real OS process termination test and must not be described as a real process-kill chaos proof.
+The restart proof is modeled restart/recovery proof. It seeds durable Mongo states a real process death could leave behind and verifies replay/recovery behavior. It is modeled proof, not true OS/JVM/container termination chaos evidence.
 
-FDP-35 provides modeled restart/recovery proof in CI. It recreates durable post-crash states and verifies replay/recovery/API behavior against the same Mongo-backed command state. It does not claim real OS/JVM/container kill chaos proof unless an explicit kill/restart test is added.
+FDP-35 provides modeled restart/recovery proof in CI. It verifies durable post-crash command states, replay policy, recovery API behavior, and operator visibility. It does not claim real OS/JVM/container process-kill chaos unless an explicit real-chaos job is implemented and run.
 
-True OS/JVM/container process termination chaos remains future scope unless explicitly implemented and run in CI.
+True OS/JVM/container termination chaos remains future scope unless explicitly implemented.
 
 ## Non Goals
 
@@ -39,7 +39,7 @@ True OS/JVM/container process termination chaos remains future scope unless expl
 - No external finality claim.
 - No distributed lock claim.
 - No distributed ACID claim.
-- No real OS/JVM/container kill proof unless a dedicated explicit chaos job is implemented and green.
+- No true OS/JVM/container termination-chaos evidence unless a dedicated explicit chaos job is implemented and green.
 - No state machine rewrite.
 - No WORM, legal notarization, or KMS claim.
 

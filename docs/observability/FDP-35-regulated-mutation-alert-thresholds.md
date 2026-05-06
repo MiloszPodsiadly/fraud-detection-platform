@@ -20,4 +20,6 @@ Window notation: `5m` means 5 minutes, `10m` means 10 minutes, `15m` means 15 mi
 | checkpoint renewal treated as progress guard | dashboard panel: processing age vs renewal count | renewal count increases while no state transition for `> configured lease duration * 2` | renewal count increases while no state transition for `> min(max total lease duration, 10m)` | `10m` | Treat as stuck processing until proven otherwise. |
 | inspection endpoint failures | `regulated_mutation_inspection_failed_total` or sensitive-read audit failure counter | `> 0` | any fail-closed audit persistence failure | `5m` | Verify audit persistence and recovery authority path before allowing inspection use. |
 
-FDP-35 provides modeled restart/recovery proof in CI. It does not claim real OS/JVM/container kill chaos proof unless an explicit kill/restart test is added.
+FDP-35 provides modeled restart/recovery proof in CI. It verifies durable post-crash command states, replay policy, recovery API behavior, and operator visibility. It does not claim real OS/JVM/container process-kill chaos unless an explicit real-chaos job is implemented and run.
+
+True OS/JVM/container termination chaos remains future scope unless explicitly implemented.

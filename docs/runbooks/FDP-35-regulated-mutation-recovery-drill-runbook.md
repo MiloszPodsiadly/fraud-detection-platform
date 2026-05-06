@@ -1,6 +1,8 @@
 # FDP-35 Regulated Mutation Recovery Drill Runbook
 
-FDP-35 provides modeled restart/recovery proof in CI. It does not claim real OS/JVM/container kill chaos proof unless an explicit kill/restart test is added. True OS/JVM/container process termination chaos remains future scope unless explicitly implemented and run in CI.
+FDP-35 provides modeled restart/recovery proof in CI. It verifies durable post-crash command states, replay policy, recovery API behavior, and operator visibility. It does not claim real OS/JVM/container process-kill chaos unless an explicit real-chaos job is implemented and run.
+
+True OS/JVM/container termination chaos remains future scope unless explicitly implemented.
 
 ## Ownership
 
@@ -24,6 +26,23 @@ FDP-35 provides modeled restart/recovery proof in CI. It does not claim real OS/
 - Confirm no duplicate business mutation occurred.
 - Record audit note with command state and action taken.
 - Escalate if durable proof is ambiguous.
+
+## Reason-Specific Operator Actions
+
+| Reason | What it means | Operator action | Escalate when | Forbidden action |
+| --- | --- | --- | --- | --- |
+| `STALE_OWNER` | Worker no longer owns the command lease. | Inspect current owner hash, command state, and latest transition; allow current owner/recovery path to proceed. | Same command repeatedly rejects current workers. | Do not rewrite `lease_owner`. |
+| `EXPIRED_LEASE` | Lease expired before a claimed transition. | Confirm no business result was exposed; check takeover/recovery backlog. | Expired commands accumulate for more than 10 minutes. | Do not mark success from stale worker output. |
+| `BUDGET_EXCEEDED` | Lease renewal/checkpoint budget is exhausted. | Treat as explicit recovery/no-progress; inspect `degradation_reason` and recovery backlog. | More than 3 in 5 minutes or any customer-visible ambiguity. | Do not increase budget without dual approval. |
+| `NON_RENEWABLE_STATE` | Command is in a state that must not renew. | Confirm terminal/recovery state and route to recovery or closure. | State is unexpected for model version. | Do not renew manually. |
+| `TERMINAL_STATE` | Command is already terminal. | Verify no duplicate operation is started; use replay result only. | Terminal state conflicts with business aggregate. | Do not mutate terminal command fields. |
+| `RECOVERY_STATE` | Command already requires recovery. | Keep recovery visible; follow recovery API/runbook. | Response snapshot appears newer than recovery state. | Do not replay stale snapshot as success. |
+| `MODEL_VERSION_MISMATCH` | Worker/model version does not match stored command. | Inspect command model version and route to matching executor/recovery owner. | Mismatch occurs on new commands. | Do not downgrade `mutation_model_version`. |
+| `EXECUTION_STATUS_MISMATCH` | Expected execution status no longer matches. | Re-read command, verify current status, and retry only through normal coordinator path. | Status oscillates or hides recovery. | Do not force status to `COMPLETED`. |
+| `UNSUPPORTED_CHECKPOINT` | Renewal attempted at an unapproved checkpoint. | Stop worker path; inspect policy and command state. | Appears in production readiness CI or more than once in operations. | Do not add ad hoc checkpoint names. |
+| `FINALIZE_RECOVERY_REQUIRED` | FDP-29 finalize path requires operator recovery. | Verify local evidence/outbox/audit state and external confirmation status. | External evidence is ambiguous. | Do not report evidence confirmed. |
+| `RECOVERY_REQUIRED` | Legacy or generic recovery is required. | Inspect command, outbox, audit phases, and business aggregate consistency. | Snapshot/business state conflict exists. | Do not return committed success. |
+| `OUTBOX_CONFIRMATION_UNKNOWN` | Business state may be committed but broker confirmation is unknown. | Use decision outbox reconciliation; verify broker offset/evidence before resolving. | Broker evidence cannot be obtained within 30 minutes. | Do not republish blindly with a new idempotency key. |
 
 ## Audit Record Template
 

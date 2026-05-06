@@ -2,7 +2,9 @@
 
 This operator drill is for regulated mutation recovery. It uses sample values only and contains no secrets.
 
-FDP-35 provides modeled restart/recovery proof in CI. It does not claim real OS/JVM/container kill chaos proof unless an explicit kill/restart test is added. True OS/JVM/container process termination chaos remains future scope unless explicitly implemented and run in CI.
+FDP-35 provides modeled restart/recovery proof in CI. It verifies durable post-crash command states, replay policy, recovery API behavior, and operator visibility. It does not claim real OS/JVM/container process-kill chaos unless an explicit real-chaos job is implemented and run.
+
+True OS/JVM/container termination chaos remains future scope unless explicitly implemented.
 
 ## Operator Control
 
@@ -48,6 +50,23 @@ FDP-35 provides modeled restart/recovery proof in CI. It does not claim real OS/
 | disable FDP-29 feature flags | Fraud Platform Owner | Compliance/Operations approver |
 | approve extended soak | SRE Lead | Fraud Platform Owner |
 | close incident | Incident Lead | Fraud Platform Owner |
+
+## Reason-Specific Drill Matrix
+
+| Reason | Required drill evidence | Expected result | Escalation |
+| --- | --- | --- | --- |
+| `STALE_OWNER` | current lease owner hash, stale rejection metric, command state | stale worker cannot transition command | repeated stale rejections |
+| `EXPIRED_LEASE` | lease expiry, takeover/recovery state, API response | no committed success from expired worker | expired backlog over threshold |
+| `BUDGET_EXCEEDED` | lease renewal count, degradation reason, recovery response | explicit recovery/no-progress | more than 3 in 5 minutes |
+| `NON_RENEWABLE_STATE` | state, model version, checkpoint name | renewal rejected without success evidence | unexpected model policy |
+| `TERMINAL_STATE` | terminal state, response snapshot presence, audit phase | replay only, no mutation | business aggregate mismatch |
+| `RECOVERY_STATE` | recovery status, stale snapshot presence | recovery wins over snapshot | hidden recovery in API |
+| `MODEL_VERSION_MISMATCH` | stored model version and executor path | no downgrade or cross-model replay | new commands affected |
+| `EXECUTION_STATUS_MISMATCH` | stored execution status and expected transition | transition rejected/fail-closed | status oscillation |
+| `UNSUPPORTED_CHECKPOINT` | checkpoint name and policy row | worker stops before business mutation | repeated unsupported checkpoint |
+| `FINALIZE_RECOVERY_REQUIRED` | local evidence, outbox, external confirmation status | no confirmed finality claim | evidence ambiguity |
+| `RECOVERY_REQUIRED` | command, outbox, audit, business aggregate state | no committed success claim | conflicting durable state |
+| `OUTBOX_CONFIRMATION_UNKNOWN` | outbox record, broker evidence, reconciliation action | resolved only with evidence | broker evidence unavailable |
 
 ## Drill 1: FINALIZE_RECOVERY_REQUIRED
 

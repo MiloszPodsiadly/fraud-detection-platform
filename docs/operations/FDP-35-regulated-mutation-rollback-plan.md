@@ -2,7 +2,9 @@
 
 Rollback must be explicit, reviewed, tested, and reversible. Operators must not manually edit regulated mutation command documents or business aggregates.
 
-FDP-35 provides modeled restart/recovery proof in CI. It does not claim real OS/JVM/container kill chaos proof unless an explicit kill/restart test is added.
+FDP-35 provides modeled restart/recovery proof in CI. It verifies durable post-crash command states, replay policy, recovery API behavior, and operator visibility. It does not claim real OS/JVM/container process-kill chaos unless an explicit real-chaos job is implemented and run.
+
+True OS/JVM/container termination chaos remains future scope unless explicitly implemented.
 
 ## Executable Rollback Checklist
 
@@ -19,6 +21,7 @@ FDP-35 provides modeled restart/recovery proof in CI. It does not claim real OS/
 | rollback validation result | `RegulatedMutationRollbackReadinessTest` green |
 | post-rollback monitoring window | minimum 60 minutes |
 | explicit no new success claims observed | required yes/no |
+| post-rollback owner signoff | required owner name and timestamp |
 
 ## Disable FDP-29 Evidence-Gated Finalize Flags
 
@@ -61,13 +64,15 @@ After rollback:
 - Verify existing model-versioned commands replay with their original model version.
 - Verify recovery/no-progress alerts are understood and triaged.
 - Verify no `FINALIZE_RECOVERY_REQUIRED` command is hidden.
+- Record post-rollback owner signoff with timestamp after the monitoring window.
 
 ## Validation
 
-- `RegulatedMutationRollbackReadinessTest.disablingCheckpointRenewalDoesNotDisableFdp32Fencing`
-- `RegulatedMutationRollbackReadinessTest.shrinkingRenewalBudgetCreatesExplicitRecoveryNotFalseSuccess`
+- `RegulatedMutationRollbackReadinessTest.disablingCheckpointRenewal_doesNotDisableFencing`
+- `RegulatedMutationRollbackReadinessTest.shrinkingRenewalBudget_doesNotCreateFalseSuccess`
 - `RegulatedMutationRollbackReadinessTest.rollbackKeepsRecoveryCommandsVisible`
-- `RegulatedMutationRollbackReadinessTest.rollbackDoesNotChangeProductionEnablementFlagsOrCreateSchedulers`
+- `RegulatedMutationRollbackReadinessTest.rollbackDoesNotEnableFdp29Production`
+- `RegulatedMutationRollbackReadinessTest.rollbackApiSmoke_doesNotHideRecovery`
 
 ## Filled Sample Output
 
@@ -87,4 +92,5 @@ api_smoke_result: RECOVERY_REQUIRED response explicit, no committed success
 rollback_validation_result: PASS
 post_rollback_monitoring_window: 60m
 no_new_success_claims_observed: true
+post_rollback_owner_signoff: fraud-platform-on-call at 2026-05-05T19:30:00Z
 ```
