@@ -1857,6 +1857,10 @@ class RegulatedMutationArchitectureTest {
                 .contains("DockerImageName.parse(imageName)")
                 .contains("killContainerCmd")
                 .contains("target\", \"fdp37-chaos")
+                .contains("IMAGE_DIGEST_PROPERTY")
+                .contains("network_mode")
+                .contains("live_in_flight_proof_executed")
+                .contains("fdp37-rollback-validation.md")
                 .contains("FDP-37 killed target must be the alert-service image/container")
                 .doesNotContain("DockerImageName.parse(\"alpine")
                 .doesNotContain("while true; do sleep");
@@ -1908,6 +1912,37 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
+    void fdp37LiveInFlightCheckpointSupportMustStayTestOnly() throws Exception {
+        List<Path> runtimeFiles;
+        try (Stream<Path> stream = Files.walk(Path.of("src/main/java/com/frauddetection/alert"))) {
+            runtimeFiles = stream.filter(path -> path.toString().endsWith(".java")).toList();
+        }
+
+        for (Path path : runtimeFiles) {
+            String source = Files.readString(path);
+            assertThat(source)
+                    .as("Live in-flight checkpoint support must not leak into runtime source: " + path)
+                    .doesNotContain("fdp36-live-in-flight")
+                    .doesNotContain("app.fdp36.live-in-flight")
+                    .doesNotContain("LiveInFlightMutationBlocker");
+        }
+
+        String fixture = Files.readString(Path.of(
+                "src/test/java/com/frauddetection/alert/regulated/chaos/Fdp36LiveInFlightMutationBlockerConfiguration.java"
+        ));
+        String configParity = Files.readString(Path.of(
+                "src/test/java/com/frauddetection/alert/regulated/RegulatedMutationProductionImageConfigParityIT.java"
+        ));
+        String proofSummaryHarness = Files.readString(Path.of(
+                "src/test/java/com/frauddetection/alert/regulated/chaos/RegulatedMutationProductionImageChaosHarness.java"
+        ));
+
+        assertThat(fixture).contains("@Profile(\"fdp36-live-in-flight\")");
+        assertThat(configParity).contains("noneMatch(argument -> argument.contains(\"fdp36-live-in-flight\"))");
+        assertThat(proofSummaryHarness).contains("live_fixture_enabled");
+    }
+
+    @Test
     void fdp37DocsMustDescribeProductionImageChaosWithoutEnablementOverclaims() throws Exception {
         String adr = Files.readString(Path.of("../docs/adr/FDP-37-production-image-chaos-enable-gate.md"));
         String mergeGate = Files.readString(Path.of("../docs/FDP-37-merge-gate.md"));
@@ -1915,7 +1950,8 @@ class RegulatedMutationArchitectureTest {
         String matrix = Files.readString(Path.of("../docs/testing/FDP-37-production-image-chaos-proof-matrix.md"));
         String proofPack = Files.readString(Path.of("../docs/testing/FDP-37-final-proof-pack.md"));
         String dashboards = Files.readString(Path.of("../docs/ops/FDP-37-dashboard-and-alert-thresholds.md"));
-        String combined = adr + "\n" + mergeGate + "\n" + checklist + "\n" + matrix + "\n" + proofPack + "\n" + dashboards;
+        String rollbackTemplate = Files.readString(Path.of("../docs/ops/FDP-37-rollback-validation-output-template.md"));
+        String combined = adr + "\n" + mergeGate + "\n" + checklist + "\n" + matrix + "\n" + proofPack + "\n" + dashboards + "\n" + rollbackTemplate;
 
         assertThat(combined).contains("FDP-37 is a proof, operations, and release-gate branch.");
         assertThat(combined).contains("production-like `alert-service` Docker image/container");
@@ -1924,8 +1960,14 @@ class RegulatedMutationArchitectureTest {
         assertThat(combined).contains("DURABLE_STATE_SEEDED_CONTAINER_PROOF");
         assertThat(combined).contains("API_PERSISTED_STATE_PROOF");
         assertThat(combined).contains("READY_FOR_ENABLEMENT_REVIEW is not production enablement.");
-        assertThat(combined).contains("no production runtime chaos hook");
+        assertThat(combined).contains("does not add production chaos hooks");
+        assertThat(combined).contains("A skipped live in-flight test is not counted as proof.");
+        assertThat(combined).contains("transaction_mode=REQUIRED");
+        assertThat(combined).contains("Linux CI host networking");
+        assertThat(combined).contains("not production environment configuration certification");
+        assertThat(combined).contains("Rollback validation is release evidence, not production rollback approval.");
         assertThat(combined).contains("Do not use command id, alert id, actor id, idempotency key, lease owner, raw exception");
+        assertThat(combined).doesNotContain("LIVE_IN_FLIGHT_REQUEST_KILL");
         assertThat(combined).doesNotContain("PRODUCTION_ENABLED");
         assertFdp36ForbiddenPhraseIsContextual(combined, "production enablement");
         assertFdp36ForbiddenPhraseIsContextual(combined, "bank certification");
@@ -1943,7 +1985,10 @@ class RegulatedMutationArchitectureTest {
         assertThat(matrix).contains("RegulatedMutationProductionImageChaosIT.productionImageKillAfterClaimBeforeAttemptedAuditDoesNotCommit");
         assertThat(matrix).contains("RegulatedMutationProductionImageChaosIT.productionImageKillInFdp29PendingExternalRemainsPendingWithoutEvidence");
         assertThat(matrix).contains("RegulatedMutationProductionImageEvidenceIntegrityIT.legacyReplayAfterProductionImageRestartDoesNotCreateSecondOutboxRecord");
-        assertThat(matrix).contains("RegulatedMutationProductionImageLiveInFlightKillIT.productionImageLiveInFlightBeforeBusinessMutationKillDoesNotCommitOrPublish");
+        assertThat(matrix).contains("RegulatedMutationProductionImageRequiredTransactionChaosIT.requiredTransactionModeBusinessCommittingRestartRequiresRecoveryWithoutFalseSuccess");
+        assertThat(matrix).contains("RegulatedMutationProductionImageRollbackIT.rollbackRestartKeepsFdp32FencingAndDoesNotCreateNewSuccessClaims");
+        assertThat(matrix).contains("A skipped live in-flight test is not counted as proof.");
+        assertThat(matrix).doesNotContain("LIVE_IN_FLIGHT_REQUEST_KILL");
         assertThat(matrix.lines()
                 .filter(line -> line.contains("PRODUCTION_IMAGE_CONTAINER_KILL"))
                 .toList())
@@ -1957,15 +2002,25 @@ class RegulatedMutationArchitectureTest {
         assertThat(ci).contains("fdp37-production-image-chaos:");
         assertThat(ci).contains("Build alert-service production-like image");
         assertThat(ci).contains("docker build -f deployment/Dockerfile.backend --build-arg MODULE_NAME=alert-service -t fdp37-alert-service:${GITHUB_SHA} .");
-        assertThat(ci).contains("-Dfdp37.alert-service.image=fdp37-alert-service:${GITHUB_SHA}");
+        assertThat(ci).contains("FDP37_ALERT_SERVICE_IMAGE=fdp37-alert-service:${GITHUB_SHA}");
+        assertThat(ci).contains("FDP37_ALERT_SERVICE_IMAGE_DIGEST");
+        assertThat(ci).contains("-Dfdp37.alert-service.image=${FDP37_ALERT_SERVICE_IMAGE}");
+        assertThat(ci).contains("-Dfdp37.alert-service.image-digest=${FDP37_ALERT_SERVICE_IMAGE_DIGEST}");
         assertThat(ci).contains("RegulatedMutationProductionImageChaosIT");
         assertThat(ci).contains("RegulatedMutationProductionImageEvidenceIntegrityIT");
         assertThat(ci).contains("RegulatedMutationProductionImageConfigParityIT");
         assertThat(ci).contains("RegulatedMutationProductionImageRollbackIT");
-        assertThat(ci).contains("RegulatedMutationProductionImageLiveInFlightKillIT");
+        assertThat(ci).contains("RegulatedMutationProductionImageRequiredTransactionChaosIT");
+        assertThat(ci).contains("FDP-37 required test class did not fully execute");
         assertThat(ci).contains("fdp37-proof-summary.md");
         assertThat(ci).contains("fdp37-proof-summary.json");
+        assertThat(ci).contains("fdp37-rollback-validation.md");
         assertThat(ci).contains("PRODUCTION_IMAGE_CONTAINER_KILL");
+        assertThat(ci).contains("PRODUCTION_IMAGE_RESTART_API_PROOF");
+        assertThat(ci).contains("transaction_mode=REQUIRED");
+        assertThat(ci).contains("network_mode=host");
+        assertThat(ci).contains("\"scenario_count\": int(summary.get(\"scenario_count\", 0)) >= 5");
+        assertThat(ci).contains("live_in_flight_proof_executed: `false`");
         assertThat(ci).contains("if-no-files-found: error");
         assertThat(ci).contains("fdp37-production-image-chaos-reports");
         assertThat(ci).contains("regulated-mutation-regression");

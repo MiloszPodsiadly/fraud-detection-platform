@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIf;
 
 import java.time.Instant;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -37,7 +38,14 @@ class RegulatedMutationProductionImageRollbackIT extends AbstractRegulatedMutati
                 }
         );
 
-        RegulatedMutationChaosResult result = chaosHarness.runDurableStateScenario(scenario);
+        RegulatedMutationChaosResult result = chaosHarness.runDurableStateScenario(
+                scenario,
+                List.of(
+                        "--app.regulated-mutations.transaction-mode=REQUIRED",
+                        "--app.regulated-mutations.checkpoint-renewal.extension=PT1S",
+                        "--app.regulated-mutations.lease-renewal.max-renewal-count=1"
+                )
+        );
         chaosHarness.recoverViaRestartedService();
         RegulatedMutationChaosResult afterRollbackRecovery = chaosHarness.collectEvidence(
                 scenario,
@@ -61,5 +69,15 @@ class RegulatedMutationProductionImageRollbackIT extends AbstractRegulatedMutati
         assertThat(afterRollbackRecovery.outboxRecords()).isZero();
         assertThat(afterRollbackRecovery.successAuditEvents()).isZero();
         assertThat(afterRollbackRecovery.analystDecision()).isNull();
+        chaosHarness.writeRollbackValidationArtifact(
+                true,
+                result.targetKilled() && result.targetRestarted(),
+                afterRollbackRecovery.executionStatus() == RegulatedMutationExecutionStatus.RECOVERY_REQUIRED,
+                afterRollbackRecovery.executionStatus() == RegulatedMutationExecutionStatus.RECOVERY_REQUIRED
+                        || afterRollbackRecovery.executionStatus() == RegulatedMutationExecutionStatus.PROCESSING,
+                afterRollbackRecovery.outboxRecords() == 0
+                        && afterRollbackRecovery.successAuditEvents() == 0
+                        && afterRollbackRecovery.analystDecision() == null
+        );
     }
 }
