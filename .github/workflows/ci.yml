@@ -167,7 +167,7 @@ jobs:
         run: docker version
 
       - name: Run regulated mutation regression suite
-        run: mvn -B -pl alert-service -am "-Dtest=EvidenceGatedFinalizeCoordinatorIntegrationTest,EvidenceGatedFinalizeCoordinatorTest,RegulatedMutationLeaseFencingIntegrationTest,RegulatedMutationFencedCommandWriterTest,RegulatedMutationLeaseRenewalIntegrationTest,RegulatedMutationLeaseRenewalServiceTest,RegulatedMutationSafeCheckpointPolicyTest,RegulatedMutationCheckpointRenewalExecutionTest,RegulatedMutationStaleWorkerExecutorIntegrationTest,RegulatedMutationRecoveryServiceTest,RegulatedMutationRecoveryControllerTest,RegulatedMutationRollbackReadinessTest,AlertControllerTest,AlertServiceMetricsTest,RegulatedMutationArchitectureTest" test
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=EvidenceGatedFinalizeCoordinatorIntegrationTest,EvidenceGatedFinalizeCoordinatorTest,RegulatedMutationLeaseFencingIntegrationTest,RegulatedMutationFencedCommandWriterTest,RegulatedMutationLeaseRenewalIntegrationTest,RegulatedMutationLeaseRenewalServiceTest,RegulatedMutationSafeCheckpointPolicyTest,RegulatedMutationCheckpointRenewalExecutionTest,RegulatedMutationStaleWorkerExecutorIntegrationTest,RegulatedMutationRecoveryServiceTest,RegulatedMutationRecoveryControllerTest,RegulatedMutationRollbackReadinessTest,AlertControllerTest,AlertServiceMetricsTest,RegulatedMutationArchitectureTest" test
 
       - name: Upload regulated mutation regression reports
         if: always()
