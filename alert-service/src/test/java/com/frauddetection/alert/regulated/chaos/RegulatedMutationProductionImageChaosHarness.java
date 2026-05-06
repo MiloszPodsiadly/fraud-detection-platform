@@ -18,7 +18,6 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.net.ServerSocket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -43,10 +42,14 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
     public static final String IMAGE_ENV = "FDP37_ALERT_SERVICE_IMAGE";
     public static final String IMAGE_DIGEST_PROPERTY = "fdp37.alert-service.image-digest";
     public static final String IMAGE_DIGEST_ENV = "FDP37_ALERT_SERVICE_IMAGE_DIGEST";
+    public static final String IMAGE_ID_PROPERTY = "fdp37.alert-service.image-id";
+    public static final String IMAGE_ID_ENV = "FDP37_ALERT_SERVICE_IMAGE_ID";
 
     private static final String TARGET_NAME = "alert-service";
     private static final String PROOF_SUMMARY_MD = "fdp37-proof-summary.md";
     private static final String PROOF_SUMMARY_JSON = "fdp37-proof-summary.json";
+    private static final String ENABLEMENT_REVIEW_PACK_MD = "fdp37-enablement-review-pack.md";
+    private static final String ENABLEMENT_REVIEW_PACK_JSON = "fdp37-enablement-review-pack.json";
     private static final String ROLLBACK_VALIDATION_MD = "fdp37-rollback-validation.md";
     private static final String ROLLBACK_VALIDATION_JSON = "fdp37-rollback-validation.json";
 
@@ -54,6 +57,7 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
     private final String mongodbUri;
     private final String imageName;
     private final String imageDigest;
+    private final String imageId;
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(2))
             .build();
@@ -79,6 +83,8 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
         this.mongodbUri = mongodbUri;
         this.imageName = requireAlertServiceImage(imageName);
         this.imageDigest = configuredImageDigest().orElse("LOCAL_IMAGE_DIGEST_NOT_PROVIDED");
+        this.imageId = configuredImageId().orElse("LOCAL_IMAGE_ID_NOT_PROVIDED");
+        requireImageProvenanceInCi();
     }
 
     public static Optional<String> configuredImageName() {
@@ -99,6 +105,18 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
             return Optional.of(property.trim());
         }
         String env = System.getenv(IMAGE_DIGEST_ENV);
+        if (env != null && !env.isBlank()) {
+            return Optional.of(env.trim());
+        }
+        return Optional.empty();
+    }
+
+    public static Optional<String> configuredImageId() {
+        String property = System.getProperty(IMAGE_ID_PROPERTY);
+        if (property != null && !property.isBlank()) {
+            return Optional.of(property.trim());
+        }
+        String env = System.getenv(IMAGE_ID_ENV);
         if (env != null && !env.isBlank()) {
             return Optional.of(env.trim());
         }
@@ -194,6 +212,7 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
         RegulatedMutationChaosResult result = new RegulatedMutationChaosResult(
                 scenario.name(),
                 scenario.window(),
+                scenario.stateReachMethod(),
                 primaryProofLevel(proofLevels),
                 killedContainerId,
                 restartedContainerId,
@@ -223,11 +242,12 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
 
     public void startAlertService(String logName, List<String> additionalArgs) {
         assertNoRunningContainer();
-        servicePort = freePort();
         List<String> args = alertServiceArgs(additionalArgs);
         lastEffectiveArgs = List.copyOf(args);
         container = new GenericContainer<>(DockerImageName.parse(imageName))
-                .withNetworkMode("host")
+                .withNetwork(FraudPlatformContainers.network())
+                .withNetworkAliases("alert-service-fdp37")
+                .withExposedPorts(8080)
                 .withCommand(args.toArray(String[]::new));
         try {
             Files.createDirectories(logDirectory);
@@ -237,6 +257,7 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
         container.start();
         assertAlertServiceImage(container.getDockerImageName());
         restartedImageName = container.getDockerImageName();
+        servicePort = container.getMappedPort(8080);
         awaitReadiness();
     }
 
@@ -248,6 +269,27 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
         killedContainerId = container.getContainerId();
         killedImageName = container.getDockerImageName();
         container.getDockerClient().killContainerCmd(killedContainerId).exec();
+        RegulatedMutationChaosWaiter.waitUntil(
+                "FDP-37 killed alert-service container to stop",
+                Duration.ofSeconds(20),
+                Duration.ofMillis(250),
+                () -> {
+                    try {
+                        Boolean running = container.getDockerClient()
+                                .inspectContainerCmd(killedContainerId)
+                                .exec()
+                                .getState()
+                                .getRunning();
+                        return Boolean.TRUE.equals(running)
+                                ? RegulatedMutationChaosWaiter.ProbeResult.waiting("container still running")
+                                : RegulatedMutationChaosWaiter.ProbeResult.satisfied("stopped");
+                    } catch (RuntimeException exception) {
+                        return RegulatedMutationChaosWaiter.ProbeResult.satisfied(
+                                "inspect unavailable after kill: " + exception.getClass().getSimpleName()
+                        );
+                    }
+                }
+        );
         container.close();
         container = null;
     }
@@ -294,9 +336,17 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
                             + "; restarted_target=" + result.restartedTargetName()
                             + "; restarted_container=" + maskId(result.restartedTargetId())
                             + "; image_tag=" + imageTag()
+                            + "; image_id=" + imageId
                             + "; image_digest=" + imageDigest
                             + "; transaction_mode=" + currentTransactionMode()
-                            + "; network_mode=host"
+                            + "; state_reach_method=" + result.stateReachMethod()
+                            + "; state=" + result.commandState()
+                            + "; status=" + result.executionStatus()
+                            + "; outbox=" + result.outboxRecords()
+                            + "; success_audit=" + result.successAuditEvents()
+                            + "; network_mode=testcontainers-shared-network"
+                            + "; network_aliases_used=true"
+                            + "; host_networking_used=false"
                             + "; result=PASS"
                             + System.lineSeparator(),
                     StandardOpenOption.CREATE,
@@ -315,11 +365,16 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
         root.put("github_run_id", Optional.ofNullable(System.getenv("GITHUB_RUN_ID")).orElse("LOCAL"));
         root.put("image_name", imageName);
         root.put("image_tag", imageTag());
+        root.put("image_id", imageId);
         root.put("image_digest_or_id", imageDigest);
+        root.put("dockerfile_path", "deployment/Dockerfile.backend");
         root.put("image_kind", "production-like");
-        root.put("network_mode", "host");
+        root.put("network_mode", "testcontainers-shared-network");
+        root.put("network_aliases_used", true);
+        root.put("host_networking_used", false);
         root.put("os_name", System.getProperty("os.name", "unknown"));
         root.put("ci_runner", Optional.ofNullable(System.getenv("RUNNER_OS")).orElse("LOCAL"));
+        root.put("readiness_wait_strategy", "bounded-poll");
         root.put("live_fixture_enabled", liveFixtureEnabled());
         root.put("live_in_flight_proof_executed", false);
         root.put("live_in_flight_test_class", "RegulatedMutationProductionImageLiveInFlightKillIT");
@@ -328,6 +383,9 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
         root.put("restarted_container_id_masked", maskId(restartedContainerId));
         root.put("mongo_replica_set_uri_masked", "mongodb://<masked-host>/<masked-db>?replicaSet=<masked>");
         root.put("scenario_count", aggregateScenarioCount());
+        root.put("durable_state_seeded_scenarios_count", countScenarios(RegulatedMutationStateReachMethod.DURABLE_STATE_SEEDED));
+        root.put("runtime_reached_fixture_scenarios_count", countScenarios(RegulatedMutationStateReachMethod.RUNTIME_REACHED_TEST_FIXTURE));
+        root.put("runtime_reached_production_image_scenarios_count", countScenarios(RegulatedMutationStateReachMethod.RUNTIME_REACHED_PRODUCTION_IMAGE));
         root.put("final_result", "PASS");
         root.put("enablement_note", "READY_FOR_ENABLEMENT_REVIEW is not production enablement.");
         ArrayNode scenarios = root.putArray("scenarios");
@@ -335,6 +393,7 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
             ObjectNode scenario = scenarios.addObject();
             scenario.put("scenario", result.scenarioName());
             scenario.put("window", result.window().name());
+            scenario.put("state_reach_method", result.stateReachMethod().name());
             scenario.put("killed_target", result.killedTargetName());
             scenario.put("restarted_target", result.restartedTargetName());
             scenario.put("state", result.commandState() == null ? null : result.commandState().name());
@@ -346,17 +405,23 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
         try {
             Files.createDirectories(logDirectory);
             objectMapper.writerWithDefaultPrettyPrinter().writeValue(logDirectory.resolve(PROOF_SUMMARY_JSON).toFile(), root);
+            writeEnablementReviewPack(root);
             Files.writeString(
                     logDirectory.resolve(PROOF_SUMMARY_MD),
                     "# FDP-37 Production Image Chaos Proof Summary\n\n"
                             + "- image_name: `" + imageName + "`\n"
                             + "- image_tag: `" + imageTag() + "`\n"
+                            + "- image_id: `" + imageId + "`\n"
                             + "- image_digest_or_id: `" + imageDigest + "`\n"
+                            + "- dockerfile_path: `deployment/Dockerfile.backend`\n"
                             + "- commit_sha: `" + Optional.ofNullable(System.getenv("GITHUB_SHA")).orElse("LOCAL") + "`\n"
                             + "- ci_job_name: `" + Optional.ofNullable(System.getenv("GITHUB_JOB")).orElse("LOCAL") + "`\n"
                             + "- github_run_id: `" + Optional.ofNullable(System.getenv("GITHUB_RUN_ID")).orElse("LOCAL") + "`\n"
                             + "- image_kind: `production-like`\n"
-                            + "- network_mode: `host`\n"
+                            + "- network_mode: `testcontainers-shared-network`\n"
+                            + "- network_aliases_used: `true`\n"
+                            + "- host_networking_used: `false`\n"
+                            + "- readiness_wait_strategy: `bounded-poll`\n"
                             + "- os_name: `" + System.getProperty("os.name", "unknown") + "`\n"
                             + "- ci_runner: `" + Optional.ofNullable(System.getenv("RUNNER_OS")).orElse("LOCAL") + "`\n"
                             + "- live_fixture_enabled: `" + liveFixtureEnabled() + "`\n"
@@ -366,6 +431,9 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
                             + "- killed_container_id_masked: `" + maskId(killedContainerId) + "`\n"
                             + "- restarted_container_id_masked: `" + maskId(restartedContainerId) + "`\n"
                             + "- scenario_count: `" + aggregateScenarioCount() + "`\n"
+                            + "- durable_state_seeded_scenarios_count: `" + countScenarios(RegulatedMutationStateReachMethod.DURABLE_STATE_SEEDED) + "`\n"
+                            + "- runtime_reached_fixture_scenarios_count: `" + countScenarios(RegulatedMutationStateReachMethod.RUNTIME_REACHED_TEST_FIXTURE) + "`\n"
+                            + "- runtime_reached_production_image_scenarios_count: `" + countScenarios(RegulatedMutationStateReachMethod.RUNTIME_REACHED_PRODUCTION_IMAGE) + "`\n"
                             + "- final_result: `PASS`\n"
                             + "- enablement_note: `READY_FOR_ENABLEMENT_REVIEW is not production enablement.`\n\n"
                             + "## Scenarios\n\n"
@@ -379,14 +447,79 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
         }
     }
 
+    private void writeEnablementReviewPack(ObjectNode proofSummary) throws IOException {
+        ObjectNode root = objectMapper.createObjectNode();
+        root.put("commit_sha", proofSummary.path("commit_sha").asText());
+        root.put("image_name", imageName);
+        root.put("image_id", imageId);
+        root.put("image_digest_or_id", imageDigest);
+        root.put("dockerfile_path", "deployment/Dockerfile.backend");
+        root.put("fdp37_job_status", "PASS");
+        root.put("regulated_mutation_regression_status", requiredWorkflowStatus("REGULATED_MUTATION_REGRESSION_STATUS"));
+        root.put("fdp35_status", requiredWorkflowStatus("FDP35_STATUS"));
+        root.put("fdp36_status", requiredWorkflowStatus("FDP36_STATUS"));
+        root.put("required_transaction_scenario_executed", hasRequiredTransactionScenario());
+        root.put("durable_state_seeded_scenario_count", countScenarios(RegulatedMutationStateReachMethod.DURABLE_STATE_SEEDED));
+        root.put("live_in_flight_required", false);
+        root.put("live_in_flight_executed", countScenarios(RegulatedMutationStateReachMethod.RUNTIME_REACHED_TEST_FIXTURE) > 0);
+        root.put("rollback_validation_passed", Files.exists(logDirectory.resolve(ROLLBACK_VALIDATION_JSON)));
+        root.put("proof_artifacts_present", true);
+        root.put("production_enablement", false);
+        root.put("release_config_pr_required", true);
+        root.put("human_approval_required", true);
+        root.put("operator_drill_required_before_enablement", true);
+        root.put("final_decision", "READY_FOR_ENABLEMENT_REVIEW");
+
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(logDirectory.resolve(ENABLEMENT_REVIEW_PACK_JSON).toFile(), root);
+        Files.writeString(
+                logDirectory.resolve(ENABLEMENT_REVIEW_PACK_MD),
+                "# FDP-37 Enablement Review Pack\n\n"
+                        + "- commit_sha: `" + root.path("commit_sha").asText() + "`\n"
+                        + "- image_name: `" + imageName + "`\n"
+                        + "- image_id: `" + imageId + "`\n"
+                        + "- image_digest_or_id: `" + imageDigest + "`\n"
+                        + "- dockerfile_path: `deployment/Dockerfile.backend`\n"
+                        + "- fdp37_job_status: `PASS`\n"
+                        + "- regulated_mutation_regression_status: `" + root.path("regulated_mutation_regression_status").asText() + "`\n"
+                        + "- fdp35_status: `" + root.path("fdp35_status").asText() + "`\n"
+                        + "- fdp36_status: `" + root.path("fdp36_status").asText() + "`\n"
+                        + "- required_transaction_scenario_executed: `" + root.path("required_transaction_scenario_executed").asBoolean() + "`\n"
+                        + "- durable_state_seeded_scenario_count: `" + root.path("durable_state_seeded_scenario_count").asLong() + "`\n"
+                        + "- live_in_flight_required: `false`\n"
+                        + "- live_in_flight_executed: `" + root.path("live_in_flight_executed").asBoolean() + "`\n"
+                        + "- rollback_validation_passed: `" + root.path("rollback_validation_passed").asBoolean() + "`\n"
+                        + "- proof_artifacts_present: `true`\n"
+                        + "- production_enablement: `false`\n"
+                        + "- release_config_pr_required: `true`\n"
+                        + "- human_approval_required: `true`\n"
+                        + "- operator_drill_required_before_enablement: `true`\n"
+                        + "- final_decision: `READY_FOR_ENABLEMENT_REVIEW`\n\n"
+                        + "`READY_FOR_ENABLEMENT_REVIEW` is not production enablement.\n",
+                StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING
+        );
+    }
+
     private String markdownRows() {
         StringBuilder builder = new StringBuilder();
-        builder.append("| Scenario | Crash window | Transaction mode | Killed target | Restarted target | State | Status | Outbox | SUCCESS audit |\n");
-        builder.append("| --- | --- | --- | --- | --- | --- | --- | ---: | ---: |\n");
+        builder.append("| Scenario | Crash window | State reach method | Transaction mode | Killed target | Restarted target | State | Status | Outbox | SUCCESS audit |\n");
+        builder.append("| --- | --- | --- | --- | --- | --- | --- | --- | ---: | ---: |\n");
+        Path evidence = logDirectory.resolve("evidence-summary.md");
+        if (Files.exists(evidence)) {
+            try (var lines = Files.lines(evidence)) {
+                lines.filter(line -> line.startsWith("- scenario="))
+                        .map(this::evidenceLineToMarkdownRow)
+                        .forEach(builder::append);
+                return builder.toString();
+            } catch (IOException exception) {
+                throw new UncheckedIOException("Unable to read FDP-37 evidence rows", exception);
+            }
+        }
         for (RegulatedMutationChaosResult result : results) {
             builder.append("| ")
                     .append(result.scenarioName()).append(" | ")
                     .append(result.window()).append(" | ")
+                    .append(result.stateReachMethod()).append(" | ")
                     .append(scenarioTransactionModes.getOrDefault(result.scenarioName(), "OFF")).append(" | ")
                     .append(result.killedTargetName()).append(" | ")
                     .append(result.restartedTargetName()).append(" | ")
@@ -396,6 +529,33 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
                     .append(result.successAuditEvents()).append(" |\n");
         }
         return builder.toString();
+    }
+
+    private String evidenceLineToMarkdownRow(String line) {
+        Map<String, String> fields = parseEvidenceLine(line);
+        return "| "
+                + fields.getOrDefault("scenario", "unknown") + " | "
+                + fields.getOrDefault("window", "unknown") + " | "
+                + fields.getOrDefault("state_reach_method", "unknown") + " | "
+                + fields.getOrDefault("transaction_mode", "unknown") + " | "
+                + fields.getOrDefault("killed_target", "unknown") + " | "
+                + fields.getOrDefault("restarted_target", "unknown") + " | "
+                + fields.getOrDefault("state", "recorded") + " | "
+                + fields.getOrDefault("status", "recorded") + " | "
+                + fields.getOrDefault("outbox", "recorded") + " | "
+                + fields.getOrDefault("success_audit", "recorded") + " |\n";
+    }
+
+    private Map<String, String> parseEvidenceLine(String line) {
+        Map<String, String> fields = new HashMap<>();
+        String normalized = line.startsWith("- ") ? line.substring(2) : line;
+        for (String segment : normalized.split(";")) {
+            int separator = segment.indexOf('=');
+            if (separator > 0 && separator < segment.length() - 1) {
+                fields.put(segment.substring(0, separator).trim(), segment.substring(separator + 1).trim());
+            }
+        }
+        return fields;
     }
 
     public void writeRollbackValidationArtifact(
@@ -429,6 +589,7 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
                     StandardOpenOption.CREATE,
                     StandardOpenOption.TRUNCATE_EXISTING
             );
+            writeProofArtifacts();
         } catch (IOException exception) {
             throw new UncheckedIOException("Unable to write FDP-37 rollback validation artifact", exception);
         }
@@ -436,12 +597,12 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
 
     private List<String> alertServiceArgs(List<String> additionalArgs) {
         List<String> args = new ArrayList<>();
-        args.add("--server.port=" + servicePort);
+        args.add("--server.port=8080");
         args.add("--spring.profiles.active=test");
         args.add("--spring.data.mongodb.uri=" + mongodbUri);
-        args.add("--spring.data.redis.host=localhost");
-        args.add("--spring.data.redis.port=" + FraudPlatformContainers.redis().getMappedPort(6379));
-        args.add("--spring.kafka.bootstrap-servers=" + FraudPlatformContainers.kafka().getBootstrapServers());
+        args.add("--spring.data.redis.host=" + FraudPlatformContainers.redisNetworkHost());
+        args.add("--spring.data.redis.port=6379");
+        args.add("--spring.kafka.bootstrap-servers=" + FraudPlatformContainers.kafkaNetworkBootstrapServers());
         args.add("--app.security.demo-auth.enabled=true");
         args.add("--app.outbox.publisher.enabled=false");
         args.add("--app.evidence-confirmation.enabled=false");
@@ -475,10 +636,14 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
     }
 
     private void awaitReadiness() {
-        long deadline = System.nanoTime() + Duration.ofSeconds(90).toNanos();
-        while (System.nanoTime() < deadline) {
+        RegulatedMutationChaosWaiter.waitUntil(
+                "FDP-37 alert-service readiness on mapped port " + servicePort,
+                Duration.ofSeconds(90),
+                Duration.ofMillis(500),
+                () -> {
             if (container == null || !container.isRunning()) {
-                throw new IllegalStateException("FDP-37 alert-service container exited before readiness");
+                throw new IllegalStateException("FDP-37 alert-service container exited before readiness; logs="
+                        + (container == null ? "<no container>" : container.getLogs()));
             }
             try {
                 HttpResponse<String> response = httpClient.send(
@@ -489,17 +654,22 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
                         HttpResponse.BodyHandlers.ofString()
                 );
                 if (response.statusCode() == 200 && response.body().contains("\"UP\"")) {
-                    return;
+                    return RegulatedMutationChaosWaiter.ProbeResult.satisfied("HTTP 200 " + response.body());
                 }
+                return RegulatedMutationChaosWaiter.ProbeResult.waiting(
+                        "HTTP " + response.statusCode() + " " + response.body()
+                );
             } catch (IOException | InterruptedException ignored) {
                 if (ignored instanceof InterruptedException) {
                     Thread.currentThread().interrupt();
                     throw new IllegalStateException("Interrupted while waiting for FDP-37 alert-service readiness", ignored);
                 }
+                return RegulatedMutationChaosWaiter.ProbeResult.waiting(
+                        ignored.getClass().getSimpleName() + ": " + ignored.getMessage()
+                );
             }
-            sleep();
-        }
-        throw new IllegalStateException("FDP-37 alert-service container did not become ready on port " + servicePort);
+                }
+        );
     }
 
     private URI uri(String path) {
@@ -524,14 +694,6 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
         return mongoTemplate.getCollection("audit_events")
                 .countDocuments(new org.bson.Document("resource_id", resourceId)
                         .append("outcome", outcome.name()));
-    }
-
-    private int freePort() {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
-        } catch (IOException exception) {
-            throw new UncheckedIOException("Unable to allocate FDP-37 alert-service test port", exception);
-        }
     }
 
     private void assertNoRunningContainer() {
@@ -575,6 +737,32 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
         }
     }
 
+    private long countScenarios(RegulatedMutationStateReachMethod reachMethod) {
+        Path evidence = logDirectory.resolve("evidence-summary.md");
+        if (Files.exists(evidence)) {
+            try (var lines = Files.lines(evidence)) {
+                return lines.filter(line -> line.startsWith("- scenario="))
+                        .filter(line -> line.contains("state_reach_method=" + reachMethod.name()))
+                        .count();
+            } catch (IOException exception) {
+                throw new UncheckedIOException("Unable to count FDP-37 evidence scenarios by reach method", exception);
+            }
+        }
+        return results.stream()
+                .filter(result -> result.stateReachMethod() == reachMethod)
+                .count();
+    }
+
+    private boolean hasRequiredTransactionScenario() {
+        return scenarioTransactionModes.values().stream().anyMatch("REQUIRED"::equals);
+    }
+
+    private String requiredWorkflowStatus(String envName) {
+        return Optional.ofNullable(System.getenv(envName))
+                .filter(value -> !value.isBlank())
+                .orElse("REQUIRED_BY_WORKFLOW_NEEDS");
+    }
+
     private boolean liveFixtureEnabled() {
         return lastEffectiveArgs.stream().anyMatch(argument -> argument.contains("fdp36-live-in-flight"));
     }
@@ -584,6 +772,19 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
             throw new IllegalArgumentException("FDP-37 requires " + IMAGE_PROPERTY + " or " + IMAGE_ENV);
         }
         return assertAlertServiceImage(candidate.trim());
+    }
+
+    private void requireImageProvenanceInCi() {
+        boolean ci = Boolean.parseBoolean(Optional.ofNullable(System.getenv("CI")).orElse("false"));
+        if (!ci) {
+            return;
+        }
+        if (!imageId.startsWith("sha256:")) {
+            throw new IllegalStateException("FDP-37 CI proof requires Docker image id starting with sha256:");
+        }
+        if (imageDigest.isBlank() || "LOCAL_IMAGE_DIGEST_NOT_PROVIDED".equals(imageDigest)) {
+            throw new IllegalStateException("FDP-37 CI proof requires image digest or immutable image id");
+        }
     }
 
     private String assertAlertServiceImage(String candidate) {
@@ -602,15 +803,6 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
             return "absent";
         }
         return id.length() <= 12 ? id : id.substring(0, 12);
-    }
-
-    private void sleep() {
-        try {
-            Thread.sleep(500);
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted while waiting for FDP-37 alert-service readiness", exception);
-        }
     }
 
     @Override

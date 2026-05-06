@@ -132,6 +132,7 @@ public final class RegulatedMutationAlertServiceProcessChaosHarness implements A
         RegulatedMutationChaosResult result = new RegulatedMutationChaosResult(
                 scenario.name(),
                 scenario.window(),
+                scenario.stateReachMethod(),
                 proofLevel,
                 String.valueOf(killedProcessId),
                 String.valueOf(restartedProcessId),

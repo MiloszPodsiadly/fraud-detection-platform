@@ -43,9 +43,6 @@ abstract class AbstractRegulatedMutationProductionImageChaosIT extends AbstractI
         if (RegulatedMutationProductionImageChaosHarness.configuredImageName().isEmpty()) {
             return false;
         }
-        if (System.getProperty("os.name", "").toLowerCase().contains("win")) {
-            return false;
-        }
         return DockerClientFactory.instance().isDockerAvailable();
     }
 
@@ -60,18 +57,15 @@ abstract class AbstractRegulatedMutationProductionImageChaosIT extends AbstractI
                         + " or "
                         + RegulatedMutationProductionImageChaosHarness.IMAGE_ENV
         );
-        Assumptions.assumeFalse(
-                System.getProperty("os.name", "").toLowerCase().contains("win"),
-                "FDP-37 production image chaos uses Docker host networking and runs on Linux CI."
-        );
         String databaseName = "fdp37_prod_image_" + UUID.randomUUID().toString().replace("-", "");
         String mongoUri = FraudPlatformContainers.mongodb().getReplicaSetUrl(databaseName);
+        String alertServiceMongoUri = FraudPlatformContainers.mongodbNetworkReplicaSetUrl(databaseName);
         databaseFactory = new SimpleMongoClientDatabaseFactory(mongoUri);
         mongoTemplate = new MongoTemplate(databaseFactory);
         MongoRepositoryFactory repositoryFactory = new MongoRepositoryFactory(mongoTemplate);
         commandRepository = repositoryFactory.getRepository(RegulatedMutationCommandRepository.class);
         alertRepository = repositoryFactory.getRepository(AlertRepository.class);
-        chaosHarness = new RegulatedMutationProductionImageChaosHarness(mongoTemplate, mongoUri, imageName);
+        chaosHarness = new RegulatedMutationProductionImageChaosHarness(mongoTemplate, alertServiceMongoUri, imageName);
     }
 
     @AfterEach

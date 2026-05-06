@@ -6,6 +6,7 @@ import com.frauddetection.alert.regulated.chaos.RegulatedMutationChaosResult;
 import com.frauddetection.alert.regulated.chaos.RegulatedMutationChaosScenario;
 import com.frauddetection.alert.regulated.chaos.RegulatedMutationChaosWindow;
 import com.frauddetection.alert.regulated.chaos.RegulatedMutationProofLevel;
+import com.frauddetection.alert.regulated.chaos.RegulatedMutationStateReachMethod;
 import com.frauddetection.common.events.enums.AlertStatus;
 import org.bson.Document;
 import org.junit.jupiter.api.Assumptions;
@@ -68,6 +69,7 @@ class RegulatedMutationProductionImageLiveInFlightKillIT extends AbstractRegulat
         RegulatedMutationChaosScenario scenario = new RegulatedMutationChaosScenario(
                 "live-inflight-before-business",
                 RegulatedMutationChaosWindow.LIVE_IN_FLIGHT_BEFORE_BUSINESS_MUTATION,
+                RegulatedMutationStateReachMethod.RUNTIME_REACHED_TEST_FIXTURE,
                 command.getId(),
                 idempotencyKey,
                 ignored -> {
