@@ -142,7 +142,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: fdp35-production-readiness-test-reports
-          path: alert-service/target/surefire-reports/
+          if-no-files-found: ignore
+          path: |
+            alert-service/target/surefire-reports/
+            alert-service/target/failsafe-reports/
 
   regulated-mutation-regression:
     name: Regulated Mutation Regression Gate
@@ -171,7 +174,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: regulated-mutation-regression-test-reports
-          path: alert-service/target/surefire-reports/
+          if-no-files-found: ignore
+          path: |
+            alert-service/target/surefire-reports/
+            alert-service/target/failsafe-reports/
 
   docker:
     name: Docker Compose Build
