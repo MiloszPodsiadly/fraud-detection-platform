@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 public record RegulatedMutationChaosResult(
         String scenarioName,
         RegulatedMutationChaosWindow window,
+        RegulatedMutationStateReachMethod stateReachMethod,
         RegulatedMutationProofLevel proofLevel,
         String killedTargetId,
         String restartedTargetId,

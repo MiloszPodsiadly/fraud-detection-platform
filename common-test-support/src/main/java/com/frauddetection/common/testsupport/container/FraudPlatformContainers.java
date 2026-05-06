@@ -16,7 +16,8 @@ public final class FraudPlatformContainers {
 
     private static final KafkaContainer KAFKA_CONTAINER = new KafkaContainer(KAFKA_IMAGE)
             .withNetwork(NETWORK)
-            .withNetworkAliases("kafka");
+            .withNetworkAliases("kafka")
+            .withListener("kafka:19092");
 
     private static final MongoDBContainer MONGODB_CONTAINER = new MongoDBContainer(MONGODB_IMAGE)
             .withNetwork(NETWORK)
@@ -52,5 +53,21 @@ public final class FraudPlatformContainers {
 
     public static GenericContainer<?> redis() {
         return REDIS_CONTAINER;
+    }
+
+    public static Network network() {
+        return NETWORK;
+    }
+
+    public static String mongodbNetworkReplicaSetUrl(String databaseName) {
+        return "mongodb://mongodb:27017/" + databaseName + "?replicaSet=docker-rs";
+    }
+
+    public static String kafkaNetworkBootstrapServers() {
+        return "kafka:19092";
+    }
+
+    public static String redisNetworkHost() {
+        return "redis";
     }
 }
