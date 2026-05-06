@@ -1,6 +1,7 @@
 package com.frauddetection.alert.regulated;
 
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.mongodb.client.result.UpdateResult;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.bson.Document;
@@ -9,6 +10,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
+import org.springframework.security.authentication.TestingAuthenticationToken;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -21,13 +24,16 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @Tag("production-readiness")
 @Tag("integration")
 class RegulatedMutationRollbackReadinessTest {
 
     @Test
-    void disablingCheckpointRenewalDoesNotDisableFdp32Fencing() {
+    void disablingCheckpointRenewal_doesNotDisableFencing() {
         MongoTemplate mongoTemplate = mock(MongoTemplate.class);
         RegulatedMutationFencedCommandWriter writer = new RegulatedMutationFencedCommandWriter(
                 mongoTemplate,
@@ -62,7 +68,7 @@ class RegulatedMutationRollbackReadinessTest {
     }
 
     @Test
-    void shrinkingRenewalBudgetCreatesExplicitRecoveryNotFalseSuccess() {
+    void shrinkingRenewalBudget_doesNotCreateFalseSuccess() {
         MongoTemplate mongoTemplate = mock(MongoTemplate.class);
         RegulatedMutationLeaseRenewalPolicy policy = new RegulatedMutationLeaseRenewalPolicy(
                 Duration.ofSeconds(10),
@@ -150,7 +156,7 @@ class RegulatedMutationRollbackReadinessTest {
     }
 
     @Test
-    void rollbackDoesNotChangeProductionEnablementFlagsOrCreateSchedulers() throws Exception {
+    void rollbackDoesNotEnableFdp29Production() throws Exception {
         String application = java.nio.file.Files.readString(java.nio.file.Path.of("src/main/resources/application.yml"));
         String legacyExecutor = java.nio.file.Files.readString(java.nio.file.Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationExecutor.java"
@@ -165,6 +171,53 @@ class RegulatedMutationRollbackReadinessTest {
                 .doesNotContain("@Scheduled")
                 .doesNotContain("fixedDelay")
                 .doesNotContain("fixedRate");
+    }
+
+    @Test
+    void rollbackApiSmoke_doesNotHideRecovery() throws Exception {
+        RegulatedMutationRecoveryService service = mock(RegulatedMutationRecoveryService.class);
+        when(service.inspect("idem-recovery")).thenReturn(new RegulatedMutationCommandInspectionResponse(
+                RegulatedMutationIntentHasher.hash("idem-recovery"),
+                "idem-r...very",
+                "SUBMIT_ANALYST_DECISION",
+                "ALERT",
+                "alert-1",
+                "BUSINESS_COMMITTING",
+                "RECOVERY_REQUIRED",
+                null,
+                null,
+                0,
+                false,
+                "attempted-audit",
+                null,
+                null,
+                "RECOVERY_REQUIRED",
+                "RECOVERY_REQUIRED",
+                Instant.parse("2026-05-05T18:00:00Z")
+        ));
+        RegulatedMutationRecoveryController controller = new RegulatedMutationRecoveryController(
+                service,
+                new RegulatedMutationInspectionRateLimiter(30),
+                mock(SensitiveReadAuditService.class)
+        );
+
+        MockMvcBuilders.standaloneSetup(controller)
+                .defaultRequest(get("/").with(request -> {
+                    request.setRemoteAddr("127.0.0.1");
+                    return request;
+                }))
+                .build()
+                .perform(get("/api/v1/regulated-mutations/idem-recovery")
+                        .principal(new TestingAuthenticationToken("ops-admin", "n/a", "FRAUD_OPS_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.execution_status").value("RECOVERY_REQUIRED"))
+                .andExpect(jsonPath("$.state").value("BUSINESS_COMMITTING"))
+                .andExpect(jsonPath("$.response_snapshot_present").value(false))
+                .andExpect(jsonPath("$.resource_id").doesNotExist())
+                .andExpect(jsonPath("$.resource_id_present").value(true))
+                .andExpect(jsonPath("$.resource_id_hash").exists())
+                .andExpect(jsonPath("$.last_error").doesNotExist())
+                .andExpect(jsonPath("$.last_error_code").value("RECOVERY_REQUIRED"));
     }
 
     private RegulatedMutationCommandDocument command(
