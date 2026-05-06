@@ -1844,6 +1844,135 @@ class RegulatedMutationArchitectureTest {
         assertThat(ci).contains("RegulatedMutationPostRestartApiBehaviorTest");
     }
 
+    @Test
+    void fdp37ProductionImageChaosMustStayOutsideRuntimeSource() throws Exception {
+        assertThat(Files.exists(Path.of("src/test/java/com/frauddetection/alert/regulated/chaos/RegulatedMutationProductionImageChaosHarness.java")))
+                .isTrue();
+        assertThat(Files.exists(Path.of("src/main/java/com/frauddetection/alert/regulated/chaos/RegulatedMutationProductionImageChaosHarness.java")))
+                .isFalse();
+
+        String harness = Files.readString(Path.of("src/test/java/com/frauddetection/alert/regulated/chaos/RegulatedMutationProductionImageChaosHarness.java"));
+        assertThat(harness)
+                .contains("PRODUCTION_IMAGE_CONTAINER_KILL")
+                .contains("DockerImageName.parse(imageName)")
+                .contains("killContainerCmd")
+                .contains("target\", \"fdp37-chaos")
+                .contains("FDP-37 killed target must be the alert-service image/container")
+                .doesNotContain("DockerImageName.parse(\"alpine")
+                .doesNotContain("while true; do sleep");
+
+        List<Path> runtimeFiles;
+        try (Stream<Path> stream = Files.walk(Path.of("src/main/java/com/frauddetection/alert"))) {
+            runtimeFiles = stream.filter(path -> path.toString().endsWith(".java")).toList();
+        }
+
+        for (Path path : runtimeFiles) {
+            String source = Files.readString(path);
+            assertThat(source)
+                    .as("FDP-37 production-image chaos must not leak into runtime source: " + path)
+                    .doesNotContain("RegulatedMutationProductionImageChaosHarness")
+                    .doesNotContain("PRODUCTION_IMAGE_CONTAINER_KILL")
+                    .doesNotContain("production-image-chaos")
+                    .doesNotContain("DockerImageName")
+                    .doesNotContain("GenericContainer")
+                    .doesNotContain("killContainerCmd")
+                    .doesNotContain("fdp37-chaos")
+                    .doesNotContain("test-only checkpoint");
+        }
+    }
+
+    @Test
+    void fdp37ExecutorsCoordinatorsAndPoliciesMustNotContainChaosCode() throws Exception {
+        List<Path> protectedRuntimeFiles = List.of(
+                Path.of("src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationExecutor.java"),
+                Path.of("src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"),
+                Path.of("src/main/java/com/frauddetection/alert/regulated/MongoRegulatedMutationCoordinator.java"),
+                Path.of("src/main/java/com/frauddetection/alert/regulated/RegulatedMutationClaimService.java"),
+                Path.of("src/main/java/com/frauddetection/alert/regulated/RegulatedMutationReplayResolver.java"),
+                Path.of("src/main/java/com/frauddetection/alert/regulated/RegulatedMutationFencedCommandWriter.java"),
+                Path.of("src/main/java/com/frauddetection/alert/regulated/RegulatedMutationLeaseRenewalPolicy.java"),
+                Path.of("src/main/java/com/frauddetection/alert/regulated/RegulatedMutationSafeCheckpointPolicy.java")
+        );
+
+        for (Path path : protectedRuntimeFiles) {
+            String source = Files.readString(path);
+            assertThat(source)
+                    .as("Runtime regulated mutation path must not contain FDP-37 production-image chaos code: " + path)
+                    .doesNotContain("production-image-chaos")
+                    .doesNotContain("PRODUCTION_IMAGE_CONTAINER_KILL")
+                    .doesNotContain("DockerImageName")
+                    .doesNotContain("GenericContainer")
+                    .doesNotContain("killContainerCmd")
+                    .doesNotContain("fdp37-chaos");
+        }
+    }
+
+    @Test
+    void fdp37DocsMustDescribeProductionImageChaosWithoutEnablementOverclaims() throws Exception {
+        String adr = Files.readString(Path.of("../docs/adr/FDP-37-production-image-chaos-enable-gate.md"));
+        String mergeGate = Files.readString(Path.of("../docs/FDP-37-merge-gate.md"));
+        String checklist = Files.readString(Path.of("../docs/FDP-37-enablement-decision-checklist.md"));
+        String matrix = Files.readString(Path.of("../docs/testing/FDP-37-production-image-chaos-proof-matrix.md"));
+        String proofPack = Files.readString(Path.of("../docs/testing/FDP-37-final-proof-pack.md"));
+        String dashboards = Files.readString(Path.of("../docs/ops/FDP-37-dashboard-and-alert-thresholds.md"));
+        String combined = adr + "\n" + mergeGate + "\n" + checklist + "\n" + matrix + "\n" + proofPack + "\n" + dashboards;
+
+        assertThat(combined).contains("FDP-37 is a proof, operations, and release-gate branch.");
+        assertThat(combined).contains("production-like `alert-service` Docker image/container");
+        assertThat(combined).contains("PRODUCTION_IMAGE_CONTAINER_KILL");
+        assertThat(combined).contains("PRODUCTION_IMAGE_RESTART_API_PROOF");
+        assertThat(combined).contains("DURABLE_STATE_SEEDED_CONTAINER_PROOF");
+        assertThat(combined).contains("API_PERSISTED_STATE_PROOF");
+        assertThat(combined).contains("READY_FOR_ENABLEMENT_REVIEW is not production enablement.");
+        assertThat(combined).contains("no production runtime chaos hook");
+        assertThat(combined).contains("Do not use command id, alert id, actor id, idempotency key, lease owner, raw exception");
+        assertThat(combined).doesNotContain("PRODUCTION_ENABLED");
+        assertFdp36ForbiddenPhraseIsContextual(combined, "production enablement");
+        assertFdp36ForbiddenPhraseIsContextual(combined, "bank certification");
+        assertFdp36ForbiddenPhraseIsContextual(combined, "external finality");
+        assertFdp36ForbiddenPhraseIsContextual(combined, "distributed ACID");
+        assertFdp36ForbiddenPhraseIsContextual(combined, "distributed lock");
+        assertFdp36ForbiddenPhraseIsContextual(combined, "Kafka exactly-once");
+    }
+
+    @Test
+    void fdp37ProofMatrixRowsMustMapToConcreteTestsAndCiJobs() throws Exception {
+        String matrix = Files.readString(Path.of("../docs/testing/FDP-37-production-image-chaos-proof-matrix.md"));
+
+        assertThat(matrix).contains("Scenario | Crash window | State reach method | Killed target | Proof level | Post-restart verification | Invariants checked | Test class/method");
+        assertThat(matrix).contains("RegulatedMutationProductionImageChaosIT.productionImageKillAfterClaimBeforeAttemptedAuditDoesNotCommit");
+        assertThat(matrix).contains("RegulatedMutationProductionImageChaosIT.productionImageKillInFdp29PendingExternalRemainsPendingWithoutEvidence");
+        assertThat(matrix).contains("RegulatedMutationProductionImageEvidenceIntegrityIT.legacyReplayAfterProductionImageRestartDoesNotCreateSecondOutboxRecord");
+        assertThat(matrix).contains("RegulatedMutationProductionImageLiveInFlightKillIT.productionImageLiveInFlightBeforeBusinessMutationKillDoesNotCommitOrPublish");
+        assertThat(matrix.lines()
+                .filter(line -> line.contains("PRODUCTION_IMAGE_CONTAINER_KILL"))
+                .toList())
+                .allSatisfy(line -> assertThat(line).contains("production-like `alert-service` Docker image/container"));
+    }
+
+    @Test
+    void fdp37CiMustContainRequiredProductionImageChaosJobAndArtifacts() throws Exception {
+        String ci = Files.readString(Path.of("../.github/workflows/ci.yml"));
+
+        assertThat(ci).contains("fdp37-production-image-chaos:");
+        assertThat(ci).contains("Build alert-service production-like image");
+        assertThat(ci).contains("docker build -f deployment/Dockerfile.backend --build-arg MODULE_NAME=alert-service -t fdp37-alert-service:${GITHUB_SHA} .");
+        assertThat(ci).contains("-Dfdp37.alert-service.image=fdp37-alert-service:${GITHUB_SHA}");
+        assertThat(ci).contains("RegulatedMutationProductionImageChaosIT");
+        assertThat(ci).contains("RegulatedMutationProductionImageEvidenceIntegrityIT");
+        assertThat(ci).contains("RegulatedMutationProductionImageConfigParityIT");
+        assertThat(ci).contains("RegulatedMutationProductionImageRollbackIT");
+        assertThat(ci).contains("RegulatedMutationProductionImageLiveInFlightKillIT");
+        assertThat(ci).contains("fdp37-proof-summary.md");
+        assertThat(ci).contains("fdp37-proof-summary.json");
+        assertThat(ci).contains("PRODUCTION_IMAGE_CONTAINER_KILL");
+        assertThat(ci).contains("if-no-files-found: error");
+        assertThat(ci).contains("fdp37-production-image-chaos-reports");
+        assertThat(ci).contains("regulated-mutation-regression");
+        assertThat(ci).contains("fdp36-real-chaos");
+        assertThat(ci).contains("fdp35-production-readiness");
+    }
+
     private void assertForbiddenPhraseIsContextual(String source, String phrase) {
         String lowerSource = source.toLowerCase(java.util.Locale.ROOT);
         String lowerPhrase = phrase.toLowerCase(java.util.Locale.ROOT);
