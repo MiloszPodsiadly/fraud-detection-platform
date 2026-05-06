@@ -14,8 +14,10 @@ public record RegulatedMutationCommandInspectionResponse(
         String mutationModelVersion,
         @JsonProperty("resource_type")
         String resourceType,
-        @JsonProperty("resource_id")
-        String resourceId,
+        @JsonProperty("resource_id_present")
+        boolean resourceIdPresent,
+        @JsonProperty("resource_id_hash")
+        String resourceIdHash,
         String state,
         @JsonProperty("execution_status")
         String executionStatus,
@@ -66,7 +68,8 @@ public record RegulatedMutationCommandInspectionResponse(
                 action,
                 RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION.name(),
                 resourceType,
-                resourceId,
+                resourceId != null && !resourceId.isBlank(),
+                safeResourceIdHash(resourceId),
                 state,
                 executionStatus,
                 leaseOwner != null && !leaseOwner.isBlank(),
@@ -108,7 +111,8 @@ public record RegulatedMutationCommandInspectionResponse(
                 action,
                 RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION.name(),
                 resourceType,
-                resourceId,
+                resourceId != null && !resourceId.isBlank(),
+                safeResourceIdHash(resourceId),
                 state,
                 executionStatus,
                 leaseOwner != null && !leaseOwner.isBlank(),
@@ -136,7 +140,8 @@ public record RegulatedMutationCommandInspectionResponse(
                 command.getAction(),
                 command.mutationModelVersionOrLegacy().name(),
                 command.getResourceType(),
-                command.getResourceId(),
+                command.getResourceId() != null && !command.getResourceId().isBlank(),
+                safeResourceIdHash(command.getResourceId()),
                 command.getState() == null ? null : command.getState().name(),
                 command.getExecutionStatus() == null ? null : command.getExecutionStatus().name(),
                 command.getLeaseOwner() != null && !command.getLeaseOwner().isBlank(),
@@ -176,6 +181,13 @@ public record RegulatedMutationCommandInspectionResponse(
             return null;
         }
         return RegulatedMutationIntentHasher.hash("leaseOwner=" + leaseOwner.trim());
+    }
+
+    private static String safeResourceIdHash(String resourceId) {
+        if (resourceId == null || resourceId.isBlank()) {
+            return null;
+        }
+        return RegulatedMutationIntentHasher.hash("resourceId=" + resourceId.trim());
     }
 
     private static String safeErrorCode(String lastError) {

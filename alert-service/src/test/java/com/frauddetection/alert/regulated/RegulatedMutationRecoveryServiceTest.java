@@ -283,13 +283,14 @@ class RegulatedMutationRecoveryServiceTest {
         assertThat(response.idempotencyKeyMasked()).isEqualTo("...em-1");
         assertThat(response.action()).isEqualTo(AuditAction.SUBMIT_ANALYST_DECISION.name());
         assertThat(response.resourceType()).isEqualTo(AuditResourceType.ALERT.name());
-        assertThat(response.resourceId()).isEqualTo("alert-1");
+        assertThat(response.resourceIdPresent()).isTrue();
+        assertThat(response.resourceIdHash()).isEqualTo(RegulatedMutationIntentHasher.hash("resourceId=alert-1"));
         assertThat(response.state()).isEqualTo(RegulatedMutationState.EVIDENCE_PENDING.name());
         assertThat(response.executionStatus()).isEqualTo(RegulatedMutationExecutionStatus.COMPLETED.name());
         assertThat(response.responseSnapshotPresent()).isTrue();
         assertThat(response.attemptedAuditId()).isEqualTo("audit-attempted");
         assertThat(response.successAuditId()).isEqualTo("audit-success");
-        assertThat(response.lastError()).isEqualTo("RECOVERY_REQUIRED");
+        assertThat(response.lastErrorCode()).isEqualTo("RECOVERY_REQUIRED");
     }
 
     @Test

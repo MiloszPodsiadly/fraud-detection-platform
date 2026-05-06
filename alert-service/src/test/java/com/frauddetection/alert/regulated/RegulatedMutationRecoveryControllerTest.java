@@ -58,6 +58,10 @@ class RegulatedMutationRecoveryControllerTest {
                 .andExpect(jsonPath("$.lease_owner_present").value(true))
                 .andExpect(jsonPath("$.lease_owner_hash").exists())
                 .andExpect(jsonPath("$.lease_owner_hash").value(not("owner-1")))
+                .andExpect(jsonPath("$.resource_id").doesNotExist())
+                .andExpect(jsonPath("$.resource_id_present").value(true))
+                .andExpect(jsonPath("$.resource_id_hash").exists())
+                .andExpect(jsonPath("$.resource_id_hash").value(not("alert-1")))
                 .andExpect(jsonPath("$.degradation_reason").value("LONG_RUNNING_PROCESSING"))
                 .andExpect(jsonPath("$.idempotency_key_masked").value("idem-l...ning"))
                 .andExpect(jsonPath("$.idempotency_key_masked").value(not("idem-long-running")));
@@ -93,6 +97,10 @@ class RegulatedMutationRecoveryControllerTest {
                 .andExpect(jsonPath("$.state").value("REQUESTED"))
                 .andExpect(jsonPath("$.execution_status").value("PROCESSING"))
                 .andExpect(jsonPath("$.lease_renewal_count").value(1))
+                .andExpect(jsonPath("$.resource_id").doesNotExist())
+                .andExpect(jsonPath("$.resource_id_present").value(true))
+                .andExpect(jsonPath("$.resource_id_hash").exists())
+                .andExpect(jsonPath("$.resource_id_hash").value(not("alert-2")))
                 .andExpect(jsonPath("$.response_snapshot_present").value(false))
                 .andExpect(jsonPath("$.attempted_audit_id").doesNotExist())
                 .andExpect(jsonPath("$.success_audit_id").doesNotExist());
@@ -133,10 +141,15 @@ class RegulatedMutationRecoveryControllerTest {
                 .andExpect(jsonPath("$.lease_owner_present").value(true))
                 .andExpect(jsonPath("$.lease_owner_hash").exists())
                 .andExpect(jsonPath("$.lease_owner_hash").value(not("raw-owner-sensitive")))
+                .andExpect(jsonPath("$.resource_id").doesNotExist())
+                .andExpect(jsonPath("$.resource_id_present").value(true))
+                .andExpect(jsonPath("$.resource_id_hash").exists())
+                .andExpect(jsonPath("$.resource_id_hash").value(not("alert-sensitive")))
                 .andExpect(jsonPath("$.last_error").doesNotExist())
                 .andExpect(jsonPath("$.last_error_code").value("UNSAFE_ERROR_REDACTED"))
                 .andExpect(content().string(not(containsString("raw exception"))))
                 .andExpect(content().string(not(containsString("/api/v1"))))
+                .andExpect(content().string(not(containsString("alert-sensitive"))))
                 .andExpect(content().string(not(containsString("token=secret"))));
     }
 
