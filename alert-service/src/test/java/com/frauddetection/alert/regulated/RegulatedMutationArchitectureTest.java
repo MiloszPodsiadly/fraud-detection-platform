@@ -1711,8 +1711,11 @@ class RegulatedMutationArchitectureTest {
                     .doesNotContain("RegulatedMutationAlertServiceProcessChaosHarness")
                     .doesNotContain("RegulatedMutationChaosScenario")
                     .doesNotContain("RegulatedMutationProofLevel")
+                    .doesNotContain("Process.destroyForcibly")
+                    .doesNotContain("service-chaos")
                     .doesNotContain("docker-chaos")
                     .doesNotContain("real-chaos")
+                    .doesNotContain("in-flight-chaos")
                     .doesNotContain("killContainer")
                     .doesNotContain("stopContainer")
                     .doesNotContain("process kill")
@@ -1755,14 +1758,19 @@ class RegulatedMutationArchitectureTest {
         String runbook = Files.readString(Path.of("../docs/runbooks/FDP-36-real-chaos-recovery-drill-runbook.md"));
         String combined = adr + "\n" + mergeGate + "\n" + checklist + "\n" + matrix + "\n" + runbook;
 
-        assertThat(combined).contains("FDP-36 provides real Docker/container kill-restart proof for selected regulated mutation crash windows. It does not change regulated mutation semantics.");
-        assertThat(combined).contains("The killed process is the actual alert-service JVM/process running regulated mutation recovery and inspection endpoints.");
+        assertThat(combined).contains("FDP-36 provides real alert-service JVM/process kill-restart proof over selected durable crash-window states. It does not change regulated mutation semantics.");
+        assertThat(combined).contains("FDP-36 kills and restarts the real alert-service JVM/process. Most crash windows are durable-state crash-window proofs, not live in-flight instruction-boundary kills.");
+        assertThat(combined).contains("Docker/Testcontainers are infrastructure dependencies, not the killed alert-service image.");
+        assertThat(combined).contains("The real-chaos proof kills the actual alert-service JVM/process running regulated mutation execution, recovery, and inspection endpoints.");
         assertThat(combined).contains("REAL_ALERT_SERVICE_KILL");
         assertThat(combined).contains("REAL_ALERT_SERVICE_RESTART_API_PROOF");
+        assertThat(combined).contains("LIVE_IN_FLIGHT_REQUEST_KILL");
         assertThat(combined).contains("MODELED_DURABLE_STATE_PROOF");
+        assertThat(combined).contains("Proof Level vs Non-Claimed Chaos Level");
         assertThat(combined).contains("Documentation must not call dummy-container proof real service chaos.");
         assertThat(combined).contains("FDP-35 provides modeled restart/recovery proof");
-        assertThat(combined).contains("FDP-36 provides real container kill/restart proof");
+        assertThat(combined).contains("FDP-36 proof code is test-only. No runtime hooks are introduced.");
+        assertThat(combined).contains("Full alert-service image container chaos is future scope");
         assertThat(combined).contains("READY_FOR_ENABLEMENT_REVIEW is not production enablement.");
         assertThat(combined).contains("no runtime chaos hooks in executors, coordinators, or domain services");
         assertThat(combined).contains("no FDP-29 production-mode enablement");
@@ -1784,12 +1792,20 @@ class RegulatedMutationArchitectureTest {
         String matrix = Files.readString(Path.of("../docs/testing/FDP-36-real-chaos-proof-matrix.md"));
 
         assertThat(matrix).contains("Proof Level");
+        assertThat(matrix).contains("State Reach Method");
+        assertThat(matrix).contains("Runtime In-Flight Kill?");
+        assertThat(matrix).contains("Exact Claim");
+        assertThat(matrix).contains("durable-state-seeded while real alert-service is running");
+        assertThat(matrix).contains("real alert-service JVM restart proof over selected durable crash-window state");
+        assertThat(matrix).contains("No FDP-36 row currently claims full live in-flight instruction-boundary kill.");
         assertThat(matrix).contains("RegulatedMutationRealAlertServiceChaosIT");
         assertThat(matrix).contains("RegulatedMutationRealAlertServiceEvidenceIntegrityIT");
+        assertThat(matrix).contains("RegulatedMutationLiveInFlightKillIT");
         assertThat(matrix).contains("RegulatedMutationPostRestartApiBehaviorTest");
         assertThat(matrix).contains("fdp36-real-chaos");
         assertThat(matrix).contains("REAL_ALERT_SERVICE_KILL");
         assertThat(matrix).contains("REAL_ALERT_SERVICE_RESTART_API_PROOF");
+        assertThat(matrix).contains("LIVE_IN_FLIGHT_REQUEST_KILL");
         assertThat(matrix.lines()
                 .filter(line -> line.contains("REAL_ALERT_SERVICE_KILL"))
                 .toList())
@@ -1815,8 +1831,12 @@ class RegulatedMutationArchitectureTest {
         assertThat(ci).contains("docker version");
         assertThat(ci).contains("-Dgroups=real-chaos,docker-chaos,service-chaos,integration");
         assertThat(ci).contains("-Dtest=RegulatedMutationRealAlertServiceChaosIT,RegulatedMutationRealAlertServiceEvidenceIntegrityIT");
+        assertThat(ci).contains("RegulatedMutationLiveInFlightKillIT");
         assertThat(ci).contains("killed target: actual alert-service JVM/process");
-        assertThat(ci).contains("REAL_ALERT_SERVICE_KILL, REAL_ALERT_SERVICE_RESTART_API_PROOF");
+        assertThat(ci).contains("Docker/Testcontainers are infrastructure dependencies, not the killed alert-service image.");
+        assertThat(ci).contains("FDP-36 real chaos is not sufficient without regulated-mutation-regression.");
+        assertThat(ci).contains("fdp36-proof-summary.md");
+        assertThat(ci).contains("REAL_ALERT_SERVICE_KILL, REAL_ALERT_SERVICE_RESTART_API_PROOF, LIVE_IN_FLIGHT_REQUEST_KILL");
         assertThat(ci).contains("alert-service/target/fdp36-chaos/");
         assertThat(ci).contains("fdp36-real-chaos-test-reports");
         assertThat(ci).contains("if-no-files-found: ignore");
