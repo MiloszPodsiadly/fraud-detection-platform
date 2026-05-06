@@ -741,6 +741,344 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
+    void fdp35MustNotAddRegulatedMutationPublicSemantics() throws Exception {
+        String statuses = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/api/SubmitDecisionOperationStatus.java"
+        ));
+        String states = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationState.java"
+        ));
+        String modelVersions = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationModelVersion.java"
+        ));
+
+        assertThat(enumValues(statuses)).containsExactly(
+                "REJECTED_BEFORE_MUTATION",
+                "IN_PROGRESS",
+                "RECOVERY_REQUIRED",
+                "COMMIT_UNKNOWN",
+                "EVIDENCE_PREPARING",
+                "EVIDENCE_PREPARED",
+                "FINALIZING",
+                "FINALIZED_VISIBLE",
+                "FINALIZED_EVIDENCE_PENDING_EXTERNAL",
+                "FINALIZED_EVIDENCE_CONFIRMED",
+                "REJECTED_EVIDENCE_UNAVAILABLE",
+                "FAILED_BUSINESS_VALIDATION",
+                "FINALIZE_RECOVERY_REQUIRED",
+                "COMMITTED_EVIDENCE_PENDING",
+                "COMMITTED_EVIDENCE_CONFIRMED",
+                "COMMITTED_EVIDENCE_INCOMPLETE"
+        );
+        assertThat(enumValues(states)).containsExactly(
+                "REQUESTED",
+                "EVIDENCE_PREPARING",
+                "EVIDENCE_PREPARED",
+                "FINALIZING",
+                "FINALIZED_VISIBLE",
+                "FINALIZED_EVIDENCE_PENDING_EXTERNAL",
+                "FINALIZED_EVIDENCE_CONFIRMED",
+                "REJECTED_EVIDENCE_UNAVAILABLE",
+                "FAILED_BUSINESS_VALIDATION",
+                "FINALIZE_RECOVERY_REQUIRED",
+                "AUDIT_ATTEMPTED",
+                "BUSINESS_COMMITTING",
+                "BUSINESS_COMMITTED",
+                "SUCCESS_AUDIT_PENDING",
+                "SUCCESS_AUDIT_RECORDED",
+                "EVIDENCE_PENDING",
+                "EVIDENCE_CONFIRMED",
+                "COMMITTED",
+                "COMMITTED_DEGRADED",
+                "REJECTED",
+                "FAILED"
+        );
+        assertThat(enumValues(modelVersions)).containsExactly(
+                "LEGACY_REGULATED_MUTATION",
+                "EVIDENCE_GATED_FINALIZE_V1"
+        );
+    }
+
+    @Test
+    void fdp35ReadinessMustNotExposeHeartbeatOrRenewalControllerSemantics() throws Exception {
+        List<Path> controllers;
+        try (Stream<Path> stream = Files.walk(Path.of("src/main/java/com/frauddetection/alert"))) {
+            controllers = stream
+                    .filter(path -> path.toString().endsWith("Controller.java"))
+                    .toList();
+        }
+
+        for (Path controller : controllers) {
+            String source = Files.readString(controller);
+            assertThat(source)
+                    .as("controller must not expose heartbeat/renewal semantics: " + controller)
+                    .doesNotContain("RegulatedMutationLeaseRenewalService")
+                    .doesNotContain("RegulatedMutationCheckpointRenewalService")
+                    .doesNotContain("heartbeat")
+                    .doesNotContain("renewLease")
+                    .doesNotContain("checkpoint-renew")
+                    .doesNotContain("/renew")
+                    .doesNotContain("/heartbeat");
+        }
+    }
+
+    @Test
+    void fdp35ReadinessTestsMustNotCallExternalAnchorOrTrustAuthority() throws Exception {
+        List<Path> readinessTests;
+        try (Stream<Path> stream = Files.walk(Path.of("src/test/java/com/frauddetection/alert"))) {
+            readinessTests = stream
+                    .filter(path -> path.toString().endsWith(".java"))
+                    .filter(path -> {
+                        String name = path.getFileName().toString();
+                        return name.contains("ProductionReadiness")
+                                || name.contains("RestartRecoveryProof")
+                                || name.contains("RecoveryControllerTest");
+                    })
+                    .toList();
+        }
+
+        for (Path test : readinessTests) {
+            String source = Files.readString(test);
+            assertThat(source)
+                    .as("FDP-35 proof tests must not depend on external finality: " + test)
+                    .doesNotContain("ExternalAuditAnchorPublisher")
+                    .doesNotContain("AuditTrustAuthorityClient")
+                    .doesNotContain("HttpAuditTrustAuthorityClient")
+                    .doesNotContain("TrustAuthority");
+        }
+    }
+
+    @Test
+    void fdp35DocsMustPreserveProofOnlyLowCardinalityClaims() throws Exception {
+        String combined = combinedFdp35Docs();
+
+        assertContainsRequiredFdp35Wording(combined);
+        assertNoForbiddenProcessKillOverclaim(combined);
+        assertNoProductionEnablementOverclaim(combined);
+        assertThat(combined).contains("Do not include command id, alert id, actor id, lease owner, idempotency key, request hash, resource id");
+    }
+
+    @Test
+    void fdp35InspectionResponseMustNotExposeUnsafeFields() throws Exception {
+        String response = readSource("src/main/java/com/frauddetection/alert/regulated/RegulatedMutationCommandInspectionResponse.java");
+        String openApi = readSource("../docs/openapi/alert-service.openapi.yaml");
+
+        assertInspectionDtoNoUnsafeFields(response);
+        assertInspectionSchemaNoUnsafeFields(openApi);
+    }
+
+    @Test
+    void fdp35CiMustBlockReadinessAndRegressionJobs() throws Exception {
+        String ci = Files.readString(Path.of("../.github/workflows/ci.yml"));
+
+        assertCiContainsRequiredFdp35Jobs(ci);
+    }
+
+    @Test
+    void fdp35DocsMustNotUsePlaceholderOutput() throws Exception {
+        assertThat(combinedFdp35Docs())
+                .doesNotContain("TBD")
+                .doesNotContain("TODO")
+                .doesNotContain("Tests run: X")
+                .doesNotContain("Failures: X")
+                .doesNotContain("paste fake")
+                .doesNotContain("Paste CI output here");
+    }
+
+    @Test
+    void fdp35DashboardThresholdsMustUseConcreteValues() throws Exception {
+        String thresholds = readDoc("observability/FDP-35-regulated-mutation-alert-thresholds.md");
+        String dashboard = readDoc("observability/FDP-35-regulated-mutation-dashboard-spec.md");
+
+        assertDocsHaveConcreteThresholds(thresholds);
+        assertThat(dashboard)
+                .contains("Threshold overlays")
+                .contains("FDP-35-regulated-mutation-alert-thresholds.md");
+    }
+
+    @Test
+    void fdp35ProofMatrixMustMapExactTestMethods() throws Exception {
+        String matrix = readDoc("testing/FDP-35-regression-proof-matrix.md");
+
+        assertThat(matrix)
+                .contains("FDP-35 must prove readiness, not claim enablement.")
+                .contains("| Invariant | Test class | Test method | Type | CI job | Failure meaning | Allowed production claim | Forbidden production claim |")
+                .contains("EvidenceGatedFinalizeCoordinatorIntegrationTest` | `shouldFinalizeSubmitDecisionThroughRealMongoCoordinatorPath")
+                .contains("EvidenceGatedFinalizeCoordinatorTest` | `shouldNotReplayStaleCommittedSnapshotWhenFinalizeRecoveryRequired")
+                .contains("RegulatedMutationLeaseFencingIntegrationTest` | `expiredLeaseCanBeTakenOverAndStaleWorkerCannotWriteAfterTakeover")
+                .contains("RegulatedMutationLeaseRenewalIntegrationTest` | `concurrentRenewalAtLastAllowedSlotAllowsOnlyOneSuccess")
+                .contains("RegulatedMutationStaleWorkerExecutorIntegrationTest` | `legacyCheckpointBudgetExceededStopsBeforeBusinessMutationThroughRealMongoExecutorPath")
+                .contains("RegulatedMutationRestartRecoveryProofTest` | `crashAfterFdp29LocalCommitBeforeExternalConfirmationDoesNotClaimConfirmedFinality")
+                .contains("AlertControllerTest` | `recoveryRequiredWithSnapshot_mustNotReplayCommittedSuccess")
+                .contains("AlertControllerTest` | `finalizeRecoveryRequiredWithSnapshot_mustNotReplayFinalizedSuccess")
+                .contains("AlertControllerTest` | `renewalBudgetExceededRecovery_mustReturnExplicitRecovery")
+                .contains("AlertControllerTest` | `staleCheckpointFailure_mustNotReturnSuccess")
+                .contains("AlertControllerTest` | `longRunningProcessing_mustBeObservableNotSuccess")
+                .contains("AlertControllerTest` | `expiredProcessingWithoutProof_mustNotReturnCommittedSuccess")
+                .contains("RegulatedMutationRecoveryControllerTest` | `inspectionEndpointNeverReturnsRawSensitiveFieldsOrExceptionText")
+                .contains("RegulatedMutationRollbackReadinessTest` | `disablingCheckpointRenewal_doesNotDisableFencing")
+                .contains("RegulatedMutationRollbackReadinessTest` | `shrinkingRenewalBudget_doesNotCreateFalseSuccess")
+                .contains("RegulatedMutationRollbackReadinessTest` | `rollbackKeepsRecoveryCommandsVisible")
+                .contains("RegulatedMutationRollbackReadinessTest` | `rollbackDoesNotEnableFdp29Production")
+                .contains("RegulatedMutationRollbackReadinessTest` | `rollbackApiSmoke_doesNotHideRecovery");
+        assertThat(matrix)
+                .doesNotContain("recovery/finalize replay tests")
+                .doesNotContain("rollback failure tests")
+                .doesNotContain("local audit tests")
+                .doesNotContain("heartbeat/renewal guards")
+                .doesNotContain("recovery API tests")
+                .doesNotContain("rollback tests/docs");
+    }
+
+    private List<String> enumValues(String source) {
+        int open = source.indexOf('{');
+        int close = source.lastIndexOf('}');
+        return Stream.of(source.substring(open + 1, close).split(","))
+                .map(value -> value.replaceAll("//.*", "").trim())
+                .filter(value -> !value.isBlank())
+                .map(value -> value.replaceAll("[;\\s].*", ""))
+                .toList();
+    }
+
+    private String readSource(String path) throws Exception {
+        return Files.readString(Path.of(path));
+    }
+
+    private String readDoc(String relativePath) throws Exception {
+        return Files.readString(Path.of("../docs/" + relativePath));
+    }
+
+    private String combinedFdp35Docs() throws Exception {
+        return readDoc("architecture/FDP-35-production-readiness-chaos-recovery-proof.md")
+                + readDoc("FDP-35-merge-gate.md")
+                + readDoc("testing/FDP-35-e2e-and-chaos-test-plan.md")
+                + readDoc("testing/FDP-35-regression-proof-matrix.md")
+                + readDoc("observability/FDP-35-regulated-mutation-dashboard-spec.md")
+                + readDoc("observability/FDP-35-regulated-mutation-alert-thresholds.md")
+                + readDoc("runbooks/FDP-35-regulated-mutation-recovery-drill.md")
+                + readDoc("runbooks/FDP-35-regulated-mutation-recovery-drill-runbook.md")
+                + readDoc("operations/FDP-35-regulated-mutation-rollback-plan.md");
+    }
+
+    private void assertNoForbiddenTerms(String source, String category, String... forbiddenClaims) {
+        String normalized = source.toLowerCase();
+        for (String forbiddenClaim : forbiddenClaims) {
+            assertThat(normalized)
+                    .as("forbidden FDP-35 " + category + " term must be absent: " + forbiddenClaim)
+                    .doesNotContain(forbiddenClaim.toLowerCase());
+        }
+    }
+
+    private void assertNoForbiddenProcessKillOverclaim(String source) {
+        // Modeled restart proof must not drift into real process/container kill claims.
+        assertNoForbiddenTerms(
+                source,
+                "process-kill overclaim",
+                "Real process-kill chaos proven.",
+                "real process-kill proof",
+                "OS kill chaos proven",
+                "JVM kill chaos proven",
+                "container kill proof",
+                "kill -9 chaos proof"
+        );
+    }
+
+    private void assertNoProductionEnablementOverclaim(String source) {
+        // FDP-35 proves readiness evidence only; it does not enable production/bank operation.
+        assertNoForbiddenTerms(
+                source,
+                "production enablement overclaim",
+                "Production enabled.",
+                "Bank certified.",
+                "production certified",
+                "bank enabled",
+                "External finality proven.",
+                "Distributed ACID achieved.",
+                "fully production ready",
+                "external finality guaranteed"
+        );
+    }
+
+    private void assertContainsRequiredFdp35Wording(String source) {
+        assertThat(source)
+                .contains("production-readiness proof branch")
+                .contains("FDP-35 provides modeled restart/recovery proof in CI. It verifies durable post-crash command states, replay policy, recovery API behavior, and operator visibility. It does not claim real OS/JVM/container process-kill chaos unless an explicit real-chaos job is implemented and run.")
+                .contains("True OS/JVM/container termination chaos remains future scope unless explicitly implemented.")
+                .contains("No new public API statuses")
+                .contains("Checkpoint renewal must not be treated as business progress")
+                .contains("FDP-35 must prove readiness, not claim enablement.")
+                .contains("Modeled restart/recovery, controller recovery behavior, Docker/Testcontainers readiness, rollback, dashboard, alert, and operator drill evidence are covered.");
+    }
+
+    private void assertInspectionDtoNoUnsafeFields(String source) {
+        // Inspection response may expose bounded booleans/hashes, never raw identifiers or raw errors.
+        assertThat(source)
+                .contains("@JsonProperty(\"resource_id_present\")")
+                .contains("@JsonProperty(\"resource_id_hash\")")
+                .contains("@JsonProperty(\"lease_owner_present\")")
+                .contains("@JsonProperty(\"lease_owner_hash\")")
+                .contains("@JsonProperty(\"last_error_code\")")
+                .contains("safeResourceIdHash")
+                .contains("safeLeaseOwnerHash")
+                .contains("safeErrorCode")
+                .doesNotContain("@JsonProperty(\"resource_id\")")
+                .doesNotContain("@JsonProperty(\"lease_owner\")")
+                .doesNotContain("@JsonProperty(\"last_error\")")
+                .doesNotContain("@JsonProperty(\"idempotency_key\")")
+                .doesNotContain("@JsonProperty(\"request_hash\")")
+                .doesNotContain("@JsonProperty(\"intent_hash\")")
+                .doesNotContain("@JsonProperty(\"payload_hash\")");
+    }
+
+    private void assertInspectionSchemaNoUnsafeFields(String source) {
+        String schema = source.substring(source.indexOf("RegulatedMutationCommandInspectionResponse:"));
+        schema = schema.substring(0, schema.indexOf("AuditDegradationListResponse:"));
+        assertThat(schema)
+                .contains("resource_id_present:")
+                .contains("resource_id_hash:")
+                .contains("lease_owner_present:")
+                .contains("lease_owner_hash:")
+                .contains("last_error_code:")
+                .doesNotContain("resource_id:")
+                .doesNotContain("lease_owner:")
+                .doesNotContain("last_error:");
+    }
+
+    private void assertCiContainsRequiredFdp35Jobs(String source) {
+        // Both jobs must block Docker build and publish reports for CI triage.
+        assertThat(source)
+                .contains("fdp35-production-readiness")
+                .contains("regulated-mutation-regression")
+                .contains("docker version")
+                .contains("-Dgroups=production-readiness,e2e,recovery-proof,integration")
+                .contains("EvidenceGatedFinalizeCoordinatorIntegrationTest")
+                .contains("RegulatedMutationLeaseFencingIntegrationTest")
+                .contains("RegulatedMutationLeaseRenewalIntegrationTest")
+                .contains("RegulatedMutationCheckpointRenewalExecutionTest")
+                .contains("RegulatedMutationStaleWorkerExecutorIntegrationTest")
+                .contains("RegulatedMutationRecoveryControllerTest")
+                .contains("RegulatedMutationRollbackReadinessTest")
+                .contains("RegulatedMutationArchitectureTest")
+                .contains("- regulated-mutation-regression")
+                .contains("alert-service/target/surefire-reports/")
+                .contains("alert-service/target/failsafe-reports/");
+    }
+
+    private void assertDocsHaveConcreteThresholds(String source) {
+        assertThat(source)
+                .contains("P1")
+                .contains("P2")
+                .contains("> 0")
+                .contains(">= 3")
+                .contains("5 minutes")
+                .contains("10 minutes")
+                .contains("15 minutes")
+                .contains("30 minutes")
+                .contains("warning")
+                .contains("critical");
+    }
+
+    @Test
     void fdp33LeaseRenewalModelPolicySeamMustOwnModelStateTables() throws Exception {
         String policy = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationLeaseRenewalPolicy.java"

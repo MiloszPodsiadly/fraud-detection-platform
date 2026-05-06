@@ -1676,7 +1676,7 @@ components:
     RegulatedMutationCommandInspectionResponse:
       type: object
       additionalProperties: false
-      required: [idempotency_key_hash, idempotency_key_masked, action, resource_type, resource_id, state, execution_status, lease_owner, lease_expires_at, response_snapshot_present, attempted_audit_id, success_audit_id, failed_audit_id, degradation_reason, last_error, updated_at]
+      required: [idempotency_key_hash, idempotency_key_masked, action, mutation_model_version, resource_type, resource_id_present, resource_id_hash, state, execution_status, lease_owner_present, lease_owner_hash, lease_expires_at, lease_renewal_count, response_snapshot_present, attempted_audit_id, success_audit_id, failed_audit_id, degradation_reason, last_error_code, updated_at]
       properties:
         idempotency_key_hash:
           type: string
@@ -1688,24 +1688,38 @@ components:
           description: Masked display form only, never the full idempotency key.
         action:
           type: string
+        mutation_model_version:
+          type: string
         resource_type:
           type: string
-        resource_id:
+        resource_id_present:
+          type: boolean
+          description: Indicates whether a resource id exists on the command. The raw resource id is never returned.
+        resource_id_hash:
           type: string
           nullable: true
+          description: Stable hash of the resource id for operational correlation without exposing the raw resource id.
         state:
           type: string
           nullable: true
         execution_status:
           type: string
           nullable: true
-        lease_owner:
+        lease_owner_present:
+          type: boolean
+          description: Indicates whether a lease owner exists. The raw lease owner is never returned.
+        lease_owner_hash:
           type: string
           nullable: true
+          description: Stable hash of the lease owner for operational correlation without exposing the raw owner value.
         lease_expires_at:
           type: string
           format: date-time
           nullable: true
+        lease_renewal_count:
+          type: integer
+          format: int32
+          minimum: 0
         response_snapshot_present:
           type: boolean
         attempted_audit_id:
@@ -1720,9 +1734,10 @@ components:
         degradation_reason:
           type: string
           nullable: true
-        last_error:
+        last_error_code:
           type: string
           nullable: true
+          description: Bounded error code only. Raw exception text is never returned.
         updated_at:
           type: string
           format: date-time

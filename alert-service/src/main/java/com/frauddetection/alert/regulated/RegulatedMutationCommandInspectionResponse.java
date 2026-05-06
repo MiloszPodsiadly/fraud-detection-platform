@@ -14,15 +14,21 @@ public record RegulatedMutationCommandInspectionResponse(
         String mutationModelVersion,
         @JsonProperty("resource_type")
         String resourceType,
-        @JsonProperty("resource_id")
-        String resourceId,
+        @JsonProperty("resource_id_present")
+        boolean resourceIdPresent,
+        @JsonProperty("resource_id_hash")
+        String resourceIdHash,
         String state,
         @JsonProperty("execution_status")
         String executionStatus,
-        @JsonProperty("lease_owner")
-        String leaseOwner,
+        @JsonProperty("lease_owner_present")
+        boolean leaseOwnerPresent,
+        @JsonProperty("lease_owner_hash")
+        String leaseOwnerHash,
         @JsonProperty("lease_expires_at")
         Instant leaseExpiresAt,
+        @JsonProperty("lease_renewal_count")
+        int leaseRenewalCount,
         @JsonProperty("response_snapshot_present")
         boolean responseSnapshotPresent,
         @JsonProperty("attempted_audit_id")
@@ -33,8 +39,8 @@ public record RegulatedMutationCommandInspectionResponse(
         String failedAuditId,
         @JsonProperty("degradation_reason")
         String degradationReason,
-        @JsonProperty("last_error")
-        String lastError,
+        @JsonProperty("last_error_code")
+        String lastErrorCode,
         @JsonProperty("updated_at")
         Instant updatedAt
 ) {
@@ -62,19 +68,69 @@ public record RegulatedMutationCommandInspectionResponse(
                 action,
                 RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION.name(),
                 resourceType,
-                resourceId,
+                resourceId != null && !resourceId.isBlank(),
+                safeResourceIdHash(resourceId),
                 state,
                 executionStatus,
-                leaseOwner,
+                leaseOwner != null && !leaseOwner.isBlank(),
+                safeLeaseOwnerHash(leaseOwner),
                 leaseExpiresAt,
+                0,
                 responseSnapshotPresent,
                 attemptedAuditId,
                 successAuditId,
                 failedAuditId,
                 degradationReason,
-                lastError,
+                safeErrorCode(lastError),
                 updatedAt
         );
+    }
+
+    public RegulatedMutationCommandInspectionResponse(
+            String idempotencyKeyHash,
+            String idempotencyKeyMasked,
+            String action,
+            String resourceType,
+            String resourceId,
+            String state,
+            String executionStatus,
+            String leaseOwner,
+            Instant leaseExpiresAt,
+            int leaseRenewalCount,
+            boolean responseSnapshotPresent,
+            String attemptedAuditId,
+            String successAuditId,
+            String failedAuditId,
+            String degradationReason,
+            String lastError,
+            Instant updatedAt
+    ) {
+        this(
+                idempotencyKeyHash,
+                idempotencyKeyMasked,
+                action,
+                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION.name(),
+                resourceType,
+                resourceId != null && !resourceId.isBlank(),
+                safeResourceIdHash(resourceId),
+                state,
+                executionStatus,
+                leaseOwner != null && !leaseOwner.isBlank(),
+                safeLeaseOwnerHash(leaseOwner),
+                leaseExpiresAt,
+                leaseRenewalCount,
+                responseSnapshotPresent,
+                attemptedAuditId,
+                successAuditId,
+                failedAuditId,
+                degradationReason,
+                safeErrorCode(lastError),
+                updatedAt
+        );
+    }
+
+    public String lastError() {
+        return lastErrorCode;
     }
 
     static RegulatedMutationCommandInspectionResponse from(RegulatedMutationCommandDocument command) {
@@ -84,17 +140,20 @@ public record RegulatedMutationCommandInspectionResponse(
                 command.getAction(),
                 command.mutationModelVersionOrLegacy().name(),
                 command.getResourceType(),
-                command.getResourceId(),
+                command.getResourceId() != null && !command.getResourceId().isBlank(),
+                safeResourceIdHash(command.getResourceId()),
                 command.getState() == null ? null : command.getState().name(),
                 command.getExecutionStatus() == null ? null : command.getExecutionStatus().name(),
-                command.getLeaseOwner(),
+                command.getLeaseOwner() != null && !command.getLeaseOwner().isBlank(),
+                safeLeaseOwnerHash(command.getLeaseOwner()),
                 command.getLeaseExpiresAt(),
+                command.leaseRenewalCountOrZero(),
                 command.getResponseSnapshot() != null,
                 command.getAttemptedAuditId(),
                 command.getSuccessAuditId(),
                 command.getFailedAuditId(),
                 command.getDegradationReason(),
-                command.getLastError(),
+                safeErrorCode(command.getLastError()),
                 command.getUpdatedAt()
         );
     }
@@ -115,5 +174,30 @@ public record RegulatedMutationCommandInspectionResponse(
             return "..." + normalized.substring(Math.max(0, normalized.length() - 4));
         }
         return normalized.substring(0, 6) + "..." + normalized.substring(normalized.length() - 4);
+    }
+
+    private static String safeLeaseOwnerHash(String leaseOwner) {
+        if (leaseOwner == null || leaseOwner.isBlank()) {
+            return null;
+        }
+        return RegulatedMutationIntentHasher.hash("leaseOwner=" + leaseOwner.trim());
+    }
+
+    private static String safeResourceIdHash(String resourceId) {
+        if (resourceId == null || resourceId.isBlank()) {
+            return null;
+        }
+        return RegulatedMutationIntentHasher.hash("resourceId=" + resourceId.trim());
+    }
+
+    private static String safeErrorCode(String lastError) {
+        if (lastError == null || lastError.isBlank()) {
+            return null;
+        }
+        String normalized = lastError.trim();
+        if (normalized.matches("^[A-Z0-9_]{1,80}$")) {
+            return normalized;
+        }
+        return "UNSAFE_ERROR_REDACTED";
     }
 }
