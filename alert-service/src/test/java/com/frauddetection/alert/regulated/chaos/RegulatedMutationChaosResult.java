@@ -5,14 +5,18 @@ import com.frauddetection.alert.regulated.RegulatedMutationExecutionStatus;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
+import com.fasterxml.jackson.databind.JsonNode;
 
 public record RegulatedMutationChaosResult(
         String scenarioName,
         RegulatedMutationChaosWindow window,
-        String killedContainerId,
-        String restartedContainerId,
-        boolean containerKilled,
-        boolean containerRestarted,
+        RegulatedMutationProofLevel proofLevel,
+        String killedTargetId,
+        String restartedTargetId,
+        String killedTargetName,
+        String restartedTargetName,
+        boolean targetKilled,
+        boolean targetRestarted,
         RegulatedMutationState commandState,
         RegulatedMutationExecutionStatus executionStatus,
         SubmitDecisionOperationStatus publicStatus,
@@ -22,6 +26,8 @@ public record RegulatedMutationChaosResult(
         long outboxRecords,
         long attemptedAuditEvents,
         long successAuditEvents,
-        long businessMutationCount
+        long businessMutationCount,
+        JsonNode inspectionResponse,
+        JsonNode recoveryResponse
 ) {
 }

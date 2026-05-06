@@ -10,7 +10,8 @@ import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.regulated.chaos.RegulatedMutationChaosResult;
 import com.frauddetection.alert.regulated.chaos.RegulatedMutationChaosScenario;
 import com.frauddetection.alert.regulated.chaos.RegulatedMutationChaosWindow;
-import com.frauddetection.alert.regulated.chaos.RegulatedMutationDockerChaosHarness;
+import com.frauddetection.alert.regulated.chaos.RegulatedMutationAlertServiceProcessChaosHarness;
+import com.frauddetection.alert.regulated.chaos.RegulatedMutationProofLevel;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
 import com.frauddetection.common.events.enums.RiskLevel;
@@ -21,10 +22,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory;
-import org.springframework.data.mongodb.core.index.Index;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.repository.support.MongoRepositoryFactory;
@@ -37,13 +36,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @Tag("real-chaos")
 @Tag("docker-chaos")
+@Tag("service-chaos")
 @Tag("integration")
-class RegulatedMutationRealChaosEvidenceIntegrityIT extends AbstractIntegrationTest {
+class RegulatedMutationRealAlertServiceEvidenceIntegrityIT extends AbstractIntegrationTest {
 
     private SimpleMongoClientDatabaseFactory databaseFactory;
     private MongoTemplate mongoTemplate;
     private RegulatedMutationCommandRepository commandRepository;
-    private RegulatedMutationDockerChaosHarness chaosHarness;
+    private RegulatedMutationAlertServiceProcessChaosHarness chaosHarness;
 
     @BeforeEach
     void setUp() {
@@ -51,9 +51,10 @@ class RegulatedMutationRealChaosEvidenceIntegrityIT extends AbstractIntegrationT
         databaseFactory = new SimpleMongoClientDatabaseFactory(FraudPlatformContainers.mongodb().getReplicaSetUrl(databaseName));
         mongoTemplate = new MongoTemplate(databaseFactory);
         commandRepository = new MongoRepositoryFactory(mongoTemplate).getRepository(RegulatedMutationCommandRepository.class);
-        mongoTemplate.indexOps(RegulatedMutationCommandDocument.class)
-                .ensureIndex(new Index().on("idempotency_key", Sort.Direction.ASC).unique());
-        chaosHarness = new RegulatedMutationDockerChaosHarness(mongoTemplate);
+        chaosHarness = new RegulatedMutationAlertServiceProcessChaosHarness(
+                mongoTemplate,
+                FraudPlatformContainers.mongodb().getReplicaSetUrl(databaseName)
+        );
     }
 
     @AfterEach
@@ -78,7 +79,9 @@ class RegulatedMutationRealChaosEvidenceIntegrityIT extends AbstractIntegrationT
         );
 
         RegulatedMutationChaosResult result = chaosHarness.run(scenario);
+        chaosHarness.inspectByIdempotencyKey(scenario.idempotencyKey());
 
+        assertRealAlertServiceKill(result);
         assertThat(result.outboxRecords()).isOne();
         assertThat(countOutbox(scenario.commandId())).isOne();
     }
@@ -92,7 +95,9 @@ class RegulatedMutationRealChaosEvidenceIntegrityIT extends AbstractIntegrationT
         );
 
         RegulatedMutationChaosResult result = chaosHarness.run(scenario);
+        chaosHarness.inspectByIdempotencyKey(scenario.idempotencyKey());
 
+        assertRealAlertServiceKill(result);
         assertThat(result.successAuditEvents()).isOne();
         assertThat(countAudit("alert-success-audit-dedupe", AuditOutcome.SUCCESS)).isOne();
     }
@@ -105,8 +110,10 @@ class RegulatedMutationRealChaosEvidenceIntegrityIT extends AbstractIntegrationT
                 command -> insertLocalAnchor(command.getId(), RegulatedMutationAuditPhase.SUCCESS)
         );
 
-        chaosHarness.run(scenario);
+        RegulatedMutationChaosResult result = chaosHarness.run(scenario);
+        chaosHarness.inspectByIdempotencyKey(scenario.idempotencyKey());
 
+        assertRealAlertServiceKill(result);
         assertThat(countLocalAnchors(scenario.commandId(), RegulatedMutationAuditPhase.SUCCESS)).isOne();
     }
 
@@ -124,7 +131,10 @@ class RegulatedMutationRealChaosEvidenceIntegrityIT extends AbstractIntegrationT
         );
 
         RegulatedMutationChaosResult result = chaosHarness.run(scenario);
+        chaosHarness.recoverViaRestartedService();
+        result = chaosHarness.collectEvidence(scenario);
 
+        assertRealAlertServiceKill(result);
         assertThat(result.businessMutationCount()).isOne();
         assertThat(countOutbox(scenario.commandId())).isOne();
         assertThat(countBusinessMutation("alert-success-audit-pending-no-business-rerun")).isOne();
@@ -143,7 +153,9 @@ class RegulatedMutationRealChaosEvidenceIntegrityIT extends AbstractIntegrationT
         );
 
         RegulatedMutationChaosResult result = chaosHarness.run(scenario);
+        chaosHarness.inspectByIdempotencyKey(scenario.idempotencyKey());
 
+        assertRealAlertServiceKill(result);
         assertThat(result.publicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         assertThat(result.outboxRecords()).isOne();
         assertThat(result.successAuditEvents()).isOne();
@@ -281,5 +293,17 @@ class RegulatedMutationRealChaosEvidenceIntegrityIT extends AbstractIntegrationT
     private long countBusinessMutation(String alertId) {
         AlertDocument alert = mongoTemplate.findById(alertId, AlertDocument.class);
         return alert != null && alert.getAnalystDecision() == AnalystDecision.CONFIRMED_FRAUD ? 1L : 0L;
+    }
+
+    private void assertRealAlertServiceKill(RegulatedMutationChaosResult result) {
+        assertThat(result.proofLevel()).isEqualTo(RegulatedMutationProofLevel.REAL_ALERT_SERVICE_KILL);
+        assertThat(result.targetKilled()).isTrue();
+        assertThat(result.targetRestarted()).isTrue();
+        assertThat(result.killedTargetName()).contains("alert-service").contains("AlertServiceApplication");
+        assertThat(result.restartedTargetName()).contains("alert-service").contains("AlertServiceApplication");
+        assertThat(result.killedTargetId()).isNotBlank();
+        assertThat(result.restartedTargetId()).isNotBlank();
+        assertThat(result.restartedTargetId()).isNotEqualTo(result.killedTargetId());
+        assertThat(result.inspectionResponse()).isNotNull();
     }
 }

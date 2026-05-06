@@ -2,58 +2,51 @@ package com.frauddetection.alert.regulated;
 
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.audit.AuditAction;
-import com.frauddetection.alert.audit.AuditDegradationService;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
-import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
+import com.frauddetection.alert.regulated.chaos.RegulatedMutationAlertServiceProcessChaosHarness;
 import com.frauddetection.alert.regulated.chaos.RegulatedMutationChaosResult;
 import com.frauddetection.alert.regulated.chaos.RegulatedMutationChaosScenario;
 import com.frauddetection.alert.regulated.chaos.RegulatedMutationChaosWindow;
-import com.frauddetection.alert.regulated.chaos.RegulatedMutationDockerChaosHarness;
+import com.frauddetection.alert.regulated.chaos.RegulatedMutationProofLevel;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.testsupport.base.AbstractIntegrationTest;
 import com.frauddetection.common.testsupport.container.FraudPlatformContainers;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.bson.Document;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory;
-import org.springframework.data.mongodb.core.index.Index;
 import org.springframework.data.mongodb.repository.support.MongoRepositoryFactory;
 
-import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 @Tag("real-chaos")
 @Tag("docker-chaos")
+@Tag("service-chaos")
 @Tag("integration")
-class RegulatedMutationRealChaosIT extends AbstractIntegrationTest {
+class RegulatedMutationRealAlertServiceChaosIT extends AbstractIntegrationTest {
+
+    private static final long RECOVERY_STUCK_THRESHOLD_MARGIN_SECONDS = 300L;
 
     private SimpleMongoClientDatabaseFactory databaseFactory;
     private MongoTemplate mongoTemplate;
     private RegulatedMutationCommandRepository commandRepository;
     private AlertRepository alertRepository;
-    private RegulatedMutationRecoveryService recoveryService;
-    private RegulatedMutationDockerChaosHarness chaosHarness;
+    private RegulatedMutationAlertServiceProcessChaosHarness chaosHarness;
 
     @BeforeEach
     void setUp() {
@@ -63,25 +56,10 @@ class RegulatedMutationRealChaosIT extends AbstractIntegrationTest {
         MongoRepositoryFactory repositoryFactory = new MongoRepositoryFactory(mongoTemplate);
         commandRepository = repositoryFactory.getRepository(RegulatedMutationCommandRepository.class);
         alertRepository = repositoryFactory.getRepository(AlertRepository.class);
-        mongoTemplate.indexOps(RegulatedMutationCommandDocument.class)
-                .ensureIndex(new Index().on("idempotency_key", Sort.Direction.ASC).unique());
-
-        RegulatedMutationAuditPhaseService auditPhaseService = mock(RegulatedMutationAuditPhaseService.class);
-        when(auditPhaseService.findPhaseAuditId(any(), eq(RegulatedMutationAuditPhase.SUCCESS))).thenReturn(null);
-        when(auditPhaseService.recordPhase(any(), any(), any(), eq(AuditOutcome.SUCCESS), eq(null)))
-                .thenAnswer(invocation -> {
-                    RegulatedMutationCommandDocument command = invocation.getArgument(0);
-                    return insertAudit(command.getResourceId(), AuditOutcome.SUCCESS, "success-" + command.getId());
-                });
-        recoveryService = new RegulatedMutationRecoveryService(
-                commandRepository,
-                auditPhaseService,
-                mock(AuditDegradationService.class),
-                new AlertServiceMetrics(new SimpleMeterRegistry()),
-                List.of(new SubmitDecisionRecoveryStrategy(alertRepository)),
-                Duration.ZERO
+        chaosHarness = new RegulatedMutationAlertServiceProcessChaosHarness(
+                mongoTemplate,
+                FraudPlatformContainers.mongodb().getReplicaSetUrl(databaseName)
         );
-        chaosHarness = new RegulatedMutationDockerChaosHarness(mongoTemplate);
     }
 
     @AfterEach
@@ -98,7 +76,7 @@ class RegulatedMutationRealChaosIT extends AbstractIntegrationTest {
     }
 
     @Test
-    void shouldRecoverAfterContainerKillAfterClaimBeforeAttemptedAudit() {
+    void shouldRecoverAfterAlertServiceKillAfterClaimBeforeAttemptedAudit() {
         RegulatedMutationChaosScenario scenario = scenario(
                 "claim-before-attempted",
                 RegulatedMutationChaosWindow.AFTER_CLAIM_BEFORE_ATTEMPTED_AUDIT,
@@ -112,7 +90,7 @@ class RegulatedMutationRealChaosIT extends AbstractIntegrationTest {
 
         RegulatedMutationChaosResult result = chaosHarness.run(scenario);
 
-        assertContainerRestarted(result);
+        assertAlertServiceRestarted(result);
         assertThat(result.commandState()).isEqualTo(RegulatedMutationState.REQUESTED);
         assertThat(result.executionStatus()).isEqualTo(RegulatedMutationExecutionStatus.PROCESSING);
         assertThat(result.responseSnapshotPresent()).isFalse();
@@ -128,7 +106,7 @@ class RegulatedMutationRealChaosIT extends AbstractIntegrationTest {
     }
 
     @Test
-    void shouldRecoverAfterContainerKillAfterAttemptedAuditBeforeBusinessMutation() {
+    void shouldRecoverAfterAlertServiceKillAfterAttemptedAuditBeforeBusinessMutation() {
         RegulatedMutationChaosScenario scenario = scenario(
                 "attempted-before-business",
                 RegulatedMutationChaosWindow.AFTER_ATTEMPTED_AUDIT_BEFORE_BUSINESS_MUTATION,
@@ -144,7 +122,7 @@ class RegulatedMutationRealChaosIT extends AbstractIntegrationTest {
 
         RegulatedMutationChaosResult result = chaosHarness.run(scenario);
 
-        assertContainerRestarted(result);
+        assertAlertServiceRestarted(result);
         assertThat(result.commandState()).isEqualTo(RegulatedMutationState.AUDIT_ATTEMPTED);
         assertThat(result.executionStatus()).isEqualTo(RegulatedMutationExecutionStatus.PROCESSING);
         assertThat(result.attemptedAuditEvents()).isOne();
@@ -165,16 +143,20 @@ class RegulatedMutationRealChaosIT extends AbstractIntegrationTest {
                     command.setAttemptedAuditId(insertAudit(command.getResourceId(), AuditOutcome.ATTEMPTED, "attempted-" + command.getId()));
                     command.setLeaseOwner("owner-business-window");
                     command.setLeaseExpiresAt(Instant.now().minusSeconds(5));
-                    command.setUpdatedAt(Instant.now().minusSeconds(60));
+                    command.setUpdatedAt(staleForRecovery());
                 }
         );
 
         RegulatedMutationChaosResult beforeRecovery = chaosHarness.run(scenario);
-        RegulatedMutationRecoveryRunResponse recovery = recoveryService.recoverNow();
-        RegulatedMutationChaosResult afterRecovery = chaosHarness.collectEvidence(scenario);
+        JsonNode recovery = chaosHarness.recoverViaRestartedService();
+        RegulatedMutationChaosResult afterRecovery = chaosHarness.collectEvidence(
+                scenario,
+                chaosHarness.inspectByCommandId(scenario.commandId()),
+                recovery
+        );
 
-        assertContainerRestarted(beforeRecovery);
-        assertThat(recovery.recoveryRequired()).isEqualTo(1);
+        assertAlertServiceRestarted(beforeRecovery);
+        assertThat(recovery.path("recovery_required").asLong()).isEqualTo(1);
         assertThat(afterRecovery.commandState()).isEqualTo(RegulatedMutationState.BUSINESS_COMMITTING);
         assertThat(afterRecovery.executionStatus()).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
         assertThat(afterRecovery.responseSnapshotPresent()).isFalse();
@@ -196,17 +178,21 @@ class RegulatedMutationRealChaosIT extends AbstractIntegrationTest {
                     command.setOutboxEventId("event-" + command.getResourceId());
                     command.setLeaseOwner("owner-success-audit-window");
                     command.setLeaseExpiresAt(Instant.now().minusSeconds(5));
-                    command.setUpdatedAt(Instant.now().minusSeconds(60));
+                    command.setUpdatedAt(staleForRecovery());
                     mongoTemplate.save(outboxRecord(command.getResourceId(), command.getId()));
                 }
         );
 
         RegulatedMutationChaosResult beforeRecovery = chaosHarness.run(scenario);
-        RegulatedMutationRecoveryRunResponse recovery = recoveryService.recoverNow();
-        RegulatedMutationChaosResult afterRecovery = chaosHarness.collectEvidence(scenario);
+        JsonNode recovery = chaosHarness.recoverViaRestartedService();
+        RegulatedMutationChaosResult afterRecovery = chaosHarness.collectEvidence(
+                scenario,
+                chaosHarness.inspectByCommandId(scenario.commandId()),
+                recovery
+        );
 
-        assertContainerRestarted(beforeRecovery);
-        assertThat(recovery.recovered()).isEqualTo(1);
+        assertAlertServiceRestarted(beforeRecovery);
+        assertThat(recovery.path("recovered").asLong()).isEqualTo(1);
         assertThat(afterRecovery.commandState()).isEqualTo(RegulatedMutationState.EVIDENCE_PENDING);
         assertThat(afterRecovery.executionStatus()).isEqualTo(RegulatedMutationExecutionStatus.COMPLETED);
         assertThat(afterRecovery.businessMutationCount()).isOne();
@@ -228,16 +214,20 @@ class RegulatedMutationRealChaosIT extends AbstractIntegrationTest {
                     command.setPublicStatus(SubmitDecisionOperationStatus.FINALIZING);
                     command.setLeaseOwner("owner-finalizing-window");
                     command.setLeaseExpiresAt(Instant.now().minusSeconds(5));
-                    command.setUpdatedAt(Instant.now().minusSeconds(60));
+                    command.setUpdatedAt(staleForRecovery());
                 }
         );
 
         RegulatedMutationChaosResult beforeRecovery = chaosHarness.run(scenario);
-        RegulatedMutationRecoveryRunResponse recovery = recoveryService.recoverNow();
-        RegulatedMutationChaosResult afterRecovery = chaosHarness.collectEvidence(scenario);
+        JsonNode recovery = chaosHarness.recoverViaRestartedService();
+        RegulatedMutationChaosResult afterRecovery = chaosHarness.collectEvidence(
+                scenario,
+                chaosHarness.inspectByCommandId(scenario.commandId()),
+                recovery
+        );
 
-        assertContainerRestarted(beforeRecovery);
-        assertThat(recovery.recoveryRequired()).isEqualTo(1);
+        assertAlertServiceRestarted(beforeRecovery);
+        assertThat(recovery.path("recovery_required").asLong()).isEqualTo(1);
         assertThat(afterRecovery.commandState()).isEqualTo(RegulatedMutationState.FINALIZING);
         assertThat(afterRecovery.executionStatus()).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
         assertThat(afterRecovery.publicStatus()).isNotIn(
@@ -272,7 +262,7 @@ class RegulatedMutationRealChaosIT extends AbstractIntegrationTest {
 
         RegulatedMutationChaosResult result = chaosHarness.run(scenario);
 
-        assertContainerRestarted(result);
+        assertAlertServiceRestarted(result);
         assertThat(result.commandState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         assertThat(result.executionStatus()).isEqualTo(RegulatedMutationExecutionStatus.COMPLETED);
         assertThat(result.publicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
@@ -406,11 +396,19 @@ class RegulatedMutationRealChaosIT extends AbstractIntegrationTest {
         return auditId;
     }
 
-    private void assertContainerRestarted(RegulatedMutationChaosResult result) {
-        assertThat(result.containerKilled()).isTrue();
-        assertThat(result.containerRestarted()).isTrue();
-        assertThat(result.killedContainerId()).isNotBlank();
-        assertThat(result.restartedContainerId()).isNotBlank();
-        assertThat(result.restartedContainerId()).isNotEqualTo(result.killedContainerId());
+    private Instant staleForRecovery() {
+        return Instant.now().minusSeconds(RECOVERY_STUCK_THRESHOLD_MARGIN_SECONDS);
+    }
+
+    private void assertAlertServiceRestarted(RegulatedMutationChaosResult result) {
+        assertThat(result.proofLevel()).isEqualTo(RegulatedMutationProofLevel.REAL_ALERT_SERVICE_KILL);
+        assertThat(result.targetKilled()).isTrue();
+        assertThat(result.targetRestarted()).isTrue();
+        assertThat(result.killedTargetName()).contains("alert-service").contains("AlertServiceApplication");
+        assertThat(result.restartedTargetName()).contains("alert-service").contains("AlertServiceApplication");
+        assertThat(result.killedTargetId()).isNotBlank();
+        assertThat(result.restartedTargetId()).isNotBlank();
+        assertThat(result.restartedTargetId()).isNotEqualTo(result.killedTargetId());
+        assertThat(result.inspectionResponse()).isNotNull();
     }
 }
