@@ -26,6 +26,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 
 public final class RegulatedMutationAlertServiceProcessChaosHarness implements AutoCloseable {
 
@@ -96,8 +97,29 @@ public final class RegulatedMutationAlertServiceProcessChaosHarness implements A
 
     public RegulatedMutationChaosResult collectEvidence(
             RegulatedMutationChaosScenario scenario,
+            RegulatedMutationProofLevel proofLevel
+    ) {
+        return collectEvidence(scenario, inspectByCommandId(scenario.commandId()), null, proofLevel);
+    }
+
+    public RegulatedMutationChaosResult collectEvidence(
+            RegulatedMutationChaosScenario scenario,
             JsonNode inspectionResponse,
             JsonNode recoveryResponse
+    ) {
+        return collectEvidence(
+                scenario,
+                inspectionResponse,
+                recoveryResponse,
+                RegulatedMutationProofLevel.REAL_ALERT_SERVICE_KILL
+        );
+    }
+
+    public RegulatedMutationChaosResult collectEvidence(
+            RegulatedMutationChaosScenario scenario,
+            JsonNode inspectionResponse,
+            JsonNode recoveryResponse,
+            RegulatedMutationProofLevel proofLevel
     ) {
         RegulatedMutationCommandDocument command = mongoTemplate.findById(
                 scenario.commandId(),
@@ -110,7 +132,7 @@ public final class RegulatedMutationAlertServiceProcessChaosHarness implements A
         RegulatedMutationChaosResult result = new RegulatedMutationChaosResult(
                 scenario.name(),
                 scenario.window(),
-                RegulatedMutationProofLevel.REAL_ALERT_SERVICE_KILL,
+                proofLevel,
                 String.valueOf(killedProcessId),
                 String.valueOf(restartedProcessId),
                 ALERT_SERVICE_TARGET_NAME + ":" + ALERT_SERVICE_MAIN_CLASS,
@@ -135,11 +157,15 @@ public final class RegulatedMutationAlertServiceProcessChaosHarness implements A
     }
 
     public void startAlertService(String logName) {
+        startAlertService(logName, List.of());
+    }
+
+    public void startAlertService(String logName, List<String> additionalArgs) {
         assertNoRunningProcess();
         servicePort = freePort();
         try {
             Files.createDirectories(logDirectory);
-            serviceProcess = new ProcessBuilder(alertServiceCommand())
+            serviceProcess = new ProcessBuilder(alertServiceCommand(additionalArgs))
                     .directory(Path.of("").toAbsolutePath().toFile())
                     .redirectOutput(logDirectory.resolve(logName + "-stdout.log").toFile())
                     .redirectError(logDirectory.resolve(logName + "-stderr.log").toFile())
@@ -167,11 +193,32 @@ public final class RegulatedMutationAlertServiceProcessChaosHarness implements A
     }
 
     public void restartAlertService(String logName) {
-        startAlertService(logName);
+        restartAlertService(logName, List.of());
+    }
+
+    public void restartAlertService(String logName, List<String> additionalArgs) {
+        startAlertService(logName, additionalArgs);
         restartedProcessId = serviceProcess.pid();
         if (restartedProcessId == killedProcessId) {
             throw new IllegalStateException("FDP-36 restarted alert-service process reused killed pid");
         }
+    }
+
+    public CompletableFuture<HttpResponse<String>> submitDecisionAsync(
+            String alertId,
+            String idempotencyKey,
+            String requestBody
+    ) {
+        return httpClient.sendAsync(
+                HttpRequest.newBuilder(uri("/api/v1/alerts/" + alertId + "/decision"))
+                        .timeout(Duration.ofSeconds(60))
+                        .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                        .header("Content-Type", "application/json")
+                        .header("X-Idempotency-Key", idempotencyKey)
+                        .headers(demoHeaders())
+                        .build(),
+                HttpResponse.BodyHandlers.ofString()
+        );
     }
 
     public String evidenceSummary() {
@@ -204,7 +251,7 @@ public final class RegulatedMutationAlertServiceProcessChaosHarness implements A
         }
     }
 
-    private List<String> alertServiceCommand() {
+    private List<String> alertServiceCommand(List<String> additionalArgs) {
         List<String> command = new ArrayList<>();
         command.add(javaExecutable());
         command.add("-cp");
@@ -225,6 +272,7 @@ public final class RegulatedMutationAlertServiceProcessChaosHarness implements A
         command.add("--app.kafka.topics.fraud-decisions=fdp36.fraud.decisions");
         command.add("--app.kafka.topics.transactions-dead-letter=fdp36.transactions.dead-letter");
         command.add("--logging.level.root=WARN");
+        command.addAll(additionalArgs);
         return command;
     }
 
