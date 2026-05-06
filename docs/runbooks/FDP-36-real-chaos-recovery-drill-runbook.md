@@ -2,6 +2,10 @@
 
 This runbook records test/dev real chaos drill output. It is sample operational evidence only, not production evidence and not production enablement.
 
+FDP-36 kills and restarts the real alert-service JVM/process. Most crash windows are durable-state crash-window proofs, not live in-flight instruction-boundary kills.
+
+Docker/Testcontainers are infrastructure dependencies, not the killed alert-service image.
+
 ## Drill Fields
 
 - drill owner
@@ -65,3 +69,5 @@ This is sample test/dev output, not production evidence.
 | lessons learned | recovery state remained explicit after real alert-service kill/restart |
 
 Documentation must not call dummy-container proof real service chaos. If the killed target is not alert-service, classify the result as `DUMMY_CONTAINER_DURABLE_STATE_PROOF` or `MODELED_DURABLE_STATE_PROOF`, not FDP-36 GO evidence.
+
+Full alert-service image container chaos is future scope: build the production image, start that image under Docker Compose/Testcontainers, kill the alert-service image container, restart the same image, and verify API/recovery/outbox/audit through the restarted image. FDP-36 does not claim production Docker image chaos or full container image kill proof.

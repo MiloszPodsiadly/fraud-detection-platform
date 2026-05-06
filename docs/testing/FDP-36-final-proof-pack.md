@@ -6,6 +6,10 @@ FDP-36 is proof and operations scope only. It does not change runtime regulated 
 
 The real-chaos proof kills the actual alert-service JVM/process running regulated mutation execution, recovery, and inspection endpoints.
 
+Docker/Testcontainers are infrastructure dependencies, not the killed alert-service image.
+
+FDP-36 kills and restarts the real alert-service JVM/process. Most crash windows are durable-state crash-window proofs, not live in-flight instruction-boundary kills.
+
 ## Invariants
 
 | Invariant | Test class | Method | CI job | Proof level |
@@ -18,6 +22,7 @@ The real-chaos proof kills the actual alert-service JVM/process running regulate
 | no duplicate SUCCESS audit | `RegulatedMutationRealAlertServiceEvidenceIntegrityIT` | `replayAfterRestartMustNotCreateSecondSuccessAudit` | `fdp36-real-chaos` | `REAL_ALERT_SERVICE_KILL`, `REAL_ALERT_SERVICE_RESTART_API_PROOF` |
 | no duplicate local audit anchor | `RegulatedMutationRealAlertServiceEvidenceIntegrityIT` | `replayAfterRestartMustNotCreateSecondLocalAuditAnchorForSameCommandPhase` | `fdp36-real-chaos` | `REAL_ALERT_SERVICE_KILL`, `REAL_ALERT_SERVICE_RESTART_API_PROOF` |
 | pending external remains pending | `RegulatedMutationRealAlertServiceChaosIT` | `shouldRemainPendingExternalAfterKillWhenFdp29LocalCommitCompletedButExternalEvidencePending` | `fdp36-real-chaos` | `REAL_ALERT_SERVICE_KILL`, `REAL_ALERT_SERVICE_RESTART_API_PROOF` |
+| one live in-flight checkpoint does not falsely commit | `RegulatedMutationLiveInFlightKillIT` | `liveInFlightBeforeBusinessMutationKillDoesNotCommitOrPublish` | `fdp36-real-chaos` | `REAL_ALERT_SERVICE_KILL`, `REAL_ALERT_SERVICE_RESTART_API_PROOF`, `LIVE_IN_FLIGHT_REQUEST_KILL` |
 | checkpoint/renewal is not progress | `RegulatedMutationSafeCheckpointPolicyTest` | checkpoint policy tests | `regulated-mutation-regression` | `MODELED_DURABLE_STATE_PROOF` |
 | long-running processing observable | `RegulatedMutationPostRestartApiBehaviorTest` | `processingExpiredAfterRestartReturnsObservableStateNotSuccess` | `regulated-mutation-regression` | `API_PERSISTED_STATE_PROOF` |
 
@@ -29,6 +34,11 @@ The real-chaos proof kills the actual alert-service JVM/process running regulate
 - Mongo primary failover during the mutation transaction
 - Kafka broker kill during outbox publication
 - external evidence authority outage confirmation semantics
+- full production Docker image container kill remains future scope
+
+Filled by CI artifact: `fdp36-proof-summary.md`.
+
+Example only, not production evidence.
 
 ## Enablement Decision
 
