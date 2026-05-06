@@ -25,4 +25,4 @@ FDP-37 release review requires dashboards and alerts for regulated mutation rest
 
 Dashboard panels should show stale rejections, lease takeovers, recovery-required count, processing age, checkpoint renewal outcomes, transition latency, FDP-37 CI proof status, image provenance status, and rollback validation status.
 
-FDP-37 uses Linux CI host networking for Testcontainers dependency access. This dashboard/runbook does not certify production Docker Compose networking.
+FDP-37 uses a shared Testcontainers network with stable dependency aliases. This dashboard/runbook does not certify production Docker Compose networking or production networking.

@@ -14,6 +14,8 @@ FDP-37 is mergeable only as production-image durable crash-window chaos proof an
 
 - `alert-service/target/fdp37-chaos/fdp37-proof-summary.md`
 - `alert-service/target/fdp37-chaos/fdp37-proof-summary.json`
+- `alert-service/target/fdp37-chaos/fdp37-enablement-review-pack.md`
+- `alert-service/target/fdp37-chaos/fdp37-enablement-review-pack.json`
 - `alert-service/target/fdp37-chaos/evidence-summary.md`
 - `alert-service/target/fdp37-chaos/fdp37-rollback-validation.md`
 - `alert-service/target/fdp37-chaos/fdp37-rollback-validation.json`
@@ -22,10 +24,13 @@ The proof summary must contain:
 
 - `fdp37-alert-service:${GITHUB_SHA}`
 - current commit SHA
+- immutable image id
 - image digest or image id
+- Dockerfile path `deployment/Dockerfile.backend`
 - masked killed container id
 - masked restarted container id
-- `network_mode: host`
+- `network_mode: testcontainers-shared-network`
+- `host_networking_used: false`
 - `live_in_flight_proof_executed: false`
 - `READY_FOR_ENABLEMENT_REVIEW is not production enablement`
 
@@ -34,7 +39,11 @@ The evidence summary must contain:
 - `PRODUCTION_IMAGE_CONTAINER_KILL`
 - `PRODUCTION_IMAGE_RESTART_API_PROOF`
 - `transaction_mode=REQUIRED`
+- `network_mode=testcontainers-shared-network`
+- `host_networking_used=false`
 - no unrelated placeholder image evidence
+
+The enablement review pack must contain job status, prerequisite status, image provenance, required transaction execution, rollback validation, proof artifact presence, `production_enablement: false`, `release_config_pr_required: true`, `human_approval_required: true`, and `operator_drill_required_before_enablement: true`.
 
 ## Required Tests
 

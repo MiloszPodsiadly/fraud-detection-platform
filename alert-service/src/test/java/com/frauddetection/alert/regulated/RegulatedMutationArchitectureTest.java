@@ -1858,10 +1858,17 @@ class RegulatedMutationArchitectureTest {
                 .contains("killContainerCmd")
                 .contains("target\", \"fdp37-chaos")
                 .contains("IMAGE_DIGEST_PROPERTY")
+                .contains("IMAGE_ID_PROPERTY")
                 .contains("network_mode")
+                .contains("testcontainers-shared-network")
+                .contains("host_networking_used")
+                .contains("fdp37-enablement-review-pack.md")
+                .contains("waitUntil(")
                 .contains("live_in_flight_proof_executed")
                 .contains("fdp37-rollback-validation.md")
                 .contains("FDP-37 killed target must be the alert-service image/container")
+                .doesNotContain("withNetworkMode(\"host\")")
+                .doesNotContain("network_mode=host")
                 .doesNotContain("DockerImageName.parse(\"alpine")
                 .doesNotContain("while true; do sleep");
 
@@ -1963,11 +1970,21 @@ class RegulatedMutationArchitectureTest {
         assertThat(combined).contains("does not add production chaos hooks");
         assertThat(combined).contains("A skipped live in-flight test is not counted as proof.");
         assertThat(combined).contains("transaction_mode=REQUIRED");
-        assertThat(combined).contains("Linux CI host networking");
+        assertThat(combined).contains("shared Testcontainers network");
+        assertThat(combined).contains("network_mode: testcontainers-shared-network");
+        assertThat(combined).contains("host_networking_used: false");
+        assertThat(combined).contains("DURABLE_STATE_SEEDED");
+        assertThat(combined).contains("RUNTIME_REACHED_TEST_FIXTURE");
+        assertThat(combined).contains("RUNTIME_REACHED_PRODUCTION_IMAGE");
+        assertThat(combined).contains("fdp37-enablement-review-pack.md");
+        assertThat(combined).contains("production_enablement: false");
+        assertThat(combined).contains("human_approval_required: true");
         assertThat(combined).contains("not production environment configuration certification");
         assertThat(combined).contains("Rollback validation is release evidence, not production rollback approval.");
         assertThat(combined).contains("Do not use command id, alert id, actor id, idempotency key, lease owner, raw exception");
         assertThat(combined).doesNotContain("LIVE_IN_FLIGHT_REQUEST_KILL");
+        assertThat(combined).doesNotContain("network_mode: host");
+        assertThat(combined).doesNotContain("Linux CI host networking");
         assertThat(combined).doesNotContain("PRODUCTION_ENABLED");
         assertFdp36ForbiddenPhraseIsContextual(combined, "production enablement");
         assertFdp36ForbiddenPhraseIsContextual(combined, "bank certification");
@@ -2003,8 +2020,10 @@ class RegulatedMutationArchitectureTest {
         assertThat(ci).contains("Build alert-service production-like image");
         assertThat(ci).contains("docker build -f deployment/Dockerfile.backend --build-arg MODULE_NAME=alert-service -t fdp37-alert-service:${GITHUB_SHA} .");
         assertThat(ci).contains("FDP37_ALERT_SERVICE_IMAGE=fdp37-alert-service:${GITHUB_SHA}");
+        assertThat(ci).contains("FDP37_ALERT_SERVICE_IMAGE_ID");
         assertThat(ci).contains("FDP37_ALERT_SERVICE_IMAGE_DIGEST");
         assertThat(ci).contains("-Dfdp37.alert-service.image=${FDP37_ALERT_SERVICE_IMAGE}");
+        assertThat(ci).contains("-Dfdp37.alert-service.image-id=${FDP37_ALERT_SERVICE_IMAGE_ID}");
         assertThat(ci).contains("-Dfdp37.alert-service.image-digest=${FDP37_ALERT_SERVICE_IMAGE_DIGEST}");
         assertThat(ci).contains("RegulatedMutationProductionImageChaosIT");
         assertThat(ci).contains("RegulatedMutationProductionImageEvidenceIntegrityIT");
@@ -2014,11 +2033,16 @@ class RegulatedMutationArchitectureTest {
         assertThat(ci).contains("FDP-37 required test class did not fully execute");
         assertThat(ci).contains("fdp37-proof-summary.md");
         assertThat(ci).contains("fdp37-proof-summary.json");
+        assertThat(ci).contains("fdp37-enablement-review-pack.md");
+        assertThat(ci).contains("fdp37-enablement-review-pack.json");
         assertThat(ci).contains("fdp37-rollback-validation.md");
         assertThat(ci).contains("PRODUCTION_IMAGE_CONTAINER_KILL");
         assertThat(ci).contains("PRODUCTION_IMAGE_RESTART_API_PROOF");
         assertThat(ci).contains("transaction_mode=REQUIRED");
-        assertThat(ci).contains("network_mode=host");
+        assertThat(ci).contains("network_mode=testcontainers-shared-network");
+        assertThat(ci).contains("host_networking_used=false");
+        assertThat(ci).contains("FDP-37 proof artifacts must not use host networking");
+        assertThat(ci).contains("FDP-37 enablement review pack failed checks");
         assertThat(ci).contains("\"scenario_count\": int(summary.get(\"scenario_count\", 0)) >= 5");
         assertThat(ci).contains("live_in_flight_proof_executed: `false`");
         assertThat(ci).contains("if-no-files-found: error");

@@ -255,24 +255,34 @@ jobs:
       - name: Build alert-service production-like image
         run: |
           docker build -f deployment/Dockerfile.backend --build-arg MODULE_NAME=alert-service -t fdp37-alert-service:${GITHUB_SHA} .
+          IMAGE_ID=$(docker image inspect fdp37-alert-service:${GITHUB_SHA} --format '{{.Id}}')
           IMAGE_DIGEST_OR_ID=$(docker image inspect fdp37-alert-service:${GITHUB_SHA} --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}')
           echo "FDP37_ALERT_SERVICE_IMAGE=fdp37-alert-service:${GITHUB_SHA}" >> "$GITHUB_ENV"
+          echo "FDP37_ALERT_SERVICE_IMAGE_ID=${IMAGE_ID}" >> "$GITHUB_ENV"
           echo "FDP37_ALERT_SERVICE_IMAGE_DIGEST=${IMAGE_DIGEST_OR_ID}" >> "$GITHUB_ENV"
-          echo "Built FDP-37 image fdp37-alert-service:${GITHUB_SHA} with digest/id ${IMAGE_DIGEST_OR_ID}"
+          echo "Built FDP-37 image fdp37-alert-service:${GITHUB_SHA} with image id ${IMAGE_ID} and digest/id ${IMAGE_DIGEST_OR_ID}"
 
       - name: Run FDP-37 production image chaos suite
-        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp37.alert-service.image=${FDP37_ALERT_SERVICE_IMAGE}" "-Dfdp37.alert-service.image-digest=${FDP37_ALERT_SERVICE_IMAGE_DIGEST}" "-Dgroups=fdp37,production-image-chaos,docker-chaos,integration" "-Dtest=RegulatedMutationProductionImageChaosIT,RegulatedMutationProductionImageEvidenceIntegrityIT,RegulatedMutationProductionImageConfigParityIT,RegulatedMutationProductionImageRollbackIT,RegulatedMutationProductionImageRequiredTransactionChaosIT" test
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp37.alert-service.image=${FDP37_ALERT_SERVICE_IMAGE}" "-Dfdp37.alert-service.image-id=${FDP37_ALERT_SERVICE_IMAGE_ID}" "-Dfdp37.alert-service.image-digest=${FDP37_ALERT_SERVICE_IMAGE_DIGEST}" "-Dgroups=fdp37,production-image-chaos,docker-chaos,integration" "-Dtest=RegulatedMutationProductionImageChaosIT,RegulatedMutationProductionImageEvidenceIntegrityIT,RegulatedMutationProductionImageConfigParityIT,RegulatedMutationProductionImageRollbackIT,RegulatedMutationProductionImageRequiredTransactionChaosIT" test
+        env:
+          REGULATED_MUTATION_REGRESSION_STATUS: PASS
+          FDP35_STATUS: PASS
+          FDP36_STATUS: PASS
 
       - name: Verify FDP-37 proof artifacts
         if: always()
         run: |
           SUMMARY_MD=alert-service/target/fdp37-chaos/fdp37-proof-summary.md
           SUMMARY_JSON=alert-service/target/fdp37-chaos/fdp37-proof-summary.json
+          ENABLEMENT_MD=alert-service/target/fdp37-chaos/fdp37-enablement-review-pack.md
+          ENABLEMENT_JSON=alert-service/target/fdp37-chaos/fdp37-enablement-review-pack.json
           EVIDENCE=alert-service/target/fdp37-chaos/evidence-summary.md
           ROLLBACK_MD=alert-service/target/fdp37-chaos/fdp37-rollback-validation.md
           ROLLBACK_JSON=alert-service/target/fdp37-chaos/fdp37-rollback-validation.json
           test -f "$SUMMARY_MD"
           test -f "$SUMMARY_JSON"
+          test -f "$ENABLEMENT_MD"
+          test -f "$ENABLEMENT_JSON"
           test -f "$EVIDENCE"
           test -f "$ROLLBACK_MD"
           test -f "$ROLLBACK_JSON"
@@ -309,7 +319,11 @@ jobs:
           checks = {
               "commit_sha": summary.get("commit_sha") == expected_sha,
               "image_name": expected_image in summary.get("image_name", ""),
+              "image_id": str(summary.get("image_id", "")).startswith("sha256:"),
               "image_digest_or_id": summary.get("image_digest_or_id") not in (None, "", "LOCAL_IMAGE_DIGEST_NOT_PROVIDED"),
+              "dockerfile_path": summary.get("dockerfile_path") == "deployment/Dockerfile.backend",
+              "network_mode": summary.get("network_mode") == "testcontainers-shared-network",
+              "host_networking_used": summary.get("host_networking_used") is False,
               "killed_container_id_masked": summary.get("killed_container_id_masked") not in (None, "", "absent"),
               "restarted_container_id_masked": summary.get("restarted_container_id_masked") not in (None, "", "absent"),
               "scenario_count": int(summary.get("scenario_count", 0)) >= 5,
@@ -332,16 +346,47 @@ jobs:
           if any(rollback.get(name) is not True for name in rollback_required):
               print("FDP-37 rollback validation artifact is incomplete or false", file=sys.stderr)
               sys.exit(1)
+
+          enablement = json.loads(pathlib.Path("alert-service/target/fdp37-chaos/fdp37-enablement-review-pack.json").read_text())
+          enablement_checks = {
+              "commit_sha": enablement.get("commit_sha") == expected_sha,
+              "image_id": str(enablement.get("image_id", "")).startswith("sha256:"),
+              "image_digest_or_id": enablement.get("image_digest_or_id") not in (None, "", "LOCAL_IMAGE_DIGEST_NOT_PROVIDED"),
+              "dockerfile_path": enablement.get("dockerfile_path") == "deployment/Dockerfile.backend",
+              "fdp37_job_status": enablement.get("fdp37_job_status") == "PASS",
+              "regulated_mutation_regression_status": enablement.get("regulated_mutation_regression_status") == "PASS",
+              "fdp35_status": enablement.get("fdp35_status") == "PASS",
+              "fdp36_status": enablement.get("fdp36_status") == "PASS",
+              "required_transaction_scenario_executed": enablement.get("required_transaction_scenario_executed") is True,
+              "production_enablement": enablement.get("production_enablement") is False,
+              "release_config_pr_required": enablement.get("release_config_pr_required") is True,
+              "human_approval_required": enablement.get("human_approval_required") is True,
+              "operator_drill_required_before_enablement": enablement.get("operator_drill_required_before_enablement") is True,
+          }
+          failed_enablement = [name for name, ok in enablement_checks.items() if not ok]
+          if failed_enablement:
+              print(f"FDP-37 enablement review pack failed checks: {failed_enablement}", file=sys.stderr)
+              sys.exit(1)
           PY
           grep -q "fdp37-alert-service:${GITHUB_SHA}" "$SUMMARY_MD"
           grep -q "${GITHUB_SHA}" "$SUMMARY_MD"
           grep -q 'PRODUCTION_IMAGE_CONTAINER_KILL' "$EVIDENCE"
           grep -q 'PRODUCTION_IMAGE_RESTART_API_PROOF' "$EVIDENCE"
           grep -q 'transaction_mode=REQUIRED' "$EVIDENCE"
-          grep -q 'network_mode=host' "$EVIDENCE"
+          grep -q 'network_mode=testcontainers-shared-network' "$EVIDENCE"
+          grep -q 'host_networking_used=false' "$EVIDENCE"
           grep -q 'READY_FOR_ENABLEMENT_REVIEW is not production enablement' "$SUMMARY_MD"
+          grep -q 'READY_FOR_ENABLEMENT_REVIEW' "$ENABLEMENT_MD"
           grep -q 'live_in_flight_proof_executed: `false`' "$SUMMARY_MD"
           grep -q 'no_new_success_claims_after_rollback: `true`' "$ROLLBACK_MD"
+          if grep -R 'network_mode=host\|network_mode: host\|Linux CI host networking' "$SUMMARY_MD" "$EVIDENCE" "$ENABLEMENT_MD"; then
+            echo "FDP-37 proof artifacts must not use host networking"
+            exit 1
+          fi
+          if grep -R 'TO_BE_FILLED_BY_CI\|PLACEHOLDER\|LOCAL_IMAGE_ID_NOT_PROVIDED\|LOCAL_IMAGE_DIGEST_NOT_PROVIDED' "$SUMMARY_MD" "$SUMMARY_JSON" "$ENABLEMENT_MD" "$ENABLEMENT_JSON"; then
+            echo "FDP-37 proof artifacts cannot contain placeholders in CI"
+            exit 1
+          fi
           if grep -R 'LIVE_IN_FLIGHT_REQUEST_KILL' docs/FDP-37-*.md docs/adr/FDP-37-*.md docs/testing/FDP-37-*.md docs/ops/FDP-37-*.md; then
             echo "FDP-37 docs cannot claim live in-flight proof unless the required artifact contains LIVE_IN_FLIGHT_REQUEST_KILL"
             exit 1

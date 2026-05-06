@@ -13,7 +13,14 @@ FDP-37 runs the production-like image under explicit CI/test configuration again
 - `DURABLE_STATE_SEEDED_CONTAINER_PROOF`: durable crash-window state is seeded before killing the production-like image.
 - `API_PERSISTED_STATE_PROOF`: verification is performed through persisted Mongo/API evidence, not process memory.
 
-`PRODUCTION_IMAGE_CONTAINER_KILL` may only be claimed when the killed target image/container name contains `alert-service` and is not an unrelated placeholder image. The proof artifact must include image name, tag, digest or image id, commit SHA, job name, run id, masked killed and restarted container ids, network mode, OS, runner, scenario count, and final result.
+`PRODUCTION_IMAGE_CONTAINER_KILL` may only be claimed when the killed target image/container name contains `alert-service` and is not an unrelated placeholder image. The proof artifact must include image name, tag, immutable Docker image id, digest or image id, Dockerfile path, commit SHA, job name, run id, masked killed and restarted container ids, network mode, OS, runner, scenario count, and final result.
+
+## State Reach Taxonomy
+
+- `DURABLE_STATE_SEEDED`: the crash-window command state is seeded durably before killing the production-like image. This is durable-state proof, not live instruction-boundary proof.
+- `RUNTIME_REACHED_TEST_FIXTURE`: a dedicated test fixture image reached the state through a live request and a test-only checkpoint. This is not final production-image proof unless explicitly separated in artifacts.
+- `RUNTIME_REACHED_PRODUCTION_IMAGE`: the final production-like image reached the state through a live request before kill. FDP-37 required durable proof does not claim this.
+- `FUTURE_SCOPE`: documented future evidence only.
 
 ## Required Scope
 
@@ -32,9 +39,9 @@ Live in-flight production-image chaos is optional/future scope unless a separate
 
 ## Network Boundary
 
-FDP-37 production-image chaos uses Linux CI host networking for Testcontainers dependency access. The proof artifact records `network_mode: host`, `os_name`, and `ci_runner`.
+FDP-37 production-image chaos uses the shared Testcontainers network and stable dependency aliases for Mongo, Redis, and Kafka. The proof artifact records `network_mode: testcontainers-shared-network`, `network_aliases_used: true`, `host_networking_used: false`, `os_name`, and `ci_runner`.
 
-This is not Docker Compose topology certification and not production networking certification. A future branch may replace host networking with a shared Testcontainers network and aliases.
+This is not Docker Compose topology certification and not production networking certification.
 
 ## Non-Claims
 
@@ -51,9 +58,12 @@ FDP-37 GO for merge requires:
 - `fdp35-production-readiness` green
 - `target/fdp37-chaos/fdp37-proof-summary.md` uploaded
 - `target/fdp37-chaos/fdp37-proof-summary.json` uploaded
+- `target/fdp37-chaos/fdp37-enablement-review-pack.md` uploaded
+- `target/fdp37-chaos/fdp37-enablement-review-pack.json` uploaded
 - `target/fdp37-chaos/evidence-summary.md` uploaded
 - `target/fdp37-chaos/fdp37-rollback-validation.md` uploaded
 - proof summary tied to `fdp37-alert-service:${GITHUB_SHA}` and image digest/id
 - evidence contains `PRODUCTION_IMAGE_CONTAINER_KILL`, `PRODUCTION_IMAGE_RESTART_API_PROOF`, and a `transaction_mode=REQUIRED` row
+- evidence contains `network_mode=testcontainers-shared-network` and `host_networking_used=false`
 
 `READY_FOR_ENABLEMENT_REVIEW` is not production enablement. Any production or bank enablement requires a separate release/config PR and human approval.

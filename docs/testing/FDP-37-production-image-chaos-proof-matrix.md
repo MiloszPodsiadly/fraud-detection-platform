@@ -4,6 +4,13 @@ FDP-37 verifies a production-like `alert-service` Docker image/container built f
 
 Live in-flight production-image chaos remains optional/future scope unless a separate fixture job explicitly enables a test-only checkpoint image and makes skipped execution fail CI. A skipped live in-flight test is not counted as proof.
 
+State reach method values are deliberately explicit:
+
+- `DURABLE_STATE_SEEDED`: durable crash-window proof for the required production-like image job.
+- `RUNTIME_REACHED_TEST_FIXTURE`: optional separate fixture-image live proof only.
+- `RUNTIME_REACHED_PRODUCTION_IMAGE`: final production-like image live proof only if a future required non-skipped job records it.
+- `FUTURE_SCOPE`: not proof.
+
 | Scenario | Crash window | State reach method | Killed target | Proof level | Post-restart verification | Invariants checked | Test class/method |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | claimed before attempted audit | after claim before attempted audit | durable-state seeded | production-like `alert-service` Docker image/container | `PRODUCTION_IMAGE_CONTAINER_KILL`, `PRODUCTION_IMAGE_RESTART_API_PROOF`, `DURABLE_STATE_SEEDED_CONTAINER_PROOF`, `API_PERSISTED_STATE_PROOF` | restarted inspection API | command remains non-terminal, no response snapshot, no outbox, no SUCCESS audit, no alert mutation | `RegulatedMutationProductionImageChaosIT.productionImageKillAfterClaimBeforeAttemptedAuditDoesNotCommit` |
