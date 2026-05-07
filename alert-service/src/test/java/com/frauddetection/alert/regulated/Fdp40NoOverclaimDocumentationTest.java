@@ -42,7 +42,8 @@ class Fdp40NoOverclaimDocumentationTest {
         assertThat(combined)
                 .contains("READY_FOR_ENABLEMENT_REVIEW is not PRODUCTION_ENABLED")
                 .contains("does not claim external finality")
-                .contains("does not mean distributed ACID");
+                .contains("does not mean distributed ACID")
+                .contains("readiness is not full platform enforcement");
         for (String claim : FORBIDDEN_POSITIVE_CLAIMS) {
             assertClaimIsNegativeContext(combined, claim);
         }

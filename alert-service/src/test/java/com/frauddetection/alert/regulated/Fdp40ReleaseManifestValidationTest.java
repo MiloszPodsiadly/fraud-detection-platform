@@ -45,6 +45,20 @@ class Fdp40ReleaseManifestValidationTest {
         assertInvalid(valid, manifest -> manifest.put("release_image_digest", "PLACEHOLDER"));
     }
 
+    @Test
+    void nestedYamlManifestFailsClosed() throws Exception {
+        Path nested = java.nio.file.Files.createTempFile("fdp40-nested", ".yaml");
+        java.nio.file.Files.writeString(nested, """
+                release_manifest_version: "1"
+                nested:
+                  release_image_digest: "sha256:111"
+                """);
+
+        assertThatThrownBy(() -> readYamlKeyValues(nested))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Nested YAML is not supported");
+    }
+
     private void assertInvalid(Map<String, String> valid, java.util.function.Consumer<Map<String, String>> mutation) {
         Map<String, String> candidate = new LinkedHashMap<>(valid);
         mutation.accept(candidate);

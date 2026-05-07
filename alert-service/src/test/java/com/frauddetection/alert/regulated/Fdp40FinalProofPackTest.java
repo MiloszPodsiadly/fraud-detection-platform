@@ -20,6 +20,16 @@ class Fdp40FinalProofPackTest {
         ObjectNode proof = objectNode();
         proof.put("release_controls_ready_for_review", true);
         proof.put("production_enabled", false);
+        proof.put("readiness_only", true);
+        proof.put("signing_verification_performed", false);
+        proof.put("registry_immutability_verified_by_fdp40", false);
+        proof.put("registry_immutability_enforced_by_fdp40", false);
+        proof.put("branch_protection_verified_by_fdp40", false);
+        proof.put("environment_protection_verified_by_fdp40", false);
+        proof.put("real_cosign_verification_required_before_production", true);
+        proof.put("real_registry_immutability_required_before_production", true);
+        proof.put("real_environment_protection_required_before_production", true);
+        proof.put("external_platform_controls_required", true);
         proof.put("release_digest_bound", true);
         proof.put("signature_subject_required", true);
         proof.put("attestation_required", true);
@@ -27,6 +37,9 @@ class Fdp40FinalProofPackTest {
         proof.put("mutable_tag_only_allowed", false);
         proof.put("fixture_image_promotion_allowed", false);
         proof.put("dual_control_required", true);
+        proof.put("sbom_required", true);
+        proof.put("sbom_generated_by_fdp40", false);
+        proof.put("sbom_external_platform_control_required", true);
         proof.put("environment_protection_required", true);
         proof.put("separate_config_pr_required", true);
         proof.put("runtime_semantics_changed", false);
@@ -86,8 +99,20 @@ class Fdp40FinalProofPackTest {
 
                 Branch protection, registry immutability, signing policy, and environment approval enforcement are external platform controls.
 
+                ## Readiness vs Enforcement
+
+                FDP-40 validates release-control readiness.
+                FDP-40 does not prove real cryptographic signature verification unless cosign enforcement mode is enabled.
+                FDP-40 does not verify registry immutability through provider APIs.
+                FDP-40 does not verify GitHub branch protection through GitHub APIs.
+                FDP-40 does not verify deployment environment protection through platform APIs.
+                These controls are required before production enablement.
+
                 - release_controls_ready_for_review: `true`
                 - production_enabled: `false`
+                - readiness_only: `true`
+                - signing_verification_performed: `false`
+                - external_platform_controls_required: `true`
                 - mutable_tag_only_allowed: `false`
                 - fixture_image_promotion_allowed: `false`
                 - external_finality_claimed: `false`
@@ -98,10 +123,17 @@ class Fdp40FinalProofPackTest {
 
         assertThat(proof.get("release_controls_ready_for_review").asBoolean()).isTrue();
         assertThat(proof.get("production_enabled").asBoolean()).isFalse();
+        assertThat(proof.get("readiness_only").asBoolean()).isTrue();
+        assertThat(proof.get("external_platform_controls_required").asBoolean()).isTrue();
+        assertThat(proof.get("signing_verification_performed").asBoolean()).isFalse();
+        assertThat(proof.get("registry_immutability_verified_by_fdp40").asBoolean()).isFalse();
+        assertThat(proof.get("branch_protection_verified_by_fdp40").asBoolean()).isFalse();
+        assertThat(proof.get("environment_protection_verified_by_fdp40").asBoolean()).isFalse();
         assertThat(proof.get("runtime_semantics_changed").asBoolean()).isFalse();
         assertThat(markdown)
                 .contains("Release Manifest Validation")
                 .contains("Signed Provenance Readiness")
+                .contains("Readiness vs Enforcement")
                 .contains("Unsupported Claims Matrix")
                 .contains("does not claim external finality");
     }

@@ -52,6 +52,14 @@ class Fdp40ReleaseEvidenceVerificationTest {
         artifact.put("fixture_not_promoted", fixtureNotPromoted);
         artifact.put("required_checks_present", requiredChecksPresent);
         artifact.put("production_enabled_false", "false".equals(manifest.get("production_enabled")));
+        artifact.put("readiness_only", "true".equals(manifest.get("readiness_only")));
+        artifact.put("external_platform_controls_required", "true".equals(manifest.get("external_platform_controls_required")));
+        artifact.put("signing_verification_performed", "true".equals(manifest.get("signing_verification_performed")));
+        artifact.put("registry_immutability_enforced_by_fdp40", "true".equals(manifest.get("registry_immutability_enforced_by_fdp40")));
+        artifact.put("environment_protection_verified_by_fdp40", "true".equals(manifest.get("environment_protection_verified_by_fdp40")));
+        artifact.put("branch_protection_verified_by_fdp40", "true".equals(manifest.get("branch_protection_verified_by_fdp40")));
+        artifact.put("release_config_pr_required", "true".equals(manifest.get("release_config_pr_required")));
+        artifact.put("dual_control_required", "true".equals(manifest.get("dual_control_required")));
         artifact.put("no_mutable_tag_only", manifest.containsKey("release_image_digest") && manifest.containsKey("release_image_tag"));
         ArrayNode reasons = artifact.putArray("failure_reasons");
         writeJson(OUTPUT_DIR.resolve("fdp40-release-evidence-verification.json"), artifact);
@@ -67,6 +75,9 @@ class Fdp40ReleaseEvidenceVerificationTest {
                         - fixture_not_promoted: `%s`
                         - required_checks_present: `%s`
                         - production_enabled_false: `true`
+                        - readiness_only: `true`
+                        - external_platform_controls_required: `true`
+                        - signing_verification_performed: `false`
                         - no_mutable_tag_only: `true`
                         - failure_reasons: `[]`
                         """.formatted(fdp39DigestMatch, fixtureNotPromoted, requiredChecksPresent)

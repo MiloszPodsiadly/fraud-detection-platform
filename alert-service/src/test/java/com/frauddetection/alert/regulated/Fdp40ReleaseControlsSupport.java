@@ -38,7 +38,15 @@ final class Fdp40ReleaseControlsSupport {
 
     static Map<String, String> readYamlKeyValues(Path path) throws IOException {
         Map<String, String> values = new LinkedHashMap<>();
-        for (String line : Files.readAllLines(path)) {
+        List<String> lines = Files.readAllLines(path);
+        for (int index = 0; index < lines.size(); index++) {
+            String line = lines.get(index);
+            if (line.startsWith("  ") && line.contains(":")) {
+                throw new IllegalArgumentException("Nested YAML is not supported at line " + (index + 1));
+            }
+            if (line.stripLeading().startsWith("- ")) {
+                throw new IllegalArgumentException("YAML lists are not supported at line " + (index + 1));
+            }
             String trimmed = line.trim();
             if (trimmed.isBlank() || trimmed.startsWith("#") || !trimmed.contains(":")) {
                 continue;
@@ -94,6 +102,12 @@ final class Fdp40ReleaseControlsSupport {
                 "fixture_image_promotable",
                 "ready_for_enablement_review",
                 "production_enabled",
+                "readiness_only",
+                "external_platform_controls_required",
+                "signing_verification_performed",
+                "registry_immutability_enforced_by_fdp40",
+                "environment_protection_verified_by_fdp40",
+                "branch_protection_verified_by_fdp40",
                 "release_config_pr_required",
                 "dual_control_required",
                 "rollback_plan_ref",
@@ -106,6 +120,12 @@ final class Fdp40ReleaseControlsSupport {
         assertThat(manifest.get("release_image_digest")).isNotEqualTo(manifest.get("fixture_image_digest"));
         assertThat(manifest.get("fixture_image_promotable")).isEqualTo("false");
         assertThat(manifest.get("production_enabled")).isEqualTo("false");
+        assertThat(manifest.get("readiness_only")).isEqualTo("true");
+        assertThat(manifest.get("external_platform_controls_required")).isEqualTo("true");
+        assertThat(manifest.get("signing_verification_performed")).isEqualTo("false");
+        assertThat(manifest.get("registry_immutability_enforced_by_fdp40")).isEqualTo("false");
+        assertThat(manifest.get("environment_protection_verified_by_fdp40")).isEqualTo("false");
+        assertThat(manifest.get("branch_protection_verified_by_fdp40")).isEqualTo("false");
         assertThat(manifest.get("release_config_pr_required")).isEqualTo("true");
         assertThat(manifest.get("dual_control_required")).isEqualTo("true");
         assertThat(manifest.get("dockerfile_path")).isEqualTo("deployment/Dockerfile.backend");
@@ -178,7 +198,7 @@ final class Fdp40ReleaseControlsSupport {
         java.util.ArrayList<String> command = new java.util.ArrayList<>();
         command.add("git");
         command.add("-c");
-        command.add("safe.directory=C:/Users/mpods/IdeaProjects/fraud-detection-platform");
+        command.add("safe.directory=" + Path.of("..").toAbsolutePath().normalize());
         command.addAll(List.of(args));
         return command;
     }
