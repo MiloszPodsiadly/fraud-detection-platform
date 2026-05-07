@@ -1,0 +1,10 @@
+{
+  "external_platform_control_required": true,
+  "fixture_repository_promotable": false,
+  "mutable_tag_overwrite_prohibited": true,
+  "promotion_by_digest_required": true,
+  "registry_immutability_required": true,
+  "release_repository_required": true,
+  "retention_policy_required": true,
+  "verified_by_fdp40": false
+}

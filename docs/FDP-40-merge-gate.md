@@ -2,6 +2,13 @@
 
 FDP-40 is merge-safe only as platform release-controls readiness. It must not be used as production enablement, bank certification, external finality, or distributed ACID proof.
 
+FDP-40 provides signing/provenance readiness validation, digest-bound release evidence validation, promotion policy readiness,
+environment protection readiness, required checks mapping, enablement governance templates, and a no-overclaim guard.
+
+FDP-40 does not provide real cosign signature verification, Sigstore/Rekor verification, registry immutability enforcement,
+GitHub branch protection enforcement, GitHub environment protection enforcement, production certification, bank certification,
+external finality, distributed ACID, exactly-once Kafka, or production enablement.
+
 ## Required Checks
 
 - backend
@@ -23,6 +30,8 @@ Each required check must be blocking and mapped in `docs/release/FDP-40-required
 - `fdp40-runtime-immutability.json`
 - `fdp40-proof-pack.json`
 - `fdp40-proof-pack.md`
+- `fdp40-cosign-verification.json`
+- `fdp40-external-platform-controls-matrix.json`
 
 ## GO Criteria
 
@@ -35,6 +44,10 @@ Each required check must be blocking and mapped in `docs/release/FDP-40-required
 - Dual control and separate config PR are required.
 - Runtime mutation semantics are unchanged.
 - Unsupported claims are explicitly denied.
+- Proof artifacts state `readiness_only: true`.
+- Proof artifacts state `production_enabled: false`.
+- Proof artifacts state external platform controls are required.
+- Proof artifacts state signing, branch protection, environment protection, and registry immutability enforcement were not performed by FDP-40.
 
 ## NO-GO Criteria
 

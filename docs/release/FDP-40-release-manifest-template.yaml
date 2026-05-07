@@ -1,3 +1,5 @@
+# This manifest is intentionally flat. Nested YAML is not supported by FDP-40
+# shell validators; use one top-level key:value entry per line.
 release_manifest_version: "1"
 commit_sha: "0123456789abcdef0123456789abcdef01234567"
 branch_name: "FDP-40"
@@ -17,6 +19,12 @@ fixture_image_digest: "sha256:33333333333333333333333333333333333333333333333333
 fixture_image_promotable: false
 ready_for_enablement_review: true
 production_enabled: false
+readiness_only: true
+external_platform_controls_required: true
+signing_verification_performed: false
+registry_immutability_enforced_by_fdp40: false
+environment_protection_verified_by_fdp40: false
+branch_protection_verified_by_fdp40: false
 release_config_pr_required: true
 dual_control_required: true
 rollback_plan_ref: "docs/release/FDP-39-approval-and-rollback-matrix.md"
