@@ -42,3 +42,5 @@ FDP-40 proof artifacts must contain:
 - `registry_immutability_enforced_by_fdp40: false`
 - `environment_protection_verified_by_fdp40: false`
 - `branch_protection_verified_by_fdp40: false`
+- `single_release_owner_model: true`
+- `dual_control_required: false`

@@ -24,9 +24,9 @@ Describe the exact feature flags and regulated mutation scope requested.
 
 - [ ] FDP-39 provenance artifact link is provided.
 
-## FDP-40 Signed Provenance / Attestation Link
+## FDP-40 Signing / Attestation Readiness Link
 
-- [ ] FDP-40 signed provenance or attestation link is provided.
+- [ ] FDP-40 signing readiness or attestation readiness link is provided.
 
 ## Required Checks Green
 
@@ -40,22 +40,47 @@ Describe the exact feature flags and regulated mutation scope requested.
 
 - [ ] Rollback plan is attached.
 
-## Security Approval
+## Release Owner
 
-- [ ] Security approval is present.
+- [ ] Release owner is named: @__________
+- [ ] Release owner confirms the immutable release image digest.
+- [ ] Release owner confirms the release manifest.
+- [ ] Release owner confirms FDP-39 provenance artifact.
+- [ ] Release owner confirms FDP-40 signing/provenance readiness evidence.
+- [ ] Release owner confirms required checks are green.
+- [ ] Release owner confirms operator drill output is attached.
+- [ ] Release owner confirms rollback plan is attached.
+- [ ] Release owner confirms separate config PR is linked.
+- [ ] Release owner confirms production is not enabled by this readiness proof alone.
 
-## Fraud Ops Approval
+## Required Reviews / Evidence
 
-- [ ] Fraud ops approval is present.
+- [ ] Security review evidence is attached or linked.
+- [ ] Fraud Ops review evidence is attached or linked.
+- [ ] Platform review evidence is attached or linked.
+- [ ] Rollback owner is named.
+- [ ] Operator drill owner is named.
 
-## Platform Approval
+## Ops Inspection Endpoint Governance
 
-- [ ] Platform approval is present.
+- [ ] Admin-only access is verified.
+- [ ] Sensitive read audit is enabled.
+- [ ] Audit failure behavior is documented.
+- [ ] Rate limit requirement is linked.
+- [ ] Raw leaseOwner, idempotencyKey, requestHash, and lastError exposure is forbidden.
+- [ ] Recovery or inspection endpoint evidence link is attached.
 
-## Dual-Control Approvers
+## Explicit Approval Model
 
-- [ ] Approver 1 is named.
-- [ ] Approver 2 is named and is not the release author.
+- [ ] This request uses the FDP-40 single release owner model.
+- [ ] This request does not claim dual-control approval.
+- [ ] This request does not claim production certification.
+- [ ] This request does not claim bank certification.
+- [ ] This request does not claim external finality.
+- [ ] This request does not claim distributed ACID.
+- [ ] This request does not enable production.
+- [ ] Production enablement requires a separate approved config PR.
+- [ ] FDP-40 readiness evidence is not production approval.
 
 ## Expiry / Review Date
 

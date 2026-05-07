@@ -27,7 +27,7 @@ does not verify GitHub branch protection, and does not verify GitHub environment
 - Readiness verification that manifest, attestation, and FDP-39 provenance agree on the release digest.
 - Registry immutability and promotion policy readiness.
 - Required checks and branch protection mapping.
-- Environment protection and dual-control approval gates.
+- Environment protection and single release owner approval gates.
 - Enablement PR template for future config-only enablement.
 - Unsupported claims matrix.
 - Runtime immutability proof.

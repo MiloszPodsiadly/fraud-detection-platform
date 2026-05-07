@@ -1,10 +1,12 @@
 {
   "deployment_must_reference_digest": true,
-  "dual_control_required": true,
+  "dual_control_required": false,
   "external_platform_control_required": true,
   "production_environment_protection_required": true,
-  "release_author_cannot_approve": true,
   "required_reviewers_required": true,
+  "release_owner_required": true,
+  "release_owner_must_be_named": true,
+  "single_release_owner_model": true,
   "secrets_access_limited_to_environment": true,
   "staging_environment_protection_required": true,
   "verified_by_fdp40": false

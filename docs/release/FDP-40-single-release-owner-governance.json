@@ -1,0 +1,14 @@
+{
+  "dual_control_required": false,
+  "production_enabled": false,
+  "release_owner_accountability_required": true,
+  "release_owner_must_be_named": true,
+  "release_owner_must_confirm_config_pr": true,
+  "release_owner_must_confirm_digest": true,
+  "release_owner_must_confirm_operator_drill": true,
+  "release_owner_must_confirm_required_checks": true,
+  "release_owner_must_confirm_rollback_plan": true,
+  "release_owner_required": true,
+  "separate_config_pr_required": true,
+  "single_release_owner_model": true
+}

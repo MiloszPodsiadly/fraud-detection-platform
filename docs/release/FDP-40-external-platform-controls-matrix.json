@@ -62,7 +62,7 @@
     },
     {
       "control_name": "deployment environment protection",
-      "evidence_required": "deployment platform gate export with dual control",
+      "evidence_required": "deployment platform gate export with single release owner approval evidence",
       "failure_policy": "NO_GO_FOR_PRODUCTION_ENABLEMENT",
       "future_enforcement_path": "deployment platform API drift check",
       "owner": "release-management",
@@ -82,7 +82,7 @@
     },
     {
       "control_name": "release approval audit trail",
-      "evidence_required": "approval audit export with release author and independent approvers",
+      "evidence_required": "approval audit export with named release owner and required review evidence",
       "failure_policy": "NO_GO_FOR_PRODUCTION_ENABLEMENT",
       "future_enforcement_path": "release approval audit exporter",
       "owner": "release-management",

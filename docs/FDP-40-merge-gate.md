@@ -41,7 +41,8 @@ Each required check must be blocking and mapped in `docs/release/FDP-40-required
 - Fixture image is not promotable.
 - Mutable tag only is NO-GO.
 - Production enablement remains false.
-- Dual control and separate config PR are required.
+- Single release owner model and separate config PR are required.
+- Release owner must be named and accountable for digest, checks, rollback, operator drill, and config PR evidence.
 - Runtime mutation semantics are unchanged.
 - Unsupported claims are explicitly denied.
 - Proof artifacts state `readiness_only: true`.

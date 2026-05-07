@@ -1,6 +1,15 @@
 # FDP-40 Signed Provenance Readiness Policy
 
-FDP-40 requires the fields needed for cosign, Sigstore, or SLSA-style signed provenance readiness. It does not claim that production signing infrastructure has already certified the system.
+FDP-40 requires the fields needed for cosign, Sigstore, or SLSA-style signing readiness.
+It does not claim that production signing infrastructure has already certified the system.
+
+Required readiness fields:
+
+- `signed_provenance_readiness: true`
+- `signing_verification_performed: false`
+- `signing_enforced_by_fdp40: false`
+- `cosign_enforcement_optional: true`
+- `external_platform_controls_required: true`
 
 ## Required Fields
 
@@ -32,4 +41,5 @@ FDP-40 requires the fields needed for cosign, Sigstore, or SLSA-style signed pro
 - Fixture image attestation cannot satisfy release image attestation.
 - Mutable tag only attestation is NO-GO.
 
-Signed artifact proof is release provenance evidence only. It does not claim external finality, distributed ACID, business correctness proof, production certification, or bank certification.
+Signing readiness is release provenance evidence only. It does not claim external finality, distributed ACID, business correctness
+proof, production certification, or bank certification.

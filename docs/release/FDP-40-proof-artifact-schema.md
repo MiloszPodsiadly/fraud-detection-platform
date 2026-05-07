@@ -9,6 +9,11 @@
 - `fixture_not_promoted`
 - `required_checks_present`
 - `production_enabled_false`
+- `readiness_only`
+- `external_platform_controls_required`
+- `signed_provenance_readiness`
+- `signing_verification_performed`
+- `signing_enforced_by_fdp40`
 - `no_mutable_tag_only`
 - `failure_reasons`
 
@@ -18,7 +23,8 @@
 - `release_digest_bound`
 - `mutable_tag_only_allowed`
 - `fixture_image_promotion_allowed`
-- `registry_immutability_verified`
+- `registry_immutability_verified_by_fdp40`
+- `registry_immutability_enforced_by_fdp40`
 - `production_readiness`
 
 ## `fdp40-runtime-immutability.json`
@@ -34,13 +40,22 @@
 
 - `release_controls_ready_for_review`
 - `production_enabled` is not true; must be false
+- `bank_enabled` is not true; must be false
+- `readiness_only`
+- `single_release_owner_model`
+- `dual_control_required` is false
+- `release_owner_required`
+- `release_owner_must_be_named`
+- `digest_bound_release_required`
+- `required_checks_must_be_green`
+- `rollback_owner_required`
+- `operator_drill_evidence_required`
 - `release_digest_bound`
 - `signature_subject_required`
 - `attestation_required`
 - `registry_immutability_required`
 - `mutable_tag_only_allowed`
 - `fixture_image_promotion_allowed`
-- `dual_control_required`
 - `environment_protection_required`
 - `separate_config_pr_required`
 - `runtime_semantics_changed`

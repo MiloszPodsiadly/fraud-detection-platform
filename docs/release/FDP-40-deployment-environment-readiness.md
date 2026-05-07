@@ -5,8 +5,8 @@ Staging and production environment protection are required before production ena
 Required external controls:
 
 - required reviewers for staging and production
-- dual control
-- release author cannot approve the release
+- single release owner model
+- named release owner
 - secrets scoped to protected environments
 - deployment references the immutable release image digest
 
