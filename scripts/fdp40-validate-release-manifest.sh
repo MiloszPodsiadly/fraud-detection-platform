@@ -21,7 +21,7 @@ import sys
 path = pathlib.Path(sys.argv[1])
 data = {}
 for line_number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-    if raw_line.startswith("  ") and ":" in raw_line:
+    if raw_line and raw_line[0].isspace() and ":" in raw_line:
         print(f"nested YAML is not supported at line {line_number}", file=sys.stderr)
         sys.exit(1)
     if raw_line.lstrip().startswith("- "):
@@ -30,6 +30,9 @@ for line_number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlin
     line = raw_line.strip()
     if not line or line.startswith("#") or ":" not in line:
         continue
+    if any(token in line for token in ["{", "}", "[", "]"]):
+        print(f"complex YAML objects/lists are not supported at line {line_number}", file=sys.stderr)
+        sys.exit(1)
     key, value = line.split(":", 1)
     data[key.strip()] = value.strip().strip('"')
 
@@ -39,10 +42,20 @@ required = [
     "dockerfile_path", "builder_identity", "build_workflow", "build_timestamp",
     "fdp39_provenance_artifact_ref", "fdp39_release_image_digest", "fixture_image_digest",
     "fixture_image_promotable", "ready_for_enablement_review", "production_enabled",
-    "readiness_only", "external_platform_controls_required", "signing_verification_performed",
-    "registry_immutability_enforced_by_fdp40", "environment_protection_verified_by_fdp40",
-    "branch_protection_verified_by_fdp40",
-    "release_config_pr_required", "dual_control_required", "rollback_plan_ref",
+    "bank_enabled", "readiness_only", "external_platform_controls_required",
+    "signed_provenance_readiness", "signing_verification_performed",
+    "signing_enforced_by_fdp40", "cosign_enforcement_optional",
+    "registry_immutability_enforced_by_fdp40", "registry_immutability_verified_by_fdp40",
+    "environment_protection_verified_by_fdp40", "branch_protection_verified_by_fdp40",
+    "required_checks_defined", "required_checks_platform_enforcement_verified_by_fdp40",
+    "single_release_owner_model", "release_owner_required", "release_owner_must_be_named",
+    "separate_config_pr_required", "release_config_pr_required", "digest_bound_release_required",
+    "required_checks_must_be_green", "rollback_owner_required", "operator_drill_evidence_required",
+    "security_review_required", "fraud_ops_review_required", "platform_review_required",
+    "dual_control_required", "ops_inspection_admin_only_required", "ops_inspection_audit_required",
+    "ops_inspection_rate_limit_required", "ops_inspection_sensitive_fields_masked_required",
+    "ops_inspection_governance_verified_by_fdp39",
+    "ops_inspection_runtime_security_revalidation_required_before_production", "rollback_plan_ref",
     "operator_drill_ref", "security_review_ref",
 ]
 missing = [key for key in required if not data.get(key)]
@@ -61,22 +74,52 @@ if data.get("fixture_image_promotable") != "false":
     failures.append("fixture_image_promotable must be false")
 if data.get("production_enabled") != "false":
     failures.append("production_enabled must be false")
+if data.get("bank_enabled") != "false":
+    failures.append("bank_enabled must be false")
 if data.get("readiness_only") != "true":
     failures.append("readiness_only must be true")
 if data.get("external_platform_controls_required") != "true":
     failures.append("external_platform_controls_required must be true")
+if data.get("signed_provenance_readiness") != "true":
+    failures.append("signed_provenance_readiness must be true")
+if data.get("cosign_enforcement_optional") != "true":
+    failures.append("cosign_enforcement_optional must be true")
 for field in [
     "signing_verification_performed",
+    "signing_enforced_by_fdp40",
     "registry_immutability_enforced_by_fdp40",
+    "registry_immutability_verified_by_fdp40",
     "environment_protection_verified_by_fdp40",
     "branch_protection_verified_by_fdp40",
+    "required_checks_platform_enforcement_verified_by_fdp40",
 ]:
     if data.get(field) != "false":
         failures.append(f"{field} must be false")
-if data.get("release_config_pr_required") != "true":
-    failures.append("release_config_pr_required must be true")
-if data.get("dual_control_required") != "true":
-    failures.append("dual_control_required must be true")
+for field in [
+    "required_checks_defined",
+    "single_release_owner_model",
+    "release_owner_required",
+    "release_owner_must_be_named",
+    "separate_config_pr_required",
+    "release_config_pr_required",
+    "digest_bound_release_required",
+    "required_checks_must_be_green",
+    "rollback_owner_required",
+    "operator_drill_evidence_required",
+    "security_review_required",
+    "fraud_ops_review_required",
+    "platform_review_required",
+    "ops_inspection_admin_only_required",
+    "ops_inspection_audit_required",
+    "ops_inspection_rate_limit_required",
+    "ops_inspection_sensitive_fields_masked_required",
+    "ops_inspection_governance_verified_by_fdp39",
+    "ops_inspection_runtime_security_revalidation_required_before_production",
+]:
+    if data.get(field) != "true":
+        failures.append(f"{field} must be true")
+if data.get("dual_control_required") != "false":
+    failures.append("dual_control_required must be false")
 if data.get("dockerfile_path") != "deployment/Dockerfile.backend":
     failures.append("dockerfile_path must be deployment/Dockerfile.backend")
 joined = "\n".join(data.values())

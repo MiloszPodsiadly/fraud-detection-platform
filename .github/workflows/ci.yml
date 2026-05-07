@@ -959,7 +959,7 @@ jobs:
           cache: maven
 
       - name: Run FDP-40 release controls tests
-        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp40.ci-mode=true" "-Dfdp40.event-name=${FDP40_EVENT_NAME}" "-Dfdp40.base-sha=${FDP40_DIFF_BASE_SHA}" "-Dfdp40.head-sha=${FDP40_DIFF_HEAD_SHA}" "-Dfdp40.base-ref=${FDP40_BASE_REF}" "-Dfdp40.release-manifest=../docs/release/FDP-40-release-manifest-template.yaml" "-Dfdp40.attestation=../docs/release/FDP-40-attestation-readiness-template.json" "-Dfdp40.fdp39-provenance=../docs/release/FDP-40-fdp39-provenance-reference.json" "-Dfdp40.required-checks-matrix=../docs/release/FDP-40-required-checks-matrix.json" "-Dtest=Fdp40ReleaseManifestValidationTest,Fdp40SignedProvenanceReadinessTest,Fdp40ReleaseEvidenceVerificationTest,Fdp40ReleaseEvidenceVerificationNegativeTest,Fdp40RegistryPromotionPolicyTest,Fdp40RegistryImmutabilityReadinessTest,Fdp40RequiredChecksMatrixTest,Fdp40EnvironmentProtectionGateTest,Fdp40DeploymentEnvironmentReadinessTest,Fdp40BranchProtectionReadinessTest,Fdp40ExternalPlatformControlsMatrixTest,Fdp40EnablementPrTemplateTest,Fdp40UnsupportedClaimsMatrixTest,Fdp40NoOverclaimDocumentationTest,Fdp40MustNotChangeRuntimeMutationSemanticsTest,Fdp40FinalProofPackTest,Fdp40SbomReadinessTest,Fdp40CosignVerificationReadinessTest,Fdp40ResidualPlatformGapsTest,Fdp40ScriptExecutionReadinessTest,Fdp40DocumentationFormattingTest,Fdp40LocalPathHygieneTest" test
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp40.ci-mode=true" "-Dfdp40.event-name=${FDP40_EVENT_NAME}" "-Dfdp40.base-sha=${FDP40_DIFF_BASE_SHA}" "-Dfdp40.head-sha=${FDP40_DIFF_HEAD_SHA}" "-Dfdp40.base-ref=${FDP40_BASE_REF}" "-Dfdp40.release-manifest=../docs/release/FDP-40-release-manifest-template.yaml" "-Dfdp40.attestation=../docs/release/FDP-40-attestation-readiness-template.json" "-Dfdp40.fdp39-provenance=../docs/release/FDP-40-fdp39-provenance-reference.json" "-Dfdp40.required-checks-matrix=../docs/release/FDP-40-required-checks-matrix.json" "-Dtest=Fdp40ReleaseManifestValidationTest,Fdp40SignedProvenanceReadinessTest,Fdp40ReleaseEvidenceVerificationTest,Fdp40ReleaseEvidenceVerificationNegativeTest,Fdp40RegistryPromotionPolicyTest,Fdp40RegistryImmutabilityReadinessTest,Fdp40RequiredChecksMatrixTest,Fdp40EnvironmentProtectionGateTest,Fdp40DeploymentEnvironmentReadinessTest,Fdp40BranchProtectionReadinessTest,Fdp40ExternalPlatformControlsMatrixTest,Fdp40EnablementPrTemplateTest,Fdp40SingleReleaseOwnerGovernanceTest,Fdp40UnsupportedClaimsMatrixTest,Fdp40NoOverclaimDocumentationTest,Fdp40MustNotChangeRuntimeMutationSemanticsTest,Fdp40FinalProofPackTest,Fdp40SbomReadinessTest,Fdp40CosignVerificationReadinessTest,Fdp40ResidualPlatformGapsTest,Fdp40ScriptExecutionReadinessTest,Fdp40DocumentationFormattingTest,Fdp40LocalPathHygieneTest" test
 
       - name: Validate FDP-40 release manifest
         run: bash scripts/fdp40-validate-release-manifest.sh docs/release/FDP-40-release-manifest-template.yaml
@@ -1008,6 +1008,7 @@ jobs:
               "Fdp40BranchProtectionReadinessTest",
               "Fdp40ExternalPlatformControlsMatrixTest",
               "Fdp40EnablementPrTemplateTest",
+              "Fdp40SingleReleaseOwnerGovernanceTest",
               "Fdp40UnsupportedClaimsMatrixTest",
               "Fdp40NoOverclaimDocumentationTest",
               "Fdp40MustNotChangeRuntimeMutationSemanticsTest",
@@ -1048,6 +1049,13 @@ jobs:
               "script_verification_passed": script_verification.get("verification_passed") is True,
               "script_readiness_only": script_verification.get("readiness_only") is True,
               "script_external_controls": script_verification.get("external_platform_controls_required") is True,
+              "script_bank_disabled": script_verification.get("bank_enabled_false") is True,
+              "script_single_owner": script_verification.get("single_release_owner_model") is True,
+              "script_dual_control_false": script_verification.get("dual_control_required") is False,
+              "script_signing_readiness": script_verification.get("signed_provenance_readiness") is True,
+              "script_signing_not_enforced": script_verification.get("signing_enforced_by_fdp40") is False,
+              "script_registry_not_verified": script_verification.get("registry_immutability_verified_by_fdp40") is False,
+              "script_required_checks_not_platform_verified": script_verification.get("required_checks_platform_enforcement_verified_by_fdp40") is False,
               "cosign_readiness_only": cosign.get("readiness_only") is True,
               "cosign_not_performed": cosign.get("verification_performed") is False,
               "manifest_valid": verification.get("manifest_valid") is True,
@@ -1056,6 +1064,16 @@ jobs:
               "fixture_not_promoted": verification.get("fixture_not_promoted") is True,
               "required_checks_present": verification.get("required_checks_present") is True,
               "production_enabled_false": verification.get("production_enabled_false") is True,
+              "bank_enabled_false": verification.get("bank_enabled_false") is True,
+              "single_release_owner_model": verification.get("single_release_owner_model") is True,
+              "dual_control_required_false": verification.get("dual_control_required") is False,
+              "release_owner_required": verification.get("release_owner_required") is True,
+              "release_owner_must_be_named": verification.get("release_owner_must_be_named") is True,
+              "signing_readiness": verification.get("signed_provenance_readiness") is True,
+              "signing_not_enforced": verification.get("signing_enforced_by_fdp40") is False,
+              "registry_not_verified": verification.get("registry_immutability_verified_by_fdp40") is False,
+              "required_checks_defined": verification.get("required_checks_defined") is True,
+              "required_checks_not_platform_verified": verification.get("required_checks_platform_enforcement_verified_by_fdp40") is False,
               "runtime_diff_computed": runtime.get("diff_computed") is True,
               "runtime_event": runtime.get("event_name") == expected_event,
               "runtime_comparison_mode": runtime_mode in {"pull-request-merge-base-to-head", "push-before-to-head"},
@@ -1071,7 +1089,11 @@ jobs:
               "proof_readiness_only": proof.get("readiness_only") is True,
               "proof_external_platform_controls": proof.get("external_platform_controls_required") is True,
               "proof_signing_not_performed": proof.get("signing_verification_performed") is False,
+              "proof_signing_not_enforced": proof.get("signing_enforced_by_fdp40") is False,
               "proof_production_disabled": proof.get("production_enabled") is False,
+              "proof_bank_disabled": proof.get("bank_enabled") is False,
+              "proof_single_owner": proof.get("single_release_owner_model") is True,
+              "proof_dual_control_false": proof.get("dual_control_required") is False,
               "proof_no_external_finality": proof.get("external_finality_claimed") is False,
               "proof_no_distributed_acid": proof.get("distributed_acid_claimed") is False,
               "proof_no_bank_cert": proof.get("bank_certification_claimed") is False,
@@ -1092,8 +1114,9 @@ jobs:
                   sys.exit(1)
           PY
           grep -q 'READY_FOR_ENABLEMENT_REVIEW is not PRODUCTION_ENABLED' docs/release/FDP-40-branch-readme.md .github/PULL_REQUEST_TEMPLATE/fdp-enablement-config-change.md
+          grep -q 'single release owner model' docs/release/FDP-40-single-release-owner-governance.md .github/PULL_REQUEST_TEMPLATE/fdp-enablement-config-change.md
           grep -q 'signed image does not mean external finality' docs/release/FDP-40-unsupported-claims-matrix.md
-          if grep -R 'production_enabled: `true`\|bank_certification_claimed: `true`\|external_finality_claimed: `true`\|distributed_acid_claimed: `true`' docs/FDP-40-*.md docs/adr/FDP-40-*.md docs/release/FDP-40-*.md "$ARTIFACT_DIR"; then
+          if grep -R 'production_enabled: `true`\|bank_certification_claimed: `true`\|external_finality_claimed: `true`\|distributed_acid_claimed: `true`\|dual_control_required: `true`' docs/FDP-40-*.md docs/adr/FDP-40-*.md docs/release/FDP-40-*.md "$ARTIFACT_DIR"; then
             echo "FDP-40 docs/artifacts contain a forbidden positive enablement or finality claim"
             exit 1
           fi
