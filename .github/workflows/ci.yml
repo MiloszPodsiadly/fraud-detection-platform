@@ -694,6 +694,10 @@ jobs:
     name: FDP-39 Release Governance Gate
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    env:
+      FDP39_EVENT_NAME: ${{ github.event_name }}
+      FDP39_DIFF_BASE_SHA: ${{ github.event.before || '' }}
+      FDP39_DIFF_HEAD_SHA: ${{ github.sha }}
     needs:
       - backend
       - regulated-mutation-regression
@@ -771,7 +775,7 @@ jobs:
           GITHUB_REF_NAME: ${{ github.ref_name }}
 
       - name: Run FDP-39 governance tests
-        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp39.ci-mode=true" "-Dfdp39.release-image.scan-root=target/fdp39-governance/release-image-root" "-Dfdp39.commit-sha=${GITHUB_SHA}" "-Dfdp39.branch-name=${GITHUB_REF_NAME}" "-Dfdp39.github-run-id=${GITHUB_RUN_ID}" "-Dfdp39.github-workflow=${GITHUB_WORKFLOW}" "-Dfdp39.release-image.name=${FDP39_RELEASE_IMAGE}" "-Dfdp39.release-image.id=${FDP39_RELEASE_IMAGE_ID}" "-Dfdp39.release-image.digest=${FDP39_RELEASE_IMAGE_DIGEST}" "-Dfdp39.fixture-image.name=${FDP39_FIXTURE_IMAGE}" "-Dfdp39.fixture-image.id=${FDP39_FIXTURE_IMAGE_ID}" "-Dfdp39.fixture-image.digest=${FDP39_FIXTURE_IMAGE_DIGEST}" "-Dtest=RegulatedMutationReleaseImageSeparationTest,FixtureDockerfileMustNotBeUsedByReleaseWorkflowTest,Fdp39GovernanceArtifactsTest,Fdp39NoOverclaimDocumentationTest,Fdp39MustNotChangeRuntimeMutationSemanticsTest,RegulatedMutationRecoveryInspectionGovernanceTest" test
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp39.ci-mode=true" "-Dfdp39.event-name=${FDP39_EVENT_NAME}" "-Dfdp39.base-sha=${FDP39_DIFF_BASE_SHA}" "-Dfdp39.head-sha=${FDP39_DIFF_HEAD_SHA}" "-Dfdp39.release-image.scan-root=target/fdp39-governance/release-image-root" "-Dfdp39.commit-sha=${GITHUB_SHA}" "-Dfdp39.branch-name=${GITHUB_REF_NAME}" "-Dfdp39.github-run-id=${GITHUB_RUN_ID}" "-Dfdp39.github-workflow=${GITHUB_WORKFLOW}" "-Dfdp39.release-image.name=${FDP39_RELEASE_IMAGE}" "-Dfdp39.release-image.id=${FDP39_RELEASE_IMAGE_ID}" "-Dfdp39.release-image.digest=${FDP39_RELEASE_IMAGE_DIGEST}" "-Dfdp39.fixture-image.name=${FDP39_FIXTURE_IMAGE}" "-Dfdp39.fixture-image.id=${FDP39_FIXTURE_IMAGE_ID}" "-Dfdp39.fixture-image.digest=${FDP39_FIXTURE_IMAGE_DIGEST}" "-Dtest=RegulatedMutationReleaseImageSeparationTest,FixtureDockerfileMustNotBeUsedByReleaseWorkflowTest,Fdp39GovernanceArtifactsTest,Fdp39NoOverclaimDocumentationTest,Fdp39MustNotChangeRuntimeMutationSemanticsTest,RegulatedMutationRecoveryInspectionGovernanceTest" test
 
       - name: Verify FDP-39 governance artifacts
         if: always()
@@ -861,8 +865,17 @@ jobs:
           runtime = json.loads((artifact_dir / "fdp39-runtime-immutability.json").read_text())
           fixture_usage = json.loads((artifact_dir / "fdp39-fixture-dockerfile-usage.json").read_text())
           ops = json.loads((artifact_dir / "fdp39-ops-inspection-governance.json").read_text())
+          expected_event = os.environ["FDP39_EVENT_NAME"]
+          expected_diff_base = os.environ.get("FDP39_DIFF_BASE_SHA", "")
+          runtime_mode = runtime.get("comparison_mode")
+          runtime_changed_file_count = int(runtime.get("changed_file_count", 0))
           additional = {
               "runtime_diff_computed": runtime.get("diff_computed") is True,
+              "runtime_event": runtime.get("event_name") == expected_event,
+              "runtime_comparison_mode": runtime_mode in {"pull-request-merge-base-to-head", "push-before-to-head"},
+              "runtime_head_sha": runtime.get("head_sha") == expected_sha,
+              "runtime_base_sha": bool(runtime.get("base_sha")),
+              "runtime_changed_file_count": runtime_changed_file_count > 0,
               "runtime_unchanged": runtime.get("runtime_semantics_unchanged") is True,
               "runtime_protected_count": runtime.get("protected_runtime_file_count") == 0,
               "fixture_forbidden_count": fixture_usage.get("forbidden_occurrence_count") == 0,
@@ -873,6 +886,11 @@ jobs:
               "ops_rate_limit": ops.get("rate_limit_verified") is True,
               "ops_audit_failure_policy": ops.get("audit_failure_policy_verified") is True,
           }
+          if expected_event == "push":
+              additional["runtime_push_comparison_mode"] = runtime_mode == "push-before-to-head"
+              additional["runtime_push_base_sha"] = runtime.get("base_sha") == expected_diff_base
+          if expected_event == "pull_request":
+              additional["runtime_pr_comparison_mode"] = runtime_mode == "pull-request-merge-base-to-head"
           failed_additional = [name for name, ok in additional.items() if not ok]
           if failed_additional:
               print(f"FDP-39 additional governance artifact checks failed: {failed_additional}", file=sys.stderr)

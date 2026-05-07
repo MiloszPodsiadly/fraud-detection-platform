@@ -83,7 +83,21 @@ class Fdp39MustNotChangeRuntimeMutationSemanticsTest {
 
     private DiffResult changedFiles() throws IOException, InterruptedException {
         boolean ciMode = Boolean.getBoolean("fdp39.ci-mode");
+        String eventName = propertyOrEnv("fdp39.event-name", "GITHUB_EVENT_NAME", "local");
+        String headSha = propertyOrEnv("fdp39.head-sha", "GITHUB_SHA", "HEAD");
         String baseRef = baseRef();
+
+        if (ciMode && "push".equals(eventName)) {
+            String baseSha = propertyOrEnv("fdp39.base-sha", "GITHUB_EVENT_BEFORE", "");
+            assertThat(baseSha)
+                    .as("FDP-39 push CI must provide github.event.before for audited diff provenance")
+                    .isNotBlank();
+            assertThat(isZeroSha(baseSha))
+                    .as("FDP-39 push CI cannot audit runtime immutability from an all-zero before SHA")
+                    .isFalse();
+            return diffBetween(eventName, "push-before-to-head", baseRef, baseSha, headSha);
+        }
+
         ProcessResult verifyOrigin = runGit("rev-parse", "--verify", "origin/" + baseRef);
         if (ciMode && !verifyOrigin.success()) {
             ProcessResult fetch = runGit("fetch", "--no-tags", "origin", baseRef);
@@ -91,30 +105,21 @@ class Fdp39MustNotChangeRuntimeMutationSemanticsTest {
                     .as("FDP-39 CI failed to fetch origin/" + baseRef + ": " + fetch.stderr())
                     .isTrue();
         }
-        ProcessResult mergeBase = runGit("merge-base", "HEAD", "origin/" + baseRef);
+        ProcessResult mergeBase = runGit("merge-base", headSha, "origin/" + baseRef);
         if (!mergeBase.success() && ciMode) {
             throw new AssertionError("FDP-39 CI failed to compute merge-base for origin/" + baseRef + ": " + mergeBase.stderr());
         }
         if (mergeBase.success() && !mergeBase.stdout().isEmpty()) {
             String baseSha = mergeBase.stdout().getFirst();
-            ProcessResult diff = runGit("diff", "--name-only", baseSha, "HEAD");
-            if (!diff.success() && ciMode) {
-                throw new AssertionError("FDP-39 CI failed to compute changed files: " + diff.stderr());
-            }
-            return new DiffResult(
-                    diff.success(),
-                    baseRef,
-                    baseSha,
-                    diff.stdout(),
-                    diff.stderr()
-            );
+            return diffBetween(eventName, "pull-request-merge-base-to-head", baseRef, baseSha, headSha);
         }
 
-        ProcessResult fallback = runGit("diff", "--name-only", "HEAD");
+        ProcessResult fallback = runGit("diff", "--name-only", headSha);
         if (!fallback.success() && ciMode) {
             throw new AssertionError("FDP-39 CI fallback diff failed: " + fallback.stderr());
         }
-        return new DiffResult(fallback.success(), baseRef, "", fallback.stdout(), fallback.stderr());
+        return new DiffResult(fallback.success(), eventName, "working-tree-fallback", baseRef, "", headSha,
+                fallback.stdout(), fallback.stderr());
     }
 
     private String baseRef() {
@@ -133,8 +138,11 @@ class Fdp39MustNotChangeRuntimeMutationSemanticsTest {
         Files.createDirectories(OUTPUT_DIR);
         ObjectNode root = objectMapper.createObjectNode();
         root.put("diff_computed", diff.diffComputed());
+        root.put("event_name", diff.eventName());
+        root.put("comparison_mode", diff.comparisonMode());
         root.put("base_ref", diff.baseRef());
-        root.put("merge_base", diff.mergeBase());
+        root.put("base_sha", diff.baseSha());
+        root.put("head_sha", diff.headSha());
         root.put("changed_file_count", diff.changedFiles().size());
         root.put("protected_runtime_file_count", protectedRuntimeFiles.size());
         root.put("runtime_semantics_unchanged", protectedRuntimeFiles.isEmpty());
@@ -145,6 +153,52 @@ class Fdp39MustNotChangeRuntimeMutationSemanticsTest {
         protectedRuntimeFiles.forEach(protectedFiles::add);
         objectMapper.writerWithDefaultPrettyPrinter()
                 .writeValue(OUTPUT_DIR.resolve("fdp39-runtime-immutability.json").toFile(), root);
+    }
+
+    private DiffResult diffBetween(
+            String eventName,
+            String comparisonMode,
+            String baseRef,
+            String baseRevision,
+            String headRevision
+    ) throws IOException, InterruptedException {
+        boolean ciMode = Boolean.getBoolean("fdp39.ci-mode");
+        String baseSha = verifiedCommit("base", baseRevision, ciMode);
+        String headSha = verifiedCommit("head", headRevision, ciMode);
+        ProcessResult diff = runGit("diff", "--name-only", baseSha, headSha);
+        if (!diff.success() && ciMode) {
+            throw new AssertionError("FDP-39 CI failed to compute changed files: " + diff.stderr());
+        }
+        return new DiffResult(diff.success(), eventName, comparisonMode, baseRef, baseSha, headSha,
+                diff.stdout(), diff.stderr());
+    }
+
+    private String verifiedCommit(String label, String revision, boolean ciMode) throws IOException, InterruptedException {
+        ProcessResult verify = runGit("rev-parse", "--verify", revision + "^{commit}");
+        if (!verify.success() && ciMode) {
+            throw new AssertionError("FDP-39 CI failed to verify " + label + " revision " + revision + ": "
+                    + verify.stderr());
+        }
+        if (verify.success() && !verify.stdout().isEmpty()) {
+            return verify.stdout().getFirst();
+        }
+        return revision;
+    }
+
+    private String propertyOrEnv(String property, String environment, String fallback) {
+        String configured = System.getProperty(property);
+        if (configured != null && !configured.isBlank()) {
+            return configured.trim();
+        }
+        String value = System.getenv(environment);
+        if (value != null && !value.isBlank()) {
+            return value.trim();
+        }
+        return fallback;
+    }
+
+    private boolean isZeroSha(String sha) {
+        return sha.chars().allMatch(character -> character == '0');
     }
 
     private ProcessResult runGit(String... args) throws IOException, InterruptedException {
@@ -179,8 +233,11 @@ class Fdp39MustNotChangeRuntimeMutationSemanticsTest {
 
     private record DiffResult(
             boolean diffComputed,
+            String eventName,
+            String comparisonMode,
             String baseRef,
-            String mergeBase,
+            String baseSha,
+            String headSha,
             List<String> changedFiles,
             String stderr
     ) {
