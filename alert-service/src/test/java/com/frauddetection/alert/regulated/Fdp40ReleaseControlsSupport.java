@@ -41,7 +41,7 @@ final class Fdp40ReleaseControlsSupport {
         List<String> lines = Files.readAllLines(path);
         for (int index = 0; index < lines.size(); index++) {
             String line = lines.get(index);
-            if (line.startsWith("  ") && line.contains(":")) {
+            if (!line.isBlank() && Character.isWhitespace(line.charAt(0)) && line.contains(":")) {
                 throw new IllegalArgumentException("Nested YAML is not supported at line " + (index + 1));
             }
             if (line.stripLeading().startsWith("- ")) {
@@ -50,6 +50,9 @@ final class Fdp40ReleaseControlsSupport {
             String trimmed = line.trim();
             if (trimmed.isBlank() || trimmed.startsWith("#") || !trimmed.contains(":")) {
                 continue;
+            }
+            if (trimmed.contains("{") || trimmed.contains("}") || trimmed.contains("[") || trimmed.contains("]")) {
+                throw new IllegalArgumentException("Complex YAML objects/lists are not supported at line " + (index + 1));
             }
             String[] parts = trimmed.split(":", 2);
             values.put(parts[0].trim(), stripQuotes(parts[1].trim()));
@@ -102,14 +105,38 @@ final class Fdp40ReleaseControlsSupport {
                 "fixture_image_promotable",
                 "ready_for_enablement_review",
                 "production_enabled",
+                "bank_enabled",
                 "readiness_only",
                 "external_platform_controls_required",
+                "signed_provenance_readiness",
                 "signing_verification_performed",
+                "signing_enforced_by_fdp40",
+                "cosign_enforcement_optional",
                 "registry_immutability_enforced_by_fdp40",
+                "registry_immutability_verified_by_fdp40",
                 "environment_protection_verified_by_fdp40",
                 "branch_protection_verified_by_fdp40",
+                "required_checks_defined",
+                "required_checks_platform_enforcement_verified_by_fdp40",
+                "single_release_owner_model",
+                "release_owner_required",
+                "release_owner_must_be_named",
+                "separate_config_pr_required",
                 "release_config_pr_required",
+                "digest_bound_release_required",
+                "required_checks_must_be_green",
+                "rollback_owner_required",
+                "operator_drill_evidence_required",
+                "security_review_required",
+                "fraud_ops_review_required",
+                "platform_review_required",
                 "dual_control_required",
+                "ops_inspection_admin_only_required",
+                "ops_inspection_audit_required",
+                "ops_inspection_rate_limit_required",
+                "ops_inspection_sensitive_fields_masked_required",
+                "ops_inspection_governance_verified_by_fdp39",
+                "ops_inspection_runtime_security_revalidation_required_before_production",
                 "rollback_plan_ref",
                 "operator_drill_ref",
                 "security_review_ref"
@@ -120,14 +147,39 @@ final class Fdp40ReleaseControlsSupport {
         assertThat(manifest.get("release_image_digest")).isNotEqualTo(manifest.get("fixture_image_digest"));
         assertThat(manifest.get("fixture_image_promotable")).isEqualTo("false");
         assertThat(manifest.get("production_enabled")).isEqualTo("false");
+        assertThat(manifest.get("bank_enabled")).isEqualTo("false");
         assertThat(manifest.get("readiness_only")).isEqualTo("true");
         assertThat(manifest.get("external_platform_controls_required")).isEqualTo("true");
+        assertThat(manifest.get("signed_provenance_readiness")).isEqualTo("true");
         assertThat(manifest.get("signing_verification_performed")).isEqualTo("false");
+        assertThat(manifest.get("signing_enforced_by_fdp40")).isEqualTo("false");
+        assertThat(manifest.get("cosign_enforcement_optional")).isEqualTo("true");
         assertThat(manifest.get("registry_immutability_enforced_by_fdp40")).isEqualTo("false");
+        assertThat(manifest.get("registry_immutability_verified_by_fdp40")).isEqualTo("false");
         assertThat(manifest.get("environment_protection_verified_by_fdp40")).isEqualTo("false");
         assertThat(manifest.get("branch_protection_verified_by_fdp40")).isEqualTo("false");
+        assertThat(manifest.get("required_checks_defined")).isEqualTo("true");
+        assertThat(manifest.get("required_checks_platform_enforcement_verified_by_fdp40")).isEqualTo("false");
+        assertThat(manifest.get("single_release_owner_model")).isEqualTo("true");
+        assertThat(manifest.get("release_owner_required")).isEqualTo("true");
+        assertThat(manifest.get("release_owner_must_be_named")).isEqualTo("true");
+        assertThat(manifest.get("separate_config_pr_required")).isEqualTo("true");
         assertThat(manifest.get("release_config_pr_required")).isEqualTo("true");
-        assertThat(manifest.get("dual_control_required")).isEqualTo("true");
+        assertThat(manifest.get("digest_bound_release_required")).isEqualTo("true");
+        assertThat(manifest.get("required_checks_must_be_green")).isEqualTo("true");
+        assertThat(manifest.get("rollback_owner_required")).isEqualTo("true");
+        assertThat(manifest.get("operator_drill_evidence_required")).isEqualTo("true");
+        assertThat(manifest.get("security_review_required")).isEqualTo("true");
+        assertThat(manifest.get("fraud_ops_review_required")).isEqualTo("true");
+        assertThat(manifest.get("platform_review_required")).isEqualTo("true");
+        assertThat(manifest.get("dual_control_required")).isEqualTo("false");
+        assertThat(manifest.get("ops_inspection_admin_only_required")).isEqualTo("true");
+        assertThat(manifest.get("ops_inspection_audit_required")).isEqualTo("true");
+        assertThat(manifest.get("ops_inspection_rate_limit_required")).isEqualTo("true");
+        assertThat(manifest.get("ops_inspection_sensitive_fields_masked_required")).isEqualTo("true");
+        assertThat(manifest.get("ops_inspection_governance_verified_by_fdp39")).isEqualTo("true");
+        assertThat(manifest.get("ops_inspection_runtime_security_revalidation_required_before_production"))
+                .isEqualTo("true");
         assertThat(manifest.get("dockerfile_path")).isEqualTo("deployment/Dockerfile.backend");
         assertThat(manifest.get("dockerfile_path")).doesNotContain("Dockerfile.alert-service-fdp38-fixture");
         assertNoFallbackTokens(String.join("\n", manifest.values()));

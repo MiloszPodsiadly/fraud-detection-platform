@@ -20,12 +20,26 @@ class Fdp40FinalProofPackTest {
         ObjectNode proof = objectNode();
         proof.put("release_controls_ready_for_review", true);
         proof.put("production_enabled", false);
+        proof.put("bank_enabled", false);
         proof.put("readiness_only", true);
+        proof.put("single_release_owner_model", true);
+        proof.put("dual_control_required", false);
+        proof.put("release_owner_required", true);
+        proof.put("release_owner_must_be_named", true);
+        proof.put("digest_bound_release_required", true);
+        proof.put("required_checks_must_be_green", true);
+        proof.put("rollback_owner_required", true);
+        proof.put("operator_drill_evidence_required", true);
+        proof.put("separate_config_pr_required", true);
+        proof.put("signed_provenance_readiness", true);
         proof.put("signing_verification_performed", false);
+        proof.put("signing_enforced_by_fdp40", false);
         proof.put("registry_immutability_verified_by_fdp40", false);
         proof.put("registry_immutability_enforced_by_fdp40", false);
         proof.put("branch_protection_verified_by_fdp40", false);
         proof.put("environment_protection_verified_by_fdp40", false);
+        proof.put("required_checks_defined", true);
+        proof.put("required_checks_platform_enforcement_verified_by_fdp40", false);
         proof.put("real_cosign_verification_required_before_production", true);
         proof.put("real_registry_immutability_required_before_production", true);
         proof.put("real_environment_protection_required_before_production", true);
@@ -36,7 +50,6 @@ class Fdp40FinalProofPackTest {
         proof.put("registry_immutability_required", true);
         proof.put("mutable_tag_only_allowed", false);
         proof.put("fixture_image_promotion_allowed", false);
-        proof.put("dual_control_required", true);
         proof.put("sbom_required", true);
         proof.put("sbom_generated_by_fdp40", false);
         proof.put("sbom_external_platform_control_required", true);
@@ -81,7 +94,7 @@ class Fdp40FinalProofPackTest {
 
                 ## 6. Environment Protection Gates
 
-                Dual control, rollback owner, security owner, fraud ops owner, and platform owner are required.
+                Single release owner, rollback owner, security review, fraud ops review, and platform review are required.
 
                 ## 7. Enablement PR Template
 
@@ -110,9 +123,23 @@ class Fdp40FinalProofPackTest {
 
                 - release_controls_ready_for_review: `true`
                 - production_enabled: `false`
+                - bank_enabled: `false`
                 - readiness_only: `true`
+                - single_release_owner_model: `true`
+                - dual_control_required: `false`
+                - release_owner_required: `true`
+                - release_owner_must_be_named: `true`
+                - digest_bound_release_required: `true`
+                - required_checks_must_be_green: `true`
+                - rollback_owner_required: `true`
+                - operator_drill_evidence_required: `true`
+                - separate_config_pr_required: `true`
+                - signed_provenance_readiness: `true`
                 - signing_verification_performed: `false`
+                - signing_enforced_by_fdp40: `false`
                 - external_platform_controls_required: `true`
+                - required_checks_defined: `true`
+                - required_checks_platform_enforcement_verified_by_fdp40: `false`
                 - mutable_tag_only_allowed: `false`
                 - fixture_image_promotion_allowed: `false`
                 - external_finality_claimed: `false`
@@ -123,12 +150,20 @@ class Fdp40FinalProofPackTest {
 
         assertThat(proof.get("release_controls_ready_for_review").asBoolean()).isTrue();
         assertThat(proof.get("production_enabled").asBoolean()).isFalse();
+        assertThat(proof.get("bank_enabled").asBoolean()).isFalse();
         assertThat(proof.get("readiness_only").asBoolean()).isTrue();
+        assertThat(proof.get("single_release_owner_model").asBoolean()).isTrue();
+        assertThat(proof.get("dual_control_required").asBoolean()).isFalse();
+        assertThat(proof.get("release_owner_required").asBoolean()).isTrue();
+        assertThat(proof.get("release_owner_must_be_named").asBoolean()).isTrue();
         assertThat(proof.get("external_platform_controls_required").asBoolean()).isTrue();
+        assertThat(proof.get("signed_provenance_readiness").asBoolean()).isTrue();
         assertThat(proof.get("signing_verification_performed").asBoolean()).isFalse();
+        assertThat(proof.get("signing_enforced_by_fdp40").asBoolean()).isFalse();
         assertThat(proof.get("registry_immutability_verified_by_fdp40").asBoolean()).isFalse();
         assertThat(proof.get("branch_protection_verified_by_fdp40").asBoolean()).isFalse();
         assertThat(proof.get("environment_protection_verified_by_fdp40").asBoolean()).isFalse();
+        assertThat(proof.get("required_checks_platform_enforcement_verified_by_fdp40").asBoolean()).isFalse();
         assertThat(proof.get("runtime_semantics_changed").asBoolean()).isFalse();
         assertThat(markdown)
                 .contains("Release Manifest Validation")

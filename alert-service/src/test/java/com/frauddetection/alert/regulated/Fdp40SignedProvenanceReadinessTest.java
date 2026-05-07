@@ -22,7 +22,10 @@ class Fdp40SignedProvenanceReadinessTest {
     void signedProvenanceReadinessRequiresReleaseImageAttestationFields() throws Exception {
         assertThat(Files.exists(Path.of("../scripts/fdp40-validate-attestation-readiness.sh"))).isTrue();
         assertThat(Files.readString(Path.of("../docs/release/FDP-40-signed-provenance-policy.md")))
-                .contains("Signed artifact proof is release provenance evidence only")
+                .contains("signed_provenance_readiness: true")
+                .contains("signing_verification_performed: false")
+                .contains("signing_enforced_by_fdp40: false")
+                .contains("Signing readiness is release provenance evidence only")
                 .contains("does not claim external finality");
 
         assertAttestationValid(readJson(ATTESTATION), readYamlKeyValues(MANIFEST));

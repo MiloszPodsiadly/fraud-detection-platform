@@ -40,7 +40,17 @@ class Fdp40ReleaseManifestValidationTest {
         assertInvalid(valid, manifest -> manifest.put("fdp39_release_image_digest", "sha256:999"));
         assertInvalid(valid, manifest -> manifest.put("release_image_digest", manifest.get("fixture_image_digest")));
         assertInvalid(valid, manifest -> manifest.put("production_enabled", "true"));
+        assertInvalid(valid, manifest -> manifest.put("bank_enabled", "true"));
+        assertInvalid(valid, manifest -> manifest.put("readiness_only", "false"));
+        assertInvalid(valid, manifest -> manifest.put("signed_provenance_readiness", "false"));
+        assertInvalid(valid, manifest -> manifest.put("signing_enforced_by_fdp40", "true"));
+        assertInvalid(valid, manifest -> manifest.put("registry_immutability_verified_by_fdp40", "true"));
+        assertInvalid(valid, manifest -> manifest.put("required_checks_platform_enforcement_verified_by_fdp40", "true"));
+        assertInvalid(valid, manifest -> manifest.put("single_release_owner_model", "false"));
+        assertInvalid(valid, manifest -> manifest.put("release_owner_required", "false"));
+        assertInvalid(valid, manifest -> manifest.put("release_owner_must_be_named", "false"));
         assertInvalid(valid, manifest -> manifest.put("release_config_pr_required", "false"));
+        assertInvalid(valid, manifest -> manifest.put("dual_control_required", "true"));
         assertInvalid(valid, manifest -> manifest.put("dockerfile_path", "deployment/Dockerfile.alert-service-fdp38-fixture"));
         assertInvalid(valid, manifest -> manifest.put("release_image_digest", "PLACEHOLDER"));
     }
@@ -57,6 +67,19 @@ class Fdp40ReleaseManifestValidationTest {
         assertThatThrownBy(() -> readYamlKeyValues(nested))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Nested YAML is not supported");
+    }
+
+    @Test
+    void complexYamlManifestFailsClosed() throws Exception {
+        Path complex = java.nio.file.Files.createTempFile("fdp40-complex", ".yaml");
+        java.nio.file.Files.writeString(complex, """
+                release_manifest_version: "1"
+                release_image_digest: ["sha256:111"]
+                """);
+
+        assertThatThrownBy(() -> readYamlKeyValues(complex))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Complex YAML objects/lists are not supported");
     }
 
     private void assertInvalid(Map<String, String> valid, java.util.function.Consumer<Map<String, String>> mutation) {

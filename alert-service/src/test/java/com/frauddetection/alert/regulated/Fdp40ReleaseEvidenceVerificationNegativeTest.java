@@ -30,8 +30,14 @@ class Fdp40ReleaseEvidenceVerificationNegativeTest {
                 invalidChecks(manifest, attestation, fdp39, checks, c -> ((Map<String, Object>) ((List<?>) c.get("checks")).get(0)).put("blocking", false)),
                 invalidChecks(manifest, attestation, fdp39, checks, c -> ((List<?>) c.get("checks")).remove(0)),
                 invalid(manifest, attestation, fdp39, checks, m -> m.put("production_enabled", "true")),
+                invalid(manifest, attestation, fdp39, checks, m -> m.put("bank_enabled", "true")),
                 invalid(manifest, attestation, fdp39, checks, m -> m.put("release_config_pr_required", "false")),
-                invalid(manifest, attestation, fdp39, checks, m -> m.put("dual_control_required", "false")),
+                invalid(manifest, attestation, fdp39, checks, m -> m.put("dual_control_required", "true")),
+                invalid(manifest, attestation, fdp39, checks, m -> m.put("single_release_owner_model", "false")),
+                invalid(manifest, attestation, fdp39, checks, m -> m.put("release_owner_required", "false")),
+                invalid(manifest, attestation, fdp39, checks, m -> m.put("release_owner_must_be_named", "false")),
+                invalid(manifest, attestation, fdp39, checks, m -> m.put("signed_provenance_readiness", "false")),
+                invalid(manifest, attestation, fdp39, checks, m -> m.put("signing_enforced_by_fdp40", "true")),
                 invalid(manifest, attestation, fdp39, checks, m -> m.remove("release_image_digest")),
                 invalid(manifest, attestation, fdp39, checks, m -> m.put("release_image_digest", "LOCAL_IMAGE")),
                 invalid(manifest, attestation, fdp39, checks, m -> m.put("release_image_digest", "TO_BE_FILLED")),
@@ -121,8 +127,14 @@ class Fdp40ReleaseEvidenceVerificationNegativeTest {
         if (!fixtureNotPromoted) failures.add("fixture_promoted");
         if (!requiredChecksPresent) failures.add("required_checks_missing");
         if (!"false".equals(manifest.get("production_enabled"))) failures.add("production_enabled_true");
+        if (!"false".equals(manifest.get("bank_enabled"))) failures.add("bank_enabled_true");
         if (!"true".equals(manifest.get("release_config_pr_required"))) failures.add("release_config_pr_not_required");
-        if (!"true".equals(manifest.get("dual_control_required"))) failures.add("dual_control_not_required");
+        if (!"true".equals(manifest.get("single_release_owner_model"))) failures.add("single_release_owner_model_missing");
+        if (!"true".equals(manifest.get("release_owner_required"))) failures.add("release_owner_not_required");
+        if (!"true".equals(manifest.get("release_owner_must_be_named"))) failures.add("release_owner_name_not_required");
+        if (!"true".equals(manifest.get("signed_provenance_readiness"))) failures.add("signing_readiness_missing");
+        if (!"false".equals(manifest.get("signing_enforced_by_fdp40"))) failures.add("signing_enforcement_unexpected");
+        if (!"false".equals(manifest.get("dual_control_required"))) failures.add("dual_control_must_be_false");
         return new VerificationResult(failures);
     }
 

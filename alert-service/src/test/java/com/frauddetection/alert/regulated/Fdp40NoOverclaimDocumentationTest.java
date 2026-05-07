@@ -16,8 +16,21 @@ class Fdp40NoOverclaimDocumentationTest {
 
     private static final List<String> FORBIDDEN_POSITIVE_CLAIMS = List.of(
             "PRODUCTION_ENABLED",
+            "dual-control required",
+            "dual control completed",
             "BANK_CERTIFIED",
+            "production enabled",
             "production certified",
+            "production ready",
+            "bank enabled",
+            "certified",
+            "approved for production",
+            "release approved",
+            "signed release enforced",
+            "cosign verified release",
+            "registry immutability enforced",
+            "branch protection enforced",
+            "environment protection enforced",
             "external finality",
             "distributed ACID",
             "global transaction",
@@ -41,6 +54,11 @@ class Fdp40NoOverclaimDocumentationTest {
 
         assertThat(combined)
                 .contains("READY_FOR_ENABLEMENT_REVIEW is not PRODUCTION_ENABLED")
+                .contains("single release owner model")
+                .contains("dual_control_required: false")
+                .contains("production_enabled: false")
+                .contains("readiness_only: true")
+                .contains("external_platform_controls_required: true")
                 .contains("does not claim external finality")
                 .contains("does not mean distributed ACID")
                 .contains("readiness is not full platform enforcement");
@@ -85,6 +103,9 @@ class Fdp40NoOverclaimDocumentationTest {
                             "not ",
                             "no ",
                             "future",
+                            "required before production",
+                            "external platform control required",
+                            "readiness only",
                             "unsupported claim",
                             "no-go",
                             "must not",

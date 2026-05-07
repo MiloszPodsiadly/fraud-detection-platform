@@ -22,11 +22,16 @@ class Fdp40RegistryImmutabilityReadinessTest {
                 .contains("does not enforce registry immutability");
         assertThat(bool(readiness, "registry_immutability_required")).isTrue();
         assertThat(bool(readiness, "verified_by_fdp40")).isFalse();
+        assertThat(bool(readiness, "registry_immutability_verified_by_fdp40")).isFalse();
+        assertThat(bool(readiness, "registry_immutability_enforced_by_fdp40")).isFalse();
         assertThat(bool(readiness, "mutable_tag_overwrite_prohibited")).isTrue();
+        assertThat(bool(readiness, "mutable_tag_only_allowed")).isFalse();
         assertThat(bool(readiness, "promotion_by_digest_required")).isTrue();
+        assertThat(bool(readiness, "fixture_image_promotion_allowed")).isFalse();
         assertThat(bool(readiness, "fixture_repository_promotable")).isFalse();
         assertThat(bool(readiness, "release_repository_required")).isTrue();
         assertThat(bool(readiness, "retention_policy_required")).isTrue();
         assertThat(bool(readiness, "external_platform_control_required")).isTrue();
+        assertThat(bool(readiness, "external_registry_control_required")).isTrue();
     }
 }

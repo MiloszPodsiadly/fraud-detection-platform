@@ -23,8 +23,10 @@ class Fdp40DeploymentEnvironmentReadinessTest {
         assertThat(bool(readiness, "staging_environment_protection_required")).isTrue();
         assertThat(bool(readiness, "production_environment_protection_required")).isTrue();
         assertThat(bool(readiness, "required_reviewers_required")).isTrue();
-        assertThat(bool(readiness, "dual_control_required")).isTrue();
-        assertThat(bool(readiness, "release_author_cannot_approve")).isTrue();
+        assertThat(bool(readiness, "single_release_owner_model")).isTrue();
+        assertThat(bool(readiness, "release_owner_required")).isTrue();
+        assertThat(bool(readiness, "release_owner_must_be_named")).isTrue();
+        assertThat(bool(readiness, "dual_control_required")).isFalse();
         assertThat(bool(readiness, "secrets_access_limited_to_environment")).isTrue();
         assertThat(bool(readiness, "deployment_must_reference_digest")).isTrue();
         assertThat(bool(readiness, "verified_by_fdp40")).isFalse();

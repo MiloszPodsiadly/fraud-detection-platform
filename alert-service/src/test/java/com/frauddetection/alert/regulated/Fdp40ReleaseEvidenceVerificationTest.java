@@ -52,12 +52,23 @@ class Fdp40ReleaseEvidenceVerificationTest {
         artifact.put("fixture_not_promoted", fixtureNotPromoted);
         artifact.put("required_checks_present", requiredChecksPresent);
         artifact.put("production_enabled_false", "false".equals(manifest.get("production_enabled")));
+        artifact.put("bank_enabled_false", "false".equals(manifest.get("bank_enabled")));
         artifact.put("readiness_only", "true".equals(manifest.get("readiness_only")));
         artifact.put("external_platform_controls_required", "true".equals(manifest.get("external_platform_controls_required")));
+        artifact.put("signed_provenance_readiness", "true".equals(manifest.get("signed_provenance_readiness")));
         artifact.put("signing_verification_performed", "true".equals(manifest.get("signing_verification_performed")));
+        artifact.put("signing_enforced_by_fdp40", "true".equals(manifest.get("signing_enforced_by_fdp40")));
         artifact.put("registry_immutability_enforced_by_fdp40", "true".equals(manifest.get("registry_immutability_enforced_by_fdp40")));
+        artifact.put("registry_immutability_verified_by_fdp40", "true".equals(manifest.get("registry_immutability_verified_by_fdp40")));
         artifact.put("environment_protection_verified_by_fdp40", "true".equals(manifest.get("environment_protection_verified_by_fdp40")));
         artifact.put("branch_protection_verified_by_fdp40", "true".equals(manifest.get("branch_protection_verified_by_fdp40")));
+        artifact.put("required_checks_defined", "true".equals(manifest.get("required_checks_defined")));
+        artifact.put("required_checks_platform_enforcement_verified_by_fdp40",
+                "true".equals(manifest.get("required_checks_platform_enforcement_verified_by_fdp40")));
+        artifact.put("single_release_owner_model", "true".equals(manifest.get("single_release_owner_model")));
+        artifact.put("release_owner_required", "true".equals(manifest.get("release_owner_required")));
+        artifact.put("release_owner_must_be_named", "true".equals(manifest.get("release_owner_must_be_named")));
+        artifact.put("separate_config_pr_required", "true".equals(manifest.get("separate_config_pr_required")));
         artifact.put("release_config_pr_required", "true".equals(manifest.get("release_config_pr_required")));
         artifact.put("dual_control_required", "true".equals(manifest.get("dual_control_required")));
         artifact.put("no_mutable_tag_only", manifest.containsKey("release_image_digest") && manifest.containsKey("release_image_tag"));
@@ -75,9 +86,16 @@ class Fdp40ReleaseEvidenceVerificationTest {
                         - fixture_not_promoted: `%s`
                         - required_checks_present: `%s`
                         - production_enabled_false: `true`
+                        - bank_enabled_false: `true`
                         - readiness_only: `true`
                         - external_platform_controls_required: `true`
+                        - signed_provenance_readiness: `true`
                         - signing_verification_performed: `false`
+                        - signing_enforced_by_fdp40: `false`
+                        - registry_immutability_verified_by_fdp40: `false`
+                        - required_checks_platform_enforcement_verified_by_fdp40: `false`
+                        - single_release_owner_model: `true`
+                        - dual_control_required: `false`
                         - no_mutable_tag_only: `true`
                         - failure_reasons: `[]`
                         """.formatted(fdp39DigestMatch, fixtureNotPromoted, requiredChecksPresent)

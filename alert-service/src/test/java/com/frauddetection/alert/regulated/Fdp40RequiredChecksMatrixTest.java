@@ -29,7 +29,10 @@ class Fdp40RequiredChecksMatrixTest {
     @Test
     void requiredChecksMatrixListsAllBlockingReleaseGates() throws Exception {
         String markdown = Files.readString(Path.of("../docs/release/FDP-40-required-checks-matrix.md"));
-        assertThat(markdown).contains("branch protection");
+        assertThat(markdown)
+                .contains("branch protection")
+                .contains("does not verify GitHub branch protection through GitHub APIs")
+                .contains("External branch protection control is required");
         Map<String, Object> matrix = readJson(Path.of("../docs/release/FDP-40-required-checks-matrix.json"));
         List<?> rawChecks = (List<?>) matrix.get("checks");
         List<Map<String, Object>> checks = rawChecks.stream()
@@ -40,6 +43,10 @@ class Fdp40RequiredChecksMatrixTest {
                 .collect(Collectors.toSet());
 
         assertThat(names).containsExactlyInAnyOrderElementsOf(REQUIRED);
+        assertThat(matrix.get("required_checks_defined")).isEqualTo(true);
+        assertThat(matrix.get("required_checks_platform_enforcement_verified_by_fdp40")).isEqualTo(false);
+        assertThat(matrix.get("branch_protection_required")).isEqualTo(true);
+        assertThat(matrix.get("external_branch_protection_control_required")).isEqualTo(true);
         for (Map<String, Object> check : checks) {
             assertThat(check.get("required")).isEqualTo(true);
             assertThat(check.get("blocking")).isEqualTo(true);

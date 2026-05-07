@@ -20,7 +20,8 @@ class Fdp40DocumentationFormattingTest {
                     .filter(path -> path.getFileName().toString().contains("FDP-40"))
                     .toList()) {
                 String content = Files.readString(file);
-                assertThat(content).doesNotContain("enablemenance");
+                assertThat(content).doesNotContain("enablemen" + "ance");
+                assertThat(content).doesNotContain("enablemen" + "ment");
                 assertThat(content).doesNotContain("PLACEHOLDER");
                 assertThat(content).doesNotContain("TO_BE_FILLED");
                 if (file.toString().endsWith(".md")) {

@@ -34,6 +34,8 @@ class Fdp40RegistryPromotionPolicyTest {
         artifact.put("fixture_image_promotion_allowed", false);
         artifact.put("registry_immutability_required", true);
         artifact.put("registry_immutability_verified_by_fdp40", false);
+        artifact.put("registry_immutability_enforced_by_fdp40", false);
+        artifact.put("external_registry_control_required", true);
         artifact.put("production_readiness", string(policy, "production_readiness"));
         writeJson(OUTPUT_DIR.resolve("fdp40-registry-promotion-policy.json"), artifact);
     }
@@ -46,9 +48,11 @@ class Fdp40RegistryPromotionPolicyTest {
         assertInvalid(valid, policy -> policy.put("mutable_tag_only_allowed", true));
         assertInvalid(valid, policy -> policy.put("fixture_image_promotion_allowed", true));
         assertInvalid(valid, policy -> policy.put("fdp39_release_image_digest", "sha256:999"));
-        assertInvalid(valid, policy -> policy.put("signed_image", false));
+        assertInvalid(valid, policy -> policy.put("signed_provenance_readiness", false));
         assertInvalid(valid, policy -> policy.put("registry_immutability_required", false));
         assertInvalid(valid, policy -> policy.put("registry_immutability_verified_by_fdp40", true));
+        assertInvalid(valid, policy -> policy.put("registry_immutability_enforced_by_fdp40", true));
+        assertInvalid(valid, policy -> policy.put("external_registry_control_required", false));
     }
 
     private void assertPromotionPolicyValid(Map<String, Object> policy) {
@@ -59,9 +63,11 @@ class Fdp40RegistryPromotionPolicyTest {
         assertThat(string(policy, "rollback_digest")).startsWith("sha256:");
         assertThat(bool(policy, "mutable_tag_only_allowed")).isFalse();
         assertThat(bool(policy, "fixture_image_promotion_allowed")).isFalse();
-        assertThat(bool(policy, "signed_image")).isTrue();
+        assertThat(bool(policy, "signed_provenance_readiness")).isTrue();
         assertThat(bool(policy, "registry_immutability_required")).isTrue();
         assertThat(bool(policy, "registry_immutability_verified_by_fdp40")).isFalse();
+        assertThat(bool(policy, "registry_immutability_enforced_by_fdp40")).isFalse();
+        assertThat(bool(policy, "external_registry_control_required")).isTrue();
         assertThat(bool(policy, "release_tag_non_overwritable_required")).isTrue();
         assertThat(string(policy, "registry_repository")).isNotBlank();
         assertThat(string(policy, "promotion_timestamp")).isNotBlank();
