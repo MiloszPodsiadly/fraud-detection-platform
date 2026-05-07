@@ -934,6 +934,7 @@ jobs:
       FDP40_EVENT_NAME: ${{ github.event_name }}
       FDP40_DIFF_BASE_SHA: ${{ github.event.before || '' }}
       FDP40_DIFF_HEAD_SHA: ${{ github.sha }}
+      FDP40_BASE_REF: ${{ github.base_ref || 'master' }}
     needs:
       - backend
       - docker
@@ -957,6 +958,9 @@ jobs:
           java-version: "21"
           cache: maven
 
+      - name: Run FDP-40 release controls tests
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp40.ci-mode=true" "-Dfdp40.event-name=${FDP40_EVENT_NAME}" "-Dfdp40.base-sha=${FDP40_DIFF_BASE_SHA}" "-Dfdp40.head-sha=${FDP40_DIFF_HEAD_SHA}" "-Dfdp40.base-ref=${FDP40_BASE_REF}" "-Dfdp40.release-manifest=../docs/release/FDP-40-release-manifest-template.yaml" "-Dfdp40.attestation=../docs/release/FDP-40-attestation-readiness-template.json" "-Dfdp40.fdp39-provenance=../docs/release/FDP-40-fdp39-provenance-reference.json" "-Dfdp40.required-checks-matrix=../docs/release/FDP-40-required-checks-matrix.json" "-Dtest=Fdp40ReleaseManifestValidationTest,Fdp40SignedProvenanceReadinessTest,Fdp40ReleaseEvidenceVerificationTest,Fdp40ReleaseEvidenceVerificationNegativeTest,Fdp40RegistryPromotionPolicyTest,Fdp40RegistryImmutabilityReadinessTest,Fdp40RequiredChecksMatrixTest,Fdp40EnvironmentProtectionGateTest,Fdp40DeploymentEnvironmentReadinessTest,Fdp40BranchProtectionReadinessTest,Fdp40ExternalPlatformControlsMatrixTest,Fdp40EnablementPrTemplateTest,Fdp40UnsupportedClaimsMatrixTest,Fdp40NoOverclaimDocumentationTest,Fdp40MustNotChangeRuntimeMutationSemanticsTest,Fdp40FinalProofPackTest,Fdp40SbomReadinessTest,Fdp40CosignVerificationReadinessTest,Fdp40ResidualPlatformGapsTest,Fdp40ScriptExecutionReadinessTest,Fdp40DocumentationFormattingTest,Fdp40LocalPathHygieneTest" test
+
       - name: Validate FDP-40 release manifest
         run: bash scripts/fdp40-validate-release-manifest.sh docs/release/FDP-40-release-manifest-template.yaml
 
@@ -966,8 +970,8 @@ jobs:
       - name: Verify FDP-40 release evidence
         run: bash scripts/fdp40-verify-release-evidence.sh docs/release/FDP-40-release-manifest-template.yaml docs/release/FDP-40-attestation-readiness-template.json docs/release/FDP-40-fdp39-provenance-reference.json docs/release/FDP-40-required-checks-matrix.json
 
-      - name: Run FDP-40 release controls tests
-        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp40.ci-mode=true" "-Dfdp40.event-name=${FDP40_EVENT_NAME}" "-Dfdp40.base-sha=${FDP40_DIFF_BASE_SHA}" "-Dfdp40.head-sha=${FDP40_DIFF_HEAD_SHA}" "-Dfdp40.release-manifest=../docs/release/FDP-40-release-manifest-template.yaml" "-Dfdp40.attestation=../docs/release/FDP-40-attestation-readiness-template.json" "-Dfdp40.fdp39-provenance=../docs/release/FDP-40-fdp39-provenance-reference.json" "-Dfdp40.required-checks-matrix=../docs/release/FDP-40-required-checks-matrix.json" "-Dtest=Fdp40ReleaseManifestValidationTest,Fdp40SignedProvenanceReadinessTest,Fdp40ReleaseEvidenceVerificationTest,Fdp40RegistryPromotionPolicyTest,Fdp40RequiredChecksMatrixTest,Fdp40EnvironmentProtectionGateTest,Fdp40EnablementPrTemplateTest,Fdp40UnsupportedClaimsMatrixTest,Fdp40NoOverclaimDocumentationTest,Fdp40MustNotChangeRuntimeMutationSemanticsTest,Fdp40FinalProofPackTest" test
+      - name: Verify FDP-40 cosign readiness mode
+        run: bash scripts/fdp40-verify-cosign-signature.sh
 
       - name: Verify FDP-40 release controls artifacts
         if: always()
@@ -980,8 +984,11 @@ jobs:
           test -f "$ARTIFACT_DIR/fdp40-runtime-immutability.json"
           test -f "$ARTIFACT_DIR/fdp40-proof-pack.json"
           test -f "$ARTIFACT_DIR/fdp40-proof-pack.md"
+          test -f "target/fdp40-release/fdp40-release-evidence-verification.json"
+          test -f "target/fdp40-release/fdp40-cosign-verification.json"
           python - <<'PY'
           import json
+          import os
           import pathlib
           import sys
           import xml.etree.ElementTree as ET
@@ -992,14 +999,25 @@ jobs:
               "Fdp40ReleaseManifestValidationTest",
               "Fdp40SignedProvenanceReadinessTest",
               "Fdp40ReleaseEvidenceVerificationTest",
+              "Fdp40ReleaseEvidenceVerificationNegativeTest",
               "Fdp40RegistryPromotionPolicyTest",
+              "Fdp40RegistryImmutabilityReadinessTest",
               "Fdp40RequiredChecksMatrixTest",
               "Fdp40EnvironmentProtectionGateTest",
+              "Fdp40DeploymentEnvironmentReadinessTest",
+              "Fdp40BranchProtectionReadinessTest",
+              "Fdp40ExternalPlatformControlsMatrixTest",
               "Fdp40EnablementPrTemplateTest",
               "Fdp40UnsupportedClaimsMatrixTest",
               "Fdp40NoOverclaimDocumentationTest",
               "Fdp40MustNotChangeRuntimeMutationSemanticsTest",
               "Fdp40FinalProofPackTest",
+              "Fdp40SbomReadinessTest",
+              "Fdp40CosignVerificationReadinessTest",
+              "Fdp40ResidualPlatformGapsTest",
+              "Fdp40ScriptExecutionReadinessTest",
+              "Fdp40DocumentationFormattingTest",
+              "Fdp40LocalPathHygieneTest",
           ]
           for class_name in required_tests:
               report = reports / f"TEST-com.frauddetection.alert.regulated.{class_name}.xml"
@@ -1016,6 +1034,8 @@ jobs:
                   sys.exit(1)
 
           verification = json.loads((artifact_dir / "fdp40-release-evidence-verification.json").read_text())
+          script_verification = json.loads(pathlib.Path("target/fdp40-release/fdp40-release-evidence-verification.json").read_text())
+          cosign = json.loads(pathlib.Path("target/fdp40-release/fdp40-cosign-verification.json").read_text())
           runtime = json.loads((artifact_dir / "fdp40-runtime-immutability.json").read_text())
           proof = json.loads((artifact_dir / "fdp40-proof-pack.json").read_text())
           registry = json.loads((artifact_dir / "fdp40-registry-promotion-policy.json").read_text())
@@ -1025,6 +1045,11 @@ jobs:
           runtime_changed_file_count = int(runtime.get("changed_file_count", 0))
           checks = {
               "verification_passed": verification.get("verification_passed") is True,
+              "script_verification_passed": script_verification.get("verification_passed") is True,
+              "script_readiness_only": script_verification.get("readiness_only") is True,
+              "script_external_controls": script_verification.get("external_platform_controls_required") is True,
+              "cosign_readiness_only": cosign.get("readiness_only") is True,
+              "cosign_not_performed": cosign.get("verification_performed") is False,
               "manifest_valid": verification.get("manifest_valid") is True,
               "attestation_valid": verification.get("attestation_valid") is True,
               "fdp39_digest_match": verification.get("fdp39_digest_match") is True,
@@ -1043,6 +1068,9 @@ jobs:
               "registry_no_mutable_tag": registry.get("mutable_tag_only_allowed") is False,
               "registry_no_fixture": registry.get("fixture_image_promotion_allowed") is False,
               "proof_ready": proof.get("release_controls_ready_for_review") is True,
+              "proof_readiness_only": proof.get("readiness_only") is True,
+              "proof_external_platform_controls": proof.get("external_platform_controls_required") is True,
+              "proof_signing_not_performed": proof.get("signing_verification_performed") is False,
               "proof_production_disabled": proof.get("production_enabled") is False,
               "proof_no_external_finality": proof.get("external_finality_claimed") is False,
               "proof_no_distributed_acid": proof.get("distributed_acid_claimed") is False,
@@ -1080,6 +1108,8 @@ jobs:
             alert-service/target/surefire-reports/
             alert-service/target/fdp40-release/fdp40-*.json
             alert-service/target/fdp40-release/fdp40-*.md
+            target/fdp40-release/fdp40-*.json
+            target/fdp40-release/fdp40-*.md
 
   docker:
     name: Docker Compose Build

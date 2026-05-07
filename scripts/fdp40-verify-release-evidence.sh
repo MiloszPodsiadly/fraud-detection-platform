@@ -25,8 +25,14 @@ import pathlib
 import sys
 
 manifest = {}
-for line in pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
-    line = line.strip()
+for line_number, raw_line in enumerate(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").splitlines(), start=1):
+    if raw_line.startswith("  ") and ":" in raw_line:
+        print(f"nested YAML is not supported at line {line_number}", file=sys.stderr)
+        sys.exit(1)
+    if raw_line.lstrip().startswith("- "):
+        print(f"YAML lists are not supported at line {line_number}", file=sys.stderr)
+        sys.exit(1)
+    line = raw_line.strip()
     if line and not line.startswith("#") and ":" in line:
         key, value = line.split(":", 1)
         manifest[key.strip()] = value.strip().strip('"')
@@ -43,6 +49,14 @@ attestation_digest_match = attestation.get("image_digest") == manifest.get("rele
 fixture_not_promoted = manifest.get("release_image_digest") != manifest.get("fixture_image_digest") and fdp39.get("fixture_image_release_candidate_allowed") is False
 required_checks_present = all(check.get("required") is True and check.get("blocking") is True for check in checks)
 production_enabled_false = manifest.get("production_enabled") == "false"
+readiness_only = manifest.get("readiness_only") == "true"
+external_platform_controls_required = manifest.get("external_platform_controls_required") == "true"
+signing_verification_performed = manifest.get("signing_verification_performed") == "true"
+registry_immutability_enforced_by_fdp40 = manifest.get("registry_immutability_enforced_by_fdp40") == "true"
+environment_protection_verified_by_fdp40 = manifest.get("environment_protection_verified_by_fdp40") == "true"
+branch_protection_verified_by_fdp40 = manifest.get("branch_protection_verified_by_fdp40") == "true"
+release_config_pr_required = manifest.get("release_config_pr_required") == "true"
+dual_control_required = manifest.get("dual_control_required") == "true"
 no_mutable_tag_only = bool(manifest.get("release_image_digest")) and bool(manifest.get("release_image_tag"))
 if not manifest_valid:
     failure_reasons.append("manifest_invalid")
@@ -58,6 +72,22 @@ if not required_checks_present:
     failure_reasons.append("required_checks_missing")
 if not production_enabled_false:
     failure_reasons.append("production_enabled_true")
+if not readiness_only:
+    failure_reasons.append("readiness_only_missing")
+if not external_platform_controls_required:
+    failure_reasons.append("external_platform_controls_missing")
+if signing_verification_performed:
+    failure_reasons.append("signing_verification_unexpected")
+if registry_immutability_enforced_by_fdp40:
+    failure_reasons.append("registry_enforcement_unexpected")
+if environment_protection_verified_by_fdp40:
+    failure_reasons.append("environment_verification_unexpected")
+if branch_protection_verified_by_fdp40:
+    failure_reasons.append("branch_protection_verification_unexpected")
+if not release_config_pr_required:
+    failure_reasons.append("release_config_pr_not_required")
+if not dual_control_required:
+    failure_reasons.append("dual_control_not_required")
 if not no_mutable_tag_only:
     failure_reasons.append("mutable_tag_only")
 passed = not failure_reasons
@@ -70,6 +100,14 @@ data = {
     "fixture_not_promoted": fixture_not_promoted,
     "required_checks_present": required_checks_present,
     "production_enabled_false": production_enabled_false,
+    "readiness_only": readiness_only,
+    "external_platform_controls_required": external_platform_controls_required,
+    "signing_verification_performed": signing_verification_performed,
+    "registry_immutability_enforced_by_fdp40": registry_immutability_enforced_by_fdp40,
+    "environment_protection_verified_by_fdp40": environment_protection_verified_by_fdp40,
+    "branch_protection_verified_by_fdp40": branch_protection_verified_by_fdp40,
+    "release_config_pr_required": release_config_pr_required,
+    "dual_control_required": dual_control_required,
     "no_mutable_tag_only": no_mutable_tag_only,
     "failure_reasons": failure_reasons,
 }

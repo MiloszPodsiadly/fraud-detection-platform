@@ -20,8 +20,14 @@ import sys
 
 path = pathlib.Path(sys.argv[1])
 data = {}
-for line in path.read_text(encoding="utf-8").splitlines():
-    line = line.strip()
+for line_number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+    if raw_line.startswith("  ") and ":" in raw_line:
+        print(f"nested YAML is not supported at line {line_number}", file=sys.stderr)
+        sys.exit(1)
+    if raw_line.lstrip().startswith("- "):
+        print(f"YAML lists are not supported at line {line_number}", file=sys.stderr)
+        sys.exit(1)
+    line = raw_line.strip()
     if not line or line.startswith("#") or ":" not in line:
         continue
     key, value = line.split(":", 1)
@@ -33,6 +39,9 @@ required = [
     "dockerfile_path", "builder_identity", "build_workflow", "build_timestamp",
     "fdp39_provenance_artifact_ref", "fdp39_release_image_digest", "fixture_image_digest",
     "fixture_image_promotable", "ready_for_enablement_review", "production_enabled",
+    "readiness_only", "external_platform_controls_required", "signing_verification_performed",
+    "registry_immutability_enforced_by_fdp40", "environment_protection_verified_by_fdp40",
+    "branch_protection_verified_by_fdp40",
     "release_config_pr_required", "dual_control_required", "rollback_plan_ref",
     "operator_drill_ref", "security_review_ref",
 ]
@@ -52,6 +61,18 @@ if data.get("fixture_image_promotable") != "false":
     failures.append("fixture_image_promotable must be false")
 if data.get("production_enabled") != "false":
     failures.append("production_enabled must be false")
+if data.get("readiness_only") != "true":
+    failures.append("readiness_only must be true")
+if data.get("external_platform_controls_required") != "true":
+    failures.append("external_platform_controls_required must be true")
+for field in [
+    "signing_verification_performed",
+    "registry_immutability_enforced_by_fdp40",
+    "environment_protection_verified_by_fdp40",
+    "branch_protection_verified_by_fdp40",
+]:
+    if data.get(field) != "false":
+        failures.append(f"{field} must be false")
 if data.get("release_config_pr_required") != "true":
     failures.append("release_config_pr_required must be true")
 if data.get("dual_control_required") != "true":
