@@ -926,6 +926,161 @@ jobs:
             alert-service/target/fdp39-governance/fdp39-*.json
             alert-service/target/fdp39-governance/fdp39-*.md
 
+  fdp40-release-controls:
+    name: FDP-40 Release Controls
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FDP40_EVENT_NAME: ${{ github.event_name }}
+      FDP40_DIFF_BASE_SHA: ${{ github.event.before || '' }}
+      FDP40_DIFF_HEAD_SHA: ${{ github.sha }}
+    needs:
+      - backend
+      - docker
+      - regulated-mutation-regression
+      - fdp35-production-readiness
+      - fdp36-real-chaos
+      - fdp37-production-image-chaos
+      - fdp38-live-runtime-checkpoint-chaos
+      - fdp39-release-governance
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Validate FDP-40 release manifest
+        run: bash scripts/fdp40-validate-release-manifest.sh docs/release/FDP-40-release-manifest-template.yaml
+
+      - name: Validate FDP-40 attestation readiness
+        run: bash scripts/fdp40-validate-attestation-readiness.sh docs/release/FDP-40-attestation-readiness-template.json docs/release/FDP-40-release-manifest-template.yaml
+
+      - name: Verify FDP-40 release evidence
+        run: bash scripts/fdp40-verify-release-evidence.sh docs/release/FDP-40-release-manifest-template.yaml docs/release/FDP-40-attestation-readiness-template.json docs/release/FDP-40-fdp39-provenance-reference.json docs/release/FDP-40-required-checks-matrix.json
+
+      - name: Run FDP-40 release controls tests
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp40.ci-mode=true" "-Dfdp40.event-name=${FDP40_EVENT_NAME}" "-Dfdp40.base-sha=${FDP40_DIFF_BASE_SHA}" "-Dfdp40.head-sha=${FDP40_DIFF_HEAD_SHA}" "-Dfdp40.release-manifest=../docs/release/FDP-40-release-manifest-template.yaml" "-Dfdp40.attestation=../docs/release/FDP-40-attestation-readiness-template.json" "-Dfdp40.fdp39-provenance=../docs/release/FDP-40-fdp39-provenance-reference.json" "-Dfdp40.required-checks-matrix=../docs/release/FDP-40-required-checks-matrix.json" "-Dtest=Fdp40ReleaseManifestValidationTest,Fdp40SignedProvenanceReadinessTest,Fdp40ReleaseEvidenceVerificationTest,Fdp40RegistryPromotionPolicyTest,Fdp40RequiredChecksMatrixTest,Fdp40EnvironmentProtectionGateTest,Fdp40EnablementPrTemplateTest,Fdp40UnsupportedClaimsMatrixTest,Fdp40NoOverclaimDocumentationTest,Fdp40MustNotChangeRuntimeMutationSemanticsTest,Fdp40FinalProofPackTest" test
+
+      - name: Verify FDP-40 release controls artifacts
+        if: always()
+        run: |
+          set -euo pipefail
+          ARTIFACT_DIR=alert-service/target/fdp40-release
+          test -f "$ARTIFACT_DIR/fdp40-release-evidence-verification.json"
+          test -f "$ARTIFACT_DIR/fdp40-release-evidence-verification.md"
+          test -f "$ARTIFACT_DIR/fdp40-registry-promotion-policy.json"
+          test -f "$ARTIFACT_DIR/fdp40-runtime-immutability.json"
+          test -f "$ARTIFACT_DIR/fdp40-proof-pack.json"
+          test -f "$ARTIFACT_DIR/fdp40-proof-pack.md"
+          python - <<'PY'
+          import json
+          import pathlib
+          import sys
+          import xml.etree.ElementTree as ET
+
+          artifact_dir = pathlib.Path("alert-service/target/fdp40-release")
+          reports = pathlib.Path("alert-service/target/surefire-reports")
+          required_tests = [
+              "Fdp40ReleaseManifestValidationTest",
+              "Fdp40SignedProvenanceReadinessTest",
+              "Fdp40ReleaseEvidenceVerificationTest",
+              "Fdp40RegistryPromotionPolicyTest",
+              "Fdp40RequiredChecksMatrixTest",
+              "Fdp40EnvironmentProtectionGateTest",
+              "Fdp40EnablementPrTemplateTest",
+              "Fdp40UnsupportedClaimsMatrixTest",
+              "Fdp40NoOverclaimDocumentationTest",
+              "Fdp40MustNotChangeRuntimeMutationSemanticsTest",
+              "Fdp40FinalProofPackTest",
+          ]
+          for class_name in required_tests:
+              report = reports / f"TEST-com.frauddetection.alert.regulated.{class_name}.xml"
+              if not report.exists():
+                  print(f"Missing FDP-40 Surefire XML: {report}", file=sys.stderr)
+                  sys.exit(1)
+              root = ET.parse(report).getroot()
+              tests = int(root.attrib.get("tests", "0"))
+              skipped = int(root.attrib.get("skipped", "0"))
+              failures = int(root.attrib.get("failures", "0"))
+              errors = int(root.attrib.get("errors", "0"))
+              if tests <= 0 or skipped > 0 or failures > 0 or errors > 0:
+                  print(f"FDP-40 test class did not fully execute: {class_name} tests={tests} skipped={skipped} failures={failures} errors={errors}", file=sys.stderr)
+                  sys.exit(1)
+
+          verification = json.loads((artifact_dir / "fdp40-release-evidence-verification.json").read_text())
+          runtime = json.loads((artifact_dir / "fdp40-runtime-immutability.json").read_text())
+          proof = json.loads((artifact_dir / "fdp40-proof-pack.json").read_text())
+          registry = json.loads((artifact_dir / "fdp40-registry-promotion-policy.json").read_text())
+          expected_event = os.environ["FDP40_EVENT_NAME"]
+          expected_diff_base = os.environ.get("FDP40_DIFF_BASE_SHA", "")
+          runtime_mode = runtime.get("comparison_mode")
+          runtime_changed_file_count = int(runtime.get("changed_file_count", 0))
+          checks = {
+              "verification_passed": verification.get("verification_passed") is True,
+              "manifest_valid": verification.get("manifest_valid") is True,
+              "attestation_valid": verification.get("attestation_valid") is True,
+              "fdp39_digest_match": verification.get("fdp39_digest_match") is True,
+              "fixture_not_promoted": verification.get("fixture_not_promoted") is True,
+              "required_checks_present": verification.get("required_checks_present") is True,
+              "production_enabled_false": verification.get("production_enabled_false") is True,
+              "runtime_diff_computed": runtime.get("diff_computed") is True,
+              "runtime_event": runtime.get("event_name") == expected_event,
+              "runtime_comparison_mode": runtime_mode in {"pull-request-merge-base-to-head", "push-before-to-head"},
+              "runtime_head_sha": runtime.get("head_sha") == os.environ["GITHUB_SHA"],
+              "runtime_base_sha": bool(runtime.get("base_sha")),
+              "runtime_changed_file_count": runtime_changed_file_count > 0,
+              "runtime_unchanged": runtime.get("runtime_semantics_unchanged") is True,
+              "runtime_protected_count": runtime.get("protected_runtime_file_count") == 0,
+              "registry_policy_valid": registry.get("promotion_policy_valid") is True,
+              "registry_no_mutable_tag": registry.get("mutable_tag_only_allowed") is False,
+              "registry_no_fixture": registry.get("fixture_image_promotion_allowed") is False,
+              "proof_ready": proof.get("release_controls_ready_for_review") is True,
+              "proof_production_disabled": proof.get("production_enabled") is False,
+              "proof_no_external_finality": proof.get("external_finality_claimed") is False,
+              "proof_no_distributed_acid": proof.get("distributed_acid_claimed") is False,
+              "proof_no_bank_cert": proof.get("bank_certification_claimed") is False,
+          }
+          if expected_event == "push":
+              checks["runtime_push_comparison_mode"] = runtime_mode == "push-before-to-head"
+              checks["runtime_push_base_sha"] = runtime.get("base_sha") == expected_diff_base
+          if expected_event == "pull_request":
+              checks["runtime_pr_comparison_mode"] = runtime_mode == "pull-request-merge-base-to-head"
+          failed = [name for name, ok in checks.items() if not ok]
+          if failed:
+              print(f"FDP-40 artifact checks failed: {failed}", file=sys.stderr)
+              sys.exit(1)
+          generated = "\n".join(path.read_text(errors="ignore") for path in artifact_dir.glob("fdp40-*.*"))
+          for token in ["LOCAL_", "PLACEHOLDER", "TO_BE_FILLED", "NOT_PROVIDED", "UNKNOWN", "BANK_CERTIFIED"]:
+              if token in generated:
+                  print(f"FDP-40 generated artifacts contain forbidden token: {token}", file=sys.stderr)
+                  sys.exit(1)
+          PY
+          grep -q 'READY_FOR_ENABLEMENT_REVIEW is not PRODUCTION_ENABLED' docs/release/FDP-40-branch-readme.md .github/PULL_REQUEST_TEMPLATE/fdp-enablement-config-change.md
+          grep -q 'signed image does not mean external finality' docs/release/FDP-40-unsupported-claims-matrix.md
+          if grep -R 'production_enabled: `true`\|bank_certification_claimed: `true`\|external_finality_claimed: `true`\|distributed_acid_claimed: `true`' docs/FDP-40-*.md docs/adr/FDP-40-*.md docs/release/FDP-40-*.md "$ARTIFACT_DIR"; then
+            echo "FDP-40 docs/artifacts contain a forbidden positive enablement or finality claim"
+            exit 1
+          fi
+
+      - name: Upload FDP-40 release controls artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fdp40-release-controls-reports
+          if-no-files-found: error
+          path: |
+            alert-service/target/surefire-reports/
+            alert-service/target/fdp40-release/fdp40-*.json
+            alert-service/target/fdp40-release/fdp40-*.md
+
   docker:
     name: Docker Compose Build
     runs-on: ubuntu-latest
