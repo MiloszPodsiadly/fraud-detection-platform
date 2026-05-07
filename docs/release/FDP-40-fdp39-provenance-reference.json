@@ -1,0 +1,7 @@
+{
+  "fixture_image_digest_or_id": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+  "fixture_image_release_candidate_allowed": false,
+  "immutable_provenance_complete": true,
+  "release_dockerfile_path": "deployment/Dockerfile.backend",
+  "release_image_digest_or_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+}

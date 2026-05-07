@@ -1,0 +1,15 @@
+{
+  "approver_cannot_equal_release_author": true,
+  "deployment_references_immutable_digest": true,
+  "deployment_references_release_manifest": true,
+  "deployment_references_rollback_plan": true,
+  "deployment_uses_fixture_image": false,
+  "fdp29_enablement_requires_separate_config_pr": true,
+  "fraud_ops_owner_required": true,
+  "platform_owner_required": true,
+  "production_deploy_requires_approval": true,
+  "production_deploy_requires_dual_control": true,
+  "rollback_owner_required": true,
+  "security_owner_required": true,
+  "staging_deploy_requires_approval": true
+}

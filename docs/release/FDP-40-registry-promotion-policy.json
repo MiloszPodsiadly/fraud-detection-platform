@@ -1,0 +1,15 @@
+{
+  "attested_release_image_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "fdp39_release_image_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "fixture_image_promotion_allowed": false,
+  "mutable_tag_only_allowed": false,
+  "production_readiness": "READY_FOR_ENABLEMENT_REVIEW",
+  "promotion_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "promotion_timestamp": "2026-05-07T00:00:00Z",
+  "registry_immutability_verified": true,
+  "registry_repository": "ghcr.io/miloszpodsiadly/fraud-detection-platform/alert-service",
+  "release_image_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "release_tag_non_overwritable": true,
+  "rollback_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "signed_image": true
+}
