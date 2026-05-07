@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
 import com.frauddetection.alert.persistence.AlertDocument;
@@ -64,6 +65,7 @@ public final class RegulatedMutationFdp38LiveCheckpointChaosHarness implements A
     private final Path logDirectory = Path.of("target", "fdp38-chaos");
     private final List<RegulatedMutationChaosResult> results = new ArrayList<>();
     private final List<String> checkpointNames = new ArrayList<>();
+    private final List<Fdp38FalseSuccessEvaluation> falseSuccessEvaluations = new ArrayList<>();
 
     private GenericContainer<?> container;
     private String killedContainerId;
@@ -248,6 +250,7 @@ public final class RegulatedMutationFdp38LiveCheckpointChaosHarness implements A
                 command.getExecutionStatus(),
                 command.getPublicStatus(),
                 command.getResponseSnapshot() != null,
+                command.getLocalCommitMarker() != null,
                 alert == null ? null : alert.getAlertStatus(),
                 alert == null ? null : alert.getAnalystDecision(),
                 countOutbox(command.getId()),
@@ -259,7 +262,9 @@ public final class RegulatedMutationFdp38LiveCheckpointChaosHarness implements A
         );
         results.add(result);
         checkpointNames.add(checkpoint.name());
-        appendEvidenceSummary(result, checkpoint);
+        Fdp38FalseSuccessEvaluation evaluation = evaluateFalseSuccess(result, checkpoint);
+        falseSuccessEvaluations.add(evaluation);
+        appendEvidenceSummary(result, checkpoint, evaluation);
         writeProofArtifacts();
         return result;
     }
@@ -394,7 +399,97 @@ public final class RegulatedMutationFdp38LiveCheckpointChaosHarness implements A
                         .append("outcome", outcome.name()));
     }
 
-    private void appendEvidenceSummary(RegulatedMutationChaosResult result, Fdp38LiveRuntimeCheckpoint checkpoint) {
+    private Fdp38FalseSuccessEvaluation evaluateFalseSuccess(
+            RegulatedMutationChaosResult result,
+            Fdp38LiveRuntimeCheckpoint checkpoint
+    ) {
+        boolean publicSuccessStatusAbsent = !isCommittedOrFinalizedPublicStatus(result.publicStatus());
+        boolean committedSnapshotAbsentWhenNotAllowed = checkpoint == Fdp38LiveRuntimeCheckpoint.BEFORE_SUCCESS_AUDIT_RETRY
+                || !result.responseSnapshotPresent();
+        boolean finalizedStatusAbsentWhenNotAllowed = !isFinalizedPublicStatus(result.publicStatus());
+        boolean successAuditAbsentWhenNotAllowed = result.successAuditEvents() == 0L;
+        boolean outboxAbsentWhenNotAllowed = checkpoint == Fdp38LiveRuntimeCheckpoint.BEFORE_SUCCESS_AUDIT_RETRY
+                || result.outboxRecords() == 0L;
+        boolean businessMutationAbsentWhenNotAllowed = checkpoint == Fdp38LiveRuntimeCheckpoint.BEFORE_SUCCESS_AUDIT_RETRY
+                || result.businessMutationCount() == 0L;
+        boolean duplicateMutationAbsent = result.businessMutationCount() <= 1L;
+        boolean duplicateOutboxAbsent = result.outboxRecords() <= 1L;
+        boolean duplicateSuccessAuditAbsent = result.successAuditEvents() <= 1L;
+
+        List<String> failedReasons = new ArrayList<>();
+        addFailureIfFalse(failedReasons, publicSuccessStatusAbsent, "public_success_status_absent");
+        addFailureIfFalse(failedReasons, committedSnapshotAbsentWhenNotAllowed, "committed_snapshot_absent_when_not_allowed");
+        addFailureIfFalse(failedReasons, finalizedStatusAbsentWhenNotAllowed, "finalized_status_absent_when_not_allowed");
+        addFailureIfFalse(failedReasons, successAuditAbsentWhenNotAllowed, "success_audit_absent_when_not_allowed");
+        addFailureIfFalse(failedReasons, outboxAbsentWhenNotAllowed, "outbox_absent_when_not_allowed");
+        addFailureIfFalse(failedReasons, businessMutationAbsentWhenNotAllowed, "business_mutation_absent_when_not_allowed");
+        addFailureIfFalse(failedReasons, duplicateMutationAbsent, "duplicate_mutation_absent");
+        addFailureIfFalse(failedReasons, duplicateOutboxAbsent, "duplicate_outbox_absent");
+        addFailureIfFalse(failedReasons, duplicateSuccessAuditAbsent, "duplicate_success_audit_absent");
+
+        switch (checkpoint) {
+            case BEFORE_LEGACY_BUSINESS_MUTATION -> {
+                addFailureIfFalse(failedReasons, result.businessMutationCount() == 0L, "before_legacy_business_mutation_business_count_zero");
+                addFailureIfFalse(failedReasons, result.outboxRecords() == 0L, "before_legacy_business_mutation_outbox_zero");
+                addFailureIfFalse(failedReasons, result.successAuditEvents() == 0L, "before_legacy_business_mutation_success_audit_zero");
+            }
+            case AFTER_ATTEMPTED_AUDIT_BEFORE_BUSINESS_MUTATION -> {
+                addFailureIfFalse(failedReasons, result.attemptedAuditEvents() == 1L, "after_attempted_audit_count_one");
+                addFailureIfFalse(failedReasons, result.businessMutationCount() == 0L, "after_attempted_business_count_zero");
+                addFailureIfFalse(failedReasons, result.outboxRecords() == 0L, "after_attempted_outbox_zero");
+                addFailureIfFalse(failedReasons, result.successAuditEvents() == 0L, "after_attempted_success_audit_zero");
+            }
+            case BEFORE_FDP29_LOCAL_FINALIZE -> {
+                addFailureIfFalse(failedReasons, !result.localCommitMarkerPresent(), "before_fdp29_local_commit_marker_absent");
+                addFailureIfFalse(failedReasons, !result.responseSnapshotPresent(), "before_fdp29_response_snapshot_absent");
+                addFailureIfFalse(failedReasons, result.businessMutationCount() == 0L, "before_fdp29_business_count_zero");
+                addFailureIfFalse(failedReasons, result.outboxRecords() == 0L, "before_fdp29_outbox_zero");
+                addFailureIfFalse(failedReasons, result.successAuditEvents() == 0L, "before_fdp29_success_audit_zero");
+            }
+            case BEFORE_SUCCESS_AUDIT_RETRY -> {
+                addFailureIfFalse(failedReasons, result.businessMutationCount() == 1L, "before_success_audit_retry_business_count_one");
+                addFailureIfFalse(failedReasons, result.outboxRecords() == 1L, "before_success_audit_retry_outbox_one");
+                addFailureIfFalse(failedReasons, result.successAuditEvents() == 0L, "before_success_audit_retry_success_audit_zero");
+            }
+        }
+
+        return new Fdp38FalseSuccessEvaluation(
+                publicSuccessStatusAbsent,
+                committedSnapshotAbsentWhenNotAllowed,
+                finalizedStatusAbsentWhenNotAllowed,
+                successAuditAbsentWhenNotAllowed,
+                outboxAbsentWhenNotAllowed,
+                businessMutationAbsentWhenNotAllowed,
+                duplicateMutationAbsent,
+                duplicateOutboxAbsent,
+                duplicateSuccessAuditAbsent,
+                List.copyOf(failedReasons)
+        );
+    }
+
+    private boolean isCommittedOrFinalizedPublicStatus(SubmitDecisionOperationStatus publicStatus) {
+        return publicStatus == SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING
+                || publicStatus == SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED
+                || isFinalizedPublicStatus(publicStatus);
+    }
+
+    private boolean isFinalizedPublicStatus(SubmitDecisionOperationStatus publicStatus) {
+        return publicStatus == SubmitDecisionOperationStatus.FINALIZED_VISIBLE
+                || publicStatus == SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
+                || publicStatus == SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED;
+    }
+
+    private void addFailureIfFalse(List<String> failures, boolean passed, String reason) {
+        if (!passed && !failures.contains(reason)) {
+            failures.add(reason);
+        }
+    }
+
+    private void appendEvidenceSummary(
+            RegulatedMutationChaosResult result,
+            Fdp38LiveRuntimeCheckpoint checkpoint,
+            Fdp38FalseSuccessEvaluation evaluation
+    ) {
         try {
             Files.createDirectories(logDirectory);
             Files.writeString(
@@ -404,11 +499,15 @@ public final class RegulatedMutationFdp38LiveCheckpointChaosHarness implements A
                             + "; checkpoint_reached=true"
                             + "; proof_levels=" + EnumSet.of(RegulatedMutationProofLevel.LIVE_IN_FLIGHT_REQUEST_KILL)
                             + "; state_reach_method=" + RegulatedMutationStateReachMethod.RUNTIME_REACHED_TEST_FIXTURE
+                            + "; precondition_setup=" + checkpoint.preconditionSetup()
+                            + "; no_false_success=" + evaluation.passed()
                             + "; killed_container_id_masked=" + maskId(result.killedTargetId())
                             + "; restarted_container_id_masked=" + maskId(result.restartedTargetId())
                             + "; image_kind=test-fixture-production-like"
                             + "; fixture_image=true"
                             + "; release_image=false"
+                            + "; release_candidate_allowed=false"
+                            + "; production_deployable=false"
                             + "; production_enablement=false"
                             + "; result=PASS"
                             + System.lineSeparator(),
@@ -426,6 +525,10 @@ public final class RegulatedMutationFdp38LiveCheckpointChaosHarness implements A
         boolean previousNoDuplicateMutation = previousSummaryBoolean("no_duplicate_mutation", true);
         boolean previousNoDuplicateOutbox = previousSummaryBoolean("no_duplicate_outbox", true);
         boolean previousNoDuplicateSuccessAudit = previousSummaryBoolean("no_duplicate_success_audit", true);
+        ObjectNode falseSuccessEvaluation = aggregateObject("false_success_evaluation");
+        ObjectNode preconditionSetup = aggregateObject("precondition_setup");
+        ArrayNode failedReasons = aggregateArray("failed_false_success_reasons");
+        appendCurrentEvaluations(falseSuccessEvaluation, preconditionSetup, failedReasons);
         ObjectNode root = objectMapper.createObjectNode();
         root.put("timestamp", Instant.now().toString());
         root.put("commit_sha", Optional.ofNullable(System.getenv("GITHUB_SHA")).orElse("LOCAL"));
@@ -435,6 +538,10 @@ public final class RegulatedMutationFdp38LiveCheckpointChaosHarness implements A
         root.put("fixture_image_kind", "test-fixture-production-like");
         root.put("fixture_image", true);
         root.put("release_image", false);
+        root.put("contains_test_classes", true);
+        root.put("contains_test_profiles", true);
+        root.put("release_candidate_allowed", false);
+        root.put("production_deployable", false);
         root.put("production_enablement", false);
         root.put("live_runtime_checkpoint_proof_executed", true);
         root.put("proof_levels", "LIVE_IN_FLIGHT_REQUEST_KILL");
@@ -444,8 +551,10 @@ public final class RegulatedMutationFdp38LiveCheckpointChaosHarness implements A
         aggregateCheckpointNames.forEach(checkpoints::add);
         root.put("killed_container_id_masked", maskId(killedContainerId));
         root.put("restarted_container_id_masked", maskId(restartedContainerId));
-        root.put("no_false_success", previousNoFalseSuccess && results.stream().allMatch(result -> !result.responseSnapshotPresent()
-                || result.businessMutationCount() == 1L));
+        root.put("no_false_success", previousNoFalseSuccess && failedReasons.isEmpty());
+        root.set("false_success_evaluation", falseSuccessEvaluation);
+        root.set("failed_false_success_reasons", failedReasons);
+        root.set("precondition_setup", preconditionSetup);
         root.put("no_duplicate_mutation", previousNoDuplicateMutation && results.stream().allMatch(result -> result.businessMutationCount() <= 1L));
         root.put("no_duplicate_outbox", previousNoDuplicateOutbox && results.stream().allMatch(result -> result.outboxRecords() <= 1L));
         root.put("no_duplicate_success_audit", previousNoDuplicateSuccessAudit && results.stream().allMatch(result -> result.successAuditEvents() <= 1L));
@@ -477,6 +586,81 @@ public final class RegulatedMutationFdp38LiveCheckpointChaosHarness implements A
         } catch (IOException exception) {
             throw new UncheckedIOException("Unable to write FDP-38 proof artifacts", exception);
         }
+    }
+
+    private void appendCurrentEvaluations(
+            ObjectNode falseSuccessEvaluation,
+            ObjectNode preconditionSetup,
+            ArrayNode failedReasons
+    ) {
+        for (int i = 0; i < checkpointNames.size(); i++) {
+            String checkpointName = checkpointNames.get(i);
+            Fdp38LiveRuntimeCheckpoint checkpoint = Fdp38LiveRuntimeCheckpoint.valueOf(checkpointName);
+            Fdp38FalseSuccessEvaluation evaluation = falseSuccessEvaluations.get(i);
+            falseSuccessEvaluation.set(checkpointName, falseSuccessEvaluationNode(evaluation));
+            preconditionSetup.put(checkpointName, checkpoint.preconditionSetup().name());
+            evaluation.failedReasons().forEach(reason -> addUniqueFailedReason(failedReasons, checkpointName + ":" + reason));
+        }
+    }
+
+    private ObjectNode falseSuccessEvaluationNode(Fdp38FalseSuccessEvaluation evaluation) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("public_success_status_absent", evaluation.publicSuccessStatusAbsent());
+        node.put("committed_snapshot_absent_when_not_allowed", evaluation.committedSnapshotAbsentWhenNotAllowed());
+        node.put("finalized_status_absent_when_not_allowed", evaluation.finalizedStatusAbsentWhenNotAllowed());
+        node.put("success_audit_absent_when_not_allowed", evaluation.successAuditAbsentWhenNotAllowed());
+        node.put("outbox_absent_when_not_allowed", evaluation.outboxAbsentWhenNotAllowed());
+        node.put("business_mutation_absent_when_not_allowed", evaluation.businessMutationAbsentWhenNotAllowed());
+        node.put("duplicate_mutation_absent", evaluation.duplicateMutationAbsent());
+        node.put("duplicate_outbox_absent", evaluation.duplicateOutboxAbsent());
+        node.put("duplicate_success_audit_absent", evaluation.duplicateSuccessAuditAbsent());
+        node.put("passed", evaluation.passed());
+        ArrayNode reasons = node.putArray("failed_reasons");
+        evaluation.failedReasons().forEach(reasons::add);
+        return node;
+    }
+
+    private ObjectNode aggregateObject(String fieldName) {
+        Path summary = logDirectory.resolve(PROOF_SUMMARY_JSON);
+        ObjectNode aggregate = objectMapper.createObjectNode();
+        if (!Files.exists(summary)) {
+            return aggregate;
+        }
+        try {
+            JsonNode existing = objectMapper.readTree(summary.toFile()).path(fieldName);
+            if (existing.isObject()) {
+                existing.fields().forEachRemaining(entry -> aggregate.set(entry.getKey(), entry.getValue()));
+            }
+            return aggregate;
+        } catch (IOException exception) {
+            throw new UncheckedIOException("Unable to read existing FDP-38 proof summary", exception);
+        }
+    }
+
+    private ArrayNode aggregateArray(String fieldName) {
+        Path summary = logDirectory.resolve(PROOF_SUMMARY_JSON);
+        ArrayNode aggregate = objectMapper.createArrayNode();
+        if (!Files.exists(summary)) {
+            return aggregate;
+        }
+        try {
+            JsonNode existing = objectMapper.readTree(summary.toFile()).path(fieldName);
+            if (existing.isArray()) {
+                existing.forEach(value -> addUniqueFailedReason(aggregate, value.asText()));
+            }
+            return aggregate;
+        } catch (IOException exception) {
+            throw new UncheckedIOException("Unable to read existing FDP-38 proof summary", exception);
+        }
+    }
+
+    private void addUniqueFailedReason(ArrayNode failedReasons, String reason) {
+        for (JsonNode existing : failedReasons) {
+            if (existing.asText().equals(reason)) {
+                return;
+            }
+        }
+        failedReasons.add(reason);
     }
 
     private List<String> aggregateCheckpointNames() {
@@ -517,15 +701,23 @@ public final class RegulatedMutationFdp38LiveCheckpointChaosHarness implements A
                 + "- fixture_image_kind: `test-fixture-production-like`\n"
                 + "- fixture_image: `true`\n"
                 + "- release_image: `false`\n"
+                + "- contains_test_classes: `true`\n"
+                + "- contains_test_profiles: `true`\n"
+                + "- release_candidate_allowed: `false`\n"
+                + "- production_deployable: `false`\n"
                 + "- production_enablement: `false`\n"
                 + "- live_runtime_checkpoint_proof_executed: `true`\n"
                 + "- proof_levels: `LIVE_IN_FLIGHT_REQUEST_KILL`\n"
                 + "- state_reach_methods: `RUNTIME_REACHED_TEST_FIXTURE`\n"
                 + "- RUNTIME_REACHED_PRODUCTION_IMAGE: `not claimed`\n"
+                + "- no_false_success: `true`\n"
+                + "- failed_false_success_reasons: `[]`\n"
+                + "- precondition_setup: see `fdp38-proof-summary.json`\n"
                 + "- checkpoint_count: `" + checkpointCount + "`\n"
                 + "- checkpoint_reached: `true`\n"
                 + "- final_result: `PASS`\n\n"
-                + "FDP-38 uses a dedicated test-fixture image. The fixture image is not a production image, not a release image, and not production enablement.\n";
+                + "FDP-38 uses a dedicated test-fixture image. The fixture image is not a production image, "
+                + "not a release image, not production deployable, and not production enablement.\n";
     }
 
     private String checkpointArtifactSlug() {
@@ -538,6 +730,10 @@ public final class RegulatedMutationFdp38LiveCheckpointChaosHarness implements A
         root.put("image_kind", "test-fixture-production-like");
         root.put("fixture_image", true);
         root.put("release_image", false);
+        root.put("contains_test_classes", true);
+        root.put("contains_test_profiles", true);
+        root.put("release_candidate_allowed", false);
+        root.put("production_deployable", false);
         root.put("image_name", fixtureImageName);
         root.put("image_tag", imageTag());
         root.put("image_id", fixtureImageId);
