@@ -18,8 +18,12 @@ FDP-38 is mergeable only as selected live runtime checkpoint proof using a dedic
 - `image_kind: test-fixture-production-like`
 - `fixture_image: true`
 - `release_image: false`
+- `contains_test_classes: true`
+- `contains_test_profiles: true`
+- `release_candidate_allowed: false`
+- `production_deployable: false`
 
-The fixture image is not a production image and not a release image.
+The fixture image is not a production image, not a release image, not production deployable, and not eligible for release-candidate promotion.
 
 ## Required Proof Artifacts
 
@@ -36,8 +40,15 @@ Artifacts must contain:
 - masked killed container id
 - masked restarted container id
 - `release_image=false`
+- `contains_test_classes=true`
+- `contains_test_profiles=true`
+- `release_candidate_allowed=false`
+- `production_deployable=false`
 - `production_enablement=false`
 - `runtime_reached_production_image=false`
+- `precondition_setup`
+- `false_success_evaluation`
+- `failed_false_success_reasons=[]`
 - no placeholders
 
 ## Required Tests
@@ -57,4 +68,6 @@ FDP-38 is GO only if `LIVE_IN_FLIGHT_REQUEST_KILL` is non-skipped, barrier-reach
 
 FDP-38 is NO-GO if it claims `RUNTIME_REACHED_PRODUCTION_IMAGE` while using the test-fixture image.
 
-FDP-38 is NO-GO if any artifact claims `release_image=true`, production enablement, full instruction-boundary coverage, external finality, distributed ACID, Kafka exactly-once delivery, legal notarization, no WORM storage, production certification, or bank certification.
+FDP-38 is NO-GO if the fixture Dockerfile is used by compose, FDP-37 production-image jobs, or release-image jobs. Only the `fdp38-live-runtime-checkpoint-chaos` job may build `deployment/Dockerfile.alert-service-fdp38-fixture`.
+
+FDP-38 is NO-GO if any artifact claims `release_image=true`, `release_candidate_allowed=true`, `production_deployable=true`, production enablement, full instruction-boundary coverage, external finality, distributed ACID, Kafka exactly-once delivery, legal notarization, WORM guarantee, production certification, or bank certification.
