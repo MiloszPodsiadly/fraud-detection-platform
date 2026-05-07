@@ -652,9 +652,11 @@ jobs:
           ci = pathlib.Path(".github/workflows/ci.yml").read_text()
           fdp38_start = ci.index("fdp38-live-runtime-checkpoint-chaos:")
           docker_start = ci.index("\n  docker:", fdp38_start)
+          fdp39_start = ci.find("\n  fdp39-release-governance:", fdp38_start)
+          fdp38_allowed_end = fdp39_start if fdp39_start >= 0 else docker_start
           for occurrence in [idx for idx in range(len(ci)) if ci.startswith("Dockerfile.alert-service-fdp38-fixture", idx)]:
-              if not (fdp38_start < occurrence < docker_start):
-                  print("FDP-38 fixture Dockerfile is referenced outside the FDP-38 CI job", file=sys.stderr)
+              if not ((fdp38_start < occurrence < fdp38_allowed_end) or (fdp39_start >= 0 and fdp39_start < occurrence < docker_start)):
+                  print("FDP-38 fixture Dockerfile is referenced outside the FDP-38/FDP-39 CI jobs", file=sys.stderr)
                   sys.exit(1)
           compose = pathlib.Path("deployment/docker-compose.yml").read_text()
           if "Dockerfile.alert-service-fdp38-fixture" in compose:
@@ -688,6 +690,176 @@ jobs:
             alert-service/target/failsafe-reports/
             alert-service/target/fdp38-chaos/
 
+  fdp39-release-governance:
+    name: FDP-39 Release Governance Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    needs:
+      - backend
+      - regulated-mutation-regression
+      - fdp35-production-readiness
+      - fdp36-real-chaos
+      - fdp37-production-image-chaos
+      - fdp38-live-runtime-checkpoint-chaos
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Verify Docker is available for FDP-39 release governance
+        run: docker version
+
+      - name: Build and export release image filesystem
+        run: |
+          set -euo pipefail
+          docker build -f deployment/Dockerfile.backend --build-arg MODULE_NAME=alert-service -t fdp39-alert-service:${GITHUB_SHA} .
+          IMAGE_ID=$(docker image inspect fdp39-alert-service:${GITHUB_SHA} --format '{{.Id}}')
+          IMAGE_DIGEST_OR_ID=$(docker image inspect fdp39-alert-service:${GITHUB_SHA} --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}')
+          test -n "$IMAGE_ID"
+          test -n "$IMAGE_DIGEST_OR_ID"
+          mkdir -p alert-service/target/fdp39-governance/release-image-root
+          CONTAINER_ID=$(docker create fdp39-alert-service:${GITHUB_SHA})
+          docker export "$CONTAINER_ID" -o alert-service/target/fdp39-governance/release-image.tar
+          docker rm "$CONTAINER_ID"
+          tar -xf alert-service/target/fdp39-governance/release-image.tar -C alert-service/target/fdp39-governance/release-image-root
+          if find alert-service/target/fdp39-governance/release-image-root -path '*target/test-classes*' -print -quit | grep -q .; then
+            echo "FDP-39 release image contains test classes"
+            exit 1
+          fi
+          if grep -R -a -E 'Fdp38LiveRuntimeCheckpointBarrierConfiguration|fdp38-live-runtime-checkpoint|Fdp38LiveRuntimeCheckpoint|LIVE_IN_FLIGHT_REQUEST_KILL|RUNTIME_REACHED_TEST_FIXTURE|Dockerfile.alert-service-fdp38-fixture' alert-service/target/fdp39-governance/release-image-root; then
+            echo "FDP-39 release image contains FDP-38 fixture/test code"
+            exit 1
+          fi
+          echo "FDP39_RELEASE_IMAGE=fdp39-alert-service:${GITHUB_SHA}" >> "$GITHUB_ENV"
+          echo "FDP39_RELEASE_IMAGE_ID=${IMAGE_ID}" >> "$GITHUB_ENV"
+          echo "FDP39_RELEASE_IMAGE_DIGEST=${IMAGE_DIGEST_OR_ID}" >> "$GITHUB_ENV"
+
+      - name: Build fixture image only for non-release provenance
+        run: |
+          set -euo pipefail
+          docker build -f deployment/Dockerfile.alert-service-fdp38-fixture -t fdp39-fdp38-fixture:${GITHUB_SHA} .
+          IMAGE_ID=$(docker image inspect fdp39-fdp38-fixture:${GITHUB_SHA} --format '{{.Id}}')
+          IMAGE_DIGEST_OR_ID=$(docker image inspect fdp39-fdp38-fixture:${GITHUB_SHA} --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}')
+          test -n "$IMAGE_ID"
+          test -n "$IMAGE_DIGEST_OR_ID"
+          echo "FDP39_FIXTURE_IMAGE=fdp39-fdp38-fixture:${GITHUB_SHA}" >> "$GITHUB_ENV"
+          echo "FDP39_FIXTURE_IMAGE_ID=${IMAGE_ID}" >> "$GITHUB_ENV"
+          echo "FDP39_FIXTURE_IMAGE_DIGEST=${IMAGE_DIGEST_OR_ID}" >> "$GITHUB_ENV"
+
+      - name: Run FDP-39 governance tests
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp39.release-image.scan-root=alert-service/target/fdp39-governance/release-image-root" "-Dfdp39.commit-sha=${GITHUB_SHA}" "-Dfdp39.branch-name=${GITHUB_REF_NAME}" "-Dfdp39.github-run-id=${GITHUB_RUN_ID}" "-Dfdp39.github-workflow=${GITHUB_WORKFLOW}" "-Dfdp39.release-image.name=${FDP39_RELEASE_IMAGE}" "-Dfdp39.release-image.id=${FDP39_RELEASE_IMAGE_ID}" "-Dfdp39.release-image.digest=${FDP39_RELEASE_IMAGE_DIGEST}" "-Dfdp39.fixture-image.name=${FDP39_FIXTURE_IMAGE}" "-Dfdp39.fixture-image.id=${FDP39_FIXTURE_IMAGE_ID}" "-Dfdp39.fixture-image.digest=${FDP39_FIXTURE_IMAGE_DIGEST}" "-Dtest=RegulatedMutationReleaseImageSeparationTest,FixtureDockerfileMustNotBeUsedByReleaseWorkflowTest,Fdp39GovernanceArtifactsTest,Fdp39NoOverclaimDocumentationTest,Fdp39MustNotChangeRuntimeMutationSemanticsTest,RegulatedMutationRecoveryInspectionGovernanceTest" test
+
+      - name: Verify FDP-39 governance artifacts
+        if: always()
+        run: |
+          set -euo pipefail
+          ARTIFACT_DIR=alert-service/target/fdp39-governance
+          test -f "$ARTIFACT_DIR/fdp39-release-image-separation.json"
+          test -f "$ARTIFACT_DIR/fdp39-fixture-dockerfile-usage.md"
+          test -f "$ARTIFACT_DIR/fdp39-artifact-provenance.json"
+          test -f "$ARTIFACT_DIR/fdp39-artifact-provenance.md"
+          test -f "$ARTIFACT_DIR/fdp39-enablement-governance-pack.json"
+          test -f "$ARTIFACT_DIR/fdp39-enablement-governance-pack.md"
+          test -f "$ARTIFACT_DIR/fdp39-rollback-governance.json"
+          python - <<'PY'
+          import json
+          import os
+          import pathlib
+          import sys
+          import xml.etree.ElementTree as ET
+
+          artifact_dir = pathlib.Path("alert-service/target/fdp39-governance")
+          required_tests = [
+              "RegulatedMutationReleaseImageSeparationTest",
+              "FixtureDockerfileMustNotBeUsedByReleaseWorkflowTest",
+              "Fdp39GovernanceArtifactsTest",
+              "Fdp39NoOverclaimDocumentationTest",
+              "Fdp39MustNotChangeRuntimeMutationSemanticsTest",
+              "RegulatedMutationRecoveryInspectionGovernanceTest",
+          ]
+          reports = pathlib.Path("alert-service/target/surefire-reports")
+          for class_name in required_tests:
+              report = reports / f"TEST-com.frauddetection.alert.regulated.{class_name}.xml"
+              if not report.exists():
+                  print(f"Missing FDP-39 Surefire XML: {report}", file=sys.stderr)
+                  sys.exit(1)
+              root = ET.parse(report).getroot()
+              tests = int(root.attrib.get("tests", "0"))
+              skipped = int(root.attrib.get("skipped", "0"))
+              failures = int(root.attrib.get("failures", "0"))
+              errors = int(root.attrib.get("errors", "0"))
+              if tests <= 0 or skipped > 0 or failures > 0 or errors > 0:
+                  print(f"FDP-39 test class did not fully execute: {class_name} tests={tests} skipped={skipped} failures={failures} errors={errors}", file=sys.stderr)
+                  sys.exit(1)
+
+          separation = json.loads((artifact_dir / "fdp39-release-image-separation.json").read_text())
+          provenance = json.loads((artifact_dir / "fdp39-artifact-provenance.json").read_text())
+          enablement = json.loads((artifact_dir / "fdp39-enablement-governance-pack.json").read_text())
+          rollback = json.loads((artifact_dir / "fdp39-rollback-governance.json").read_text())
+          expected_sha = os.environ["GITHUB_SHA"]
+          checks = {
+              "separation_release_image_safe": separation.get("release_image_safe") is True,
+              "separation_fixture_code_absent": separation.get("fixture_code_present") is False,
+              "separation_test_classes_absent": separation.get("test_classes_present") is False,
+              "separation_profile_absent": separation.get("fdp38_profile_present") is False,
+              "separation_release_dockerfile": separation.get("release_dockerfile_path") == "deployment/Dockerfile.backend",
+              "provenance_commit": provenance.get("commit_sha") == expected_sha,
+              "provenance_release_image": provenance.get("release_image_name") == f"fdp39-alert-service:{expected_sha}",
+              "provenance_release_id": str(provenance.get("release_image_id", "")).startswith("sha256:"),
+              "provenance_release_digest": str(provenance.get("release_image_digest_or_id", "")).startswith("sha256:") or "@sha256:" in str(provenance.get("release_image_digest_or_id", "")),
+              "provenance_fixture_image": provenance.get("fixture_image_name") == f"fdp39-fdp38-fixture:{expected_sha}",
+              "provenance_fixture_id": str(provenance.get("fixture_image_id", "")).startswith("sha256:"),
+              "provenance_fixture_not_release": provenance.get("fixture_image_release_candidate_allowed") is False,
+              "enablement_ready": enablement.get("ready_for_enablement_review") is True,
+              "enablement_production_disabled": enablement.get("production_enabled") is False,
+              "enablement_bank_disabled": enablement.get("bank_enabled") is False,
+              "enablement_human_approval": enablement.get("human_approval_required") is True,
+              "enablement_dual_control": enablement.get("dual_control_required") is True,
+              "rollback_plan_present": rollback.get("rollback_plan_present") is True,
+              "rollback_keeps_fencing": rollback.get("rollback_does_not_disable_fencing") is True,
+              "rollback_no_enablement_change": rollback.get("production_enablement_not_changed") is True,
+          }
+          failed = [name for name, ok in checks.items() if not ok]
+          if failed:
+              print(f"FDP-39 governance artifact checks failed: {failed}", file=sys.stderr)
+              sys.exit(1)
+
+          generated = "\n".join(path.read_text(errors="ignore") for path in artifact_dir.glob("fdp39-*.*"))
+          forbidden = ["PLACEHOLDER", "TO_BE_FILLED", "LOCAL_IMAGE_ID_NOT_PROVIDED", "LOCAL_IMAGE_DIGEST_NOT_PROVIDED", "BANK_CERTIFIED"]
+          for token in forbidden:
+              if token in generated:
+                  print(f"FDP-39 generated artifacts contain forbidden token: {token}", file=sys.stderr)
+                  sys.exit(1)
+          if "`READY_FOR_ENABLEMENT_REVIEW` is not `PRODUCTION_ENABLED`" not in generated:
+              print("FDP-39 enablement artifact must explicitly deny PRODUCTION_ENABLED", file=sys.stderr)
+              sys.exit(1)
+          PY
+          grep -q 'READY_FOR_ENABLEMENT_REVIEW' docs/FDP-39-merge-gate.md docs/release/FDP-39-branch-readme.md
+          grep -q 'Fixture proof is not production proof' docs/release/FDP-39-final-regulated-mutation-proof-matrix.md
+          grep -q 'production_enabled: `false`' "$ARTIFACT_DIR/fdp39-enablement-governance-pack.md"
+          grep -q 'fixture_image_release_candidate_allowed: `false`' "$ARTIFACT_DIR/fdp39-artifact-provenance.md"
+          if grep -R 'RUNTIME_REACHED_PRODUCTION_IMAGE.*claimed\|production_enablement: `true`\|bank_enabled: `true`\|production_enabled: `true`' docs/FDP-39-*.md docs/adr/FDP-39-*.md docs/release/FDP-39-*.md "$ARTIFACT_DIR"; then
+            echo "FDP-39 docs/artifacts contain a forbidden positive enablement claim"
+            exit 1
+          fi
+
+      - name: Upload FDP-39 release governance artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fdp39-release-governance-reports
+          if-no-files-found: error
+          path: |
+            alert-service/target/surefire-reports/
+            alert-service/target/fdp39-governance/
+
   docker:
     name: Docker Compose Build
     runs-on: ubuntu-latest
@@ -701,6 +873,7 @@ jobs:
       - fdp36-real-chaos
       - fdp37-production-image-chaos
       - fdp38-live-runtime-checkpoint-chaos
+      - fdp39-release-governance
       - regulated-mutation-regression
 
     steps:
