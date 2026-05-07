@@ -40,6 +40,7 @@ class RegulatedMutationProductionImageConfigParityIT extends AbstractRegulatedMu
                         "--app.regulated-mutations.lease-renewal.max-renewal-count=3"
                 )
                 .noneMatch(argument -> argument.contains("fdp36-live-in-flight"))
+                .noneMatch(argument -> argument.contains("fdp38-live-runtime-checkpoint"))
                 .noneMatch(argument -> argument.contains("production"));
     }
 }

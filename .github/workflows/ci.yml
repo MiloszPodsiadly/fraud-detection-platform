@@ -443,6 +443,251 @@ jobs:
             alert-service/target/surefire-reports/
             alert-service/target/failsafe-reports/
 
+  fdp38-live-runtime-checkpoint-chaos:
+    name: FDP-38 Live Runtime Checkpoint Chaos Proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs:
+      - fdp37-production-image-chaos
+      - regulated-mutation-regression
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Verify Docker is available for FDP-38 fixture chaos
+        run: docker version
+
+      - name: Build FDP-38 alert-service test-fixture image
+        run: |
+          docker build -f deployment/Dockerfile.alert-service-fdp38-fixture -t fdp38-alert-service-test-fixture:${GITHUB_SHA} .
+          IMAGE_ID=$(docker image inspect fdp38-alert-service-test-fixture:${GITHUB_SHA} --format '{{.Id}}')
+          IMAGE_DIGEST_OR_ID=$(docker image inspect fdp38-alert-service-test-fixture:${GITHUB_SHA} --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}')
+          echo "FDP38_ALERT_SERVICE_FIXTURE_IMAGE=fdp38-alert-service-test-fixture:${GITHUB_SHA}" >> "$GITHUB_ENV"
+          echo "FDP38_ALERT_SERVICE_FIXTURE_IMAGE_ID=${IMAGE_ID}" >> "$GITHUB_ENV"
+          echo "FDP38_ALERT_SERVICE_FIXTURE_IMAGE_DIGEST=${IMAGE_DIGEST_OR_ID}" >> "$GITHUB_ENV"
+          test -n "$IMAGE_ID"
+          test -n "$IMAGE_DIGEST_OR_ID"
+          case "fdp38-alert-service-test-fixture:${GITHUB_SHA}" in
+            *fdp38-alert-service-test-fixture*) ;;
+            *) echo "FDP-38 fixture image name must contain fdp38-alert-service-test-fixture"; exit 1 ;;
+          esac
+
+      - name: Run FDP-38 live runtime checkpoint suite
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp38.live-runtime-checkpoint.enabled=true" "-Dfdp38.alert-service.fixture-image=${FDP38_ALERT_SERVICE_FIXTURE_IMAGE}" "-Dfdp38.alert-service.fixture-image-id=${FDP38_ALERT_SERVICE_FIXTURE_IMAGE_ID}" "-Dfdp38.alert-service.fixture-image-digest=${FDP38_ALERT_SERVICE_FIXTURE_IMAGE_DIGEST}" "-Dgroups=fdp38,live-runtime-checkpoint-chaos,docker-chaos,integration" "-Dtest=RegulatedMutationLiveCheckpointBeforeBusinessMutationIT,RegulatedMutationLiveCheckpointAfterAttemptedAuditIT,RegulatedMutationLiveCheckpointBeforeFdp29FinalizeIT,RegulatedMutationLiveCheckpointBeforeSuccessAuditRetryIT" test
+
+      - name: Verify FDP-38 proof artifacts
+        if: always()
+        run: |
+          SUMMARY_MD=alert-service/target/fdp38-chaos/fdp38-proof-summary.md
+          SUMMARY_JSON=alert-service/target/fdp38-chaos/fdp38-proof-summary.json
+          EVIDENCE_MD=alert-service/target/fdp38-chaos/fdp38-live-checkpoint-evidence.md
+          PROVENANCE_JSON=alert-service/target/fdp38-chaos/fdp38-fixture-image-provenance.json
+          test -f "$SUMMARY_MD"
+          test -f "$SUMMARY_JSON"
+          test -f "$EVIDENCE_MD"
+          test -f "$PROVENANCE_JSON"
+          for checkpoint in after-attempted-audit-before-business-mutation before-legacy-business-mutation before-fdp29-local-finalize before-success-audit-retry; do
+            test -f "alert-service/target/fdp38-chaos/fdp38-proof-summary-${checkpoint}.md"
+            test -f "alert-service/target/fdp38-chaos/fdp38-proof-summary-${checkpoint}.json"
+          done
+          python - <<'PY'
+          import json
+          import os
+          import pathlib
+          import sys
+          import xml.etree.ElementTree as ET
+
+          reports = pathlib.Path("alert-service/target/surefire-reports")
+          required = {
+              "BEFORE_LEGACY_BUSINESS_MUTATION": {
+                  "class": "RegulatedMutationLiveCheckpointBeforeBusinessMutationIT",
+                  "method": "beforeLegacyBusinessMutationLiveKillDoesNotCommitOrPublish",
+                  "precondition_setup": "LIVE_HTTP_FLOW_FROM_INITIAL_REQUEST",
+              },
+              "AFTER_ATTEMPTED_AUDIT_BEFORE_BUSINESS_MUTATION": {
+                  "class": "RegulatedMutationLiveCheckpointAfterAttemptedAuditIT",
+                  "method": "afterAttemptedAuditBeforeBusinessMutationLiveKillPreservesAttemptedAuditOnly",
+                  "precondition_setup": "LIVE_HTTP_FLOW_FROM_INITIAL_REQUEST",
+              },
+              "BEFORE_FDP29_LOCAL_FINALIZE": {
+                  "class": "RegulatedMutationLiveCheckpointBeforeFdp29FinalizeIT",
+                  "method": "beforeFdp29LocalFinalizeLiveKillDoesNotClaimFinality",
+                  "precondition_setup": "LIVE_HTTP_FLOW_FROM_INITIAL_REQUEST",
+              },
+              "BEFORE_SUCCESS_AUDIT_RETRY": {
+                  "class": "RegulatedMutationLiveCheckpointBeforeSuccessAuditRetryIT",
+                  "method": "beforeSuccessAuditRetryLiveKillDoesNotDuplicateBusinessMutationOrOutbox",
+                  "precondition_setup": "SEEDED_DURABLE_PRECONDITION_THEN_RUNTIME_REACHED_CHECKPOINT",
+              },
+          }
+          for checkpoint, metadata in required.items():
+              class_name = metadata["class"]
+              report = reports / f"TEST-com.frauddetection.alert.regulated.{class_name}.xml"
+              if not report.exists():
+                  print(f"Missing required FDP-38 Surefire XML: {report}", file=sys.stderr)
+                  sys.exit(1)
+              root = ET.parse(report).getroot()
+              tests = int(root.attrib.get("tests", "0"))
+              skipped = int(root.attrib.get("skipped", "0"))
+              failures = int(root.attrib.get("failures", "0"))
+              errors = int(root.attrib.get("errors", "0"))
+              if tests <= 0 or skipped > 0 or failures > 0 or errors > 0:
+                  print(f"FDP-38 required test class did not fully execute: {class_name} tests={tests} skipped={skipped} failures={failures} errors={errors}", file=sys.stderr)
+                  sys.exit(1)
+              method_names = {case.attrib.get("name") for case in root.findall("testcase")}
+              if metadata["method"] not in method_names:
+                  print(f"FDP-38 checkpoint method missing for {checkpoint}: {metadata['method']}", file=sys.stderr)
+                  sys.exit(1)
+
+          expected_sha = os.environ["GITHUB_SHA"]
+          expected_image = f"fdp38-alert-service-test-fixture:{expected_sha}"
+          summary = json.loads(pathlib.Path("alert-service/target/fdp38-chaos/fdp38-proof-summary.json").read_text())
+          checks = {
+              "commit_sha": summary.get("commit_sha") == expected_sha,
+              "fixture_image_name": summary.get("fixture_image_name") == expected_image,
+              "fixture_image_id": str(summary.get("fixture_image_id", "")).startswith("sha256:"),
+              "fixture_image_digest_or_id": summary.get("fixture_image_digest_or_id") not in (None, "", "LOCAL_IMAGE_DIGEST_NOT_PROVIDED"),
+              "fixture_image_kind": summary.get("fixture_image_kind") == "test-fixture-production-like",
+              "fixture_image": summary.get("fixture_image") is True,
+              "release_image": summary.get("release_image") is False,
+              "contains_test_classes": summary.get("contains_test_classes") is True,
+              "contains_test_profiles": summary.get("contains_test_profiles") is True,
+              "release_candidate_allowed": summary.get("release_candidate_allowed") is False,
+              "production_deployable": summary.get("production_deployable") is False,
+              "production_enablement": summary.get("production_enablement") is False,
+              "live_runtime_checkpoint_proof_executed": summary.get("live_runtime_checkpoint_proof_executed") is True,
+              "proof_levels": "LIVE_IN_FLIGHT_REQUEST_KILL" in str(summary.get("proof_levels")),
+              "state_reach_methods": "RUNTIME_REACHED_TEST_FIXTURE" in str(summary.get("state_reach_methods")),
+              "runtime_reached_production_image": summary.get("runtime_reached_production_image") is False,
+              "checkpoint_count": int(summary.get("checkpoint_count", 0)) == len(required),
+              "killed_container_id_masked": summary.get("killed_container_id_masked") not in (None, "", "absent"),
+              "restarted_container_id_masked": summary.get("restarted_container_id_masked") not in (None, "", "absent"),
+              "no_false_success": summary.get("no_false_success") is True,
+              "no_duplicate_mutation": summary.get("no_duplicate_mutation") is True,
+              "no_duplicate_outbox": summary.get("no_duplicate_outbox") is True,
+              "no_duplicate_success_audit": summary.get("no_duplicate_success_audit") is True,
+              "recovery_wins": summary.get("recovery_wins") is True,
+              "final_result": summary.get("final_result") == "PASS",
+          }
+          failed = [name for name, ok in checks.items() if not ok]
+          if failed:
+              print(f"FDP-38 proof summary failed checks: {failed}", file=sys.stderr)
+              sys.exit(1)
+          checkpoint_names = set(summary.get("checkpoint_names", []))
+          if checkpoint_names != set(required):
+              print(f"FDP-38 checkpoint registration mismatch: {checkpoint_names}", file=sys.stderr)
+              sys.exit(1)
+          preconditions = summary.get("precondition_setup", {})
+          false_success = summary.get("false_success_evaluation", {})
+          failed_reasons = summary.get("failed_false_success_reasons", [])
+          if failed_reasons != []:
+              print(f"FDP-38 false success reasons must be empty: {failed_reasons}", file=sys.stderr)
+              sys.exit(1)
+          required_invariants = {
+              "public_success_status_absent",
+              "committed_snapshot_absent_when_not_allowed",
+              "finalized_status_absent_when_not_allowed",
+              "success_audit_absent_when_not_allowed",
+              "outbox_absent_when_not_allowed",
+              "business_mutation_absent_when_not_allowed",
+              "duplicate_mutation_absent",
+              "duplicate_outbox_absent",
+              "duplicate_success_audit_absent",
+              "passed",
+              "failed_reasons",
+          }
+          for checkpoint, metadata in required.items():
+              if preconditions.get(checkpoint) != metadata["precondition_setup"]:
+                  print(f"FDP-38 wrong precondition setup for {checkpoint}: {preconditions.get(checkpoint)}", file=sys.stderr)
+                  sys.exit(1)
+              evaluation = false_success.get(checkpoint)
+              if not isinstance(evaluation, dict):
+                  print(f"FDP-38 missing false success evaluation for {checkpoint}", file=sys.stderr)
+                  sys.exit(1)
+              missing = required_invariants - set(evaluation)
+              if missing:
+                  print(f"FDP-38 false success evaluation missing keys for {checkpoint}: {missing}", file=sys.stderr)
+                  sys.exit(1)
+              if evaluation.get("passed") is not True or evaluation.get("failed_reasons") != []:
+                  print(f"FDP-38 false success evaluation failed for {checkpoint}: {evaluation}", file=sys.stderr)
+                  sys.exit(1)
+
+          artifact_text = "\n".join(pathlib.Path(path).read_text() for path in [
+              "alert-service/target/fdp38-chaos/fdp38-proof-summary.md",
+              "alert-service/target/fdp38-chaos/fdp38-live-checkpoint-evidence.md",
+          ])
+          for token in ["PLACEHOLDER", "TO_BE_FILLED", "LOCAL_IMAGE_ID_NOT_PROVIDED", "LOCAL_IMAGE_DIGEST_NOT_PROVIDED"]:
+              if token in artifact_text or token in json.dumps(summary):
+                  print(f"FDP-38 artifacts contain placeholder token: {token}", file=sys.stderr)
+                  sys.exit(1)
+          for checkpoint in required:
+              if checkpoint not in artifact_text or f"precondition_setup={required[checkpoint]['precondition_setup']}" not in artifact_text:
+                  print(f"FDP-38 evidence markdown missing checkpoint/precondition: {checkpoint}", file=sys.stderr)
+                  sys.exit(1)
+
+          provenance = json.loads(pathlib.Path("alert-service/target/fdp38-chaos/fdp38-fixture-image-provenance.json").read_text())
+          if provenance.get("release_image") is not False or provenance.get("fixture_image") is not True:
+              print("FDP-38 provenance must be fixture_image=true and release_image=false", file=sys.stderr)
+              sys.exit(1)
+          for key, expected in {
+              "contains_test_classes": True,
+              "contains_test_profiles": True,
+              "release_candidate_allowed": False,
+              "production_deployable": False,
+          }.items():
+              if provenance.get(key) is not expected:
+                  print(f"FDP-38 provenance wrong {key}: {provenance.get(key)}", file=sys.stderr)
+                  sys.exit(1)
+          if "fdp38-alert-service-test-fixture" not in provenance.get("image_name", ""):
+              print("FDP-38 fixture image provenance has wrong image name", file=sys.stderr)
+              sys.exit(1)
+          ci = pathlib.Path(".github/workflows/ci.yml").read_text()
+          fdp38_start = ci.index("fdp38-live-runtime-checkpoint-chaos:")
+          docker_start = ci.index("\n  docker:", fdp38_start)
+          for occurrence in [idx for idx in range(len(ci)) if ci.startswith("Dockerfile.alert-service-fdp38-fixture", idx)]:
+              if not (fdp38_start < occurrence < docker_start):
+                  print("FDP-38 fixture Dockerfile is referenced outside the FDP-38 CI job", file=sys.stderr)
+                  sys.exit(1)
+          compose = pathlib.Path("deployment/docker-compose.yml").read_text()
+          if "Dockerfile.alert-service-fdp38-fixture" in compose:
+              print("FDP-38 fixture Dockerfile must not be used by release compose", file=sys.stderr)
+              sys.exit(1)
+          if "docker build -f deployment/Dockerfile.backend --build-arg MODULE_NAME=alert-service -t fdp37-alert-service" not in ci:
+              print("FDP-37 production-image job must continue using deployment/Dockerfile.backend", file=sys.stderr)
+              sys.exit(1)
+          PY
+          grep -q 'LIVE_IN_FLIGHT_REQUEST_KILL' "$SUMMARY_MD" "$EVIDENCE_MD"
+          grep -q 'RUNTIME_REACHED_TEST_FIXTURE' "$SUMMARY_MD" "$EVIDENCE_MD"
+          grep -q 'checkpoint_reached=true' "$EVIDENCE_MD"
+          grep -q 'no_false_success=true' "$EVIDENCE_MD"
+          grep -q 'release_image=false' "$EVIDENCE_MD"
+          grep -q 'release_candidate_allowed=false' "$EVIDENCE_MD"
+          grep -q 'production_deployable=false' "$EVIDENCE_MD"
+          grep -q 'fixture image is not a production image' docs/FDP-38-merge-gate.md
+          if grep -R 'release_image: `true`\|release_candidate_allowed: `true`\|production_deployable: `true`\|RUNTIME_REACHED_PRODUCTION_IMAGE: `claimed`\|production_enablement: `true`' "$SUMMARY_MD" "$EVIDENCE_MD" "$PROVENANCE_JSON" docs/FDP-38-*.md docs/adr/FDP-38-*.md docs/testing/FDP-38-*.md; then
+            echo "FDP-38 artifacts/docs cannot claim production image live proof or production enablement"
+            exit 1
+          fi
+
+      - name: Upload FDP-38 live runtime checkpoint artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fdp38-live-runtime-checkpoint-chaos-reports
+          if-no-files-found: error
+          path: |
+            alert-service/target/surefire-reports/
+            alert-service/target/failsafe-reports/
+            alert-service/target/fdp38-chaos/
+
   docker:
     name: Docker Compose Build
     runs-on: ubuntu-latest
@@ -455,6 +700,7 @@ jobs:
       - fdp35-production-readiness
       - fdp36-real-chaos
       - fdp37-production-image-chaos
+      - fdp38-live-runtime-checkpoint-chaos
       - regulated-mutation-regression
 
     steps:

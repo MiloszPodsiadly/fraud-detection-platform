@@ -1,5 +1,6 @@
 package com.frauddetection.alert.regulated;
 
+import com.frauddetection.alert.regulated.chaos.Fdp38LiveRuntimeCheckpoint;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import org.junit.jupiter.api.Test;
@@ -1950,6 +1951,210 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
+    void fdp38LiveRuntimeCheckpointSupportMustStayInTestFixtureOnly() throws Exception {
+        assertThat(Files.exists(Path.of("src/test/java/com/frauddetection/alert/regulated/chaos/Fdp38LiveRuntimeCheckpointBarrierConfiguration.java")))
+                .isTrue();
+        assertThat(Files.exists(Path.of("../deployment/Dockerfile.alert-service-fdp38-fixture")))
+                .isTrue();
+
+        List<Path> runtimeFiles;
+        try (Stream<Path> stream = Files.walk(Path.of("src/main/java/com/frauddetection/alert"))) {
+            runtimeFiles = stream.filter(path -> path.toString().endsWith(".java")).toList();
+        }
+
+        for (Path path : runtimeFiles) {
+            String source = Files.readString(path);
+            assertThat(source)
+                    .as("FDP-38 checkpoint barrier must not leak into runtime source: " + path)
+                    .doesNotContain("FDP38")
+                    .doesNotContain("fdp38-live-runtime-checkpoint")
+                    .doesNotContain("Fdp38LiveRuntimeCheckpoint")
+                    .doesNotContain("ChaosBarrier")
+                    .doesNotContain("LIVE_IN_FLIGHT_REQUEST_KILL")
+                    .doesNotContain("RUNTIME_REACHED_TEST_FIXTURE");
+        }
+
+        List<Path> protectedRuntimeFiles = List.of(
+                Path.of("src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationExecutor.java"),
+                Path.of("src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"),
+                Path.of("src/main/java/com/frauddetection/alert/regulated/MongoRegulatedMutationCoordinator.java"),
+                Path.of("src/main/java/com/frauddetection/alert/regulated/mutation/submitdecision/SubmitDecisionMutationHandler.java")
+        );
+        for (Path path : protectedRuntimeFiles) {
+            String source = Files.readString(path);
+            assertThat(source)
+                    .as("Runtime mutation path must not branch on FDP-38 chaos: " + path)
+                    .doesNotContain("fdp38")
+                    .doesNotContain("checkpoint barrier")
+                    .doesNotContain("LIVE_IN_FLIGHT_REQUEST_KILL")
+                    .doesNotContain("RUNTIME_REACHED_TEST_FIXTURE");
+        }
+
+        String fixture = Files.readString(Path.of(
+                "src/test/java/com/frauddetection/alert/regulated/chaos/Fdp38LiveRuntimeCheckpointBarrierConfiguration.java"
+        ));
+        String dockerfile = Files.readString(Path.of("../deployment/Dockerfile.alert-service-fdp38-fixture"));
+        String fdp37ConfigParity = Files.readString(Path.of(
+                "src/test/java/com/frauddetection/alert/regulated/RegulatedMutationProductionImageConfigParityIT.java"
+        ));
+
+        assertThat(fixture)
+                .contains("@Profile(\"fdp38-live-runtime-checkpoint\")")
+                .contains("fdp38_live_checkpoint_barriers")
+                .contains("checkpoint_reached")
+                .contains("BEFORE_LEGACY_BUSINESS_MUTATION")
+                .contains("BEFORE_FDP29_LOCAL_FINALIZE");
+        assertThat(dockerfile)
+                .contains("Dockerfile.alert-service-fdp38-fixture")
+                .contains("target/test-classes")
+                .contains("AlertServiceApplication");
+        assertThat(Files.readString(Path.of(
+                "src/test/java/com/frauddetection/alert/regulated/chaos/RegulatedMutationFdp38LiveCheckpointChaosHarness.java"
+        )))
+                .contains("contains_test_classes")
+                .contains("contains_test_profiles")
+                .contains("release_candidate_allowed")
+                .contains("production_deployable")
+                .contains("false_success_evaluation")
+                .contains("failed_false_success_reasons")
+                .contains("precondition_setup");
+        assertThat(fdp37ConfigParity)
+                .contains("noneMatch(argument -> argument.contains(\"fdp38-live-runtime-checkpoint\"))");
+    }
+
+    @Test
+    void fdp38DocsMustNotOverclaimFixtureProof() throws Exception {
+        String adr = Files.readString(Path.of("../docs/adr/FDP-38-live-runtime-checkpoint-fixture-proof.md"));
+        String mergeGate = Files.readString(Path.of("../docs/FDP-38-merge-gate.md"));
+        String matrix = Files.readString(Path.of("../docs/testing/FDP-38-live-runtime-checkpoint-proof-matrix.md"));
+        String proofPack = Files.readString(Path.of("../docs/testing/FDP-38-final-proof-pack.md"));
+        String combined = adr + "\n" + mergeGate + "\n" + matrix + "\n" + proofPack;
+
+        assertThat(combined).contains("dedicated alert-service test-fixture image");
+        assertThat(combined).contains("fixture image is not a production image");
+        assertThat(combined).contains("FDP-38 is not production enablement");
+        assertThat(combined).contains("LIVE_IN_FLIGHT_REQUEST_KILL");
+        assertThat(combined).contains("RUNTIME_REACHED_TEST_FIXTURE");
+        assertThat(combined).contains("FDP-38 does not claim `RUNTIME_REACHED_PRODUCTION_IMAGE`");
+        assertThat(combined).contains("release_image: false");
+        assertThat(combined).contains("contains_test_classes: true");
+        assertThat(combined).contains("contains_test_profiles: true");
+        assertThat(combined).contains("release_candidate_allowed: false");
+        assertThat(combined).contains("production_deployable: false");
+        assertThat(combined).contains("production_enablement: false");
+        assertThat(combined).contains("LIVE_HTTP_FLOW_FROM_INITIAL_REQUEST");
+        assertThat(combined).contains("SEEDED_DURABLE_PRECONDITION_THEN_RUNTIME_REACHED_CHECKPOINT");
+        assertThat(combined).contains("durable business mutation and outbox preconditions were seeded");
+        assertThat(combined).contains("Every `Fdp38LiveRuntimeCheckpoint` enum value must be represented");
+        assertThat(combined).contains("false_success_evaluation");
+        assertThat(combined).contains("failed_false_success_reasons: []");
+        assertThat(combined).contains("The release image does not contain checkpoint barrier support");
+
+        assertFdp38ForbiddenPhraseIsContextual(combined, "production certified");
+        assertFdp38ForbiddenPhraseIsContextual(combined, "bank certified");
+        assertFdp38ForbiddenPhraseIsContextual(combined, "final production image live checkpoint proof");
+        assertFdp38ForbiddenPhraseIsContextual(combined, "all crash windows killed live");
+        assertFdp38ForbiddenPhraseIsContextual(combined, "full instruction-boundary coverage");
+        assertFdp38ForbiddenPhraseIsContextual(combined, "production enablement");
+        assertFdp38ForbiddenPhraseIsContextual(combined, "external finality");
+        assertFdp38ForbiddenPhraseIsContextual(combined, "distributed ACID");
+        assertFdp38ForbiddenPhraseIsContextual(combined, "Kafka exactly-once");
+        assertFdp38ForbiddenPhraseIsContextual(combined, "legal notarization");
+        assertFdp38ForbiddenPhraseIsContextual(combined, "WORM guarantee");
+        assertFdp38ForbiddenPhraseIsContextual(combined, "production deployable");
+    }
+
+    @Test
+    void fdp38CiMustRequireLiveCheckpointFixtureProof() throws Exception {
+        String ci = Files.readString(Path.of("../.github/workflows/ci.yml"));
+
+        assertThat(ci).contains("fdp38-live-runtime-checkpoint-chaos:");
+        assertThat(ci).contains("fdp38-alert-service-test-fixture:${GITHUB_SHA}");
+        assertThat(ci).contains("deployment/Dockerfile.alert-service-fdp38-fixture");
+        assertThat(ci).contains("-Dfdp38.live-runtime-checkpoint.enabled=true");
+        assertThat(ci).contains("-Dfdp38.alert-service.fixture-image=${FDP38_ALERT_SERVICE_FIXTURE_IMAGE}");
+        assertThat(ci).contains("RegulatedMutationLiveCheckpointBeforeBusinessMutationIT");
+        assertThat(ci).contains("RegulatedMutationLiveCheckpointAfterAttemptedAuditIT");
+        assertThat(ci).contains("RegulatedMutationLiveCheckpointBeforeFdp29FinalizeIT");
+        assertThat(ci).contains("RegulatedMutationLiveCheckpointBeforeSuccessAuditRetryIT");
+        assertThat(ci).contains("skipped > 0");
+        assertThat(ci).contains("LIVE_IN_FLIGHT_REQUEST_KILL");
+        assertThat(ci).contains("RUNTIME_REACHED_TEST_FIXTURE");
+        assertThat(ci).contains("checkpoint_reached=true");
+        assertThat(ci).contains("no_false_success=true");
+        assertThat(ci).contains("release_image=false");
+        assertThat(ci).contains("contains_test_classes");
+        assertThat(ci).contains("contains_test_profiles");
+        assertThat(ci).contains("release_candidate_allowed");
+        assertThat(ci).contains("production_deployable");
+        assertThat(ci).contains("false_success_evaluation");
+        assertThat(ci).contains("failed_false_success_reasons");
+        assertThat(ci).contains("precondition_setup");
+        assertThat(ci).contains("fdp38-proof-summary-${checkpoint}.md");
+        assertThat(ci).contains("fdp38-proof-summary-${checkpoint}.json");
+        assertThat(ci).contains("fdp38-fixture-image-provenance.json");
+        assertThat(ci).contains("fdp38-live-runtime-checkpoint-chaos-reports");
+    }
+
+    @Test
+    void fdp38CheckpointRegistrationMustBeExplicitInDocsTestsAndCi() throws Exception {
+        String matrix = Files.readString(Path.of("../docs/testing/FDP-38-live-runtime-checkpoint-proof-matrix.md"));
+        String ci = Files.readString(Path.of("../.github/workflows/ci.yml"));
+        String harness = Files.readString(Path.of(
+                "src/test/java/com/frauddetection/alert/regulated/chaos/RegulatedMutationFdp38LiveCheckpointChaosHarness.java"
+        ));
+        String enumSource = Files.readString(Path.of(
+                "src/test/java/com/frauddetection/alert/regulated/chaos/Fdp38LiveRuntimeCheckpoint.java"
+        ));
+
+        assertThat(enumSource)
+                .contains("LIVE_HTTP_FLOW_FROM_INITIAL_REQUEST")
+                .contains("SEEDED_DURABLE_PRECONDITION_THEN_RUNTIME_REACHED_CHECKPOINT");
+        assertThat(harness)
+                .contains("public_success_status_absent")
+                .contains("committed_snapshot_absent_when_not_allowed")
+                .contains("finalized_status_absent_when_not_allowed")
+                .contains("success_audit_absent_when_not_allowed")
+                .contains("outbox_absent_when_not_allowed")
+                .contains("business_mutation_absent_when_not_allowed")
+                .contains("duplicate_mutation_absent")
+                .contains("duplicate_outbox_absent")
+                .contains("duplicate_success_audit_absent");
+
+        for (Fdp38LiveRuntimeCheckpoint checkpoint : Fdp38LiveRuntimeCheckpoint.values()) {
+            assertThat(matrix)
+                    .as("FDP-38 proof matrix must register checkpoint " + checkpoint)
+                    .contains(checkpoint.name());
+            assertThat(ci)
+                    .as("FDP-38 CI must validate checkpoint " + checkpoint)
+                    .contains(checkpoint.name())
+                    .contains(checkpoint.preconditionSetup().name());
+            assertThat(harness)
+                    .as("FDP-38 harness must evaluate checkpoint " + checkpoint)
+                    .contains("case " + checkpoint.name());
+        }
+        assertThat(matrix).contains("FUTURE_SCOPE");
+    }
+
+    @Test
+    void fdp38FixtureDockerfileMustNotBeUsedByReleasePaths() throws Exception {
+        String ci = Files.readString(Path.of("../.github/workflows/ci.yml"));
+        String compose = Files.readString(Path.of("../deployment/docker-compose.yml"));
+        String fdp38Job = ci.substring(
+                ci.indexOf("fdp38-live-runtime-checkpoint-chaos:"),
+                ci.indexOf("\n  docker:", ci.indexOf("fdp38-live-runtime-checkpoint-chaos:"))
+        );
+        String ciOutsideFdp38 = ci.replace(fdp38Job, "");
+
+        assertThat(compose).doesNotContain("Dockerfile.alert-service-fdp38-fixture");
+        assertThat(ciOutsideFdp38).doesNotContain("Dockerfile.alert-service-fdp38-fixture");
+        assertThat(fdp38Job).contains("Dockerfile.alert-service-fdp38-fixture");
+        assertThat(ci).contains(
+                "docker build -f deployment/Dockerfile.backend --build-arg MODULE_NAME=alert-service -t fdp37-alert-service"
+        );
+    }
+
+    @Test
     void fdp37DocsMustDescribeProductionImageChaosWithoutEnablementOverclaims() throws Exception {
         String adr = Files.readString(Path.of("../docs/adr/FDP-37-production-image-chaos-enable-gate.md"));
         String mergeGate = Files.readString(Path.of("../docs/FDP-37-merge-gate.md"));
@@ -2105,6 +2310,35 @@ class RegulatedMutationArchitectureTest {
                             "future",
                             "review",
                             "not production enablement"
+                    );
+            index = lowerSource.indexOf(lowerPhrase, index + lowerPhrase.length());
+        }
+    }
+
+    private void assertFdp38ForbiddenPhraseIsContextual(String source, String phrase) {
+        String lowerSource = source.toLowerCase(java.util.Locale.ROOT);
+        String lowerPhrase = phrase.toLowerCase(java.util.Locale.ROOT);
+        int index = lowerSource.indexOf(lowerPhrase);
+        while (index >= 0) {
+            int start = Math.max(0, index - 500);
+            int end = Math.min(lowerSource.length(), index + lowerPhrase.length() + 500);
+            String context = lowerSource.substring(start, end);
+            assertThat(context)
+                    .as("FDP-38 forbidden wording must be negated, no-claim, or future-scope contextual: " + phrase)
+                    .containsAnyOf(
+                            "does not",
+                            "do not",
+                            "not ",
+                            "no ",
+                            "never",
+                            "must not",
+                            "no-go",
+                            "non-claims",
+                            "future",
+                            "without claiming",
+                            "not production enablement",
+                            "is not a production image",
+                            "if any artifact claims"
                     );
             index = lowerSource.indexOf(lowerPhrase, index + lowerPhrase.length());
         }

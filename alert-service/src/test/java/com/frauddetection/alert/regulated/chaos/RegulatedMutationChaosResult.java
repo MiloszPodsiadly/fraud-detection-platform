@@ -22,6 +22,7 @@ public record RegulatedMutationChaosResult(
         RegulatedMutationExecutionStatus executionStatus,
         SubmitDecisionOperationStatus publicStatus,
         boolean responseSnapshotPresent,
+        boolean localCommitMarkerPresent,
         AlertStatus alertStatus,
         AnalystDecision analystDecision,
         long outboxRecords,

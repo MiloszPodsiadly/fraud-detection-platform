@@ -224,6 +224,7 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
                 command.getExecutionStatus(),
                 command.getPublicStatus(),
                 command.getResponseSnapshot() != null,
+                command.getLocalCommitMarker() != null,
                 alert.map(AlertDocument::getAlertStatus).orElse(null),
                 alert.map(AlertDocument::getAnalystDecision).orElse(null),
                 countOutbox(command.getId()),
