@@ -1,6 +1,6 @@
 # FDP-39 Enablement Governance
 
-This document intentionally keeps the misspelled filename requested by the FDP-39 prompt for stable review lookup.
+This document is the FDP-39 enablement governance reference for release review lookup.
 
 FDP-39 can produce `READY_FOR_ENABLEMENT_REVIEW` evidence. It does not produce `PRODUCTION_ENABLED` evidence.
 

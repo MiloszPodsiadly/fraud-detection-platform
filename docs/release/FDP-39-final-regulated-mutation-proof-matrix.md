@@ -19,7 +19,12 @@ Fixture proof is not production proof. `READY_FOR_ENABLEMENT_REVIEW` is not `PRO
 - no full production config certification
 - no proof that fixture image is release image
 - no all-instruction-boundary live chaos coverage
+- no registry immutability enforcement
+- no image signing, Sigstore/cosign, or SLSA attestation enforcement
+- no runtime admission controller policy
+- no production registry promotion-control enforcement
+- no production environment protection-rule enforcement outside GitHub
 
 ## Final Allowed Claim
 
-FDP-39 proves release artifact separation and enablement governance hardening for regulated mutation proof artifacts. It does not enable production mode.
+FDP-39 proves release artifact separation and enablement governance hardening for regulated mutation proof artifacts. It does not enable production mode and does not replace enterprise registry, signing, admission-control, or production promotion controls.
