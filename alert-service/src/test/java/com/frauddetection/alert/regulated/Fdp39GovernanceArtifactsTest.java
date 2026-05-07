@@ -20,9 +20,27 @@ class Fdp39GovernanceArtifactsTest {
     @Test
     void governanceArtifactsAreGeneratedWithImmutableProvenanceAndNoEnablementClaim() throws Exception {
         Files.createDirectories(OUTPUT_DIR);
+        boolean ciMode = Boolean.getBoolean("fdp39.ci-mode");
+        if (ciMode) {
+            requireCiProperties(
+                    "fdp39.commit-sha",
+                    "fdp39.branch-name",
+                    "fdp39.github-run-id",
+                    "fdp39.github-workflow",
+                    "fdp39.release-image.name",
+                    "fdp39.release-image.id",
+                    "fdp39.release-image.digest",
+                    "fdp39.fixture-image.name",
+                    "fdp39.fixture-image.id",
+                    "fdp39.fixture-image.digest"
+            );
+        }
 
         ObjectNode provenance = objectMapper.createObjectNode();
         provenance.put("timestamp", Instant.now().toString());
+        provenance.put("ci_mode", ciMode);
+        provenance.put("local_fallback_used", !ciMode);
+        provenance.put("immutable_provenance_complete", ciMode);
         provenance.put("commit_sha", property("fdp39.commit-sha", "LOCAL_COMMIT"));
         provenance.put("branch_name", property("fdp39.branch-name", "FDP-39"));
         provenance.put("github_run_id", property("fdp39.github-run-id", "LOCAL_RUN"));
@@ -42,7 +60,10 @@ class Fdp39GovernanceArtifactsTest {
         Files.writeString(OUTPUT_DIR.resolve("fdp39-artifact-provenance.md"), provenanceMarkdown(provenance));
 
         ObjectNode enablement = objectMapper.createObjectNode();
+        enablement.put("ci_mode", ciMode);
+        enablement.put("local_fallback_used", !ciMode);
         enablement.put("ready_for_enablement_review", true);
+        enablement.put("not_valid_for_enablement", !ciMode);
         enablement.put("production_enabled", false);
         enablement.put("bank_enabled", false);
         enablement.put("release_config_pr_required", true);
@@ -63,6 +84,7 @@ class Fdp39GovernanceArtifactsTest {
         Files.writeString(OUTPUT_DIR.resolve("fdp39-enablement-governance-pack.md"), enablementMarkdown(enablement));
 
         ObjectNode rollback = objectMapper.createObjectNode();
+        rollback.put("ci_mode", ciMode);
         rollback.put("rollback_plan_present", true);
         rollback.put("dual_control_required", true);
         rollback.put("rollback_does_not_disable_fencing", true);
@@ -73,6 +95,8 @@ class Fdp39GovernanceArtifactsTest {
 
         assertThat(provenance.get("release_image_id").asText()).startsWith("sha256:");
         assertThat(provenance.get("fixture_image_id").asText()).startsWith("sha256:");
+        assertThat(provenance.get("local_fallback_used").asBoolean()).isEqualTo(!ciMode);
+        assertThat(provenance.get("immutable_provenance_complete").asBoolean()).isEqualTo(ciMode);
         assertThat(enablement.get("production_enabled").asBoolean()).isFalse();
         assertThat(enablement.get("bank_enabled").asBoolean()).isFalse();
         assertThat(rollback.get("rollback_does_not_disable_fencing").asBoolean()).isTrue();
@@ -90,8 +114,36 @@ class Fdp39GovernanceArtifactsTest {
                     .doesNotContain("TO_BE_FILLED")
                     .doesNotContain("PLACEHOLDER")
                     .doesNotContain("LOCAL_IMAGE_ID_NOT_PROVIDED")
-                    .doesNotContain("LOCAL_IMAGE_DIGEST_NOT_PROVIDED");
+                    .doesNotContain("LOCAL_IMAGE_DIGEST_NOT_PROVIDED")
+                    .doesNotContain("NOT_PROVIDED")
+                    .doesNotContain("UNKNOWN");
+            if (ciMode) {
+                assertThat(content)
+                        .as("CI-generated FDP-39 artifact must not use LOCAL fallback values: " + artifact)
+                        .doesNotContain("LOCAL_");
+            }
         }
+    }
+
+    private void requireCiProperties(String... keys) {
+        for (String key : keys) {
+            String value = System.getProperty(key);
+            assertThat(value)
+                    .as("Missing required FDP-39 CI property: " + key)
+                    .isNotBlank();
+            assertNoFallbackToken(key, value);
+        }
+    }
+
+    private void assertNoFallbackToken(String key, String value) {
+        assertThat(value)
+                .as("FDP-39 CI property must be real immutable provenance: " + key)
+                .doesNotContain("LOCAL_")
+                .doesNotContain("PLACEHOLDER")
+                .doesNotContain("TO_BE_FILLED")
+                .doesNotContain("NOT_PROVIDED")
+                .doesNotContain("UNKNOWN")
+                .doesNotContain("null");
     }
 
     private String property(String key, String fallback) {
@@ -108,6 +160,9 @@ class Fdp39GovernanceArtifactsTest {
         return """
                 # FDP-39 Artifact Provenance
 
+                - ci_mode: `%s`
+                - local_fallback_used: `%s`
+                - immutable_provenance_complete: `%s`
                 - commit_sha: `%s`
                 - branch_name: `%s`
                 - github_run_id: `%s`
@@ -122,6 +177,9 @@ class Fdp39GovernanceArtifactsTest {
                 - fixture_dockerfile_path: `deployment/Dockerfile.alert-service-fdp38-fixture`
                 - fixture_image_release_candidate_allowed: `false`
                 """.formatted(
+                provenance.get("ci_mode").asBoolean(),
+                provenance.get("local_fallback_used").asBoolean(),
+                provenance.get("immutable_provenance_complete").asBoolean(),
                 provenance.get("commit_sha").asText(),
                 provenance.get("branch_name").asText(),
                 provenance.get("github_run_id").asText(),
@@ -139,7 +197,10 @@ class Fdp39GovernanceArtifactsTest {
         return """
                 # FDP-39 Enablement Governance Pack
 
+                - ci_mode: `%s`
+                - local_fallback_used: `%s`
                 - ready_for_enablement_review: `%s`
+                - not_valid_for_enablement: `%s`
                 - production_enabled: `%s`
                 - bank_enabled: `%s`
                 - release_config_pr_required: `%s`
@@ -152,7 +213,10 @@ class Fdp39GovernanceArtifactsTest {
 
                 `READY_FOR_ENABLEMENT_REVIEW` is not `PRODUCTION_ENABLED`.
                 """.formatted(
+                enablement.get("ci_mode").asBoolean(),
+                enablement.get("local_fallback_used").asBoolean(),
                 enablement.get("ready_for_enablement_review").asBoolean(),
+                enablement.get("not_valid_for_enablement").asBoolean(),
                 enablement.get("production_enabled").asBoolean(),
                 enablement.get("bank_enabled").asBoolean(),
                 enablement.get("release_config_pr_required").asBoolean(),

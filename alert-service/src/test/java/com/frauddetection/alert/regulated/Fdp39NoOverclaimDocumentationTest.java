@@ -42,6 +42,7 @@ class Fdp39NoOverclaimDocumentationTest {
 
         assertThat(combined).contains("READY_FOR_ENABLEMENT_REVIEW` is not `PRODUCTION_ENABLED");
         assertThat(combined).contains("Fixture proof is not production proof");
+        assertThat(combined).doesNotContain("enablemenance");
         for (String claim : FORBIDDEN_POSITIVE_CLAIMS) {
             assertClaimIsNegativeContext(combined, claim);
         }
