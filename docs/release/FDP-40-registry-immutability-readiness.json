@@ -1,0 +1,15 @@
+{
+  "external_platform_control_required": true,
+  "external_registry_control_required": true,
+  "fixture_repository_promotable": false,
+  "fixture_image_promotion_allowed": false,
+  "mutable_tag_only_allowed": false,
+  "mutable_tag_overwrite_prohibited": true,
+  "promotion_by_digest_required": true,
+  "registry_immutability_enforced_by_fdp40": false,
+  "registry_immutability_required": true,
+  "registry_immutability_verified_by_fdp40": false,
+  "release_repository_required": true,
+  "retention_policy_required": true,
+  "verified_by_fdp40": false
+}

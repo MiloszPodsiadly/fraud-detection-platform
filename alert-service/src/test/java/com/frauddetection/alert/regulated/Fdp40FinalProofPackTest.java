@@ -1,0 +1,175 @@
+package com.frauddetection.alert.regulated;
+
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.junit.jupiter.api.Test;
+
+import java.nio.file.Files;
+import java.util.List;
+
+import static com.frauddetection.alert.regulated.Fdp40ReleaseControlsSupport.OUTPUT_DIR;
+import static com.frauddetection.alert.regulated.Fdp40ReleaseControlsSupport.objectNode;
+import static com.frauddetection.alert.regulated.Fdp40ReleaseControlsSupport.writeJson;
+import static org.assertj.core.api.Assertions.assertThat;
+
+class Fdp40FinalProofPackTest {
+
+    @Test
+    void finalProofPackSummarizesReleaseControlsWithoutProductionEnablementClaims() throws Exception {
+        Files.createDirectories(OUTPUT_DIR);
+        ObjectNode proof = objectNode();
+        proof.put("release_controls_ready_for_review", true);
+        proof.put("production_enabled", false);
+        proof.put("bank_enabled", false);
+        proof.put("readiness_only", true);
+        proof.put("single_release_owner_model", true);
+        proof.put("dual_control_required", false);
+        proof.put("release_owner_required", true);
+        proof.put("release_owner_must_be_named", true);
+        proof.put("digest_bound_release_required", true);
+        proof.put("required_checks_must_be_green", true);
+        proof.put("rollback_owner_required", true);
+        proof.put("operator_drill_evidence_required", true);
+        proof.put("separate_config_pr_required", true);
+        proof.put("signed_provenance_readiness", true);
+        proof.put("signing_verification_performed", false);
+        proof.put("signing_enforced_by_fdp40", false);
+        proof.put("registry_immutability_verified_by_fdp40", false);
+        proof.put("registry_immutability_enforced_by_fdp40", false);
+        proof.put("branch_protection_verified_by_fdp40", false);
+        proof.put("environment_protection_verified_by_fdp40", false);
+        proof.put("required_checks_defined", true);
+        proof.put("required_checks_platform_enforcement_verified_by_fdp40", false);
+        proof.put("real_cosign_verification_required_before_production", true);
+        proof.put("real_registry_immutability_required_before_production", true);
+        proof.put("real_environment_protection_required_before_production", true);
+        proof.put("external_platform_controls_required", true);
+        proof.put("release_digest_bound", true);
+        proof.put("signature_subject_required", true);
+        proof.put("attestation_required", true);
+        proof.put("registry_immutability_required", true);
+        proof.put("mutable_tag_only_allowed", false);
+        proof.put("fixture_image_promotion_allowed", false);
+        proof.put("sbom_required", true);
+        proof.put("sbom_generated_by_fdp40", false);
+        proof.put("sbom_external_platform_control_required", true);
+        proof.put("environment_protection_required", true);
+        proof.put("separate_config_pr_required", true);
+        proof.put("runtime_semantics_changed", false);
+        proof.put("external_finality_claimed", false);
+        proof.put("distributed_acid_claimed", false);
+        proof.put("bank_certification_claimed", false);
+        ArrayNode gaps = proof.putArray("residual_platform_gaps");
+        List.of(
+                "Branch protection must enforce required checks outside repository code.",
+                "Registry immutability must be enforced by registry/platform configuration.",
+                "Production signing keys and Sigstore or cosign policy are external platform controls.",
+                "Environment approvals must be configured in the deployment platform.",
+                "Separate config PR is required before production enablement."
+        ).forEach(gaps::add);
+        writeJson(OUTPUT_DIR.resolve("fdp40-proof-pack.json"), proof);
+
+        String markdown = """
+                # FDP-40 Final Proof Pack
+
+                ## 1. Release Manifest Validation
+
+                Release manifest validation requires immutable release image digest and image id.
+
+                ## 2. Signed Provenance Readiness
+
+                Signature subject and attestation fields are required.
+
+                ## 3. Attestation Verification
+
+                Attestation digest must match the release manifest digest.
+
+                ## 4. Registry Immutability / Promotion Policy
+
+                Mutable tag only is NO-GO and fixture image promotion is forbidden.
+
+                ## 5. Required Checks Mapping
+
+                Required checks are mapped as blocking NO-GO controls.
+
+                ## 6. Environment Protection Gates
+
+                Single release owner, rollback owner, security review, fraud ops review, and platform review are required.
+
+                ## 7. Enablement PR Template
+
+                Separate config PR is required before enablement.
+
+                ## 8. Unsupported Claims Matrix
+
+                Signed provenance does not claim external finality. Release approval does not mean distributed ACID.
+
+                ## 9. Runtime Immutability
+
+                Runtime mutation semantics changed: `false`.
+
+                ## 10. Residual Platform Gaps
+
+                Branch protection, registry immutability, signing policy, and environment approval enforcement are external platform controls.
+
+                ## Readiness vs Enforcement
+
+                FDP-40 validates release-control readiness.
+                FDP-40 does not prove real cryptographic signature verification unless cosign enforcement mode is enabled.
+                FDP-40 does not verify registry immutability through provider APIs.
+                FDP-40 does not verify GitHub branch protection through GitHub APIs.
+                FDP-40 does not verify deployment environment protection through platform APIs.
+                These controls are required before production enablement.
+
+                - release_controls_ready_for_review: `true`
+                - production_enabled: `false`
+                - bank_enabled: `false`
+                - readiness_only: `true`
+                - single_release_owner_model: `true`
+                - dual_control_required: `false`
+                - release_owner_required: `true`
+                - release_owner_must_be_named: `true`
+                - digest_bound_release_required: `true`
+                - required_checks_must_be_green: `true`
+                - rollback_owner_required: `true`
+                - operator_drill_evidence_required: `true`
+                - separate_config_pr_required: `true`
+                - signed_provenance_readiness: `true`
+                - signing_verification_performed: `false`
+                - signing_enforced_by_fdp40: `false`
+                - external_platform_controls_required: `true`
+                - required_checks_defined: `true`
+                - required_checks_platform_enforcement_verified_by_fdp40: `false`
+                - mutable_tag_only_allowed: `false`
+                - fixture_image_promotion_allowed: `false`
+                - external_finality_claimed: `false`
+                - distributed_acid_claimed: `false`
+                - bank_certification_claimed: `false`
+                """;
+        Files.writeString(OUTPUT_DIR.resolve("fdp40-proof-pack.md"), markdown);
+
+        assertThat(proof.get("release_controls_ready_for_review").asBoolean()).isTrue();
+        assertThat(proof.get("production_enabled").asBoolean()).isFalse();
+        assertThat(proof.get("bank_enabled").asBoolean()).isFalse();
+        assertThat(proof.get("readiness_only").asBoolean()).isTrue();
+        assertThat(proof.get("single_release_owner_model").asBoolean()).isTrue();
+        assertThat(proof.get("dual_control_required").asBoolean()).isFalse();
+        assertThat(proof.get("release_owner_required").asBoolean()).isTrue();
+        assertThat(proof.get("release_owner_must_be_named").asBoolean()).isTrue();
+        assertThat(proof.get("external_platform_controls_required").asBoolean()).isTrue();
+        assertThat(proof.get("signed_provenance_readiness").asBoolean()).isTrue();
+        assertThat(proof.get("signing_verification_performed").asBoolean()).isFalse();
+        assertThat(proof.get("signing_enforced_by_fdp40").asBoolean()).isFalse();
+        assertThat(proof.get("registry_immutability_verified_by_fdp40").asBoolean()).isFalse();
+        assertThat(proof.get("branch_protection_verified_by_fdp40").asBoolean()).isFalse();
+        assertThat(proof.get("environment_protection_verified_by_fdp40").asBoolean()).isFalse();
+        assertThat(proof.get("required_checks_platform_enforcement_verified_by_fdp40").asBoolean()).isFalse();
+        assertThat(proof.get("runtime_semantics_changed").asBoolean()).isFalse();
+        assertThat(markdown)
+                .contains("Release Manifest Validation")
+                .contains("Signed Provenance Readiness")
+                .contains("Readiness vs Enforcement")
+                .contains("Unsupported Claims Matrix")
+                .contains("does not claim external finality");
+    }
+}

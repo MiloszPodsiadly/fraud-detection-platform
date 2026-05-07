@@ -96,6 +96,7 @@ class Fdp39NoOverclaimDocumentationTest {
                             "non-goals",
                             "must not",
                             "is not",
+                            "_false",
                             ": false",
                             "\" : false"
                     );

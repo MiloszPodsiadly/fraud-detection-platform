@@ -1,0 +1,15 @@
+{
+  "build_workflow": "CI",
+  "commit_sha": "0123456789abcdef0123456789abcdef01234567",
+  "generation_tool": "external-sbom-tool-required",
+  "image_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "retention_policy_required": true,
+  "sbom_format_allowed": [
+    "SPDX",
+    "CycloneDX"
+  ],
+  "sbom_generated_by_fdp40": false,
+  "sbom_required_before_production_enablement": true,
+  "security_owner_required": true,
+  "vulnerability_review_required": true
+}

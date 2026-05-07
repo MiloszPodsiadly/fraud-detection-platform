@@ -1,0 +1,18 @@
+{
+  "checks": [
+    {"artifact_name": "backend-test-reports", "artifact_required": true, "blocking": true, "check_name": "backend", "failure_policy": "NO_GO", "owner": "backend", "required": true},
+    {"artifact_name": "docker-compose-build", "artifact_required": false, "blocking": true, "check_name": "docker", "failure_policy": "NO_GO", "owner": "platform", "required": true},
+    {"artifact_name": "regulated-mutation-regression-test-reports", "artifact_required": true, "blocking": true, "check_name": "regulated-mutation-regression", "failure_policy": "NO_GO", "owner": "regulated-mutation", "required": true},
+    {"artifact_name": "fdp35-production-readiness-reports", "artifact_required": true, "blocking": true, "check_name": "fdp35-production-readiness", "failure_policy": "NO_GO", "owner": "release", "required": true},
+    {"artifact_name": "fdp36-real-chaos-reports", "artifact_required": true, "blocking": true, "check_name": "fdp36-real-chaos", "failure_policy": "NO_GO", "owner": "release", "required": true},
+    {"artifact_name": "fdp37-production-image-chaos-reports", "artifact_required": true, "blocking": true, "check_name": "fdp37-production-image-chaos", "failure_policy": "NO_GO", "owner": "release", "required": true},
+    {"artifact_name": "fdp38-live-runtime-checkpoint-chaos-reports", "artifact_required": true, "blocking": true, "check_name": "fdp38-live-runtime-checkpoint-chaos", "failure_policy": "NO_GO", "owner": "release", "required": true},
+    {"artifact_name": "fdp39-release-governance-reports", "artifact_required": true, "blocking": true, "check_name": "fdp39-release-governance", "failure_policy": "NO_GO", "owner": "release", "required": true},
+    {"artifact_name": "fdp40-release-controls-reports", "artifact_required": true, "blocking": true, "check_name": "fdp40-release-controls", "failure_policy": "NO_GO", "owner": "platform-release", "required": true}
+  ],
+  "branch_protection_required": true,
+  "external_branch_protection_control_required": true,
+  "platform_enforcement_note": "Required checks must be enforced by branch protection or platform policy outside the repository before production enablement.",
+  "required_checks_defined": true,
+  "required_checks_platform_enforcement_verified_by_fdp40": false
+}
