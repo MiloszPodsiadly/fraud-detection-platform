@@ -905,7 +905,8 @@ jobs:
           if-no-files-found: error
           path: |
             alert-service/target/surefire-reports/
-            alert-service/target/fdp39-governance/
+            alert-service/target/fdp39-governance/fdp39-*.json
+            alert-service/target/fdp39-governance/fdp39-*.md
 
   docker:
     name: Docker Compose Build
