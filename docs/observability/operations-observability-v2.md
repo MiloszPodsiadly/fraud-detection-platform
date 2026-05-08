@@ -2,7 +2,7 @@
 
 Reviewer-friendly operations spec for `fraud-detection-platform` after FDP-5.
 
-This document supersedes `operations-observability-v1.md` for current local runtime decisions.
+This document supersedes `observability/operations-observability-v1.md` for current local runtime decisions.
 
 This document extends the current observability foundation with direct ML runtime metrics so that `ml-inference-service` can be monitored as an independent operational component.
 
@@ -75,7 +75,7 @@ Prometheus scrape targets:
 - `GET /health`
 - `POST /v1/fraud/score`
 
-The stable ML API contract is documented in `docs/openapi/ml-inference-service.openapi.yaml` and summarized in `docs/api-surface-v1.md`. Error responses use the platform `timestamp/status/error/message/details` envelope; metrics labels and governance fields remain bounded so observability changes do not alter scoring semantics.
+The stable ML API contract is documented in `docs/openapi/ml-inference-service.openapi.yaml` and summarized in `docs/api/api-surface-v1.md`. Error responses use the platform `timestamp/status/error/message/details` envelope; metrics labels and governance fields remain bounded so observability changes do not alter scoring semantics.
 
 Prometheus metric contract:
 
@@ -429,7 +429,7 @@ Governance advisory events:
 - Advisory events are heuristic signals and may be inaccurate under low data conditions. The system does not guarantee correctness of drift or advisory signals.
 - Advisory lifecycle context is correlation context only; it must not be read as proof that lifecycle activity caused drift.
 - The advisory API supports bounded exact filters only: `severity`, `model_version`, `lifecycle_status`, and `limit`; it does not support free-text search or regex.
-- Filtering by `lifecycle_status` applies to the bounded advisory result set. It does not guarantee global completeness.
+- Filtering by `lifecycle_status` applies to the bounded advisory result set. It does not provide global completeness.
 - Advisory lifecycle status is derived from the latest human-review audit event. It is not persisted as source of truth, not a workflow engine, and not an automation trigger.
 - Advisory audit analytics are read-only, bounded by `window_days`, and provide visibility only. `totals.advisories` is the distinct advisory projection population; audit-only advisory IDs outside that population are not counted. Time-to-first-review ignores missing, negative, and corrupted durations and reports `LOW_CONFIDENCE` below five valid samples. Audit scans are capped by `GOVERNANCE_AUDIT_ANALYTICS_MAX_AUDIT_EVENTS`. Analytics do not define SLA, trigger alerts, or drive automation.
 
@@ -449,7 +449,7 @@ Analyst console operator queue:
 - The UI does not trigger scoring changes, retraining, rollback, fraud decisions, or external incident workflows.
 - Empty, partial, unavailable, and error states are visible to the operator instead of hidden by silent retries.
 
-Detailed contract and playbook: [ML Governance And Drift v1](ml-governance-drift-v1.md).
+Detailed contract and playbook: [ML Governance And Drift v1](../ml/ml-governance-drift-v1.md).
 
 ## Dashboard Queries
 
@@ -724,3 +724,5 @@ No Java runtime behavior change is required. Java should continue using existing
 - Drift action recommendations are advisory operator signals only.
 - Logs remain necessary for request-level investigation.
 - First build on a new machine still requires Docker access to upstream registries for base images.
+
+

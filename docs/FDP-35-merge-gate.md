@@ -38,7 +38,7 @@ True OS/JVM/container termination chaos remains future scope unless explicitly i
 
 ## Required Proof Matrix
 
-Every FDP-35 invariant must map to an exact test class and method in `docs/testing/FDP-35-regression-proof-matrix.md`.
+Every FDP-35 invariant must map to an exact test class and method in `docs/testing/fdp-35-regression-proof-matrix.md`.
 
 ## Required Docs
 

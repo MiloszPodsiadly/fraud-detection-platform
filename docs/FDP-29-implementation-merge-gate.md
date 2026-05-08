@@ -42,8 +42,8 @@ Merge does not equal production or bank enablement approval.
 | Legacy and evidence-gated evidence confirmation paths are model-version aware | `MutationEvidenceConfirmationServiceTest` |
 | Evidence confirmation limit `<=0` is explicit no-op | `MutationEvidenceConfirmationServiceTest` |
 | Metrics use bounded reason/status labels only | `AlertServiceMetricsTest` |
-| `FINALIZING_RETRY_REQUIRES_RECONCILIATION` has operator runbook coverage | `docs/runbooks/FDP-29-finalize-recovery-required.md` |
-| Local audit-chain contention has operator runbook coverage | `docs/runbooks/FDP-29-local-audit-chain-contention.md` |
+| `FINALIZING_RETRY_REQUIRES_RECONCILIATION` has operator runbook coverage | `docs/runbooks/fdp-29-finalize-recovery-required.md` |
+| Local audit-chain contention has operator runbook coverage | `docs/runbooks/fdp-29-local-audit-chain-contention.md` |
 | FDP-29 evidence-gated execution is isolated from the legacy coordinator flow | `EvidenceGatedFinalizeExecutor`, `RegulatedMutationArchitectureTest` |
 | Docs explicitly avoid external-finality and distributed-ACID claims | `RegulatedMutationArchitectureTest` |
 

@@ -1,5 +1,5 @@
 {
-  "artifact_lineage_ref": "docs/release/FDP-40-release-manifest-template.yaml",
+  "artifact_lineage_ref": "docs/release/fdp-40-release-manifest-template.yaml",
   "build_trigger": "github-actions",
   "build_type": "container-image",
   "builder_identity": "github-actions:CI",

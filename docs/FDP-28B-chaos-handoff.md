@@ -15,9 +15,9 @@ FDP-28 is an invariant and modeled failure-injection proof pack. FDP-28B is the 
 
 ## Non-Goals
 
-- Distributed ACID.
-- Exactly-once Kafka.
-- Legal notarization.
+- No distributed ACID.
+- No exactly-once Kafka.
+- No legal notarization.
 - New business features.
 
 ## Merge Boundary

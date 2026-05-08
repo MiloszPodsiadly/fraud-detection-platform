@@ -504,7 +504,7 @@ Only the latest audit event is considered. The audit trail remains the source of
 
 Lifecycle depends on audit availability. The system never assumes `OPEN` when audit is unavailable. Advisory list responses are `PARTIAL` with `reason_code=AUDIT_UNAVAILABLE` when lifecycle enrichment is degraded. Analytics expose degraded audit truth as `UNKNOWN`, not as `OPEN`.
 
-Filtering by `lifecycle_status` applies to the bounded advisory result set. It does not guarantee global completeness.
+Filtering by `lifecycle_status` applies to the bounded advisory result set. It does not provide global completeness.
 
 ## Lifecycle Red Lines
 
@@ -613,7 +613,7 @@ GET /health
 GET /metrics
 ```
 
-The current ML API surface and backward-compatibility rules are tracked in `docs/api-surface-v1.md`; the OpenAPI reference is `docs/openapi/ml-inference-service.openapi.yaml`. Governance and scoring success responses keep their existing top-level fields. Error responses use the platform `timestamp/status/error/message/details` envelope.
+The current ML API surface and backward-compatibility rules are tracked in `docs/api/api-surface-v1.md`; the OpenAPI reference is `docs/openapi/ml-inference-service.openapi.yaml`. Governance and scoring success responses keep their existing top-level fields. Error responses use the platform `timestamp/status/error/message/details` envelope.
 
 No auth is added to the ML governance read endpoints because `ml-inference-service` does not currently own an auth boundary. Governance audit writes are different: they are handled by `alert-service` so the authenticated analyst principal remains the source of actor attribution. In production, expose ML read endpoints only through the same network controls used for operational metrics.
 
@@ -772,3 +772,5 @@ For advisory audit persistence `UNAVAILABLE`:
 - blocking live scoring based on drift
 - Java fallback behavior changes
 - full MLOps tooling such as MLflow, Feast, Airflow, Spark, or cloud MLOps services
+
+

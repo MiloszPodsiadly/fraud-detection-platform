@@ -26,7 +26,7 @@ READY_FOR_ENABLEMENT_REVIEW is not production enablement.
 | Rollback validation | `target/fdp37-chaos/fdp37-rollback-validation.md` uploaded |
 | Regression gate | `regulated-mutation-regression` green |
 | Prior chaos/readiness gates | `fdp36-real-chaos` and `fdp35-production-readiness` green |
-| Dashboard readiness | `docs/ops/FDP-37-dashboard-and-alert-thresholds.md` reviewed |
+| Dashboard readiness | `docs/ops/fdp-37-dashboard-and-alert-thresholds.md` reviewed |
 | Config review | separate production config review remains required |
 | Release/config PR | separate approval required before any production or bank enablement |
 | Final decision | one of `NOT_READY`, `READY_WITH_LIMITATIONS`, `READY_FOR_ENABLEMENT_REVIEW` |

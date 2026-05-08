@@ -17,7 +17,7 @@ FDP-17 does not change scoring behavior, ML model behavior, Kafka contracts, gov
 - `TOKEN_VALIDATOR`: compatibility shared-token mode. In prod-like profiles it requires `INTERNAL_AUTH_ALLOW_TOKEN_VALIDATOR_IN_PROD=true`, token hash mode, and an allowlist.
 - `JWT_SERVICE_IDENTITY`: signed JWT service identity mode. `RS256` is the production-target algorithm. `HS256` remains local compatibility only and is rejected in prod-like profiles.
 - `MTLS_READY`: fail-closed compatibility boundary.
-- `MTLS_SERVICE_IDENTITY`: implemented in FDP-18 as certificate-backed internal service identity. See `docs/service-identity-fdp18.md`.
+- `MTLS_SERVICE_IDENTITY`: implemented in FDP-18 as certificate-backed internal service identity. See `docs/security/service-identity-fdp-18.md`.
 
 Unknown modes fail startup instead of downgrading.
 
@@ -124,3 +124,5 @@ Expected checks:
 `deployment/service-identity/` contains local development keys only. Do not use them in production.
 
 This is a JWT service-auth foundation. FDP-18 adds internal mTLS in a separate contract. FDP-17 remains not enterprise IAM, not external JWKS discovery, not automated key rotation, not HSM/KMS integration, not zero-trust certification, not WORM storage, not SIEM integration, and not a compliance archive.
+
+

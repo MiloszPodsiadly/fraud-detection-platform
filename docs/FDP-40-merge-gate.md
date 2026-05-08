@@ -21,7 +21,7 @@ external finality, distributed ACID, exactly-once Kafka, or production enablemen
 - fdp39-release-governance
 - fdp40-release-controls
 
-Each required check must be blocking and mapped in `docs/release/FDP-40-required-checks-matrix.json`.
+Each required check must be blocking and mapped in `docs/release/fdp-40-required-checks-matrix.json`.
 
 ## Required Artifacts
 
@@ -58,4 +58,4 @@ Each required check must be blocking and mapped in `docs/release/FDP-40-required
 - Required check missing, non-blocking, or not required.
 - Environment approval missing.
 - Runtime mutation semantic file changed.
-- Any positive claim of production certification, bank certification, external finality, distributed ACID, exactly-once Kafka, legal notarization, or business correctness from signing.
+- Any forbidden positive claim of production certification, bank certification, external finality, distributed ACID, exactly-once Kafka, legal notarization, or business correctness from signing.

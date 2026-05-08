@@ -18,6 +18,6 @@
     "helm",
     "k8s",
     "deployment/docker-compose*.yml",
-    "README.md"
+    "index.md"
   ]
 }

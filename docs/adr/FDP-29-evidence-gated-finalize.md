@@ -182,17 +182,17 @@ FDP-25/FDP-26/FDP-27/FDP-28 statuses remain valid for legacy commands and replay
 - `RECOVERY_REQUIRED` maps to `FINALIZE_RECOVERY_REQUIRED` when finalization safety cannot be proven.
 - `PUBLISH_CONFIRMATION_UNKNOWN` remains outbox evidence ambiguity after local finalize and must not be treated as exactly-once publication.
 
-Detailed mapping is defined in `docs/architecture/FDP-29-compatibility-matrix.md`.
+Detailed mapping is defined in `docs/architecture/fdp-29-compatibility-matrix.md`.
 
 ## Non-Goals
 
 FDP-29 does not claim:
 
-- distributed ACID
-- exactly-once Kafka
+- no distributed ACID
+- no exactly-once Kafka
 - external witness inside local transaction
 - legal notarization
-- WORM storage
+- no WORM storage
 - KMS/HSM-backed signing
 - zero external failure
 - no need for recovery
@@ -210,7 +210,7 @@ Disallowed shorthand:
 
 > FDP-29 provides full evidence-gated commit.
 
-That wording is too broad because external anchors, remote signing, Kafka delivery, WORM storage, and legal proof are outside the local finalize transaction.
+That wording is too broad because external anchors, remote signing, Kafka delivery, no WORM storage proof, and legal proof are outside the local finalize transaction.
 
 ## Consequences
 

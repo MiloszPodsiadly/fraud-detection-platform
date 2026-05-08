@@ -14,7 +14,7 @@ All panels must use low-cardinality labels only. Forbidden labels include comman
 
 ## Required Threshold Overlays
 
-Threshold overlays must match the concrete values in `FDP-35-regulated-mutation-alert-thresholds.md`.
+Threshold overlays must match the concrete values in `fdp-35-regulated-mutation-alert-thresholds.md`.
 
 - Stale owner rejection: warning `> 5 in 5m`, critical `> 20 in 5m`.
 - Expired lease rejection: warning `> 1 in 5m`, critical `> 5 in 5m`.
@@ -33,4 +33,4 @@ True OS/JVM/container termination chaos remains future scope unless explicitly i
 
 ## Runbook Link
 
-Use `docs/runbooks/FDP-35-regulated-mutation-recovery-drill.md` for operator actions.
+Use `docs/runbooks/fdp-35-regulated-mutation-recovery-drill.md` for operator actions.

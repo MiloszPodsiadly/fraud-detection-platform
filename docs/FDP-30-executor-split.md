@@ -15,9 +15,9 @@ FDP-30 does not add:
 - FDP-29 production enablement,
 - API contract change,
 - local ACID semantic change,
-- external finality,
-- distributed ACID,
-- exactly-once Kafka delivery,
+- no external finality,
+- no distributed ACID,
+- no exactly-once Kafka delivery,
 - process-kill chaos testing.
 
 ## Architecture After FDP-30

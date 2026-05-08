@@ -4,7 +4,7 @@ FDP-29 adds the first local evidence-precondition-gated finalize runtime path be
 
 The design addresses the remaining gap that FDP-28 intentionally documents instead of hiding: a regulated business mutation can become visible before all required success evidence is fully ready.
 
-## Target Guarantee
+## Target Behavior
 
 When `app.regulated-mutations.evidence-gated-finalize.enabled=true`, `app.regulated-mutations.evidence-gated-finalize.submit-decision.enabled=true`, and `app.regulated-mutations.transaction-mode=REQUIRED`, submit-decision uses `EVIDENCE_GATED_FINALIZE_V1`. In that model, no externally visible submit-decision mutation is finalized unless required locally verifiable evidence preconditions are satisfied. New FDP-29 submit-decision commands persist `FINALIZED_EVIDENCE_PENDING_EXTERNAL` as the durable local-visible state; `FINALIZED_VISIBLE` is compatibility/repair state only.
 
@@ -26,19 +26,19 @@ External anchor readiness, Trust Authority signing readiness, independent witnes
 
 ## Design Contract
 
-- ADR: `docs/adr/FDP-29-evidence-gated-finalize.md`
-- Evidence preconditions: `docs/architecture/FDP-29-evidence-preconditions.md`
-- State machine: `docs/architecture/FDP-29-state-machine.md`
-- Compatibility matrix: `docs/architecture/FDP-29-compatibility-matrix.md`
-- API response contract: `docs/api/FDP-29-api-response-contract.md`
-- Finalize recovery runbook: `docs/runbooks/FDP-29-finalize-recovery-required.md`
-- Local audit-chain contention runbook: `docs/runbooks/FDP-29-local-audit-chain-contention.md`
-- Failure windows: `docs/architecture/FDP-29-failure-windows.md`
-- Idempotency replay: `docs/architecture/FDP-29-idempotency-replay.md`
-- Migration and rollout: `docs/architecture/FDP-29-migration-rollout.md`
-- Implementation merge checklist: `docs/FDP-29-implementation-merge-gate.md`
-- Future test plan: `docs/testing/FDP-29-test-plan.md`
-- Design checklist: `docs/FDP-29-design-checklist.md`
+- ADR: `docs/adr/fdp-29-evidence-gated-finalize.md`
+- Evidence preconditions: `docs/architecture/fdp-29-evidence-preconditions.md`
+- State machine: `docs/architecture/fdp-29-state-machine.md`
+- Compatibility matrix: `docs/architecture/fdp-29-compatibility-matrix.md`
+- API response contract: `docs/api/fdp-29-api-response-contract.md`
+- Finalize recovery runbook: `docs/runbooks/fdp-29-finalize-recovery-required.md`
+- Local audit-chain contention runbook: `docs/runbooks/fdp-29-local-audit-chain-contention.md`
+- Failure windows: `docs/architecture/fdp-29-failure-windows.md`
+- Idempotency replay: `docs/architecture/fdp-29-idempotency-replay.md`
+- Migration and rollout: `docs/architecture/fdp-29-migration-rollout.md`
+- Implementation merge checklist: `docs/fdp-29-implementation-merge-gate.md`
+- Future test plan: `docs/testing/fdp-29-test-plan.md`
+- Design checklist: `docs/fdp-29-design-checklist.md`
 
 ## Runtime Boundary
 

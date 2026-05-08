@@ -119,4 +119,4 @@ FDP-37 uses a shared Testcontainers network with stable dependency aliases. It d
 
 FDP-37 does not prove production environment config, production networking, production secrets, production Kafka delivery, external finality, distributed ACID, Kafka exactly-once delivery, legal notarization, or bank certification. Any such claim requires separate evidence.
 
-Use `docs/FDP-37-enablement-decision-checklist.md`. `READY_FOR_ENABLEMENT_REVIEW` is not production enablement.
+Use `docs/fdp-37-enablement-decision-checklist.md`. `READY_FOR_ENABLEMENT_REVIEW` is not production enablement.

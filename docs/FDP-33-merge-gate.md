@@ -28,8 +28,8 @@ FDP-33 is merge-safe only as primitive + readiness: bounded owner-fenced lease r
 - renewal cannot create infinite `PROCESSING`
 - bank/prod startup guard rejects unsafe renewal budget configuration
 - metrics use low-cardinality labels only
-- operational runbook exists at `docs/runbooks/FDP-33-lease-renewal-runbook.md`
-- observability dashboard contract exists at `docs/observability/FDP-33-lease-renewal-dashboard.md`
+- operational runbook exists at `docs/runbooks/fdp-33-lease-renewal-runbook.md`
+- observability dashboard contract exists at `docs/observability/fdp-33-lease-renewal-dashboard.md`
 - FDP-32 stale-worker and fencing tests pass
 - FDP-31 claim and replay tests pass
 - FDP-29 integration tests pass

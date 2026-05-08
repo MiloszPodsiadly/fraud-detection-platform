@@ -271,3 +271,5 @@ This v1 spec is intentionally small. It gives the reviewer confidence that:
 - correlation and trace context now have a stable shared contract
 
 The next step after this document is cleanup and review hardening, not more instrumentation sprawl.
+
+

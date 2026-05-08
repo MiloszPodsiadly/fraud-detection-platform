@@ -5,7 +5,7 @@ Branch protection is required before production enablement. FDP-40 does not veri
 Required platform settings:
 
 - required status checks before merge
-- status checks matching `docs/release/FDP-40-required-checks-matrix.json`
+- status checks matching `docs/release/fdp-40-required-checks-matrix.json`
 - stale review dismissal
 - code owner reviews
 - no admin bypass

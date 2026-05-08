@@ -320,7 +320,7 @@ Advisory lifecycle status is a read-time projection:
 
 Only the latest audit event matters. Lifecycle status is not persisted independently, is not workflow state, has no SLA, and triggers no automation.
 
-Filtering by `lifecycle_status` applies to the bounded advisory result set. It does not guarantee global completeness.
+Filtering by `lifecycle_status` applies to the bounded advisory result set. It does not provide global completeness.
 
 Failure semantics:
 
@@ -397,4 +397,6 @@ All normalized local API errors use:
 }
 ```
 
-See `docs/api-error-contract.md` for field rules and non-leakage requirements.
+See `docs/api/api-error-contract.md` for field rules and non-leakage requirements.
+
+

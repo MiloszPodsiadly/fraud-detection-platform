@@ -51,6 +51,6 @@ ops_inspection_rate_limit_required: true
 ops_inspection_sensitive_fields_masked_required: true
 ops_inspection_governance_verified_by_fdp39: true
 ops_inspection_runtime_security_revalidation_required_before_production: true
-rollback_plan_ref: "docs/release/FDP-39-approval-and-rollback-matrix.md"
-operator_drill_ref: "docs/release/FDP-40-environment-protection-gates.md"
-security_review_ref: "docs/release/FDP-40-signed-provenance-policy.md"
+rollback_plan_ref: "docs/release/fdp-39-approval-and-rollback-matrix.md"
+operator_drill_ref: "docs/release/fdp-40-environment-protection-gates.md"
+security_review_ref: "docs/release/fdp-40-signed-provenance-policy.md"

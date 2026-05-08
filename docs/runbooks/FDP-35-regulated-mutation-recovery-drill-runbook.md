@@ -5,7 +5,7 @@ FDP-35 provides modeled restart/recovery proof in CI. It verifies durable post-c
 True OS/JVM/container termination chaos remains future scope unless explicitly implemented.
 
 FDP-36 implements selected real Docker/container kill-restart proof separately in
-`docs/runbooks/FDP-36-real-chaos-recovery-drill-runbook.md`. FDP-35 remains the
+`docs/runbooks/fdp-36-real-chaos-recovery-drill-runbook.md`. FDP-35 remains the
 modeled restart/recovery runbook and must not be reworded as real process-kill
 proof.
 

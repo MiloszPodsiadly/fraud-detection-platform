@@ -49,9 +49,9 @@ FDP-36 proof code is test-only. No runtime hooks are introduced.
 
 ## Merge Inputs
 
-- `docs/testing/FDP-36-real-chaos-proof-matrix.md`
-- `docs/FDP-36-enablement-decision-checklist.md`
-- `docs/runbooks/FDP-36-real-chaos-recovery-drill-runbook.md`
+- `docs/testing/fdp-36-real-chaos-proof-matrix.md`
+- `docs/fdp-36-enablement-decision-checklist.md`
+- `docs/runbooks/fdp-36-real-chaos-recovery-drill-runbook.md`
 - `RegulatedMutationRealAlertServiceChaosIT`
 - `RegulatedMutationRealAlertServiceEvidenceIntegrityIT`
 - `RegulatedMutationPostRestartApiBehaviorTest`

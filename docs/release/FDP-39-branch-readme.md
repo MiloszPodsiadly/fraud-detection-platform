@@ -16,11 +16,11 @@ Release artifact separation and enablement governance hardening.
 
 - production enablement
 - bank certification
-- external finality
-- distributed ACID
-- Kafka exactly-once delivery
-- legal notarization
-- WORM guarantee
+- no external finality
+- no distributed ACID
+- no Kafka exactly-once delivery
+- no legal notarization
+- no WORM guarantee
 
 ## What FDP-39 Does Not Replace
 

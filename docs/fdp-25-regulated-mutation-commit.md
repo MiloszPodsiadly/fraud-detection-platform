@@ -133,13 +133,13 @@ Operational metrics:
 
 System trust degrades when any regulated mutation backlog health signal is non-zero: recovery-required commands, stale processing leases, committed-degraded commands, or repeated recovery failures.
 
-Mongo multi-document transactions are not required by FDP-25 Phase 1 and are not claimed as the guarantee. A future optional transaction mode may narrow local Mongo write windows, but the declared FDP-25 guarantee remains the recoverable command state machine and explicit degradation, not a cross-system atomic commit guarantee.
+Mongo multi-document transactions are not required by FDP-25 Phase 1 and are not claimed as the guarantee. A future optional transaction mode may narrow local Mongo write windows, but the declared FDP-25 behavior remains the recoverable command state machine and explicit degradation, not a cross-system atomic commit guarantee.
 
 ## Non-Goals
 
 FDP-25 Phase 1 must not change scoring behavior, ML model behavior, Kafka event contracts, governance advisory semantics, model retraining, rollback automation, alert triggering, or SLA enforcement.
 
-FDP-25 Phase 1 must not describe operator evidence as cryptographic proof unless the evidence is actually cryptographically verifiable. It is not exactly-once Kafka, legal notarization, WORM storage, perfect rollback, a final regulated commit guarantee, or a single atomic boundary across business data, audit storage, external witnesses, and Kafka.
+FDP-25 Phase 1 must not describe operator evidence as cryptographic proof unless the evidence is actually cryptographically verifiable. It is not exactly-once Kafka, legal notarization, WORM storage, perfect rollback, a final regulated commit claim, or a single atomic boundary across business data, audit storage, external witnesses, and Kafka.
 
 ## Required Tests
 

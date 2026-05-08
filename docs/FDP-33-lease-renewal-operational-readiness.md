@@ -137,7 +137,7 @@ Recommended alerts:
 
 ## Runbooks
 
-Use `docs/runbooks/FDP-33-lease-renewal-runbook.md` for per-reason operator handling. The runbook covers `STALE_OWNER`, `EXPIRED_LEASE`, `BUDGET_EXCEEDED`, `INVALID_EXTENSION`, `COMMAND_NOT_FOUND`, `NON_RENEWABLE_STATE`, `TERMINAL_STATE`, `RECOVERY_STATE`, `MODEL_VERSION_MISMATCH`, `EXECUTION_STATUS_MISMATCH`, and `UNKNOWN`.
+Use `docs/runbooks/fdp-33-lease-renewal-runbook.md` for per-reason operator handling. The runbook covers `STALE_OWNER`, `EXPIRED_LEASE`, `BUDGET_EXCEEDED`, `INVALID_EXTENSION`, `COMMAND_NOT_FOUND`, `NON_RENEWABLE_STATE`, `TERMINAL_STATE`, `RECOVERY_STATE`, `MODEL_VERSION_MISMATCH`, `EXECUTION_STATUS_MISMATCH`, and `UNKNOWN`.
 
 ## Production And Bank Enablement Gate
 

@@ -2,7 +2,7 @@
 
 Single technical reference for the analyst workflow security foundation in `fraud-detection-platform`.
 
-This document consolidates RBAC, local demo auth, local OIDC, audit logging, frontend session behavior, JWT validation, and review notes into one reviewer-friendly entry point. `README.md` stays the high-level project entry point.
+This document consolidates RBAC, local demo auth, local OIDC, audit logging, frontend session behavior, JWT validation, and review notes into one reviewer-friendly entry point. `index.md` stays the high-level project entry point.
 
 ## Current State
 
@@ -350,9 +350,9 @@ Platform Local Trust Authority:
 - Audit reads do not provide regex, free-text search, unbounded export, aggregation, delete, or update operations.
 - `metadata_summary` is bounded and limited to safe correlation/request/source/schema/failure context. Raw payloads, feature vectors, tokens, secrets, stack traces, and customer/account/card data are not stored or returned.
 
-## FDP-20/FDP-22 Operational Guarantees
+## FDP-20/FDP-22 Operational Behavior
 
-FDP-20/FDP-22 guarantee append-only durable audit events, local chain anchors, external tamper-evidence publication when a supported sink is enabled, bounded external verification, bounded evidence export, explicit `AVAILABLE` versus `PARTIAL` versus `UNAVAILABLE` status, strict-mode rejection of partial evidence packages, and complete bounded export audit metadata. They also guarantee that local-file external anchoring is blocked in prod-like profiles and remains development-only.
+FDP-20/FDP-22 implement append-only durable audit events, local chain anchors, external tamper-evidence publication when a supported sink is enabled, bounded external verification, bounded evidence export, explicit `AVAILABLE` versus `PARTIAL` versus `UNAVAILABLE` status, strict-mode rejection of partial evidence packages, and complete bounded export audit metadata. They also block local-file external anchoring in prod-like profiles, where it remains development-only.
 
 FDP-20/FDP-22 do not guarantee certified WORM storage, legal notarization, legal non-repudiation, HSM/KMS-backed signatures, SIEM integration, a bundled cloud-provider object-store client, a regulator-ready archive, or cross-instance rate limiting. Evidence export rate limiting is enforced per service instance; in multi-instance deployments, effective rate limiting must be enforced at API gateway or shared infrastructure level. `external_immutability_level=NONE` or `CONFIGURED` is not WORM proof. FDP-20/FDP-22 provide external tamper-evidence, not external trust enforcement.
 
@@ -430,7 +430,7 @@ Configured internal ML scoring and governance calls use an internal service-auth
 - Security events and metrics are low-cardinality and do not include tokens, actor IDs, resource IDs, paths, or exception messages.
 - Internal auth metrics are `fraud_internal_auth_success_total{source_service,target_service,mode}`, `fraud_internal_auth_failure_total{target_service,mode,reason}`, `fraud_internal_mtls_handshake_failures_total{reason}`, `fraud_internal_mtls_cert_expiry_seconds{source_service,target_service}`, `fraud_internal_mtls_cert_age_seconds{source_service,target_service}`, `fraud_internal_auth_replay_rejected_total{reason}`, and `fraud_internal_auth_token_age_seconds{reason}`. Trust-authority JWT key pinning emits `trust_jwt_key_fingerprint_mismatch_total` on startup validation mismatch.
 
-See `docs/service-identity-fdp17.md` for the FDP-17 JWT service identity contract and `docs/service-identity-fdp18.md` for the FDP-18 mTLS contract. This is an internal service-auth foundation, not enterprise IAM, not external JWKS discovery, not automated key/certificate rotation, not HSM/KMS integration, not bank-grade certification, and not a replacement for production deployment hardening.
+See `docs/security/service-identity-fdp-17.md` for the FDP-17 JWT service identity contract and `docs/security/service-identity-fdp-18.md` for the FDP-18 mTLS contract. This is an internal service-auth foundation, not enterprise IAM, not external JWKS discovery, not automated key/certificate rotation, not HSM/KMS integration, not bank-grade certification, and not a replacement for production deployment hardening.
 
 ## FDP-27 Bank Profile And Production Closure
 
@@ -636,3 +636,5 @@ Reviewers should check:
 3. Remove request-body actor fields once API compatibility allows it.
 4. Define audit retention/export policy if compliance requirements need long-term searchable audit history.
 5. Decide whether a shared security module is justified after another service needs the same model.
+
+
