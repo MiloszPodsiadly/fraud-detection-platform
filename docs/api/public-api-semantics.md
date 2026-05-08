@@ -14,7 +14,33 @@ semantics only; it does not enable FDP-29 production mode or change API contract
 - A conflicting idempotency key and intent must be treated as a conflict, not a retry.
 - Local evidence confirmation is not external finality, legal notarization, or WORM proof.
 - Checkpoint renewal preserves lease ownership only; it is not proof of business progress.
+- Lease renewal preserves the current worker's ownership window only; it is not a business progress claim.
 - Signed release or provenance artifacts are release controls, not proof of business correctness.
+
+## Public Response Fields
+
+`SubmitAnalystDecisionResponse` currently exposes:
+
+| Field | Meaning | Safety note |
+| --- | --- | --- |
+| `alertId` | Alert identifier for the decision response. | Not a proof artifact. |
+| `decision` | Analyst decision value. | Must be interpreted with `operation_status`. |
+| `resultingStatus` | Alert status projected by the service. | HTTP 200 alone is not finality. |
+| `decisionEventId` | Decision event identifier when available. | Kafka delivery remains at-least-once. |
+| `decidedAt` | Service decision timestamp. | Not external timestamp proof. |
+| `operation_status` | Regulated mutation public status. | Primary status for mutation interpretation. |
+
+`UpdateFraudCaseResponse` currently exposes:
+
+| Field | Meaning | Safety note |
+| --- | --- | --- |
+| `operation_status` | Regulated mutation public status. | Recovery statuses are not success. |
+| `command_id` | Regulated command identifier. | Operational identifier only. |
+| `idempotency_key_hash` | Hash of the idempotency key. | Raw idempotency keys are not exposed. |
+| `case_id` | Fraud case identifier. | Not external finality proof. |
+| `current_case_snapshot` | Prior case projection when available. | Snapshot is local service data. |
+| `updated_case` | Updated case projection when available. | Must be interpreted with `operation_status`. |
+| `recovery_required_reason` | Safe recovery reason when recovery is required. | Recovery required is not success. |
 
 ## Status Families
 
@@ -31,6 +57,27 @@ semantics only; it does not enable FDP-29 production mode or change API contract
 `FINALIZED_VISIBLE` exists in the public enum for compatibility with older repair/replay paths, but the current
 regulated mutation public-status mapper reports that state as `FINALIZED_EVIDENCE_PENDING_EXTERNAL` rather than a
 stronger completion claim.
+
+## Status Truth Table
+
+| Status | Current semantics | Required non-claim |
+| --- | --- | --- |
+| `REJECTED_BEFORE_MUTATION` | Request was rejected before a valid mutation was committed. | Not a committed decision. |
+| `IN_PROGRESS` | Command is accepted or currently owned by a worker. | Not success and not progress proof. |
+| `RECOVERY_REQUIRED` | Durable state requires operator or recovery workflow inspection. | Recovery required is not success. |
+| `COMMIT_UNKNOWN` | Business commit visibility cannot be concluded from the immediate response. | Not success or rollback. |
+| `EVIDENCE_PREPARING` | Evidence-gated path is preparing local evidence. | Not committed business success. |
+| `EVIDENCE_PREPARED` | Evidence-gated path prepared local evidence. | Not external finality. |
+| `FINALIZING` | Evidence-gated path is finalizing local mutation state. | Not complete or externally confirmed. |
+| `FINALIZED_VISIBLE` | Compatibility status for older repair/replay paths. | Current mapper avoids stronger finality. |
+| `FINALIZED_EVIDENCE_PENDING_EXTERNAL` | Local finalized state is visible while external evidence remains pending. | Pending external evidence is not confirmed. |
+| `FINALIZED_EVIDENCE_CONFIRMED` | Current local evidence policy is satisfied for finalize. | Not WORM, legal proof, or distributed ACID. |
+| `REJECTED_EVIDENCE_UNAVAILABLE` | Evidence-gated path rejected because required evidence was unavailable. | Not committed success. |
+| `FAILED_BUSINESS_VALIDATION` | Business validation rejected the requested mutation. | Not a committed requested decision. |
+| `FINALIZE_RECOVERY_REQUIRED` | Finalize path requires recovery inspection. | Not success or external finality. |
+| `COMMITTED_EVIDENCE_PENDING` | Legacy path locally committed business state with evidence still pending. | Pending evidence is not confirmed. |
+| `COMMITTED_EVIDENCE_CONFIRMED` | Current local evidence policy is satisfied for commit. | Local evidence is not external finality. |
+| `COMMITTED_EVIDENCE_INCOMPLETE` | Business state may be committed while evidence completion degraded. | Not complete evidence and not rollback. |
 
 ## Replay Behavior
 

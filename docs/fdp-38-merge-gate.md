@@ -62,12 +62,28 @@ The CI job must fail if any required class XML is missing or skipped:
 
 ## GO Criteria
 
-FDP-38 is GO only if `LIVE_IN_FLIGHT_REQUEST_KILL` is non-skipped, barrier-reached, container-killed, artifact-backed, and clearly marked as `RUNTIME_REACHED_TEST_FIXTURE`.
+FDP-38 is GO only if `LIVE_IN_FLIGHT_REQUEST_KILL` is non-skipped, barrier-reached, container-killed,
+artifact-backed, and clearly marked as `RUNTIME_REACHED_TEST_FIXTURE`.
 
 ## NO-GO Criteria
 
 FDP-38 is NO-GO if it claims `RUNTIME_REACHED_PRODUCTION_IMAGE` while using the test-fixture image.
 
-FDP-38 is NO-GO if the fixture Dockerfile is used by compose, FDP-37 production-image jobs, or release-image jobs. Only the `fdp38-live-runtime-checkpoint-chaos` job may build `deployment/Dockerfile.alert-service-fdp38-fixture`.
+FDP-38 is NO-GO if the fixture Dockerfile is used by compose, FDP-37 production-image jobs, or release-image
+jobs. Only the `fdp38-live-runtime-checkpoint-chaos` job may build
+`deployment/Dockerfile.alert-service-fdp38-fixture`.
 
-FDP-38 is NO-GO if any artifact claims `release_image=true`, `release_candidate_allowed=true`, `production_deployable=true`, production enablement, full instruction-boundary coverage, external finality, distributed ACID, Kafka exactly-once delivery, legal notarization, WORM guarantee, production certification, or bank certification.
+FDP-38 is NO-GO if any artifact claims:
+
+- must not claim `release_image=true`
+- must not claim `release_candidate_allowed=true`
+- must not claim `production_deployable=true`
+- must not claim production enablement
+- must not claim full instruction-boundary coverage
+- must not claim external finality
+- must not claim distributed ACID
+- must not claim Kafka exactly-once delivery
+- must not claim legal notarization
+- must not claim WORM guarantee
+- must not claim production certification
+- must not claim bank certification

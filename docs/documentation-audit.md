@@ -17,7 +17,7 @@ production enablement, or bank certification posture.
 | --- | --- | --- | --- |
 | Current source of truth | Stable docs that should remain true after merge. | `docs/index.md`, current architecture, public API semantics | Must avoid active-branch wording and must state non-claims clearly. |
 | Contract summary | Human-readable companion to code/API contracts. | `docs/api/status-truth-table.md`, `docs/configuration/configuration-guide.md` | Must match enum/config/controller behavior or explicitly call out gaps. |
-| Historical FDP evidence | Branch-specific proof, handoff, merge-gate, or readiness documents. | `docs/FDP-*.md`, `docs/**/FDP-*.md` | Preserve for traceability; do not treat as current truth when superseded. |
+| Historical FDP evidence | Branch-specific proof, handoff, merge-gate, or readiness documents. | `docs/fdp-*.md`, `docs/**/fdp-*.md` | Preserve for traceability; do not treat as current truth when superseded. |
 | Template or checklist | A form to complete during release or enablement review. | PR templates, enablement checklists, release owner templates | Placeholders are allowed only when clearly marked as fields to fill, not generated proof. |
 | Supporting local docs | Local setup or service identity material. | `deployment/service-identity/index.md` | Must label local/dev material as local/dev and avoid production claims. |
 
@@ -31,6 +31,25 @@ production enablement, or bank certification posture.
 - [Runbook standards](runbooks/index.md)
 - [Documentation style guide](documentation-style-guide.md)
 - [Historical FDP index](historical-fdp-documents.md)
+
+## Historical Evidence Handling
+
+Historical FDP documents are retained as trace evidence for the branch that produced them. They may contain
+older assumptions, narrower proof scope, or limitations that were superseded by later FDP work.
+
+Historical FDP documents must not be read as current production truth unless a current source-of-truth document
+explicitly restates the claim.
+
+Current interpretation rules:
+
+| Evidence family | Current interpretation |
+| --- | --- |
+| FDP-35 | Production-readiness proof only; not enablement. |
+| FDP-36 | Real alert-service kill proof scope; not production certification. |
+| FDP-37 | Production-like image durable crash-window evidence; not live instruction-boundary proof. |
+| FDP-38 | Dedicated test-fixture live checkpoint proof; not production-image proof. |
+| FDP-39 | Release artifact separation and governance readiness; not production enablement. |
+| FDP-40 | Release control readiness and provenance readiness; not enforced signing by itself. |
 
 ## Implementation Alignment Checks
 

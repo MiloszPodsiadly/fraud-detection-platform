@@ -46,7 +46,8 @@ temporary task. If a document is branch-specific, classify it as historical FDP 
 ## Writing Style
 
 - Prefer short paragraphs.
-- Keep Markdown lines under 240 characters outside code blocks and URLs.
+- Keep current source-of-truth Markdown lines under 180 characters outside code blocks, tables, and unavoidable
+  URLs.
 - Use `Status`, `Scope`, and `Non-claims` sections for large or review-facing docs.
 - State limitations directly.
 - Do not describe future behavior as current behavior.

@@ -7,14 +7,15 @@ Status: current configuration guide.
 This guide summarizes configuration posture for local, test, production-like, and fixture profiles. It does not
 enable production mode and does not replace environment-specific release approval.
 
-## Profiles
+## Environment Truth Table
 
-| Profile | Use | Safe assumptions | Forbidden interpretation |
-| --- | --- | --- | --- |
-| local/dev/docker-local | Developer and portfolio smoke testing. | Demo auth and local infrastructure may be enabled. | Not bank-grade or production enablement. |
-| test | Automated tests and Testcontainers. | Fixtures may replace external services. | Not release runtime evidence unless named as fixture proof. |
-| production-like | Startup guard and release-readiness validation. | Should fail closed on missing required controls. | Not production approval by itself. |
-| fixture/test-only | Chaos and proof harnesses. | May contain test blockers or fixture image markers. | Must not be promoted as release image. |
+| Environment | Allowed transaction mode | FDP-29 enablement | Fixture profiles | Checkpoint barriers | Production enablement | Required guardrails |
+| --- | --- | --- | --- | --- | --- | --- |
+| local/dev | `OFF` or `REQUIRED` for local verification. | Local only when explicitly configured. | Allowed for local tests only. | Allowed only in test harnesses. | No. | Demo/local limitations must be visible. |
+| test | `OFF` or `REQUIRED` depending on scenario. | Allowed for automated coverage. | Allowed. | Allowed. | No. | Fixtures must be labeled as test evidence. |
+| production-like | `REQUIRED` for regulated mutation safety. | Only as readiness validation before separate approval. | Not allowed. | Not allowed. | No. | Startup guards and release controls must fail closed. |
+| FDP-38 fixture image/profile | Scenario-specific test mode only. | Test-fixture proof only. | Required by fixture design. | Allowed. | No. | Must never be promoted as release image or release profile. |
+| release image | `REQUIRED` for bank/prod-style regulated mutation safety. | Only after separate config/release PR. | Not allowed. | Not allowed. | Separate approval required. | Immutable digest, required checks, runbooks, and rollback plan. |
 
 ## Regulated Mutation Settings
 
@@ -22,6 +23,8 @@ enable production mode and does not replace environment-specific release approva
 - `REQUIRED` is expected for bank/prod-style regulated mutation safety.
 - Lease duration, renewal, and checkpoint budgets must be reviewed with stale-worker metrics before enablement.
 - FDP-29 evidence-gated finalize requires a separate config PR and explicit release approval.
+- Checkpoint renewal is ownership preservation only. It is not proof of business progress.
+- FDP-38 checkpoint barriers are fixture/test-only controls and must never be included in a release image claim.
 
 ## Messaging And Outbox
 

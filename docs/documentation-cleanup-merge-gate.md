@@ -25,6 +25,12 @@ tests. It is not a runtime release gate and does not approve production enableme
 - Historical FDP docs remain traceable and are not rewritten as current production proof.
 - Documentation safety tests are green.
 - Link integrity tests are green.
+- Public API semantics documentation tests are green.
+- Configuration guide consistency tests are green.
+- No-fake-claims documentation tests are green.
+- Hidden Unicode and bidi control character tests are green.
+- Current truth versus historical evidence classification tests are green.
+- Raw Markdown readability and line-length tests are green for current source-of-truth docs.
 - Application runtime code is unchanged.
 
 ## Non-Claims
@@ -36,6 +42,17 @@ certification, external finality, WORM storage, distributed ACID, exactly-once K
 
 GO requires all required evidence above and no application runtime code changes.
 
-NO-GO if docs imply future behavior as current behavior, hide limitations, expose sensitive example values, or
-claim production readiness without naming remaining risks.
+NO-GO if docs:
 
+- imply future behavior as current behavior;
+- hide limitations;
+- expose sensitive example values;
+- claim production enablement;
+- claim bank certification;
+- claim external finality;
+- claim distributed ACID;
+- claim exactly-once Kafka;
+- describe fixture proof as production proof;
+- present historical FDP evidence as current truth without context;
+- contain hidden Unicode or bidi control characters;
+- fail raw Markdown auditability checks.

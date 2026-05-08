@@ -7,18 +7,26 @@ Status: current documentation index.
 This index is the entry point for current documentation. It separates evergreen docs from historical FDP proof
 artifacts so reviewers can find the latest source of truth without losing branch-level traceability.
 
-## Current State
+## Current Source Of Truth
+
+These files describe the current intended interpretation after merge. Start here before reading branch-level
+FDP evidence.
 
 - [Current architecture](architecture/current-architecture.md)
-- [Documentation inventory](documentation-inventory.md)
-- [Documentation audit](documentation-audit.md)
-- [Documentation style guide](documentation-style-guide.md)
-- [Documentation naming map](documentation-naming-map.md)
 - [Public API semantics](api/public-api-semantics.md)
 - [Status truth table](api/status-truth-table.md)
 - [OpenAPI safety audit](api/openapi-safety-audit.md)
 - [Configuration guide](configuration/configuration-guide.md)
 - [Architecture diagrams](architecture/diagrams.md)
+
+## Documentation Governance
+
+These files define how documentation is classified, named, linked, and reviewed.
+
+- [Documentation inventory](documentation-inventory.md)
+- [Documentation audit](documentation-audit.md)
+- [Documentation style guide](documentation-style-guide.md)
+- [Documentation naming map](documentation-naming-map.md)
 - [Documentation cleanup merge gate](documentation-cleanup-merge-gate.md)
 
 ## API Contracts
@@ -37,11 +45,19 @@ artifacts so reviewers can find the latest source of truth without losing branch
 - [FDP-35 recovery drill runbook](runbooks/fdp-35-regulated-mutation-recovery-drill-runbook.md)
 - [FDP-36 real chaos recovery drill runbook](runbooks/fdp-36-real-chaos-recovery-drill-runbook.md)
 
-## Release And Proof Docs
+## Historical FDP Evidence
 
 FDP release documents are retained for historical traceability. Later FDP branches may supersede parts of
 earlier scope. Treat each FDP document as evidence for that branch unless a current document explicitly says
 otherwise.
+
+The FDP-35 through FDP-40 documents are proof, readiness, or governance evidence. They are not production
+enablement and they are not bank certification.
+
+FDP-38 fixture proof is test-fixture runtime evidence only. It is not production-image proof.
+
+FDP-40 signed provenance readiness is readiness evidence only. It is not enforced signing unless a real
+sign-and-verify artifact or platform policy proves enforcement.
 
 - [FDP-40 merge gate](fdp-40-merge-gate.md)
 - [FDP-39 merge gate](fdp-39-merge-gate.md)
