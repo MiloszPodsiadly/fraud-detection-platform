@@ -15,6 +15,7 @@ class NoFakeClaimsDocumentationTest {
 
     private static final List<String> FORBIDDEN_PHRASES = List.of(
             "production enabled",
+            "production ready",
             "bank certified",
             "production certified",
             "externally final",
@@ -24,12 +25,18 @@ class NoFakeClaimsDocumentationTest {
             "WORM guaranteed",
             "legal notarization",
             "signed provenance proves business correctness",
+            "signed artifact proves business correctness",
+            "release approval proves correctness",
             "checkpoint renewal proves progress",
+            "lease renewal proves progress",
             "fixture image is release image",
+            "fixture proof is production image proof",
             "runtime checkpoint fixture is production image proof",
+            "RUNTIME_REACHED_TEST_FIXTURE is RUNTIME_REACHED_PRODUCTION_IMAGE",
             "READY_FOR_ENABLEMENT_REVIEW means PRODUCTION_ENABLED",
             "recovery required is success",
-            "local evidence confirmation is external confirmation"
+            "local evidence confirmation is external confirmation",
+            "FINALIZED_VISIBLE means externally confirmed"
     );
 
     private static final List<String> ALLOWED_NEGATIVE_CONTEXT = List.of(
@@ -68,12 +75,12 @@ class NoFakeClaimsDocumentationTest {
                 while (index >= 0) {
                     if (!isAllowedNegativeContext(lowerContent, index, lowerPhrase.length())) {
                         int lineNumber = lineNumberAt(content, index);
-                        String line = lines[Math.max(0, lineNumber - 1)].trim();
+                        String context = surroundingLineContext(lines, lineNumber);
                         violations.add("%s:%d: forbidden positive claim '%s': %s".formatted(
-                                path,
+                                DocumentationTestSupport.relativeToRepository(path),
                                 lineNumber,
                                 phrase,
-                                line
+                                context
                         ));
                     }
                     index = lowerContent.indexOf(lowerPhrase, index + lowerPhrase.length());
@@ -93,6 +100,12 @@ class NoFakeClaimsDocumentationTest {
         return ALLOWED_NEGATIVE_CONTEXT.stream().anyMatch(context::contains);
     }
 
+    private String surroundingLineContext(String[] lines, int lineNumber) {
+        int start = Math.max(0, lineNumber - 2);
+        int end = Math.min(lines.length, lineNumber + 1);
+        return String.join(" / ", java.util.Arrays.copyOfRange(lines, start, end)).trim();
+    }
+
     private int lineNumberAt(String content, int charIndex) {
         int line = 1;
         for (int i = 0; i < charIndex; i++) {
@@ -105,13 +118,14 @@ class NoFakeClaimsDocumentationTest {
 
     private List<Path> scannedMarkdown() throws Exception {
         List<Path> files = new ArrayList<>();
-        files.add(Path.of("../README.md"));
-        try (Stream<Path> stream = Files.walk(Path.of("../docs"))) {
+        Path repositoryRoot = DocumentationTestSupport.repositoryRoot();
+        files.add(repositoryRoot.resolve("README.md"));
+        try (Stream<Path> stream = Files.walk(repositoryRoot.resolve("docs"))) {
             files.addAll(stream.filter(Files::isRegularFile)
                     .filter(path -> path.toString().endsWith(".md"))
                     .toList());
         }
-        Path templateRoot = Path.of("../.github/PULL_REQUEST_TEMPLATE");
+        Path templateRoot = repositoryRoot.resolve(".github/PULL_REQUEST_TEMPLATE");
         if (Files.exists(templateRoot)) {
             try (Stream<Path> stream = Files.walk(templateRoot)) {
                 files.addAll(stream.filter(Files::isRegularFile)

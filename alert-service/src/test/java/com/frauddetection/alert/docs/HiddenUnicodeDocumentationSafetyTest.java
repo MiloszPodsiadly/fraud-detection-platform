@@ -26,7 +26,8 @@ class HiddenUnicodeDocumentationSafetyTest {
             Map.entry(0x200B, "ZERO WIDTH SPACE"),
             Map.entry(0x200C, "ZERO WIDTH NON-JOINER"),
             Map.entry(0x200D, "ZERO WIDTH JOINER"),
-            Map.entry(0xFEFF, "ZERO WIDTH NO-BREAK SPACE")
+            Map.entry(0xFEFF, "ZERO WIDTH NO-BREAK SPACE"),
+            Map.entry(0x00A0, "NO-BREAK SPACE")
     );
 
     @Test
@@ -35,16 +36,20 @@ class HiddenUnicodeDocumentationSafetyTest {
         for (Path path : scannedFiles()) {
             String[] lines = Files.readString(path).split("\\R", -1);
             for (int lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-                int[] codePoints = lines[lineIndex].codePoints().toArray();
-                for (int codePoint : codePoints) {
-                    if (FORBIDDEN_CODE_POINTS.containsKey(codePoint)) {
-                        violations.add("%s:%d: U+%04X %s".formatted(
-                                path,
+                String line = lines[lineIndex];
+                for (int offset = 0, column = 1; offset < line.length(); column++) {
+                    int codePoint = line.codePointAt(offset);
+                    if (isForbidden(codePoint)) {
+                        violations.add("%s:%d:%d: U+%04X %s context=\"%s\"".formatted(
+                                DocumentationTestSupport.relativeToRepository(path),
                                 lineIndex + 1,
+                                column,
                                 codePoint,
-                                FORBIDDEN_CODE_POINTS.get(codePoint)
+                                codePointName(codePoint),
+                                escapedContext(line, offset)
                         ));
                     }
+                    offset += Character.charCount(codePoint);
                 }
             }
         }
@@ -54,11 +59,44 @@ class HiddenUnicodeDocumentationSafetyTest {
                 .isEmpty();
     }
 
+    private boolean isForbidden(int codePoint) {
+        if (FORBIDDEN_CODE_POINTS.containsKey(codePoint)) {
+            return true;
+        }
+        if (Character.getType(codePoint) == Character.FORMAT) {
+            return true;
+        }
+        return Character.isISOControl(codePoint)
+                && codePoint != '\n'
+                && codePoint != '\r'
+                && codePoint != '\t';
+    }
+
+    private String codePointName(int codePoint) {
+        return FORBIDDEN_CODE_POINTS.getOrDefault(codePoint, Character.getName(codePoint));
+    }
+
+    private String escapedContext(String line, int offset) {
+        int start = Math.max(0, offset - 20);
+        int end = Math.min(line.length(), offset + 21);
+        String context = line.substring(start, end);
+        StringBuilder escaped = new StringBuilder();
+        context.codePoints().forEach(codePoint -> {
+            if (codePoint < 0x20 || codePoint > 0x7E || Character.getType(codePoint) == Character.FORMAT) {
+                escaped.append("\\u%04X".formatted(codePoint));
+            } else {
+                escaped.appendCodePoint(codePoint);
+            }
+        });
+        return escaped.toString();
+    }
+
     private List<Path> scannedFiles() throws Exception {
         List<Path> files = new ArrayList<>();
-        files.add(Path.of("../README.md"));
-        files.addAll(walk(Path.of("../docs"), ".md", ".yaml", ".yml"));
-        files.addAll(walk(Path.of("../.github"), ".yaml", ".yml", ".md"));
+        Path repositoryRoot = DocumentationTestSupport.repositoryRoot();
+        files.add(repositoryRoot.resolve("README.md"));
+        files.addAll(walk(repositoryRoot.resolve("docs"), ".md", ".yaml", ".yml"));
+        files.addAll(walk(repositoryRoot.resolve(".github"), ".yaml", ".yml", ".md"));
         return files;
     }
 

@@ -7,17 +7,25 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.Set;
 import java.util.List;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class PublicApiDocumentationConsistencyTest {
 
+    private static final Pattern UPPERCASE_TOKEN = Pattern.compile("\\b[A-Z][A-Z0-9_]{3,}\\b");
+    private static final Set<String> NON_STATUS_TOKENS = Set.of("HTTP", "WORM", "ACID");
+
     @Test
     void publicStatusDocsCoverEverySubmitDecisionOperationStatus() throws Exception {
-        String truthTable = Files.readString(Path.of("../docs/api/status-truth-table.md"));
-        String semantics = Files.readString(Path.of("../docs/api/public-api-semantics.md"));
-        String openApi = Files.readString(Path.of("../docs/openapi/alert-service.openapi.yaml"));
+        Path docsRoot = DocumentationTestSupport.docsRoot();
+        String truthTable = Files.readString(docsRoot.resolve("api/status-truth-table.md"));
+        String semantics = Files.readString(docsRoot.resolve("api/public-api-semantics.md"));
+        String openApi = Files.readString(docsRoot.resolve("openapi/alert-service.openapi.yaml"));
 
         for (SubmitDecisionOperationStatus status : SubmitDecisionOperationStatus.values()) {
             assertThat(truthTable).contains(status.name());
@@ -29,11 +37,23 @@ class PublicApiDocumentationConsistencyTest {
                 .contains("Checkpoint renewal preserves lease ownership only")
                 .contains("Lease renewal preserves the current worker's ownership window only")
                 .contains("Signed release or provenance artifacts are release controls");
+
+        Set<String> currentStatuses = Arrays.stream(SubmitDecisionOperationStatus.values())
+                .map(Enum::name)
+                .collect(Collectors.toSet());
+        Set<String> documentedStatusTokens = UPPERCASE_TOKEN.matcher(semantics)
+                .results()
+                .map(match -> match.group())
+                .filter(token -> !NON_STATUS_TOKENS.contains(token))
+                .collect(Collectors.toCollection(java.util.TreeSet::new));
+        assertThat(documentedStatusTokens)
+                .as("Public API semantics must not document removed status names unless explicitly historical")
+                .isSubsetOf(currentStatuses);
     }
 
     @Test
     void publicResponseFieldDocsCoverCurrentDtoFields() throws Exception {
-        String semantics = Files.readString(Path.of("../docs/api/public-api-semantics.md"));
+        String semantics = Files.readString(DocumentationTestSupport.docsRoot().resolve("api/public-api-semantics.md"));
 
         List<String> submitDecisionFields = List.of(
                 "alertId",
@@ -67,9 +87,10 @@ class PublicApiDocumentationConsistencyTest {
 
     @Test
     void publicDocsRejectKnownFalseEquivalences() throws Exception {
-        String combined = Files.readString(Path.of("../docs/api/public-api-semantics.md"))
-                + "\n" + Files.readString(Path.of("../docs/api/status-truth-table.md"))
-                + "\n" + Files.readString(Path.of("../docs/api/openapi-safety-audit.md"));
+        Path docsRoot = DocumentationTestSupport.docsRoot();
+        String combined = Files.readString(docsRoot.resolve("api/public-api-semantics.md"))
+                + "\n" + Files.readString(docsRoot.resolve("api/status-truth-table.md"))
+                + "\n" + Files.readString(docsRoot.resolve("api/openapi-safety-audit.md"));
 
         assertThat(combined)
                 .contains("not external finality")
@@ -79,7 +100,9 @@ class PublicApiDocumentationConsistencyTest {
                 .contains("Local evidence is not external finality")
                 .contains("not success")
                 .contains("not distributed exactly-once")
-                .contains("not proof of business correctness");
+                .contains("not proof of business correctness")
+                .contains("FINALIZED_VISIBLE is a compatibility-visible status")
+                .contains("FINALIZED_VISIBLE is not external confirmation");
 
         assertThat(combined.toLowerCase())
                 .doesNotContain("local committed == external finality")
