@@ -4,9 +4,9 @@
     ".github/workflows/ci.yml#fdp39-release-governance",
     "scripts/fdp39-generate-governance-artifacts.sh",
     "deployment/Dockerfile.alert-service-fdp38-fixture",
-    "docs/FDP-38-*.md",
-    "docs/adr/FDP-39-*.md",
-    "docs/release/FDP-39-*.md",
+    "docs/fdp-38-*.md",
+    "docs/adr/fdp-39-*.md",
+    "docs/release/fdp-39-*.md",
     "alert-service/src/test/**"
   ],
   "forbidden_contexts": [

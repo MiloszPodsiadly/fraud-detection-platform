@@ -387,7 +387,7 @@ jobs:
             echo "FDP-37 proof artifacts cannot contain placeholders in CI"
             exit 1
           fi
-          if grep -R 'LIVE_IN_FLIGHT_REQUEST_KILL' docs/FDP-37-*.md docs/adr/FDP-37-*.md docs/testing/FDP-37-*.md docs/ops/FDP-37-*.md; then
+          if grep -R 'LIVE_IN_FLIGHT_REQUEST_KILL' docs/fdp-37-*.md docs/adr/fdp-37-*.md docs/testing/fdp-37-*.md docs/ops/fdp-37-*.md; then
             echo "FDP-37 docs cannot claim live in-flight proof unless the required artifact contains LIVE_IN_FLIGHT_REQUEST_KILL"
             exit 1
           fi
@@ -674,7 +674,7 @@ jobs:
           grep -q 'release_candidate_allowed=false' "$EVIDENCE_MD"
           grep -q 'production_deployable=false' "$EVIDENCE_MD"
           grep -q 'fixture image is not a production image' docs/fdp-38-merge-gate.md
-          if grep -R 'release_image: `true`\|release_candidate_allowed: `true`\|production_deployable: `true`\|RUNTIME_REACHED_PRODUCTION_IMAGE: `claimed`\|production_enablement: `true`' "$SUMMARY_MD" "$EVIDENCE_MD" "$PROVENANCE_JSON" docs/FDP-38-*.md docs/adr/FDP-38-*.md docs/testing/FDP-38-*.md; then
+          if grep -R 'release_image: `true`\|release_candidate_allowed: `true`\|production_deployable: `true`\|RUNTIME_REACHED_PRODUCTION_IMAGE: `claimed`\|production_enablement: `true`' "$SUMMARY_MD" "$EVIDENCE_MD" "$PROVENANCE_JSON" docs/fdp-38-*.md docs/adr/fdp-38-*.md docs/testing/fdp-38-*.md; then
             echo "FDP-38 artifacts/docs cannot claim production image live proof or production enablement"
             exit 1
           fi
@@ -910,7 +910,7 @@ jobs:
           grep -q 'Fixture proof is not production proof' docs/release/fdp-39-final-regulated-mutation-proof-matrix.md
           grep -q 'production_enabled: `false`' "$ARTIFACT_DIR/fdp39-enablement-governance-pack.md"
           grep -q 'fixture_image_release_candidate_allowed: `false`' "$ARTIFACT_DIR/fdp39-artifact-provenance.md"
-          if grep -R 'RUNTIME_REACHED_PRODUCTION_IMAGE.*claimed\|production_enablement: `true`\|bank_enabled: `true`\|production_enabled: `true`' docs/FDP-39-*.md docs/adr/FDP-39-*.md docs/release/FDP-39-*.md "$ARTIFACT_DIR"; then
+          if grep -R 'RUNTIME_REACHED_PRODUCTION_IMAGE.*claimed\|production_enablement: `true`\|bank_enabled: `true`\|production_enabled: `true`' docs/fdp-39-*.md docs/adr/fdp-39-*.md docs/release/fdp-39-*.md "$ARTIFACT_DIR"; then
             echo "FDP-39 docs/artifacts contain a forbidden positive enablement claim"
             exit 1
           fi
@@ -1116,7 +1116,7 @@ jobs:
           grep -q 'READY_FOR_ENABLEMENT_REVIEW is not PRODUCTION_ENABLED' docs/release/fdp-40-branch-readme.md .github/PULL_REQUEST_TEMPLATE/fdp-enablement-config-change.md
           grep -q 'single release owner model' docs/release/fdp-40-single-release-owner-governance.md .github/PULL_REQUEST_TEMPLATE/fdp-enablement-config-change.md
           grep -q 'signed image does not mean external finality' docs/release/fdp-40-unsupported-claims-matrix.md
-          if grep -R 'production_enabled: `true`\|bank_certification_claimed: `true`\|external_finality_claimed: `true`\|distributed_acid_claimed: `true`\|dual_control_required: `true`' docs/FDP-40-*.md docs/adr/FDP-40-*.md docs/release/FDP-40-*.md "$ARTIFACT_DIR"; then
+          if grep -R 'production_enabled: `true`\|bank_certification_claimed: `true`\|external_finality_claimed: `true`\|distributed_acid_claimed: `true`\|dual_control_required: `true`' docs/fdp-40-*.md docs/adr/fdp-40-*.md docs/release/fdp-40-*.md "$ARTIFACT_DIR"; then
             echo "FDP-40 docs/artifacts contain a forbidden positive enablement or finality claim"
             exit 1
           fi
