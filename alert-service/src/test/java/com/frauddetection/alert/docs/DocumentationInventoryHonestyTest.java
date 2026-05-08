@@ -49,6 +49,28 @@ class DocumentationInventoryHonestyTest {
         }
     }
 
+    @Test
+    void currentTruthAndHistoricalEvidenceAreExplicitlySeparated() throws Exception {
+        String index = Files.readString(Path.of("../docs/index.md"));
+        String audit = Files.readString(Path.of("../docs/documentation-audit.md"));
+
+        assertThat(index)
+                .contains("Current Source Of Truth")
+                .contains("Documentation Governance")
+                .contains("Historical FDP Evidence")
+                .contains("FDP-38 fixture proof is test-fixture runtime evidence only")
+                .contains("FDP-40 signed provenance readiness is readiness evidence only");
+        assertThat(audit)
+                .contains("Current source of truth")
+                .contains("Contract summary")
+                .contains("Historical FDP evidence")
+                .contains("Historical Evidence Handling")
+                .contains("FDP-38")
+                .contains("not production-image proof")
+                .contains("FDP-40")
+                .contains("not enforced signing by itself");
+    }
+
     private List<String> normalizedSegments(String path) {
         return List.of(path.replace('\\', '/').split("/"));
     }

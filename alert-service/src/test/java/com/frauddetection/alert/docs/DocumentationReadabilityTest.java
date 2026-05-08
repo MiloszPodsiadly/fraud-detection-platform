@@ -36,6 +36,9 @@ class DocumentationReadabilityTest {
             assertThat(content).as(path + " must include status").contains("Status:");
             assertThat(content).as(path + " must name scope").contains("Scope");
             assertMarkdownLineLength(path, content);
+            assertThat(content)
+                    .as(path + " must not contain huge one-line Markdown blobs")
+                    .doesNotContain("## Scope ");
         }
     }
 
@@ -73,14 +76,16 @@ class DocumentationReadabilityTest {
 
     private void assertMarkdownLineLength(Path path, String content) {
         boolean inCodeBlock = false;
-        for (String line : content.split("\\R", -1)) {
+        String[] lines = content.split("\\R", -1);
+        for (int index = 0; index < lines.length; index++) {
+            String line = lines[index];
             if (line.startsWith("```")) {
                 inCodeBlock = !inCodeBlock;
             }
-            if (!inCodeBlock && !line.startsWith("http")) {
+            if (!inCodeBlock && !line.startsWith("http") && !line.startsWith("|")) {
                 assertThat(line.length())
-                        .as("Line too long in " + path + ": " + line)
-                        .isLessThanOrEqualTo(240);
+                        .as("Line too long in " + path + " line " + (index + 1) + ": " + line)
+                        .isLessThanOrEqualTo(180);
             }
         }
     }

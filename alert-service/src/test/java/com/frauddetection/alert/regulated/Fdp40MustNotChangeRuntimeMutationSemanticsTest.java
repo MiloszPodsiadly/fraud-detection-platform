@@ -113,7 +113,7 @@ class Fdp40MustNotChangeRuntimeMutationSemanticsTest {
             return diffBetween(eventName, "pull-request-merge-base-to-head", baseRef, baseSha, headSha);
         }
 
-        ProcessResult fallback = runGit("diff", "--name-only", headSha);
+        ProcessResult fallback = runGit("diff", "--no-renames", "--name-only", headSha);
         if (!fallback.success() && ciMode) {
             throw new AssertionError("FDP-40 CI fallback diff failed: " + fallback.stderr());
         }
@@ -159,9 +159,22 @@ class Fdp40MustNotChangeRuntimeMutationSemanticsTest {
         boolean ciMode = Boolean.getBoolean("fdp40.ci-mode");
         String baseSha = verifiedCommit("base", baseRevision, ciMode);
         String headSha = verifiedCommit("head", headRevision, ciMode);
-        ProcessResult diff = runGit("diff", "--name-only", baseSha, headSha);
+        ProcessResult diff = runGit("diff", "--no-renames", "--name-only", baseSha, headSha);
         if (!diff.success() && ciMode) {
             throw new AssertionError("FDP-40 CI failed to compute changed files: " + diff.stderr());
+        }
+        if (!diff.success()) {
+            ProcessResult fallback = runGit("diff", "--no-renames", "--name-only", headRevision);
+            return new DiffResult(
+                    fallback.success(),
+                    eventName,
+                    comparisonMode + "-local-working-tree-fallback",
+                    baseRef,
+                    baseSha,
+                    headSha,
+                    fallback.stdout(),
+                    fallback.stderr()
+            );
         }
         return new DiffResult(diff.success(), eventName, comparisonMode, baseRef, baseSha, headSha,
                 diff.stdout(), diff.stderr());
