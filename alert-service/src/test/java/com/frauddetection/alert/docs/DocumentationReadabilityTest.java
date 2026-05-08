@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -27,7 +28,9 @@ class DocumentationReadabilityTest {
             "# Documentation Index Status:",
             "# Documentation Audit Status:",
             "# Public API Semantics Status:",
-            "# Configuration Guide Status:"
+            "# Configuration Guide Status:",
+            "# Documentation Cleanup Merge Gate Status:",
+            "# Documentation Style Guide Status:"
     );
 
     @Test
@@ -39,16 +42,19 @@ class DocumentationReadabilityTest {
             String content = Files.readString(path);
             assertThat(content).as(path + " must include status").contains("Status:");
             assertThat(content).as(path + " must name scope").contains("Scope");
-            assertMarkdownLineLength(path, content);
-            assertThat(content)
-                    .as(path + " must not contain huge one-line Markdown blobs")
-                    .doesNotContain("## Scope ");
-            for (String forbiddenPrefix : FORBIDDEN_BLOB_PREFIXES) {
-                assertThat(content)
-                        .as(path + " must not contain one-line blob prefix: " + forbiddenPrefix)
-                        .doesNotContain(forbiddenPrefix);
-            }
+            assertThat(readabilityViolations(relativePath, content))
+                    .as(relativePath + " must be readable raw Markdown")
+                    .isEmpty();
         }
+    }
+
+    @Test
+    void knownOneLineDocumentationIndexBlobIsRejected() {
+        String oldBadPattern = "# Documentation Index Status: current documentation index. ## Scope";
+
+        assertThat(readabilityViolations(Path.of("docs/index.md"), oldBadPattern))
+                .as("DocumentationReadabilityTest must reject the exact old one-line blob pattern")
+                .isNotEmpty();
     }
 
     @Test
@@ -83,7 +89,8 @@ class DocumentationReadabilityTest {
                 .contains("This portfolio API specification does not represent bank certification");
     }
 
-    private void assertMarkdownLineLength(Path path, String content) {
+    private List<String> readabilityViolations(Path path, String content) {
+        List<String> violations = new ArrayList<>();
         boolean inCodeBlock = false;
         String[] lines = content.split("\\R", -1);
         for (int index = 0; index < lines.length; index++) {
@@ -91,11 +98,65 @@ class DocumentationReadabilityTest {
             if (line.startsWith("```")) {
                 inCodeBlock = !inCodeBlock;
             }
-            if (!inCodeBlock && !line.startsWith("http") && !line.startsWith("|")) {
-                assertThat(line.length())
-                        .as("Line too long in " + path + " line " + (index + 1) + ": " + line)
-                        .isLessThanOrEqualTo(180);
+            if (inCodeBlock) {
+                continue;
+            }
+            int lineNumber = index + 1;
+            if (!line.startsWith("http") && !line.startsWith("|") && line.length() > 180) {
+                violations.add("%s:%d line length %d exceeds 180: %s".formatted(
+                        path, lineNumber, line.length(), excerpt(line)
+                ));
+            }
+            for (String forbiddenPrefix : FORBIDDEN_BLOB_PREFIXES) {
+                if (line.contains(forbiddenPrefix)) {
+                    violations.add("%s:%d contains one-line blob prefix %s: %s".formatted(
+                            path, lineNumber, forbiddenPrefix, excerpt(line)
+                    ));
+                }
+            }
+            if (line.contains("## Scope ") && !line.stripLeading().startsWith("## Scope ")) {
+                violations.add("%s:%d contains embedded Scope heading: %s".formatted(
+                        path, lineNumber, excerpt(line)
+                ));
+            }
+            if (line.matches(".*\\S\\s+#{1,6}\\s+.*")) {
+                violations.add("%s:%d contains heading marker after non-whitespace text: %s".formatted(
+                        path, lineNumber, excerpt(line)
+                ));
+            }
+            if (markdownHeadingCount(line) > 1) {
+                violations.add("%s:%d contains multiple Markdown headings on one line: %s".formatted(
+                        path, lineNumber, excerpt(line)
+                ));
             }
         }
+        return violations;
+    }
+
+    private int markdownHeadingCount(String line) {
+        int count = 0;
+        for (int index = 0; index < line.length(); index++) {
+            if (line.charAt(index) == '#'
+                    && (index == 0 || Character.isWhitespace(line.charAt(index - 1)))
+                    && (index == 0 || line.charAt(index - 1) != '#')) {
+                int end = index;
+                while (end < line.length() && line.charAt(end) == '#') {
+                    end++;
+                }
+                if (end <= index + 6 && end < line.length() && Character.isWhitespace(line.charAt(end))) {
+                    count++;
+                }
+                index = end;
+            }
+        }
+        return count;
+    }
+
+    private String excerpt(String line) {
+        String normalized = line.replace("\t", "\\t");
+        if (normalized.length() <= 220) {
+            return normalized;
+        }
+        return normalized.substring(0, 217) + "...";
     }
 }

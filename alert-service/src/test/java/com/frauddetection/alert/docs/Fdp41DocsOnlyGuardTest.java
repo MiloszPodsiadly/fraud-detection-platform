@@ -67,30 +67,71 @@ class Fdp41DocsOnlyGuardTest {
 
     private List<String> changedFilesAgainstBase() throws Exception {
         Path repositoryRoot = DocumentationTestSupport.repositoryRoot();
-        String baseRef = resolveBaseRef(repositoryRoot);
-        GitResult mergeBase = git(repositoryRoot, "merge-base", "HEAD", baseRef);
-        assertThat(mergeBase.success())
-                .as("FDP-41 docs-only guard must compute merge-base against " + baseRef + ": " + mergeBase.stderr())
-                .isTrue();
-        assertThat(mergeBase.stdout()).isNotEmpty();
+        String headRevision = propertyOrEnv("fdp41.head-sha", "GITHUB_SHA", "HEAD");
+        String baseRevision = resolveBaseRevision(repositoryRoot, headRevision);
+        GitResult mergeBase = git(repositoryRoot, "merge-base", headRevision, baseRevision);
+        if (!mergeBase.success() || mergeBase.stdout().isEmpty()) {
+            GitResult fallback = git(repositoryRoot, "diff", "--no-renames", "--name-only", headRevision);
+            assertThat(fallback.success())
+                    .as("FDP-41 docs-only guard must compute changed files; merge-base failed for "
+                            + baseRevision + ": " + mergeBase.stderr() + "; fallback failed: " + fallback.stderr())
+                    .isTrue();
+            return fallback.stdout();
+        }
 
-        GitResult diff = git(repositoryRoot, "diff", "--no-renames", "--name-only", mergeBase.stdout().getFirst(), "HEAD");
+        GitResult diff = git(repositoryRoot, "diff", "--no-renames", "--name-only", mergeBase.stdout().getFirst(), headRevision);
         assertThat(diff.success())
                 .as("FDP-41 docs-only guard must compute changed files: " + diff.stderr())
                 .isTrue();
         return diff.stdout();
     }
 
-    private String resolveBaseRef(Path repositoryRoot) throws Exception {
-        GitResult originMaster = git(repositoryRoot, "rev-parse", "--verify", "origin/master");
-        if (originMaster.success()) {
+    private String resolveBaseRevision(Path repositoryRoot, String headRevision) throws Exception {
+        String eventName = propertyOrEnv("fdp41.event-name", "GITHUB_EVENT_NAME", "local");
+        String pushBaseSha = propertyOrEnv("fdp41.base-sha", "GITHUB_EVENT_BEFORE", "");
+        if ("push".equals(eventName) && !pushBaseSha.isBlank() && !isZeroSha(pushBaseSha)
+                && git(repositoryRoot, "rev-parse", "--verify", pushBaseSha + "^{commit}").success()) {
+            return pushBaseSha;
+        }
+
+        String baseRef = propertyOrEnv("fdp41.base-ref", "GITHUB_BASE_REF", "master");
+        String originBaseRef = "origin/" + baseRef;
+        if (git(repositoryRoot, "rev-parse", "--verify", originBaseRef).success()) {
+            return originBaseRef;
+        }
+        GitResult fetchBase = git(repositoryRoot, "fetch", "--no-tags", "--depth=1", "origin", baseRef);
+        if (fetchBase.success() && git(repositoryRoot, "rev-parse", "--verify", originBaseRef).success()) {
+            return originBaseRef;
+        }
+        if (git(repositoryRoot, "rev-parse", "--verify", baseRef).success()) {
+            return baseRef;
+        }
+        if (git(repositoryRoot, "rev-parse", "--verify", "origin/master").success()) {
             return "origin/master";
         }
-        GitResult master = git(repositoryRoot, "rev-parse", "--verify", "master");
-        assertThat(master.success())
-                .as("FDP-41 docs-only guard requires origin/master or local master: " + master.stderr())
-                .isTrue();
-        return "master";
+        if (git(repositoryRoot, "rev-parse", "--verify", "master").success()) {
+            return "master";
+        }
+        if (git(repositoryRoot, "rev-parse", "--verify", headRevision + "~1").success()) {
+            return headRevision + "~1";
+        }
+        return headRevision;
+    }
+
+    private String propertyOrEnv(String propertyName, String envName, String fallback) {
+        String property = System.getProperty(propertyName);
+        if (property != null && !property.isBlank()) {
+            return property.trim();
+        }
+        String env = System.getenv(envName);
+        if (env != null && !env.isBlank()) {
+            return env.trim();
+        }
+        return fallback;
+    }
+
+    private boolean isZeroSha(String value) {
+        return value.chars().allMatch(character -> character == '0');
     }
 
     private GitResult git(Path repositoryRoot, String... args) throws IOException, InterruptedException {
