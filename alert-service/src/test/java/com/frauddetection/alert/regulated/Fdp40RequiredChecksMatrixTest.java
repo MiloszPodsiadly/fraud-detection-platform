@@ -28,12 +28,12 @@ class Fdp40RequiredChecksMatrixTest {
 
     @Test
     void requiredChecksMatrixListsAllBlockingReleaseGates() throws Exception {
-        String markdown = Files.readString(Path.of("../docs/release/FDP-40-required-checks-matrix.md"));
+        String markdown = Files.readString(Path.of("../docs/release/fdp-40-required-checks-matrix.md"));
         assertThat(markdown)
                 .contains("branch protection")
                 .contains("does not verify GitHub branch protection through GitHub APIs")
                 .contains("External branch protection control is required");
-        Map<String, Object> matrix = readJson(Path.of("../docs/release/FDP-40-required-checks-matrix.json"));
+        Map<String, Object> matrix = readJson(Path.of("../docs/release/fdp-40-required-checks-matrix.json"));
         List<?> rawChecks = (List<?>) matrix.get("checks");
         List<Map<String, Object>> checks = rawChecks.stream()
                 .map(check -> (Map<String, Object>) check)
