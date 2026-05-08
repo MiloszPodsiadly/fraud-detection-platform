@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-manifest="${1:-docs/release/FDP-40-release-manifest-template.yaml}"
+manifest="${1:-docs/release/fdp-40-release-manifest-template.yaml}"
 
 if command -v python3 >/dev/null 2>&1 && python3 --version >/dev/null 2>&1; then
   PYTHON_CMD="python3"
