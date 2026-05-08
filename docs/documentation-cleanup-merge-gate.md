@@ -23,14 +23,14 @@ tests. It is not a runtime release gate and does not approve production enableme
 - Architecture diagrams exist: `docs/architecture/diagrams.md`.
 - Runbook requirements are documented or represented in professional runbooks.
 - Historical FDP docs remain traceable and are not rewritten as current production proof.
-- Documentation safety tests are green.
-- Link integrity tests are green.
-- Public API semantics documentation tests are green.
-- Configuration guide consistency tests are green.
-- No-fake-claims documentation tests are green.
-- Hidden Unicode and bidi control character tests are green.
-- Current truth versus historical evidence classification tests are green.
-- Raw Markdown readability and line-length tests are green for current source-of-truth docs.
+- `DocumentationReadabilityTest` is green.
+- `HiddenUnicodeDocumentationSafetyTest` is green.
+- `NoFakeClaimsDocumentationTest` is green.
+- `DocumentationLinkIntegrityTest` is green.
+- `PublicApiDocumentationConsistencyTest` is green.
+- `ConfigurationDocumentationSafetyTest` is green.
+- `DocumentationInventoryHonestyTest` is green.
+- CI docs path alignment is green.
 - Application runtime code is unchanged.
 
 ## Non-Claims
@@ -44,6 +44,8 @@ GO requires all required evidence above and no application runtime code changes.
 
 NO-GO if docs:
 
+- leave current docs as one-line blobs;
+- contain hidden, bidi, zero-width, non-breaking, or unsupported control characters;
 - imply future behavior as current behavior;
 - hide limitations;
 - expose sensitive example values;
@@ -53,6 +55,10 @@ NO-GO if docs:
 - claim distributed ACID;
 - claim exactly-once Kafka;
 - describe fixture proof as production proof;
+- confuse readiness with enablement;
 - present historical FDP evidence as current truth without context;
 - contain hidden Unicode or bidi control characters;
 - fail raw Markdown auditability checks.
+
+NO-GO if this documentation cleanup changes application runtime files, production config semantics, public
+DTOs/controllers/enums, transaction configuration, Kafka/outbox behavior, or mutation executors/coordinators/handlers.

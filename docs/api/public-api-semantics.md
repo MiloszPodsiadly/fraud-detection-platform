@@ -54,9 +54,9 @@ semantics only; it does not enable FDP-29 production mode or change API contract
 | Degraded commit | `COMMITTED_EVIDENCE_INCOMPLETE` | Business state may be committed while evidence completion degraded. | Not complete evidence and not rollback. |
 | Business validation failure | `FAILED_BUSINESS_VALIDATION` | Business validation rejected the mutation. | Not a committed requested decision. |
 
-`FINALIZED_VISIBLE` exists in the public enum for compatibility with older repair/replay paths, but the current
-regulated mutation public-status mapper reports that state as `FINALIZED_EVIDENCE_PENDING_EXTERNAL` rather than a
-stronger completion claim.
+FINALIZED_VISIBLE is a compatibility-visible status for older repair/replay paths, but the current regulated mutation
+public-status mapper reports that state as `FINALIZED_EVIDENCE_PENDING_EXTERNAL` rather than a stronger completion
+claim. FINALIZED_VISIBLE is not external confirmation.
 
 ## Status Truth Table
 

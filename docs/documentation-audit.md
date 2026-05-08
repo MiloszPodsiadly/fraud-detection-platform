@@ -32,6 +32,17 @@ production enablement, or bank certification posture.
 - [Documentation style guide](documentation-style-guide.md)
 - [Historical FDP index](historical-fdp-documents.md)
 
+## Current API, Config, And Security Semantics
+
+These documents summarize current behavior and configuration posture. They must match code or state an explicit
+gap.
+
+- [Public API semantics](api/public-api-semantics.md)
+- [API status truth table](api/status-truth-table.md)
+- [OpenAPI safety audit](api/openapi-safety-audit.md)
+- [Configuration guide](configuration/configuration-guide.md)
+- [Security foundation](security/security-foundation-v1.md)
+
 ## Historical Evidence Handling
 
 Historical FDP documents are retained as trace evidence for the branch that produced them. They may contain
@@ -50,6 +61,33 @@ Current interpretation rules:
 | FDP-38 | Dedicated test-fixture live checkpoint proof; not production-image proof. |
 | FDP-39 | Release artifact separation and governance readiness; not production enablement. |
 | FDP-40 | Release control readiness and provenance readiness; not enforced signing by itself. |
+
+## Release And Governance Proof Artifacts
+
+Release/governance proof artifacts are readiness evidence. They are not production enablement, bank certification,
+external finality, or business-correctness proof.
+
+- FDP-39 artifacts separate release image evidence from fixture image evidence.
+- FDP-40 artifacts describe platform control readiness and signed-provenance readiness.
+- `READY_FOR_ENABLEMENT_REVIEW` never means `PRODUCTION_ENABLED`.
+
+## Templates And Checklists
+
+Templates and checklists are forms for future review. Placeholder fields are allowed only when they are clearly
+fields to fill, not completed proof.
+
+- Enablement checklists must name missing external controls.
+- Release templates must require immutable digests where release proof depends on them.
+- Review templates must not imply approval before the external control exists.
+
+## Superseded Or Historical Context
+
+If a historical FDP document conflicts with a current source-of-truth document, the current source-of-truth
+document wins. If two historical FDP documents conflict, the later FDP document is the more recent evidence unless
+the current source-of-truth docs say otherwise.
+
+FDP-38 fixture proof must never be described as production-image proof. FDP-40 signed provenance readiness must
+never be described as enforced signing unless a real sign-and-verify artifact or platform policy proves it.
 
 ## Implementation Alignment Checks
 
