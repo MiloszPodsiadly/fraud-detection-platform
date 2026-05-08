@@ -123,7 +123,7 @@ Important security boundaries:
 
 Main docs:
 
-- [Security Foundation v1](docs/security-foundation-v1.md)
+- [Security Foundation v1](docs/security/security-foundation-v1.md)
 
 ## Authorization Model RBAC
 
@@ -200,7 +200,7 @@ Representative endpoint matrix:
 | `GET /governance/advisories/{event_id}/audit` | `transaction-monitor:read` |
 | `POST /governance/advisories/{event_id}/audit` | `governance-advisory:audit:write` |
 
-Full matrix: [Security Foundation v1](docs/security-foundation-v1.md).
+Full matrix: [Security Foundation v1](docs/security/security-foundation-v1.md).
 
 ## Audit Logging
 
@@ -263,7 +263,7 @@ Durable audit writes happen before structured log publication. If audit persiste
 
 Platform audit writes use an insert-only repository contract and store `partition_key`, `previous_event_hash`, `event_hash`, `hash_algorithm=SHA-256`, and `schema_version`. The current partition strategy is per-service (`partition_key=source_service:alert-service`), so `previous_event_hash` is resolved inside that partition. Corrections must be represented as new audit events, not mutation of existing events.
 
-## Audit Integrity Guarantees
+## Audit Integrity Implemented Behavior
 
 FDP-19 provides application-level audit integrity support:
 
@@ -287,7 +287,7 @@ FDP-26 trust incident refresh modes are intentionally constrained:
 
 | Mode | Allowed environment | Meaning |
 | --- | --- | --- |
-| `ATOMIC` | prod/bank/staging/local | All-or-rollback refresh when `app.regulated-mutations.transaction-mode=REQUIRED`; required for bank-grade operation. |
+| `ATOMIC` | prod/bank/staging/local | All-or-rollback refresh when `app.regulated-mutations.transaction-mode=REQUIRED`; required before any future bank-grade operating claim; this mode is not a bank-grade claim by itself. |
 | `PARTIAL` | local/dev/test only | Best-effort materialization with explicit degraded state after persisted incidents are verified from durable state. |
 
 `PARTIAL` is not regulator-grade, is not equivalent to `REQUIRED`, and can produce `COMMITTED_DEGRADED`. Prod-like and bank startup fails when `PARTIAL` or non-`REQUIRED` transaction mode is configured.
@@ -365,9 +365,9 @@ External anchors are required for full evidence validation. `status=AVAILABLE` m
 
 Sensitive read-access audit is implemented separately for selected reads in `read_access_audit_events`: alert details, fraud case details, scored transaction monitor, governance advisory list, governance advisory details, governance advisory audit history, and governance advisory analytics. There is no public read-access audit query endpoint in this scope. These audit records are best-effort and do not block the read response if audit persistence fails. They store bounded metadata only: actor identity from the authenticated backend principal or `unknown` with an anomaly metric if no principal is present, endpoint category, resource type/id where applicable, page/size, canonical hashed query shape, bounded result count, outcome, correlation id, source service, and schema version. They do not store raw query params, filters, response payloads, transaction data, customer/account/card data, advisory content, full URLs, exception messages, tokens, or stack traces.
 
-### FDP-20 Operational Guarantees
+### FDP-20 Operational Behavior
 
-FDP-20 guarantees append-only durable audit events, local chain anchors, external tamper-evidence publication when a supported sink is enabled, bounded external verification, bounded evidence export, explicit `AVAILABLE` versus `PARTIAL` versus `UNAVAILABLE` status, strict-mode rejection of partial evidence packages, and complete bounded export audit metadata (`from`, `to`, `source_service`, `limit`, `returned_count`, `export_status`, `reason_code`, `external_anchor_status`, `anchor_coverage`, and `export_fingerprint`). Clients MUST NOT infer business effectiveness from `outcome` or `compensated` alone; they must use `business_effective_status` together with `audit_evidence_status`. Audit read and evidence export expose `compensated`, `superseded_by_event_id`, backward-compatible `business_effective`, authoritative `business_effective_status`, `audit_evidence_status`, per-event `external_anchor_status`, `compensation_type`, and `related_event_id`. `ATTEMPTED` is not business-effective, `SUCCESS` means the business write committed, and `ABORTED_EXTERNAL_ANCHOR_REQUIRED` is never business-effective. Compensation may exist outside the current page/window, and read/export APIs enrich returned events with bounded compensation lookup. Companion publication status records track bounded operational fields (`external_published`, `external_publication_status`, `external_object_status`, `head_manifest_status`, `local_tracking_status`, `external_published_at`, `external_sink_type`, `external_publish_attempts`, `manifest_status`, and `last_external_publish_failure_reason`) without mutating audit events, local anchor records, or event hashes. `UNVERIFIED` means the anchor object may exist but required proof is incomplete; `LOCAL_STATUS_UNVERIFIED` means external publication/read-back succeeded but Mongo publication-status persistence failed, so the system must not count it as a clean local `PUBLISHED` state until recovered by reconciliation. `LOCAL_ANCHOR_CREATED_EXTERNAL_REQUIRED_FAILED` means the local audit event and local anchor were already created but required external publication failed; this is intentionally visible and recoverable, not a rollback claim. FDP-24 is fail-closed and truthful, but not single-transaction atomic across the business DB, audit DB, and external witness; local audit chain position may advance even when the request fails. Operations should alert on `requiredPublicationFailures > 0`, inspect coverage, and use explicit bounded range reconciliation for older gaps. Successful mutation example: `ATTEMPTED` then `SUCCESS` with `business_effective_status=TRUE`. External anchor failure before business write: `ATTEMPTED` plus `ABORTED_EXTERNAL_ANCHOR_REQUIRED`, with `business_effective_status=FALSE` and `audit_evidence_status=ANCHOR_REQUIRED_FAILED`. External anchor failure after business write: `SUCCESS` plus `ABORTED_EXTERNAL_ANCHOR_REQUIRED`, with the `SUCCESS` event returned as `business_effective_status=TRUE` and `audit_evidence_status=ANCHOR_REQUIRED_FAILED`. Default reconciliation is an operational convenience over a bounded head window; older gaps require explicit bounded range reconciliation.
+FDP-20 implements append-only durable audit events, local chain anchors, external tamper-evidence publication when a supported sink is enabled, bounded external verification, bounded evidence export, explicit `AVAILABLE` versus `PARTIAL` versus `UNAVAILABLE` status, strict-mode rejection of partial evidence packages, and complete bounded export audit metadata (`from`, `to`, `source_service`, `limit`, `returned_count`, `export_status`, `reason_code`, `external_anchor_status`, `anchor_coverage`, and `export_fingerprint`). Clients MUST NOT infer business effectiveness from `outcome` or `compensated` alone; they must use `business_effective_status` together with `audit_evidence_status`. Audit read and evidence export expose `compensated`, `superseded_by_event_id`, backward-compatible `business_effective`, authoritative `business_effective_status`, `audit_evidence_status`, per-event `external_anchor_status`, `compensation_type`, and `related_event_id`. `ATTEMPTED` is not business-effective, `SUCCESS` means the business write committed, and `ABORTED_EXTERNAL_ANCHOR_REQUIRED` is never business-effective. Compensation may exist outside the current page/window, and read/export APIs enrich returned events with bounded compensation lookup. Companion publication status records track bounded operational fields (`external_published`, `external_publication_status`, `external_object_status`, `head_manifest_status`, `local_tracking_status`, `external_published_at`, `external_sink_type`, `external_publish_attempts`, `manifest_status`, and `last_external_publish_failure_reason`) without mutating audit events, local anchor records, or event hashes. `UNVERIFIED` means the anchor object may exist but required proof is incomplete; `LOCAL_STATUS_UNVERIFIED` means external publication/read-back succeeded but Mongo publication-status persistence failed, so the system must not count it as a clean local `PUBLISHED` state until recovered by reconciliation. `LOCAL_ANCHOR_CREATED_EXTERNAL_REQUIRED_FAILED` means the local audit event and local anchor already exist while required external publication failed; this is intentionally visible and recoverable, not a rollback claim. FDP-24 is fail-closed and truthful, but not single-transaction atomic across the business DB, audit DB, and external witness; local audit chain position may advance even when the request fails. Operations should alert on `requiredPublicationFailures > 0`, inspect coverage, and use explicit bounded range reconciliation for older gaps. Successful mutation example: `ATTEMPTED` then `SUCCESS` with `business_effective_status=TRUE`. External anchor failure before business write: `ATTEMPTED` plus `ABORTED_EXTERNAL_ANCHOR_REQUIRED`, with `business_effective_status=FALSE` and `audit_evidence_status=ANCHOR_REQUIRED_FAILED`. External anchor failure after business write: `SUCCESS` plus `ABORTED_EXTERNAL_ANCHOR_REQUIRED`, with the `SUCCESS` event returned as `business_effective_status=TRUE` and `audit_evidence_status=ANCHOR_REQUIRED_FAILED`. Default reconciliation is an operational convenience over a bounded head window; older gaps require explicit bounded range reconciliation.
 
 FDP-20/FDP-22 do not guarantee certified WORM storage, legal notarization, legal non-repudiation, HSM/KMS-backed signatures, SIEM integration, a regulator-ready archive, zero data exfiltration risk, or cross-instance rate limiting. Local-file sink is development-only and blocked in prod-like profiles. Object-store immutability depends on external bucket/object-store controls and must be interpreted through `external_immutability_level`; `NONE` and `CONFIGURED` are not WORM proof. Evidence export rate limiting is enforced per service instance; in multi-instance deployments, effective rate limiting must be enforced at API gateway or shared infrastructure level. FDP-20/FDP-22 provide external tamper-evidence, not external trust enforcement.
 
@@ -436,18 +436,18 @@ This system provides INTERNAL cryptographic trust only. External trust requires 
 This module is NOT:
 
 - external notarization
-- WORM storage
+- no WORM storage
 - KMS/HSM-backed signing
 - independent third-party trust
 
-This module guarantees:
+This module currently provides:
 
 - no silent trust escalation
 - cryptographic integrity over signed audit anchor payload hashes
 - authenticated signing authority for configured internal callers
 - tamper-evident trust-authority audit chain
 
-To reach full bank-grade external trust:
+To reach a stronger production external-trust posture:
 
 - FDP-24 external anchoring of trust-authority audit heads
 - KMS/HSM-backed signing material
@@ -465,7 +465,7 @@ Is this KMS/HSM-backed? No.
 
 Is this externally verifiable? Not yet (FDP-24).
 
-What does it guarantee? Internal cryptographic integrity and non-repudiation within system boundary.
+What does it provide? Internal cryptographic integrity and non-repudiation within the system boundary.
 
 Governance advisory audit entries are separate from fraud workflow audit logs. They are persisted append-only as human review history, derive actor identity from the backend-authenticated principal, and do not affect scoring, model behavior, retraining, rollback, or fraud decisioning. Advisory lifecycle status is a read-time projection from the latest audit entry, not a persisted workflow state or automation trigger.
 
@@ -473,7 +473,7 @@ Governance advisory audit entries are separate from fraud workflow audit logs. T
 
 Lifecycle depends on audit availability. `OPEN` means the audit source was readable and no audit events exist for the advisory. `UNKNOWN` means the system cannot determine lifecycle because audit lookup failed or audit truth is unavailable. The system never assumes `OPEN` when audit is unavailable. Advisory list responses return `status=PARTIAL` with `reason_code=AUDIT_UNAVAILABLE` when lifecycle enrichment is degraded; analytics responses expose `reason_code` for `PARTIAL` or `UNAVAILABLE` responses.
 
-Filtering by `lifecycle_status` applies to the bounded advisory result set. It does not guarantee global completeness.
+Filtering by `lifecycle_status` applies to the bounded advisory result set. It does not provide global completeness.
 
 Audit analytics are derived from advisory and audit history through `GET /governance/advisories/analytics`. `advisories` means distinct `advisory_event_id` values in the bounded advisory projection window; `reviewed`, `open`, `resolved`, `unknown`, decision distribution, and lifecycle distribution all use that same population. `open` excludes `UNKNOWN`; audit degradation is counted separately in `unknown`. Time-to-first-review uses valid non-negative first audit durations only and reports `LOW_CONFIDENCE` below five samples. Analytics are read-only, bounded by `window_days` and `GOVERNANCE_AUDIT_ANALYTICS_MAX_AUDIT_EVENTS`, not persisted as aggregates, not an SLA, and do not trigger actions or influence scoring/model behavior.
 
@@ -502,7 +502,7 @@ Lifecycle status:
 - does NOT influence model behavior
 - is NOT persisted as authoritative state
 
-Full details: [Security Foundation v1](docs/security-foundation-v1.md).
+Full details: [Security Foundation v1](docs/security/security-foundation-v1.md).
 
 ## Local Development
 
@@ -621,7 +621,7 @@ Expected behavior:
 - authenticated user without required authority: HTTP 403
 - invalid demo role/authority: normalized security error
 
-Full details: [Security Foundation v1](docs/security-foundation-v1.md).
+Full details: [Security Foundation v1](docs/security/security-foundation-v1.md).
 
 #### 2. Local OIDC (Keycloak)
 
@@ -786,7 +786,7 @@ curl -i -H "Authorization: Bearer invalid-token" http://localhost:8090/governanc
 curl -s http://localhost:8090/metrics | grep fraud_internal_auth
 ```
 
-Expected results: anonymous direct ML calls return `401`, invalid bearer calls return `403`, configured Java clients attach RS256 signed JWT service identity through `InternalServiceAuthHeaders`, `ml-inference-service` validates public JWKS material only, `kid` is required, service-to-key binding is enforced, strict `iat`/`exp` freshness checks bound replay risk, and internal auth metrics remain low-cardinality. See `docs/service-identity-fdp17.md` for the full contract. This is a JWT service-auth foundation, not enterprise mTLS or enterprise IAM.
+Expected results: anonymous direct ML calls return `401`, invalid bearer calls return `403`, configured Java clients attach RS256 signed JWT service identity through `InternalServiceAuthHeaders`, `ml-inference-service` validates public JWKS material only, `kid` is required, service-to-key binding is enforced, strict `iat`/`exp` freshness checks bound replay risk, and internal auth metrics remain low-cardinality. See `docs/security/service-identity-fdp-17.md` for the full contract. This is a JWT service-auth foundation, not enterprise mTLS or enterprise IAM.
 
 To verify the FDP-23 trust-authority JWT client path together with OIDC and the FDP-18 mTLS ML/governance path:
 
@@ -838,7 +838,7 @@ If certificates are rotated without overlap, service downtime will occur. The ma
 
 FDP-18.1 does not provide automated certificate rotation, a certificate management system, CA integration, secret rotation automation, cert-manager, Vault, KMS/HSM, or external PKI automation.
 
-FDP-18 is an internal mTLS service identity foundation. It is not enterprise IAM, not automated certificate rotation, not cert-manager/Vault/KMS integration, not full zero-trust certification, not WORM storage, and not SIEM integration. See `docs/service-identity-fdp18.md`.
+FDP-18 is an internal mTLS service identity foundation. It is not enterprise IAM, not automated certificate rotation, not cert-manager/Vault/KMS integration, not full zero-trust certification, not WORM storage, and not SIEM integration. See `docs/security/service-identity-fdp-18.md`.
 
 ## Replay Risk
 
@@ -855,7 +855,7 @@ FDP-17 reduces this risk by:
 
 This does NOT provide:
 
-- zero replay guarantee
+- no zero-replay claim
 - nonce-based replay prevention
 - mTLS channel binding
 
@@ -959,7 +959,7 @@ Security UX:
 
 Frontend checks are not enforcement. They keep the analyst workflow clear while backend authorization remains authoritative.
 
-Full details: [Security Foundation v1](docs/security-foundation-v1.md).
+Full details: [Security Foundation v1](docs/security/security-foundation-v1.md).
 
 ## Path To Production
 
@@ -978,7 +978,7 @@ Planned production path:
 - Harden the existing frontend OIDC flow for deployment environments while preserving the `userId`/`roles`/`authorities` UI contract and lifecycle states.
 - Define audit retention/export policy if compliance requirements need long-term searchable audit history.
 
-Migration notes: [Security Foundation v1](docs/security-foundation-v1.md).
+Migration notes: [Security Foundation v1](docs/security/security-foundation-v1.md).
 
 ## Services And Ports
 
@@ -1155,12 +1155,12 @@ Current metrics exposure:
 
 Reviewer-facing operations specs:
 
-- [Operations And Observability v1](docs/operations-observability-v1.md)
-- [Operations And Observability v2](docs/operations-observability-v2.md)
+- [Operations And Observability v1](docs/observability/operations-observability-v1.md)
+- [Operations And Observability v2](docs/observability/operations-observability-v2.md)
 
 ## Idempotency And Performance
 
-Current guarantees:
+Current behavior:
 
 - `transaction-ingest-service` publishes raw events keyed by `transactionId`.
 - `feature-enricher-service` checks Redis before loading feature windows and skips already processed customer-scoped transaction ids.
@@ -1232,7 +1232,7 @@ GET /governance/history
 ```
 
 The Java scoring service sends `MlModelInput`, where `features` is the Java-enriched feature snapshot. The Python service responds with `MlModelOutput`: fraud score, risk level, model metadata, reason codes, score details, and explanation metadata.
-The ML HTTP contract is documented in `docs/openapi/ml-inference-service.openapi.yaml`; its public endpoint inventory and backward-compatibility rules are summarized in `docs/api-surface-v1.md`. ML error responses use the same platform `timestamp/status/error/message/details` envelope as the Java APIs.
+The ML HTTP contract is documented in `docs/openapi/ml-inference-service.openapi.yaml`; its public endpoint inventory and backward-compatibility rules are summarized in `docs/api/api-surface-v1.md`. ML error responses use the same platform `timestamp/status/error/message/details` envelope as the Java APIs.
 
 Current ML and governance capabilities:
 
@@ -1262,7 +1262,7 @@ Governance snapshot and lifecycle persistence use the existing local MongoDB ser
 
 MongoDB outage pauses persisted governance history but does not fail scoring.
 Model lifecycle visibility is read-only; it does not switch models, retrain, rollback, approve models, validate model quality, or expose raw artifacts. Drift actions include lifecycle context for operator triage only and do not claim model lifecycle activity caused drift.
-Governance advisory events are operator signals only; they are not fraud alerts, model actions, retraining triggers, rollback triggers, automatic decisions, or frontend workflow items. Advisory events are heuristic and may be inaccurate under low data conditions; the system does not guarantee correctness of drift or advisory signals. Advisory events include bounded confidence context and are deduplicated to avoid repeated signals from repeated polling.
+Governance advisory events are operator signals only; they are not fraud alerts, model actions, retraining triggers, rollback triggers, automatic decisions, or frontend workflow items. Advisory events are heuristic and may be inaccurate under low data conditions; the system does not provide correctness proof for drift or advisory signals. Advisory events include bounded confidence context and are deduplicated to avoid repeated signals from repeated polling.
 Drift actions and advisory events do not block transactions, change scores, switch models, retrain models, roll back models, or trigger external alerting workflows.
 
 FDP-12 surfaces governance advisory events in the analyst console as an operator review queue. FDP-13 adds authenticated human-review audit recording for each advisory event. FDP-14 adds advisory lifecycle badges and filtering derived only from audit history. FDP-15 adds read-only audit analytics for recent advisory handling. The UI consumes `GET /governance/advisories` through `alert-service` for advisory context plus lifecycle projection and uses `alert-service` for append-only audit history, audit analytics, and writes. Audit entries record only `decision`, optional bounded `note`, backend-derived actor, and bounded advisory metadata; lifecycle status and analytics do not change scoring, model behavior, retraining, rollback, advisory emission, or fraud decisioning. Lifecycle filtering and analytics apply only to the recent bounded advisory window.
@@ -1342,24 +1342,25 @@ scripts/                         Synthetic dataset and replay scripts
 
 Security and architecture:
 
-- [Security Foundation v1](docs/security-foundation-v1.md): consolidated technical reference for RBAC, local demo auth, actor identity, audit logging, frontend security UX, JWT/OIDC migration, review notes, known limitations, and next steps.
-- [API Surface v1](docs/api-surface-v1.md): public local HTTP endpoint inventory and backward-compatibility rules.
+- [Security Foundation v1](docs/security/security-foundation-v1.md): consolidated technical reference for RBAC, local demo auth, actor identity, audit logging, frontend security UX, JWT/OIDC migration, review notes, known limitations, and next steps.
+- [API Surface v1](docs/api/api-surface-v1.md): public local HTTP endpoint inventory and backward-compatibility rules.
 - [ML Inference OpenAPI](docs/openapi/ml-inference-service.openapi.yaml): current OpenAPI reference for the Python ML runtime.
 - [Alert Service OpenAPI](docs/openapi/alert-service.openapi.yaml): current OpenAPI reference for platform Audit Read API and governance advisory audit endpoints.
-- [API Error Contract](docs/api-error-contract.md): canonical local REST error envelope for timestamp/status/error/message/details and non-leakage rules.
-- [Operations And Observability v1](docs/operations-observability-v1.md): baseline observability foundation before the local monitoring stack rollout.
-- [Operations And Observability v2](docs/operations-observability-v2.md): current local Prometheus/Grafana runtime guide, ML metrics contract, alert thresholds, and troubleshooting flow.
+- [API Error Contract](docs/api/api-error-contract.md): canonical local REST error envelope for timestamp/status/error/message/details and non-leakage rules.
+- [Operations And Observability v1](docs/observability/operations-observability-v1.md): baseline observability foundation before the local monitoring stack rollout.
+- [Operations And Observability v2](docs/observability/operations-observability-v2.md): current local Prometheus/Grafana runtime guide, ML metrics contract, alert thresholds, and troubleshooting flow.
 - [Alert Service Source Of Truth](docs/architecture/alert-service-source-of-truth.md): FDP-27 authoritative stores and projection boundaries.
 - [Alert Service Write Path Inventory](docs/architecture/alert-service-write-path-inventory.md): FDP-27 mutating path inventory with idempotency, audit, and recovery expectations.
 - [Alert Service Production Runbooks](docs/runbooks/alert-service-production-runbooks.md): FDP-27 operator actions for production trust and recovery conditions.
-- [FDP-29 Finalize Recovery Runbook](docs/runbooks/FDP-29-finalize-recovery-required.md): operator procedure for `FINALIZING_RETRY_REQUIRES_RECONCILIATION`.
-- [FDP-29 Local Audit Chain Contention Runbook](docs/runbooks/FDP-29-local-audit-chain-contention.md): operator procedure for bounded local audit writer contention and stale-lock symptoms.
+- [FDP-29 Finalize Recovery Runbook](docs/runbooks/fdp-29-finalize-recovery-required.md): operator procedure for `FINALIZING_RETRY_REQUIRES_RECONCILIATION`.
+- [FDP-29 Local Audit Chain Contention Runbook](docs/runbooks/fdp-29-local-audit-chain-contention.md): operator procedure for bounded local audit writer contention and stale-lock symptoms.
 - [Alert Service SLOs](docs/observability/alert-service-slo.md): FDP-27 low-cardinality operational thresholds.
 - [Alert Service Config Matrix](docs/deployment/alert-service-config-matrix.md): local/test/docker/staging/prod/bank configuration semantics.
-- [FDP-27 Merge Gate](docs/FDP-27-merge-gate.md): pre-merge invariant checklist and explicit non-goals.
-- [ML Governance And Drift v1](docs/ml-governance-drift-v1.md): bounded runtime governance layer for active model metadata, aggregate profiles, drift status, privacy rules, and incident playbook.
+- [FDP-27 Merge Gate](docs/fdp-27-merge-gate.md): pre-merge invariant checklist and explicit non-goals.
+- [ML Governance And Drift v1](docs/ml/ml-governance-drift-v1.md): bounded runtime governance layer for active model metadata, aggregate profiles, drift status, privacy rules, and incident playbook.
 
-TODO: If future work adds docs for data generation or deployment, keep them as a small set of consolidated feature documents instead of many prompt-sized files.
+Documentation guidance: future data-generation or deployment docs should stay consolidated by feature area instead
+of adding prompt-sized one-off files.
 
 ## Project Status
 
@@ -1408,3 +1409,6 @@ Milosz Podsiadly
 ## License
 
 Licensed under the [MIT License](https://opensource.org/licenses/MIT).
+
+
+

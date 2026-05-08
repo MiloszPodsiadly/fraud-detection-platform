@@ -65,7 +65,7 @@ class AlertServiceBankGradeArchitectureTest {
     void docsMustNotOverclaimBankGradeClosure() throws Exception {
         String combined = Files.readString(Path.of("../README.md"))
                 + "\n" + readIfExists("../docs/architecture/alert-service-source-of-truth.md")
-                + "\n" + readIfExists("../docs/FDP-27-merge-gate.md");
+                + "\n" + readIfExists("../docs/fdp-27-merge-gate.md");
 
         assertContextual(combined, "distributed ACID");
         assertContextual(combined, "exactly-once");

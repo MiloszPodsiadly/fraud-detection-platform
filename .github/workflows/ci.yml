@@ -387,7 +387,7 @@ jobs:
             echo "FDP-37 proof artifacts cannot contain placeholders in CI"
             exit 1
           fi
-          if grep -R 'LIVE_IN_FLIGHT_REQUEST_KILL' docs/FDP-37-*.md docs/adr/FDP-37-*.md docs/testing/FDP-37-*.md docs/ops/FDP-37-*.md; then
+          if grep -R 'LIVE_IN_FLIGHT_REQUEST_KILL' docs/fdp-37-*.md docs/adr/fdp-37-*.md docs/testing/fdp-37-*.md docs/ops/fdp-37-*.md; then
             echo "FDP-37 docs cannot claim live in-flight proof unless the required artifact contains LIVE_IN_FLIGHT_REQUEST_KILL"
             exit 1
           fi
@@ -673,8 +673,8 @@ jobs:
           grep -q 'release_image=false' "$EVIDENCE_MD"
           grep -q 'release_candidate_allowed=false' "$EVIDENCE_MD"
           grep -q 'production_deployable=false' "$EVIDENCE_MD"
-          grep -q 'fixture image is not a production image' docs/FDP-38-merge-gate.md
-          if grep -R 'release_image: `true`\|release_candidate_allowed: `true`\|production_deployable: `true`\|RUNTIME_REACHED_PRODUCTION_IMAGE: `claimed`\|production_enablement: `true`' "$SUMMARY_MD" "$EVIDENCE_MD" "$PROVENANCE_JSON" docs/FDP-38-*.md docs/adr/FDP-38-*.md docs/testing/FDP-38-*.md; then
+          grep -q 'fixture image is not a production image' docs/fdp-38-merge-gate.md
+          if grep -R 'release_image: `true`\|release_candidate_allowed: `true`\|production_deployable: `true`\|RUNTIME_REACHED_PRODUCTION_IMAGE: `claimed`\|production_enablement: `true`' "$SUMMARY_MD" "$EVIDENCE_MD" "$PROVENANCE_JSON" docs/fdp-38-*.md docs/adr/fdp-38-*.md docs/testing/fdp-38-*.md; then
             echo "FDP-38 artifacts/docs cannot claim production image live proof or production enablement"
             exit 1
           fi
@@ -906,11 +906,11 @@ jobs:
               print("FDP-39 enablement artifact must explicitly deny PRODUCTION_ENABLED", file=sys.stderr)
               sys.exit(1)
           PY
-          grep -q 'READY_FOR_ENABLEMENT_REVIEW' docs/FDP-39-merge-gate.md docs/release/FDP-39-branch-readme.md
-          grep -q 'Fixture proof is not production proof' docs/release/FDP-39-final-regulated-mutation-proof-matrix.md
+          grep -q 'READY_FOR_ENABLEMENT_REVIEW' docs/fdp-39-merge-gate.md docs/release/fdp-39-branch-readme.md
+          grep -q 'Fixture proof is not production proof' docs/release/fdp-39-final-regulated-mutation-proof-matrix.md
           grep -q 'production_enabled: `false`' "$ARTIFACT_DIR/fdp39-enablement-governance-pack.md"
           grep -q 'fixture_image_release_candidate_allowed: `false`' "$ARTIFACT_DIR/fdp39-artifact-provenance.md"
-          if grep -R 'RUNTIME_REACHED_PRODUCTION_IMAGE.*claimed\|production_enablement: `true`\|bank_enabled: `true`\|production_enabled: `true`' docs/FDP-39-*.md docs/adr/FDP-39-*.md docs/release/FDP-39-*.md "$ARTIFACT_DIR"; then
+          if grep -R 'RUNTIME_REACHED_PRODUCTION_IMAGE.*claimed\|production_enablement: `true`\|bank_enabled: `true`\|production_enabled: `true`' docs/fdp-39-*.md docs/adr/fdp-39-*.md docs/release/fdp-39-*.md "$ARTIFACT_DIR"; then
             echo "FDP-39 docs/artifacts contain a forbidden positive enablement claim"
             exit 1
           fi
@@ -959,16 +959,16 @@ jobs:
           cache: maven
 
       - name: Run FDP-40 release controls tests
-        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp40.ci-mode=true" "-Dfdp40.event-name=${FDP40_EVENT_NAME}" "-Dfdp40.base-sha=${FDP40_DIFF_BASE_SHA}" "-Dfdp40.head-sha=${FDP40_DIFF_HEAD_SHA}" "-Dfdp40.base-ref=${FDP40_BASE_REF}" "-Dfdp40.release-manifest=../docs/release/FDP-40-release-manifest-template.yaml" "-Dfdp40.attestation=../docs/release/FDP-40-attestation-readiness-template.json" "-Dfdp40.fdp39-provenance=../docs/release/FDP-40-fdp39-provenance-reference.json" "-Dfdp40.required-checks-matrix=../docs/release/FDP-40-required-checks-matrix.json" "-Dtest=Fdp40ReleaseManifestValidationTest,Fdp40SignedProvenanceReadinessTest,Fdp40ReleaseEvidenceVerificationTest,Fdp40ReleaseEvidenceVerificationNegativeTest,Fdp40RegistryPromotionPolicyTest,Fdp40RegistryImmutabilityReadinessTest,Fdp40RequiredChecksMatrixTest,Fdp40EnvironmentProtectionGateTest,Fdp40DeploymentEnvironmentReadinessTest,Fdp40BranchProtectionReadinessTest,Fdp40ExternalPlatformControlsMatrixTest,Fdp40EnablementPrTemplateTest,Fdp40SingleReleaseOwnerGovernanceTest,Fdp40UnsupportedClaimsMatrixTest,Fdp40NoOverclaimDocumentationTest,Fdp40MustNotChangeRuntimeMutationSemanticsTest,Fdp40FinalProofPackTest,Fdp40SbomReadinessTest,Fdp40CosignVerificationReadinessTest,Fdp40ResidualPlatformGapsTest,Fdp40ScriptExecutionReadinessTest,Fdp40DocumentationFormattingTest,Fdp40LocalPathHygieneTest" test
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp40.ci-mode=true" "-Dfdp40.event-name=${FDP40_EVENT_NAME}" "-Dfdp40.base-sha=${FDP40_DIFF_BASE_SHA}" "-Dfdp40.head-sha=${FDP40_DIFF_HEAD_SHA}" "-Dfdp40.base-ref=${FDP40_BASE_REF}" "-Dfdp40.release-manifest=../docs/release/fdp-40-release-manifest-template.yaml" "-Dfdp40.attestation=../docs/release/fdp-40-attestation-readiness-template.json" "-Dfdp40.fdp39-provenance=../docs/release/fdp-40-fdp39-provenance-reference.json" "-Dfdp40.required-checks-matrix=../docs/release/fdp-40-required-checks-matrix.json" "-Dtest=Fdp40ReleaseManifestValidationTest,Fdp40SignedProvenanceReadinessTest,Fdp40ReleaseEvidenceVerificationTest,Fdp40ReleaseEvidenceVerificationNegativeTest,Fdp40RegistryPromotionPolicyTest,Fdp40RegistryImmutabilityReadinessTest,Fdp40RequiredChecksMatrixTest,Fdp40EnvironmentProtectionGateTest,Fdp40DeploymentEnvironmentReadinessTest,Fdp40BranchProtectionReadinessTest,Fdp40ExternalPlatformControlsMatrixTest,Fdp40EnablementPrTemplateTest,Fdp40SingleReleaseOwnerGovernanceTest,Fdp40UnsupportedClaimsMatrixTest,Fdp40NoOverclaimDocumentationTest,Fdp40MustNotChangeRuntimeMutationSemanticsTest,Fdp40FinalProofPackTest,Fdp40SbomReadinessTest,Fdp40CosignVerificationReadinessTest,Fdp40ResidualPlatformGapsTest,Fdp40ScriptExecutionReadinessTest,Fdp40DocumentationFormattingTest,Fdp40LocalPathHygieneTest" test
 
       - name: Validate FDP-40 release manifest
-        run: bash scripts/fdp40-validate-release-manifest.sh docs/release/FDP-40-release-manifest-template.yaml
+        run: bash scripts/fdp40-validate-release-manifest.sh docs/release/fdp-40-release-manifest-template.yaml
 
       - name: Validate FDP-40 attestation readiness
-        run: bash scripts/fdp40-validate-attestation-readiness.sh docs/release/FDP-40-attestation-readiness-template.json docs/release/FDP-40-release-manifest-template.yaml
+        run: bash scripts/fdp40-validate-attestation-readiness.sh docs/release/fdp-40-attestation-readiness-template.json docs/release/fdp-40-release-manifest-template.yaml
 
       - name: Verify FDP-40 release evidence
-        run: bash scripts/fdp40-verify-release-evidence.sh docs/release/FDP-40-release-manifest-template.yaml docs/release/FDP-40-attestation-readiness-template.json docs/release/FDP-40-fdp39-provenance-reference.json docs/release/FDP-40-required-checks-matrix.json
+        run: bash scripts/fdp40-verify-release-evidence.sh docs/release/fdp-40-release-manifest-template.yaml docs/release/fdp-40-attestation-readiness-template.json docs/release/fdp-40-fdp39-provenance-reference.json docs/release/fdp-40-required-checks-matrix.json
 
       - name: Verify FDP-40 cosign readiness mode
         run: bash scripts/fdp40-verify-cosign-signature.sh
@@ -1113,10 +1113,10 @@ jobs:
                   print(f"FDP-40 generated artifacts contain forbidden token: {token}", file=sys.stderr)
                   sys.exit(1)
           PY
-          grep -q 'READY_FOR_ENABLEMENT_REVIEW is not PRODUCTION_ENABLED' docs/release/FDP-40-branch-readme.md .github/PULL_REQUEST_TEMPLATE/fdp-enablement-config-change.md
-          grep -q 'single release owner model' docs/release/FDP-40-single-release-owner-governance.md .github/PULL_REQUEST_TEMPLATE/fdp-enablement-config-change.md
-          grep -q 'signed image does not mean external finality' docs/release/FDP-40-unsupported-claims-matrix.md
-          if grep -R 'production_enabled: `true`\|bank_certification_claimed: `true`\|external_finality_claimed: `true`\|distributed_acid_claimed: `true`\|dual_control_required: `true`' docs/FDP-40-*.md docs/adr/FDP-40-*.md docs/release/FDP-40-*.md "$ARTIFACT_DIR"; then
+          grep -q 'READY_FOR_ENABLEMENT_REVIEW is not PRODUCTION_ENABLED' docs/release/fdp-40-branch-readme.md .github/PULL_REQUEST_TEMPLATE/fdp-enablement-config-change.md
+          grep -q 'single release owner model' docs/release/fdp-40-single-release-owner-governance.md .github/PULL_REQUEST_TEMPLATE/fdp-enablement-config-change.md
+          grep -q 'signed image does not mean external finality' docs/release/fdp-40-unsupported-claims-matrix.md
+          if grep -R 'production_enabled: `true`\|bank_certification_claimed: `true`\|external_finality_claimed: `true`\|distributed_acid_claimed: `true`\|dual_control_required: `true`' docs/fdp-40-*.md docs/adr/fdp-40-*.md docs/release/fdp-40-*.md "$ARTIFACT_DIR"; then
             echo "FDP-40 docs/artifacts contain a forbidden positive enablement or finality claim"
             exit 1
           fi

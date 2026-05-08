@@ -11,7 +11,7 @@ class Fdp40CosignVerificationReadinessTest {
 
     @Test
     void cosignReadinessScriptDefaultsToNonEnforcementMode() throws Exception {
-        String docs = Files.readString(Path.of("../docs/release/FDP-40-cosign-verification-readiness.md"));
+        String docs = Files.readString(Path.of("../docs/release/fdp-40-cosign-verification-readiness.md"));
         String script = Files.readString(Path.of("../scripts/fdp40-verify-cosign-signature.sh"));
 
         assertThat(docs)

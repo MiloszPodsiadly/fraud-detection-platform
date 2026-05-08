@@ -46,8 +46,8 @@ class Fdp40NoOverclaimDocumentationTest {
 
     @Test
     void fdp40DocsTemplatesAndGeneratedArtifactsDoNotContainPositiveOverclaims() throws Exception {
-        String combined = readTree(Path.of("../docs/release"), "FDP-40", ".md")
-                + "\n" + readTree(Path.of("../docs/adr"), "FDP-40", ".md")
+        String combined = readTree(Path.of("../docs/release"), "fdp-40", ".md")
+                + "\n" + readTree(Path.of("../docs/adr"), "fdp-40", ".md")
                 + "\n" + readTree(Path.of("target/fdp40-release"), "fdp40-", ".md")
                 + "\n" + readTree(Path.of("target/fdp40-release"), "fdp40-", ".json")
                 + "\n" + readTree(Path.of("../.github/PULL_REQUEST_TEMPLATE"), "fdp-enablement", ".md");
@@ -55,13 +55,21 @@ class Fdp40NoOverclaimDocumentationTest {
         assertThat(combined)
                 .contains("READY_FOR_ENABLEMENT_REVIEW is not PRODUCTION_ENABLED")
                 .contains("single release owner model")
-                .contains("dual_control_required: false")
-                .contains("production_enabled: false")
-                .contains("readiness_only: true")
-                .contains("external_platform_controls_required: true")
                 .contains("does not claim external finality")
                 .contains("does not mean distributed ACID")
                 .contains("readiness is not full platform enforcement");
+        assertThat(combined)
+                .containsAnyOf("production_enabled: false", "production_enabled: `false`", "\"production_enabled\" : false");
+        assertThat(combined)
+                .containsAnyOf("readiness_only: true", "readiness_only: `true`", "\"readiness_only\" : true");
+        assertThat(combined)
+                .containsAnyOf(
+                        "external_platform_controls_required: true",
+                        "external_platform_controls_required: `true`",
+                        "\"external_platform_controls_required\" : true"
+                );
+        assertThat(combined)
+                .containsAnyOf("dual_control_required: false", "dual_control_required: `false`");
         for (String claim : FORBIDDEN_POSITIVE_CLAIMS) {
             assertClaimIsNegativeContext(combined, claim);
         }
@@ -71,10 +79,11 @@ class Fdp40NoOverclaimDocumentationTest {
         if (!Files.exists(root)) {
             return "";
         }
+        String normalizedPrefix = namePrefix.toLowerCase(Locale.ROOT);
         try (Stream<Path> stream = Files.walk(root)) {
             StringBuilder builder = new StringBuilder();
             for (Path path : stream.filter(Files::isRegularFile)
-                    .filter(file -> file.getFileName().toString().startsWith(namePrefix))
+                    .filter(file -> file.getFileName().toString().toLowerCase(Locale.ROOT).startsWith(normalizedPrefix))
                     .filter(file -> file.toString().endsWith(suffix))
                     .toList()) {
                 builder.append("\n# ").append(path).append("\n");

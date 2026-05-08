@@ -16,9 +16,9 @@ class Fdp40SingleReleaseOwnerGovernanceTest {
 
     @Test
     void singleReleaseOwnerGovernanceRequiresNamedAccountableOwnerWithoutDualControlClaim() throws Exception {
-        String docs = Files.readString(Path.of("../docs/release/FDP-40-single-release-owner-governance.md"));
+        String docs = Files.readString(Path.of("../docs/release/fdp-40-single-release-owner-governance.md"));
         Map<String, Object> governance = readJson(
-                Path.of("../docs/release/FDP-40-single-release-owner-governance.json")
+                Path.of("../docs/release/fdp-40-single-release-owner-governance.json")
         );
 
         assertThat(docs)
@@ -32,7 +32,7 @@ class Fdp40SingleReleaseOwnerGovernanceTest {
 
     @Test
     void invalidSingleReleaseOwnerGovernanceFailsClosed() throws Exception {
-        Map<String, Object> valid = readJson(Path.of("../docs/release/FDP-40-single-release-owner-governance.json"));
+        Map<String, Object> valid = readJson(Path.of("../docs/release/fdp-40-single-release-owner-governance.json"));
 
         assertInvalid(valid, governance -> governance.put("release_owner_required", false));
         assertInvalid(valid, governance -> governance.put("release_owner_must_be_named", false));

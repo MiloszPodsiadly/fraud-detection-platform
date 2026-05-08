@@ -126,7 +126,7 @@ class Fdp40FinalProofPackTest {
                 - bank_enabled: `false`
                 - readiness_only: `true`
                 - single_release_owner_model: `true`
-                - dual_control_required: `false`
+                - dual_control_required: false
                 - release_owner_required: `true`
                 - release_owner_must_be_named: `true`
                 - digest_bound_release_required: `true`

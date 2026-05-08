@@ -16,8 +16,8 @@ class Fdp40SbomReadinessTest {
 
     @Test
     void sbomReadinessRequiresExternalGenerationRetentionAndSecurityReview() throws Exception {
-        String docs = Files.readString(Path.of("../docs/release/FDP-40-sbom-readiness-policy.md"));
-        Map<String, Object> sbom = readJson(Path.of("../docs/release/FDP-40-sbom-readiness-template.json"));
+        String docs = Files.readString(Path.of("../docs/release/fdp-40-sbom-readiness-policy.md"));
+        Map<String, Object> sbom = readJson(Path.of("../docs/release/fdp-40-sbom-readiness-template.json"));
 
         assertThat(docs)
                 .contains("does not generate a production SBOM")

@@ -16,10 +16,10 @@ class Fdp40ReleaseEvidenceVerificationNegativeTest {
 
     @Test
     void malformedReleaseEvidenceFailsClosed() throws Exception {
-        Map<String, String> manifest = readYamlKeyValues(java.nio.file.Path.of("../docs/release/FDP-40-release-manifest-template.yaml"));
-        Map<String, Object> attestation = readJson(java.nio.file.Path.of("../docs/release/FDP-40-attestation-readiness-template.json"));
-        Map<String, Object> fdp39 = readJson(java.nio.file.Path.of("../docs/release/FDP-40-fdp39-provenance-reference.json"));
-        Map<String, Object> checks = readJson(java.nio.file.Path.of("../docs/release/FDP-40-required-checks-matrix.json"));
+        Map<String, String> manifest = readYamlKeyValues(java.nio.file.Path.of("../docs/release/fdp-40-release-manifest-template.yaml"));
+        Map<String, Object> attestation = readJson(java.nio.file.Path.of("../docs/release/fdp-40-attestation-readiness-template.json"));
+        Map<String, Object> fdp39 = readJson(java.nio.file.Path.of("../docs/release/fdp-40-fdp39-provenance-reference.json"));
+        Map<String, Object> checks = readJson(java.nio.file.Path.of("../docs/release/fdp-40-required-checks-matrix.json"));
 
         List.of(
                 invalid(manifest, attestation, fdp39, checks, m -> m.remove("release_image_digest")),

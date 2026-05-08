@@ -21,10 +21,10 @@ class Fdp40RegistryPromotionPolicyTest {
 
     @Test
     void registryPromotionPolicyRequiresImmutableSignedDigest() throws Exception {
-        assertThat(Files.readString(Path.of("../docs/release/FDP-40-registry-promotion-policy.md")))
+        assertThat(Files.readString(Path.of("../docs/release/fdp-40-registry-promotion-policy.md")))
                 .contains("Mutable tag alone is NO-GO")
                 .contains("NOT_READY_FOR_PRODUCTION_ENABLEMENT");
-        Map<String, Object> policy = readJson(Path.of("../docs/release/FDP-40-registry-promotion-policy.json"));
+        Map<String, Object> policy = readJson(Path.of("../docs/release/fdp-40-registry-promotion-policy.json"));
 
         assertPromotionPolicyValid(policy);
         ObjectNode artifact = objectNode();
@@ -42,7 +42,7 @@ class Fdp40RegistryPromotionPolicyTest {
 
     @Test
     void invalidRegistryPromotionCasesFailClosed() throws Exception {
-        Map<String, Object> valid = readJson(Path.of("../docs/release/FDP-40-registry-promotion-policy.json"));
+        Map<String, Object> valid = readJson(Path.of("../docs/release/fdp-40-registry-promotion-policy.json"));
 
         assertInvalid(valid, policy -> policy.put("promotion_digest", ""));
         assertInvalid(valid, policy -> policy.put("mutable_tag_only_allowed", true));

@@ -1,0 +1,115 @@
+# Documentation Audit
+
+Status: current documentation audit.
+
+## Scope
+
+This audit defines how repository documentation is classified, reviewed, and interpreted. It covers project
+documentation in `index.md`, `docs/**`, `.github/PULL_REQUEST_TEMPLATE/**`, and `deployment/service-identity/**`.
+It excludes prompt sources in `documents/`, build output, dependency folders, git internals, and temporary folders.
+
+The audit is documentation-only. It does not change runtime semantics, public API contracts, release approval,
+production enablement, or bank certification posture.
+
+## Classification
+
+| Class | Meaning | Examples | Review rule |
+| --- | --- | --- | --- |
+| Current source of truth | Stable docs that should remain true after merge. | `docs/index.md`, current architecture, public API semantics | Must avoid active-branch wording and must state non-claims clearly. |
+| Contract summary | Human-readable companion to code/API contracts. | `docs/api/status-truth-table.md`, `docs/configuration/configuration-guide.md` | Must match enum/config/controller behavior or explicitly call out gaps. |
+| Historical FDP evidence | Branch-specific proof, handoff, merge-gate, or readiness documents. | `docs/fdp-*.md`, `docs/**/fdp-*.md` | Preserve for traceability; do not treat as current truth when superseded. |
+| Template or checklist | A form to complete during release or enablement review. | PR templates, enablement checklists, release owner templates | Placeholders are allowed only when clearly marked as fields to fill, not generated proof. |
+| Supporting local docs | Local setup or service identity material. | `deployment/service-identity/index.md` | Must label local/dev material as local/dev and avoid production claims. |
+
+## Current Sources Of Truth
+
+- [Documentation index](index.md)
+- [Current architecture](architecture/current-architecture.md)
+- [Public API semantics](api/public-api-semantics.md)
+- [API status truth table](api/status-truth-table.md)
+- [Configuration guide](configuration/configuration-guide.md)
+- [Runbook standards](runbooks/index.md)
+- [Documentation style guide](documentation-style-guide.md)
+- [Historical FDP index](historical-fdp-documents.md)
+
+## Current API, Config, And Security Semantics
+
+These documents summarize current behavior and configuration posture. They must match code or state an explicit
+gap.
+
+- [Public API semantics](api/public-api-semantics.md)
+- [API status truth table](api/status-truth-table.md)
+- [OpenAPI safety audit](api/openapi-safety-audit.md)
+- [Configuration guide](configuration/configuration-guide.md)
+- [Security foundation](security/security-foundation-v1.md)
+
+## Historical Evidence Handling
+
+Historical FDP documents are retained as trace evidence for the branch that produced them. They may contain
+older assumptions, narrower proof scope, or limitations that were superseded by later FDP work.
+
+Historical FDP documents must not be read as current production truth unless a current source-of-truth document
+explicitly restates the claim.
+
+Current interpretation rules:
+
+| Evidence family | Current interpretation |
+| --- | --- |
+| FDP-35 | Production-readiness proof only; not enablement. |
+| FDP-36 | Real alert-service kill proof scope; not production certification. |
+| FDP-37 | Production-like image durable crash-window evidence; not live instruction-boundary proof. |
+| FDP-38 | Dedicated test-fixture live checkpoint proof; not production-image proof. |
+| FDP-39 | Release artifact separation and governance readiness; not production enablement. |
+| FDP-40 | Release control readiness and provenance readiness; not enforced signing by itself. |
+
+## Release And Governance Proof Artifacts
+
+Release/governance proof artifacts are readiness evidence. They are not production enablement, bank certification,
+external finality, or business-correctness proof.
+
+- FDP-39 artifacts separate release image evidence from fixture image evidence.
+- FDP-40 artifacts describe platform control readiness and signed-provenance readiness.
+- `READY_FOR_ENABLEMENT_REVIEW` never means `PRODUCTION_ENABLED`.
+
+## Templates And Checklists
+
+Templates and checklists are forms for future review. Placeholder fields are allowed only when they are clearly
+fields to fill, not completed proof.
+
+- Enablement checklists must name missing external controls.
+- Release templates must require immutable digests where release proof depends on them.
+- Review templates must not imply approval before the external control exists.
+
+## Superseded Or Historical Context
+
+If a historical FDP document conflicts with a current source-of-truth document, the current source-of-truth
+document wins. If two historical FDP documents conflict, the later FDP document is the more recent evidence unless
+the current source-of-truth docs say otherwise.
+
+FDP-38 fixture proof must never be described as production-image proof. FDP-40 signed provenance readiness must
+never be described as enforced signing unless a real sign-and-verify artifact or platform policy proves it.
+
+## Implementation Alignment Checks
+
+- Public submit-decision statuses are checked against `SubmitDecisionOperationStatus`.
+- Public API status wording must distinguish local evidence, recovery-required states, and states that are not
+  external finality.
+- Configuration wording must distinguish local/dev, fixture/test-only, production-like, and bank profile behavior.
+- Markdown links are checked across repository documentation.
+- JSON documentation artifacts must parse.
+- Current documentation filenames use lower-kebab names under domain folders.
+- Current docs must not embed an active branch name as their status.
+- Inventory must exclude prompts, build outputs, dependency folders, git internals, and temporary folders.
+
+## Known Honest Limitations
+
+- Historical FDP documents can contain older scope, older risk statements, or template placeholders.
+- Historical FDP documents are retained as trace evidence and are not automatically rewritten into current truth.
+- Long root `index.md` sections remain as accumulated project history; current docs should link out to domain docs
+  instead of expanding that file further.
+- Documentation tests guard wording and links; they are not architectural proof by themselves.
+
+## Non-Claims
+
+This audit does not claim production enablement, bank certification, external finality, WORM storage, legal
+notarization, distributed ACID, exactly-once Kafka delivery, regulator approval, or release approval.

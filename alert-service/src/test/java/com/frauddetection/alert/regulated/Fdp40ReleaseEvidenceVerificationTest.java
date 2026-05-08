@@ -25,10 +25,10 @@ class Fdp40ReleaseEvidenceVerificationTest {
     void releaseEvidenceVerificationProducesPassArtifact() throws Exception {
         assertThat(Files.exists(Path.of("../scripts/fdp40-verify-release-evidence.sh"))).isTrue();
 
-        Map<String, String> manifest = readYamlKeyValues(Path.of("../docs/release/FDP-40-release-manifest-template.yaml"));
-        Map<String, Object> attestation = readJson(Path.of("../docs/release/FDP-40-attestation-readiness-template.json"));
-        Map<String, Object> fdp39 = readJson(Path.of("../docs/release/FDP-40-fdp39-provenance-reference.json"));
-        Map<String, Object> checks = readJson(Path.of("../docs/release/FDP-40-required-checks-matrix.json"));
+        Map<String, String> manifest = readYamlKeyValues(Path.of("../docs/release/fdp-40-release-manifest-template.yaml"));
+        Map<String, Object> attestation = readJson(Path.of("../docs/release/fdp-40-attestation-readiness-template.json"));
+        Map<String, Object> fdp39 = readJson(Path.of("../docs/release/fdp-40-fdp39-provenance-reference.json"));
+        Map<String, Object> checks = readJson(Path.of("../docs/release/fdp-40-required-checks-matrix.json"));
 
         assertReleaseManifestValid(manifest);
         assertAttestationValid(attestation, manifest);
@@ -95,7 +95,7 @@ class Fdp40ReleaseEvidenceVerificationTest {
                         - registry_immutability_verified_by_fdp40: `false`
                         - required_checks_platform_enforcement_verified_by_fdp40: `false`
                         - single_release_owner_model: `true`
-                        - dual_control_required: `false`
+                        - dual_control_required: false
                         - no_mutable_tag_only: `true`
                         - failure_reasons: `[]`
                         """.formatted(fdp39DigestMatch, fixtureNotPromoted, requiredChecksPresent)
