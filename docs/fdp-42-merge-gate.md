@@ -12,10 +12,12 @@ Status: branch merge gate.
 - Fraud case documentation no-overclaim tests pass for local lifecycle scope.
 - Existing fraud-case regulated mutation regression tests pass.
 - Alert-service security configuration tests pass after endpoint additions.
+- CI required check `fdp42-fraud-case-management` runs the complete FDP-42 proof suite and uploads test reports.
 
 ## No-Go Conditions
 
-- Case mutation can happen without an audit append in the same transaction runner callback.
+- Analyst lifecycle mutation can happen without an audit append in the same transaction runner callback.
+- GET/list/search mutates durable case state.
 - Closed case can be modified without explicit reopen.
 - Invalid transition is accepted by the policy.
 - Controller contains lifecycle business logic.
@@ -27,6 +29,8 @@ Status: branch merge gate.
 
 ## Current Verification
 
+CI check name: `fdp42-fraud-case-management`.
+
 Run:
 
 ```powershell
@@ -34,6 +38,22 @@ mvn "-Dmaven.repo.local=$PWD\.m2repo" "-Dsurefire.failIfNoSpecifiedTests=false" 
 mvn "-Dmaven.repo.local=$PWD\.m2repo" "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=AlertSecurityConfigTest,AlertSecurityConfigJwtEnabledTest,DemoAuthSecurityConfigTest,AnalystRoleTest,FraudCaseSecurityIntegrationTest" test
 mvn "-Dmaven.repo.local=$PWD\.m2repo" "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=FraudCaseTransactionIntegrationTest" test
 ```
+
+Required gate checklist:
+
+1. No read endpoint mutates durable case state.
+2. Every analyst lifecycle mutation writes audit in the same local transaction.
+3. Audit failure rollback is directly tested for create, assign, note, decision, transition, close, and reopen.
+4. Security filters are enabled in FDP-42 security tests.
+5. Audit endpoint requires `FRAUD_CASE_AUDIT_READ`.
+6. Duplicate-submit behavior is documented and tested.
+7. Manual create does not copy alert ids into `transactionIds`.
+8. Event ingestion is documented separately from analyst lifecycle.
+9. Search uses Mongo criteria, not in-memory `findAll` filtering.
+10. Audit append-only architecture tests pass.
+11. Docs no-overclaim tests pass.
+12. Existing regulated mutation tests pass.
+13. CI has required FDP-42 proof job.
 
 FDP-42 is not a production enablement claim. It is a clean product-domain module with audited lifecycle mutations.
 It is not a regulated mutation finality claim, not evidence-gated finalize, not lease-fenced replay safety, and not

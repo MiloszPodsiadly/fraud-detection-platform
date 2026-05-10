@@ -77,6 +77,17 @@ Stable FDP-42 error details include `reason:FRAUD_CASE_VALIDATION_FAILED`,
 The local lifecycle POST endpoints are not idempotent. Repeating `notes` or `decisions` creates another append-only
 record and audit entry. Clients must not blindly retry these POSTs after ambiguous transport failures. Repeated close
 or reopen follows the lifecycle policy and returns `409` once the status no longer allows the transition.
+Reassigning the same investigator is accepted and audited as `CASE_REASSIGNED`. Repeating a create request with the
+same alert ids creates an independent case unless a future idempotency contract is introduced.
+
+`RESOLVED` cases remain mutable until `CLOSED`; notes, decisions, and assignment remain allowed while the case is
+resolved.
+
+## System-Generated Case Candidate Ingestion
+
+Transaction-scored event ingestion is separate from these analyst lifecycle endpoints. It may create or enrich
+system-generated case candidates, but it is not an investigator lifecycle action and does not claim FDP-42 analyst
+lifecycle audit semantics.
 
 ## Non-Claims
 

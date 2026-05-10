@@ -27,6 +27,9 @@ these local lifecycle endpoints.
 Closed cases cannot be assigned, annotated, or receive decisions. The only allowed mutation for a closed case is
 explicit reopen with a reason.
 
+`RESOLVED` is not terminal. A resolved case can still be assigned, receive notes, and receive decisions until it is
+explicitly closed with a closure reason.
+
 ## Product Operations
 
 - Create a case from one or more alert ids.
@@ -43,23 +46,34 @@ Manual case creation stores request `alertIds` as `linkedAlertIds`. It does not 
 `transactionIds`; `transactionIds` remains empty until transaction-derived case ingestion supplies real transaction
 references.
 
+## System-Generated Case Candidate Ingestion
+
+`handleScoredTransaction(...)` is event-derived candidate ingestion. It can create or update system-generated fraud
+case candidates from scored transaction events and transaction snapshots. This path is separate from analyst
+lifecycle mutations, does not represent investigator action or decision, and does not claim FDP-42 analyst lifecycle
+audit semantics.
+
 ## Duplicate Submit Policy
 
 The local lifecycle POST endpoints are intentionally non-idempotent. Repeating `notes` or `decisions` appends another
 note or decision and another audit entry. Clients must not blindly retry local lifecycle POSTs after ambiguous network
 failures. Repeated close or reopen is rejected by lifecycle policy when the current status no longer allows the
 requested transition. Reassigning to the same investigator is treated as an audited reassignment, not a replay.
+Submitting the same create request again creates an independent case unless a future idempotency contract is added.
 
 ## Audit And ACID Semantics
 
-Every case mutation writes a `FraudCaseAuditEntryDocument` in the same `RegulatedMutationTransactionRunner`
-callback as the business state change. When the platform runs with Mongo transactions enabled
+Every analyst lifecycle mutation writes a `FraudCaseAuditEntryDocument` in the same
+`RegulatedMutationTransactionRunner` callback as the business state change. When the platform runs with Mongo transactions enabled
 (`app.regulated-mutations.transaction-mode=REQUIRED`), case state and audit append commit or roll back together.
 
 Audit details are intentionally small. They include identifiers and decision metadata such as assignment changes,
 note ids, decision ids, status changes, and close/reopen reasons; they do not store raw request payloads, raw
 idempotency keys, lease owners, payload hashes, or stack traces. The audit endpoint intentionally exposes `actorId`
 to users with the dedicated `fraud-case:audit:read` authority.
+
+Append-only is enforced by application API shape and architecture tests. It is not WORM storage, legal notarization,
+or bank certification.
 
 ## Operational Notes
 
