@@ -8,6 +8,7 @@ import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.fraudcase.FraudCaseAuditService;
+import com.frauddetection.alert.fraudcase.FraudCaseSearchRepository;
 import com.frauddetection.alert.fraudcase.FraudCaseTransitionPolicy;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
@@ -321,6 +322,7 @@ class FraudCaseManagementServiceTest {
                 mock(FraudCaseNoteRepository.class),
                 mock(FraudCaseDecisionRepository.class),
                 mock(FraudCaseAuditRepository.class),
+                mock(FraudCaseSearchRepository.class),
                 analystActorResolver,
                 metrics,
                 new FraudCaseUpdateMutationHandler(fraudCaseRepository, metrics),

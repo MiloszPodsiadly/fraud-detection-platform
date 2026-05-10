@@ -41,7 +41,7 @@ class FraudCaseTransitionPolicyTest {
         assertThatThrownBy(() -> policy.validateTransition(FraudCaseStatus.CLOSED, FraudCaseStatus.RESOLVED))
                 .isInstanceOf(FraudCaseConflictException.class);
         assertThatThrownBy(() -> policy.validateTransition(FraudCaseStatus.OPEN, null))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(FraudCaseValidationException.class);
     }
 
     @Test
@@ -58,11 +58,11 @@ class FraudCaseTransitionPolicyTest {
     void shouldValidateCreateCloseAndReopenInputs() {
         assertThatNoException().isThrownBy(() -> policy.validateCreate(List.of("alert-1"), FraudCasePriority.HIGH));
         assertThatThrownBy(() -> policy.validateCreate(List.of(), FraudCasePriority.HIGH))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(FraudCaseValidationException.class);
         assertThatThrownBy(() -> policy.validateClose(FraudCaseStatus.RESOLVED, " "))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(FraudCaseValidationException.class);
         assertThatThrownBy(() -> policy.validateReopen(FraudCaseStatus.CLOSED, " "))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(FraudCaseValidationException.class);
     }
 
     private Transition transition(FraudCaseStatus from, FraudCaseStatus to) {

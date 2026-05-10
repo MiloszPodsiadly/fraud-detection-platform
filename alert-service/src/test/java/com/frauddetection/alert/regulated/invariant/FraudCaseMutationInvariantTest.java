@@ -6,6 +6,7 @@ import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.fraudcase.FraudCaseAuditService;
+import com.frauddetection.alert.fraudcase.FraudCaseSearchRepository;
 import com.frauddetection.alert.fraudcase.FraudCaseTransitionPolicy;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
@@ -117,6 +118,7 @@ class FraudCaseMutationInvariantTest {
                 mock(FraudCaseNoteRepository.class),
                 mock(FraudCaseDecisionRepository.class),
                 auditRepository,
+                mock(FraudCaseSearchRepository.class),
                 actorResolver,
                 metrics,
                 new FraudCaseUpdateMutationHandler(fraudCaseRepository, metrics),
