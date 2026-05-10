@@ -7,10 +7,16 @@ import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.domain.FraudCaseStatus;
+import com.frauddetection.alert.fraudcase.FraudCaseAuditService;
+import com.frauddetection.alert.fraudcase.FraudCaseTransitionPolicy;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
+import com.frauddetection.alert.persistence.AlertRepository;
+import com.frauddetection.alert.persistence.FraudCaseAuditRepository;
+import com.frauddetection.alert.persistence.FraudCaseDecisionRepository;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
+import com.frauddetection.alert.persistence.FraudCaseNoteRepository;
 import com.frauddetection.alert.persistence.FraudCaseRepository;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
@@ -19,6 +25,7 @@ import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
 import com.frauddetection.alert.regulated.RegulatedMutationExecutionContext;
 import com.frauddetection.alert.regulated.RegulatedMutationResult;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
+import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import com.frauddetection.alert.regulated.mutation.fraudcase.FraudCaseUpdateMutationHandler;
 import com.frauddetection.alert.security.principal.AnalystActorResolver;
 import com.frauddetection.common.events.enums.RiskLevel;
@@ -305,13 +312,22 @@ class FraudCaseManagementServiceTest {
             AlertServiceMetrics metrics,
             RegulatedMutationCoordinator coordinator
     ) {
+        RegulatedMutationTransactionRunner transactionRunner = mock(RegulatedMutationTransactionRunner.class);
+        when(transactionRunner.runLocalCommit(any())).thenAnswer(invocation -> invocation.<java.util.function.Supplier<?>>getArgument(0).get());
         return new FraudCaseManagementService(
                 fraudCaseRepository,
                 scoredTransactionRepository,
+                mock(AlertRepository.class),
+                mock(FraudCaseNoteRepository.class),
+                mock(FraudCaseDecisionRepository.class),
+                mock(FraudCaseAuditRepository.class),
                 analystActorResolver,
                 metrics,
                 new FraudCaseUpdateMutationHandler(fraudCaseRepository, metrics),
                 coordinator,
+                transactionRunner,
+                new FraudCaseTransitionPolicy(),
+                new FraudCaseAuditService(mock(FraudCaseAuditRepository.class)),
                 new FraudCaseResponseMapper(new AlertResponseMapper())
         );
     }

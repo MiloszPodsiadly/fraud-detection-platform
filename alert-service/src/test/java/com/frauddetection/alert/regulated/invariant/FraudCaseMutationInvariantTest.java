@@ -5,16 +5,23 @@ import com.frauddetection.alert.api.UpdateFraudCaseResponse;
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.domain.FraudCaseStatus;
+import com.frauddetection.alert.fraudcase.FraudCaseAuditService;
+import com.frauddetection.alert.fraudcase.FraudCaseTransitionPolicy;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.persistence.AlertRepository;
+import com.frauddetection.alert.persistence.FraudCaseAuditRepository;
+import com.frauddetection.alert.persistence.FraudCaseDecisionRepository;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
+import com.frauddetection.alert.persistence.FraudCaseNoteRepository;
 import com.frauddetection.alert.persistence.FraudCaseRepository;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
 import com.frauddetection.alert.regulated.RegulatedMutationCommand;
 import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
 import com.frauddetection.alert.regulated.RegulatedMutationResult;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
+import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import com.frauddetection.alert.regulated.mutation.fraudcase.FraudCaseUpdateMutationHandler;
 import com.frauddetection.alert.security.principal.AnalystActorResolver;
 import com.frauddetection.alert.service.FraudCaseManagementService;
@@ -98,16 +105,25 @@ class FraudCaseMutationInvariantTest {
     private static final class Fixture {
         private final FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
         private final ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
+        private final FraudCaseAuditRepository auditRepository = mock(FraudCaseAuditRepository.class);
         private final AnalystActorResolver actorResolver = mock(AnalystActorResolver.class);
         private final AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
         private final RegulatedMutationCoordinator coordinator = mock(RegulatedMutationCoordinator.class);
+        private final RegulatedMutationTransactionRunner transactionRunner = transactionRunner();
         private final FraudCaseManagementService service = new FraudCaseManagementService(
                 fraudCaseRepository,
                 scoredTransactionRepository,
+                mock(AlertRepository.class),
+                mock(FraudCaseNoteRepository.class),
+                mock(FraudCaseDecisionRepository.class),
+                auditRepository,
                 actorResolver,
                 metrics,
                 new FraudCaseUpdateMutationHandler(fraudCaseRepository, metrics),
                 coordinator,
+                transactionRunner,
+                new FraudCaseTransitionPolicy(),
+                new FraudCaseAuditService(auditRepository),
                 new FraudCaseResponseMapper(new AlertResponseMapper())
         );
 
@@ -118,6 +134,12 @@ class FraudCaseMutationInvariantTest {
             document.setTransactionIds(List.of());
             document.setTransactions(List.of());
             return document;
+        }
+
+        private RegulatedMutationTransactionRunner transactionRunner() {
+            RegulatedMutationTransactionRunner runner = mock(RegulatedMutationTransactionRunner.class);
+            when(runner.runLocalCommit(any())).thenAnswer(invocation -> invocation.<java.util.function.Supplier<?>>getArgument(0).get());
+            return runner;
         }
     }
 }
