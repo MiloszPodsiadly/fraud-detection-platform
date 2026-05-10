@@ -34,6 +34,92 @@ jobs:
       - name: Build and test backend modules
         run: mvn -B verify
 
+  fdp42-fraud-case-management:
+    name: FDP-42 Fraud Case Management
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Verify Docker is available for Testcontainers
+        run: docker version
+
+      - name: Run FDP-42 fraud case proof suite
+        run: mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=FraudCaseTransitionPolicyTest,Fdp42FraudCaseManagementServiceTest,FraudCaseControllerTest,FraudCaseManagementServiceTest,FraudCaseMutationInvariantTest,FraudCaseAuditServiceTest,Fdp42FraudCaseAuditAppendOnlyArchitectureTest,Fdp42FraudCaseDocumentationNoOverclaimTest,FraudCaseSecurityIntegrationTest,FraudCaseTransactionIntegrationTest,AlertSecurityConfigTest,AlertSecurityConfigJwtEnabledTest,DemoAuthSecurityConfigTest,AnalystRoleTest" test
+
+      - name: Verify FDP-42 proof suite reports
+        run: |
+          python - <<'PY'
+          import pathlib
+          import sys
+          import xml.etree.ElementTree as ET
+
+          reports = pathlib.Path("alert-service/target/surefire-reports")
+          required = [
+              "FraudCaseTransitionPolicyTest",
+              "Fdp42FraudCaseManagementServiceTest",
+              "FraudCaseControllerTest",
+              "FraudCaseManagementServiceTest",
+              "FraudCaseMutationInvariantTest",
+              "FraudCaseAuditServiceTest",
+              "Fdp42FraudCaseAuditAppendOnlyArchitectureTest",
+              "Fdp42FraudCaseDocumentationNoOverclaimTest",
+              "FraudCaseSecurityIntegrationTest",
+              "FraudCaseTransactionIntegrationTest",
+              "AlertSecurityConfigTest",
+              "AlertSecurityConfigJwtEnabledTest",
+              "DemoAuthSecurityConfigTest",
+              "AnalystRoleTest",
+          ]
+
+          xml_by_class = {}
+          for report in reports.glob("TEST-*.xml"):
+              root = ET.parse(report).getroot()
+              class_name = root.attrib.get("name", report.stem.removeprefix("TEST-")).split(".")[-1]
+              xml_by_class[class_name] = (report, root)
+
+          failed = []
+          for class_name in required:
+              if class_name not in xml_by_class:
+                  failed.append(f"missing XML report for {class_name}")
+                  continue
+              report, root = xml_by_class[class_name]
+              tests = int(root.attrib.get("tests", "0"))
+              skipped = int(root.attrib.get("skipped", "0"))
+              failures = int(root.attrib.get("failures", "0"))
+              errors = int(root.attrib.get("errors", "0"))
+              if tests <= 0 or skipped != 0 or failures != 0 or errors != 0:
+                  failed.append(
+                      f"{class_name} did not fully execute: report={report} "
+                      f"tests={tests} skipped={skipped} failures={failures} errors={errors}"
+                  )
+
+          if failed:
+              print("FDP-42 proof suite verification failed:", file=sys.stderr)
+              for failure in failed:
+                  print(f"- {failure}", file=sys.stderr)
+              sys.exit(1)
+          PY
+
+      - name: Upload FDP-42 test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fdp42-fraud-case-management-test-reports
+          if-no-files-found: error
+          path: |
+            alert-service/target/surefire-reports/
+            alert-service/target/failsafe-reports/
+
   ml:
     name: Python ML Checks
     runs-on: ubuntu-latest

@@ -13,7 +13,9 @@ These files describe the current intended interpretation after merge. Start here
 FDP evidence.
 
 - [Current architecture](architecture/current-architecture.md)
+- [Fraud case management architecture](architecture/fraud-case-management-architecture.md)
 - [Public API semantics](api/public-api-semantics.md)
+- [Fraud Case API](api/fraud-case-api.md)
 - [Status truth table](api/status-truth-table.md)
 - [OpenAPI safety audit](api/openapi-safety-audit.md)
 - [Configuration guide](configuration/configuration-guide.md)
@@ -43,6 +45,7 @@ These files define how documentation is classified, named, linked, and reviewed.
 
 - [Alert service OpenAPI](openapi/alert-service.openapi.yaml)
 - [ML inference service OpenAPI](openapi/ml-inference-service.openapi.yaml)
+- [Fraud Case API](api/fraud-case-api.md)
 - [API surface v1](api/api-surface-v1.md)
 - [API error contract](api/api-error-contract.md)
 
@@ -64,12 +67,17 @@ otherwise.
 The FDP-35 through FDP-40 documents are proof, readiness, or governance evidence. They are not production
 enablement and they are not bank certification.
 
+FDP-42 fraud case management is a local audited lifecycle workflow. It is not evidence-gated finalize, not a
+regulated mutation finality claim, not lease-fenced replay safety, and not external finality.
+
 FDP-38 fixture proof is test-fixture runtime evidence only. It is not production-image proof.
 
 FDP-40 signed provenance readiness is readiness evidence only. It is not enforced signing unless a real
 sign-and-verify artifact or platform policy proves enforcement.
 
+- [FDP-42 proof summary](fdp-42-summary.md)
 - [FDP-40 merge gate](fdp-40-merge-gate.md)
+- [FDP-42 merge gate](fdp-42-merge-gate.md)
 - [FDP-39 merge gate](fdp-39-merge-gate.md)
 - [FDP-38 merge gate](fdp-38-merge-gate.md)
 - [FDP-37 merge gate](fdp-37-merge-gate.md)

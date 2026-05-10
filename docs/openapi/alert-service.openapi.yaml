@@ -444,7 +444,7 @@ paths:
   /api/v1/trust/incidents/{incidentId}/ack:
     post:
       summary: Acknowledge trust incident
-      description: Requires trust-incident:ack and X-Idempotency-Key. ACK is a regulated mutation: ATTEMPTED audit is recorded before state mutation and SUCCESS audit is owned by the coordinator after the incident state save. ACK means the operator has seen and accepted ownership; it does not mean mitigation or resolution. In bank fail-closed mode, acknowledgement reason is required. The mutation handler does not write AuditService directly.
+      description: "Requires trust-incident:ack and X-Idempotency-Key. ACK is a regulated mutation: ATTEMPTED audit is recorded before state mutation and SUCCESS audit is owned by the coordinator after the incident state save. ACK means the operator has seen and accepted ownership; it does not mean mitigation or resolution. In bank fail-closed mode, acknowledgement reason is required. The mutation handler does not write AuditService directly."
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -550,7 +550,7 @@ paths:
   /api/v1/audit/degradations/{auditId}/resolve:
     post:
       summary: Resolve audit degradation event
-      description: Requires audit-degradation:resolve. Records ATTEMPTED before mutation, SUCCESS after mutation, and FAILED on update failure. In bank fail-closed mode, structured evidence is mandatory and resolution is dual-control: first request marks resolution_pending, second distinct actor approves. A post-commit success-audit failure returns committed-incomplete and records durable degradation instead of pretending the resolution is fully evidenced.
+      description: "Requires audit-degradation:resolve. Records ATTEMPTED before mutation, SUCCESS after mutation, and FAILED on update failure. In bank fail-closed mode, structured evidence is mandatory and resolution is dual-control: first request marks resolution_pending, second distinct actor approves. A post-commit success-audit failure returns committed-incomplete and records durable degradation instead of pretending the resolution is fully evidenced."
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -911,11 +911,11 @@ paths:
             type: string
             minLength: 1
             maxLength: 160
-          - name: X-Idempotency-Key
-            in: header
-            required: true
-            schema:
-              type: string
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
             minLength: 1
             maxLength: 160
       requestBody:
@@ -957,6 +957,106 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiErrorResponse"
+  /api/v1/fraud-cases:
+    get:
+      summary: List fraud cases
+      description: >-
+        Returns a paged fraud-case list. Size is bounded to 100. When filters are present, search is delegated to the
+        fraud-case query service. This is a read-only endpoint and must not perform lifecycle mutation behavior.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/FraudCaseStatus"
+        - name: assignee
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: priority
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/FraudCasePriority"
+        - name: riskLevel
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/RiskLevel"
+        - name: createdFrom
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: createdTo
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: linkedAlertId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paged fraud cases returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FraudCaseSummaryPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      summary: Create fraud case
+      description: >-
+        Creates a local audited fraud case from one or more alert ids. This endpoint is not idempotent unless a future
+        contract explicitly states otherwise; clients must not blindly retry after an ambiguous network failure.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFraudCaseRequest"
+      responses:
+        "200":
+          description: Fraud case created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FraudCaseResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /api/v1/fraud-cases/{caseId}:
     get:
       summary: Get one fraud case
@@ -978,7 +1078,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/GenericObject"
+                $ref: "#/components/schemas/FraudCaseResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1029,6 +1129,276 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+  /api/v1/fraud-cases/{caseId}/assign:
+    post:
+      summary: Assign fraud case
+      description: >-
+        Assigns a fraud case through the local audited lifecycle service. This endpoint is not idempotent unless a
+        future contract explicitly states otherwise.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignFraudCaseRequest"
+      responses:
+        "200":
+          description: Fraud case assigned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FraudCaseResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/fraud-cases/{caseId}/notes:
+    post:
+      summary: Add fraud case note
+      description: >-
+        Appends a fraud-case note through the local audited lifecycle service. This endpoint is not idempotent unless
+        a future contract explicitly states otherwise.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddFraudCaseNoteRequest"
+      responses:
+        "200":
+          description: Fraud case note appended.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FraudCaseNoteResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/fraud-cases/{caseId}/decisions:
+    post:
+      summary: Add fraud case decision
+      description: >-
+        Appends a fraud-case decision through the local audited lifecycle service. This endpoint is not idempotent
+        unless a future contract explicitly states otherwise.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddFraudCaseDecisionRequest"
+      responses:
+        "200":
+          description: Fraud case decision appended.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FraudCaseDecisionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/fraud-cases/{caseId}/transition:
+    post:
+      summary: Transition fraud case
+      description: >-
+        Transitions a fraud case through FraudCaseTransitionPolicy. This endpoint is not idempotent unless a future
+        contract explicitly states otherwise.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransitionFraudCaseRequest"
+      responses:
+        "200":
+          description: Fraud case transitioned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FraudCaseResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/fraud-cases/{caseId}/close:
+    post:
+      summary: Close fraud case
+      description: >-
+        Closes a fraud case through FraudCaseTransitionPolicy. This endpoint is not idempotent unless a future
+        contract explicitly states otherwise.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CloseFraudCaseRequest"
+      responses:
+        "200":
+          description: Fraud case closed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FraudCaseResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/fraud-cases/{caseId}/reopen:
+    post:
+      summary: Reopen fraud case
+      description: >-
+        Reopens a fraud case through FraudCaseTransitionPolicy. This endpoint is not idempotent unless a future
+        contract explicitly states otherwise.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReopenFraudCaseRequest"
+      responses:
+        "200":
+          description: Fraud case reopened.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FraudCaseResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/fraud-cases/{caseId}/audit:
+    get:
+      summary: Read fraud case audit trail
+      description: Returns the append-only local fraud-case audit trail for users with fraud-case audit read authority.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      responses:
+        "200":
+          description: Fraud case audit trail returned.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FraudCaseAuditResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /api/v1/transactions/scored:
     get:
       summary: List scored transaction projections
@@ -1609,7 +1979,8 @@ components:
           nullable: true
         resolution_evidence:
           nullable: true
-          $ref: "#/components/schemas/ResolutionEvidenceReference"
+          allOf:
+            - $ref: "#/components/schemas/ResolutionEvidenceReference"
     RegulatedMutationRecoveryRunResponse:
       type: object
       additionalProperties: false
@@ -1830,7 +2201,8 @@ components:
           maxLength: 500
         evidence_reference:
           nullable: true
-          $ref: "#/components/schemas/ResolutionEvidenceReference"
+          allOf:
+            - $ref: "#/components/schemas/ResolutionEvidenceReference"
     ResolutionEvidenceReference:
       type: object
       additionalProperties: false
@@ -1943,7 +2315,8 @@ components:
           maxLength: 500
         evidence_reference:
           nullable: true
-          $ref: "#/components/schemas/ResolutionEvidenceReference"
+          allOf:
+            - $ref: "#/components/schemas/ResolutionEvidenceReference"
     OutboxBacklogResponse:
       type: object
       additionalProperties: false
@@ -2083,14 +2456,352 @@ components:
           type: string
           format: date-time
           nullable: true
+    FraudCaseStatus:
+      type: string
+      enum: [OPEN, IN_REVIEW, ESCALATED, RESOLVED, REOPENED, CONFIRMED_FRAUD, FALSE_POSITIVE, CLOSED]
+    FraudCasePriority:
+      type: string
+      enum: [LOW, MEDIUM, HIGH, CRITICAL]
+    RiskLevel:
+      type: string
+      enum: [LOW, MEDIUM, HIGH, CRITICAL]
+    FraudCaseDecisionType:
+      type: string
+      enum: [FRAUD_CONFIRMED, FALSE_POSITIVE, NEEDS_MORE_INFO, ESCALATE, NO_ACTION]
+    FraudCaseAuditAction:
+      type: string
+      enum: [CASE_CREATED, CASE_ASSIGNED, CASE_REASSIGNED, NOTE_ADDED, DECISION_ADDED, STATUS_CHANGED, CASE_CLOSED, CASE_REOPENED]
+    CreateFraudCaseRequest:
+      type: object
+      additionalProperties: false
+      required: [alertIds, priority, riskLevel, actorId]
+      properties:
+        alertIds:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+        priority:
+          $ref: "#/components/schemas/FraudCasePriority"
+        riskLevel:
+          $ref: "#/components/schemas/RiskLevel"
+        reason:
+          type: string
+          nullable: true
+          maxLength: 500
+        actorId:
+          type: string
+          minLength: 1
+          maxLength: 64
+    AssignFraudCaseRequest:
+      type: object
+      additionalProperties: false
+      required: [assignedInvestigatorId, actorId]
+      properties:
+        assignedInvestigatorId:
+          type: string
+          minLength: 1
+          maxLength: 64
+        actorId:
+          type: string
+          minLength: 1
+          maxLength: 64
+    AddFraudCaseNoteRequest:
+      type: object
+      additionalProperties: false
+      required: [body, actorId]
+      properties:
+        body:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        internalOnly:
+          type: boolean
+        actorId:
+          type: string
+          minLength: 1
+          maxLength: 64
+    AddFraudCaseDecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [decisionType, summary, actorId]
+      properties:
+        decisionType:
+          $ref: "#/components/schemas/FraudCaseDecisionType"
+        summary:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        actorId:
+          type: string
+          minLength: 1
+          maxLength: 64
+    TransitionFraudCaseRequest:
+      type: object
+      additionalProperties: false
+      required: [targetStatus, actorId]
+      properties:
+        targetStatus:
+          $ref: "#/components/schemas/FraudCaseStatus"
+        actorId:
+          type: string
+          minLength: 1
+          maxLength: 64
+    CloseFraudCaseRequest:
+      type: object
+      additionalProperties: false
+      required: [closureReason, actorId]
+      properties:
+        closureReason:
+          type: string
+          minLength: 1
+          maxLength: 500
+        actorId:
+          type: string
+          minLength: 1
+          maxLength: 64
+    ReopenFraudCaseRequest:
+      type: object
+      additionalProperties: false
+      required: [reason, actorId]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+        actorId:
+          type: string
+          minLength: 1
+          maxLength: 64
+    FraudCaseSummaryPage:
+      type: object
+      additionalProperties: false
+      required: [content, totalElements, totalPages, page, size]
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/FraudCaseSummaryResponse"
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+        page:
+          type: integer
+        size:
+          type: integer
+    FraudCaseSummaryResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        caseId:
+          type: string
+        caseNumber:
+          type: string
+          nullable: true
+        status:
+          $ref: "#/components/schemas/FraudCaseStatus"
+        priority:
+          $ref: "#/components/schemas/FraudCasePriority"
+        riskLevel:
+          $ref: "#/components/schemas/RiskLevel"
+        assignedInvestigatorId:
+          type: string
+          nullable: true
+        linkedAlertIds:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    FraudCaseResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        caseId:
+          type: string
+        caseNumber:
+          type: string
+          nullable: true
+        customerId:
+          type: string
+          nullable: true
+        suspicionType:
+          type: string
+          nullable: true
+        status:
+          $ref: "#/components/schemas/FraudCaseStatus"
+        priority:
+          $ref: "#/components/schemas/FraudCasePriority"
+        riskLevel:
+          $ref: "#/components/schemas/RiskLevel"
+        linkedAlertIds:
+          type: array
+          items:
+            type: string
+        assignedInvestigatorId:
+          type: string
+          nullable: true
+        createdBy:
+          type: string
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+        thresholdPln:
+          type: number
+          nullable: true
+        totalAmountPln:
+          type: number
+          nullable: true
+        aggregationWindow:
+          type: string
+          nullable: true
+        firstTransactionAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastTransactionAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        analystId:
+          type: string
+          nullable: true
+        decisionReason:
+          type: string
+          nullable: true
+        decisionTags:
+          type: array
+          items:
+            type: string
+        decidedAt:
+          type: string
+          format: date-time
+          nullable: true
+        closedAt:
+          type: string
+          format: date-time
+          nullable: true
+        closureReason:
+          type: string
+          nullable: true
+        version:
+          type: integer
+          format: int64
+          nullable: true
+        transactionIds:
+          type: array
+          items:
+            type: string
+        transactions:
+          type: array
+          items:
+            $ref: "#/components/schemas/FraudCaseTransactionResponse"
+    FraudCaseTransactionResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        transactionId:
+          type: string
+        correlationId:
+          type: string
+          nullable: true
+        transactionTimestamp:
+          type: string
+          format: date-time
+          nullable: true
+        transactionAmount:
+          $ref: "#/components/schemas/GenericObject"
+        amountPln:
+          type: number
+          nullable: true
+        fraudScore:
+          type: number
+          nullable: true
+        riskLevel:
+          $ref: "#/components/schemas/RiskLevel"
+    FraudCaseNoteResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+        caseId:
+          type: string
+        body:
+          type: string
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        internalOnly:
+          type: boolean
+    FraudCaseDecisionResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+        caseId:
+          type: string
+        decisionType:
+          $ref: "#/components/schemas/FraudCaseDecisionType"
+        summary:
+          type: string
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    FraudCaseAuditResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+        caseId:
+          type: string
+        action:
+          $ref: "#/components/schemas/FraudCaseAuditAction"
+        actorId:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+        previousStatus:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/FraudCaseStatus"
+        newStatus:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/FraudCaseStatus"
+        details:
+          type: object
+          additionalProperties:
+            type: string
     UpdateFraudCaseRequest:
       type: object
       additionalProperties: false
       required: [status]
       properties:
         status:
-          type: string
-          enum: [OPEN, IN_REVIEW, CONFIRMED_FRAUD, FALSE_POSITIVE, CLOSED]
+          $ref: "#/components/schemas/FraudCaseStatus"
         analystId:
           type: string
           nullable: true
@@ -2125,10 +2836,12 @@ components:
           type: string
         current_case_snapshot:
           nullable: true
-          $ref: "#/components/schemas/GenericObject"
+          allOf:
+            - $ref: "#/components/schemas/GenericObject"
         updated_case:
           nullable: true
-          $ref: "#/components/schemas/GenericObject"
+          allOf:
+            - $ref: "#/components/schemas/GenericObject"
           description: Present only for committed/evidence-pending committed states. Absent for IN_PROGRESS, RECOVERY_REQUIRED, COMMIT_UNKNOWN, and rejected states.
         recovery_required_reason:
           type: string
@@ -2471,7 +3184,8 @@ components:
           enum: [AVAILABLE, PARTIAL, UNAVAILABLE, DISABLED, VALID, MISSING, STALE, INVALID]
         anchor_coverage:
           nullable: true
-          $ref: "#/components/schemas/AuditEvidenceExportAnchorCoverage"
+          allOf:
+            - $ref: "#/components/schemas/AuditEvidenceExportAnchorCoverage"
         export_fingerprint:
           type: string
           nullable: true
@@ -2612,10 +3326,12 @@ components:
           maxLength: 160
         local_anchor:
           nullable: true
-          $ref: "#/components/schemas/AuditAnchorSummary"
+          allOf:
+            - $ref: "#/components/schemas/AuditAnchorSummary"
         external_anchor:
           nullable: true
-          $ref: "#/components/schemas/AuditAnchorSummary"
+          allOf:
+            - $ref: "#/components/schemas/AuditAnchorSummary"
         external_immutability_level:
           $ref: "#/components/schemas/ExternalImmutabilityLevel"
         durability_guarantee:
@@ -2892,10 +3608,12 @@ components:
           nullable: true
         local_anchor:
           nullable: true
-          $ref: "#/components/schemas/AuditEvidenceExportAnchorReference"
+          allOf:
+            - $ref: "#/components/schemas/AuditEvidenceExportAnchorReference"
         external_anchor:
           nullable: true
-          $ref: "#/components/schemas/AuditEvidenceExportAnchorReference"
+          allOf:
+            - $ref: "#/components/schemas/AuditEvidenceExportAnchorReference"
         compensated:
           type: boolean
           description: True when this event was superseded by a later compensating audit event. Compensation enrichment uses a bounded lookup for returned audit ids and is not limited to events present in the export window.
@@ -2986,7 +3704,8 @@ components:
           enum: [local-file, object-store]
         external_immutability_level:
           nullable: true
-          $ref: "#/components/schemas/ExternalImmutabilityLevel"
+          allOf:
+            - $ref: "#/components/schemas/ExternalImmutabilityLevel"
         external_key:
           type: string
           nullable: true
@@ -3083,7 +3802,8 @@ components:
           enum: [FAILED]
         external_reference:
           nullable: true
-          $ref: "#/components/schemas/ExternalAnchorReference"
+          allOf:
+            - $ref: "#/components/schemas/ExternalAnchorReference"
         external_immutability_level:
           $ref: "#/components/schemas/ExternalImmutabilityLevel"
     AuditTrustAttestationResponse:
@@ -3134,7 +3854,8 @@ components:
           nullable: true
         latest_external_anchor_reference:
           nullable: true
-          $ref: "#/components/schemas/AuditTrustAttestationExternalAnchorReference"
+          allOf:
+            - $ref: "#/components/schemas/AuditTrustAttestationExternalAnchorReference"
         attestation_fingerprint:
           type: string
           minLength: 64

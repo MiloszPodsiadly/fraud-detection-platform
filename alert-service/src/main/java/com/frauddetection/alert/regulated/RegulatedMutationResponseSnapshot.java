@@ -308,7 +308,13 @@ public record RegulatedMutationResponseSnapshot(
                 document.getCaseId(),
                 null,
                 null,
+                null,
                 document.getStatus(),
+                null,
+                null,
+                List.of(),
+                null,
+                null,
                 null,
                 null,
                 null,
@@ -321,6 +327,9 @@ public record RegulatedMutationResponseSnapshot(
                 document.getDecisionReason(),
                 document.getDecisionTags(),
                 document.getDecidedAt(),
+                null,
+                null,
+                null,
                 List.of(),
                 List.of()
         );

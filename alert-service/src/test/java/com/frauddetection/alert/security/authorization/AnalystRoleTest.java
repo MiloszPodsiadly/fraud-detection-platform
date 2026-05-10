@@ -17,6 +17,7 @@ class AnalystRoleTest {
                 )
                 .doesNotContain(
                         AnalystAuthority.ALERT_DECISION_SUBMIT,
+                        AnalystAuthority.FRAUD_CASE_AUDIT_READ,
                         AnalystAuthority.FRAUD_CASE_UPDATE,
                         AnalystAuthority.GOVERNANCE_ADVISORY_AUDIT_WRITE,
                         AnalystAuthority.AUDIT_READ,
@@ -36,6 +37,7 @@ class AnalystRoleTest {
                 )
                 .doesNotContain(
                         AnalystAuthority.FRAUD_CASE_UPDATE,
+                        AnalystAuthority.FRAUD_CASE_AUDIT_READ,
                         AnalystAuthority.AUDIT_READ,
                         AnalystAuthority.AUDIT_VERIFY,
                         AnalystAuthority.AUDIT_EXPORT,
@@ -49,6 +51,7 @@ class AnalystRoleTest {
         assertThat(AnalystRole.REVIEWER.authorities())
                 .contains(
                         AnalystAuthority.FRAUD_CASE_UPDATE,
+                        AnalystAuthority.FRAUD_CASE_AUDIT_READ,
                         AnalystAuthority.GOVERNANCE_ADVISORY_AUDIT_WRITE
                 )
                 .doesNotContain(

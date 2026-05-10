@@ -1,12 +1,23 @@
 package com.frauddetection.alert.service;
 
+import com.frauddetection.alert.api.AddFraudCaseDecisionRequest;
+import com.frauddetection.alert.api.AddFraudCaseNoteRequest;
+import com.frauddetection.alert.api.AssignFraudCaseRequest;
+import com.frauddetection.alert.api.CloseFraudCaseRequest;
+import com.frauddetection.alert.api.CreateFraudCaseRequest;
+import com.frauddetection.alert.api.FraudCaseAuditResponse;
+import com.frauddetection.alert.api.FraudCaseDecisionResponse;
+import com.frauddetection.alert.api.FraudCaseNoteResponse;
+import com.frauddetection.alert.api.FraudCaseSummaryResponse;
+import com.frauddetection.alert.api.ReopenFraudCaseRequest;
+import com.frauddetection.alert.api.TransitionFraudCaseRequest;
+import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.api.UpdateFraudCaseRequest;
 import com.frauddetection.alert.api.UpdateFraudCaseResponse;
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditResourceType;
-import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.persistence.FraudCaseRepository;
 import com.frauddetection.alert.persistence.FraudCaseTransactionDocument;
@@ -22,6 +33,7 @@ import com.frauddetection.alert.regulated.mutation.fraudcase.FraudCaseUpdateMuta
 import com.frauddetection.alert.security.principal.AnalystActorResolver;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
+import com.frauddetection.common.events.enums.RiskLevel;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -46,30 +58,34 @@ public class FraudCaseManagementService {
     private final FraudCaseRepository fraudCaseRepository;
     private final ScoredTransactionRepository scoredTransactionRepository;
     private final AnalystActorResolver analystActorResolver;
-    private final AlertServiceMetrics metrics;
     private final FraudCaseUpdateMutationHandler updateMutationHandler;
     private final RegulatedMutationCoordinator regulatedMutationCoordinator;
     private final FraudCaseResponseMapper responseMapper;
+    private final FraudCaseLifecycleService lifecycleService;
+    private final FraudCaseQueryService queryService;
 
     public FraudCaseManagementService(
             FraudCaseRepository fraudCaseRepository,
             ScoredTransactionRepository scoredTransactionRepository,
             AnalystActorResolver analystActorResolver,
-            AlertServiceMetrics metrics,
             FraudCaseUpdateMutationHandler updateMutationHandler,
             RegulatedMutationCoordinator regulatedMutationCoordinator,
-            FraudCaseResponseMapper responseMapper
+            FraudCaseResponseMapper responseMapper,
+            FraudCaseLifecycleService lifecycleService,
+            FraudCaseQueryService queryService
     ) {
         this.fraudCaseRepository = fraudCaseRepository;
         this.scoredTransactionRepository = scoredTransactionRepository;
         this.analystActorResolver = analystActorResolver;
-        this.metrics = metrics;
         this.updateMutationHandler = updateMutationHandler;
         this.regulatedMutationCoordinator = regulatedMutationCoordinator;
         this.responseMapper = responseMapper;
+        this.lifecycleService = lifecycleService;
+        this.queryService = queryService;
     }
 
     public void handleScoredTransaction(TransactionScoredEvent event) {
+        // System-generated candidate ingestion; not an analyst lifecycle mutation.
         if (event.featureSnapshot() == null
                 || !Boolean.TRUE.equals(event.featureSnapshot().get("rapidTransferFraudCaseCandidate"))) {
             return;
@@ -96,20 +112,62 @@ public class FraudCaseManagementService {
         fraudCaseRepository.save(document);
     }
 
+    @Deprecated(forRemoval = false)
     public List<FraudCaseDocument> listCases() {
-        return fraudCaseRepository.findAll().stream()
-                .map(this::refreshTransactionDetails)
-                .toList();
+        return queryService.listCases();
     }
 
     public Page<FraudCaseDocument> listCases(Pageable pageable) {
-        return fraudCaseRepository.findAll(pageable)
-                .map(this::refreshTransactionDetails);
+        return queryService.listCases(pageable);
     }
 
     public FraudCaseDocument getCase(String caseId) {
-        return refreshTransactionDetails(fraudCaseRepository.findById(caseId)
-                .orElseThrow(() -> new com.frauddetection.alert.exception.AlertNotFoundException(caseId)));
+        return queryService.getCase(caseId);
+    }
+
+    public FraudCaseDocument createCase(CreateFraudCaseRequest request) {
+        return lifecycleService.createCase(request);
+    }
+
+    public Page<FraudCaseSummaryResponse> searchCases(
+            FraudCaseStatus status,
+            String assignee,
+            FraudCasePriority priority,
+            RiskLevel riskLevel,
+            Instant createdFrom,
+            Instant createdTo,
+            String linkedAlertId,
+            Pageable pageable
+    ) {
+        return queryService.searchCases(status, assignee, priority, riskLevel, createdFrom, createdTo, linkedAlertId, pageable);
+    }
+
+    public FraudCaseDocument assignCase(String caseId, AssignFraudCaseRequest request) {
+        return lifecycleService.assignCase(caseId, request);
+    }
+
+    public FraudCaseNoteResponse addNote(String caseId, AddFraudCaseNoteRequest request) {
+        return lifecycleService.addNote(caseId, request);
+    }
+
+    public FraudCaseDecisionResponse addDecision(String caseId, AddFraudCaseDecisionRequest request) {
+        return lifecycleService.addDecision(caseId, request);
+    }
+
+    public FraudCaseDocument transitionCase(String caseId, TransitionFraudCaseRequest request) {
+        return lifecycleService.transitionCase(caseId, request);
+    }
+
+    public FraudCaseDocument closeCase(String caseId, CloseFraudCaseRequest request) {
+        return lifecycleService.closeCase(caseId, request);
+    }
+
+    public FraudCaseDocument reopenCase(String caseId, ReopenFraudCaseRequest request) {
+        return lifecycleService.reopenCase(caseId, request);
+    }
+
+    public List<FraudCaseAuditResponse> auditTrail(String caseId) {
+        return queryService.auditTrail(caseId);
     }
 
     public UpdateFraudCaseResponse updateCase(String caseId, UpdateFraudCaseRequest request, String idempotencyKey) {
@@ -266,31 +324,6 @@ public class FraudCaseManagementService {
         document.setFraudScore(scoredTransaction.getFraudScore());
         document.setRiskLevel(scoredTransaction.getRiskLevel());
         return document;
-    }
-
-    private FraudCaseDocument refreshTransactionDetails(FraudCaseDocument document) {
-        List<String> transactionIds = document.getTransactionIds() == null ? List.of() : document.getTransactionIds();
-        if (transactionIds.isEmpty()) {
-            return document;
-        }
-
-        List<String> existingIds = document.getTransactions() == null
-                ? List.of()
-                : document.getTransactions().stream().map(FraudCaseTransactionDocument::getTransactionId).toList();
-        if (existingIds.size() == transactionIds.size() && existingIds.containsAll(transactionIds)) {
-            return document;
-        }
-
-        List<FraudCaseTransactionDocument> transactions = caseTransactions(transactionIds, null);
-        if (transactions.isEmpty()) {
-            return document;
-        }
-
-        document.setTransactions(transactions);
-        document.setFirstTransactionAt(firstTransactionAt(transactions, document.getFirstTransactionAt()));
-        document.setLastTransactionAt(lastTransactionAt(transactions, document.getLastTransactionAt()));
-        document.setUpdatedAt(Instant.now());
-        return fraudCaseRepository.save(document);
     }
 
     private List<FraudCaseTransactionDocument> caseTransactions(List<String> transactionIds, TransactionScoredEvent currentEvent) {

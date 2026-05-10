@@ -22,6 +22,7 @@ public enum AnalystRole {
             AnalystAuthority.ASSISTANT_SUMMARY_READ,
             AnalystAuthority.ALERT_DECISION_SUBMIT,
             AnalystAuthority.FRAUD_CASE_READ,
+            AnalystAuthority.FRAUD_CASE_AUDIT_READ,
             AnalystAuthority.FRAUD_CASE_UPDATE,
             AnalystAuthority.TRANSACTION_MONITOR_READ,
             AnalystAuthority.GOVERNANCE_ADVISORY_AUDIT_WRITE

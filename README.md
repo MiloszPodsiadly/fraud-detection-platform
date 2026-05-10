@@ -88,7 +88,7 @@ Kafka contracts live in `common-events`. REST DTOs and persistence documents sta
   - `SHADOW`: rule-based result remains final while ML diagnostics are attached.
   - `COMPARE`: rule-based result remains final while rule-vs-ML comparison diagnostics are attached.
 - Alerting: `HIGH` and `CRITICAL` scored transactions create analyst alerts.
-- Case management: rapid-transfer grouped fraud cases are created for `RAPID_TRANSFER_BURST_20K_PLN`.
+- Case management: rapid-transfer grouped cases and audited FDP-42 investigator workflow for alert-linked fraud cases.
 - Analyst console: scored transaction monitor, alert queue, alert details, assistant summary, decision form, and fraud case update flow.
 - Audit logging: analyst write actions are persisted append-only and emitted as structured audit events; governance advisory human-review entries are persisted append-only.
 
