@@ -31,6 +31,7 @@ import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -60,7 +61,7 @@ class FraudCaseControllerTest {
 
     @Test
     void shouldCreateFraudCase() throws Exception {
-        when(fraudCaseManagementService.createCase(any())).thenReturn(caseDocument());
+        when(fraudCaseManagementService.createCase(any(), eq("create-key-1"))).thenReturn(caseDocument());
 
         CreateFraudCaseRequest request = new CreateFraudCaseRequest(
                 List.of("alert-1"),
@@ -71,6 +72,7 @@ class FraudCaseControllerTest {
         );
 
         mockMvc.perform(post("/api/fraud-cases")
+                        .header("X-Idempotency-Key", "create-key-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
@@ -110,10 +112,11 @@ class FraudCaseControllerTest {
 
     @Test
     void shouldReturnConflictForLifecycleViolation() throws Exception {
-        when(fraudCaseManagementService.assignCase(eq("case-1"), any()))
+        when(fraudCaseManagementService.assignCase(eq("case-1"), any(), eq("assign-key-1")))
                 .thenThrow(new FraudCaseConflictException("Closed case cannot be assigned."));
 
         mockMvc.perform(post("/api/fraud-cases/case-1/assign")
+                        .header("X-Idempotency-Key", "assign-key-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"assignedInvestigatorId\":\"investigator-1\",\"actorId\":\"lead-1\"}"))
                 .andExpect(status().isConflict())
@@ -122,18 +125,20 @@ class FraudCaseControllerTest {
 
     @Test
     void shouldReturnConflictForRepeatedCloseAndReopen() throws Exception {
-        when(fraudCaseManagementService.closeCase(eq("case-1"), any()))
+        when(fraudCaseManagementService.closeCase(eq("case-1"), any(), eq("close-key-1")))
                 .thenThrow(new FraudCaseConflictException("Forbidden fraud case status transition: CLOSED -> CLOSED"));
-        when(fraudCaseManagementService.reopenCase(eq("case-1"), any()))
+        when(fraudCaseManagementService.reopenCase(eq("case-1"), any(), eq("reopen-key-1")))
                 .thenThrow(new FraudCaseConflictException("Forbidden fraud case status transition: REOPENED -> REOPENED"));
 
         mockMvc.perform(post("/api/fraud-cases/case-1/close")
+                        .header("X-Idempotency-Key", "close-key-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"closureReason\":\"Done\",\"actorId\":\"lead-1\"}"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.details[0]").value("reason:FRAUD_CASE_LIFECYCLE_CONFLICT"));
 
         mockMvc.perform(post("/api/fraud-cases/case-1/reopen")
+                        .header("X-Idempotency-Key", "reopen-key-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"reason\":\"New evidence\",\"actorId\":\"lead-1\"}"))
                 .andExpect(status().isConflict())
@@ -143,9 +148,24 @@ class FraudCaseControllerTest {
     @Test
     void shouldRejectInvalidCreateRequest() throws Exception {
         mockMvc.perform(post("/api/fraud-cases")
+                        .header("X-Idempotency-Key", "create-key-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"alertIds\":[],\"priority\":\"HIGH\",\"actorId\":\"analyst-1\"}"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void shouldReturnLocalMissingIdempotencyErrorForLifecyclePost() throws Exception {
+        when(fraudCaseManagementService.createCase(any(), isNull()))
+                .thenThrow(new com.frauddetection.alert.fraudcase.FraudCaseMissingIdempotencyKeyException());
+
+        mockMvc.perform(post("/api/fraud-cases")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"alertIds":["alert-1"],"priority":"HIGH","riskLevel":"CRITICAL","actorId":"analyst-1"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.details[0]").value("code:MISSING_IDEMPOTENCY_KEY"));
     }
 
     private FraudCaseDocument caseDocument() {

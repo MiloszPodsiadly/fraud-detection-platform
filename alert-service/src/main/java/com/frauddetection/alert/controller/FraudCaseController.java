@@ -95,8 +95,11 @@ public class FraudCaseController {
     }
 
     @PostMapping
-    public FraudCaseResponse createCase(@Valid @RequestBody CreateFraudCaseRequest request) {
-        return responseMapper.toResponse(fraudCaseManagementService.createCase(request));
+    public FraudCaseResponse createCase(
+            @RequestHeader(name = "X-Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody CreateFraudCaseRequest request
+    ) {
+        return responseMapper.toResponse(fraudCaseManagementService.createCase(request, idempotencyKey));
     }
 
     @GetMapping("/{caseId}")
@@ -105,33 +108,57 @@ public class FraudCaseController {
     }
 
     @PostMapping("/{caseId}/assign")
-    public FraudCaseResponse assign(@PathVariable String caseId, @Valid @RequestBody AssignFraudCaseRequest request) {
-        return responseMapper.toResponse(fraudCaseManagementService.assignCase(caseId, request));
+    public FraudCaseResponse assign(
+            @PathVariable String caseId,
+            @RequestHeader(name = "X-Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody AssignFraudCaseRequest request
+    ) {
+        return responseMapper.toResponse(fraudCaseManagementService.assignCase(caseId, request, idempotencyKey));
     }
 
     @PostMapping("/{caseId}/notes")
-    public FraudCaseNoteResponse addNote(@PathVariable String caseId, @Valid @RequestBody AddFraudCaseNoteRequest request) {
-        return fraudCaseManagementService.addNote(caseId, request);
+    public FraudCaseNoteResponse addNote(
+            @PathVariable String caseId,
+            @RequestHeader(name = "X-Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody AddFraudCaseNoteRequest request
+    ) {
+        return fraudCaseManagementService.addNote(caseId, request, idempotencyKey);
     }
 
     @PostMapping("/{caseId}/decisions")
-    public FraudCaseDecisionResponse addDecision(@PathVariable String caseId, @Valid @RequestBody AddFraudCaseDecisionRequest request) {
-        return fraudCaseManagementService.addDecision(caseId, request);
+    public FraudCaseDecisionResponse addDecision(
+            @PathVariable String caseId,
+            @RequestHeader(name = "X-Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody AddFraudCaseDecisionRequest request
+    ) {
+        return fraudCaseManagementService.addDecision(caseId, request, idempotencyKey);
     }
 
     @PostMapping("/{caseId}/transition")
-    public FraudCaseResponse transition(@PathVariable String caseId, @Valid @RequestBody TransitionFraudCaseRequest request) {
-        return responseMapper.toResponse(fraudCaseManagementService.transitionCase(caseId, request));
+    public FraudCaseResponse transition(
+            @PathVariable String caseId,
+            @RequestHeader(name = "X-Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody TransitionFraudCaseRequest request
+    ) {
+        return responseMapper.toResponse(fraudCaseManagementService.transitionCase(caseId, request, idempotencyKey));
     }
 
     @PostMapping("/{caseId}/close")
-    public FraudCaseResponse close(@PathVariable String caseId, @Valid @RequestBody CloseFraudCaseRequest request) {
-        return responseMapper.toResponse(fraudCaseManagementService.closeCase(caseId, request));
+    public FraudCaseResponse close(
+            @PathVariable String caseId,
+            @RequestHeader(name = "X-Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody CloseFraudCaseRequest request
+    ) {
+        return responseMapper.toResponse(fraudCaseManagementService.closeCase(caseId, request, idempotencyKey));
     }
 
     @PostMapping("/{caseId}/reopen")
-    public FraudCaseResponse reopen(@PathVariable String caseId, @Valid @RequestBody ReopenFraudCaseRequest request) {
-        return responseMapper.toResponse(fraudCaseManagementService.reopenCase(caseId, request));
+    public FraudCaseResponse reopen(
+            @PathVariable String caseId,
+            @RequestHeader(name = "X-Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody ReopenFraudCaseRequest request
+    ) {
+        return responseMapper.toResponse(fraudCaseManagementService.reopenCase(caseId, request, idempotencyKey));
     }
 
     @GetMapping("/{caseId}/audit")

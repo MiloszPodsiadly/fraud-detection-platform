@@ -1,5 +1,7 @@
 package com.frauddetection.alert.fraudcase;
 
+import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.frauddetection.alert.api.AddFraudCaseDecisionRequest;
 import com.frauddetection.alert.api.AddFraudCaseNoteRequest;
 import com.frauddetection.alert.api.AssignFraudCaseRequest;
@@ -11,6 +13,8 @@ import com.frauddetection.alert.domain.FraudCaseAuditAction;
 import com.frauddetection.alert.domain.FraudCaseDecisionType;
 import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.domain.FraudCaseStatus;
+import com.frauddetection.alert.idempotency.SharedIdempotencyConflictPolicy;
+import com.frauddetection.alert.idempotency.SharedIdempotencyKeyPolicy;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
@@ -21,6 +25,8 @@ import com.frauddetection.alert.persistence.FraudCaseAuditRepository;
 import com.frauddetection.alert.persistence.FraudCaseDecisionDocument;
 import com.frauddetection.alert.persistence.FraudCaseDecisionRepository;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
+import com.frauddetection.alert.persistence.FraudCaseLifecycleIdempotencyRecordDocument;
+import com.frauddetection.alert.persistence.FraudCaseLifecycleIdempotencyRepository;
 import com.frauddetection.alert.persistence.FraudCaseNoteDocument;
 import com.frauddetection.alert.persistence.FraudCaseNoteRepository;
 import com.frauddetection.alert.persistence.FraudCaseRepository;
@@ -73,6 +79,7 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
     private FraudCaseNoteRepository noteRepository;
     private FraudCaseDecisionRepository decisionRepository;
     private FraudCaseAuditRepository auditRepository;
+    private FraudCaseLifecycleIdempotencyRepository idempotencyRepository;
     private AlertRepository alertRepository;
     private FraudCaseManagementService service;
 
@@ -87,6 +94,7 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
         noteRepository = repositoryFactory.getRepository(FraudCaseNoteRepository.class);
         decisionRepository = repositoryFactory.getRepository(FraudCaseDecisionRepository.class);
         auditRepository = repositoryFactory.getRepository(FraudCaseAuditRepository.class);
+        idempotencyRepository = repositoryFactory.getRepository(FraudCaseLifecycleIdempotencyRepository.class);
         alertRepository = repositoryFactory.getRepository(AlertRepository.class);
         service = service(new FraudCaseAuditService(auditRepository));
         alertRepository.save(alert("alert-1"));
@@ -332,6 +340,97 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
         assertThat(mongoTemplate.count(new Query(), FraudCaseAuditEntryDocument.class)).isEqualTo(auditBefore);
     }
 
+    @Test
+    void shouldReplaySameKeyAddNoteWithoutDuplicateMutationOrAudit() {
+        FraudCaseDocument created = createCase();
+        AddFraudCaseNoteRequest request = new AddFraudCaseNoteRequest("Retry-safe note", true, "analyst-1");
+
+        var first = service.addNote(created.getCaseId(), request, "note-key-1");
+        var replay = service.addNote(created.getCaseId(), request, "note-key-1");
+
+        assertThat(replay).isEqualTo(first);
+        assertThat(noteRepository.findByCaseIdOrderByCreatedAtAsc(created.getCaseId())).hasSize(1);
+        assertThat(auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId()))
+                .extracting(FraudCaseAuditEntryDocument::getAction)
+                .containsExactly(FraudCaseAuditAction.CASE_CREATED, FraudCaseAuditAction.NOTE_ADDED);
+        assertThat(idempotencyRepository.findAll())
+                .filteredOn(record -> record.getAction().equals("ADD_FRAUD_CASE_NOTE"))
+                .hasSize(1)
+                .first()
+                .extracting(FraudCaseLifecycleIdempotencyRecordDocument::getStatus)
+                .isEqualTo(FraudCaseLifecycleIdempotencyStatus.COMPLETED);
+    }
+
+    @Test
+    void shouldRejectSameKeyDifferentPayloadWithoutMutationOrAudit() {
+        FraudCaseDocument created = createCase();
+        service.addNote(created.getCaseId(), new AddFraudCaseNoteRequest("First note", true, "analyst-1"), "note-key-2");
+        int notesBefore = noteRepository.findByCaseIdOrderByCreatedAtAsc(created.getCaseId()).size();
+        int auditBefore = auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId()).size();
+
+        assertThatThrownBy(() -> service.addNote(
+                created.getCaseId(),
+                new AddFraudCaseNoteRequest("Different note", true, "analyst-1"),
+                "note-key-2"
+        )).isInstanceOf(FraudCaseIdempotencyConflictException.class);
+
+        assertThat(noteRepository.findByCaseIdOrderByCreatedAtAsc(created.getCaseId())).hasSize(notesBefore);
+        assertThat(auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId())).hasSize(auditBefore);
+    }
+
+    @Test
+    void shouldReplaySameKeyCreateCaseWithoutSecondCaseOrAudit() {
+        CreateFraudCaseRequest request = new CreateFraudCaseRequest(
+                List.of("alert-1"),
+                FraudCasePriority.HIGH,
+                RiskLevel.CRITICAL,
+                "Manual investigation",
+                "analyst-1"
+        );
+
+        FraudCaseDocument first = service.createCase(request, "create-key-1");
+        FraudCaseDocument replay = service.createCase(request, "create-key-1");
+
+        assertThat(replay.getCaseId()).isEqualTo(first.getCaseId());
+        assertThat(caseRepository.findAll()).hasSize(1);
+        assertThat(auditRepository.findByCaseIdOrderByOccurredAtAsc(first.getCaseId())).hasSize(1);
+    }
+
+    @Test
+    void shouldRejectMissingIdempotencyKeyOnIdempotentLifecyclePathWithoutMutation() {
+        CreateFraudCaseRequest request = new CreateFraudCaseRequest(
+                List.of("alert-1"),
+                FraudCasePriority.HIGH,
+                RiskLevel.CRITICAL,
+                "Manual investigation",
+                "analyst-1"
+        );
+
+        assertThatThrownBy(() -> service.createCase(request, null))
+                .isInstanceOf(FraudCaseMissingIdempotencyKeyException.class);
+
+        assertThat(caseRepository.findAll()).isEmpty();
+        assertThat(auditRepository.findAll()).isEmpty();
+        assertThat(idempotencyRepository.findAll()).isEmpty();
+    }
+
+    @Test
+    void shouldRollbackIdempotencyRecordWhenAuditAppendFails() {
+        FraudCaseDocument created = createCase();
+        service = service(new FailingFraudCaseAuditService(auditRepository));
+
+        assertThatThrownBy(() -> service.addNote(
+                created.getCaseId(),
+                new AddFraudCaseNoteRequest("Rollback note", false, "analyst-1"),
+                "note-key-rollback"
+        )).isInstanceOf(IllegalStateException.class);
+
+        assertThat(noteRepository.findByCaseIdOrderByCreatedAtAsc(created.getCaseId())).isEmpty();
+        assertThat(idempotencyRepository.findAll())
+                .noneMatch(record -> "ADD_FRAUD_CASE_NOTE".equals(record.getAction())
+                        && created.getCaseId().equals(record.getCaseIdScope()));
+    }
+
     private FraudCaseDocument createCase() {
         return service.createCase(new CreateFraudCaseRequest(
                 List.of("alert-1"),
@@ -349,6 +448,13 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
         var actorResolver = new AnalystActorResolver(new CurrentAnalystUser(), metrics);
         var transactionRunner = transactionRunner();
         var responseMapper = new FraudCaseResponseMapper(new AlertResponseMapper());
+        var idempotencyService = new FraudCaseLifecycleIdempotencyService(
+                idempotencyRepository,
+                new SharedIdempotencyKeyPolicy(),
+                new FraudCaseLifecycleIdempotencyConflictPolicy(new SharedIdempotencyConflictPolicy()),
+                transactionRunner,
+                JsonMapper.builder().addModule(new JavaTimeModule()).build()
+        );
         return new FraudCaseManagementService(
                 caseRepository,
                 scoredTransactionRepository,
@@ -364,7 +470,8 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
                         actorResolver,
                         transactionRunner,
                         new FraudCaseTransitionPolicy(),
-                        auditService
+                        auditService,
+                        idempotencyService
                 ),
                 new FraudCaseQueryService(
                         caseRepository,

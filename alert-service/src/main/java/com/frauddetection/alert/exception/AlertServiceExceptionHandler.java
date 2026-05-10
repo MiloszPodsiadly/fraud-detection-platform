@@ -8,6 +8,10 @@ import com.frauddetection.alert.audit.external.AuditEvidenceExportRejectedExcept
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorPublicationRequiredException;
 import com.frauddetection.alert.fraudcase.FraudCaseActorUnavailableException;
 import com.frauddetection.alert.fraudcase.FraudCaseConflictException;
+import com.frauddetection.alert.fraudcase.FraudCaseIdempotencyConflictException;
+import com.frauddetection.alert.fraudcase.FraudCaseIdempotencyInProgressException;
+import com.frauddetection.alert.fraudcase.FraudCaseInvalidIdempotencyKeyException;
+import com.frauddetection.alert.fraudcase.FraudCaseMissingIdempotencyKeyException;
 import com.frauddetection.alert.fraudcase.FraudCaseNotFoundException;
 import com.frauddetection.alert.fraudcase.FraudCaseValidationException;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryLookupUnavailableException;
@@ -234,6 +238,34 @@ public class AlertServiceExceptionHandler {
     public ResponseEntity<ApiErrorResponse> handleFraudCaseValidation(FraudCaseValidationException exception) {
         return ResponseEntity.badRequest().body(
                 new ApiErrorResponse(Instant.now(), 400, "Bad Request", exception.getMessage(), List.of("reason:FRAUD_CASE_VALIDATION_FAILED"))
+        );
+    }
+
+    @ExceptionHandler(FraudCaseMissingIdempotencyKeyException.class)
+    public ResponseEntity<ApiErrorResponse> handleFraudCaseMissingIdempotencyKey(FraudCaseMissingIdempotencyKeyException exception) {
+        return ResponseEntity.badRequest().body(
+                new ApiErrorResponse(Instant.now(), 400, "Bad Request", exception.getMessage(), List.of("code:MISSING_IDEMPOTENCY_KEY"))
+        );
+    }
+
+    @ExceptionHandler(FraudCaseInvalidIdempotencyKeyException.class)
+    public ResponseEntity<ApiErrorResponse> handleFraudCaseInvalidIdempotencyKey(FraudCaseInvalidIdempotencyKeyException exception) {
+        return ResponseEntity.badRequest().body(
+                new ApiErrorResponse(Instant.now(), 400, "Bad Request", exception.getMessage(), List.of("code:INVALID_IDEMPOTENCY_KEY"))
+        );
+    }
+
+    @ExceptionHandler(FraudCaseIdempotencyConflictException.class)
+    public ResponseEntity<ApiErrorResponse> handleFraudCaseIdempotencyConflict(FraudCaseIdempotencyConflictException exception) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(
+                new ApiErrorResponse(Instant.now(), 409, "Conflict", exception.getMessage(), List.of("code:IDEMPOTENCY_KEY_CONFLICT"))
+        );
+    }
+
+    @ExceptionHandler(FraudCaseIdempotencyInProgressException.class)
+    public ResponseEntity<ApiErrorResponse> handleFraudCaseIdempotencyInProgress(FraudCaseIdempotencyInProgressException exception) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(
+                new ApiErrorResponse(Instant.now(), 409, "Conflict", exception.getMessage(), List.of("code:IDEMPOTENCY_KEY_IN_PROGRESS"))
         );
     }
 

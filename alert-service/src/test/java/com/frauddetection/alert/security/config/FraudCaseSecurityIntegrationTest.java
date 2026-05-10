@@ -105,17 +105,19 @@ class FraudCaseSecurityIntegrationTest {
 
     @Test
     void shouldDenyMutationsForReadOnlyAuthorityAndAllowUpdateAuthorityOnBothPaths() throws Exception {
-        when(fraudCaseManagementService.createCase(any())).thenReturn(caseDocument());
-        when(fraudCaseManagementService.assignCase(any(), any())).thenReturn(caseDocument());
+        when(fraudCaseManagementService.createCase(any(), any())).thenReturn(caseDocument());
+        when(fraudCaseManagementService.assignCase(any(), any(), any())).thenReturn(caseDocument());
 
         mockMvc.perform(post("/api/v1/fraud-cases")
                         .with(userWith(AnalystAuthority.FRAUD_CASE_READ))
+                        .header("X-Idempotency-Key", "case-create-readonly")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(createPayload()))
                 .andExpect(status().isForbidden());
 
         mockMvc.perform(post("/api/v1/fraud-cases")
                         .with(userWith(AnalystAuthority.FRAUD_CASE_UPDATE))
+                        .header("X-Idempotency-Key", "case-create-update")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(createPayload()))
                 .andExpect(status().isOk())
@@ -123,6 +125,7 @@ class FraudCaseSecurityIntegrationTest {
 
         mockMvc.perform(post("/api/fraud-cases/case-1/assign")
                         .with(userWith(AnalystAuthority.FRAUD_CASE_UPDATE))
+                        .header("X-Idempotency-Key", "case-assign-update")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"assignedInvestigatorId\":\"investigator-1\",\"actorId\":\"lead-1\"}"))
                 .andExpect(status().isOk())
