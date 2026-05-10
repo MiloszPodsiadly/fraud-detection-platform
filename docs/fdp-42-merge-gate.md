@@ -25,8 +25,8 @@ Status: branch merge gate.
 - Repository contains lifecycle policy logic.
 - API leaks raw internal errors.
 - FDP-42 changes FDP-31 through FDP-40 regulated mutation, Kafka/outbox, or release-governance semantics.
-- FDP-42 docs claim evidence-gated finalize, lease fencing, replay safety, exactly-once delivery, or external finality.
-- FDP-42 docs claim unconditional rollback atomicity without Mongo transactions and transaction-mode `REQUIRED`.
+- FDP-42 docs must not claim evidence-gated finalize, lease fencing, replay safety, exactly-once delivery, or external finality.
+- FDP-42 docs must not claim unconditional rollback atomicity without Mongo transactions and transaction-mode `REQUIRED`.
 - Local lifecycle POSTs are documented or implemented as idempotent replay-safe commands.
 
 ## Current Verification
