@@ -42,6 +42,9 @@ class Fdp42FraudCaseDocumentationNoOverclaimTest {
         assertThat(docs).contains("must not blindly retry");
         assertThat(docs).contains("linkedalertids");
         assertThat(docs).contains("transactionids");
+        assertThat(docs).contains("system-generated case candidate ingestion");
+        assertThat(docs).contains("resolved");
+        assertThat(docs).contains("fdp42-fraud-case-management");
     }
 
     @Test
@@ -57,6 +60,18 @@ class Fdp42FraudCaseDocumentationNoOverclaimTest {
                 .doesNotContain("are lease fenced")
                 .doesNotContain("provides external finality")
                 .doesNotContain("guarantees exactly-once");
+    }
+
+    @Test
+    void fdp42DocsShouldQualifyAuditScopeToAnalystLifecycleMutations() throws IOException {
+        String docs = readDocs().toLowerCase(java.util.Locale.ROOT);
+
+        assertThat(docs).contains("every analyst lifecycle mutation writes");
+        assertThat(docs).contains("system event ingestion");
+        assertThat(docs).doesNotContain("every case mutation writes");
+        assertThat(docs).doesNotContain("every case mutation is audited");
+        assertThat(docs).contains("not worm storage");
+        assertThat(docs).contains("not an analyst lifecycle mutation");
     }
 
     private String readDocs() throws IOException {

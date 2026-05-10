@@ -34,6 +34,38 @@ jobs:
       - name: Build and test backend modules
         run: mvn -B verify
 
+  fdp42-fraud-case-management:
+    name: FDP-42 Fraud Case Management
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Verify Docker is available for Testcontainers
+        run: docker version
+
+      - name: Run FDP-42 fraud case proof suite
+        run: mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=FraudCaseTransitionPolicyTest,Fdp42FraudCaseManagementServiceTest,FraudCaseControllerTest,FraudCaseManagementServiceTest,FraudCaseMutationInvariantTest,FraudCaseAuditServiceTest,Fdp42FraudCaseAuditAppendOnlyArchitectureTest,Fdp42FraudCaseDocumentationNoOverclaimTest,FraudCaseSecurityIntegrationTest,FraudCaseTransactionIntegrationTest,AlertSecurityConfigTest,AlertSecurityConfigJwtEnabledTest,DemoAuthSecurityConfigTest,AnalystRoleTest" test
+
+      - name: Upload FDP-42 test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fdp42-fraud-case-management-test-reports
+          if-no-files-found: error
+          path: |
+            alert-service/target/surefire-reports/
+            alert-service/target/failsafe-reports/
+
   ml:
     name: Python ML Checks
     runs-on: ubuntu-latest

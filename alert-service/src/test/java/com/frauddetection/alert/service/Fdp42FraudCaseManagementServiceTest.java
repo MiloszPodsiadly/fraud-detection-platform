@@ -114,6 +114,49 @@ class Fdp42FraudCaseManagementServiceTest {
     }
 
     @Test
+    void shouldAuditSameInvestigatorAssignmentAsReassignment() {
+        Fixture fixture = new Fixture();
+        FraudCaseDocument document = openCase();
+        document.setAssignedInvestigatorId("investigator-1");
+        when(fixture.fraudCaseRepository.findById("case-1")).thenReturn(Optional.of(document));
+        when(fixture.fraudCaseRepository.save(any(FraudCaseDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(fixture.auditRepository.save(any(FraudCaseAuditEntryDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(fixture.actorResolver.resolveActorId(eq("lead-1"), eq("ASSIGN_FRAUD_CASE"), eq("case-1"))).thenReturn("lead-1");
+
+        FraudCaseDocument assigned = fixture.service.assignCase("case-1", new AssignFraudCaseRequest("investigator-1", "lead-1"));
+
+        assertThat(assigned.getAssignedInvestigatorId()).isEqualTo("investigator-1");
+        ArgumentCaptor<FraudCaseAuditEntryDocument> auditCaptor = ArgumentCaptor.forClass(FraudCaseAuditEntryDocument.class);
+        verify(fixture.auditRepository).save(auditCaptor.capture());
+        assertThat(auditCaptor.getValue().getAction()).isEqualTo(FraudCaseAuditAction.CASE_REASSIGNED);
+        assertThat(auditCaptor.getValue().getDetails()).containsEntry("previousAssignee", "investigator-1");
+        assertThat(auditCaptor.getValue().getDetails()).containsEntry("newAssignee", "investigator-1");
+    }
+
+    @Test
+    void shouldCreateIndependentCasesForDuplicateCreateRequests() {
+        Fixture fixture = new Fixture();
+        when(fixture.alertRepository.findAllById(List.of("alert-1"))).thenReturn(List.of(alert("alert-1")));
+        when(fixture.actorResolver.resolveActorId(eq("analyst-1"), eq("CREATE_FRAUD_CASE"), eq("new"))).thenReturn("analyst-1");
+        when(fixture.fraudCaseRepository.save(any(FraudCaseDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(fixture.auditRepository.save(any(FraudCaseAuditEntryDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        CreateFraudCaseRequest request = new CreateFraudCaseRequest(
+                List.of("alert-1"),
+                FraudCasePriority.HIGH,
+                RiskLevel.CRITICAL,
+                "Manual investigation",
+                "analyst-1"
+        );
+
+        FraudCaseDocument first = fixture.service.createCase(request);
+        FraudCaseDocument second = fixture.service.createCase(request);
+
+        assertThat(first.getCaseId()).isNotEqualTo(second.getCaseId());
+        assertThat(first.getCaseNumber()).isNotEqualTo(second.getCaseNumber());
+        verify(fixture.auditRepository, times(2)).save(any(FraudCaseAuditEntryDocument.class));
+    }
+
+    @Test
     void shouldRejectNoteOnClosedCase() {
         Fixture fixture = new Fixture();
         FraudCaseDocument document = openCase();
@@ -122,6 +165,34 @@ class Fdp42FraudCaseManagementServiceTest {
 
         assertThatThrownBy(() -> fixture.service.addNote("case-1", new AddFraudCaseNoteRequest("note", false, "analyst-1")))
                 .isInstanceOf(FraudCaseConflictException.class);
+    }
+
+    @Test
+    void shouldAllowResolvedCasesToRemainMutableUntilClosed() {
+        Fixture fixture = new Fixture();
+        FraudCaseDocument document = openCase();
+        document.setStatus(FraudCaseStatus.RESOLVED);
+        when(fixture.fraudCaseRepository.findById("case-1")).thenReturn(Optional.of(document));
+        when(fixture.fraudCaseRepository.save(any(FraudCaseDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(fixture.noteRepository.save(any(FraudCaseNoteDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(fixture.decisionRepository.save(any(FraudCaseDecisionDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(fixture.auditRepository.save(any(FraudCaseAuditEntryDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(fixture.actorResolver.resolveActorId(eq("analyst-1"), eq("ADD_FRAUD_CASE_NOTE"), eq("case-1"))).thenReturn("analyst-1");
+        when(fixture.actorResolver.resolveActorId(eq("analyst-1"), eq("ADD_FRAUD_CASE_DECISION"), eq("case-1"))).thenReturn("analyst-1");
+        when(fixture.actorResolver.resolveActorId(eq("lead-1"), eq("CLOSE_FRAUD_CASE"), eq("case-1"))).thenReturn("lead-1");
+
+        fixture.service.addNote("case-1", new AddFraudCaseNoteRequest("resolved note", false, "analyst-1"));
+        fixture.service.addDecision("case-1", new AddFraudCaseDecisionRequest(
+                FraudCaseDecisionType.NO_ACTION,
+                "resolved decision",
+                "analyst-1"
+        ));
+        FraudCaseDocument closed = fixture.service.closeCase("case-1", new CloseFraudCaseRequest("Done", "lead-1"));
+
+        assertThat(closed.getStatus()).isEqualTo(FraudCaseStatus.CLOSED);
+        verify(fixture.noteRepository).save(any(FraudCaseNoteDocument.class));
+        verify(fixture.decisionRepository).save(any(FraudCaseDecisionDocument.class));
+        verify(fixture.auditRepository, times(3)).save(any(FraudCaseAuditEntryDocument.class));
     }
 
     @Test

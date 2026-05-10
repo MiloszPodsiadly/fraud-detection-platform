@@ -34,6 +34,8 @@ import com.frauddetection.common.events.model.Money;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -102,7 +104,7 @@ class FraudCaseManagementServiceTest {
     }
 
     @Test
-    void shouldBackfillMissingGroupedTransactionsWhenCaseIsRead() {
+    void shouldNotBackfillMissingGroupedTransactionsWhenCaseIsRead() {
         FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
         ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
         AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
@@ -121,21 +123,92 @@ class FraudCaseManagementServiceTest {
         storedCase.setLastTransactionAt(Instant.parse("2026-04-20T10:15:28Z"));
 
         when(fraudCaseRepository.findById("case-1")).thenReturn(Optional.of(storedCase));
-        when(scoredTransactionRepository.findAllById(storedCase.getTransactionIds())).thenReturn(List.of(
-                scoredTransaction("rapid-txn-1", "rapid-customer-1", new BigDecimal("7400.00"), Instant.parse("2026-04-20T10:10:28Z")),
-                scoredTransaction("rapid-txn-2", "rapid-customer-1", new BigDecimal("8600.00"), Instant.parse("2026-04-20T10:12:28Z")),
-                scoredTransaction("rapid-txn-3", "rapid-customer-1", new BigDecimal("6800.00"), Instant.parse("2026-04-20T10:15:28Z"))
-        ));
-        when(fraudCaseRepository.save(any(FraudCaseDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        FraudCaseDocument hydrated = service.getCase("case-1");
+        FraudCaseDocument read = service.getCase("case-1");
 
-        assertThat(hydrated.getTransactions())
+        assertThat(read.getTransactions())
                 .extracting("transactionId")
-                .containsExactly("rapid-txn-1", "rapid-txn-2", "rapid-txn-3");
-        assertThat(hydrated.getFirstTransactionAt()).isEqualTo(Instant.parse("2026-04-20T10:10:28Z"));
-        assertThat(hydrated.getLastTransactionAt()).isEqualTo(Instant.parse("2026-04-20T10:15:28Z"));
-        verify(fraudCaseRepository).save(hydrated);
+                .containsExactly("rapid-txn-3");
+        assertThat(read.getFirstTransactionAt()).isEqualTo(Instant.parse("2026-04-20T10:15:28Z"));
+        assertThat(read.getLastTransactionAt()).isEqualTo(Instant.parse("2026-04-20T10:15:28Z"));
+        verify(scoredTransactionRepository, never()).findAllById(any());
+        verify(fraudCaseRepository, never()).save(any(FraudCaseDocument.class));
+    }
+
+    @Test
+    void shouldNotMutateCasesWhenListingOrSearching() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
+        FraudCaseSearchRepository searchRepository = mock(FraudCaseSearchRepository.class);
+        AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        FraudCaseManagementService service = service(
+                fraudCaseRepository,
+                scoredTransactionRepository,
+                analystActorResolver,
+                metrics,
+                mock(RegulatedMutationCoordinator.class),
+                mock(FraudCaseAuditRepository.class),
+                searchRepository
+        );
+        FraudCaseDocument storedCase = new FraudCaseDocument();
+        storedCase.setCaseId("case-1");
+        storedCase.setStatus(FraudCaseStatus.OPEN);
+        storedCase.setTransactionIds(List.of("rapid-txn-1"));
+        storedCase.setTransactions(List.of());
+        storedCase.setCreatedAt(Instant.parse("2026-04-20T10:15:28Z"));
+        storedCase.setUpdatedAt(Instant.parse("2026-04-20T10:15:28Z"));
+
+        when(fraudCaseRepository.findAll()).thenReturn(List.of(storedCase));
+        when(fraudCaseRepository.findAll(any(org.springframework.data.domain.Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(storedCase)));
+        when(searchRepository.search(any(), any())).thenReturn(new PageImpl<>(List.of(storedCase)));
+
+        service.listCases();
+        service.listCases(PageRequest.of(0, 10));
+        service.searchCases(FraudCaseStatus.OPEN, null, null, null, null, null, null, PageRequest.of(0, 10));
+
+        verify(scoredTransactionRepository, never()).findAllById(any());
+        verify(fraudCaseRepository, never()).save(any(FraudCaseDocument.class));
+    }
+
+    @Test
+    void shouldKeepSystemIngestionSeparateFromAnalystLifecycleAudit() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
+        FraudCaseAuditRepository auditRepository = mock(FraudCaseAuditRepository.class);
+        AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        FraudCaseManagementService service = service(
+                fraudCaseRepository,
+                scoredTransactionRepository,
+                analystActorResolver,
+                metrics,
+                mock(RegulatedMutationCoordinator.class),
+                auditRepository,
+                mock(FraudCaseSearchRepository.class)
+        );
+        var currentEvent = TransactionFixtures.scoredTransaction()
+                .withTransactionId("rapid-txn-1")
+                .withCustomerId("rapid-customer-1")
+                .withFeatureSnapshot(Map.of(
+                        "rapidTransferFraudCaseCandidate", true,
+                        "rapidTransferTransactionIds", List.of("rapid-txn-1"),
+                        "rapidTransferTotalPln", new BigDecimal("20000.00"),
+                        "rapidTransferThresholdPln", new BigDecimal("20000.00"),
+                        "rapidTransferWindow", "PT1M",
+                        "currentTransactionAmountPln", new BigDecimal("20000.00")
+                ))
+                .build();
+
+        when(fraudCaseRepository.findByCaseKey("rapid-customer-1:RAPID_TRANSFER_BURST_20K_PLN:rapid-txn-1"))
+                .thenReturn(Optional.empty());
+        when(scoredTransactionRepository.findAllById(List.of("rapid-txn-1"))).thenReturn(List.of());
+
+        service.handleScoredTransaction(currentEvent);
+
+        verify(fraudCaseRepository).save(any(FraudCaseDocument.class));
+        verify(auditRepository, never()).save(any());
     }
 
     @Test
@@ -330,6 +403,36 @@ class FraudCaseManagementServiceTest {
                 transactionRunner,
                 new FraudCaseTransitionPolicy(),
                 new FraudCaseAuditService(mock(FraudCaseAuditRepository.class)),
+                new FraudCaseResponseMapper(new AlertResponseMapper())
+        );
+    }
+
+    private FraudCaseManagementService service(
+            FraudCaseRepository fraudCaseRepository,
+            ScoredTransactionRepository scoredTransactionRepository,
+            AnalystActorResolver analystActorResolver,
+            AlertServiceMetrics metrics,
+            RegulatedMutationCoordinator coordinator,
+            FraudCaseAuditRepository auditRepository,
+            FraudCaseSearchRepository searchRepository
+    ) {
+        RegulatedMutationTransactionRunner transactionRunner = mock(RegulatedMutationTransactionRunner.class);
+        when(transactionRunner.runLocalCommit(any())).thenAnswer(invocation -> invocation.<java.util.function.Supplier<?>>getArgument(0).get());
+        return new FraudCaseManagementService(
+                fraudCaseRepository,
+                scoredTransactionRepository,
+                mock(AlertRepository.class),
+                mock(FraudCaseNoteRepository.class),
+                mock(FraudCaseDecisionRepository.class),
+                auditRepository,
+                searchRepository,
+                analystActorResolver,
+                metrics,
+                new FraudCaseUpdateMutationHandler(fraudCaseRepository, metrics),
+                coordinator,
+                transactionRunner,
+                new FraudCaseTransitionPolicy(),
+                new FraudCaseAuditService(auditRepository),
                 new FraudCaseResponseMapper(new AlertResponseMapper())
         );
     }

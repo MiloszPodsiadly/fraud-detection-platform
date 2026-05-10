@@ -195,6 +195,107 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void shouldRollbackAssignmentWhenAuditAppendFails() {
+        FraudCaseDocument created = createCase();
+        Instant originalUpdatedAt = caseRepository.findById(created.getCaseId()).orElseThrow().getUpdatedAt();
+        long auditBefore = auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId()).size();
+        service = service(new FailingFraudCaseAuditService(auditRepository));
+
+        assertThatThrownBy(() -> service.assignCase(created.getCaseId(), new AssignFraudCaseRequest("investigator-1", "lead-1")))
+                .isInstanceOf(IllegalStateException.class);
+
+        FraudCaseDocument persisted = caseRepository.findById(created.getCaseId()).orElseThrow();
+        assertThat(persisted.getAssignedInvestigatorId()).isNull();
+        assertThat(persisted.getUpdatedAt()).isEqualTo(originalUpdatedAt);
+        assertThat(auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId())).hasSize((int) auditBefore);
+    }
+
+    @Test
+    void shouldRollbackTransitionWhenAuditAppendFails() {
+        FraudCaseDocument created = createCase();
+        Instant originalUpdatedAt = caseRepository.findById(created.getCaseId()).orElseThrow().getUpdatedAt();
+        long auditBefore = auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId()).size();
+        service = service(new FailingFraudCaseAuditService(auditRepository));
+
+        assertThatThrownBy(() -> service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.IN_REVIEW, "analyst-1")))
+                .isInstanceOf(IllegalStateException.class);
+
+        FraudCaseDocument persisted = caseRepository.findById(created.getCaseId()).orElseThrow();
+        assertThat(persisted.getStatus()).isEqualTo(FraudCaseStatus.OPEN);
+        assertThat(persisted.getUpdatedAt()).isEqualTo(originalUpdatedAt);
+        assertThat(auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId())).hasSize((int) auditBefore);
+    }
+
+    @Test
+    void shouldRollbackCloseWhenAuditAppendFails() {
+        FraudCaseDocument created = createCase();
+        service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.IN_REVIEW, "analyst-1"));
+        service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.RESOLVED, "analyst-1"));
+        Instant originalUpdatedAt = caseRepository.findById(created.getCaseId()).orElseThrow().getUpdatedAt();
+        long auditBefore = auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId()).size();
+        service = service(new FailingFraudCaseAuditService(auditRepository));
+
+        assertThatThrownBy(() -> service.closeCase(created.getCaseId(), new CloseFraudCaseRequest("Resolved", "lead-1")))
+                .isInstanceOf(IllegalStateException.class);
+
+        FraudCaseDocument persisted = caseRepository.findById(created.getCaseId()).orElseThrow();
+        assertThat(persisted.getStatus()).isEqualTo(FraudCaseStatus.RESOLVED);
+        assertThat(persisted.getClosedAt()).isNull();
+        assertThat(persisted.getClosureReason()).isNull();
+        assertThat(persisted.getUpdatedAt()).isEqualTo(originalUpdatedAt);
+        assertThat(auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId())).hasSize((int) auditBefore);
+    }
+
+    @Test
+    void shouldRollbackReopenWhenAuditAppendFails() {
+        FraudCaseDocument created = createCase();
+        service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.IN_REVIEW, "analyst-1"));
+        service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.RESOLVED, "analyst-1"));
+        service.closeCase(created.getCaseId(), new CloseFraudCaseRequest("Resolved", "lead-1"));
+        FraudCaseDocument closed = caseRepository.findById(created.getCaseId()).orElseThrow();
+        Instant originalUpdatedAt = closed.getUpdatedAt();
+        Instant originalClosedAt = closed.getClosedAt();
+        long auditBefore = auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId()).size();
+        service = service(new FailingFraudCaseAuditService(auditRepository));
+
+        assertThatThrownBy(() -> service.reopenCase(created.getCaseId(), new ReopenFraudCaseRequest("New evidence", "lead-1")))
+                .isInstanceOf(IllegalStateException.class);
+
+        FraudCaseDocument persisted = caseRepository.findById(created.getCaseId()).orElseThrow();
+        assertThat(persisted.getStatus()).isEqualTo(FraudCaseStatus.CLOSED);
+        assertThat(persisted.getClosedAt()).isEqualTo(originalClosedAt);
+        assertThat(persisted.getClosureReason()).isEqualTo("Resolved");
+        assertThat(persisted.getUpdatedAt()).isEqualTo(originalUpdatedAt);
+        assertThat(auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId())).hasSize((int) auditBefore);
+    }
+
+    @Test
+    void shouldKeepAuditEntriesAppendOnlyOrderedAndOnePerLifecycleMutation() {
+        FraudCaseDocument created = createCase();
+        List<FraudCaseAuditEntryDocument> afterCreate = auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId());
+        FraudCaseAuditEntryDocument firstEntry = afterCreate.get(0);
+        Map<String, String> firstDetails = Map.copyOf(firstEntry.getDetails());
+
+        service.assignCase(created.getCaseId(), new AssignFraudCaseRequest("investigator-1", "lead-1"));
+        assertThat(auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId())).hasSize(afterCreate.size() + 1);
+        service.addNote(created.getCaseId(), new AddFraudCaseNoteRequest("note", false, "investigator-1"));
+        assertThat(auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId())).hasSize(afterCreate.size() + 2);
+        service.addDecision(created.getCaseId(), new AddFraudCaseDecisionRequest(
+                FraudCaseDecisionType.NO_ACTION,
+                "decision",
+                "investigator-1"
+        ));
+        assertThat(auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId())).hasSize(afterCreate.size() + 3);
+
+        List<FraudCaseAuditEntryDocument> audits = auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId());
+        assertThat(audits).extracting(FraudCaseAuditEntryDocument::getOccurredAt).isSorted();
+        FraudCaseAuditEntryDocument persistedFirst = audits.get(0);
+        assertThat(persistedFirst.getId()).isEqualTo(firstEntry.getId());
+        assertThat(persistedFirst.getAction()).isEqualTo(firstEntry.getAction());
+        assertThat(persistedFirst.getDetails()).isEqualTo(firstDetails);
+    }
+
+    @Test
     void shouldRollbackWhenCallbackThrowsAfterCaseSaveBeforeAudit() {
         RegulatedMutationTransactionRunner runner = transactionRunner();
         long auditBefore = mongoTemplate.count(new Query(), FraudCaseAuditEntryDocument.class);

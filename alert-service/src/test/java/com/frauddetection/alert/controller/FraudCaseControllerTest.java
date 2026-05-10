@@ -121,6 +121,26 @@ class FraudCaseControllerTest {
     }
 
     @Test
+    void shouldReturnConflictForRepeatedCloseAndReopen() throws Exception {
+        when(fraudCaseManagementService.closeCase(eq("case-1"), any()))
+                .thenThrow(new FraudCaseConflictException("Forbidden fraud case status transition: CLOSED -> CLOSED"));
+        when(fraudCaseManagementService.reopenCase(eq("case-1"), any()))
+                .thenThrow(new FraudCaseConflictException("Forbidden fraud case status transition: REOPENED -> REOPENED"));
+
+        mockMvc.perform(post("/api/fraud-cases/case-1/close")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"closureReason\":\"Done\",\"actorId\":\"lead-1\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.details[0]").value("reason:FRAUD_CASE_LIFECYCLE_CONFLICT"));
+
+        mockMvc.perform(post("/api/fraud-cases/case-1/reopen")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"New evidence\",\"actorId\":\"lead-1\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.details[0]").value("reason:FRAUD_CASE_LIFECYCLE_CONFLICT"));
+    }
+
+    @Test
     void shouldRejectInvalidCreateRequest() throws Exception {
         mockMvc.perform(post("/api/fraud-cases")
                         .contentType(MediaType.APPLICATION_JSON)
