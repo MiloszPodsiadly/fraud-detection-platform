@@ -65,6 +65,9 @@ transactions are enabled with transaction-mode `REQUIRED`. Raw idempotency keys 
 stored or exposed; only key hashes, request hashes, bounded action/actor/scope metadata, and safe response snapshots
 are stored.
 
+Response snapshots are bounded at runtime. If a replay snapshot would exceed the configured limit, the lifecycle
+operation fails closed and rolls back the idempotency record, case mutation, and audit append.
+
 ## Audit And ACID Semantics
 
 Every analyst lifecycle mutation writes a `FraudCaseAuditEntryDocument` in the same local transaction callback as the

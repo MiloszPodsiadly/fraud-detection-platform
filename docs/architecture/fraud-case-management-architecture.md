@@ -68,6 +68,10 @@ not make those operations regulated commands, lease-fenced commands, or external
 - Replay does not re-run the lifecycle mutation and does not append another audit entry.
 - In-progress duplicate operations return a local conflict response.
 - Raw idempotency keys and raw request payloads are not stored or exposed.
+- Response snapshots are runtime-bounded. Oversized snapshots fail closed inside the local transaction and roll back
+  the idempotency record, lifecycle mutation, and audit append.
+- Public HTTP lifecycle POSTs must call only service overloads that accept the resolved `X-Idempotency-Key`; overloads
+  without a key exist only for internal/backward-compatibility callers and must not become controller mutation paths.
 
 ## Read And Ingestion Boundaries
 

@@ -56,6 +56,11 @@ regulated mutation architecture. It does not route fraud-case lifecycle operatio
   or exposed.
 - The idempotency record, lifecycle mutation, and audit append commit or roll back together when Mongo transactions
   are enabled with `app.regulated-mutations.transaction-mode=REQUIRED`.
+- Response snapshots are bounded at runtime. If the safe replay snapshot exceeds the configured limit, the local
+  lifecycle operation fails closed with `code:IDEMPOTENCY_SNAPSHOT_TOO_LARGE` and the idempotency record, lifecycle
+  mutation, and audit append roll back together.
+- Public HTTP lifecycle POSTs use only idempotency-key service overloads. No missing `X-Idempotency-Key` request
+  reaches the lifecycle mutation path.
 
 ## Sample Requests
 
@@ -94,7 +99,8 @@ regulated mutation architecture. It does not route fraud-case lifecycle operatio
 
 Stable error details include `reason:FRAUD_CASE_VALIDATION_FAILED`, `reason:FRAUD_CASE_NOT_FOUND`,
 `reason:FRAUD_CASE_LIFECYCLE_CONFLICT`, `code:MISSING_IDEMPOTENCY_KEY`, `code:INVALID_IDEMPOTENCY_KEY`,
-`code:IDEMPOTENCY_KEY_CONFLICT`, and `code:IDEMPOTENCY_KEY_IN_PROGRESS`.
+`code:IDEMPOTENCY_KEY_CONFLICT`, `code:IDEMPOTENCY_KEY_IN_PROGRESS`, and
+`code:IDEMPOTENCY_SNAPSHOT_TOO_LARGE`.
 
 ## Duplicate Submit Semantics
 
