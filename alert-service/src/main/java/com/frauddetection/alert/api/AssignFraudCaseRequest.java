@@ -5,6 +5,6 @@ import jakarta.validation.constraints.Size;
 
 public record AssignFraudCaseRequest(
         @NotBlank @Size(max = 64) String assignedInvestigatorId,
-        @Size(max = 64) String actorId
+        @NotBlank @Size(max = 64) String actorId
 ) {
 }

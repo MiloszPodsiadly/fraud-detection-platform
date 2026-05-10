@@ -8,6 +8,6 @@ import jakarta.validation.constraints.Size;
 public record AddFraudCaseDecisionRequest(
         @NotNull FraudCaseDecisionType decisionType,
         @NotBlank @Size(max = 2000) String summary,
-        @Size(max = 64) String actorId
+        @NotBlank @Size(max = 64) String actorId
 ) {
 }

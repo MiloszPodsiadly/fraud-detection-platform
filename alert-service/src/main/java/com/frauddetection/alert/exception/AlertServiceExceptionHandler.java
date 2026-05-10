@@ -8,6 +8,8 @@ import com.frauddetection.alert.audit.external.AuditEvidenceExportRejectedExcept
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorPublicationRequiredException;
 import com.frauddetection.alert.fraudcase.FraudCaseActorUnavailableException;
 import com.frauddetection.alert.fraudcase.FraudCaseConflictException;
+import com.frauddetection.alert.fraudcase.FraudCaseNotFoundException;
+import com.frauddetection.alert.fraudcase.FraudCaseValidationException;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryLookupUnavailableException;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryNotFoundException;
 import com.frauddetection.alert.governance.audit.GovernanceAuditActorUnavailableException;
@@ -214,10 +216,24 @@ public class AlertServiceExceptionHandler {
         );
     }
 
+    @ExceptionHandler(FraudCaseNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleFraudCaseNotFound(FraudCaseNotFoundException exception) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(
+                new ApiErrorResponse(Instant.now(), 404, "Not Found", exception.getMessage(), List.of("reason:FRAUD_CASE_NOT_FOUND"))
+        );
+    }
+
     @ExceptionHandler(FraudCaseConflictException.class)
     public ResponseEntity<ApiErrorResponse> handleFraudCaseConflict(FraudCaseConflictException exception) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(
                 new ApiErrorResponse(Instant.now(), 409, "Conflict", exception.getMessage(), List.of("reason:FRAUD_CASE_LIFECYCLE_CONFLICT"))
+        );
+    }
+
+    @ExceptionHandler(FraudCaseValidationException.class)
+    public ResponseEntity<ApiErrorResponse> handleFraudCaseValidation(FraudCaseValidationException exception) {
+        return ResponseEntity.badRequest().body(
+                new ApiErrorResponse(Instant.now(), 400, "Bad Request", exception.getMessage(), List.of("reason:FRAUD_CASE_VALIDATION_FAILED"))
         );
     }
 

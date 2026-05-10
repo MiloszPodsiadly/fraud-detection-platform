@@ -19,40 +19,40 @@ public class FraudCaseTransitionPolicy {
 
     public void validateCreate(List<String> linkedAlertIds, FraudCasePriority priority) {
         if (linkedAlertIds == null || linkedAlertIds.stream().noneMatch(StringUtils::hasText)) {
-            throw new IllegalArgumentException("Fraud case must reference at least one alert.");
+            throw new FraudCaseValidationException("Fraud case must reference at least one alert.");
         }
         if (priority == null) {
-            throw new IllegalArgumentException("Fraud case priority is required.");
+            throw new FraudCaseValidationException("Fraud case priority is required.");
         }
     }
 
     public void validateAssign(FraudCaseStatus currentStatus, String assignedInvestigatorId) {
         rejectClosed(currentStatus, "Closed case cannot be assigned.");
         if (!StringUtils.hasText(assignedInvestigatorId)) {
-            throw new IllegalArgumentException("Assigned investigator is required.");
+            throw new FraudCaseValidationException("Assigned investigator is required.");
         }
     }
 
     public void validateAddNote(FraudCaseStatus currentStatus, String body) {
         rejectClosed(currentStatus, "Closed case cannot receive notes.");
         if (!StringUtils.hasText(body)) {
-            throw new IllegalArgumentException("Note body is required.");
+            throw new FraudCaseValidationException("Note body is required.");
         }
     }
 
     public void validateAddDecision(FraudCaseStatus currentStatus, FraudCaseDecisionType decisionType, String summary) {
         rejectClosed(currentStatus, "Closed case cannot receive decisions.");
         if (decisionType == null) {
-            throw new IllegalArgumentException("Decision type is required.");
+            throw new FraudCaseValidationException("Decision type is required.");
         }
         if (!StringUtils.hasText(summary)) {
-            throw new IllegalArgumentException("Decision summary is required.");
+            throw new FraudCaseValidationException("Decision summary is required.");
         }
     }
 
     public void validateTransition(FraudCaseStatus currentStatus, FraudCaseStatus targetStatus) {
         if (targetStatus == null) {
-            throw new IllegalArgumentException("Target status is required.");
+            throw new FraudCaseValidationException("Target status is required.");
         }
         if (currentStatus == null) {
             throw new FraudCaseConflictException("Current case status is unknown.");
@@ -64,14 +64,14 @@ public class FraudCaseTransitionPolicy {
 
     public void validateClose(FraudCaseStatus currentStatus, String closureReason) {
         if (!StringUtils.hasText(closureReason)) {
-            throw new IllegalArgumentException("Closure reason is required.");
+            throw new FraudCaseValidationException("Closure reason is required.");
         }
         validateTransition(currentStatus, FraudCaseStatus.CLOSED);
     }
 
     public void validateReopen(FraudCaseStatus currentStatus, String reason) {
         if (!StringUtils.hasText(reason)) {
-            throw new IllegalArgumentException("Reopen reason is required.");
+            throw new FraudCaseValidationException("Reopen reason is required.");
         }
         validateTransition(currentStatus, FraudCaseStatus.REOPENED);
     }

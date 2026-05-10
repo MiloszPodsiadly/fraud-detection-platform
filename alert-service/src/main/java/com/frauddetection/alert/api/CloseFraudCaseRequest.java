@@ -5,6 +5,6 @@ import jakarta.validation.constraints.Size;
 
 public record CloseFraudCaseRequest(
         @NotBlank @Size(max = 500) String closureReason,
-        @Size(max = 64) String actorId
+        @NotBlank @Size(max = 64) String actorId
 ) {
 }

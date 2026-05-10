@@ -6,6 +6,6 @@ import jakarta.validation.constraints.Size;
 public record AddFraudCaseNoteRequest(
         @NotBlank @Size(max = 2000) String body,
         boolean internalOnly,
-        @Size(max = 64) String actorId
+        @NotBlank @Size(max = 64) String actorId
 ) {
 }

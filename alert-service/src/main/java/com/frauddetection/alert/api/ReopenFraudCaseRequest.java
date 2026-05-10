@@ -5,6 +5,6 @@ import jakarta.validation.constraints.Size;
 
 public record ReopenFraudCaseRequest(
         @NotBlank @Size(max = 500) String reason,
-        @Size(max = 64) String actorId
+        @NotBlank @Size(max = 64) String actorId
 ) {
 }

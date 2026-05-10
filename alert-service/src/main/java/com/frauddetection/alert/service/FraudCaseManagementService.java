@@ -20,6 +20,9 @@ import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.fraudcase.FraudCaseActorUnavailableException;
 import com.frauddetection.alert.fraudcase.FraudCaseAuditService;
+import com.frauddetection.alert.fraudcase.FraudCaseNotFoundException;
+import com.frauddetection.alert.fraudcase.FraudCaseSearchCriteria;
+import com.frauddetection.alert.fraudcase.FraudCaseSearchRepository;
 import com.frauddetection.alert.fraudcase.FraudCaseTransitionPolicy;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.AlertRepository;
@@ -47,7 +50,6 @@ import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.RiskLevel;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -58,13 +60,11 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -81,6 +81,7 @@ public class FraudCaseManagementService {
     private final FraudCaseNoteRepository noteRepository;
     private final FraudCaseDecisionRepository decisionRepository;
     private final FraudCaseAuditRepository auditRepository;
+    private final FraudCaseSearchRepository searchRepository;
     private final AnalystActorResolver analystActorResolver;
     private final AlertServiceMetrics metrics;
     private final FraudCaseUpdateMutationHandler updateMutationHandler;
@@ -97,6 +98,7 @@ public class FraudCaseManagementService {
             FraudCaseNoteRepository noteRepository,
             FraudCaseDecisionRepository decisionRepository,
             FraudCaseAuditRepository auditRepository,
+            FraudCaseSearchRepository searchRepository,
             AnalystActorResolver analystActorResolver,
             AlertServiceMetrics metrics,
             FraudCaseUpdateMutationHandler updateMutationHandler,
@@ -112,6 +114,7 @@ public class FraudCaseManagementService {
         this.noteRepository = noteRepository;
         this.decisionRepository = decisionRepository;
         this.auditRepository = auditRepository;
+        this.searchRepository = searchRepository;
         this.analystActorResolver = analystActorResolver;
         this.metrics = metrics;
         this.updateMutationHandler = updateMutationHandler;
@@ -162,7 +165,7 @@ public class FraudCaseManagementService {
 
     public FraudCaseDocument getCase(String caseId) {
         return refreshTransactionDetails(fraudCaseRepository.findById(caseId)
-                .orElseThrow(() -> new com.frauddetection.alert.exception.AlertNotFoundException(caseId)));
+                .orElseThrow(() -> new FraudCaseNotFoundException(caseId)));
     }
 
     public FraudCaseDocument createCase(CreateFraudCaseRequest request) {
@@ -187,9 +190,9 @@ public class FraudCaseManagementService {
             document.setCaseKey("FDP42:" + caseNumber);
             document.setStatus(FraudCaseStatus.OPEN);
             document.setPriority(request.priority());
-            document.setRiskLevel(request.riskLevel() == null ? RiskLevel.HIGH : request.riskLevel());
+            document.setRiskLevel(request.riskLevel());
             document.setLinkedAlertIds(alertIds);
-            document.setTransactionIds(alertIds);
+            document.setTransactionIds(List.of());
             document.setReason(StringUtils.hasText(request.reason()) ? request.reason() : "Fraud alerts require investigator workflow.");
             document.setCreatedBy(actorId);
             document.setCreatedAt(now);
@@ -217,22 +220,10 @@ public class FraudCaseManagementService {
             String linkedAlertId,
             Pageable pageable
     ) {
-        List<FraudCaseSummaryResponse> filtered = fraudCaseRepository.findAll().stream()
-                .filter(document -> status == null || document.getStatus() == status)
-                .filter(document -> !StringUtils.hasText(assignee) || Objects.equals(document.getAssignedInvestigatorId(), assignee))
-                .filter(document -> priority == null || document.getPriority() == priority)
-                .filter(document -> riskLevel == null || document.getRiskLevel() == riskLevel)
-                .filter(document -> createdFrom == null || !document.getCreatedAt().isBefore(createdFrom))
-                .filter(document -> createdTo == null || !document.getCreatedAt().isAfter(createdTo))
-                .filter(document -> !StringUtils.hasText(linkedAlertId)
-                        || safeList(document.getLinkedAlertIds()).contains(linkedAlertId)
-                        || safeList(document.getTransactionIds()).contains(linkedAlertId))
-                .sorted(Comparator.comparing(FraudCaseDocument::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder())).reversed())
-                .map(responseMapper::toSummary)
-                .toList();
-        int from = Math.min((int) pageable.getOffset(), filtered.size());
-        int to = Math.min(from + pageable.getPageSize(), filtered.size());
-        return new PageImpl<>(filtered.subList(from, to), pageable, filtered.size());
+        return searchRepository.search(
+                new FraudCaseSearchCriteria(status, assignee, priority, riskLevel, createdFrom, createdTo, linkedAlertId),
+                pageable
+        ).map(responseMapper::toSummary);
     }
 
     public FraudCaseDocument assignCase(String caseId, AssignFraudCaseRequest request) {
@@ -379,7 +370,7 @@ public class FraudCaseManagementService {
 
     public List<FraudCaseAuditResponse> auditTrail(String caseId) {
         if (!fraudCaseRepository.existsById(caseId)) {
-            throw new com.frauddetection.alert.exception.AlertNotFoundException(caseId);
+            throw new FraudCaseNotFoundException(caseId);
         }
         return auditRepository.findByCaseIdOrderByOccurredAtAsc(caseId).stream()
                 .map(this::toAuditResponse)
@@ -426,7 +417,7 @@ public class FraudCaseManagementService {
 
     private FraudCaseDocument loadCase(String caseId) {
         return fraudCaseRepository.findById(caseId)
-                .orElseThrow(() -> new com.frauddetection.alert.exception.AlertNotFoundException(caseId));
+                .orElseThrow(() -> new FraudCaseNotFoundException(caseId));
     }
 
     private String requiredActor(String requestActorId, String action, String resourceId) {
