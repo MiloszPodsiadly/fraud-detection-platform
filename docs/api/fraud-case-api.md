@@ -9,9 +9,10 @@ Base paths:
 
 Both paths are protected by the same `alert-service` RBAC rules.
 
-FDP-42 endpoints are local audited lifecycle endpoints. They are not `RegulatedMutationCoordinator` endpoints, not
-FDP-29 evidence-gated finalize endpoints, not lease-fenced commands, not replay-safe commands, and not external
-finality.
+FDP-43 lifecycle endpoints are local audited lifecycle endpoints with local idempotency. They reuse shared
+idempotency primitives from the existing regulated mutation model, but they are not routed through
+`RegulatedMutationCoordinator`, not FDP-29 evidence-gated finalize endpoints, not lease-fenced commands, not global
+exactly-once execution, and not external finality.
 
 ## Endpoints
 
@@ -40,23 +41,21 @@ List semantics:
 
 ## POST Endpoint Idempotency
 
-For every local lifecycle `POST`: Idempotency: not idempotent unless explicitly stated. Do not blindly retry after
-ambiguous network failure.
+Every local lifecycle `POST` requires `X-Idempotency-Key`. Missing keys return `400` with
+`code:MISSING_IDEMPOTENCY_KEY`; invalid keys return `400` with `code:INVALID_IDEMPOTENCY_KEY`.
 
-- `POST /fraud-cases`: Idempotency: not idempotent unless explicitly stated. Do not blindly retry after ambiguous
-  network failure. Repeated submit creates an independent case.
-- `POST /fraud-cases/{caseId}/assign`: Idempotency: not idempotent unless explicitly stated. Do not blindly retry
-  after ambiguous network failure. Same assignee assignment is accepted and audited as reassignment.
-- `POST /fraud-cases/{caseId}/notes`: Idempotency: not idempotent unless explicitly stated. Do not blindly retry
-  after ambiguous network failure. Repeated submit appends another note record and audit entry.
-- `POST /fraud-cases/{caseId}/decisions`: Idempotency: not idempotent unless explicitly stated. Do not blindly
-  retry after ambiguous network failure. Repeated submit appends another decision record and audit entry.
-- `POST /fraud-cases/{caseId}/transition`: Idempotency: not idempotent unless explicitly stated. Do not blindly
-  retry after ambiguous network failure. Repeated submit follows the lifecycle policy and may return `409`.
-- `POST /fraud-cases/{caseId}/close`: Idempotency: not idempotent unless explicitly stated. Do not blindly retry
-  after ambiguous network failure. Repeated submit may return `409` once the case is no longer closable.
-- `POST /fraud-cases/{caseId}/reopen`: Idempotency: not idempotent unless explicitly stated. Do not blindly retry
-  after ambiguous network failure. Repeated submit may return `409` once the case is no longer reopenable.
+FDP-43 local lifecycle idempotency reuses shared canonical hashing, key validation, and conflict semantics from the
+regulated mutation architecture. It does not route fraud-case lifecycle operations through
+`RegulatedMutationCoordinator`.
+
+- Same key + same payload + same backend actor/action/scope returns the stored response snapshot and does not
+  re-execute the lifecycle mutation or append another audit entry.
+- Same key + different payload, actor, action, or scope returns `409` with `code:IDEMPOTENCY_KEY_CONFLICT`.
+- An in-progress same-key operation returns `409` with `code:IDEMPOTENCY_KEY_IN_PROGRESS`.
+- Idempotency key hashes and request hashes are stored; raw idempotency keys and raw request payloads are not stored
+  or exposed.
+- The idempotency record, lifecycle mutation, and audit append commit or roll back together when Mongo transactions
+  are enabled with `app.regulated-mutations.transaction-mode=REQUIRED`.
 
 ## Sample Requests
 
@@ -93,16 +92,15 @@ ambiguous network failure.
 - Forbidden lifecycle mutations return `409`.
 - Unhandled internals return stable JSON `500` without raw stack traces.
 
-Stable FDP-42 error details include `reason:FRAUD_CASE_VALIDATION_FAILED`,
-`reason:FRAUD_CASE_NOT_FOUND`, and `reason:FRAUD_CASE_LIFECYCLE_CONFLICT`.
+Stable error details include `reason:FRAUD_CASE_VALIDATION_FAILED`, `reason:FRAUD_CASE_NOT_FOUND`,
+`reason:FRAUD_CASE_LIFECYCLE_CONFLICT`, `code:MISSING_IDEMPOTENCY_KEY`, `code:INVALID_IDEMPOTENCY_KEY`,
+`code:IDEMPOTENCY_KEY_CONFLICT`, and `code:IDEMPOTENCY_KEY_IN_PROGRESS`.
 
 ## Duplicate Submit Semantics
 
-The local lifecycle POST endpoints are not idempotent. Repeating `notes` or `decisions` creates another append-only
-record and audit entry. Clients must not blindly retry these POSTs after ambiguous transport failures. Repeated close
-or reopen follows the lifecycle policy and returns `409` once the status no longer allows the transition.
-Reassigning the same investigator is accepted and audited as `CASE_REASSIGNED`. Repeating a create request with the
-same alert ids creates an independent case unless a future idempotency contract is introduced.
+With the same `X-Idempotency-Key` and same payload, repeating `notes` or `decisions` replays the stored response and
+does not create another append-only record or audit entry. With a different idempotency key, each POST is a new local
+lifecycle command and follows normal lifecycle policy.
 
 `RESOLVED` cases remain mutable until `CLOSED`; notes, decisions, and assignment remain allowed while the case is
 resolved.
@@ -116,5 +114,6 @@ lifecycle audit semantics.
 ## Non-Claims
 
 This API does not change Kafka/outbox semantics, does not replace the regulated mutation safety model, does not add
-ML behavior, and does not add release-governance controls. It also does not claim evidence-gated finalize,
-lease-fenced execution, replay safety, exactly-once delivery, or external finality.
+ML behavior, and does not add release-governance controls. It also does not claim FDP-29 evidence-gated finalize,
+lease-fenced execution, global exactly-once delivery, distributed ACID, WORM storage, legal notarization, Kafka
+exactly-once, or external finality.

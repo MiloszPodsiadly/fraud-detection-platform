@@ -8,9 +8,11 @@ Fraud Case Management is implemented inside `alert-service`. It reuses existing 
 documents, repositories, exception handling, authentication, and RBAC. It does not introduce a new service,
 message topic, outbox contract, ML path, or release-governance model.
 
-The FDP-42 local lifecycle endpoints are not implemented through `RegulatedMutationCoordinator`, are not FDP-29
-evidence-gated finalize, are not lease fenced, are not replay safe, and are not external finality. The older regulated
-`PATCH` path remains isolated as compatibility behavior.
+FDP-43 adds local lifecycle idempotency for fraud-case lifecycle POST endpoints. It reuses shared idempotency
+primitives and conflict semantics from the existing regulated mutation architecture, but the lifecycle endpoints are
+not implemented through `RegulatedMutationCoordinator`, are not FDP-29 evidence-gated finalize, are not lease fenced,
+are not global exactly-once, and are not external finality. The older regulated `PATCH` path remains isolated as
+compatibility behavior.
 
 ## Flow
 
@@ -18,6 +20,8 @@ evidence-gated finalize, are not lease fenced, are not replay safe, and are not 
 FraudCaseController
   -> FraudCaseManagementService
   -> FraudCaseLifecycleService / FraudCaseQueryService
+  -> FraudCaseLifecycleIdempotencyService
+  -> FraudCaseLifecycleIdempotencyRepository
   -> FraudCaseTransitionPolicy
   -> FraudCaseRepository / FraudCaseNoteRepository / FraudCaseDecisionRepository
   -> FraudCaseSearchRepository / MongoFraudCaseSearchRepository
@@ -28,6 +32,7 @@ FraudCaseController
 Controllers handle HTTP and validation only. `FraudCaseManagementService` is the compatibility facade. It delegates
 analyst lifecycle work to `FraudCaseLifecycleService`, read/search/audit work to `FraudCaseQueryService`, and keeps
 system event ingestion plus the legacy regulated `PATCH` path separate. `FraudCaseTransitionPolicy` owns lifecycle validation.
+`FraudCaseLifecycleIdempotencyService` wraps local lifecycle POST mutations and stores bounded replay snapshots.
 `FraudCaseSearchRepository` owns repository-level Mongo search instead of in-memory `findAll().stream` filtering.
 `FraudCaseAuditService` appends immutable audit entries. `FraudCaseResponseMapper` separates persistence documents
 from API responses.
@@ -39,20 +44,30 @@ from API responses.
 - `FraudCaseNoteDocument` is append-only.
 - `FraudCaseDecisionDocument` is append-only.
 - `FraudCaseAuditEntryDocument` is append-only and ordered by `occurredAt`.
+- `FraudCaseLifecycleIdempotencyRecordDocument` stores hashed idempotency keys, request hashes, action/actor/scope,
+  bounded response snapshots, and local status. It does not store raw idempotency keys or raw request payloads.
 
 ## Transaction Direction
 
-All analyst lifecycle mutations are wrapped in `RegulatedMutationTransactionRunner.runLocalCommit`. In local default
-mode this keeps the code path aligned with the rest of the service. In transaction-required deployments, Mongo
-transaction manager support provides atomic case state + audit persistence.
+All idempotent analyst lifecycle mutations are wrapped by `FraudCaseLifecycleIdempotencyService`, which uses
+`RegulatedMutationTransactionRunner.runLocalCommit` as the local Mongo transaction boundary. In transaction-required
+deployments, Mongo transaction manager support provides atomic idempotency record + case state + audit persistence.
 
 FDP-42 analyst lifecycle atomicity requires Mongo transactions. Bank-grade case+audit atomic rollback requires
 `app.regulated-mutations.transaction-mode=REQUIRED`. If transaction mode is `OFF`, FDP-42 must not claim rollback
 atomicity. Integration tests prove atomicity using `MongoTransactionManager` and transaction-mode `REQUIRED`.
 
 This transaction runner is used only as the local Mongo transaction boundary for FDP-42 lifecycle operations. It does
-not make those operations regulated commands, replayable commands, lease-fenced commands, or externally finalized
-commands.
+not make those operations regulated commands, lease-fenced commands, or externally finalized commands.
+
+## Local Idempotency Semantics
+
+- `X-Idempotency-Key` is required for lifecycle POST endpoints.
+- Same key, payload, backend actor, action, and scope replays the stored response snapshot.
+- Same key with different payload, actor, action, or scope is a local idempotency conflict.
+- Replay does not re-run the lifecycle mutation and does not append another audit entry.
+- In-progress duplicate operations return a local conflict response.
+- Raw idempotency keys and raw request payloads are not stored or exposed.
 
 ## Read And Ingestion Boundaries
 
@@ -74,3 +89,4 @@ audit claim.
 - Append-only is enforced by application API shape and architecture tests; it is not WORM storage or legal
   notarization.
 - Existing regulated mutation semantics for legacy fraud-case `PATCH` remain unchanged.
+- FDP-43 shared idempotency primitives must not become a second regulated mutation framework.

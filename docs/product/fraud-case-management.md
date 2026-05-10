@@ -8,10 +8,11 @@ Fraud Case Management connects one or more fraud alerts to an investigator workf
 It is a product workflow for case triage and investigation; it does not add ML behavior, external CRM integration,
 document/file attachment storage, advanced RBAC, Kafka/outbox semantic changes, or production release controls.
 
-FDP-42 is a local audited lifecycle workflow. It is not a `RegulatedMutationCoordinator` workflow, not the FDP-29
-evidence-gated finalize model, not lease fenced, not replay safe, and not external finality. The legacy regulated
-`PATCH /fraud-cases/{caseId}` path remains separately available for backward compatibility and is not extended by
-these local lifecycle endpoints.
+FDP-43 keeps Fraud Case Management as a local audited lifecycle workflow and adds local retry safety for lifecycle
+POSTs. It reuses shared idempotency primitives from the existing regulated mutation architecture, but it is not a
+`RegulatedMutationCoordinator` workflow, not the FDP-29 evidence-gated finalize model, not lease fenced, not global
+exactly-once, and not external finality. The legacy regulated `PATCH /fraud-cases/{caseId}` path remains separately
+available for backward compatibility and is not extended by these local lifecycle endpoints.
 
 ## Lifecycle
 
@@ -53,19 +54,22 @@ case candidates from scored transaction events and transaction snapshots. This p
 lifecycle mutations, is not analyst lifecycle mutation behavior, does not represent investigator action or decision,
 and does not claim FDP-42 analyst lifecycle audit semantics.
 
-## Duplicate Submit Policy
+## Lifecycle Idempotency Policy
 
-The local lifecycle POST endpoints are intentionally non-idempotent. Repeating `notes` or `decisions` appends another
-note or decision and another audit entry. Clients must not blindly retry local lifecycle POSTs after ambiguous network
-failures. Repeated close or reopen is rejected by lifecycle policy when the current status no longer allows the
-requested transition. Reassigning to the same investigator is treated as an audited reassignment, not a replay.
-Submitting the same create request again creates an independent case unless a future idempotency contract is added.
+The local lifecycle POST endpoints require `X-Idempotency-Key`. Same key + same payload + same backend actor/action
+and scope returns the stored response snapshot. Replay does not append another note, decision, case audit entry, or
+status transition. Same key with different payload, actor, action, or scope returns a local conflict.
+
+The idempotency record, lifecycle mutation, and fraud-case audit append commit or roll back together when Mongo
+transactions are enabled with transaction-mode `REQUIRED`. Raw idempotency keys and raw request payloads are not
+stored or exposed; only key hashes, request hashes, bounded action/actor/scope metadata, and safe response snapshots
+are stored.
 
 ## Audit And ACID Semantics
 
-Every analyst lifecycle mutation writes a `FraudCaseAuditEntryDocument` in the same
-`RegulatedMutationTransactionRunner` callback as the business state change. When the platform runs with Mongo transactions enabled
-(`app.regulated-mutations.transaction-mode=REQUIRED`), case state and audit append commit or roll back together.
+Every analyst lifecycle mutation writes a `FraudCaseAuditEntryDocument` in the same local transaction callback as the
+idempotency record and business state change. When the platform runs with Mongo transactions enabled
+(`app.regulated-mutations.transaction-mode=REQUIRED`), idempotency record, case state, and audit append commit or roll back together.
 FDP-42 analyst lifecycle atomicity requires Mongo transactions. Bank-grade case+audit atomic rollback requires
 `app.regulated-mutations.transaction-mode=REQUIRED`; if transaction mode is `OFF`, FDP-42 must not claim rollback
 atomicity. Integration tests prove atomicity using `MongoTransactionManager` and transaction-mode `REQUIRED`.

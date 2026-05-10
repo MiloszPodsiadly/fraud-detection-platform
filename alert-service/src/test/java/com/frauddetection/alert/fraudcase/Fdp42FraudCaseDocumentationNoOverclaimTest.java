@@ -27,27 +27,23 @@ class Fdp42FraudCaseDocumentationNoOverclaimTest {
         assertThat(docs).contains("local audited lifecycle");
         assertThat(docs).contains("not evidence-gated");
         assertThat(docs).contains("not lease");
-        assertThat(docs).contains("not replay");
+        assertThat(docs).contains("not lease-fenced replay safety");
         assertThat(docs).contains("not external finality");
-        assertThat(docs).contains("not a `regulatedmutationcoordinator`");
+        assertThat(docs).contains("regulatedmutationcoordinator");
         assertThat(docs).contains("not a regulated mutation finality claim");
     }
 
     @Test
-    void fdp42DocsShouldDocumentAuditAuthorityAndNonIdempotentPosts() throws IOException {
+    void fdp42AndFdp43DocsShouldDocumentAuditAuthorityAndLocalIdempotentPosts() throws IOException {
         String docs = readDocs().toLowerCase(java.util.Locale.ROOT);
 
         assertThat(docs).contains("fraud-case:audit:read");
         assertThat(docs).contains("actorid");
-        assertThat(docs).contains("not idempotent");
-        assertThat(docs).contains("must not blindly retry");
-        assertThat(docs).contains("post /fraud-cases");
-        assertThat(docs).contains("post /fraud-cases/{caseid}/assign");
-        assertThat(docs).contains("post /fraud-cases/{caseid}/notes");
-        assertThat(docs).contains("post /fraud-cases/{caseid}/decisions");
-        assertThat(docs).contains("post /fraud-cases/{caseid}/transition");
-        assertThat(docs).contains("post /fraud-cases/{caseid}/close");
-        assertThat(docs).contains("post /fraud-cases/{caseid}/reopen");
+        assertThat(docs).contains("every local lifecycle `post` requires `x-idempotency-key`");
+        assertThat(docs).contains("same key + same payload");
+        assertThat(docs).contains("replays the stored response");
+        assertThat(docs).contains("idempotency_key_conflict");
+        assertThat(docs).contains("raw idempotency keys and raw request payloads are not stored");
         assertThat(docs).contains("linkedalertids");
         assertThat(docs).contains("transactionids");
         assertThat(docs).contains("system-generated case candidate ingestion");
