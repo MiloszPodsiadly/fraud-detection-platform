@@ -11,28 +11,14 @@ import com.frauddetection.alert.api.FraudCaseNoteResponse;
 import com.frauddetection.alert.api.FraudCaseSummaryResponse;
 import com.frauddetection.alert.api.ReopenFraudCaseRequest;
 import com.frauddetection.alert.api.TransitionFraudCaseRequest;
-import com.frauddetection.alert.domain.FraudCaseAuditAction;
+import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.api.UpdateFraudCaseRequest;
 import com.frauddetection.alert.api.UpdateFraudCaseResponse;
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditResourceType;
-import com.frauddetection.alert.fraudcase.FraudCaseActorUnavailableException;
-import com.frauddetection.alert.fraudcase.FraudCaseAuditService;
-import com.frauddetection.alert.fraudcase.FraudCaseNotFoundException;
-import com.frauddetection.alert.fraudcase.FraudCaseSearchCriteria;
-import com.frauddetection.alert.fraudcase.FraudCaseSearchRepository;
-import com.frauddetection.alert.fraudcase.FraudCaseTransitionPolicy;
-import com.frauddetection.alert.observability.AlertServiceMetrics;
-import com.frauddetection.alert.persistence.AlertRepository;
-import com.frauddetection.alert.persistence.FraudCaseAuditEntryDocument;
-import com.frauddetection.alert.persistence.FraudCaseAuditRepository;
-import com.frauddetection.alert.persistence.FraudCaseDecisionDocument;
-import com.frauddetection.alert.persistence.FraudCaseDecisionRepository;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
-import com.frauddetection.alert.persistence.FraudCaseNoteDocument;
-import com.frauddetection.alert.persistence.FraudCaseNoteRepository;
 import com.frauddetection.alert.persistence.FraudCaseRepository;
 import com.frauddetection.alert.persistence.FraudCaseTransactionDocument;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
@@ -43,7 +29,6 @@ import com.frauddetection.alert.regulated.RegulatedMutationIntent;
 import com.frauddetection.alert.regulated.RegulatedMutationIntentHasher;
 import com.frauddetection.alert.regulated.RegulatedMutationResponseSnapshot;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
-import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import com.frauddetection.alert.regulated.mutation.fraudcase.FraudCaseUpdateMutationHandler;
 import com.frauddetection.alert.security.principal.AnalystActorResolver;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
@@ -52,20 +37,15 @@ import com.frauddetection.common.events.enums.RiskLevel;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
-import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -77,18 +57,9 @@ public class FraudCaseManagementService {
 
     private final FraudCaseRepository fraudCaseRepository;
     private final ScoredTransactionRepository scoredTransactionRepository;
-    private final AlertRepository alertRepository;
-    private final FraudCaseNoteRepository noteRepository;
-    private final FraudCaseDecisionRepository decisionRepository;
-    private final FraudCaseAuditRepository auditRepository;
-    private final FraudCaseSearchRepository searchRepository;
     private final AnalystActorResolver analystActorResolver;
-    private final AlertServiceMetrics metrics;
     private final FraudCaseUpdateMutationHandler updateMutationHandler;
     private final RegulatedMutationCoordinator regulatedMutationCoordinator;
-    private final RegulatedMutationTransactionRunner transactionRunner;
-    private final FraudCaseTransitionPolicy transitionPolicy;
-    private final FraudCaseAuditService caseAuditService;
     private final FraudCaseResponseMapper responseMapper;
     private final FraudCaseLifecycleService lifecycleService;
     private final FraudCaseQueryService queryService;
@@ -96,51 +67,21 @@ public class FraudCaseManagementService {
     public FraudCaseManagementService(
             FraudCaseRepository fraudCaseRepository,
             ScoredTransactionRepository scoredTransactionRepository,
-            AlertRepository alertRepository,
-            FraudCaseNoteRepository noteRepository,
-            FraudCaseDecisionRepository decisionRepository,
-            FraudCaseAuditRepository auditRepository,
-            FraudCaseSearchRepository searchRepository,
             AnalystActorResolver analystActorResolver,
-            AlertServiceMetrics metrics,
             FraudCaseUpdateMutationHandler updateMutationHandler,
             RegulatedMutationCoordinator regulatedMutationCoordinator,
-            RegulatedMutationTransactionRunner transactionRunner,
-            FraudCaseTransitionPolicy transitionPolicy,
-            FraudCaseAuditService caseAuditService,
-            FraudCaseResponseMapper responseMapper
+            FraudCaseResponseMapper responseMapper,
+            FraudCaseLifecycleService lifecycleService,
+            FraudCaseQueryService queryService
     ) {
         this.fraudCaseRepository = fraudCaseRepository;
         this.scoredTransactionRepository = scoredTransactionRepository;
-        this.alertRepository = alertRepository;
-        this.noteRepository = noteRepository;
-        this.decisionRepository = decisionRepository;
-        this.auditRepository = auditRepository;
-        this.searchRepository = searchRepository;
         this.analystActorResolver = analystActorResolver;
-        this.metrics = metrics;
         this.updateMutationHandler = updateMutationHandler;
         this.regulatedMutationCoordinator = regulatedMutationCoordinator;
-        this.transactionRunner = transactionRunner;
-        this.transitionPolicy = transitionPolicy;
-        this.caseAuditService = caseAuditService;
         this.responseMapper = responseMapper;
-        this.lifecycleService = new FraudCaseLifecycleService(
-                fraudCaseRepository,
-                alertRepository,
-                noteRepository,
-                decisionRepository,
-                analystActorResolver,
-                transactionRunner,
-                transitionPolicy,
-                caseAuditService
-        );
-        this.queryService = new FraudCaseQueryService(
-                fraudCaseRepository,
-                auditRepository,
-                searchRepository,
-                responseMapper
-        );
+        this.lifecycleService = lifecycleService;
+        this.queryService = queryService;
     }
 
     public void handleScoredTransaction(TransactionScoredEvent event) {
@@ -171,6 +112,7 @@ public class FraudCaseManagementService {
         fraudCaseRepository.save(document);
     }
 
+    @Deprecated(forRemoval = false)
     public List<FraudCaseDocument> listCases() {
         return queryService.listCases();
     }
@@ -190,7 +132,7 @@ public class FraudCaseManagementService {
     public Page<FraudCaseSummaryResponse> searchCases(
             FraudCaseStatus status,
             String assignee,
-            com.frauddetection.alert.domain.FraudCasePriority priority,
+            FraudCasePriority priority,
             RiskLevel riskLevel,
             Instant createdFrom,
             Instant createdTo,
@@ -264,73 +206,6 @@ public class FraudCaseManagementService {
 
     public UpdateFraudCaseResponse updateCase(String caseId, UpdateFraudCaseRequest request) {
         return updateCase(caseId, request, null);
-    }
-
-    private FraudCaseDocument loadCase(String caseId) {
-        return fraudCaseRepository.findById(caseId)
-                .orElseThrow(() -> new FraudCaseNotFoundException(caseId));
-    }
-
-    private String requiredActor(String requestActorId, String action, String resourceId) {
-        String actorId = analystActorResolver.resolveActorId(requestActorId, action, resourceId);
-        if (!StringUtils.hasText(actorId)) {
-            throw new FraudCaseActorUnavailableException();
-        }
-        return actorId;
-    }
-
-    private List<String> normalizedIds(List<String> values) {
-        return values == null
-                ? List.of()
-                : values.stream()
-                .filter(StringUtils::hasText)
-                .map(String::trim)
-                .distinct()
-                .toList();
-    }
-
-    private List<String> safeList(List<String> values) {
-        return values == null ? List.of() : values;
-    }
-
-    private String caseNumber(Instant now) {
-        String date = DateTimeFormatter.BASIC_ISO_DATE.withZone(ZoneOffset.UTC).format(now);
-        return "FC-" + date + "-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(Locale.ROOT);
-    }
-
-    private FraudCaseAuditResponse toAuditResponse(FraudCaseAuditEntryDocument document) {
-        return new FraudCaseAuditResponse(
-                document.getId(),
-                document.getCaseId(),
-                document.getAction(),
-                document.getActorId(),
-                document.getOccurredAt(),
-                document.getPreviousStatus(),
-                document.getNewStatus(),
-                document.getDetails() == null ? Map.of() : document.getDetails()
-        );
-    }
-
-    private FraudCaseNoteResponse toNoteResponse(FraudCaseNoteDocument document) {
-        return new FraudCaseNoteResponse(
-                document.getId(),
-                document.getCaseId(),
-                document.getBody(),
-                document.getCreatedBy(),
-                document.getCreatedAt(),
-                document.isInternalOnly()
-        );
-    }
-
-    private FraudCaseDecisionResponse toDecisionResponse(FraudCaseDecisionDocument document) {
-        return new FraudCaseDecisionResponse(
-                document.getId(),
-                document.getCaseId(),
-                document.getDecisionType(),
-                document.getSummary(),
-                document.getCreatedBy(),
-                document.getCreatedAt()
-        );
     }
 
     private String correlationId(FraudCaseDocument document) {
@@ -448,10 +323,6 @@ public class FraudCaseManagementService {
         document.setAmountPln(toPln(scoredTransaction.getTransactionAmount()));
         document.setFraudScore(scoredTransaction.getFraudScore());
         document.setRiskLevel(scoredTransaction.getRiskLevel());
-        return document;
-    }
-
-    private FraudCaseDocument refreshTransactionDetails(FraudCaseDocument document) {
         return document;
     }
 

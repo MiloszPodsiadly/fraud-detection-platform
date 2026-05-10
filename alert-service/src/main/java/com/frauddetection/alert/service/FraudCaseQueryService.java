@@ -41,6 +41,7 @@ public class FraudCaseQueryService {
         this.responseMapper = responseMapper;
     }
 
+    @Deprecated(forRemoval = false)
     public List<FraudCaseDocument> listCases() {
         return fraudCaseRepository.findAll();
     }

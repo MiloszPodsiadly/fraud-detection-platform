@@ -25,7 +25,9 @@ import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import com.frauddetection.alert.regulated.mutation.fraudcase.FraudCaseUpdateMutationHandler;
 import com.frauddetection.alert.security.principal.AnalystActorResolver;
+import com.frauddetection.alert.service.FraudCaseLifecycleService;
 import com.frauddetection.alert.service.FraudCaseManagementService;
+import com.frauddetection.alert.service.FraudCaseQueryService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -111,22 +113,30 @@ class FraudCaseMutationInvariantTest {
         private final AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
         private final RegulatedMutationCoordinator coordinator = mock(RegulatedMutationCoordinator.class);
         private final RegulatedMutationTransactionRunner transactionRunner = transactionRunner();
+        private final FraudCaseResponseMapper responseMapper = new FraudCaseResponseMapper(new AlertResponseMapper());
         private final FraudCaseManagementService service = new FraudCaseManagementService(
                 fraudCaseRepository,
                 scoredTransactionRepository,
-                mock(AlertRepository.class),
-                mock(FraudCaseNoteRepository.class),
-                mock(FraudCaseDecisionRepository.class),
-                auditRepository,
-                mock(FraudCaseSearchRepository.class),
                 actorResolver,
-                metrics,
                 new FraudCaseUpdateMutationHandler(fraudCaseRepository, metrics),
                 coordinator,
-                transactionRunner,
-                new FraudCaseTransitionPolicy(),
-                new FraudCaseAuditService(auditRepository),
-                new FraudCaseResponseMapper(new AlertResponseMapper())
+                responseMapper,
+                new FraudCaseLifecycleService(
+                        fraudCaseRepository,
+                        mock(AlertRepository.class),
+                        mock(FraudCaseNoteRepository.class),
+                        mock(FraudCaseDecisionRepository.class),
+                        actorResolver,
+                        transactionRunner,
+                        new FraudCaseTransitionPolicy(),
+                        new FraudCaseAuditService(auditRepository)
+                ),
+                new FraudCaseQueryService(
+                        fraudCaseRepository,
+                        auditRepository,
+                        mock(FraudCaseSearchRepository.class),
+                        responseMapper
+                )
         );
 
         private FraudCaseDocument openCase() {

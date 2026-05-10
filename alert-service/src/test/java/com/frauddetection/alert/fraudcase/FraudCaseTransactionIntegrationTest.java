@@ -32,7 +32,9 @@ import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import com.frauddetection.alert.regulated.mutation.fraudcase.FraudCaseUpdateMutationHandler;
 import com.frauddetection.alert.security.principal.AnalystActorResolver;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
+import com.frauddetection.alert.service.FraudCaseLifecycleService;
 import com.frauddetection.alert.service.FraudCaseManagementService;
+import com.frauddetection.alert.service.FraudCaseQueryService;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.testsupport.base.AbstractIntegrationTest;
 import com.frauddetection.common.testsupport.container.FraudPlatformContainers;
@@ -342,22 +344,34 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
 
     private FraudCaseManagementService service(FraudCaseAuditService auditService) {
         AlertServiceMetrics metrics = new AlertServiceMetrics(new SimpleMeterRegistry());
+        var scoredTransactionRepository = new MongoRepositoryFactory(mongoTemplate).getRepository(ScoredTransactionRepository.class);
+        var searchRepository = new MongoFraudCaseSearchRepository(mongoTemplate);
+        var actorResolver = new AnalystActorResolver(new CurrentAnalystUser(), metrics);
+        var transactionRunner = transactionRunner();
+        var responseMapper = new FraudCaseResponseMapper(new AlertResponseMapper());
         return new FraudCaseManagementService(
                 caseRepository,
-                new MongoRepositoryFactory(mongoTemplate).getRepository(ScoredTransactionRepository.class),
-                alertRepository,
-                noteRepository,
-                decisionRepository,
-                auditRepository,
-                new MongoFraudCaseSearchRepository(mongoTemplate),
-                new AnalystActorResolver(new CurrentAnalystUser(), metrics),
-                metrics,
+                scoredTransactionRepository,
+                actorResolver,
                 new FraudCaseUpdateMutationHandler(caseRepository, metrics),
                 unusedRegulatedMutationCoordinator(),
-                transactionRunner(),
-                new FraudCaseTransitionPolicy(),
-                auditService,
-                new FraudCaseResponseMapper(new AlertResponseMapper())
+                responseMapper,
+                new FraudCaseLifecycleService(
+                        caseRepository,
+                        alertRepository,
+                        noteRepository,
+                        decisionRepository,
+                        actorResolver,
+                        transactionRunner,
+                        new FraudCaseTransitionPolicy(),
+                        auditService
+                ),
+                new FraudCaseQueryService(
+                        caseRepository,
+                        auditRepository,
+                        searchRepository,
+                        responseMapper
+                )
         );
     }
 

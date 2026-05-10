@@ -310,22 +310,30 @@ class Fdp42FraudCaseManagementServiceTest {
         private final AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
         private final RegulatedMutationCoordinator coordinator = mock(RegulatedMutationCoordinator.class);
         private final RegulatedMutationTransactionRunner transactionRunner = transactionRunner();
+        private final FraudCaseResponseMapper responseMapper = new FraudCaseResponseMapper(new AlertResponseMapper());
         private final FraudCaseManagementService service = new FraudCaseManagementService(
                 fraudCaseRepository,
                 scoredTransactionRepository,
-                alertRepository,
-                noteRepository,
-                decisionRepository,
-                auditRepository,
-                searchRepository,
                 actorResolver,
-                metrics,
                 new FraudCaseUpdateMutationHandler(fraudCaseRepository, metrics),
                 coordinator,
-                transactionRunner,
-                new FraudCaseTransitionPolicy(),
-                new FraudCaseAuditService(auditRepository),
-                new FraudCaseResponseMapper(new AlertResponseMapper())
+                responseMapper,
+                new FraudCaseLifecycleService(
+                        fraudCaseRepository,
+                        alertRepository,
+                        noteRepository,
+                        decisionRepository,
+                        actorResolver,
+                        transactionRunner,
+                        new FraudCaseTransitionPolicy(),
+                        new FraudCaseAuditService(auditRepository)
+                ),
+                new FraudCaseQueryService(
+                        fraudCaseRepository,
+                        auditRepository,
+                        searchRepository,
+                        responseMapper
+                )
         );
 
         private RegulatedMutationTransactionRunner transactionRunner() {

@@ -212,6 +212,51 @@ class FraudCaseManagementServiceTest {
     }
 
     @Test
+    void shouldDelegateLifecycleAndQueryCallsToInjectedServices() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
+        AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
+        FraudCaseLifecycleService lifecycleService = mock(FraudCaseLifecycleService.class);
+        FraudCaseQueryService queryService = mock(FraudCaseQueryService.class);
+        FraudCaseManagementService service = new FraudCaseManagementService(
+                fraudCaseRepository,
+                scoredTransactionRepository,
+                analystActorResolver,
+                new FraudCaseUpdateMutationHandler(fraudCaseRepository, mock(AlertServiceMetrics.class)),
+                mock(RegulatedMutationCoordinator.class),
+                new FraudCaseResponseMapper(new AlertResponseMapper()),
+                lifecycleService,
+                queryService
+        );
+
+        service.listCases();
+        service.listCases(PageRequest.of(0, 10));
+        service.getCase("case-1");
+        service.searchCases(FraudCaseStatus.OPEN, null, null, null, null, null, null, PageRequest.of(0, 10));
+        service.createCase(null);
+        service.assignCase("case-1", null);
+        service.addNote("case-1", null);
+        service.addDecision("case-1", null);
+        service.transitionCase("case-1", null);
+        service.closeCase("case-1", null);
+        service.reopenCase("case-1", null);
+        service.auditTrail("case-1");
+
+        verify(queryService).listCases();
+        verify(queryService).listCases(any(org.springframework.data.domain.Pageable.class));
+        verify(queryService).getCase("case-1");
+        verify(queryService).searchCases(FraudCaseStatus.OPEN, null, null, null, null, null, null, PageRequest.of(0, 10));
+        verify(queryService).auditTrail("case-1");
+        verify(lifecycleService).createCase(null);
+        verify(lifecycleService).assignCase("case-1", null);
+        verify(lifecycleService).addNote("case-1", null);
+        verify(lifecycleService).addDecision("case-1", null);
+        verify(lifecycleService).transitionCase("case-1", null);
+        verify(lifecycleService).closeCase("case-1", null);
+        verify(lifecycleService).reopenCase("case-1", null);
+    }
+
+    @Test
     void shouldSubmitFraudCaseUpdateThroughRegulatedCoordinator() {
         FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
         ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
@@ -388,22 +433,31 @@ class FraudCaseManagementServiceTest {
     ) {
         RegulatedMutationTransactionRunner transactionRunner = mock(RegulatedMutationTransactionRunner.class);
         when(transactionRunner.runLocalCommit(any())).thenAnswer(invocation -> invocation.<java.util.function.Supplier<?>>getArgument(0).get());
+        FraudCaseAuditRepository auditRepository = mock(FraudCaseAuditRepository.class);
+        FraudCaseResponseMapper responseMapper = new FraudCaseResponseMapper(new AlertResponseMapper());
         return new FraudCaseManagementService(
                 fraudCaseRepository,
                 scoredTransactionRepository,
-                mock(AlertRepository.class),
-                mock(FraudCaseNoteRepository.class),
-                mock(FraudCaseDecisionRepository.class),
-                mock(FraudCaseAuditRepository.class),
-                mock(FraudCaseSearchRepository.class),
                 analystActorResolver,
-                metrics,
                 new FraudCaseUpdateMutationHandler(fraudCaseRepository, metrics),
                 coordinator,
-                transactionRunner,
-                new FraudCaseTransitionPolicy(),
-                new FraudCaseAuditService(mock(FraudCaseAuditRepository.class)),
-                new FraudCaseResponseMapper(new AlertResponseMapper())
+                responseMapper,
+                new FraudCaseLifecycleService(
+                        fraudCaseRepository,
+                        mock(AlertRepository.class),
+                        mock(FraudCaseNoteRepository.class),
+                        mock(FraudCaseDecisionRepository.class),
+                        analystActorResolver,
+                        transactionRunner,
+                        new FraudCaseTransitionPolicy(),
+                        new FraudCaseAuditService(auditRepository)
+                ),
+                new FraudCaseQueryService(
+                        fraudCaseRepository,
+                        auditRepository,
+                        mock(FraudCaseSearchRepository.class),
+                        responseMapper
+                )
         );
     }
 
@@ -418,22 +472,30 @@ class FraudCaseManagementServiceTest {
     ) {
         RegulatedMutationTransactionRunner transactionRunner = mock(RegulatedMutationTransactionRunner.class);
         when(transactionRunner.runLocalCommit(any())).thenAnswer(invocation -> invocation.<java.util.function.Supplier<?>>getArgument(0).get());
+        FraudCaseResponseMapper responseMapper = new FraudCaseResponseMapper(new AlertResponseMapper());
         return new FraudCaseManagementService(
                 fraudCaseRepository,
                 scoredTransactionRepository,
-                mock(AlertRepository.class),
-                mock(FraudCaseNoteRepository.class),
-                mock(FraudCaseDecisionRepository.class),
-                auditRepository,
-                searchRepository,
                 analystActorResolver,
-                metrics,
                 new FraudCaseUpdateMutationHandler(fraudCaseRepository, metrics),
                 coordinator,
-                transactionRunner,
-                new FraudCaseTransitionPolicy(),
-                new FraudCaseAuditService(auditRepository),
-                new FraudCaseResponseMapper(new AlertResponseMapper())
+                responseMapper,
+                new FraudCaseLifecycleService(
+                        fraudCaseRepository,
+                        mock(AlertRepository.class),
+                        mock(FraudCaseNoteRepository.class),
+                        mock(FraudCaseDecisionRepository.class),
+                        analystActorResolver,
+                        transactionRunner,
+                        new FraudCaseTransitionPolicy(),
+                        new FraudCaseAuditService(auditRepository)
+                ),
+                new FraudCaseQueryService(
+                        fraudCaseRepository,
+                        auditRepository,
+                        searchRepository,
+                        responseMapper
+                )
         );
     }
 
