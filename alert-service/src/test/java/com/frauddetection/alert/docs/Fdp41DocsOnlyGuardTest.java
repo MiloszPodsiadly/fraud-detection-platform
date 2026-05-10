@@ -17,6 +17,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class Fdp41DocsOnlyGuardTest {
 
@@ -45,6 +46,8 @@ class Fdp41DocsOnlyGuardTest {
 
     @Test
     void fdp41DoesNotChangeRuntimeBehaviorFiles() throws Exception {
+        Path repositoryRoot = DocumentationTestSupport.repositoryRoot();
+        assumeTrue(isFdp41Context(repositoryRoot), "FDP-41 docs-only guard applies only to FDP-41 branches or jobs.");
         List<String> changedFiles = changedFilesAgainstBase();
         List<String> forbidden = changedFiles.stream()
                 .map(path -> path.replace('\\', '/'))
@@ -63,6 +66,24 @@ class Fdp41DocsOnlyGuardTest {
         return path.endsWith("application.yml")
                 || path.endsWith("application-bank.yml")
                 || (path.contains("/src/main/") && FORBIDDEN_RUNTIME_FRAGMENTS.stream().anyMatch(path::contains));
+    }
+
+    private boolean isFdp41Context(Path repositoryRoot) throws Exception {
+        if (Boolean.parseBoolean(propertyOrEnv("fdp41.enforce", "FDP41_DOCS_ONLY_GUARD", "false"))) {
+            return true;
+        }
+        return List.of(
+                        propertyOrEnv("fdp41.branch", "GITHUB_HEAD_REF", ""),
+                        propertyOrEnv("fdp41.ref-name", "GITHUB_REF_NAME", ""),
+                        currentBranch(repositoryRoot)
+                ).stream()
+                .map(String::toLowerCase)
+                .anyMatch(value -> value.contains("fdp-41") || value.contains("fdp41"));
+    }
+
+    private String currentBranch(Path repositoryRoot) throws Exception {
+        GitResult branch = git(repositoryRoot, "branch", "--show-current");
+        return branch.success() && !branch.stdout().isEmpty() ? branch.stdout().getFirst() : "";
     }
 
     private List<String> changedFilesAgainstBase() throws Exception {
