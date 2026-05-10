@@ -8,7 +8,8 @@ Status: branch merge gate.
 - Fraud case service tests pass for create, assignment, note conflict, and audit append behavior.
 - Fraud case controller tests pass for create, search, validation, and conflict responses.
 - Fraud case security tests pass with filters enabled for `/api/v1/fraud-cases/**` and `/api/fraud-cases/**`.
-- Fraud case Mongo transaction integration tests prove case state and audit append commit or roll back together.
+- Fraud case Mongo transaction integration tests prove case state and audit append commit or roll back together with
+  `MongoTransactionManager` and `app.regulated-mutations.transaction-mode=REQUIRED`.
 - Fraud case documentation no-overclaim tests pass for local lifecycle scope.
 - Existing fraud-case regulated mutation regression tests pass.
 - Alert-service security configuration tests pass after endpoint additions.
@@ -25,6 +26,7 @@ Status: branch merge gate.
 - API leaks raw internal errors.
 - FDP-42 changes FDP-31 through FDP-40 regulated mutation, Kafka/outbox, or release-governance semantics.
 - FDP-42 docs claim evidence-gated finalize, lease fencing, replay safety, exactly-once delivery, or external finality.
+- FDP-42 docs claim unconditional rollback atomicity without Mongo transactions and transaction-mode `REQUIRED`.
 - Local lifecycle POSTs are documented or implemented as idempotent replay-safe commands.
 
 ## Current Verification
@@ -54,6 +56,8 @@ Required gate checklist:
 11. Docs no-overclaim tests pass.
 12. Existing regulated mutation tests pass.
 13. CI has required FDP-42 proof job.
+14. Atomic rollback claims are scoped to Mongo transactions with transaction-mode `REQUIRED`; transaction mode `OFF`
+    is not described as bank-grade rollback atomicity.
 
 FDP-42 is not a production enablement claim. It is a clean product-domain module with audited lifecycle mutations.
 It is not a regulated mutation finality claim, not evidence-gated finalize, not lease-fenced replay safety, and not

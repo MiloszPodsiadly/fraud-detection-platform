@@ -74,6 +74,110 @@ class Fdp42FraudCaseAuditAppendOnlyArchitectureTest {
         }
     }
 
+    @Test
+    void fraudCaseManagementServiceShouldUseInjectedLifecycleAndQueryServices() {
+        String source = read(sourceRoot().resolve(Path.of("service", "FraudCaseManagementService.java")));
+
+        assertThat(source)
+                .contains("FraudCaseLifecycleService lifecycleService")
+                .contains("FraudCaseQueryService queryService")
+                .doesNotContain("new FraudCaseLifecycleService")
+                .doesNotContain("new FraudCaseQueryService");
+    }
+
+    @Test
+    void fraudCaseManagementServiceShouldDelegateLifecycleAndQueryOperations() {
+        String source = read(sourceRoot().resolve(Path.of("service", "FraudCaseManagementService.java")));
+
+        assertThat(source)
+                .contains("return queryService.listCases();")
+                .contains("return queryService.listCases(pageable);")
+                .contains("return queryService.getCase(caseId);")
+                .contains("return queryService.searchCases(status, assignee, priority, riskLevel, createdFrom, createdTo, linkedAlertId, pageable);")
+                .contains("return queryService.auditTrail(caseId);")
+                .contains("return lifecycleService.createCase(request);")
+                .contains("return lifecycleService.assignCase(caseId, request);")
+                .contains("return lifecycleService.addNote(caseId, request);")
+                .contains("return lifecycleService.addDecision(caseId, request);")
+                .contains("return lifecycleService.transitionCase(caseId, request);")
+                .contains("return lifecycleService.closeCase(caseId, request);")
+                .contains("return lifecycleService.reopenCase(caseId, request);")
+                .doesNotContain("noteRepository.save")
+                .doesNotContain("decisionRepository.save")
+                .doesNotContain("auditRepository.save");
+    }
+
+    @Test
+    void fraudCaseQueryServiceShouldRemainReadOnly() {
+        String source = read(sourceRoot().resolve(Path.of("service", "FraudCaseQueryService.java")));
+
+        assertThat(source)
+                .doesNotContain(".save(")
+                .doesNotContain(".insert(")
+                .doesNotContain(".update")
+                .doesNotContain(".remove(")
+                .doesNotContain("MongoTemplate");
+    }
+
+    @Test
+    void fraudCaseControllerShouldNotContainLifecyclePolicyOrSystemIngestion() {
+        String source = read(sourceRoot().resolve(Path.of("controller", "FraudCaseController.java")));
+
+        assertThat(source)
+                .doesNotContain("FraudCaseStatus.")
+                .doesNotContain("FraudCaseLifecycleService")
+                .doesNotContain("FraudCaseTransitionPolicy")
+                .doesNotContain("handleScoredTransaction");
+    }
+
+    @Test
+    void fraudCaseControllerShouldUsePagedListOnly() {
+        String source = read(sourceRoot().resolve(Path.of("controller", "FraudCaseController.java")));
+
+        assertThat(source)
+                .contains("PageRequest.of(page, size")
+                .contains("fraudCaseManagementService.listCases(pageable)")
+                .doesNotContain("fraudCaseManagementService.listCases()");
+    }
+
+    @Test
+    void fraudCaseRepositoriesShouldNotContainLifecyclePolicyLogic() throws IOException {
+        Path persistenceRoot = sourceRoot().resolve("persistence");
+
+        try (var files = Files.walk(persistenceRoot)) {
+            List<Path> offenders = files
+                    .filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().endsWith("Repository.java"))
+                    .filter(path -> {
+                        String source = read(path);
+                        return source.contains("FraudCaseTransitionPolicy")
+                                || source.contains("validateTransition")
+                                || source.contains("ALLOWED_TRANSITIONS")
+                                || source.contains("allowedTransitions")
+                                || source.contains("FraudCaseStatus.");
+                    })
+                    .toList();
+
+            assertThat(offenders).isEmpty();
+        }
+    }
+
+    @Test
+    void fraudCaseTransitionPolicyShouldOwnAllowedTransitionTable() throws IOException {
+        Path sourceRoot = sourceRoot();
+
+        try (var files = Files.walk(sourceRoot)) {
+            List<Path> offenders = files
+                    .filter(Files::isRegularFile)
+                    .filter(path -> path.toString().endsWith(".java"))
+                    .filter(path -> !path.endsWith(Path.of("FraudCaseTransitionPolicy.java")))
+                    .filter(path -> read(path).contains("ALLOWED_TRANSITIONS") || read(path).contains("allowedTransitions()"))
+                    .toList();
+
+            assertThat(offenders).isEmpty();
+        }
+    }
+
     private String read(Path path) {
         try {
             return Files.readString(path);

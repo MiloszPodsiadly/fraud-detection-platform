@@ -16,6 +16,7 @@ class Fdp42FraudCaseDocumentationNoOverclaimTest {
             "docs/api/fraud-case-api.md",
             "docs/architecture/fraud-case-management-architecture.md",
             "docs/fdp-42-merge-gate.md",
+            "docs/fdp-42-summary.md",
             "docs/index.md"
     );
 
@@ -40,6 +41,13 @@ class Fdp42FraudCaseDocumentationNoOverclaimTest {
         assertThat(docs).contains("actorid");
         assertThat(docs).contains("not idempotent");
         assertThat(docs).contains("must not blindly retry");
+        assertThat(docs).contains("post /fraud-cases");
+        assertThat(docs).contains("post /fraud-cases/{caseid}/assign");
+        assertThat(docs).contains("post /fraud-cases/{caseid}/notes");
+        assertThat(docs).contains("post /fraud-cases/{caseid}/decisions");
+        assertThat(docs).contains("post /fraud-cases/{caseid}/transition");
+        assertThat(docs).contains("post /fraud-cases/{caseid}/close");
+        assertThat(docs).contains("post /fraud-cases/{caseid}/reopen");
         assertThat(docs).contains("linkedalertids");
         assertThat(docs).contains("transactionids");
         assertThat(docs).contains("system-generated case candidate ingestion");
@@ -72,6 +80,20 @@ class Fdp42FraudCaseDocumentationNoOverclaimTest {
         assertThat(docs).doesNotContain("every case mutation is audited");
         assertThat(docs).contains("not worm storage");
         assertThat(docs).contains("not an analyst lifecycle mutation");
+        assertThat(docs).contains("not analyst lifecycle mutation");
+    }
+
+    @Test
+    void fdp42DocsShouldScopeAtomicRollbackToRequiredMongoTransactions() throws IOException {
+        String docs = readDocs().toLowerCase(java.util.Locale.ROOT);
+
+        assertThat(docs).contains("mongo transactions");
+        assertThat(docs).contains("transaction-mode=required");
+        assertThat(docs).contains("mongotransactionmanager");
+        assertThat(docs).contains("if transaction mode is `off`, fdp-42 must not claim rollback");
+        assertThat(docs).contains("atomicity");
+        assertThat(docs).doesNotContain("unconditional atomic rollback");
+        assertThat(docs).doesNotContain("rollback atomicity regardless of transaction mode");
     }
 
     private String readDocs() throws IOException {

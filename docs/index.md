@@ -75,6 +75,7 @@ FDP-38 fixture proof is test-fixture runtime evidence only. It is not production
 FDP-40 signed provenance readiness is readiness evidence only. It is not enforced signing unless a real
 sign-and-verify artifact or platform policy proves enforcement.
 
+- [FDP-42 proof summary](fdp-42-summary.md)
 - [FDP-40 merge gate](fdp-40-merge-gate.md)
 - [FDP-42 merge gate](fdp-42-merge-gate.md)
 - [FDP-39 merge gate](fdp-39-merge-gate.md)

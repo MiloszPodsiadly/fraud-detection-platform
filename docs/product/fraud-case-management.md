@@ -50,8 +50,8 @@ references.
 
 `handleScoredTransaction(...)` is event-derived candidate ingestion. It can create or update system-generated fraud
 case candidates from scored transaction events and transaction snapshots. This path is separate from analyst
-lifecycle mutations, does not represent investigator action or decision, and does not claim FDP-42 analyst lifecycle
-audit semantics.
+lifecycle mutations, is not analyst lifecycle mutation behavior, does not represent investigator action or decision,
+and does not claim FDP-42 analyst lifecycle audit semantics.
 
 ## Duplicate Submit Policy
 
@@ -66,6 +66,9 @@ Submitting the same create request again creates an independent case unless a fu
 Every analyst lifecycle mutation writes a `FraudCaseAuditEntryDocument` in the same
 `RegulatedMutationTransactionRunner` callback as the business state change. When the platform runs with Mongo transactions enabled
 (`app.regulated-mutations.transaction-mode=REQUIRED`), case state and audit append commit or roll back together.
+FDP-42 analyst lifecycle atomicity requires Mongo transactions. Bank-grade case+audit atomic rollback requires
+`app.regulated-mutations.transaction-mode=REQUIRED`; if transaction mode is `OFF`, FDP-42 must not claim rollback
+atomicity. Integration tests prove atomicity using `MongoTransactionManager` and transaction-mode `REQUIRED`.
 
 Audit details are intentionally small. They include identifiers and decision metadata such as assignment changes,
 note ids, decision ids, status changes, and close/reopen reasons; they do not store raw request payloads, raw

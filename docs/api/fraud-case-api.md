@@ -34,6 +34,30 @@ Authorities:
 - Lifecycle `POST` endpoints require `fraud-case:update`.
 - `GET /fraud-cases/{caseId}/audit` requires `fraud-case:audit:read` and intentionally returns audit `actorId`.
 
+List semantics:
+
+- `GET /fraud-cases` is paginated. The API accepts `page` and `size`; `size` is capped at 100.
+
+## POST Endpoint Idempotency
+
+For every local lifecycle `POST`: Idempotency: not idempotent unless explicitly stated. Do not blindly retry after
+ambiguous network failure.
+
+- `POST /fraud-cases`: Idempotency: not idempotent unless explicitly stated. Do not blindly retry after ambiguous
+  network failure. Repeated submit creates an independent case.
+- `POST /fraud-cases/{caseId}/assign`: Idempotency: not idempotent unless explicitly stated. Do not blindly retry
+  after ambiguous network failure. Same assignee assignment is accepted and audited as reassignment.
+- `POST /fraud-cases/{caseId}/notes`: Idempotency: not idempotent unless explicitly stated. Do not blindly retry
+  after ambiguous network failure. Repeated submit appends another note record and audit entry.
+- `POST /fraud-cases/{caseId}/decisions`: Idempotency: not idempotent unless explicitly stated. Do not blindly
+  retry after ambiguous network failure. Repeated submit appends another decision record and audit entry.
+- `POST /fraud-cases/{caseId}/transition`: Idempotency: not idempotent unless explicitly stated. Do not blindly
+  retry after ambiguous network failure. Repeated submit follows the lifecycle policy and may return `409`.
+- `POST /fraud-cases/{caseId}/close`: Idempotency: not idempotent unless explicitly stated. Do not blindly retry
+  after ambiguous network failure. Repeated submit may return `409` once the case is no longer closable.
+- `POST /fraud-cases/{caseId}/reopen`: Idempotency: not idempotent unless explicitly stated. Do not blindly retry
+  after ambiguous network failure. Repeated submit may return `409` once the case is no longer reopenable.
+
 ## Sample Requests
 
 ```json

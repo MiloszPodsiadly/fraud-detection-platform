@@ -46,6 +46,10 @@ All analyst lifecycle mutations are wrapped in `RegulatedMutationTransactionRunn
 mode this keeps the code path aligned with the rest of the service. In transaction-required deployments, Mongo
 transaction manager support provides atomic case state + audit persistence.
 
+FDP-42 analyst lifecycle atomicity requires Mongo transactions. Bank-grade case+audit atomic rollback requires
+`app.regulated-mutations.transaction-mode=REQUIRED`. If transaction mode is `OFF`, FDP-42 must not claim rollback
+atomicity. Integration tests prove atomicity using `MongoTransactionManager` and transaction-mode `REQUIRED`.
+
 This transaction runner is used only as the local Mongo transaction boundary for FDP-42 lifecycle operations. It does
 not make those operations regulated commands, replayable commands, lease-fenced commands, or externally finalized
 commands.
