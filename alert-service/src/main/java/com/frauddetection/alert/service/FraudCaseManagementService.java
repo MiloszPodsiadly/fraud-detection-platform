@@ -90,6 +90,8 @@ public class FraudCaseManagementService {
     private final FraudCaseTransitionPolicy transitionPolicy;
     private final FraudCaseAuditService caseAuditService;
     private final FraudCaseResponseMapper responseMapper;
+    private final FraudCaseLifecycleService lifecycleService;
+    private final FraudCaseQueryService queryService;
 
     public FraudCaseManagementService(
             FraudCaseRepository fraudCaseRepository,
@@ -123,9 +125,26 @@ public class FraudCaseManagementService {
         this.transitionPolicy = transitionPolicy;
         this.caseAuditService = caseAuditService;
         this.responseMapper = responseMapper;
+        this.lifecycleService = new FraudCaseLifecycleService(
+                fraudCaseRepository,
+                alertRepository,
+                noteRepository,
+                decisionRepository,
+                analystActorResolver,
+                transactionRunner,
+                transitionPolicy,
+                caseAuditService
+        );
+        this.queryService = new FraudCaseQueryService(
+                fraudCaseRepository,
+                auditRepository,
+                searchRepository,
+                responseMapper
+        );
     }
 
     public void handleScoredTransaction(TransactionScoredEvent event) {
+        // System-generated candidate ingestion; not an analyst lifecycle mutation.
         if (event.featureSnapshot() == null
                 || !Boolean.TRUE.equals(event.featureSnapshot().get("rapidTransferFraudCaseCandidate"))) {
             return;
@@ -153,61 +172,19 @@ public class FraudCaseManagementService {
     }
 
     public List<FraudCaseDocument> listCases() {
-        return fraudCaseRepository.findAll().stream()
-                .map(this::refreshTransactionDetails)
-                .toList();
+        return queryService.listCases();
     }
 
     public Page<FraudCaseDocument> listCases(Pageable pageable) {
-        return fraudCaseRepository.findAll(pageable)
-                .map(this::refreshTransactionDetails);
+        return queryService.listCases(pageable);
     }
 
     public FraudCaseDocument getCase(String caseId) {
-        return refreshTransactionDetails(fraudCaseRepository.findById(caseId)
-                .orElseThrow(() -> new FraudCaseNotFoundException(caseId)));
+        return queryService.getCase(caseId);
     }
 
     public FraudCaseDocument createCase(CreateFraudCaseRequest request) {
-        List<String> alertIds = normalizedIds(request.alertIds());
-        transitionPolicy.validateCreate(alertIds, request.priority());
-        Set<String> existingAlertIds = alertRepository.findAllById(alertIds).stream()
-                .map(alert -> alert.getAlertId())
-                .collect(Collectors.toSet());
-        List<String> missingAlertIds = alertIds.stream()
-                .filter(alertId -> !existingAlertIds.contains(alertId))
-                .toList();
-        if (!missingAlertIds.isEmpty()) {
-            throw new com.frauddetection.alert.exception.AlertNotFoundException(String.join(",", missingAlertIds));
-        }
-        String actorId = requiredActor(request.actorId(), "CREATE_FRAUD_CASE", "new");
-        return transactionRunner.runLocalCommit(() -> {
-            Instant now = Instant.now();
-            String caseNumber = caseNumber(now);
-            FraudCaseDocument document = new FraudCaseDocument();
-            document.setCaseId(UUID.randomUUID().toString());
-            document.setCaseNumber(caseNumber);
-            document.setCaseKey("FDP42:" + caseNumber);
-            document.setStatus(FraudCaseStatus.OPEN);
-            document.setPriority(request.priority());
-            document.setRiskLevel(request.riskLevel());
-            document.setLinkedAlertIds(alertIds);
-            document.setTransactionIds(List.of());
-            document.setReason(StringUtils.hasText(request.reason()) ? request.reason() : "Fraud alerts require investigator workflow.");
-            document.setCreatedBy(actorId);
-            document.setCreatedAt(now);
-            document.setUpdatedAt(now);
-            FraudCaseDocument saved = fraudCaseRepository.save(document);
-            caseAuditService.append(
-                    saved.getCaseId(),
-                    actorId,
-                    FraudCaseAuditAction.CASE_CREATED,
-                    null,
-                    saved.getStatus(),
-                    Map.of("alertCount", String.valueOf(alertIds.size()), "caseNumber", caseNumber)
-            );
-            return saved;
-        });
+        return lifecycleService.createCase(request);
     }
 
     public Page<FraudCaseSummaryResponse> searchCases(
@@ -220,161 +197,35 @@ public class FraudCaseManagementService {
             String linkedAlertId,
             Pageable pageable
     ) {
-        return searchRepository.search(
-                new FraudCaseSearchCriteria(status, assignee, priority, riskLevel, createdFrom, createdTo, linkedAlertId),
-                pageable
-        ).map(responseMapper::toSummary);
+        return queryService.searchCases(status, assignee, priority, riskLevel, createdFrom, createdTo, linkedAlertId, pageable);
     }
 
     public FraudCaseDocument assignCase(String caseId, AssignFraudCaseRequest request) {
-        return transactionRunner.runLocalCommit(() -> {
-            FraudCaseDocument document = loadCase(caseId);
-            transitionPolicy.validateAssign(document.getStatus(), request.assignedInvestigatorId());
-            String actorId = requiredActor(request.actorId(), "ASSIGN_FRAUD_CASE", caseId);
-            String previousAssignee = document.getAssignedInvestigatorId();
-            Instant now = Instant.now();
-            document.setAssignedInvestigatorId(request.assignedInvestigatorId());
-            document.setUpdatedAt(now);
-            FraudCaseDocument saved = fraudCaseRepository.save(document);
-            caseAuditService.append(
-                    caseId,
-                    actorId,
-                    StringUtils.hasText(previousAssignee) ? FraudCaseAuditAction.CASE_REASSIGNED : FraudCaseAuditAction.CASE_ASSIGNED,
-                    document.getStatus(),
-                    document.getStatus(),
-                    Map.of(
-                            "previousAssignee", previousAssignee == null ? "" : previousAssignee,
-                            "newAssignee", request.assignedInvestigatorId()
-                    )
-            );
-            return saved;
-        });
+        return lifecycleService.assignCase(caseId, request);
     }
 
     public FraudCaseNoteResponse addNote(String caseId, AddFraudCaseNoteRequest request) {
-        return transactionRunner.runLocalCommit(() -> {
-            FraudCaseDocument document = loadCase(caseId);
-            transitionPolicy.validateAddNote(document.getStatus(), request.body());
-            String actorId = requiredActor(request.actorId(), "ADD_FRAUD_CASE_NOTE", caseId);
-            Instant now = Instant.now();
-            FraudCaseNoteDocument note = new FraudCaseNoteDocument();
-            note.setId(UUID.randomUUID().toString());
-            note.setCaseId(caseId);
-            note.setBody(request.body());
-            note.setInternalOnly(request.internalOnly());
-            note.setCreatedBy(actorId);
-            note.setCreatedAt(now);
-            FraudCaseNoteDocument savedNote = noteRepository.save(note);
-            document.setUpdatedAt(now);
-            fraudCaseRepository.save(document);
-            caseAuditService.append(
-                    caseId,
-                    actorId,
-                    FraudCaseAuditAction.NOTE_ADDED,
-                    document.getStatus(),
-                    document.getStatus(),
-                    Map.of("noteId", savedNote.getId(), "internalOnly", String.valueOf(request.internalOnly()))
-            );
-            return toNoteResponse(savedNote);
-        });
+        return lifecycleService.addNote(caseId, request);
     }
 
     public FraudCaseDecisionResponse addDecision(String caseId, AddFraudCaseDecisionRequest request) {
-        return transactionRunner.runLocalCommit(() -> {
-            FraudCaseDocument document = loadCase(caseId);
-            transitionPolicy.validateAddDecision(document.getStatus(), request.decisionType(), request.summary());
-            String actorId = requiredActor(request.actorId(), "ADD_FRAUD_CASE_DECISION", caseId);
-            Instant now = Instant.now();
-            FraudCaseDecisionDocument decision = new FraudCaseDecisionDocument();
-            decision.setId(UUID.randomUUID().toString());
-            decision.setCaseId(caseId);
-            decision.setDecisionType(request.decisionType());
-            decision.setSummary(request.summary());
-            decision.setCreatedBy(actorId);
-            decision.setCreatedAt(now);
-            FraudCaseDecisionDocument savedDecision = decisionRepository.save(decision);
-            document.setUpdatedAt(now);
-            fraudCaseRepository.save(document);
-            caseAuditService.append(
-                    caseId,
-                    actorId,
-                    FraudCaseAuditAction.DECISION_ADDED,
-                    document.getStatus(),
-                    document.getStatus(),
-                    Map.of("decisionId", savedDecision.getId(), "decisionType", request.decisionType().name())
-            );
-            return toDecisionResponse(savedDecision);
-        });
+        return lifecycleService.addDecision(caseId, request);
     }
 
     public FraudCaseDocument transitionCase(String caseId, TransitionFraudCaseRequest request) {
-        return transactionRunner.runLocalCommit(() -> {
-            FraudCaseDocument document = loadCase(caseId);
-            FraudCaseStatus previousStatus = document.getStatus();
-            transitionPolicy.validateTransition(previousStatus, request.targetStatus());
-            String actorId = requiredActor(request.actorId(), "TRANSITION_FRAUD_CASE", caseId);
-            document.setStatus(request.targetStatus());
-            document.setUpdatedAt(Instant.now());
-            FraudCaseDocument saved = fraudCaseRepository.save(document);
-            caseAuditService.append(caseId, actorId, FraudCaseAuditAction.STATUS_CHANGED, previousStatus, request.targetStatus(), Map.of());
-            return saved;
-        });
+        return lifecycleService.transitionCase(caseId, request);
     }
 
     public FraudCaseDocument closeCase(String caseId, CloseFraudCaseRequest request) {
-        return transactionRunner.runLocalCommit(() -> {
-            FraudCaseDocument document = loadCase(caseId);
-            FraudCaseStatus previousStatus = document.getStatus();
-            transitionPolicy.validateClose(previousStatus, request.closureReason());
-            String actorId = requiredActor(request.actorId(), "CLOSE_FRAUD_CASE", caseId);
-            Instant now = Instant.now();
-            document.setStatus(FraudCaseStatus.CLOSED);
-            document.setClosureReason(request.closureReason());
-            document.setClosedAt(now);
-            document.setUpdatedAt(now);
-            FraudCaseDocument saved = fraudCaseRepository.save(document);
-            caseAuditService.append(
-                    caseId,
-                    actorId,
-                    FraudCaseAuditAction.CASE_CLOSED,
-                    previousStatus,
-                    FraudCaseStatus.CLOSED,
-                    Map.of("reason", request.closureReason())
-            );
-            return saved;
-        });
+        return lifecycleService.closeCase(caseId, request);
     }
 
     public FraudCaseDocument reopenCase(String caseId, ReopenFraudCaseRequest request) {
-        return transactionRunner.runLocalCommit(() -> {
-            FraudCaseDocument document = loadCase(caseId);
-            FraudCaseStatus previousStatus = document.getStatus();
-            transitionPolicy.validateReopen(previousStatus, request.reason());
-            String actorId = requiredActor(request.actorId(), "REOPEN_FRAUD_CASE", caseId);
-            document.setStatus(FraudCaseStatus.REOPENED);
-            document.setClosureReason(null);
-            document.setClosedAt(null);
-            document.setUpdatedAt(Instant.now());
-            FraudCaseDocument saved = fraudCaseRepository.save(document);
-            caseAuditService.append(
-                    caseId,
-                    actorId,
-                    FraudCaseAuditAction.CASE_REOPENED,
-                    previousStatus,
-                    FraudCaseStatus.REOPENED,
-                    Map.of("reason", request.reason())
-            );
-            return saved;
-        });
+        return lifecycleService.reopenCase(caseId, request);
     }
 
     public List<FraudCaseAuditResponse> auditTrail(String caseId) {
-        if (!fraudCaseRepository.existsById(caseId)) {
-            throw new FraudCaseNotFoundException(caseId);
-        }
-        return auditRepository.findByCaseIdOrderByOccurredAtAsc(caseId).stream()
-                .map(this::toAuditResponse)
-                .toList();
+        return queryService.auditTrail(caseId);
     }
 
     public UpdateFraudCaseResponse updateCase(String caseId, UpdateFraudCaseRequest request, String idempotencyKey) {
@@ -601,28 +452,7 @@ public class FraudCaseManagementService {
     }
 
     private FraudCaseDocument refreshTransactionDetails(FraudCaseDocument document) {
-        List<String> transactionIds = document.getTransactionIds() == null ? List.of() : document.getTransactionIds();
-        if (transactionIds.isEmpty()) {
-            return document;
-        }
-
-        List<String> existingIds = document.getTransactions() == null
-                ? List.of()
-                : document.getTransactions().stream().map(FraudCaseTransactionDocument::getTransactionId).toList();
-        if (existingIds.size() == transactionIds.size() && existingIds.containsAll(transactionIds)) {
-            return document;
-        }
-
-        List<FraudCaseTransactionDocument> transactions = caseTransactions(transactionIds, null);
-        if (transactions.isEmpty()) {
-            return document;
-        }
-
-        document.setTransactions(transactions);
-        document.setFirstTransactionAt(firstTransactionAt(transactions, document.getFirstTransactionAt()));
-        document.setLastTransactionAt(lastTransactionAt(transactions, document.getLastTransactionAt()));
-        document.setUpdatedAt(Instant.now());
-        return fraudCaseRepository.save(document);
+        return document;
     }
 
     private List<FraudCaseTransactionDocument> caseTransactions(List<String> transactionIds, TransactionScoredEvent currentEvent) {
