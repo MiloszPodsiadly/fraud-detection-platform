@@ -8,6 +8,11 @@ Fraud Case Management connects one or more fraud alerts to an investigator workf
 It is a product workflow for case triage and investigation; it does not add ML behavior, external CRM integration,
 document/file attachment storage, advanced RBAC, Kafka/outbox semantic changes, or production release controls.
 
+FDP-42 is a local audited lifecycle workflow. It is not a `RegulatedMutationCoordinator` workflow, not the FDP-29
+evidence-gated finalize model, not lease fenced, not replay safe, and not external finality. The legacy regulated
+`PATCH /fraud-cases/{caseId}` path remains separately available for backward compatibility and is not extended by
+these local lifecycle endpoints.
+
 ## Lifecycle
 
 | From | Allowed To |
@@ -34,6 +39,17 @@ explicit reopen with a reason.
 - Search by status, assignee, priority, risk level, creation window, or linked alert id.
 - Read the append-only case audit trail.
 
+Manual case creation stores request `alertIds` as `linkedAlertIds`. It does not copy those alert ids into
+`transactionIds`; `transactionIds` remains empty until transaction-derived case ingestion supplies real transaction
+references.
+
+## Duplicate Submit Policy
+
+The local lifecycle POST endpoints are intentionally non-idempotent. Repeating `notes` or `decisions` appends another
+note or decision and another audit entry. Clients must not blindly retry local lifecycle POSTs after ambiguous network
+failures. Repeated close or reopen is rejected by lifecycle policy when the current status no longer allows the
+requested transition. Reassigning to the same investigator is treated as an audited reassignment, not a replay.
+
 ## Audit And ACID Semantics
 
 Every case mutation writes a `FraudCaseAuditEntryDocument` in the same `RegulatedMutationTransactionRunner`
@@ -41,11 +57,12 @@ callback as the business state change. When the platform runs with Mongo transac
 (`app.regulated-mutations.transaction-mode=REQUIRED`), case state and audit append commit or roll back together.
 
 Audit details are intentionally small. They include identifiers and decision metadata such as assignment changes,
-note ids, decision ids, status changes, and close/reopen reasons; they do not store raw request payloads or stack
-traces.
+note ids, decision ids, status changes, and close/reopen reasons; they do not store raw request payloads, raw
+idempotency keys, lease owners, payload hashes, or stack traces. The audit endpoint intentionally exposes `actorId`
+to users with the dedicated `fraud-case:audit:read` authority.
 
 ## Operational Notes
 
 The module reuses `alert-service` authentication and authority boundaries. Read endpoints require
-`fraud-case:read`; mutation endpoints require `fraud-case:update`. Existing regulated fraud-case `PATCH` behavior
-remains in place for backward compatibility.
+`fraud-case:read`; mutation endpoints require `fraud-case:update`; audit history requires
+`fraud-case:audit:read`. Existing regulated fraud-case `PATCH` behavior remains in place for backward compatibility.

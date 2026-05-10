@@ -67,6 +67,9 @@ otherwise.
 The FDP-35 through FDP-40 documents are proof, readiness, or governance evidence. They are not production
 enablement and they are not bank certification.
 
+FDP-42 fraud case management is a local audited lifecycle workflow. It is not evidence-gated finalize, not a
+regulated mutation finality claim, not lease-fenced replay safety, and not external finality.
+
 FDP-38 fixture proof is test-fixture runtime evidence only. It is not production-image proof.
 
 FDP-40 signed provenance readiness is readiness evidence only. It is not enforced signing unless a real
