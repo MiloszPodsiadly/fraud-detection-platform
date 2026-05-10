@@ -101,6 +101,7 @@ public class FraudCaseLifecycleService {
         this.idempotencyService = idempotencyService;
     }
 
+    @Deprecated(forRemoval = false)
     public FraudCaseDocument createCase(CreateFraudCaseRequest request) {
         return createCase(request, null, false);
     }
@@ -111,15 +112,8 @@ public class FraudCaseLifecycleService {
 
     private FraudCaseDocument createCase(CreateFraudCaseRequest request, String idempotencyKey, boolean requireIdempotency) {
         List<String> alertIds = normalizedIds(request.alertIds());
-        transitionPolicy.validateCreate(alertIds, request.priority());
-        Set<String> existingAlertIds = alertRepository.findAllById(alertIds).stream()
-                .map(alert -> alert.getAlertId())
-                .collect(Collectors.toSet());
-        List<String> missingAlertIds = alertIds.stream()
-                .filter(alertId -> !existingAlertIds.contains(alertId))
-                .toList();
-        if (!missingAlertIds.isEmpty()) {
-            throw new com.frauddetection.alert.exception.AlertNotFoundException(String.join(",", missingAlertIds));
+        if (!requireIdempotency) {
+            transitionPolicy.validateCreate(alertIds, request.priority());
         }
         String actorId = requiredActor(request.actorId(), "CREATE_FRAUD_CASE", "new");
         return execute(command(
@@ -129,6 +123,16 @@ public class FraudCaseLifecycleService {
                 "CREATE",
                 payload("alertIds", alertIds, "priority", request.priority(), "riskLevel", request.riskLevel(), "reason", request.reason())
         ), () -> {
+            transitionPolicy.validateCreate(alertIds, request.priority());
+            Set<String> existingAlertIds = alertRepository.findAllById(alertIds).stream()
+                    .map(alert -> alert.getAlertId())
+                    .collect(Collectors.toSet());
+            List<String> missingAlertIds = alertIds.stream()
+                    .filter(alertId -> !existingAlertIds.contains(alertId))
+                    .toList();
+            if (!missingAlertIds.isEmpty()) {
+                throw new com.frauddetection.alert.exception.AlertNotFoundException(String.join(",", missingAlertIds));
+            }
             Instant now = Instant.now();
             String caseNumber = caseNumber(now);
             FraudCaseDocument document = new FraudCaseDocument();
@@ -157,6 +161,7 @@ public class FraudCaseLifecycleService {
         }, FraudCaseDocument.class, requireIdempotency);
     }
 
+    @Deprecated(forRemoval = false)
     public FraudCaseDocument assignCase(String caseId, AssignFraudCaseRequest request) {
         return assignCase(caseId, request, null, false);
     }
@@ -166,8 +171,6 @@ public class FraudCaseLifecycleService {
     }
 
     private FraudCaseDocument assignCase(String caseId, AssignFraudCaseRequest request, String idempotencyKey, boolean requireIdempotency) {
-        FraudCaseDocument current = loadCase(caseId);
-        transitionPolicy.validateAssign(current.getStatus(), request.assignedInvestigatorId());
         String actorId = requiredActor(request.actorId(), "ASSIGN_FRAUD_CASE", caseId);
         return execute(command(
                 idempotencyKey,
@@ -198,6 +201,7 @@ public class FraudCaseLifecycleService {
         }, FraudCaseDocument.class, requireIdempotency);
     }
 
+    @Deprecated(forRemoval = false)
     public FraudCaseNoteResponse addNote(String caseId, AddFraudCaseNoteRequest request) {
         return addNote(caseId, request, null, false);
     }
@@ -207,8 +211,10 @@ public class FraudCaseLifecycleService {
     }
 
     private FraudCaseNoteResponse addNote(String caseId, AddFraudCaseNoteRequest request, String idempotencyKey, boolean requireIdempotency) {
-        FraudCaseDocument current = loadCase(caseId);
-        transitionPolicy.validateAddNote(current.getStatus(), request.body());
+        if (!requireIdempotency) {
+            FraudCaseDocument document = loadCase(caseId);
+            transitionPolicy.validateAddNote(document.getStatus(), request.body());
+        }
         String actorId = requiredActor(request.actorId(), "ADD_FRAUD_CASE_NOTE", caseId);
         return execute(command(
                 idempotencyKey,
@@ -242,6 +248,7 @@ public class FraudCaseLifecycleService {
         }, FraudCaseNoteResponse.class, requireIdempotency);
     }
 
+    @Deprecated(forRemoval = false)
     public FraudCaseDecisionResponse addDecision(String caseId, AddFraudCaseDecisionRequest request) {
         return addDecision(caseId, request, null, false);
     }
@@ -251,8 +258,6 @@ public class FraudCaseLifecycleService {
     }
 
     private FraudCaseDecisionResponse addDecision(String caseId, AddFraudCaseDecisionRequest request, String idempotencyKey, boolean requireIdempotency) {
-        FraudCaseDocument current = loadCase(caseId);
-        transitionPolicy.validateAddDecision(current.getStatus(), request.decisionType(), request.summary());
         String actorId = requiredActor(request.actorId(), "ADD_FRAUD_CASE_DECISION", caseId);
         return execute(command(
                 idempotencyKey,
@@ -286,6 +291,7 @@ public class FraudCaseLifecycleService {
         }, FraudCaseDecisionResponse.class, requireIdempotency);
     }
 
+    @Deprecated(forRemoval = false)
     public FraudCaseDocument transitionCase(String caseId, TransitionFraudCaseRequest request) {
         return transitionCase(caseId, request, null, false);
     }
@@ -295,8 +301,6 @@ public class FraudCaseLifecycleService {
     }
 
     private FraudCaseDocument transitionCase(String caseId, TransitionFraudCaseRequest request, String idempotencyKey, boolean requireIdempotency) {
-        FraudCaseDocument current = loadCase(caseId);
-        transitionPolicy.validateTransition(current.getStatus(), request.targetStatus());
         String actorId = requiredActor(request.actorId(), "TRANSITION_FRAUD_CASE", caseId);
         return execute(command(
                 idempotencyKey,
@@ -316,6 +320,7 @@ public class FraudCaseLifecycleService {
         }, FraudCaseDocument.class, requireIdempotency);
     }
 
+    @Deprecated(forRemoval = false)
     public FraudCaseDocument closeCase(String caseId, CloseFraudCaseRequest request) {
         return closeCase(caseId, request, null, false);
     }
@@ -325,8 +330,6 @@ public class FraudCaseLifecycleService {
     }
 
     private FraudCaseDocument closeCase(String caseId, CloseFraudCaseRequest request, String idempotencyKey, boolean requireIdempotency) {
-        FraudCaseDocument current = loadCase(caseId);
-        transitionPolicy.validateClose(current.getStatus(), request.closureReason());
         String actorId = requiredActor(request.actorId(), "CLOSE_FRAUD_CASE", caseId);
         return execute(command(
                 idempotencyKey,
@@ -356,6 +359,7 @@ public class FraudCaseLifecycleService {
         }, FraudCaseDocument.class, requireIdempotency);
     }
 
+    @Deprecated(forRemoval = false)
     public FraudCaseDocument reopenCase(String caseId, ReopenFraudCaseRequest request) {
         return reopenCase(caseId, request, null, false);
     }
@@ -365,8 +369,6 @@ public class FraudCaseLifecycleService {
     }
 
     private FraudCaseDocument reopenCase(String caseId, ReopenFraudCaseRequest request, String idempotencyKey, boolean requireIdempotency) {
-        FraudCaseDocument current = loadCase(caseId);
-        transitionPolicy.validateReopen(current.getStatus(), request.reason());
         String actorId = requiredActor(request.actorId(), "REOPEN_FRAUD_CASE", caseId);
         return execute(command(
                 idempotencyKey,

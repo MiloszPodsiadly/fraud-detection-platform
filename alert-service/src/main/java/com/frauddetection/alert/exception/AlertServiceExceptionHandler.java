@@ -10,6 +10,7 @@ import com.frauddetection.alert.fraudcase.FraudCaseActorUnavailableException;
 import com.frauddetection.alert.fraudcase.FraudCaseConflictException;
 import com.frauddetection.alert.fraudcase.FraudCaseIdempotencyConflictException;
 import com.frauddetection.alert.fraudcase.FraudCaseIdempotencyInProgressException;
+import com.frauddetection.alert.fraudcase.FraudCaseIdempotencySnapshotTooLargeException;
 import com.frauddetection.alert.fraudcase.FraudCaseInvalidIdempotencyKeyException;
 import com.frauddetection.alert.fraudcase.FraudCaseMissingIdempotencyKeyException;
 import com.frauddetection.alert.fraudcase.FraudCaseNotFoundException;
@@ -269,6 +270,19 @@ public class AlertServiceExceptionHandler {
         );
     }
 
+    @ExceptionHandler(FraudCaseIdempotencySnapshotTooLargeException.class)
+    public ResponseEntity<ApiErrorResponse> handleFraudCaseIdempotencySnapshotTooLarge(FraudCaseIdempotencySnapshotTooLargeException exception) {
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
+                new ApiErrorResponse(
+                        Instant.now(),
+                        500,
+                        "Internal Server Error",
+                        "Fraud case lifecycle idempotency response snapshot exceeded the configured size limit.",
+                        List.of("code:IDEMPOTENCY_SNAPSHOT_TOO_LARGE")
+                )
+        );
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiErrorResponse> handleIllegalArgument(IllegalArgumentException exception) {
         return ResponseEntity.badRequest().body(
@@ -288,6 +302,9 @@ public class AlertServiceExceptionHandler {
 
     @ExceptionHandler(MissingRequestHeaderException.class)
     public ResponseEntity<ApiErrorResponse> handleMissingRequestHeader(MissingRequestHeaderException exception) {
+        if ("X-Idempotency-Key".equalsIgnoreCase(exception.getHeaderName())) {
+            return handleFraudCaseMissingIdempotencyKey(new FraudCaseMissingIdempotencyKeyException());
+        }
         return ResponseEntity.badRequest().body(
                 new ApiErrorResponse(
                         Instant.now(),

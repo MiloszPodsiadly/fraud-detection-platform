@@ -8,21 +8,27 @@ import com.frauddetection.alert.idempotency.SharedMissingIdempotencyKeyException
 import com.frauddetection.alert.persistence.FraudCaseLifecycleIdempotencyRecordDocument;
 import com.frauddetection.alert.persistence.FraudCaseLifecycleIdempotencyRepository;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.nio.charset.StandardCharsets;
 import java.util.function.Supplier;
 
 @Service
 public class FraudCaseLifecycleIdempotencyService {
+
+    public static final int MAX_RESPONSE_SNAPSHOT_BYTES = 64 * 1024;
 
     private final FraudCaseLifecycleIdempotencyRepository repository;
     private final SharedIdempotencyKeyPolicy keyPolicy;
     private final FraudCaseLifecycleIdempotencyConflictPolicy conflictPolicy;
     private final RegulatedMutationTransactionRunner transactionRunner;
     private final ObjectMapper objectMapper;
+    private final int maxResponseSnapshotBytes;
 
+    @Autowired
     public FraudCaseLifecycleIdempotencyService(
             FraudCaseLifecycleIdempotencyRepository repository,
             SharedIdempotencyKeyPolicy keyPolicy,
@@ -30,11 +36,23 @@ public class FraudCaseLifecycleIdempotencyService {
             RegulatedMutationTransactionRunner transactionRunner,
             ObjectMapper objectMapper
     ) {
+        this(repository, keyPolicy, conflictPolicy, transactionRunner, objectMapper, MAX_RESPONSE_SNAPSHOT_BYTES);
+    }
+
+    FraudCaseLifecycleIdempotencyService(
+            FraudCaseLifecycleIdempotencyRepository repository,
+            SharedIdempotencyKeyPolicy keyPolicy,
+            FraudCaseLifecycleIdempotencyConflictPolicy conflictPolicy,
+            RegulatedMutationTransactionRunner transactionRunner,
+            ObjectMapper objectMapper,
+            int maxResponseSnapshotBytes
+    ) {
         this.repository = repository;
         this.keyPolicy = keyPolicy;
         this.conflictPolicy = conflictPolicy;
         this.transactionRunner = transactionRunner;
         this.objectMapper = objectMapper;
+        this.maxResponseSnapshotBytes = maxResponseSnapshotBytes;
     }
 
     public <T> T execute(FraudCaseLifecycleIdempotencyCommand command, Supplier<T> mutation, Class<T> responseType) {
@@ -57,7 +75,7 @@ public class FraudCaseLifecycleIdempotencyService {
             Supplier<T> mutation,
             Class<T> responseType
     ) {
-        return repository.findByIdempotencyKeyHashAndActionAndActorIdAndCaseIdScope(
+        return findRecord(
                         keyHash,
                         command.action(),
                         command.actorId(),
@@ -83,9 +101,9 @@ public class FraudCaseLifecycleIdempotencyService {
         record.setStatus(FraudCaseLifecycleIdempotencyStatus.IN_PROGRESS);
         record.setCreatedAt(command.now());
         try {
-            repository.save(record);
+            saveRecord(record);
         } catch (DuplicateKeyException exception) {
-            FraudCaseLifecycleIdempotencyRecordDocument existing = repository.findByIdempotencyKeyHashAndActionAndActorIdAndCaseIdScope(
+            FraudCaseLifecycleIdempotencyRecordDocument existing = findRecord(
                             keyHash,
                             command.action(),
                             command.actorId(),
@@ -99,7 +117,7 @@ public class FraudCaseLifecycleIdempotencyService {
         record.setResponseStatus("COMPLETED");
         record.setStatus(FraudCaseLifecycleIdempotencyStatus.COMPLETED);
         record.setCompletedAt(command.now());
-        repository.save(record);
+        saveRecord(record);
         return response;
     }
 
@@ -128,7 +146,11 @@ public class FraudCaseLifecycleIdempotencyService {
 
     private String snapshot(Object response) {
         try {
-            return objectMapper.writeValueAsString(response);
+            String serialized = objectMapper.writeValueAsString(response);
+            if (serialized.getBytes(StandardCharsets.UTF_8).length > maxResponseSnapshotBytes) {
+                throw new FraudCaseIdempotencySnapshotTooLargeException();
+            }
+            return serialized;
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("Fraud case lifecycle idempotency response snapshot failed.", exception);
         }
@@ -140,5 +162,23 @@ public class FraudCaseLifecycleIdempotencyService {
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("Fraud case lifecycle idempotency response replay failed.", exception);
         }
+    }
+
+    protected FraudCaseLifecycleIdempotencyRecordDocument saveRecord(FraudCaseLifecycleIdempotencyRecordDocument record) {
+        return repository.save(record);
+    }
+
+    protected java.util.Optional<FraudCaseLifecycleIdempotencyRecordDocument> findRecord(
+            String keyHash,
+            String action,
+            String actorId,
+            String caseIdScope
+    ) {
+        return repository.findByIdempotencyKeyHashAndActionAndActorIdAndCaseIdScope(
+                keyHash,
+                action,
+                actorId,
+                caseIdScope
+        );
     }
 }
