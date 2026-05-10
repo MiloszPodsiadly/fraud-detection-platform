@@ -7,6 +7,9 @@ import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.alert.fraudcase.FraudCaseConflictException;
+import com.frauddetection.alert.fraudcase.FraudCaseIdempotencyConflictException;
+import com.frauddetection.alert.fraudcase.FraudCaseIdempotencyInProgressException;
+import com.frauddetection.alert.fraudcase.FraudCaseInvalidIdempotencyKeyException;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
@@ -31,12 +34,14 @@ import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.assertj.core.api.Assertions.assertThat;
 
 @WebMvcTest(
         controllers = FraudCaseController.class,
@@ -156,9 +161,6 @@ class FraudCaseControllerTest {
 
     @Test
     void shouldReturnLocalMissingIdempotencyErrorForLifecyclePost() throws Exception {
-        when(fraudCaseManagementService.createCase(any(), isNull()))
-                .thenThrow(new com.frauddetection.alert.fraudcase.FraudCaseMissingIdempotencyKeyException());
-
         mockMvc.perform(post("/api/fraud-cases")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -166,6 +168,78 @@ class FraudCaseControllerTest {
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.details[0]").value("code:MISSING_IDEMPOTENCY_KEY"));
+
+        verify(fraudCaseManagementService, never()).createCase(any(), any());
+    }
+
+    @Test
+    void shouldReturnMissingIdempotencyForNotesWithoutCallingService() throws Exception {
+        mockMvc.perform(post("/api/fraud-cases/case-1/notes")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"note\",\"actorId\":\"analyst-1\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.details[0]").value("code:MISSING_IDEMPOTENCY_KEY"));
+
+        verify(fraudCaseManagementService, never()).addNote(any(), any(), any());
+    }
+
+    @Test
+    void shouldMapInvalidConflictAndInProgressIdempotencyErrorsSafely() throws Exception {
+        when(fraudCaseManagementService.createCase(any(), eq("invalid key")))
+                .thenThrow(new FraudCaseInvalidIdempotencyKeyException());
+        when(fraudCaseManagementService.createCase(any(), eq("conflict-key")))
+                .thenThrow(new FraudCaseIdempotencyConflictException());
+        when(fraudCaseManagementService.addNote(eq("case-1"), any(), eq("progress-key")))
+                .thenThrow(new FraudCaseIdempotencyInProgressException());
+
+        String invalid = mockMvc.perform(post("/api/fraud-cases")
+                        .header("X-Idempotency-Key", "invalid key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"alertIds":["alert-1"],"priority":"HIGH","riskLevel":"CRITICAL","actorId":"analyst-1"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.details[0]").value("code:INVALID_IDEMPOTENCY_KEY"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        assertThat(invalid)
+                .doesNotContain("invalid key")
+                .doesNotContain("requestHash")
+                .doesNotContain("FraudCaseInvalidIdempotencyKeyException")
+                .doesNotContain("java.lang");
+
+        String conflict = mockMvc.perform(post("/api/fraud-cases")
+                        .header("X-Idempotency-Key", "conflict-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"alertIds":["alert-1"],"priority":"HIGH","riskLevel":"CRITICAL","actorId":"analyst-1"}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.details[0]").value("code:IDEMPOTENCY_KEY_CONFLICT"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        assertThat(conflict)
+                .doesNotContain("conflict-key")
+                .doesNotContain("requestHash")
+                .doesNotContain("FraudCaseIdempotencyConflictException")
+                .doesNotContain("java.lang");
+
+        String inProgress = mockMvc.perform(post("/api/fraud-cases/case-1/notes")
+                        .header("X-Idempotency-Key", "progress-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"note\",\"actorId\":\"analyst-1\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.details[0]").value("code:IDEMPOTENCY_KEY_IN_PROGRESS"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        assertThat(inProgress)
+                .doesNotContain("progress-key")
+                .doesNotContain("requestHash")
+                .doesNotContain("FraudCaseIdempotencyInProgressException")
+                .doesNotContain("java.lang");
     }
 
     private FraudCaseDocument caseDocument() {

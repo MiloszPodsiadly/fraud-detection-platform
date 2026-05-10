@@ -133,6 +133,23 @@ class FraudCaseSecurityIntegrationTest {
     }
 
     @Test
+    void shouldValidateMissingIdempotencyAfterAuthorization() throws Exception {
+        mockMvc.perform(post("/api/v1/fraud-cases")
+                        .with(userWith(AnalystAuthority.FRAUD_CASE_UPDATE))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createPayload()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.details[0]").value("code:MISSING_IDEMPOTENCY_KEY"));
+
+        mockMvc.perform(post("/api/v1/fraud-cases")
+                        .with(userWith(AnalystAuthority.FRAUD_CASE_READ))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createPayload()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.details[0]").value("reason:insufficient_authority"));
+    }
+
+    @Test
     void shouldRequireDedicatedAuthorityForFraudCaseAuditTrail() throws Exception {
         when(fraudCaseManagementService.auditTrail("case-1")).thenReturn(List.of(new FraudCaseAuditResponse(
                 "audit-1",
