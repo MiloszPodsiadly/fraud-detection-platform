@@ -181,7 +181,13 @@ class FraudCaseLifecycleIdempotencyFailureIntegrationTest extends AbstractIntegr
                         idempotencyService,
                         responseMapper
                 ),
-                new FraudCaseQueryService(caseRepository, auditRepository, searchRepository, responseMapper)
+                new FraudCaseQueryService(
+                        caseRepository,
+                        auditRepository,
+                        searchRepository,
+                        responseMapper,
+                        new FraudCaseWorkQueueProperties(java.time.Duration.ofHours(24))
+                )
         );
     }
 

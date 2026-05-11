@@ -1,5 +1,7 @@
 package com.frauddetection.alert.controller;
 
+import com.frauddetection.alert.api.FraudCaseWorkQueueSliceResponse;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueQueryException;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
@@ -7,7 +9,6 @@ import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.service.FraudCaseManagementService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.util.LinkedMultiValueMap;
@@ -27,15 +28,16 @@ class Fdp45FraudCaseWorkQueueSortingTest {
     private final FraudCaseController controller = new FraudCaseController(
             service,
             new FraudCaseResponseMapper(new AlertResponseMapper()),
-            mock(AlertServiceMetrics.class)
+            mock(AlertServiceMetrics.class),
+            mock(SensitiveReadAuditService.class)
     );
 
     @Test
     void shouldAllowOnlyStableSortFieldsAndDirections() {
         when(service.workQueue(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(Pageable.class)))
-                .thenReturn(new PageImpl<>(List.of()));
+                .thenReturn(new FraudCaseWorkQueueSliceResponse(List.of(), 0, 20, false, null));
 
-        controller.listCases(0, 20, "updatedAt,asc", null, null, null, null, null, null, null, null, null, null, params("sort", "updatedAt,asc"));
+        controller.workQueue(0, 20, "updatedAt,asc", null, null, null, null, null, null, null, null, null, null, null, params("sort", "updatedAt,asc"));
 
         ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
         verify(service).workQueue(any(), any(), any(), any(), any(), any(), any(), any(), any(), captor.capture());
@@ -43,11 +45,11 @@ class Fdp45FraudCaseWorkQueueSortingTest {
         assertThat(order).isNotNull();
         assertThat(order.getDirection()).isEqualTo(Sort.Direction.ASC);
 
-        assertThatThrownBy(() -> controller.listCases(0, 20, "customerId,desc", null, null, null, null, null, null, null, null, null, null, params("sort", "customerId,desc")))
+        assertThatThrownBy(() -> controller.workQueue(0, 20, "customerId,desc", null, null, null, null, null, null, null, null, null, null, null, params("sort", "customerId,desc")))
                 .isInstanceOf(FraudCaseWorkQueueQueryException.class)
                 .extracting("code")
                 .isEqualTo("UNSUPPORTED_SORT_FIELD");
-        assertThatThrownBy(() -> controller.listCases(0, 20, "createdAt,sideways", null, null, null, null, null, null, null, null, null, null, params("sort", "createdAt,sideways")))
+        assertThatThrownBy(() -> controller.workQueue(0, 20, "createdAt,sideways", null, null, null, null, null, null, null, null, null, null, null, params("sort", "createdAt,sideways")))
                 .isInstanceOf(FraudCaseWorkQueueQueryException.class)
                 .extracting("code")
                 .isEqualTo("UNSUPPORTED_SORT_DIRECTION");

@@ -761,7 +761,8 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
                         caseRepository,
                         auditRepository,
                         searchRepository,
-                        responseMapper
+                        responseMapper,
+                        new FraudCaseWorkQueueProperties(java.time.Duration.ofHours(24))
                 )
         );
     }

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.api.FraudCaseAuditResponse;
 import com.frauddetection.alert.api.FraudCaseSlaStatus;
 import com.frauddetection.alert.api.FraudCaseWorkQueueItemResponse;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.controller.FraudCaseController;
 import com.frauddetection.alert.domain.FraudCaseAuditAction;
 import com.frauddetection.alert.domain.FraudCasePriority;
@@ -74,6 +75,9 @@ class FraudCaseSecurityIntegrationTest {
     @MockBean
     private AlertServiceMetrics alertServiceMetrics;
 
+    @MockBean
+    private SensitiveReadAuditService sensitiveReadAuditService;
+
     @Test
     void shouldRequireAuthenticationForFraudCaseReadAndMutationEndpoints() throws Exception {
         mockMvc.perform(get("/api/v1/fraud-cases"))
@@ -97,13 +101,17 @@ class FraudCaseSecurityIntegrationTest {
 
     @Test
     void shouldAllowReadAuthorityForCurrentAndLegacyReadPaths() throws Exception {
+        when(fraudCaseManagementService.listCases(any(Pageable.class))).thenReturn(new PageImpl<>(List.of(caseDocument())));
         when(fraudCaseManagementService.workQueue(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(Pageable.class)))
-                .thenReturn(new PageImpl<>(List.of(workQueueItem())));
+                .thenReturn(new com.frauddetection.alert.api.FraudCaseWorkQueueSliceResponse(List.of(workQueueItem()), 0, 20, false, null));
         when(fraudCaseManagementService.getCase("case-1")).thenReturn(caseDocument());
 
         mockMvc.perform(get("/api/v1/fraud-cases").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].caseId").value("case-1"));
+        mockMvc.perform(get("/api/v1/fraud-cases/work-queue").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].linkedAlertCount").value(1));
         mockMvc.perform(get("/api/fraud-cases/case-1").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.caseId").value("case-1"));

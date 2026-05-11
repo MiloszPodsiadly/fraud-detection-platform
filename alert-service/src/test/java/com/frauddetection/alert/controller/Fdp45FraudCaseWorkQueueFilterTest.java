@@ -1,5 +1,7 @@
 package com.frauddetection.alert.controller;
 
+import com.frauddetection.alert.api.FraudCaseWorkQueueSliceResponse;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueQueryException;
@@ -9,7 +11,6 @@ import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.service.FraudCaseManagementService;
 import com.frauddetection.common.events.enums.RiskLevel;
 import org.junit.jupiter.api.Test;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.util.LinkedMultiValueMap;
 
@@ -29,20 +30,21 @@ class Fdp45FraudCaseWorkQueueFilterTest {
     private final FraudCaseController controller = new FraudCaseController(
             service,
             new FraudCaseResponseMapper(new AlertResponseMapper()),
-            mock(AlertServiceMetrics.class)
+            mock(AlertServiceMetrics.class),
+            mock(SensitiveReadAuditService.class)
     );
 
     @Test
     void shouldPassOnlyAllowlistedFiltersAndRejectUnknownOrInvalidRanges() {
         when(service.workQueue(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(Pageable.class)))
-                .thenReturn(new PageImpl<>(List.of()));
+                .thenReturn(new FraudCaseWorkQueueSliceResponse(List.of(), 0, 20, false, null));
         Instant createdFrom = Instant.parse("2026-05-10T10:00:00Z");
         Instant createdTo = Instant.parse("2026-05-11T10:00:00Z");
         Instant updatedFrom = Instant.parse("2026-05-10T11:00:00Z");
         Instant updatedTo = Instant.parse("2026-05-11T11:00:00Z");
 
-        controller.listCases(0, 20, "createdAt,desc", FraudCaseStatus.OPEN, null, "investigator-1", FraudCasePriority.HIGH,
-                RiskLevel.CRITICAL, createdFrom, createdTo, updatedFrom, updatedTo, "alert-1", params(
+        controller.workQueue(0, 20, "createdAt,desc", FraudCaseStatus.OPEN, null, "investigator-1", FraudCasePriority.HIGH,
+                RiskLevel.CRITICAL, createdFrom, createdTo, updatedFrom, updatedTo, "alert-1", null, params(
                         "status", "OPEN",
                         "assignedInvestigatorId", "investigator-1",
                         "priority", "HIGH",
@@ -56,13 +58,13 @@ class Fdp45FraudCaseWorkQueueFilterTest {
 
         verify(service).workQueue(eq(FraudCaseStatus.OPEN), eq("investigator-1"), eq(FraudCasePriority.HIGH), eq(RiskLevel.CRITICAL),
                 eq(createdFrom), eq(createdTo), eq(updatedFrom), eq(updatedTo), eq("alert-1"), any(Pageable.class));
-        assertThatThrownBy(() -> controller.listCases(0, 20, "createdAt,desc", null, null, null, null, null,
-                createdTo, createdFrom, null, null, null, params()))
+        assertThatThrownBy(() -> controller.workQueue(0, 20, "createdAt,desc", null, null, null, null, null,
+                createdTo, createdFrom, null, null, null, null, params()))
                 .isInstanceOf(FraudCaseWorkQueueQueryException.class)
                 .extracting("code")
                 .isEqualTo("INVALID_FILTER_RANGE");
-        assertThatThrownBy(() -> controller.listCases(0, 20, "createdAt,desc", null, null, null, null, null,
-                null, null, null, null, null, params("customerId", "customer-1")))
+        assertThatThrownBy(() -> controller.workQueue(0, 20, "createdAt,desc", null, null, null, null, null,
+                null, null, null, null, null, null, params("customerId", "customer-1")))
                 .isInstanceOf(FraudCaseWorkQueueQueryException.class)
                 .extracting("code")
                 .isEqualTo("UNSUPPORTED_FILTER");

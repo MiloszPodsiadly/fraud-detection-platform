@@ -235,7 +235,8 @@ class FraudCaseLifecycleIdempotencyGlobalKeyRegressionIntegrationTest extends Ab
                         caseRepository,
                         auditRepository,
                         new MongoFraudCaseSearchRepository(mongoTemplate),
-                        responseMapper
+                        responseMapper,
+                        new FraudCaseWorkQueueProperties(java.time.Duration.ofHours(24))
                 )
         );
     }

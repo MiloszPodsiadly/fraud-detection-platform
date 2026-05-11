@@ -8,10 +8,12 @@ import com.frauddetection.alert.persistence.FraudCaseAuditRepository;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.persistence.FraudCaseRepository;
 import org.junit.jupiter.api.Test;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.SliceImpl;
 
 import java.time.Instant;
+import java.time.Clock;
+import java.time.Duration;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -33,16 +35,18 @@ class Fdp45FraudCaseWorkQueueReadOnlySafetyTest {
         document.setStatus(FraudCaseStatus.OPEN);
         document.setCreatedAt(Instant.parse("2026-05-10T10:00:00Z"));
         document.setUpdatedAt(Instant.parse("2026-05-10T11:00:00Z"));
-        when(searchRepository.search(any(), any())).thenReturn(new PageImpl<>(List.of(document)));
+        when(searchRepository.searchSlice(any(), any())).thenReturn(new SliceImpl<>(List.of(document)));
         FraudCaseQueryService service = new FraudCaseQueryService(
                 repository,
                 auditRepository,
                 searchRepository,
-                new FraudCaseResponseMapper(new AlertResponseMapper())
+                new FraudCaseResponseMapper(new AlertResponseMapper()),
+                Clock.systemUTC(),
+                Duration.ofHours(24)
         );
 
         var item = service.workQueue(null, null, null, null, null, null, null, null, null, PageRequest.of(0, 20))
-                .getContent()
+                .content()
                 .getFirst();
 
         assertThat(item.caseAgeSeconds()).isNotNull();

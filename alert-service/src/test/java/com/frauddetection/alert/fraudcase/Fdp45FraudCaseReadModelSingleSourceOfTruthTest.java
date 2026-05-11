@@ -15,24 +15,34 @@ class Fdp45FraudCaseReadModelSingleSourceOfTruthTest {
         String controller = read("controller/FraudCaseController.java");
         String queryService = read("service/FraudCaseQueryService.java");
         String searchRepository = read("fraudcase/MongoFraudCaseSearchRepository.java");
+        String queryPolicy = read("fraudcase/FraudCaseWorkQueueQueryPolicy.java");
 
         assertThat(controller)
+                .contains("@GetMapping(\"/work-queue\")")
                 .contains("fraudCaseManagementService.workQueue(")
-                .doesNotContain("fraudCaseManagementService.searchCases(")
-                .doesNotContain("fraudCaseManagementService.listCases(pageable)")
+                .contains("FraudCaseWorkQueueQueryPolicy")
                 .doesNotContain("MongoTemplate")
                 .doesNotContain("Criteria.where")
                 .doesNotContain("new Query(");
         assertThat(queryService)
-                .contains("searchRepository.search(")
+                .contains("searchRepository.searchSlice(")
                 .contains("new FraudCaseSearchCriteria(")
                 .doesNotContain("MongoTemplate")
                 .doesNotContain("Criteria.where")
                 .doesNotContain("new Query(");
         assertThat(searchRepository)
                 .contains("class MongoFraudCaseSearchRepository")
-                .contains("stableSort(")
-                .contains("Sort.Order.asc(\"_id\")");
+                .contains("searchSlice(")
+                .contains("stableSort(");
+        assertThat(queryPolicy)
+                .contains("Sort.Order.asc(TIE_BREAKER_FIELD)");
+        assertThat(searchSliceMethod(searchRepository)).doesNotContain(".count(");
+    }
+
+    private String searchSliceMethod(String source) {
+        int start = source.indexOf("public Slice<FraudCaseDocument> searchSlice");
+        int end = source.indexOf("private List<Criteria> criteria", start);
+        return source.substring(start, end);
     }
 
     private String read(String relativePath) throws IOException {

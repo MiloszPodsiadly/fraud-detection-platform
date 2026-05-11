@@ -11,8 +11,8 @@ import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.persistence.FraudCaseRepository;
 import com.frauddetection.common.events.enums.RiskLevel;
 import org.junit.jupiter.api.Test;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.SliceImpl;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -34,7 +34,7 @@ class Fdp45FraudCaseWorkQueueSlaAgeTest {
         FraudCaseDocument breached = caseDocument("case-breached", FraudCaseStatus.IN_REVIEW, "2026-05-09T12:00:00Z", "2026-05-10T07:00:00Z");
         FraudCaseDocument closed = caseDocument("case-closed", FraudCaseStatus.CLOSED, "2026-05-10T12:00:00Z", "2026-05-10T13:00:00Z");
         FraudCaseDocument unknown = caseDocument("case-unknown", FraudCaseStatus.OPEN, null, "2026-05-11T07:00:00Z");
-        when(searchRepository.search(any(), any())).thenReturn(new PageImpl<>(List.of(open, breached, closed, unknown)));
+        when(searchRepository.searchSlice(any(), any())).thenReturn(new SliceImpl<>(List.of(open, breached, closed, unknown)));
         FraudCaseQueryService service = new FraudCaseQueryService(
                 mock(FraudCaseRepository.class),
                 mock(FraudCaseAuditRepository.class),
@@ -44,7 +44,7 @@ class Fdp45FraudCaseWorkQueueSlaAgeTest {
                 Duration.ofHours(24)
         );
 
-        var items = service.workQueue(null, null, null, null, null, null, null, null, null, PageRequest.of(0, 20)).getContent();
+        var items = service.workQueue(null, null, null, null, null, null, null, null, null, PageRequest.of(0, 20)).content();
 
         assertThat(items.get(0).caseAgeSeconds()).isEqualTo(79_200L);
         assertThat(items.get(0).lastUpdatedAgeSeconds()).isEqualTo(10_800L);

@@ -1,6 +1,8 @@
 package com.frauddetection.alert.controller;
 
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
+import com.frauddetection.alert.api.FraudCaseWorkQueueSliceResponse;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueQueryException;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
@@ -8,7 +10,6 @@ import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.service.FraudCaseManagementService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.util.LinkedMultiValueMap;
 
@@ -28,26 +29,27 @@ class Fdp45FraudCaseWorkQueuePaginationTest {
     private final FraudCaseController controller = new FraudCaseController(
             service,
             new FraudCaseResponseMapper(new AlertResponseMapper()),
-            metrics
+            metrics,
+            mock(SensitiveReadAuditService.class)
     );
 
     @Test
     void shouldEnforceBoundedPaginationAndPassPageableToAuthoritativeQueryPath() {
         when(service.workQueue(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(Pageable.class)))
-                .thenReturn(new PageImpl<>(List.of()));
+                .thenReturn(new FraudCaseWorkQueueSliceResponse(List.of(), 2, 100, false, null));
 
-        controller.listCases(2, 100, "createdAt,desc", null, null, null, null, null, null, null, null, null, null, params("page", "2", "size", "100"));
+        controller.workQueue(2, 100, "createdAt,desc", null, null, null, null, null, null, null, null, null, null, null, params("page", "2", "size", "100"));
 
         ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
         verify(service).workQueue(any(), any(), any(), any(), any(), any(), any(), any(), any(), captor.capture());
         assertThat(captor.getValue().getPageNumber()).isEqualTo(2);
         assertThat(captor.getValue().getPageSize()).isEqualTo(100);
 
-        assertThatThrownBy(() -> controller.listCases(-1, 20, "createdAt,desc", null, null, null, null, null, null, null, null, null, null, params()))
+        assertThatThrownBy(() -> controller.workQueue(-1, 20, "createdAt,desc", null, null, null, null, null, null, null, null, null, null, null, params()))
                 .isInstanceOf(FraudCaseWorkQueueQueryException.class)
                 .extracting("code")
                 .isEqualTo("INVALID_PAGE_REQUEST");
-        assertThatThrownBy(() -> controller.listCases(0, 101, "createdAt,desc", null, null, null, null, null, null, null, null, null, null, params()))
+        assertThatThrownBy(() -> controller.workQueue(0, 101, "createdAt,desc", null, null, null, null, null, null, null, null, null, null, null, params()))
                 .isInstanceOf(FraudCaseWorkQueueQueryException.class)
                 .extracting("code")
                 .isEqualTo("INVALID_PAGE_REQUEST");

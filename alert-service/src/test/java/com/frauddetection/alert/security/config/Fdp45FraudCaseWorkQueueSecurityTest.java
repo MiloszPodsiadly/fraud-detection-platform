@@ -3,6 +3,8 @@ package com.frauddetection.alert.security.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.controller.FraudCaseController;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
+import com.frauddetection.alert.api.FraudCaseWorkQueueSliceResponse;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
@@ -16,7 +18,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -58,17 +59,20 @@ class Fdp45FraudCaseWorkQueueSecurityTest {
     @MockBean
     private AlertServiceMetrics alertServiceMetrics;
 
+    @MockBean
+    private SensitiveReadAuditService sensitiveReadAuditService;
+
     @Test
     void shouldRequireFraudCaseReadForWorkQueueAndKeepReadOnlyUsersFromMutating() throws Exception {
         when(fraudCaseManagementService.workQueue(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(Pageable.class)))
-                .thenReturn(new PageImpl<>(List.of()));
+                .thenReturn(new FraudCaseWorkQueueSliceResponse(List.of(), 0, 20, false, null));
 
-        mockMvc.perform(get("/api/v1/fraud-cases"))
+        mockMvc.perform(get("/api/v1/fraud-cases/work-queue"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.details[0]").value("reason:missing_credentials"));
-        mockMvc.perform(get("/api/v1/fraud-cases").with(userWith(AnalystAuthority.TRANSACTION_MONITOR_READ)))
+        mockMvc.perform(get("/api/v1/fraud-cases/work-queue").with(userWith(AnalystAuthority.TRANSACTION_MONITOR_READ)))
                 .andExpect(status().isForbidden());
-        mockMvc.perform(get("/api/v1/fraud-cases").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
+        mockMvc.perform(get("/api/v1/fraud-cases/work-queue").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
                 .andExpect(status().isOk());
         mockMvc.perform(post("/api/v1/fraud-cases")
                         .with(userWith(AnalystAuthority.FRAUD_CASE_READ))

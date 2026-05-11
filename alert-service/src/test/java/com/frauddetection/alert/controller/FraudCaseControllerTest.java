@@ -3,7 +3,10 @@ package com.frauddetection.alert.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.api.CreateFraudCaseRequest;
 import com.frauddetection.alert.api.FraudCaseSlaStatus;
+import com.frauddetection.alert.api.FraudCaseSummaryResponse;
 import com.frauddetection.alert.api.FraudCaseWorkQueueItemResponse;
+import com.frauddetection.alert.api.FraudCaseWorkQueueSliceResponse;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
@@ -72,6 +75,9 @@ class FraudCaseControllerTest {
     @MockBean
     private AlertServiceMetrics alertServiceMetrics;
 
+    @MockBean
+    private SensitiveReadAuditService sensitiveReadAuditService;
+
     @Test
     void shouldCreateFraudCase() throws Exception {
         when(fraudCaseManagementService.createCase(any(), eq("create-key-1"))).thenReturn(responseMapper.toResponse(caseDocument()));
@@ -96,6 +102,27 @@ class FraudCaseControllerTest {
 
     @Test
     void shouldSearchFraudCases() throws Exception {
+        FraudCaseSummaryResponse summary = responseMapper.toSummary(caseDocument());
+        when(fraudCaseManagementService.searchCases(
+                eq(FraudCaseStatus.OPEN),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(Pageable.class)
+        )).thenReturn(new PageImpl<>(List.of(summary)));
+
+        mockMvc.perform(get("/api/fraud-cases").param("status", "OPEN"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].caseId").value("case-1"))
+                .andExpect(jsonPath("$.content[0].linkedAlertIds[0]").value("alert-1"))
+                .andExpect(jsonPath("$.totalElements").value(1));
+    }
+
+    @Test
+    void shouldReturnDedicatedWorkQueueSlice() throws Exception {
         when(fraudCaseManagementService.workQueue(
                 eq(FraudCaseStatus.OPEN),
                 any(),
@@ -107,26 +134,26 @@ class FraudCaseControllerTest {
                 any(),
                 any(),
                 any(Pageable.class)
-        )).thenReturn(new PageImpl<>(List.of(workQueueItem())));
+        )).thenReturn(workQueueSlice());
 
-        mockMvc.perform(get("/api/fraud-cases").param("status", "OPEN"))
+        mockMvc.perform(get("/api/fraud-cases/work-queue").param("status", "OPEN"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].caseId").value("case-1"))
                 .andExpect(jsonPath("$.content[0].linkedAlertCount").value(1))
-                .andExpect(jsonPath("$.totalElements").value(1));
+                .andExpect(jsonPath("$.hasNext").value(false));
     }
 
     @Test
     void shouldRejectUnsupportedWorkQueueSortAndUnknownFilters() throws Exception {
-        mockMvc.perform(get("/api/fraud-cases").param("sort", "customerId,desc"))
+        mockMvc.perform(get("/api/fraud-cases/work-queue").param("sort", "customerId,desc"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.details[0]").value("code:UNSUPPORTED_SORT_FIELD"));
 
-        mockMvc.perform(get("/api/fraud-cases").param("customerId", "customer-1"))
+        mockMvc.perform(get("/api/fraud-cases/work-queue").param("customerId", "customer-1"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.details[0]").value("code:UNSUPPORTED_FILTER"));
 
-        mockMvc.perform(get("/api/fraud-cases").param("size", "101"))
+        mockMvc.perform(get("/api/fraud-cases/work-queue").param("size", "101"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.details[0]").value("code:INVALID_PAGE_REQUEST"));
     }
@@ -291,5 +318,9 @@ class FraudCaseControllerTest {
                 Instant.parse("2026-05-11T10:00:00Z"),
                 1
         );
+    }
+
+    private FraudCaseWorkQueueSliceResponse workQueueSlice() {
+        return new FraudCaseWorkQueueSliceResponse(List.of(workQueueItem()), 0, 20, false, null);
     }
 }
