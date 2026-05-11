@@ -288,7 +288,8 @@ class FraudCaseLifecycleIdempotencyConcurrencyIntegrationTest extends AbstractIn
                         caseRepository,
                         auditRepository,
                         searchRepository,
-                        responseMapper
+                        responseMapper,
+                        new FraudCaseWorkQueueProperties(java.time.Duration.ofHours(24))
                 )
         );
     }

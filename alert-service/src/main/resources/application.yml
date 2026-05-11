@@ -39,6 +39,10 @@ management:
             requests: true
 
 app:
+  fraud-cases:
+    work-queue:
+      sla: ${FRAUD_CASE_WORK_QUEUE_SLA:PT24H}
+      cursor-signing-secret: ${FRAUD_CASE_WORK_QUEUE_CURSOR_SIGNING_SECRET:local-dev-work-queue-cursor-secret-change-me}
   regulated-mutations:
     transaction-mode: ${REGULATED_MUTATIONS_TRANSACTION_MODE:OFF}
     evidence-gated-finalize:

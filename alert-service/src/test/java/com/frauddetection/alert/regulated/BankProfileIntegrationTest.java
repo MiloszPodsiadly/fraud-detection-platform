@@ -23,6 +23,7 @@ class BankProfileIntegrationTest {
         assertThat(properties.getProperty("app.outbox.recovery.enabled")).isEqualTo("true");
         assertThat(properties.getProperty("app.outbox.confirmation.dual-control.enabled")).isEqualTo("true");
         assertThat(properties.getProperty("app.audit.bank-mode.fail-closed")).isEqualTo("true");
+        assertThat(properties.getProperty("app.fraud-cases.work-queue.sla")).isEqualTo("${FRAUD_CASE_WORK_QUEUE_SLA}");
         assertThat(properties.getProperty("app.sensitive-reads.audit.fail-closed")).isEqualTo("true");
         assertThat(properties.getProperty("app.audit.external-anchoring.publication.enabled")).isEqualTo("true");
         assertThat(properties.getProperty("app.audit.external-anchoring.publication.required")).isEqualTo("true");

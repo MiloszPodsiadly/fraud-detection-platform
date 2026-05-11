@@ -961,8 +961,8 @@ paths:
     get:
       summary: List fraud cases
       description: >-
-        Returns a paged fraud-case list. Size is bounded to 100. When filters are present, search is delegated to the
-        fraud-case query service. This is a read-only endpoint and must not perform lifecycle mutation behavior.
+        Returns the existing paged fraud-case summary contract for list/search clients. FDP-45 keeps this endpoint
+        compatible; investigator work queue fields are exposed only by /api/v1/fraud-cases/work-queue.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -973,6 +973,7 @@ paths:
           schema:
             type: integer
             minimum: 0
+            maximum: 1000
             default: 0
         - name: size
           in: query
@@ -1021,7 +1022,7 @@ paths:
             type: string
       responses:
         "200":
-          description: Paged fraud cases returned.
+          description: Paged fraud-case summaries returned.
           content:
             application/json:
               schema:
@@ -1072,6 +1073,131 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "409":
           $ref: "#/components/responses/Conflict"
+  /api/v1/fraud-cases/work-queue:
+    get:
+      summary: List fraud case work queue
+      description: >-
+        Returns a bounded investigator work queue slice using the existing FraudCaseQueryService and
+        FraudCaseSearchRepository path. Cursor/keyset pagination is recommended for long traversal; page remains a
+        bounded offset compatibility mode with maximum page 1000. Cursor values are opaque, signed, not encrypted,
+        versioned, bound to the original filters and sort, and must not be parsed, logged, used as confidential storage,
+        copied into audit payloads, or used as metric labels by clients. Cursor pagination is not snapshot isolation
+        and does not freeze the work queue. Changing filters or sort with a cursor returns INVALID_CURSOR. A cursor with
+        page other than 0 returns INVALID_CURSOR_PAGE_COMBINATION. Existing cursors may become invalid after cursor signing secret rotation. It
+        is read-only, audited as a sensitive read, rejects duplicate single-valued query params, derives SLA fields from
+        app.fraud-cases.work-queue.sla, and does not perform an exact count.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: Bounded offset compatibility mode. Use cursor for long queue traversal. Must be absent or 0 when cursor is supplied.
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 1000
+            default: 0
+        - name: size
+          in: query
+          required: false
+          description: Bounded slice size. Cursor is bound to filters and sort, not size; changing size within bounds is allowed.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: sort
+          in: query
+          required: false
+          description: Allowlisted stable sort in field,direction form. Supported fields are createdAt, updatedAt, priority, riskLevel, and caseNumber. priority and riskLevel sorting uses stored enum value order, not a custom business severity ranking.
+          schema:
+            type: string
+            maxLength: 64
+            default: createdAt,desc
+            example: updatedAt,asc
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque signed, not encrypted, versioned cursor returned by the previous work queue response. It is bound to the original filters and sort, not size. Clients must not parse it, log it, treat it as confidential storage, or persist it long-term; unsupported versions, tampering, malformed values, secret rotation, filter mismatches, or sort mismatches return INVALID_CURSOR. Cursor with page other than 0 returns INVALID_CURSOR_PAGE_COMBINATION.
+          schema:
+            type: string
+            maxLength: 2048
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/FraudCaseStatus"
+        - name: assignee
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 128
+        - name: assignedInvestigatorId
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 128
+        - name: priority
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/FraudCasePriority"
+        - name: riskLevel
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/RiskLevel"
+        - name: createdFrom
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: createdTo
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: updatedFrom
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: updatedTo
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: linkedAlertId
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 128
+      responses:
+        "200":
+          description: Bounded fraud-case work queue slice returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FraudCaseWorkQueueSlice"
+        "400":
+          description: Bad request. Includes INVALID_CURSOR when cursor validation, filter binding, or sort binding fails, and INVALID_CURSOR_PAGE_COMBINATION when cursor mode is combined with non-zero page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /api/v1/fraud-cases/{caseId}:
     get:
       summary: Get one fraud case
@@ -1500,6 +1626,7 @@ paths:
           schema:
             type: integer
             minimum: 0
+            maximum: 1000
             default: 0
         - name: size
           in: query
@@ -2680,6 +2807,84 @@ components:
           type: integer
         size:
           type: integer
+    FraudCaseWorkQueueSlice:
+      type: object
+      additionalProperties: false
+      required: [content, page, size, hasNext]
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/FraudCaseWorkQueueItemResponse"
+        page:
+          type: integer
+        size:
+          type: integer
+        hasNext:
+          type: boolean
+        nextPage:
+          type: integer
+          nullable: true
+          description: Compatibility page-mode pointer. Null when cursor mode is used or there is no next page.
+        nextCursor:
+          type: string
+          nullable: true
+          description: Opaque signed cursor for the next slice. It is bound to the current filters and sort. Clients must not parse it.
+        sort:
+          type: string
+          nullable: true
+          description: Stable sort used for this slice.
+    FraudCaseSlaStatus:
+      type: string
+      enum:
+        - NOT_APPLICABLE
+        - WITHIN_SLA
+        - NEAR_BREACH
+        - BREACHED
+        - UNKNOWN
+    FraudCaseWorkQueueItemResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        caseId:
+          type: string
+        caseNumber:
+          type: string
+          nullable: true
+        status:
+          $ref: "#/components/schemas/FraudCaseStatus"
+        priority:
+          $ref: "#/components/schemas/FraudCasePriority"
+        riskLevel:
+          $ref: "#/components/schemas/RiskLevel"
+        assignedInvestigatorId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        caseAgeSeconds:
+          type: integer
+          format: int64
+          nullable: true
+        lastUpdatedAgeSeconds:
+          type: integer
+          format: int64
+          nullable: true
+        slaStatus:
+          $ref: "#/components/schemas/FraudCaseSlaStatus"
+        slaDeadlineAt:
+          type: string
+          format: date-time
+          nullable: true
+        linkedAlertCount:
+          type: integer
+          minimum: 0
     FraudCaseSummaryResponse:
       type: object
       additionalProperties: false

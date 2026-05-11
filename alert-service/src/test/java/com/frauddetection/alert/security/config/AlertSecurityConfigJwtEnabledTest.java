@@ -8,6 +8,7 @@ import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.api.UpdateFraudCaseRequest;
 import com.frauddetection.alert.api.UpdateFraudCaseResponse;
 import com.frauddetection.alert.assistant.AnalystCaseSummaryUseCase;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.controller.AlertController;
 import com.frauddetection.alert.controller.FraudCaseController;
 import com.frauddetection.alert.controller.ScoredTransactionController;
@@ -106,11 +107,15 @@ class AlertSecurityConfigJwtEnabledTest {
     @MockBean
     private AlertServiceMetrics alertServiceMetrics;
 
+    @MockBean
+    private SensitiveReadAuditService sensitiveReadAuditService;
+
     @BeforeEach
     void setUp() {
         when(alertManagementUseCase.listAlerts(any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
         when(transactionMonitoringUseCase.listScoredTransactions(any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
-        when(fraudCaseManagementService.listCases(any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
+        when(fraudCaseManagementService.listCases(any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of()));
         when(jwtDecoder.decode(startsWith("token-"))).thenAnswer(invocation -> switch (invocation.getArgument(0, String.class)) {
             case "token-analyst" -> jwt("analyst-1", List.of("fraud-analyst"));
             case "token-readonly" -> jwt("readonly-1", List.of("fraud-readonly-analyst"));

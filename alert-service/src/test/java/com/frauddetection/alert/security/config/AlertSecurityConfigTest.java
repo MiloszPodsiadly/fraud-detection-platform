@@ -464,7 +464,8 @@ class AlertSecurityConfigTest {
 
     @Test
     void shouldAllowReadOnlyAnalystToListFraudCases() throws Exception {
-        when(fraudCaseManagementService.listCases(any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
+        when(fraudCaseManagementService.listCases(any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of()));
 
         mockMvc.perform(get("/api/v1/fraud-cases").with(demoUser("READ_ONLY_ANALYST")))
                 .andExpect(status().isOk())

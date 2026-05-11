@@ -94,6 +94,7 @@ class Fdp42FraudCaseAuditAppendOnlyArchitectureTest {
                 .contains("return queryService.listCases(pageable);")
                 .contains("return queryService.getCase(caseId);")
                 .contains("return queryService.searchCases(status, assignee, priority, riskLevel, createdFrom, createdTo, linkedAlertId, pageable);")
+                .contains("return queryService.workQueue(status, assignee, priority, riskLevel, createdFrom, createdTo, updatedFrom, updatedTo, linkedAlertId, pageable);")
                 .contains("return queryService.auditTrail(caseId);")
                 .contains("return lifecycleService.createCase(request, idempotencyKey);")
                 .contains("return lifecycleService.assignCase(caseId, request, idempotencyKey);")
@@ -136,7 +137,7 @@ class Fdp42FraudCaseAuditAppendOnlyArchitectureTest {
 
         assertThat(source)
                 .contains("PageRequest.of(page, size")
-                .contains("fraudCaseManagementService.listCases(pageable)")
+                .contains("fraudCaseManagementService.workQueue(")
                 .doesNotContain("fraudCaseManagementService.listCases()");
     }
 

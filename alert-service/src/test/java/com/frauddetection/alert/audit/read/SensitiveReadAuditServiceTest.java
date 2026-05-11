@@ -4,6 +4,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.server.ResponseStatusException;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -62,5 +63,27 @@ class SensitiveReadAuditServiceTest {
                 org.mockito.ArgumentMatchers.eq(100),
                 org.mockito.ArgumentMatchers.isNull()
         );
+    }
+
+    @Test
+    void shouldMarkRequestAsAuditedAfterManualSensitiveReadAuditSucceeds() {
+        ReadAccessAuditService delegate = mock(ReadAccessAuditService.class);
+        SensitiveReadAuditPolicy policy = mock(SensitiveReadAuditPolicy.class);
+        when(policy.failClosed()).thenReturn(false);
+        SensitiveReadAuditService service = new SensitiveReadAuditService(delegate, policy);
+        org.springframework.mock.web.MockHttpServletRequest request = new org.springframework.mock.web.MockHttpServletRequest(
+                "GET",
+                "/api/v1/fraud-cases/work-queue"
+        );
+
+        service.audit(
+                ReadAccessEndpointCategory.FRAUD_CASE_WORK_QUEUE,
+                ReadAccessResourceType.FRAUD_CASE,
+                null,
+                1,
+                request
+        );
+
+        assertThat(request.getAttribute(ReadAccessAuditResponseAdvice.AUDITED_ATTRIBUTE)).isEqualTo(Boolean.TRUE);
     }
 }

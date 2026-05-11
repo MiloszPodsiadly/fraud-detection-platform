@@ -15,6 +15,7 @@ import com.frauddetection.alert.fraudcase.FraudCaseInvalidIdempotencyKeyExceptio
 import com.frauddetection.alert.fraudcase.FraudCaseMissingIdempotencyKeyException;
 import com.frauddetection.alert.fraudcase.FraudCaseNotFoundException;
 import com.frauddetection.alert.fraudcase.FraudCaseValidationException;
+import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueQueryException;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryLookupUnavailableException;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryNotFoundException;
 import com.frauddetection.alert.governance.audit.GovernanceAuditActorUnavailableException;
@@ -239,6 +240,13 @@ public class AlertServiceExceptionHandler {
     public ResponseEntity<ApiErrorResponse> handleFraudCaseValidation(FraudCaseValidationException exception) {
         return ResponseEntity.badRequest().body(
                 new ApiErrorResponse(Instant.now(), 400, "Bad Request", exception.getMessage(), List.of("reason:FRAUD_CASE_VALIDATION_FAILED"))
+        );
+    }
+
+    @ExceptionHandler(FraudCaseWorkQueueQueryException.class)
+    public ResponseEntity<ApiErrorResponse> handleFraudCaseWorkQueueQuery(FraudCaseWorkQueueQueryException exception) {
+        return ResponseEntity.badRequest().body(
+                new ApiErrorResponse(Instant.now(), 400, "Bad Request", exception.getMessage(), List.of("code:" + exception.code()))
         );
     }
 
