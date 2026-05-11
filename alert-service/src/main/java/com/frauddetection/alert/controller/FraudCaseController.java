@@ -25,7 +25,7 @@ import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueQueryException;
-import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueQueryPolicy;
+import com.frauddetection.alert.fraudcase.FraudCaseReadQueryPolicy;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.service.FraudCaseManagementService;
@@ -84,7 +84,7 @@ public class FraudCaseController {
             @RequestParam(required = false) Instant createdTo,
             @RequestParam(required = false) String linkedAlertId
     ) {
-        FraudCaseWorkQueueQueryPolicy.validateLegacyListPagination(page, size);
+        FraudCaseReadQueryPolicy.validateLegacyListPagination(page, size);
         var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         var result = hasSearchFilters(status, assignee, priority, riskLevel, createdFrom, createdTo, linkedAlertId)
                 ? fraudCaseManagementService.searchCases(status, assignee, priority, riskLevel, createdFrom, createdTo, linkedAlertId, pageable)
@@ -103,7 +103,7 @@ public class FraudCaseController {
     public FraudCaseWorkQueueSliceResponse workQueue(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
-            @RequestParam(defaultValue = FraudCaseWorkQueueQueryPolicy.DEFAULT_SORT) String sort,
+            @RequestParam(defaultValue = FraudCaseReadQueryPolicy.DEFAULT_SORT) String sort,
             @RequestParam(required = false) FraudCaseStatus status,
             @RequestParam(required = false) String assignee,
             @RequestParam(required = false) String assignedInvestigatorId,
@@ -119,14 +119,14 @@ public class FraudCaseController {
     ) {
         Sort.Order sortOrder = null;
         try {
-            FraudCaseWorkQueueQueryPolicy.validateAllowedParameters(requestParams);
-            FraudCaseWorkQueueQueryPolicy.validateSingleValueParameters(requestParams);
-            FraudCaseWorkQueueQueryPolicy.validatePagination(page, size);
-            FraudCaseWorkQueueQueryPolicy.validateStringFilters(assignee, assignedInvestigatorId, linkedAlertId, sort);
-            FraudCaseWorkQueueQueryPolicy.validateRange("createdAt", createdFrom, createdTo);
-            FraudCaseWorkQueueQueryPolicy.validateRange("updatedAt", updatedFrom, updatedTo);
+            FraudCaseReadQueryPolicy.validateWorkQueueAllowedParameters(requestParams);
+            FraudCaseReadQueryPolicy.validateWorkQueueSingleValueParameters(requestParams);
+            FraudCaseReadQueryPolicy.validateWorkQueuePagination(page, size);
+            FraudCaseReadQueryPolicy.validateWorkQueueStringFilters(assignee, assignedInvestigatorId, linkedAlertId, sort);
+            FraudCaseReadQueryPolicy.validateRange("createdAt", createdFrom, createdTo);
+            FraudCaseReadQueryPolicy.validateRange("updatedAt", updatedFrom, updatedTo);
             String normalizedAssignee = assignee(assignee, assignedInvestigatorId);
-            sortOrder = FraudCaseWorkQueueQueryPolicy.sortOrder(sort);
+            sortOrder = FraudCaseReadQueryPolicy.workQueueSortOrder(sort);
             var result = fraudCaseManagementService.workQueue(
                     status,
                     normalizedAssignee,
@@ -137,7 +137,7 @@ public class FraudCaseController {
                     updatedFrom,
                     updatedTo,
                     linkedAlertId,
-                    FraudCaseWorkQueueQueryPolicy.boundedPageable(page, size, sortOrder)
+                    FraudCaseReadQueryPolicy.boundedWorkQueuePageable(page, size, sortOrder)
             );
             sensitiveReadAuditService.audit(
                     ReadAccessEndpointCategory.FRAUD_CASE_WORK_QUEUE,
@@ -296,7 +296,7 @@ public class FraudCaseController {
             return "default";
         }
         String field = sort.trim().split(",")[0];
-        return StringUtils.hasText(field) && FraudCaseWorkQueueQueryPolicy.SORT_FIELDS.contains(field) ? field : "default";
+        return StringUtils.hasText(field) && FraudCaseReadQueryPolicy.SORT_FIELDS.contains(field) ? field : "default";
     }
 
     private boolean hasSearchFilters(

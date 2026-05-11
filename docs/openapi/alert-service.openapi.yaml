@@ -973,6 +973,7 @@ paths:
           schema:
             type: integer
             minimum: 0
+            maximum: 1000
             default: 0
         - name: size
           in: query

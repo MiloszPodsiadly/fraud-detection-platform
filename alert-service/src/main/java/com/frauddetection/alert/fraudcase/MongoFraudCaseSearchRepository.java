@@ -32,7 +32,7 @@ public class MongoFraudCaseSearchRepository implements FraudCaseSearchRepository
         criteria(criteria).forEach(query::addCriteria);
         long total = mongoTemplate.count(query, FraudCaseDocument.class);
         query.with(guardedPageable);
-        query.with(stableSort(guardedPageable.getSort()));
+        query.with(stableReadSort(guardedPageable.getSort()));
         List<FraudCaseDocument> content = mongoTemplate.find(query, FraudCaseDocument.class);
         return new PageImpl<>(content, guardedPageable, total);
     }
@@ -42,7 +42,7 @@ public class MongoFraudCaseSearchRepository implements FraudCaseSearchRepository
         Pageable guardedPageable = guardPageSize(pageable);
         Query query = new Query();
         criteria(criteria).forEach(query::addCriteria);
-        query.with(FraudCaseWorkQueueQueryPolicy.stableSort(guardedPageable.getSort()));
+        query.with(FraudCaseReadQueryPolicy.stableReadSort(guardedPageable.getSort()));
         query.skip(guardedPageable.getOffset());
         query.limit(guardedPageable.getPageSize() + 1);
         List<FraudCaseDocument> fetched = mongoTemplate.find(query, FraudCaseDocument.class);
@@ -93,18 +93,18 @@ public class MongoFraudCaseSearchRepository implements FraudCaseSearchRepository
         return filters;
     }
 
-    private Sort stableSort(Sort requestedSort) {
-        return FraudCaseWorkQueueQueryPolicy.stableSort(requestedSort);
+    private Sort stableReadSort(Sort requestedSort) {
+        return FraudCaseReadQueryPolicy.stableReadSort(requestedSort);
     }
 
     private Pageable guardPageSize(Pageable pageable) {
-        FraudCaseWorkQueueQueryPolicy.validatePagination(pageable.getPageNumber(), Math.min(pageable.getPageSize(), FraudCaseWorkQueueQueryPolicy.MAX_PAGE_SIZE));
-        if (pageable.getPageSize() <= FraudCaseWorkQueueQueryPolicy.MAX_PAGE_SIZE) {
+        FraudCaseReadQueryPolicy.validateRepositoryPageBounds(pageable.getPageNumber(), Math.min(pageable.getPageSize(), FraudCaseReadQueryPolicy.MAX_PAGE_SIZE));
+        if (pageable.getPageSize() <= FraudCaseReadQueryPolicy.MAX_PAGE_SIZE) {
             return pageable;
         }
         return org.springframework.data.domain.PageRequest.of(
                 pageable.getPageNumber(),
-                FraudCaseWorkQueueQueryPolicy.MAX_PAGE_SIZE,
+                FraudCaseReadQueryPolicy.MAX_PAGE_SIZE,
                 pageable.getSort()
         );
     }

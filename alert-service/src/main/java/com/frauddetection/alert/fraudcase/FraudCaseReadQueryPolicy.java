@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
-public final class FraudCaseWorkQueueQueryPolicy {
+public final class FraudCaseReadQueryPolicy {
 
     public static final int MAX_PAGE_SIZE = 100;
     public static final int MAX_PAGE_NUMBER = 1000;
@@ -37,10 +37,10 @@ public final class FraudCaseWorkQueueQueryPolicy {
     public static final Set<String> SINGLE_VALUE_PARAMS = ALLOWED_QUERY_PARAMS;
     public static final Set<String> SORT_FIELDS = Set.of("createdAt", "updatedAt", "priority", "riskLevel", "caseNumber");
 
-    private FraudCaseWorkQueueQueryPolicy() {
+    private FraudCaseReadQueryPolicy() {
     }
 
-    public static void validateAllowedParameters(MultiValueMap<String, String> requestParams) {
+    public static void validateWorkQueueAllowedParameters(MultiValueMap<String, String> requestParams) {
         List<String> unsupported = requestParams.keySet().stream()
                 .filter(param -> !ALLOWED_QUERY_PARAMS.contains(param))
                 .toList();
@@ -49,7 +49,7 @@ public final class FraudCaseWorkQueueQueryPolicy {
         }
     }
 
-    public static void validateSingleValueParameters(MultiValueMap<String, String> requestParams) {
+    public static void validateWorkQueueSingleValueParameters(MultiValueMap<String, String> requestParams) {
         List<String> duplicated = requestParams.entrySet().stream()
                 .filter(entry -> SINGLE_VALUE_PARAMS.contains(entry.getKey()))
                 .filter(entry -> entry.getValue() != null && entry.getValue().size() > 1)
@@ -60,19 +60,25 @@ public final class FraudCaseWorkQueueQueryPolicy {
         }
     }
 
-    public static void validatePagination(int page, int size) {
+    public static void validateWorkQueuePagination(int page, int size) {
         if (page < 0 || page > MAX_PAGE_NUMBER || size < 1 || size > MAX_PAGE_SIZE) {
             throw new FraudCaseWorkQueueQueryException("INVALID_PAGE_REQUEST", "Invalid fraud case work queue page request.");
         }
     }
 
     public static void validateLegacyListPagination(int page, int size) {
-        if (page < 0 || size < 1 || size > MAX_PAGE_SIZE) {
+        if (page < 0 || page > MAX_PAGE_NUMBER || size < 1 || size > MAX_PAGE_SIZE) {
             throw new FraudCaseWorkQueueQueryException("INVALID_PAGE_REQUEST", "Invalid fraud case list page request.");
         }
     }
 
-    public static void validateStringFilters(String assignee, String assignedInvestigatorId, String linkedAlertId, String sort) {
+    public static void validateRepositoryPageBounds(int page, int size) {
+        if (page < 0 || page > MAX_PAGE_NUMBER || size < 1 || size > MAX_PAGE_SIZE) {
+            throw new FraudCaseWorkQueueQueryException("INVALID_PAGE_REQUEST", "Invalid fraud case read page request.");
+        }
+    }
+
+    public static void validateWorkQueueStringFilters(String assignee, String assignedInvestigatorId, String linkedAlertId, String sort) {
         validateLength(assignee, MAX_FILTER_VALUE_LENGTH, "INVALID_FILTER", "Invalid fraud case work queue filter.");
         validateLength(assignedInvestigatorId, MAX_FILTER_VALUE_LENGTH, "INVALID_FILTER", "Invalid fraud case work queue filter.");
         validateLength(linkedAlertId, MAX_FILTER_VALUE_LENGTH, "INVALID_FILTER", "Invalid fraud case work queue filter.");
@@ -91,7 +97,7 @@ public final class FraudCaseWorkQueueQueryPolicy {
         }
     }
 
-    public static Sort.Order sortOrder(String sort) {
+    public static Sort.Order workQueueSortOrder(String sort) {
         String value = StringUtils.hasText(sort) ? sort.trim() : DEFAULT_SORT;
         String[] parts = value.split(",");
         if (parts.length > 2 || !SORT_FIELDS.contains(parts[0])) {
@@ -108,14 +114,14 @@ public final class FraudCaseWorkQueueQueryPolicy {
         return new Sort.Order(direction, parts[0]);
     }
 
-    public static Pageable boundedPageable(int page, int size, Sort.Order sortOrder) {
-        validatePagination(page, size);
+    public static Pageable boundedWorkQueuePageable(int page, int size, Sort.Order sortOrder) {
+        validateWorkQueuePagination(page, size);
         return PageRequest.of(page, size, Sort.by(sortOrder));
     }
 
-    public static Sort stableSort(Sort requestedSort) {
+    public static Sort stableReadSort(Sort requestedSort) {
         if (requestedSort == null || requestedSort.isUnsorted()) {
-            return Sort.by(sortOrder(DEFAULT_SORT), Sort.Order.asc(TIE_BREAKER_FIELD));
+            return Sort.by(workQueueSortOrder(DEFAULT_SORT), Sort.Order.asc(TIE_BREAKER_FIELD));
         }
         Sort.Order primary = requestedSort.stream()
                 .filter(order -> SORT_FIELDS.contains(order.getProperty()))
