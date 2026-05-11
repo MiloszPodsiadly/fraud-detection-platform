@@ -39,6 +39,9 @@ management:
             requests: true
 
 app:
+  fraud-cases:
+    work-queue:
+      sla: ${FRAUD_CASE_WORK_QUEUE_SLA:PT24H}
   regulated-mutations:
     transaction-mode: ${REGULATED_MUTATIONS_TRANSACTION_MODE:OFF}
     evidence-gated-finalize:

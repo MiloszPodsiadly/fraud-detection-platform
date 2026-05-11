@@ -4,11 +4,13 @@ import com.frauddetection.alert.api.FraudCaseAuditResponse;
 import com.frauddetection.alert.api.FraudCaseSlaStatus;
 import com.frauddetection.alert.api.FraudCaseSummaryResponse;
 import com.frauddetection.alert.api.FraudCaseWorkQueueItemResponse;
+import com.frauddetection.alert.api.FraudCaseWorkQueueSliceResponse;
 import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.fraudcase.FraudCaseNotFoundException;
 import com.frauddetection.alert.fraudcase.FraudCaseSearchCriteria;
 import com.frauddetection.alert.fraudcase.FraudCaseSearchRepository;
+import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueProperties;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.persistence.FraudCaseAuditEntryDocument;
 import com.frauddetection.alert.persistence.FraudCaseAuditRepository;
@@ -41,9 +43,10 @@ public class FraudCaseQueryService {
             FraudCaseRepository fraudCaseRepository,
             FraudCaseAuditRepository auditRepository,
             FraudCaseSearchRepository searchRepository,
-            FraudCaseResponseMapper responseMapper
+            FraudCaseResponseMapper responseMapper,
+            FraudCaseWorkQueueProperties workQueueProperties
     ) {
-        this(fraudCaseRepository, auditRepository, searchRepository, responseMapper, Clock.systemUTC(), Duration.ofHours(24));
+        this(fraudCaseRepository, auditRepository, searchRepository, responseMapper, Clock.systemUTC(), workQueueProperties.sla());
     }
 
     FraudCaseQueryService(
@@ -59,9 +62,10 @@ public class FraudCaseQueryService {
         this.searchRepository = searchRepository;
         this.responseMapper = responseMapper;
         this.clock = clock;
-        this.workQueueSla = workQueueSla == null || workQueueSla.isNegative() || workQueueSla.isZero()
-                ? Duration.ofHours(24)
-                : workQueueSla;
+        if (workQueueSla == null || workQueueSla.isNegative() || workQueueSla.isZero()) {
+            throw new IllegalArgumentException("Fraud case work queue SLA must be a positive duration.");
+        }
+        this.workQueueSla = workQueueSla;
     }
 
     @Deprecated(forRemoval = false)
@@ -94,7 +98,7 @@ public class FraudCaseQueryService {
         ).map(responseMapper::toSummary);
     }
 
-    public Page<FraudCaseWorkQueueItemResponse> workQueue(
+    public FraudCaseWorkQueueSliceResponse workQueue(
             FraudCaseStatus status,
             String assignee,
             FraudCasePriority priority,
@@ -107,7 +111,7 @@ public class FraudCaseQueryService {
             Pageable pageable
     ) {
         Instant now = clock.instant();
-        return searchRepository.search(
+        var slice = searchRepository.searchSlice(
                 new FraudCaseSearchCriteria(
                         status,
                         assignee,
@@ -121,6 +125,13 @@ public class FraudCaseQueryService {
                 ),
                 pageable
         ).map(document -> toWorkQueueItem(document, now));
+        return new FraudCaseWorkQueueSliceResponse(
+                slice.getContent(),
+                slice.getNumber(),
+                slice.getSize(),
+                slice.hasNext(),
+                slice.hasNext() ? slice.getNumber() + 1 : null
+        );
     }
 
     public List<FraudCaseAuditResponse> auditTrail(String caseId) {

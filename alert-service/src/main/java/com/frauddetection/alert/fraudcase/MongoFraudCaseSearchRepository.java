@@ -4,6 +4,8 @@ import com.frauddetection.alert.persistence.FraudCaseDocument;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Slice;
+import org.springframework.data.domain.SliceImpl;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
@@ -16,15 +18,6 @@ import java.util.List;
 
 @Repository
 public class MongoFraudCaseSearchRepository implements FraudCaseSearchRepository {
-
-    private static final int MAX_PAGE_SIZE = 100;
-    private static final List<String> SORT_ALLOWLIST = List.of(
-            "createdAt",
-            "updatedAt",
-            "priority",
-            "riskLevel",
-            "caseNumber"
-    );
 
     private final MongoTemplate mongoTemplate;
 
@@ -42,6 +35,22 @@ public class MongoFraudCaseSearchRepository implements FraudCaseSearchRepository
         query.with(stableSort(guardedPageable.getSort()));
         List<FraudCaseDocument> content = mongoTemplate.find(query, FraudCaseDocument.class);
         return new PageImpl<>(content, guardedPageable, total);
+    }
+
+    @Override
+    public Slice<FraudCaseDocument> searchSlice(FraudCaseSearchCriteria criteria, Pageable pageable) {
+        Pageable guardedPageable = guardPageSize(pageable);
+        Query query = new Query();
+        criteria(criteria).forEach(query::addCriteria);
+        query.with(FraudCaseWorkQueueQueryPolicy.stableSort(guardedPageable.getSort()));
+        query.skip(guardedPageable.getOffset());
+        query.limit(guardedPageable.getPageSize() + 1);
+        List<FraudCaseDocument> fetched = mongoTemplate.find(query, FraudCaseDocument.class);
+        boolean hasNext = fetched.size() > guardedPageable.getPageSize();
+        List<FraudCaseDocument> content = hasNext
+                ? fetched.subList(0, guardedPageable.getPageSize())
+                : fetched;
+        return new SliceImpl<>(content, guardedPageable, hasNext);
     }
 
     private List<Criteria> criteria(FraudCaseSearchCriteria criteria) {
@@ -85,20 +94,16 @@ public class MongoFraudCaseSearchRepository implements FraudCaseSearchRepository
     }
 
     private Sort stableSort(Sort requestedSort) {
-        Sort.Order primary = requestedSort.stream()
-                .filter(order -> SORT_ALLOWLIST.contains(order.getProperty()))
-                .findFirst()
-                .orElse(Sort.Order.desc("createdAt"));
-        return Sort.by(primary, Sort.Order.asc("_id"));
+        return FraudCaseWorkQueueQueryPolicy.stableSort(requestedSort);
     }
 
     private Pageable guardPageSize(Pageable pageable) {
-        if (pageable.getPageSize() <= MAX_PAGE_SIZE) {
+        if (pageable.getPageSize() <= FraudCaseWorkQueueQueryPolicy.MAX_PAGE_SIZE) {
             return pageable;
         }
         return org.springframework.data.domain.PageRequest.of(
                 pageable.getPageNumber(),
-                MAX_PAGE_SIZE,
+                FraudCaseWorkQueueQueryPolicy.MAX_PAGE_SIZE,
                 pageable.getSort()
         );
     }

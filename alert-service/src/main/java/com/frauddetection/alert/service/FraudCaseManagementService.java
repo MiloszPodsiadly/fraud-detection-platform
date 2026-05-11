@@ -11,6 +11,7 @@ import com.frauddetection.alert.api.FraudCaseNoteResponse;
 import com.frauddetection.alert.api.FraudCaseResponse;
 import com.frauddetection.alert.api.FraudCaseSummaryResponse;
 import com.frauddetection.alert.api.FraudCaseWorkQueueItemResponse;
+import com.frauddetection.alert.api.FraudCaseWorkQueueSliceResponse;
 import com.frauddetection.alert.api.ReopenFraudCaseRequest;
 import com.frauddetection.alert.api.TransitionFraudCaseRequest;
 import com.frauddetection.alert.domain.FraudCasePriority;
@@ -144,7 +145,7 @@ public class FraudCaseManagementService {
         return queryService.searchCases(status, assignee, priority, riskLevel, createdFrom, createdTo, linkedAlertId, pageable);
     }
 
-    public Page<FraudCaseWorkQueueItemResponse> workQueue(
+    public FraudCaseWorkQueueSliceResponse workQueue(
             FraudCaseStatus status,
             String assignee,
             FraudCasePriority priority,

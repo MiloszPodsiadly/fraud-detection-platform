@@ -3,6 +3,7 @@ package com.frauddetection.alert.audit.read;
 public enum ReadAccessEndpointCategory {
     ALERT_DETAIL,
     FRAUD_CASE_DETAIL,
+    FRAUD_CASE_WORK_QUEUE,
     SCORED_TRANSACTION_LIST,
     GOVERNANCE_ADVISORY_LIST,
     GOVERNANCE_ADVISORY_DETAIL,
