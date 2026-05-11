@@ -299,6 +299,93 @@ jobs:
             alert-service/target/surefire-reports/
             alert-service/target/failsafe-reports/
 
+  fdp45-fraud-case-work-queue-read-model:
+    name: FDP-45 Fraud Case Work Queue Read Model
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs:
+      - backend
+      - fdp42-fraud-case-management
+      - regulated-mutation-regression
+      - fdp43-fraud-case-idempotency
+      - fdp44-fraud-case-idempotency-hardening
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Verify Docker is available for Testcontainers
+        run: docker version
+
+      - name: Run FDP-45 fraud case work queue read model suite
+        run: mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=Fdp45FraudCaseReadModelSingleSourceOfTruthTest,Fdp45FraudCaseWorkQueuePaginationTest,Fdp45FraudCaseWorkQueueSortingTest,Fdp45FraudCaseWorkQueueFilterTest,Fdp45FraudCaseWorkQueueSlaAgeTest,Fdp45FraudCaseWorkQueueReadOnlySafetyTest,Fdp45FraudCaseWorkQueueSecurityTest,Fdp45FraudCaseWorkQueueObservabilityTest,Fdp45FraudCaseWorkQueueDocsNoOverclaimTest" test
+
+      - name: Verify FDP-45 proof suite reports
+        run: |
+          python - <<'PY'
+          import pathlib
+          import sys
+          import xml.etree.ElementTree as ET
+
+          reports = pathlib.Path("alert-service/target/surefire-reports")
+          required = [
+              "Fdp45FraudCaseReadModelSingleSourceOfTruthTest",
+              "Fdp45FraudCaseWorkQueuePaginationTest",
+              "Fdp45FraudCaseWorkQueueSortingTest",
+              "Fdp45FraudCaseWorkQueueFilterTest",
+              "Fdp45FraudCaseWorkQueueSlaAgeTest",
+              "Fdp45FraudCaseWorkQueueReadOnlySafetyTest",
+              "Fdp45FraudCaseWorkQueueSecurityTest",
+              "Fdp45FraudCaseWorkQueueObservabilityTest",
+              "Fdp45FraudCaseWorkQueueDocsNoOverclaimTest",
+          ]
+
+          xml_by_class = {}
+          for report in reports.glob("TEST-*.xml"):
+              root = ET.parse(report).getroot()
+              class_name = root.attrib.get("name", report.stem.removeprefix("TEST-")).split(".")[-1]
+              xml_by_class[class_name] = (report, root)
+
+          failed = []
+          for class_name in required:
+              if class_name not in xml_by_class:
+                  failed.append(f"missing XML report for {class_name}")
+                  continue
+              report, root = xml_by_class[class_name]
+              tests = int(root.attrib.get("tests", "0"))
+              skipped = int(root.attrib.get("skipped", "0"))
+              failures = int(root.attrib.get("failures", "0"))
+              errors = int(root.attrib.get("errors", "0"))
+              if tests <= 0 or skipped != 0 or failures != 0 or errors != 0:
+                  failed.append(
+                      f"{class_name} did not fully execute: report={report} "
+                      f"tests={tests} skipped={skipped} failures={failures} errors={errors}"
+                  )
+
+          if failed:
+              print("FDP-45 proof suite verification failed:", file=sys.stderr)
+              for failure in failed:
+                  print(f"- {failure}", file=sys.stderr)
+              sys.exit(1)
+          PY
+
+      - name: Upload FDP-45 test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fdp45-fraud-case-work-queue-read-model-test-reports
+          if-no-files-found: error
+          path: |
+            alert-service/target/surefire-reports/
+            alert-service/target/failsafe-reports/
+
   ml:
     name: Python ML Checks
     runs-on: ubuntu-latest
