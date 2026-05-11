@@ -2,3 +2,4 @@ app:
   fraud-cases:
     work-queue:
       sla: ${FRAUD_CASE_WORK_QUEUE_SLA}
+      cursor-signing-secret: ${FRAUD_CASE_WORK_QUEUE_CURSOR_SIGNING_SECRET}

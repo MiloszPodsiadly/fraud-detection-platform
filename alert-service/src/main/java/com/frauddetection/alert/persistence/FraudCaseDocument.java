@@ -5,6 +5,8 @@ import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.common.events.enums.RiskLevel;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Version;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
@@ -13,6 +15,15 @@ import java.time.Instant;
 import java.util.List;
 
 @Document(collection = "fraud_cases")
+@CompoundIndexes({
+        @CompoundIndex(name = "fraud_case_wq_status_created_id_idx", def = "{'status': 1, 'createdAt': -1, '_id': 1}"),
+        @CompoundIndex(name = "fraud_case_wq_assignee_created_id_idx", def = "{'assignedInvestigatorId': 1, 'createdAt': -1, '_id': 1}"),
+        @CompoundIndex(name = "fraud_case_wq_priority_created_id_idx", def = "{'priority': 1, 'createdAt': -1, '_id': 1}"),
+        @CompoundIndex(name = "fraud_case_wq_risk_created_id_idx", def = "{'riskLevel': 1, 'createdAt': -1, '_id': 1}"),
+        @CompoundIndex(name = "fraud_case_wq_linked_alert_created_id_idx", def = "{'linkedAlertIds': 1, 'createdAt': -1, '_id': 1}"),
+        @CompoundIndex(name = "fraud_case_wq_status_updated_id_idx", def = "{'status': 1, 'updatedAt': -1, '_id': 1}"),
+        @CompoundIndex(name = "fraud_case_wq_assignee_updated_id_idx", def = "{'assignedInvestigatorId': 1, 'updatedAt': -1, '_id': 1}")
+})
 public class FraudCaseDocument {
 
     @Id

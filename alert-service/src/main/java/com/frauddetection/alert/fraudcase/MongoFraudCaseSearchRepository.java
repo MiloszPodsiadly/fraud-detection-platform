@@ -13,6 +13,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 import org.springframework.util.StringUtils;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -51,6 +52,25 @@ public class MongoFraudCaseSearchRepository implements FraudCaseSearchRepository
                 ? fetched.subList(0, guardedPageable.getPageSize())
                 : fetched;
         return new SliceImpl<>(content, guardedPageable, hasNext);
+    }
+
+    @Override
+    public Slice<FraudCaseDocument> searchSliceAfter(
+            FraudCaseSearchCriteria criteria,
+            int size,
+            Sort.Order sortOrder,
+            FraudCaseWorkQueueCursor cursor
+    ) {
+        FraudCaseReadQueryPolicy.validateRepositoryPageBounds(0, size);
+        Query query = new Query();
+        criteria(criteria).forEach(query::addCriteria);
+        query.addCriteria(keysetCriteria(sortOrder, cursor));
+        query.with(FraudCaseReadQueryPolicy.stableReadSort(Sort.by(sortOrder)));
+        query.limit(size + 1);
+        List<FraudCaseDocument> fetched = mongoTemplate.find(query, FraudCaseDocument.class);
+        boolean hasNext = fetched.size() > size;
+        List<FraudCaseDocument> content = hasNext ? fetched.subList(0, size) : fetched;
+        return new SliceImpl<>(content, org.springframework.data.domain.PageRequest.of(0, size, Sort.by(sortOrder)), hasNext);
     }
 
     private List<Criteria> criteria(FraudCaseSearchCriteria criteria) {
@@ -95,6 +115,29 @@ public class MongoFraudCaseSearchRepository implements FraudCaseSearchRepository
 
     private Sort stableReadSort(Sort requestedSort) {
         return FraudCaseReadQueryPolicy.stableReadSort(requestedSort);
+    }
+
+    private Criteria keysetCriteria(Sort.Order sortOrder, FraudCaseWorkQueueCursor cursor) {
+        String field = sortOrder.getProperty();
+        Object lastValue = cursorValue(field, cursor.lastValue());
+        Criteria primary = sortOrder.isDescending()
+                ? Criteria.where(field).lt(lastValue)
+                : Criteria.where(field).gt(lastValue);
+        Criteria tieBreaker = new Criteria().andOperator(
+                Criteria.where(field).is(lastValue),
+                Criteria.where("_id").gt(cursor.lastId())
+        );
+        return new Criteria().orOperator(primary, tieBreaker);
+    }
+
+    private Object cursorValue(String field, String value) {
+        return switch (field) {
+            case "createdAt", "updatedAt" -> Instant.parse(value);
+            case "priority" -> com.frauddetection.alert.domain.FraudCasePriority.valueOf(value);
+            case "riskLevel" -> com.frauddetection.common.events.enums.RiskLevel.valueOf(value);
+            case "caseNumber" -> value;
+            default -> throw new FraudCaseWorkQueueQueryException("INVALID_CURSOR", "Invalid fraud case work queue cursor.");
+        };
     }
 
     private Pageable guardPageSize(Pageable pageable) {

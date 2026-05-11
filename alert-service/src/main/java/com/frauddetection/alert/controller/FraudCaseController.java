@@ -122,12 +122,28 @@ public class FraudCaseController {
             FraudCaseReadQueryPolicy.validateWorkQueueAllowedParameters(requestParams);
             FraudCaseReadQueryPolicy.validateWorkQueueSingleValueParameters(requestParams);
             FraudCaseReadQueryPolicy.validateWorkQueuePagination(page, size);
-            FraudCaseReadQueryPolicy.validateWorkQueueStringFilters(assignee, assignedInvestigatorId, linkedAlertId, sort);
+            String cursor = firstValue(requestParams, "cursor");
+            FraudCaseReadQueryPolicy.validateWorkQueueStringFilters(assignee, assignedInvestigatorId, linkedAlertId, sort, cursor);
             FraudCaseReadQueryPolicy.validateRange("createdAt", createdFrom, createdTo);
             FraudCaseReadQueryPolicy.validateRange("updatedAt", updatedFrom, updatedTo);
             String normalizedAssignee = assignee(assignee, assignedInvestigatorId);
             sortOrder = FraudCaseReadQueryPolicy.workQueueSortOrder(sort);
-            var result = fraudCaseManagementService.workQueue(
+            var result = StringUtils.hasText(cursor)
+                    ? fraudCaseManagementService.workQueue(
+                    status,
+                    normalizedAssignee,
+                    priority,
+                    riskLevel,
+                    createdFrom,
+                    createdTo,
+                    updatedFrom,
+                    updatedTo,
+                    linkedAlertId,
+                    FraudCaseReadQueryPolicy.boundedWorkQueuePageable(0, size, sortOrder),
+                    cursor,
+                    sortOrder
+            )
+                    : fraudCaseManagementService.workQueue(
                     status,
                     normalizedAssignee,
                     priority,
@@ -297,6 +313,10 @@ public class FraudCaseController {
         }
         String field = sort.trim().split(",")[0];
         return StringUtils.hasText(field) && FraudCaseReadQueryPolicy.SORT_FIELDS.contains(field) ? field : "default";
+    }
+
+    private String firstValue(MultiValueMap<String, String> requestParams, String key) {
+        return requestParams == null ? null : requestParams.getFirst(key);
     }
 
     private boolean hasSearchFilters(

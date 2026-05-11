@@ -39,6 +39,7 @@ import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.RiskLevel;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -158,6 +159,23 @@ public class FraudCaseManagementService {
             Pageable pageable
     ) {
         return queryService.workQueue(status, assignee, priority, riskLevel, createdFrom, createdTo, updatedFrom, updatedTo, linkedAlertId, pageable);
+    }
+
+    public FraudCaseWorkQueueSliceResponse workQueue(
+            FraudCaseStatus status,
+            String assignee,
+            FraudCasePriority priority,
+            RiskLevel riskLevel,
+            Instant createdFrom,
+            Instant createdTo,
+            Instant updatedFrom,
+            Instant updatedTo,
+            String linkedAlertId,
+            Pageable pageable,
+            String cursor,
+            Sort.Order sortOrder
+    ) {
+        return queryService.workQueue(status, assignee, priority, riskLevel, createdFrom, createdTo, updatedFrom, updatedTo, linkedAlertId, pageable, cursor, sortOrder);
     }
 
     public FraudCaseResponse assignCase(String caseId, AssignFraudCaseRequest request, String idempotencyKey) {

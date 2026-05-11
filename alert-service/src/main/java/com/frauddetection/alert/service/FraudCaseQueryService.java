@@ -10,6 +10,8 @@ import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.fraudcase.FraudCaseNotFoundException;
 import com.frauddetection.alert.fraudcase.FraudCaseSearchCriteria;
 import com.frauddetection.alert.fraudcase.FraudCaseSearchRepository;
+import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueCursor;
+import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueCursorCodec;
 import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueProperties;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.persistence.FraudCaseAuditEntryDocument;
@@ -20,6 +22,7 @@ import com.frauddetection.common.events.enums.RiskLevel;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -37,6 +40,7 @@ public class FraudCaseQueryService {
     private final FraudCaseResponseMapper responseMapper;
     private final Clock clock;
     private final Duration workQueueSla;
+    private final FraudCaseWorkQueueCursorCodec cursorCodec;
 
     @Autowired
     public FraudCaseQueryService(
@@ -46,7 +50,15 @@ public class FraudCaseQueryService {
             FraudCaseResponseMapper responseMapper,
             FraudCaseWorkQueueProperties workQueueProperties
     ) {
-        this(fraudCaseRepository, auditRepository, searchRepository, responseMapper, Clock.systemUTC(), workQueueProperties.sla());
+        this(
+                fraudCaseRepository,
+                auditRepository,
+                searchRepository,
+                responseMapper,
+                Clock.systemUTC(),
+                workQueueProperties.sla(),
+                new FraudCaseWorkQueueCursorCodec(workQueueProperties.cursorSigningSecret())
+        );
     }
 
     FraudCaseQueryService(
@@ -57,6 +69,18 @@ public class FraudCaseQueryService {
             Clock clock,
             Duration workQueueSla
     ) {
+        this(fraudCaseRepository, auditRepository, searchRepository, responseMapper, clock, workQueueSla, FraudCaseWorkQueueCursorCodec.localDefault());
+    }
+
+    FraudCaseQueryService(
+            FraudCaseRepository fraudCaseRepository,
+            FraudCaseAuditRepository auditRepository,
+            FraudCaseSearchRepository searchRepository,
+            FraudCaseResponseMapper responseMapper,
+            Clock clock,
+            Duration workQueueSla,
+            FraudCaseWorkQueueCursorCodec cursorCodec
+    ) {
         this.fraudCaseRepository = fraudCaseRepository;
         this.auditRepository = auditRepository;
         this.searchRepository = searchRepository;
@@ -66,6 +90,7 @@ public class FraudCaseQueryService {
             throw new IllegalArgumentException("Fraud case work queue SLA must be a positive duration.");
         }
         this.workQueueSla = workQueueSla;
+        this.cursorCodec = cursorCodec;
     }
 
     @Deprecated(forRemoval = false)
@@ -110,27 +135,55 @@ public class FraudCaseQueryService {
             String linkedAlertId,
             Pageable pageable
     ) {
+        Sort.Order sortOrder = primarySortOrder(pageable);
+        return workQueue(status, assignee, priority, riskLevel, createdFrom, createdTo, updatedFrom, updatedTo, linkedAlertId, pageable, null, sortOrder);
+    }
+
+    public FraudCaseWorkQueueSliceResponse workQueue(
+            FraudCaseStatus status,
+            String assignee,
+            FraudCasePriority priority,
+            RiskLevel riskLevel,
+            Instant createdFrom,
+            Instant createdTo,
+            Instant updatedFrom,
+            Instant updatedTo,
+            String linkedAlertId,
+            Pageable pageable,
+            String encodedCursor,
+            Sort.Order sortOrder
+    ) {
         Instant now = clock.instant();
-        var slice = searchRepository.searchSlice(
-                new FraudCaseSearchCriteria(
-                        status,
-                        assignee,
-                        priority,
-                        riskLevel,
-                        createdFrom,
-                        createdTo,
-                        updatedFrom,
-                        updatedTo,
-                        linkedAlertId
-                ),
-                pageable
-        ).map(document -> toWorkQueueItem(document, now));
+        FraudCaseSearchCriteria criteria = new FraudCaseSearchCriteria(
+                status,
+                assignee,
+                priority,
+                riskLevel,
+                createdFrom,
+                createdTo,
+                updatedFrom,
+                updatedTo,
+                linkedAlertId
+        );
+        Sort.Order effectiveSort = sortOrder == null ? primarySortOrder(pageable) : sortOrder;
+        FraudCaseWorkQueueCursor cursor = cursorCodec.decode(encodedCursor, effectiveSort);
+        var documentSlice = cursor == null
+                ? searchRepository.searchSlice(criteria, pageable)
+                : searchRepository.searchSliceAfter(criteria, pageable.getPageSize(), effectiveSort, cursor);
+        var content = documentSlice.getContent().stream()
+                .map(document -> toWorkQueueItem(document, now))
+                .toList();
+        String nextCursor = documentSlice.hasNext() && !documentSlice.getContent().isEmpty()
+                ? cursorCodec.encode(effectiveSort, documentSlice.getContent().getLast())
+                : null;
         return new FraudCaseWorkQueueSliceResponse(
-                slice.getContent(),
-                slice.getNumber(),
-                slice.getSize(),
-                slice.hasNext(),
-                slice.hasNext() ? slice.getNumber() + 1 : null
+                content,
+                cursor == null ? documentSlice.getNumber() : 0,
+                documentSlice.getSize(),
+                documentSlice.hasNext(),
+                cursor == null && documentSlice.hasNext() ? documentSlice.getNumber() + 1 : null,
+                nextCursor,
+                formatSort(effectiveSort)
         );
     }
 
@@ -158,6 +211,19 @@ public class FraudCaseQueryService {
 
     private FraudCaseSearchCriteria emptyCriteria() {
         return new FraudCaseSearchCriteria(null, null, null, null, null, null, null, null, null);
+    }
+
+    private Sort.Order primarySortOrder(Pageable pageable) {
+        if (pageable == null || pageable.getSort().isUnsorted()) {
+            return Sort.Order.desc("createdAt");
+        }
+        return pageable.getSort().stream()
+                .findFirst()
+                .orElse(Sort.Order.desc("createdAt"));
+    }
+
+    private String formatSort(Sort.Order sortOrder) {
+        return sortOrder.getProperty() + "," + sortOrder.getDirection().name().toLowerCase(java.util.Locale.ROOT);
     }
 
     private FraudCaseWorkQueueItemResponse toWorkQueueItem(FraudCaseDocument document, Instant now) {

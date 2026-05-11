@@ -7,6 +7,17 @@ public record FraudCaseWorkQueueSliceResponse(
         int page,
         int size,
         boolean hasNext,
-        Integer nextPage
+        Integer nextPage,
+        String nextCursor,
+        String sort
 ) {
+    public FraudCaseWorkQueueSliceResponse(
+            List<FraudCaseWorkQueueItemResponse> content,
+            int page,
+            int size,
+            boolean hasNext,
+            Integer nextPage
+    ) {
+        this(content, page, size, hasNext, nextPage, null, null);
+    }
 }

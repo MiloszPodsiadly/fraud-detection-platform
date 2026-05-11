@@ -17,6 +17,7 @@ public final class FraudCaseReadQueryPolicy {
     public static final int MAX_PAGE_NUMBER = 1000;
     public static final int MAX_FILTER_VALUE_LENGTH = 128;
     public static final int MAX_SORT_VALUE_LENGTH = 64;
+    public static final int MAX_CURSOR_LENGTH = 2048;
     public static final String DEFAULT_SORT = "createdAt,desc";
     public static final String TIE_BREAKER_FIELD = "_id";
     public static final Set<String> ALLOWED_QUERY_PARAMS = Set.of(
@@ -32,7 +33,8 @@ public final class FraudCaseReadQueryPolicy {
             "createdTo",
             "updatedFrom",
             "updatedTo",
-            "linkedAlertId"
+            "linkedAlertId",
+            "cursor"
     );
     public static final Set<String> SINGLE_VALUE_PARAMS = ALLOWED_QUERY_PARAMS;
     public static final Set<String> SORT_FIELDS = Set.of("createdAt", "updatedAt", "priority", "riskLevel", "caseNumber");
@@ -78,11 +80,12 @@ public final class FraudCaseReadQueryPolicy {
         }
     }
 
-    public static void validateWorkQueueStringFilters(String assignee, String assignedInvestigatorId, String linkedAlertId, String sort) {
+    public static void validateWorkQueueStringFilters(String assignee, String assignedInvestigatorId, String linkedAlertId, String sort, String cursor) {
         validateLength(assignee, MAX_FILTER_VALUE_LENGTH, "INVALID_FILTER", "Invalid fraud case work queue filter.");
         validateLength(assignedInvestigatorId, MAX_FILTER_VALUE_LENGTH, "INVALID_FILTER", "Invalid fraud case work queue filter.");
         validateLength(linkedAlertId, MAX_FILTER_VALUE_LENGTH, "INVALID_FILTER", "Invalid fraud case work queue filter.");
         validateLength(sort, MAX_SORT_VALUE_LENGTH, "UNSUPPORTED_SORT_FIELD", "Unsupported fraud case work queue sort field.");
+        validateLength(cursor, MAX_CURSOR_LENGTH, "INVALID_CURSOR", "Invalid fraud case work queue cursor.");
     }
 
     private static void validateLength(String value, int maxLength, String code, String message) {
