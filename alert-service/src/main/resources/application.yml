@@ -39,6 +39,9 @@ management:
             requests: true
 
 app:
+  fraud-cases:
+    idempotency:
+      retention: ${FRAUD_CASE_LIFECYCLE_IDEMPOTENCY_RETENTION:PT24H}
   regulated-mutations:
     transaction-mode: ${REGULATED_MUTATIONS_TRANSACTION_MODE:OFF}
     evidence-gated-finalize:

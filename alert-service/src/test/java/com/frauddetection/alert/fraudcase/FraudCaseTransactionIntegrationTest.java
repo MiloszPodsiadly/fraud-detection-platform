@@ -59,6 +59,7 @@ import org.springframework.data.mongodb.repository.support.MongoRepositoryFactor
 import org.springframework.test.context.junit.jupiter.EnabledIf;
 import org.springframework.transaction.PlatformTransactionManager;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Iterator;
 import java.util.List;
@@ -357,8 +358,10 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
                 .filteredOn(record -> record.getAction().equals("ADD_FRAUD_CASE_NOTE"))
                 .hasSize(1)
                 .first()
-                .extracting(FraudCaseLifecycleIdempotencyRecordDocument::getStatus)
-                .isEqualTo(FraudCaseLifecycleIdempotencyStatus.COMPLETED);
+                .satisfies(record -> {
+                    assertThat(record.getStatus()).isEqualTo(FraudCaseLifecycleIdempotencyStatus.COMPLETED);
+                    assertThat(record.getExpiresAt()).isEqualTo(record.getCreatedAt().plus(Duration.ofHours(24)));
+                });
     }
 
     @Test
@@ -376,6 +379,61 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
 
         assertThat(noteRepository.findByCaseIdOrderByCreatedAtAsc(created.getCaseId())).hasSize(notesBefore);
         assertThat(auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId())).hasSize(auditBefore);
+    }
+
+    @Test
+    void shouldRejectSameKeyDifferentActionWithoutMutationOrAudit() {
+        FraudCaseDocument created = createCase();
+        service.addNote(created.getCaseId(), new AddFraudCaseNoteRequest("First note", true, "analyst-1"), "global-key-action");
+        int auditBefore = auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId()).size();
+
+        assertThatThrownBy(() -> service.closeCase(
+                created.getCaseId(),
+                new CloseFraudCaseRequest("Different lifecycle operation", "analyst-1"),
+                "global-key-action"
+        )).isInstanceOf(FraudCaseIdempotencyConflictException.class);
+
+        assertThat(caseRepository.findById(created.getCaseId()).orElseThrow().getStatus()).isEqualTo(FraudCaseStatus.OPEN);
+        assertThat(countAudit(created.getCaseId(), FraudCaseAuditAction.CASE_CLOSED)).isZero();
+        assertThat(auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId())).hasSize(auditBefore);
+        assertThat(idempotencyRepository.findAll()).hasSize(1);
+    }
+
+    @Test
+    void shouldRejectSameKeyDifferentScopeWithoutMutationOrAudit() {
+        FraudCaseDocument firstCase = createCase("alert-1");
+        FraudCaseDocument secondCase = createCase("alert-2");
+        service.addNote(firstCase.getCaseId(), new AddFraudCaseNoteRequest("First note", true, "analyst-1"), "global-key-scope");
+        int secondCaseAuditBefore = auditRepository.findByCaseIdOrderByOccurredAtAsc(secondCase.getCaseId()).size();
+
+        assertThatThrownBy(() -> service.addNote(
+                secondCase.getCaseId(),
+                new AddFraudCaseNoteRequest("Second case note", true, "analyst-1"),
+                "global-key-scope"
+        )).isInstanceOf(FraudCaseIdempotencyConflictException.class);
+
+        assertThat(noteRepository.findByCaseIdOrderByCreatedAtAsc(secondCase.getCaseId())).isEmpty();
+        assertThat(countAudit(secondCase.getCaseId(), FraudCaseAuditAction.NOTE_ADDED)).isZero();
+        assertThat(auditRepository.findByCaseIdOrderByOccurredAtAsc(secondCase.getCaseId())).hasSize(secondCaseAuditBefore);
+        assertThat(idempotencyRepository.findAll()).hasSize(1);
+    }
+
+    @Test
+    void shouldRejectSameKeyDifferentActorWithoutMutationOrAudit() {
+        FraudCaseDocument created = createCase();
+        service.addNote(created.getCaseId(), new AddFraudCaseNoteRequest("First note", true, "analyst-1"), "global-key-actor");
+        int auditBefore = auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId()).size();
+
+        assertThatThrownBy(() -> service.addNote(
+                created.getCaseId(),
+                new AddFraudCaseNoteRequest("First note", true, "analyst-2"),
+                "global-key-actor"
+        )).isInstanceOf(FraudCaseIdempotencyConflictException.class);
+
+        assertThat(noteRepository.findByCaseIdOrderByCreatedAtAsc(created.getCaseId())).hasSize(1);
+        assertThat(countAudit(created.getCaseId(), FraudCaseAuditAction.NOTE_ADDED)).isEqualTo(1);
+        assertThat(auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId())).hasSize(auditBefore);
+        assertThat(idempotencyRepository.findAll()).hasSize(1);
     }
 
     @Test
@@ -535,6 +593,36 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void shouldFailClosedWhenRequiredIdempotencyServiceIsMissing() {
+        service = service(new FraudCaseAuditService(auditRepository), IdempotencyServiceMode.NULL_IDEMPOTENCY);
+        FraudCaseDocument created = createCase();
+        int auditBefore = auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId()).size();
+
+        assertThatThrownBy(() -> service.addNote(
+                created.getCaseId(),
+                new AddFraudCaseNoteRequest("Must not commit", false, "analyst-1"),
+                "missing-service-key"
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessage("Fraud-case lifecycle idempotency is required but not configured.");
+
+        assertThat(noteRepository.findByCaseIdOrderByCreatedAtAsc(created.getCaseId())).isEmpty();
+        assertThat(auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId())).hasSize(auditBefore);
+        assertThat(idempotencyRepository.findAll()).isEmpty();
+    }
+
+    @Test
+    void shouldAllowInternalCompatibilityPathWhenIdempotencyServiceIsMissing() {
+        service = service(new FraudCaseAuditService(auditRepository), IdempotencyServiceMode.NULL_IDEMPOTENCY);
+        FraudCaseDocument created = createCase();
+
+        service.addNote(created.getCaseId(), new AddFraudCaseNoteRequest("Internal note", false, "analyst-1"));
+
+        assertThat(noteRepository.findByCaseIdOrderByCreatedAtAsc(created.getCaseId())).hasSize(1);
+        assertThat(countAudit(created.getCaseId(), FraudCaseAuditAction.NOTE_ADDED)).isEqualTo(1);
+        assertThat(idempotencyRepository.findAll()).isEmpty();
+    }
+
+    @Test
     void shouldRollbackIdempotencyRecordWhenAuditAppendFails() {
         FraudCaseDocument created = createCase();
         service = service(new FailingFraudCaseAuditService(auditRepository));
@@ -592,8 +680,12 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
     }
 
     private FraudCaseDocument createCase() {
+        return createCase("alert-1");
+    }
+
+    private FraudCaseDocument createCase(String alertId) {
         return service.createCase(new CreateFraudCaseRequest(
-                List.of("alert-1"),
+                List.of(alertId),
                 FraudCasePriority.HIGH,
                 RiskLevel.CRITICAL,
                 "Manual investigation",
@@ -612,14 +704,16 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
         var actorResolver = new AnalystActorResolver(new CurrentAnalystUser(), metrics);
         var transactionRunner = transactionRunner();
         var responseMapper = new FraudCaseResponseMapper(new AlertResponseMapper());
-        var idempotencyService = idempotencyService(
-                idempotencyRepository,
-                new SharedIdempotencyKeyPolicy(),
-                new FraudCaseLifecycleIdempotencyConflictPolicy(new SharedIdempotencyConflictPolicy()),
-                transactionRunner,
-                JsonMapper.builder().addModule(new JavaTimeModule()).build(),
-                mode
-        );
+        var idempotencyService = mode == IdempotencyServiceMode.NULL_IDEMPOTENCY
+                ? null
+                : idempotencyService(
+                        idempotencyRepository,
+                        new SharedIdempotencyKeyPolicy(),
+                        new FraudCaseLifecycleIdempotencyConflictPolicy(new SharedIdempotencyConflictPolicy()),
+                        transactionRunner,
+                        JsonMapper.builder().addModule(new JavaTimeModule()).build(),
+                        mode
+                );
         return new FraudCaseManagementService(
                 caseRepository,
                 scoredTransactionRepository,
@@ -719,7 +813,8 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
     private enum IdempotencyServiceMode {
         NORMAL,
         FAIL_COMPLETION_SAVE,
-        TINY_SNAPSHOT_LIMIT
+        TINY_SNAPSHOT_LIMIT,
+        NULL_IDEMPOTENCY
     }
 
     private static final class CompletionFailingFraudCaseLifecycleIdempotencyService extends FraudCaseLifecycleIdempotencyService {

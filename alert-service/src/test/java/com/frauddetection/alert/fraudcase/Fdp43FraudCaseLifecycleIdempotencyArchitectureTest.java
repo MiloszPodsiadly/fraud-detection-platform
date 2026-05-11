@@ -28,12 +28,33 @@ class Fdp43FraudCaseLifecycleIdempotencyArchitectureTest {
 
         assertThat(source)
                 .contains("idempotencyKeyHash")
+                .contains("@Indexed(name = \"fraud_case_lifecycle_idempotency_key_hash_idx\", unique = true)")
                 .contains("requestHash")
                 .contains("responsePayloadSnapshot")
                 .doesNotContain("private String idempotencyKey;")
                 .doesNotContain("private String requestPayload")
+                .doesNotContain("CompoundIndex")
+                .doesNotContain("responseStatus")
                 .doesNotContain("private String raw")
                 .doesNotContain("RegulatedMutationCommandDocument");
+    }
+
+    @Test
+    void lifecycleIdempotencyRepositoryMustLookupByGlobalKeyHashOnly() {
+        String source = read(sourceRoot().resolve(Path.of("persistence", "FraudCaseLifecycleIdempotencyRepository.java")));
+
+        assertThat(source)
+                .contains("findByIdempotencyKeyHash(String idempotencyKeyHash)")
+                .doesNotContain("findByIdempotencyKeyHashAndActionAndActorIdAndCaseIdScope");
+    }
+
+    @Test
+    void lifecycleRequiredIdempotencyMustFailClosedWhenServiceIsMissing() {
+        String source = read(sourceRoot().resolve(Path.of("service", "FraudCaseLifecycleService.java")));
+
+        assertThat(source)
+                .contains("Fraud-case lifecycle idempotency is required but not configured.")
+                .doesNotContain("!requireIdempotency || idempotencyService == null");
     }
 
     @Test

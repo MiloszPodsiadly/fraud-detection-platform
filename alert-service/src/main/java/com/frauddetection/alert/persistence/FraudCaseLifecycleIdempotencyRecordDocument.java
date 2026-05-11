@@ -3,7 +3,6 @@ package com.frauddetection.alert.persistence;
 import com.frauddetection.alert.fraudcase.FraudCaseLifecycleIdempotencyStatus;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Version;
-import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
@@ -11,16 +10,12 @@ import org.springframework.data.mongodb.core.mapping.Field;
 import java.time.Instant;
 
 @Document(collection = "fraud_case_lifecycle_idempotency_records")
-@CompoundIndex(
-        name = "fraud_case_lifecycle_idempotency_scope_idx",
-        def = "{'idempotency_key_hash': 1, 'action': 1, 'actor_id': 1, 'case_id_scope': 1}",
-        unique = true
-)
 public class FraudCaseLifecycleIdempotencyRecordDocument {
 
     @Id
     private String id;
 
+    @Indexed(name = "fraud_case_lifecycle_idempotency_key_hash_idx", unique = true)
     @Field("idempotency_key_hash")
     private String idempotencyKeyHash;
 
@@ -40,9 +35,6 @@ public class FraudCaseLifecycleIdempotencyRecordDocument {
 
     @Field("response_payload_snapshot")
     private String responsePayloadSnapshot;
-
-    @Field("response_status")
-    private String responseStatus;
 
     private FraudCaseLifecycleIdempotencyStatus status;
 
@@ -75,8 +67,6 @@ public class FraudCaseLifecycleIdempotencyRecordDocument {
     public void setRequestHash(String requestHash) { this.requestHash = requestHash; }
     public String getResponsePayloadSnapshot() { return responsePayloadSnapshot; }
     public void setResponsePayloadSnapshot(String responsePayloadSnapshot) { this.responsePayloadSnapshot = responsePayloadSnapshot; }
-    public String getResponseStatus() { return responseStatus; }
-    public void setResponseStatus(String responseStatus) { this.responseStatus = responseStatus; }
     public FraudCaseLifecycleIdempotencyStatus getStatus() { return status; }
     public void setStatus(FraudCaseLifecycleIdempotencyStatus status) { this.status = status; }
     public Instant getCreatedAt() { return createdAt; }

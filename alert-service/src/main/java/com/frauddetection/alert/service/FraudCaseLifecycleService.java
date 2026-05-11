@@ -480,8 +480,11 @@ public class FraudCaseLifecycleService {
             Class<T> responseType,
             boolean requireIdempotency
     ) {
-        if (!requireIdempotency || idempotencyService == null) {
+        if (!requireIdempotency) {
             return transactionRunner.runLocalCommit(mutation);
+        }
+        if (idempotencyService == null) {
+            throw new IllegalStateException("Fraud-case lifecycle idempotency is required but not configured.");
         }
         return idempotencyService.execute(command, mutation, responseType);
     }

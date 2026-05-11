@@ -9,6 +9,7 @@ import com.frauddetection.alert.persistence.FraudCaseLifecycleIdempotencyRecordD
 import com.frauddetection.alert.persistence.FraudCaseLifecycleIdempotencyRepository;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -16,12 +17,14 @@ import org.springframework.transaction.TransactionSystemException;
 import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.function.Supplier;
 
 @Service
 public class FraudCaseLifecycleIdempotencyService {
 
     public static final int MAX_RESPONSE_SNAPSHOT_BYTES = 64 * 1024;
+    static final Duration DEFAULT_RETENTION = Duration.ofHours(24);
 
     private final FraudCaseLifecycleIdempotencyRepository repository;
     private final SharedIdempotencyKeyPolicy keyPolicy;
@@ -29,6 +32,7 @@ public class FraudCaseLifecycleIdempotencyService {
     private final RegulatedMutationTransactionRunner transactionRunner;
     private final ObjectMapper objectMapper;
     private final int maxResponseSnapshotBytes;
+    private final Duration retention;
 
     @Autowired
     public FraudCaseLifecycleIdempotencyService(
@@ -36,9 +40,20 @@ public class FraudCaseLifecycleIdempotencyService {
             SharedIdempotencyKeyPolicy keyPolicy,
             FraudCaseLifecycleIdempotencyConflictPolicy conflictPolicy,
             RegulatedMutationTransactionRunner transactionRunner,
+            ObjectMapper objectMapper,
+            @Value("${app.fraud-cases.idempotency.retention:PT24H}") Duration retention
+    ) {
+        this(repository, keyPolicy, conflictPolicy, transactionRunner, objectMapper, MAX_RESPONSE_SNAPSHOT_BYTES, retention);
+    }
+
+    FraudCaseLifecycleIdempotencyService(
+            FraudCaseLifecycleIdempotencyRepository repository,
+            SharedIdempotencyKeyPolicy keyPolicy,
+            FraudCaseLifecycleIdempotencyConflictPolicy conflictPolicy,
+            RegulatedMutationTransactionRunner transactionRunner,
             ObjectMapper objectMapper
     ) {
-        this(repository, keyPolicy, conflictPolicy, transactionRunner, objectMapper, MAX_RESPONSE_SNAPSHOT_BYTES);
+        this(repository, keyPolicy, conflictPolicy, transactionRunner, objectMapper, MAX_RESPONSE_SNAPSHOT_BYTES, DEFAULT_RETENTION);
     }
 
     FraudCaseLifecycleIdempotencyService(
@@ -49,12 +64,25 @@ public class FraudCaseLifecycleIdempotencyService {
             ObjectMapper objectMapper,
             int maxResponseSnapshotBytes
     ) {
+        this(repository, keyPolicy, conflictPolicy, transactionRunner, objectMapper, maxResponseSnapshotBytes, DEFAULT_RETENTION);
+    }
+
+    FraudCaseLifecycleIdempotencyService(
+            FraudCaseLifecycleIdempotencyRepository repository,
+            SharedIdempotencyKeyPolicy keyPolicy,
+            FraudCaseLifecycleIdempotencyConflictPolicy conflictPolicy,
+            RegulatedMutationTransactionRunner transactionRunner,
+            ObjectMapper objectMapper,
+            int maxResponseSnapshotBytes,
+            Duration retention
+    ) {
         this.repository = repository;
         this.keyPolicy = keyPolicy;
         this.conflictPolicy = conflictPolicy;
         this.transactionRunner = transactionRunner;
         this.objectMapper = objectMapper;
         this.maxResponseSnapshotBytes = maxResponseSnapshotBytes;
+        this.retention = validateRetention(retention);
     }
 
     public <T> T execute(FraudCaseLifecycleIdempotencyCommand command, Supplier<T> mutation, Class<T> responseType) {
@@ -114,6 +142,7 @@ public class FraudCaseLifecycleIdempotencyService {
         record.setRequestHash(command.requestHash());
         record.setStatus(FraudCaseLifecycleIdempotencyStatus.IN_PROGRESS);
         record.setCreatedAt(command.now());
+        record.setExpiresAt(command.now().plus(retention));
         try {
             saveRecord(record);
         } catch (DataAccessException exception) {
@@ -124,7 +153,6 @@ public class FraudCaseLifecycleIdempotencyService {
         }
         T response = mutation.get();
         record.setResponsePayloadSnapshot(snapshot(response));
-        record.setResponseStatus("COMPLETED");
         record.setStatus(FraudCaseLifecycleIdempotencyStatus.COMPLETED);
         record.setCompletedAt(command.now());
         saveRecord(record);
@@ -239,11 +267,13 @@ public class FraudCaseLifecycleIdempotencyService {
             String actorId,
             String caseIdScope
     ) {
-        return repository.findByIdempotencyKeyHashAndActionAndActorIdAndCaseIdScope(
-                keyHash,
-                action,
-                actorId,
-                caseIdScope
-        );
+        return repository.findByIdempotencyKeyHash(keyHash);
+    }
+
+    private Duration validateRetention(Duration retention) {
+        if (retention == null || retention.isZero() || retention.isNegative()) {
+            throw new IllegalArgumentException("Fraud-case lifecycle idempotency retention must be positive.");
+        }
+        return retention;
     }
 }

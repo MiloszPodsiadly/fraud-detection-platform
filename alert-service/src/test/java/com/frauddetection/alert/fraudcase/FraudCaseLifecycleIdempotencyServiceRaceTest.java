@@ -11,6 +11,7 @@ import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.transaction.TransactionSystemException;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -113,6 +114,20 @@ class FraudCaseLifecycleIdempotencyServiceRaceTest {
         String response = service.execute(COMMAND, () -> "mutated", String.class);
 
         assertThat(response).isEqualTo("replayed");
+    }
+
+    @Test
+    void invalidRetentionFailsConstruction() {
+        assertThatThrownBy(() -> new FraudCaseLifecycleIdempotencyService(
+                mock(FraudCaseLifecycleIdempotencyRepository.class),
+                new SharedIdempotencyKeyPolicy(),
+                new FraudCaseLifecycleIdempotencyConflictPolicy(new SharedIdempotencyConflictPolicy()),
+                transactionRunner(),
+                JsonMapper.builder().build(),
+                FraudCaseLifecycleIdempotencyService.MAX_RESPONSE_SNAPSHOT_BYTES,
+                Duration.ZERO
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Fraud-case lifecycle idempotency retention must be positive.");
     }
 
     private FraudCaseLifecycleIdempotencyService duplicateInsertService(
