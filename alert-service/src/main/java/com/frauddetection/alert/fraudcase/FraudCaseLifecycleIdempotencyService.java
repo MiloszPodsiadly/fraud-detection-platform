@@ -34,6 +34,7 @@ public class FraudCaseLifecycleIdempotencyService {
     private final FraudCaseLifecycleIdempotencyConflictPolicy conflictPolicy;
     private final RegulatedMutationTransactionRunner transactionRunner;
     private final ObjectMapper objectMapper;
+    private final FraudCaseLifecycleReplaySnapshotMapper replaySnapshotMapper;
     private final int maxResponseSnapshotBytes;
     private final Duration retention;
     private final AlertServiceMetrics metrics;
@@ -101,6 +102,7 @@ public class FraudCaseLifecycleIdempotencyService {
         this.conflictPolicy = conflictPolicy;
         this.transactionRunner = transactionRunner;
         this.objectMapper = objectMapper;
+        this.replaySnapshotMapper = new FraudCaseLifecycleReplaySnapshotMapper();
         this.maxResponseSnapshotBytes = maxResponseSnapshotBytes;
         this.retention = validateRetention(retention);
         this.metrics = metrics;
@@ -170,8 +172,9 @@ public class FraudCaseLifecycleIdempotencyService {
             return resolveIdempotencyRace(keyHash, command, responseType);
         }
         T response = mutation.get();
+        Instant completedAt = Instant.now(clock);
         try {
-            record.setResponsePayloadSnapshot(snapshot(response));
+            record.setResponsePayloadSnapshot(snapshot(command, response, completedAt));
         } catch (FraudCaseIdempotencySnapshotTooLargeException exception) {
             recordOutcome("snapshot_too_large");
             throw exception;
@@ -180,7 +183,7 @@ public class FraudCaseLifecycleIdempotencyService {
             throw exception;
         }
         record.setStatus(FraudCaseLifecycleIdempotencyStatus.COMPLETED);
-        record.setCompletedAt(Instant.now(clock));
+        record.setCompletedAt(completedAt);
         try {
             saveRecord(record);
         } catch (DataAccessException exception) {
@@ -279,9 +282,10 @@ public class FraudCaseLifecycleIdempotencyService {
         }
     }
 
-    private String snapshot(Object response) {
+    private String snapshot(FraudCaseLifecycleIdempotencyCommand command, Object response, Instant completedAt) {
         try {
-            String serialized = objectMapper.writeValueAsString(response);
+            Object snapshot = replaySnapshotMapper.toSnapshot(command, response, completedAt);
+            String serialized = objectMapper.writeValueAsString(snapshot == null ? response : snapshot);
             if (serialized.getBytes(StandardCharsets.UTF_8).length > maxResponseSnapshotBytes) {
                 throw new FraudCaseIdempotencySnapshotTooLargeException();
             }
@@ -292,6 +296,14 @@ public class FraudCaseLifecycleIdempotencyService {
     }
 
     private <T> T restore(String snapshot, Class<T> responseType) {
+        try {
+            FraudCaseLifecycleReplaySnapshot replaySnapshot = objectMapper.readValue(snapshot, FraudCaseLifecycleReplaySnapshot.class);
+            if (replaySnapshot.snapshotType() != null) {
+                return replaySnapshotMapper.toResponse(replaySnapshot, responseType);
+            }
+        } catch (JsonProcessingException exception) {
+            // Backward-compatible read for any existing pre-FDP-44 raw response snapshots.
+        }
         try {
             return objectMapper.readValue(snapshot, responseType);
         } catch (JsonProcessingException exception) {
