@@ -101,6 +101,10 @@ public class FraudCaseLifecycleService {
         this.idempotencyService = idempotencyService;
     }
 
+    /**
+     * Internal/backward-compatibility path only. Public HTTP lifecycle POST endpoints must use
+     * idempotency-key overloads. Guarded by the FDP-43 public-path architecture test.
+     */
     @Deprecated(forRemoval = false)
     public FraudCaseDocument createCase(CreateFraudCaseRequest request) {
         return createCase(request, null, false);
@@ -161,6 +165,10 @@ public class FraudCaseLifecycleService {
         }, FraudCaseDocument.class, requireIdempotency);
     }
 
+    /**
+     * Internal/backward-compatibility path only. Public HTTP lifecycle POST endpoints must use
+     * idempotency-key overloads. Guarded by the FDP-43 public-path architecture test.
+     */
     @Deprecated(forRemoval = false)
     public FraudCaseDocument assignCase(String caseId, AssignFraudCaseRequest request) {
         return assignCase(caseId, request, null, false);
@@ -201,6 +209,10 @@ public class FraudCaseLifecycleService {
         }, FraudCaseDocument.class, requireIdempotency);
     }
 
+    /**
+     * Internal/backward-compatibility path only. Public HTTP lifecycle POST endpoints must use
+     * idempotency-key overloads. Guarded by the FDP-43 public-path architecture test.
+     */
     @Deprecated(forRemoval = false)
     public FraudCaseNoteResponse addNote(String caseId, AddFraudCaseNoteRequest request) {
         return addNote(caseId, request, null, false);
@@ -248,6 +260,10 @@ public class FraudCaseLifecycleService {
         }, FraudCaseNoteResponse.class, requireIdempotency);
     }
 
+    /**
+     * Internal/backward-compatibility path only. Public HTTP lifecycle POST endpoints must use
+     * idempotency-key overloads. Guarded by the FDP-43 public-path architecture test.
+     */
     @Deprecated(forRemoval = false)
     public FraudCaseDecisionResponse addDecision(String caseId, AddFraudCaseDecisionRequest request) {
         return addDecision(caseId, request, null, false);
@@ -291,6 +307,10 @@ public class FraudCaseLifecycleService {
         }, FraudCaseDecisionResponse.class, requireIdempotency);
     }
 
+    /**
+     * Internal/backward-compatibility path only. Public HTTP lifecycle POST endpoints must use
+     * idempotency-key overloads. Guarded by the FDP-43 public-path architecture test.
+     */
     @Deprecated(forRemoval = false)
     public FraudCaseDocument transitionCase(String caseId, TransitionFraudCaseRequest request) {
         return transitionCase(caseId, request, null, false);
@@ -320,6 +340,10 @@ public class FraudCaseLifecycleService {
         }, FraudCaseDocument.class, requireIdempotency);
     }
 
+    /**
+     * Internal/backward-compatibility path only. Public HTTP lifecycle POST endpoints must use
+     * idempotency-key overloads. Guarded by the FDP-43 public-path architecture test.
+     */
     @Deprecated(forRemoval = false)
     public FraudCaseDocument closeCase(String caseId, CloseFraudCaseRequest request) {
         return closeCase(caseId, request, null, false);
@@ -359,6 +383,10 @@ public class FraudCaseLifecycleService {
         }, FraudCaseDocument.class, requireIdempotency);
     }
 
+    /**
+     * Internal/backward-compatibility path only. Public HTTP lifecycle POST endpoints must use
+     * idempotency-key overloads. Guarded by the FDP-43 public-path architecture test.
+     */
     @Deprecated(forRemoval = false)
     public FraudCaseDocument reopenCase(String caseId, ReopenFraudCaseRequest request) {
         return reopenCase(caseId, request, null, false);

@@ -59,7 +59,7 @@ class Fdp43FraudCaseLifecyclePublicPathIdempotencyArchitectureTest {
     }
 
     @Test
-    void compatibilityOverloadsMustBeMarkedDeprecated() {
+    void compatibilityOverloadsMustBeMarkedDeprecatedAndInternalOnly() {
         String lifecycle = read(sourceRoot().resolve(Path.of("service", "FraudCaseLifecycleService.java")));
         String management = read(sourceRoot().resolve(Path.of("service", "FraudCaseManagementService.java")));
 
@@ -93,8 +93,13 @@ class Fdp43FraudCaseLifecyclePublicPathIdempotencyArchitectureTest {
     private void assertDeprecatedCompatibilityOverload(String source, String signature) {
         int signatureIndex = source.indexOf(signature);
         assertThat(signatureIndex).as(signature).isGreaterThan(0);
-        String prefix = source.substring(Math.max(0, signatureIndex - 80), signatureIndex);
-        assertThat(prefix).as(signature).contains("@Deprecated(forRemoval = false)");
+        String prefix = source.substring(Math.max(0, signatureIndex - 400), signatureIndex);
+        assertThat(prefix).as(signature)
+                .contains("@Deprecated(forRemoval = false)")
+                .contains("Internal/backward-compatibility path only");
+        assertThat(compact(prefix)).as(signature)
+                .contains("public http lifecycle post endpoints must use")
+                .contains("idempotency-key overloads");
     }
 
     private String read(Path path) {

@@ -7,7 +7,9 @@ import com.frauddetection.alert.persistence.FraudCaseLifecycleIdempotencyRecordD
 import com.frauddetection.alert.persistence.FraudCaseLifecycleIdempotencyRepository;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.transaction.TransactionSystemException;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -63,6 +65,56 @@ class FraudCaseLifecycleIdempotencyServiceRaceTest {
                 .isNotInstanceOf(DuplicateKeyException.class);
     }
 
+    @Test
+    void unknownDataAccessExceptionDuringInitialSavePropagatesWithoutReplayOrInProgressOutcome() {
+        AtomicInteger mutationCalls = new AtomicInteger();
+        DataAccessResourceFailureException failure = new DataAccessResourceFailureException("primary unavailable");
+        FraudCaseLifecycleIdempotencyService service = saveFailureService(failure, null);
+
+        assertThatThrownBy(() -> service.execute(COMMAND, () -> {
+                    mutationCalls.incrementAndGet();
+                    return "mutated";
+                }, String.class))
+                .isSameAs(failure)
+                .isNotInstanceOf(FraudCaseIdempotencyInProgressException.class);
+        assertThat(mutationCalls).hasValue(0);
+    }
+
+    @Test
+    void unknownTransactionSystemExceptionPropagatesWithoutIdempotencyDomainOutcome() {
+        TransactionSystemException failure = new TransactionSystemException("commit failed for unrelated reason");
+        FraudCaseLifecycleIdempotencyService service = transactionFailureService(failure, existing("request-hash-1", "\"replayed\""));
+
+        assertThatThrownBy(() -> service.execute(COMMAND, () -> "mutated", String.class))
+                .isSameAs(failure)
+                .isNotInstanceOf(FraudCaseIdempotencyInProgressException.class)
+                .isNotInstanceOf(FraudCaseIdempotencyConflictException.class);
+    }
+
+    @Test
+    void knownMongoWriteConflictTransactionSignalBecomesInProgressWhenNoRecordIsVisible() {
+        TransactionSystemException failure = new TransactionSystemException(
+                "Could not commit Mongo transaction after WriteConflict with TransientTransactionError"
+        );
+        FraudCaseLifecycleIdempotencyService service = transactionFailureService(failure, null);
+
+        assertThatThrownBy(() -> service.execute(COMMAND, () -> "mutated", String.class))
+                .isInstanceOf(FraudCaseIdempotencyInProgressException.class)
+                .isNotInstanceOf(TransactionSystemException.class);
+    }
+
+    @Test
+    void knownMongoWriteConflictTransactionSignalReplaysCompletedRecordWhenVisible() {
+        TransactionSystemException failure = new TransactionSystemException(
+                "Could not commit Mongo transaction after WriteConflict with TransientTransactionError"
+        );
+        FraudCaseLifecycleIdempotencyService service = transactionFailureService(failure, existing("request-hash-1", "\"replayed\""));
+
+        String response = service.execute(COMMAND, () -> "mutated", String.class);
+
+        assertThat(response).isEqualTo("replayed");
+    }
+
     private FraudCaseLifecycleIdempotencyService duplicateInsertService(
             FraudCaseLifecycleIdempotencyRecordDocument existing
     ) {
@@ -71,6 +123,35 @@ class FraudCaseLifecycleIdempotencyServiceRaceTest {
                 new SharedIdempotencyKeyPolicy(),
                 new FraudCaseLifecycleIdempotencyConflictPolicy(new SharedIdempotencyConflictPolicy()),
                 transactionRunner(),
+                existing
+        );
+    }
+
+    private FraudCaseLifecycleIdempotencyService saveFailureService(
+            RuntimeException failure,
+            FraudCaseLifecycleIdempotencyRecordDocument existing
+    ) {
+        return new SaveFailureFraudCaseLifecycleIdempotencyService(
+                mock(FraudCaseLifecycleIdempotencyRepository.class),
+                new SharedIdempotencyKeyPolicy(),
+                new FraudCaseLifecycleIdempotencyConflictPolicy(new SharedIdempotencyConflictPolicy()),
+                transactionRunner(),
+                failure,
+                existing
+        );
+    }
+
+    private FraudCaseLifecycleIdempotencyService transactionFailureService(
+            RuntimeException failure,
+            FraudCaseLifecycleIdempotencyRecordDocument existing
+    ) {
+        RegulatedMutationTransactionRunner transactionRunner = mock(RegulatedMutationTransactionRunner.class);
+        when(transactionRunner.runLocalCommit(any())).thenThrow(failure);
+        return new ExistingRecordFraudCaseLifecycleIdempotencyService(
+                mock(FraudCaseLifecycleIdempotencyRepository.class),
+                new SharedIdempotencyKeyPolicy(),
+                new FraudCaseLifecycleIdempotencyConflictPolicy(new SharedIdempotencyConflictPolicy()),
+                transactionRunner,
                 existing
         );
     }
@@ -126,6 +207,58 @@ class FraudCaseLifecycleIdempotencyServiceRaceTest {
                 String caseIdScope
         ) {
             return Optional.ofNullable(existing);
+        }
+    }
+
+    private static class ExistingRecordFraudCaseLifecycleIdempotencyService extends FraudCaseLifecycleIdempotencyService {
+
+        private final FraudCaseLifecycleIdempotencyRecordDocument existing;
+
+        protected ExistingRecordFraudCaseLifecycleIdempotencyService(
+                FraudCaseLifecycleIdempotencyRepository repository,
+                SharedIdempotencyKeyPolicy keyPolicy,
+                FraudCaseLifecycleIdempotencyConflictPolicy conflictPolicy,
+                RegulatedMutationTransactionRunner transactionRunner,
+                FraudCaseLifecycleIdempotencyRecordDocument existing
+        ) {
+            super(repository, keyPolicy, conflictPolicy, transactionRunner, JsonMapper.builder().build(), MAX_RESPONSE_SNAPSHOT_BYTES);
+            this.existing = existing;
+        }
+
+        @Override
+        protected Optional<FraudCaseLifecycleIdempotencyRecordDocument> findRecord(
+                String keyHash,
+                String action,
+                String actorId,
+                String caseIdScope
+        ) {
+            return Optional.ofNullable(existing);
+        }
+    }
+
+    private static final class SaveFailureFraudCaseLifecycleIdempotencyService
+            extends ExistingRecordFraudCaseLifecycleIdempotencyService {
+
+        private final RuntimeException failure;
+
+        private SaveFailureFraudCaseLifecycleIdempotencyService(
+                FraudCaseLifecycleIdempotencyRepository repository,
+                SharedIdempotencyKeyPolicy keyPolicy,
+                FraudCaseLifecycleIdempotencyConflictPolicy conflictPolicy,
+                RegulatedMutationTransactionRunner transactionRunner,
+                RuntimeException failure,
+                FraudCaseLifecycleIdempotencyRecordDocument existing
+        ) {
+            super(repository, keyPolicy, conflictPolicy, transactionRunner, existing);
+            this.failure = failure;
+        }
+
+        @Override
+        protected FraudCaseLifecycleIdempotencyRecordDocument saveRecord(FraudCaseLifecycleIdempotencyRecordDocument record) {
+            if (record.getStatus() == FraudCaseLifecycleIdempotencyStatus.IN_PROGRESS) {
+                throw failure;
+            }
+            return record;
         }
     }
 }

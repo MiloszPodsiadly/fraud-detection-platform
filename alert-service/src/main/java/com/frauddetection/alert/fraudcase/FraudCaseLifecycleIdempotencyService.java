@@ -167,6 +167,9 @@ public class FraudCaseLifecycleIdempotencyService {
     }
 
     private boolean containsWriteConflictSignal(Throwable throwable) {
+        // Narrow Mongo same-key race translation only. Unknown DataAccessException or
+        // TransactionSystemException must propagate so business, audit, or mutation failures
+        // are never misreported as idempotency replay/in-progress outcomes.
         Throwable current = throwable;
         while (current != null) {
             String message = current.getMessage();
