@@ -78,6 +78,18 @@ ranges, overlong filters, or deep page requests are audited as `REJECTED`. Unexp
 audited as `FAILED`. These audit attempts use endpoint/resource metadata and result count only; raw filters and user
 supplied values are not stored.
 
+For `/api/v1/fraud-cases/work-queue` and legacy `/api/fraud-cases/work-queue`, the controller owns the sensitive-read
+audit for `SUCCESS`, `REJECTED`, and `FAILED` outcomes because FDP-45 needs explicit outcome classification. The generic
+response advice remains the owner for other sensitive reads when no manual audit has happened. `AUDITED_ATTRIBUTE`
+prevents response-advice duplicate writes after a manual work queue audit. Manual work queue audit preserves bounded
+query metadata such as query hash, page, and size; it does not store raw query strings, raw assignees, linked alert ids,
+case-id lists, exception messages, or stack traces.
+
+Rejected work queue reads normally return `400`. In fail-closed sensitive-read audit mode, if audit persistence is
+unavailable, rejected reads, failed reads, and successful reads return `503` instead. This is intentional: sensitive-read
+audit is mandatory in bank mode, and success metrics are recorded only after the read succeeds and the required audit
+write succeeds.
+
 Metrics are low-cardinality:
 
 - `fraud_case_work_queue_requests_total{endpoint_family,outcome}`
@@ -98,10 +110,10 @@ FDP-45 is GO only when the current head SHA has all required CI jobs completed s
 FDP-42, FDP-43, FDP-44, regulated mutation regression, and the FDP-45 work queue proof suite. The FDP-45 proof suite
 must include contract compatibility, pagination bounds, duplicate-param rejection, filter normalization/length checks,
 allowlisted sorting, index readiness, real Mongo filter/sort/page proof, SLA config/derived fields, read-only safety,
-security, low-cardinality metrics, read-access audit success/rejected/failed outcomes, OpenAPI truth, and no-overclaim
-docs proof.
+security, low-cardinality metrics, read-access audit success/rejected/failed outcomes, no duplicate work queue success
+audit, response-advice marker behavior, fail-closed audit precedence, OpenAPI truth, and no-overclaim docs proof.
 
 FDP-45 is NO-GO while any required job is pending, in progress, skipped, missing, cancelled, timed out, or failed. It is
 also NO-GO if the old `GET /api/v1/fraud-cases` contract drifts, the work queue performs unbounded list/export/exact
-count behavior, unsupported filters silently fall back, failed sensitive-read attempts are not audited, or docs claim
-mutation/idempotency/finality guarantees outside FDP-45 scope.
+count behavior, unsupported filters silently fall back, failed sensitive-read attempts are not audited, successful work
+queue reads are audited twice, or docs claim mutation/idempotency/finality guarantees outside FDP-45 scope.

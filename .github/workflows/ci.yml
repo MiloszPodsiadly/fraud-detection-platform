@@ -325,7 +325,7 @@ jobs:
         run: docker version
 
       - name: Run FDP-45 fraud case work queue read model suite
-        run: mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=Fdp45FraudCaseReadModelSingleSourceOfTruthTest,Fdp45FraudCaseWorkQueuePaginationTest,Fdp45FraudCaseWorkQueueSortingTest,Fdp45FraudCaseWorkQueueFilterTest,Fdp45FraudCaseWorkQueueDuplicateParamTest,Fdp45FraudCaseWorkQueueSlaConfigTest,Fdp45FraudCaseWorkQueueSlaAgeTest,Fdp45FraudCaseWorkQueueReadOnlySafetyTest,Fdp45FraudCaseWorkQueueSecurityTest,Fdp45FraudCaseWorkQueueObservabilityTest,Fdp45FraudCaseWorkQueueFailureMetricsTest,Fdp45FraudCaseWorkQueueReadAccessAuditTest,Fdp45FraudCaseWorkQueueMongoIntegrationTest,Fdp45FraudCaseWorkQueueContractCompatibilityTest,Fdp45FraudCaseWorkQueueDocsNoOverclaimTest,Fdp45FraudCaseLegacyListValidationTest,Fdp45FraudCaseWorkQueueDeepPaginationTest,Fdp45FraudCaseWorkQueueIndexReadinessTest,Fdp45FraudCaseWorkQueueOpenApiContractTest,Fdp45FraudCaseWorkQueueFailedReadAuditTest,Fdp45FraudCaseWorkQueueFilterLengthTest" test
+        run: mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=Fdp45FraudCaseReadModelSingleSourceOfTruthTest,Fdp45FraudCaseWorkQueuePaginationTest,Fdp45FraudCaseWorkQueueSortingTest,Fdp45FraudCaseWorkQueueFilterTest,Fdp45FraudCaseWorkQueueDuplicateParamTest,Fdp45FraudCaseWorkQueueSlaConfigTest,Fdp45FraudCaseWorkQueueSlaAgeTest,Fdp45FraudCaseWorkQueueReadOnlySafetyTest,Fdp45FraudCaseWorkQueueSecurityTest,Fdp45FraudCaseWorkQueueObservabilityTest,Fdp45FraudCaseWorkQueueFailureMetricsTest,Fdp45FraudCaseWorkQueueReadAccessAuditTest,Fdp45FraudCaseWorkQueueMongoIntegrationTest,Fdp45FraudCaseWorkQueueContractCompatibilityTest,Fdp45FraudCaseWorkQueueDocsNoOverclaimTest,Fdp45FraudCaseLegacyListValidationTest,Fdp45FraudCaseWorkQueueDeepPaginationTest,Fdp45FraudCaseWorkQueueIndexReadinessTest,Fdp45FraudCaseWorkQueueOpenApiContractTest,Fdp45FraudCaseWorkQueueFailedReadAuditTest,Fdp45FraudCaseWorkQueueFilterLengthTest,Fdp45FraudCaseWorkQueueNoDuplicateAuditAdviceTest,Fdp45ReadAccessAuditResponseAdviceMarkerTest,Fdp45FraudCaseWorkQueueAuditPrecedenceTest" test
 
       - name: Verify FDP-45 proof suite reports
         run: |
@@ -357,6 +357,9 @@ jobs:
               "Fdp45FraudCaseWorkQueueOpenApiContractTest",
               "Fdp45FraudCaseWorkQueueFailedReadAuditTest",
               "Fdp45FraudCaseWorkQueueFilterLengthTest",
+              "Fdp45FraudCaseWorkQueueNoDuplicateAuditAdviceTest",
+              "Fdp45ReadAccessAuditResponseAdviceMarkerTest",
+              "Fdp45FraudCaseWorkQueueAuditPrecedenceTest",
           ]
 
           xml_by_class = {}
