@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   listAlerts,
   listFraudCases,
+  listFraudCaseWorkQueue,
   listGovernanceAdvisories,
   getGovernanceAdvisoryAnalytics,
   listScoredTransactions,
@@ -14,6 +15,13 @@ import { isOidcCallbackPath } from "./auth/oidcClient.js";
 import { normalizeSession } from "./auth/session.js";
 import { SESSION_STATES, getSessionStateForApiError, getSessionStateForProvider } from "./auth/sessionState.js";
 import { SessionBadge } from "./components/SessionBadge.jsx";
+import {
+  initialFraudCaseWorkQueue,
+  initialFraudCaseWorkQueueRequest,
+  isInvalidWorkQueueCursorError,
+  mergeWorkQueueSlice,
+  resetWorkQueueRequestForFilterChange
+} from "./fraudCases/workQueueState.js";
 import { AlertDetailsPage } from "./pages/AlertDetailsPage.jsx";
 import { AlertsListPage } from "./pages/AlertsListPage.jsx";
 import { FraudCaseDetailsPage } from "./pages/FraudCaseDetailsPage.jsx";
@@ -44,6 +52,8 @@ export default function App() {
     size: 4
   });
   const [fraudCasePageRequest, setFraudCasePageRequest] = useState({ page: 0, size: 4 });
+  const [fraudCaseWorkQueue, setFraudCaseWorkQueue] = useState(initialFraudCaseWorkQueue);
+  const [fraudCaseWorkQueueRequest, setFraudCaseWorkQueueRequest] = useState(initialFraudCaseWorkQueueRequest);
   const [transactionPage, setTransactionPage] = useState({
     content: [],
     totalElements: 0,
@@ -51,7 +61,13 @@ export default function App() {
     page: 0,
     size: 25
   });
-  const [transactionPageRequest, setTransactionPageRequest] = useState({ page: 0, size: 25 });
+  const [transactionPageRequest, setTransactionPageRequest] = useState({
+    page: 0,
+    size: 25,
+    query: "",
+    riskLevel: "ALL",
+    status: "ALL"
+  });
   const [advisoryQueue, setAdvisoryQueue] = useState({
     status: "UNAVAILABLE",
     count: 0,
@@ -82,9 +98,11 @@ export default function App() {
   const [session, setSession] = useState(() => authProvider.getInitialSession());
   const [sessionState, setSessionState] = useState(() => getSessionStateForProvider(authProvider.getInitialSession(), authProvider));
   const [isLoading, setIsLoading] = useState(true);
+  const [isFraudCaseWorkQueueLoading, setIsFraudCaseWorkQueueLoading] = useState(true);
   const [isGovernanceLoading, setIsGovernanceLoading] = useState(true);
   const [isAnalyticsLoading, setIsAnalyticsLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [fraudCaseWorkQueueError, setFraudCaseWorkQueueError] = useState(null);
   const [governanceError, setGovernanceError] = useState(null);
   const [analyticsError, setAnalyticsError] = useState(null);
   const [governanceAuditHistories, setGovernanceAuditHistories] = useState({});
@@ -92,12 +110,20 @@ export default function App() {
   const handlingOidcCallback = authProvider.kind === "oidc" && isOidcCallbackPath();
   const [sessionBootstrapPending, setSessionBootstrapPending] = useState(authProvider.kind === "oidc");
   const skipNextOidcBootstrapRef = useRef(false);
+  const skipNextWorkQueueReloadRef = useRef(false);
 
   useEffect(() => {
     setApiSession(session, authProvider);
     authProvider.persistSession(session);
     setSessionState(getSessionStateForProvider(session, authProvider));
   }, [authProvider, session]);
+
+  useEffect(() => {
+    if (!selectedAlertId && !selectedFraudCaseId) {
+      return;
+    }
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [selectedAlertId, selectedFraudCaseId]);
 
   useEffect(() => {
     if (authProvider.kind !== "oidc" || handlingOidcCallback || typeof authProvider.refreshSession !== "function") {
@@ -157,6 +183,22 @@ export default function App() {
     setApiSession(session, authProvider);
     loadDashboard({ transaction: transactionPageRequest, alert: alertPageRequest, fraudCase: fraudCasePageRequest });
   }, [authProvider, transactionPageRequest, alertPageRequest, fraudCasePageRequest, handlingOidcCallback, session, sessionBootstrapPending]);
+
+  useEffect(() => {
+    if (handlingOidcCallback || sessionBootstrapPending) {
+      return;
+    }
+    if (skipNextWorkQueueReloadRef.current) {
+      skipNextWorkQueueReloadRef.current = false;
+      return;
+    }
+    if (shouldBlockDashboardFetch(sessionState)) {
+      setIsFraudCaseWorkQueueLoading(false);
+      return;
+    }
+    setApiSession(session, authProvider);
+    loadFraudCaseWorkQueue(fraudCaseWorkQueueRequest);
+  }, [authProvider, fraudCaseWorkQueueRequest, handlingOidcCallback, session, sessionBootstrapPending, sessionState?.status]);
 
   useEffect(() => {
     if (handlingOidcCallback || sessionBootstrapPending) {
@@ -253,6 +295,29 @@ export default function App() {
     }
   }
 
+  async function loadFraudCaseWorkQueue(nextRequest = fraudCaseWorkQueueRequest) {
+    setIsFraudCaseWorkQueueLoading(true);
+    setFraudCaseWorkQueueError(null);
+    try {
+      const nextQueue = await listFraudCaseWorkQueue(nextRequest);
+      setFraudCaseWorkQueue((current) => mergeWorkQueueSlice(current, nextQueue, { append: Boolean(nextRequest.cursor) }));
+    } catch (apiError) {
+      setFraudCaseWorkQueueError(apiError);
+      setFraudCaseWorkQueue((current) => ({
+        ...initialFraudCaseWorkQueue(),
+        size: current.size,
+        sort: current.sort
+      }));
+      if (isInvalidWorkQueueCursorError(apiError)) {
+        skipNextWorkQueueReloadRef.current = true;
+        setFraudCaseWorkQueueRequest((current) => ({ ...current, cursor: null }));
+      }
+      setSessionState(getSessionStateForApiError(session, apiError) || getSessionStateForProvider(session, authProvider));
+    } finally {
+      setIsFraudCaseWorkQueueLoading(false);
+    }
+  }
+
   async function loadGovernanceQueue(nextRequest = advisoryQueueRequest) {
     setIsGovernanceLoading(true);
     setGovernanceError(null);
@@ -317,6 +382,7 @@ export default function App() {
 
   function refreshDashboard() {
     loadDashboard({ transaction: transactionPageRequest, alert: alertPageRequest, fraudCase: fraudCasePageRequest });
+    refreshFraudCaseWorkQueueFromStart();
     if (!shouldBlockDashboardFetch(sessionState)) {
       loadGovernanceQueue(advisoryQueueRequest);
       loadGovernanceAnalytics(analyticsWindowDays);
@@ -332,7 +398,15 @@ export default function App() {
   }
 
   function changeTransactionPageSize(size) {
-    setTransactionPageRequest({ page: 0, size });
+    setTransactionPageRequest((current) => ({ ...current, page: 0, size }));
+  }
+
+  function changeTransactionFilters(filters) {
+    setTransactionPageRequest((current) => ({
+      ...current,
+      ...filters,
+      page: 0
+    }));
   }
 
   function changeAlertPage(page) {
@@ -349,6 +423,27 @@ export default function App() {
 
   function changeFraudCasePageSize(size) {
     setFraudCasePageRequest({ page: 0, size });
+  }
+
+  function changeFraudCaseWorkQueueRequest(patch) {
+    setFraudCaseWorkQueue(initialFraudCaseWorkQueue());
+    setFraudCaseWorkQueueRequest((current) => resetWorkQueueRequestForFilterChange(current, patch));
+  }
+
+  function loadMoreFraudCaseWorkQueue() {
+    if (!fraudCaseWorkQueue.nextCursor) {
+      return;
+    }
+    setFraudCaseWorkQueueRequest((current) => ({
+      ...current,
+      cursor: fraudCaseWorkQueue.nextCursor
+    }));
+  }
+
+  function refreshFraudCaseWorkQueueFromStart() {
+    setFraudCaseWorkQueue(initialFraudCaseWorkQueue());
+    setFraudCaseWorkQueueRequest((current) => ({ ...current, cursor: null }));
+    loadFraudCaseWorkQueue({ ...fraudCaseWorkQueueRequest, cursor: null });
   }
 
   function openAlert(alertId) {
@@ -375,6 +470,8 @@ export default function App() {
     setSelectedFraudCaseId(null);
   }
 
+  const detailMode = Boolean(selectedAlertId || selectedFraudCaseId);
+
   if (handlingOidcCallback) {
     return (
       <div className="appShell">
@@ -397,16 +494,11 @@ export default function App() {
 
   return (
     <div className="appShell">
-      <header className="hero">
-        <div>
-          <p className="eyebrow">Fraud operations</p>
+      <header className={detailMode ? "appHeader appHeaderCompact" : "appHeader appHeaderLanding"}>
+        <div className="brandBlock">
           <h1>Analyst Console</h1>
-          <p className="heroCopy">
-            Internal workspace for watching legitimate and suspicious transactions, triaging
-            high-risk alerts, and submitting analyst decisions.
-          </p>
         </div>
-        <div className="heroStats" aria-label="Alert summary">
+        <div className="headerStats" aria-label="Operations summary">
           <div>
             <span>{transactionPage.totalElements}</span>
             <small>Scored transactions</small>
@@ -448,15 +540,20 @@ export default function App() {
           <AlertsListPage
             alertPage={alertPage}
             fraudCasePage={fraudCasePage}
+            fraudCaseWorkQueue={fraudCaseWorkQueue}
+            fraudCaseWorkQueueRequest={fraudCaseWorkQueueRequest}
             transactionPage={transactionPage}
+            transactionPageRequest={transactionPageRequest}
             advisoryQueue={advisoryQueue}
             advisoryQueueRequest={advisoryQueueRequest}
             governanceAnalytics={governanceAnalytics}
             analyticsWindowDays={analyticsWindowDays}
             isLoading={isLoading}
+            isFraudCaseWorkQueueLoading={isFraudCaseWorkQueueLoading}
             isGovernanceLoading={isGovernanceLoading}
             isAnalyticsLoading={isAnalyticsLoading}
             error={error}
+            fraudCaseWorkQueueError={fraudCaseWorkQueueError}
             governanceError={governanceError}
             analyticsError={analyticsError}
             governanceAuditHistories={governanceAuditHistories}
@@ -466,8 +563,13 @@ export default function App() {
             onGovernanceRetry={() => loadGovernanceQueue(advisoryQueueRequest)}
             onAnalyticsRetry={() => loadGovernanceAnalytics(analyticsWindowDays)}
             onAdvisoryQueueRequestChange={setAdvisoryQueueRequest}
+            onFraudCaseWorkQueueRequestChange={changeFraudCaseWorkQueueRequest}
+            onFraudCaseWorkQueueRetry={() => loadFraudCaseWorkQueue(fraudCaseWorkQueueRequest)}
+            onFraudCaseWorkQueueRefreshFirstSlice={refreshFraudCaseWorkQueueFromStart}
+            onFraudCaseWorkQueueLoadMore={loadMoreFraudCaseWorkQueue}
             onAnalyticsWindowDaysChange={setAnalyticsWindowDays}
             onRecordGovernanceAudit={recordGovernanceAudit}
+            onTransactionFiltersChange={changeTransactionFilters}
             onTransactionPageChange={changeTransactionPage}
             onTransactionPageSizeChange={changeTransactionPageSize}
             onAlertPageChange={changeAlertPage}

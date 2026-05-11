@@ -1,23 +1,30 @@
 :root {
   color-scheme: light;
   font-family: "Aptos", "Segoe UI", sans-serif;
-  --ink: #17211b;
-  --muted: #66736c;
-  --line: #d8ddd5;
-  --panel: rgba(255, 252, 244, 0.88);
-  --panel-solid: #fffaf0;
-  --field: #fffdf7;
-  --olive: #52613c;
-  --moss: #7f8d63;
-  --clay: #b75f3b;
-  --gold: #d9a441;
-  --red: #b43434;
-  --green: #3f7b55;
-  --shadow: 0 22px 70px rgba(51, 45, 30, 0.14);
+  --ink: #111827;
+  --muted: #637083;
+  --line: #dbe3ee;
+  --panel: rgba(255, 255, 255, 0.94);
+  --panel-solid: #ffffff;
+  --field: #f8fafc;
+  --olive: #2563eb;
+  --moss: #0f766e;
+  --clay: #b45309;
+  --gold: #d97706;
+  --red: #dc2626;
+  --green: #15803d;
+  --blue: #2563eb;
+  --navy: #172554;
+  --shadow: 0 18px 55px rgba(15, 23, 42, 0.1);
+  --soft-shadow: 0 8px 26px rgba(15, 23, 42, 0.08);
 }
 
 * {
   box-sizing: border-box;
+}
+
+html {
+  font-size: 75%;
 }
 
 body {
@@ -25,9 +32,10 @@ body {
   min-width: 320px;
   color: var(--ink);
   background:
-    radial-gradient(circle at 10% 10%, rgba(217, 164, 65, 0.22), transparent 28rem),
-    radial-gradient(circle at 90% 5%, rgba(82, 97, 60, 0.22), transparent 26rem),
-    linear-gradient(135deg, #f7efe1 0%, #edf1e3 52%, #f9f2e8 100%);
+    linear-gradient(90deg, rgba(37, 99, 235, 0.06) 1px, transparent 1px),
+    linear-gradient(rgba(37, 99, 235, 0.045) 1px, transparent 1px),
+    linear-gradient(135deg, #f8fafc 0%, #eef4fb 48%, #f7faf8 100%);
+  background-size: 44px 44px, 44px 44px, auto;
 }
 
 button,
@@ -53,61 +61,204 @@ code {
 }
 
 .appShell {
-  width: min(1440px, calc(100% - 2rem));
+  width: min(1500px, calc(100% - 2rem));
   margin: 0 auto;
-  padding: 2rem 0 4rem;
+  padding: 1.25rem 0 3rem;
 }
 
-.hero {
+.appHeader {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(18rem, 24rem);
-  gap: 1.5rem;
+  grid-template-columns: minmax(0, 1fr) minmax(22rem, 0.32fr);
+  grid-template-areas:
+    "brand session"
+    "stats session";
+  gap: 1rem;
   align-items: end;
-  padding: 2rem;
+  margin-bottom: 1rem;
+  position: relative;
+  overflow: visible;
+  border: 1px solid rgba(37, 99, 235, 0.14);
+  border-radius: 1rem;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(239, 246, 255, 0.86)),
+    linear-gradient(90deg, rgba(37, 99, 235, 0.08), transparent 45%);
+  box-shadow: var(--soft-shadow);
+  padding: 1rem;
 }
 
-.hero h1,
+.appHeader::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(37, 99, 235, 0.08) 1px, transparent 1px),
+    linear-gradient(rgba(20, 184, 166, 0.08) 1px, transparent 1px);
+  background-size: 26px 26px;
+  mask-image: linear-gradient(90deg, transparent, #000 18%, #000 72%, transparent);
+}
+
+.appHeader > * {
+  position: relative;
+  z-index: 1;
+}
+
+.appHeaderLanding {
+  min-height: 19rem;
+  align-items: end;
+}
+
+.appHeaderCompact {
+  grid-template-columns: minmax(0, 1fr) minmax(16rem, 24rem) minmax(18rem, 25rem);
+  grid-template-areas: "brand stats session";
+  min-height: auto;
+  padding: 0.85rem;
+}
+
+.appHeaderCompact .brandBlock {
+  align-content: center;
+}
+
+.appHeaderCompact h1 {
+  font-size: clamp(2rem, 3vw, 3.2rem);
+  line-height: 0.9;
+}
+
+.appHeaderCompact .headerCopy {
+  max-width: 32rem;
+}
+
+.brandBlock {
+  grid-area: brand;
+  display: grid;
+  align-content: end;
+  align-self: end;
+  justify-items: start;
+  min-width: 0;
+  overflow: visible;
+  text-align: left;
+}
+
+.appHeader h1,
 .panel h2 {
   margin: 0;
-  letter-spacing: -0.055em;
+  letter-spacing: 0;
 }
 
-.hero h1 {
-  font-size: clamp(3rem, 8vw, 7rem);
+.appHeader h1 {
+  max-width: 100%;
+  font-size: clamp(5.2rem, 7.2vw, 8.2rem);
   line-height: 0.88;
+  color: var(--navy);
+  overflow-wrap: normal;
+  white-space: nowrap;
+  text-shadow:
+    0 0.12rem 0 rgba(37, 99, 235, 0.1),
+    0 1.3rem 3rem rgba(23, 37, 84, 0.16);
 }
 
-.heroCopy {
-  max-width: 44rem;
+.headerCopy {
+  max-width: 34rem;
+  margin: 0.55rem 0 0;
   color: var(--muted);
-  font-size: 1.05rem;
+  font-size: 1rem;
+  line-height: 1.45;
 }
 
-.heroStats {
+.headerSignal {
+  display: grid;
+  align-content: end;
+  gap: 0.45rem;
+  min-width: 0;
+  min-height: 9.6rem;
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  border-radius: 0.85rem;
+  background:
+    linear-gradient(145deg, rgba(37, 99, 235, 0.12), rgba(20, 184, 166, 0.08)),
+    rgba(255, 255, 255, 0.68);
+  padding: 1rem;
+}
+
+.headerSignal span {
+  width: fit-content;
+  border-radius: 999px;
+  background: rgba(20, 184, 166, 0.14);
+  color: #0f766e;
+  padding: 0.28rem 0.6rem;
+  font-size: 0.74rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.headerSignal strong {
+  color: var(--navy);
+  font-size: 1.08rem;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+}
+
+.headerSignal small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.headerStats {
+  grid-area: stats;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 0.8rem;
+  gap: 0.65rem;
+  align-self: end;
+  justify-self: start;
+  width: min(40rem, 100%);
+  min-width: 0;
 }
 
-.heroStats div,
+.headerStats div,
 .metricCard,
 .summaryItem,
 .caseMiniCard,
 .sessionBadge {
-  border: 1px solid rgba(82, 97, 60, 0.18);
-  border-radius: 1rem;
-  background: rgba(255, 252, 244, 0.72);
+  border: 1px solid rgba(15, 23, 42, 0.09);
+  border-radius: 0.65rem;
+  background: rgba(255, 255, 255, 0.86);
 }
 
-.heroStats div {
-  min-width: 8rem;
-  padding: 1rem;
+.headerStats div {
+  min-width: 0;
+  padding: 0.9rem;
+  box-shadow: none;
+}
+
+.headerStats small {
+  display: block;
+  line-height: 1.25;
+}
+
+.appHeaderLanding .headerStats {
+  align-self: end;
+}
+
+.appHeaderLanding .sessionBadge {
+  align-self: end;
+}
+
+.appHeaderCompact .brandBlock {
+  justify-items: start;
+  text-align: left;
+}
+
+.appHeaderCompact .headerStats {
+  justify-self: stretch;
+  width: 100%;
 }
 
 .sessionBadge {
+  grid-area: session;
   display: grid;
   gap: 0.75rem;
   padding: 1rem;
+  align-self: start;
+  min-width: 0;
 }
 
 .sessionIdentity {
@@ -143,10 +294,10 @@ code {
 
 .sessionModePill {
   margin-left: auto;
-  border: 1px solid rgba(63, 123, 85, 0.2);
+  border: 1px solid rgba(21, 128, 61, 0.2);
   border-radius: 999px;
   padding: 0.25rem 0.55rem;
-  background: rgba(63, 123, 85, 0.1);
+  background: rgba(21, 128, 61, 0.1);
   color: var(--green);
   font-size: 0.72rem;
   font-weight: 800;
@@ -177,6 +328,52 @@ code {
   gap: 0.45rem;
 }
 
+.sessionDetails {
+  display: grid;
+  gap: 0.75rem;
+  position: relative;
+}
+
+.sessionDetails summary {
+  width: fit-content;
+  border: 1px solid rgba(82, 97, 60, 0.16);
+  border-radius: 999px;
+  background: rgba(82, 97, 60, 0.08);
+  padding: 0.45rem 0.75rem;
+  color: var(--ink);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.sessionDetails[open] {
+  gap: 0;
+}
+
+.sessionDetails[open] summary {
+  margin-bottom: 0;
+}
+
+.sessionDetailsPanel {
+  display: none;
+}
+
+.sessionDetails[open] .sessionDetailsPanel {
+  position: absolute;
+  top: calc(100% + 0.55rem);
+  right: 0;
+  z-index: 25;
+  display: grid;
+  gap: 0.75rem;
+  width: min(24rem, calc(100vw - 3rem));
+  max-height: min(32rem, calc(100vh - 9rem));
+  overflow: auto;
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  border-radius: 0.85rem;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 1.25rem 3rem rgba(15, 23, 42, 0.16);
+  padding: 1rem;
+}
+
 .sessionFact {
   border: 1px solid rgba(82, 97, 60, 0.14);
   border-radius: 999px;
@@ -201,14 +398,14 @@ code {
   font-size: 0.68rem;
 }
 
-.heroStats span,
+.headerStats span,
 .metricCard strong {
   display: block;
-  font-size: 1.8rem;
+  font-size: 1.65rem;
   font-weight: 800;
 }
 
-.heroStats small,
+.headerStats small,
 .metricCard span,
 .summaryItem span,
 .muted {
@@ -217,29 +414,33 @@ code {
 
 .eyebrow {
   margin: 0 0 0.55rem;
-  color: var(--clay);
+  color: var(--blue);
   font-size: 0.78rem;
   font-weight: 800;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
 .panel,
 .subPanel {
-  border: 1px solid rgba(82, 97, 60, 0.18);
-  border-radius: 1.8rem;
+  border: 1px solid rgba(15, 23, 42, 0.09);
+  border-radius: 0.75rem;
   background: var(--panel);
   box-shadow: var(--shadow);
-  backdrop-filter: blur(14px);
+  backdrop-filter: blur(10px);
 }
 
 .panel {
-  padding: 1.25rem;
+  padding: 1rem;
+}
+
+.workQueuePanel {
+  overflow: hidden;
 }
 
 .dashboardGrid {
   display: grid;
-  gap: 1rem;
+  gap: 0.85rem;
 }
 
 .sectionCopy {
@@ -248,8 +449,8 @@ code {
   color: var(--muted);
 }
 
-.fraudCasePanel {
-  border-color: rgba(180, 52, 52, 0.26);
+.workQueuePanel {
+  border-color: rgba(37, 99, 235, 0.24);
 }
 
 .governanceQueuePanel {
@@ -288,6 +489,184 @@ code {
   background: rgba(180, 52, 52, 0.08);
   padding: 0.9rem 1rem;
   text-align: right;
+}
+
+.workQueueCounter {
+  min-width: 9rem;
+  border: 1px solid rgba(37, 99, 235, 0.22);
+  border-radius: 0.5rem;
+  background: rgba(37, 99, 235, 0.08);
+  padding: 0.9rem 1rem;
+  text-align: right;
+}
+
+.workQueueCounter strong {
+  display: block;
+  color: var(--blue);
+  font-size: 1.8rem;
+}
+
+.workQueueCounter span {
+  color: var(--muted);
+}
+
+.workQueueHeaderActions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: stretch;
+}
+
+.workQueueHeaderActions .secondaryButton {
+  align-self: center;
+}
+
+.workQueueSummary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.workQueueMetric {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+  min-height: 3.2rem;
+  border: 1px solid rgba(15, 23, 42, 0.09);
+  border-radius: 0.5rem;
+  background: rgba(248, 250, 252, 0.92);
+  padding: 0.75rem 0.85rem;
+}
+
+.workQueueMetric span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.workQueueMetric strong {
+  font-size: 1.35rem;
+}
+
+.workQueueMetriccritical {
+  border-color: rgba(220, 38, 38, 0.2);
+  background: rgba(254, 242, 242, 0.92);
+}
+
+.workQueueMetricwarning {
+  border-color: rgba(217, 119, 6, 0.22);
+  background: rgba(255, 251, 235, 0.94);
+}
+
+.workQueueMetricmuted {
+  background: rgba(82, 97, 60, 0.06);
+}
+
+.workQueueFilters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.85rem;
+  margin-bottom: 1rem;
+}
+
+.workQueueToolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.workQueuePanel .statePanel {
+  min-height: 7rem;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 0.65rem;
+  background: rgba(248, 250, 252, 0.74);
+  margin-top: 0.5rem;
+  padding: 1rem;
+}
+
+.workQueuePanel .errorPanel {
+  border-color: rgba(220, 38, 38, 0.22);
+  background: rgba(254, 242, 242, 0.9);
+}
+
+.workQueueChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.compactButton {
+  flex: 0 0 auto;
+  padding: 0.55rem 0.75rem;
+}
+
+.workQueueTable td {
+  vertical-align: top;
+}
+
+.workQueueCaseCell {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.workQueueCaseCell strong {
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+}
+
+.workQueueFooter {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+  padding-top: 1rem;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.priorityPill,
+.slaBadge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.35rem 0.65rem;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.priorityLOW,
+.slaWITHIN_SLA {
+  background: rgba(63, 123, 85, 0.13);
+  color: var(--green);
+}
+
+.priorityMEDIUM,
+.slaNEAR_BREACH {
+  background: rgba(217, 164, 65, 0.18);
+  color: #946b15;
+}
+
+.priorityHIGH {
+  background: rgba(183, 95, 59, 0.16);
+  color: var(--clay);
+}
+
+.priorityCRITICAL,
+.slaBREACHED {
+  background: rgba(180, 52, 52, 0.16);
+  color: var(--red);
+}
+
+.priorityUNKNOWN,
+.slaUNKNOWN,
+.slaNOT_APPLICABLE {
+  background: rgba(23, 33, 27, 0.08);
+  color: var(--ink);
 }
 
 .fraudCaseCounter strong {
@@ -390,6 +769,39 @@ code {
   overflow-wrap: anywhere;
 }
 
+.transactionDetailRow td {
+  padding-top: 0;
+  background: rgba(82, 97, 60, 0.04);
+}
+
+.transactionDetailGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+  border: 1px solid rgba(82, 97, 60, 0.14);
+  border-radius: 0.75rem;
+  background: rgba(255, 253, 247, 0.78);
+  padding: 0.9rem;
+}
+
+.transactionDetailGrid div {
+  min-width: 0;
+}
+
+.transactionDetailGrid dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.transactionDetailGrid dd {
+  margin: 0.2rem 0 0;
+  overflow-wrap: anywhere;
+  font-weight: 800;
+}
+
 .fraudCaseRisk {
   display: flex;
   flex-shrink: 0;
@@ -435,10 +847,10 @@ select,
 textarea {
   width: 100%;
   border: 1px solid var(--line);
-  border-radius: 0.95rem;
+  border-radius: 0.55rem;
   background: var(--field);
   color: var(--ink);
-  padding: 0.78rem 0.9rem;
+  padding: 0.72rem 0.82rem;
   outline: none;
 }
 
@@ -468,8 +880,8 @@ textarea:focus {
 
 .alertTable th,
 .alertTable td {
-  padding: 1rem;
-  border-bottom: 1px solid rgba(82, 97, 60, 0.14);
+  padding: 0.9rem;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
   vertical-align: middle;
 }
 
@@ -636,7 +1048,7 @@ textarea:focus {
 .riskUNKNOWN,
 .statusPill,
 .tag {
-  background: rgba(23, 33, 27, 0.08);
+  background: rgba(15, 23, 42, 0.08);
   color: var(--ink);
 }
 
@@ -746,17 +1158,24 @@ textarea:focus {
 
 .primaryButton {
   width: 100%;
-  background: var(--ink);
-  color: #fffaf0;
+  background: var(--navy);
+  color: #ffffff;
   padding: 0.9rem 1rem;
 }
 
 .secondaryButton,
 .rowButton,
 .backButton {
-  background: rgba(82, 97, 60, 0.12);
+  background: rgba(15, 23, 42, 0.08);
   color: var(--ink);
   padding: 0.7rem 0.95rem;
+}
+
+.secondaryButton:hover,
+.rowButton:hover,
+.backButton:hover {
+  background: rgba(37, 99, 235, 0.12);
+  color: var(--navy);
 }
 
 .detailsLayout {
@@ -831,7 +1250,7 @@ textarea:focus {
 
 .metricCard,
 .summaryItem {
-  padding: 1rem;
+  padding: 0.9rem;
 }
 
 .summaryGrid {
@@ -879,9 +1298,9 @@ textarea:focus {
 .jsonBlock {
   max-height: 18rem;
   overflow: auto;
-  border-radius: 1rem;
-  background: #17211b;
-  color: #f7efe1;
+  border-radius: 0.65rem;
+  background: #111827;
+  color: #f8fafc;
   padding: 1rem;
 }
 
@@ -1024,6 +1443,44 @@ textarea:focus {
   gap: 1rem;
 }
 
+.caseStateList {
+  display: grid;
+  gap: 0.85rem;
+  margin: 1rem 0 0;
+}
+
+.caseStatePanel {
+  display: grid;
+  gap: 0.25rem;
+  margin-top: 1rem;
+  border-top: 1px solid rgba(15, 23, 42, 0.1);
+  padding-top: 1rem;
+}
+
+.caseStatePanel h3 {
+  margin: 0;
+}
+
+.caseStateList div {
+  display: grid;
+  gap: 0.25rem;
+  border-bottom: 1px solid rgba(82, 97, 60, 0.12);
+  padding-bottom: 0.75rem;
+}
+
+.caseStateList dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.caseStateList dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-weight: 800;
+}
+
 .caseMiniCard {
   display: grid;
   gap: 0.35rem;
@@ -1070,12 +1527,12 @@ textarea:focus {
 }
 
 .stateBanner {
-  border: 1px solid rgba(217, 164, 65, 0.28);
-  border-radius: 1rem;
-  background: rgba(217, 164, 65, 0.12);
+  border: 1px solid rgba(217, 119, 6, 0.24);
+  border-radius: 0.65rem;
+  background: rgba(255, 251, 235, 0.92);
   margin-bottom: 1rem;
   padding: 0.85rem 1rem;
-  color: #74510f;
+  color: #92400e;
   font-weight: 800;
 }
 
@@ -1150,17 +1607,46 @@ textarea:focus {
 }
 
 @media (max-width: 980px) {
-  .hero,
+  .appHeader,
+  .appHeaderCompact,
   .detailsLayout {
     grid-template-columns: 1fr;
   }
 
+  .appHeader,
+  .appHeaderCompact {
+    grid-template-areas:
+      "brand"
+      "stats"
+      "session";
+  }
+
+  .appHeaderLanding {
+    min-height: auto;
+  }
+
+  .appHeader h1 {
+    font-size: clamp(2.6rem, 11vw, 4.6rem);
+    white-space: normal;
+  }
+
+  .headerStats {
+    justify-self: stretch;
+    width: 100%;
+  }
+
+  .workQueueSummary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .filterBar,
+  .workQueueFilters,
   .metricGrid,
   .analyticsGrid,
   .summaryGrid,
   .splitGrid,
   .assistantFacts,
+  .transactionDetailGrid,
   .fraudCaseGrid,
   .fraudCaseFacts,
   .governanceAuditPanel {
@@ -1178,18 +1664,20 @@ textarea:focus {
     padding-top: 1rem;
   }
 
-  .hero,
+  .appHeader,
   .panel {
     padding: 1rem;
   }
 
-  .heroStats,
+  .headerStats,
   .filterBar,
+  .workQueueFilters,
   .metricGrid,
   .analyticsGrid,
   .summaryGrid,
   .splitGrid,
   .assistantFacts,
+  .transactionDetailGrid,
   .fraudCaseGrid,
   .fraudCaseFacts,
   .governanceAuditPanel {
@@ -1208,12 +1696,20 @@ textarea:focus {
   .detailsHeader,
   .paginationBar,
   .paginationActions,
+  .workQueueHeaderActions,
+  .workQueueToolbar,
+  .workQueueFooter,
   .fraudCaseCardHeader,
   .fraudCaseTransaction {
     display: grid;
   }
 
+  .workQueueSummary {
+    grid-template-columns: 1fr 1fr;
+  }
+
   .fraudCaseCounter,
+  .workQueueCounter,
   .fraudCaseCardHeader > strong {
     text-align: left;
   }

@@ -15,16 +15,17 @@ async function request(path, options = {}) {
   const {
     baseUrl = API_BASE_URL,
     includeAuth = true,
+    headers = {},
     ...fetchOptions
   } = options;
   const authHeaders = includeAuth ? authHeadersForSession(activeAuthProvider, activeSession) : {};
   const response = await fetch(`${baseUrl}${path}`, {
+    ...fetchOptions,
     headers: {
       "Content-Type": "application/json",
       ...authHeaders,
-      ...fetchOptions.headers
-    },
-    ...fetchOptions
+      ...headers
+    }
   });
 
   if (!response.ok) {
@@ -70,11 +71,47 @@ export function listFraudCases({ page = 0, size = 4 } = {}) {
   return request(`/api/v1/fraud-cases?${params.toString()}`);
 }
 
-export function listScoredTransactions({ page = 0, size = 25 } = {}) {
+export function listFraudCaseWorkQueue({
+  size = 20,
+  cursor,
+  status,
+  priority,
+  riskLevel,
+  assignee,
+  assignedInvestigatorId,
+  createdFrom,
+  createdTo,
+  updatedFrom,
+  updatedTo,
+  linkedAlertId,
+  sort = "createdAt,desc"
+} = {}) {
+  const params = new URLSearchParams();
+  params.set("size", String(Math.min(Math.max(Number(size) || 20, 1), 100)));
+  appendOptionalParam(params, "cursor", cursor);
+  appendOptionalParam(params, "status", status);
+  appendOptionalParam(params, "priority", priority);
+  appendOptionalParam(params, "riskLevel", riskLevel);
+  appendOptionalParam(params, "assignee", assignee);
+  appendOptionalParam(params, "assignedInvestigatorId", assignedInvestigatorId);
+  appendOptionalParam(params, "createdFrom", createdFrom);
+  appendOptionalParam(params, "createdTo", createdTo);
+  appendOptionalParam(params, "updatedFrom", updatedFrom);
+  appendOptionalParam(params, "updatedTo", updatedTo);
+  appendOptionalParam(params, "linkedAlertId", linkedAlertId);
+  params.set("sort", sort || "createdAt,desc");
+
+  return request(`/api/v1/fraud-cases/work-queue?${params.toString()}`);
+}
+
+export function listScoredTransactions({ page = 0, size = 25, query, riskLevel, status, classification } = {}) {
   const params = new URLSearchParams({
     page: String(page),
     size: String(size)
   });
+  appendOptionalParam(params, "query", query);
+  appendOptionalParam(params, "riskLevel", riskLevel);
+  appendOptionalParam(params, "classification", classification || status);
   return request(`/api/v1/transactions/scored?${params.toString()}`);
 }
 
@@ -124,16 +161,29 @@ export function getFraudCase(caseId) {
   return request(`/api/v1/fraud-cases/${encodeURIComponent(caseId)}`);
 }
 
-export function updateFraudCase(caseId, decision) {
+export function updateFraudCase(caseId, decision, { idempotencyKey } = {}) {
   return request(`/api/v1/fraud-cases/${encodeURIComponent(caseId)}`, {
     method: "PATCH",
+    headers: idempotencyKey ? { "X-Idempotency-Key": idempotencyKey } : {},
     body: JSON.stringify(decision)
   });
 }
 
-export function submitAnalystDecision(alertId, decision) {
+export function submitAnalystDecision(alertId, decision, { idempotencyKey } = {}) {
   return request(`/api/v1/alerts/${encodeURIComponent(alertId)}/decision`, {
     method: "POST",
+    headers: idempotencyKey ? { "X-Idempotency-Key": idempotencyKey } : {},
     body: JSON.stringify(decision)
   });
+}
+
+function appendOptionalParam(params, name, value) {
+  if (value === undefined || value === null) {
+    return;
+  }
+  const normalized = typeof value === "string" ? value.trim() : String(value);
+  if (!normalized || normalized === "ALL") {
+    return;
+  }
+  params.set(name, normalized);
 }

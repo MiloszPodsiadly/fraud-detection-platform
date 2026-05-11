@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { SESSION_STATES } from "../auth/sessionState.js";
 import { AlertsListPage } from "./AlertsListPage.jsx";
@@ -9,21 +9,29 @@ describe("AlertsListPage session lifecycle", () => {
       <AlertsListPage
         alertPage={emptyPage(10)}
         fraudCasePage={emptyPage(4)}
+        fraudCaseWorkQueue={emptyWorkQueue()}
+        fraudCaseWorkQueueRequest={emptyWorkQueueRequest()}
         transactionPage={emptyPage(25)}
         advisoryQueue={emptyAdvisoryQueue()}
         advisoryQueueRequest={{ severity: "ALL", modelVersion: "", lifecycleStatus: "ALL", limit: 25 }}
         governanceAnalytics={emptyAnalytics()}
         analyticsWindowDays={7}
         isLoading={false}
+        isFraudCaseWorkQueueLoading={false}
         isGovernanceLoading={false}
         isAnalyticsLoading={false}
         error={null}
+        fraudCaseWorkQueueError={null}
         governanceError={null}
         analyticsError={null}
         sessionState={{ status: SESSION_STATES.UNAUTHENTICATED }}
         onRetry={vi.fn()}
         onGovernanceRetry={vi.fn()}
         onAnalyticsRetry={vi.fn()}
+        onFraudCaseWorkQueueRequestChange={vi.fn()}
+        onFraudCaseWorkQueueRetry={vi.fn()}
+        onFraudCaseWorkQueueRefreshFirstSlice={vi.fn()}
+        onFraudCaseWorkQueueLoadMore={vi.fn()}
         onAdvisoryQueueRequestChange={vi.fn()}
         onAnalyticsWindowDaysChange={vi.fn()}
         onRecordGovernanceAudit={vi.fn()}
@@ -47,21 +55,29 @@ describe("AlertsListPage session lifecycle", () => {
       <AlertsListPage
         alertPage={emptyPage(10)}
         fraudCasePage={emptyPage(4)}
+        fraudCaseWorkQueue={emptyWorkQueue()}
+        fraudCaseWorkQueueRequest={emptyWorkQueueRequest()}
         transactionPage={emptyPage(25)}
         advisoryQueue={emptyAdvisoryQueue()}
         advisoryQueueRequest={{ severity: "ALL", modelVersion: "", lifecycleStatus: "ALL", limit: 25 }}
         governanceAnalytics={emptyAnalytics()}
         analyticsWindowDays={7}
         isLoading={false}
+        isFraudCaseWorkQueueLoading={false}
         isGovernanceLoading={false}
         isAnalyticsLoading={false}
         error={null}
+        fraudCaseWorkQueueError={null}
         governanceError={null}
         analyticsError={null}
         sessionState={{ status: SESSION_STATES.EXPIRED }}
         onRetry={vi.fn()}
         onGovernanceRetry={vi.fn()}
         onAnalyticsRetry={vi.fn()}
+        onFraudCaseWorkQueueRequestChange={vi.fn()}
+        onFraudCaseWorkQueueRetry={vi.fn()}
+        onFraudCaseWorkQueueRefreshFirstSlice={vi.fn()}
+        onFraudCaseWorkQueueLoadMore={vi.fn()}
         onAdvisoryQueueRequestChange={vi.fn()}
         onAnalyticsWindowDaysChange={vi.fn()}
         onRecordGovernanceAudit={vi.fn()}
@@ -77,6 +93,66 @@ describe("AlertsListPage session lifecycle", () => {
     );
 
     expect(screen.getAllByRole("heading", { name: "Session expired" })).toHaveLength(2);
+  });
+
+  it("sends transaction monitor filters to request state instead of filtering only the current page", () => {
+    const onTransactionFiltersChange = vi.fn();
+    render(
+      <AlertsListPage
+        alertPage={emptyPage(10)}
+        fraudCaseWorkQueue={emptyWorkQueue()}
+        fraudCaseWorkQueueRequest={emptyWorkQueueRequest()}
+        transactionPage={{
+          content: [scoredTransaction("txn-1", "LOW", false)],
+          totalElements: 73,
+          totalPages: 8,
+          page: 0,
+          size: 10
+        }}
+        transactionPageRequest={{ page: 0, size: 10, query: "", riskLevel: "ALL", status: "ALL" }}
+        advisoryQueue={emptyAdvisoryQueue()}
+        advisoryQueueRequest={{ severity: "ALL", modelVersion: "", lifecycleStatus: "ALL", limit: 25 }}
+        governanceAnalytics={emptyAnalytics()}
+        analyticsWindowDays={7}
+        isLoading={false}
+        isFraudCaseWorkQueueLoading={false}
+        isGovernanceLoading={false}
+        isAnalyticsLoading={false}
+        error={null}
+        fraudCaseWorkQueueError={null}
+        governanceError={null}
+        analyticsError={null}
+        sessionState={{ status: SESSION_STATES.AUTHENTICATED }}
+        onRetry={vi.fn()}
+        onGovernanceRetry={vi.fn()}
+        onAnalyticsRetry={vi.fn()}
+        onFraudCaseWorkQueueRequestChange={vi.fn()}
+        onFraudCaseWorkQueueRetry={vi.fn()}
+        onFraudCaseWorkQueueRefreshFirstSlice={vi.fn()}
+        onFraudCaseWorkQueueLoadMore={vi.fn()}
+        onAdvisoryQueueRequestChange={vi.fn()}
+        onAnalyticsWindowDaysChange={vi.fn()}
+        onRecordGovernanceAudit={vi.fn()}
+        onTransactionFiltersChange={onTransactionFiltersChange}
+        onTransactionPageChange={vi.fn()}
+        onTransactionPageSizeChange={vi.fn()}
+        onAlertPageChange={vi.fn()}
+        onAlertPageSizeChange={vi.fn()}
+        onOpenAlert={vi.fn()}
+        onOpenFraudCase={vi.fn()}
+      />
+    );
+
+    fireEvent.change(screen.getAllByLabelText("Risk", { selector: "select" })[2], { target: { value: "CRITICAL" } });
+
+    expect(onTransactionFiltersChange).toHaveBeenCalledWith({
+      page: 0,
+      size: 10,
+      query: "",
+      riskLevel: "CRITICAL",
+      status: "ALL"
+    });
+    expect(screen.getByText("txn-1")).toBeInTheDocument();
   });
 });
 
@@ -99,6 +175,33 @@ function emptyAdvisoryQueue() {
   };
 }
 
+function emptyWorkQueue() {
+  return {
+    content: [],
+    size: 20,
+    hasNext: false,
+    nextCursor: null,
+    sort: "createdAt,desc"
+  };
+}
+
+function emptyWorkQueueRequest() {
+  return {
+    size: 20,
+    status: "ALL",
+    priority: "ALL",
+    riskLevel: "ALL",
+    assignee: "",
+    createdFrom: "",
+    createdTo: "",
+    updatedFrom: "",
+    updatedTo: "",
+    linkedAlertId: "",
+    sort: "createdAt,desc",
+    cursor: null
+  };
+}
+
 function emptyAnalytics() {
   return {
     status: "AVAILABLE",
@@ -107,5 +210,18 @@ function emptyAnalytics() {
     decision_distribution: {},
     lifecycle_distribution: {},
     review_timeliness: { status: "LOW_CONFIDENCE" }
+  };
+}
+
+function scoredTransaction(transactionId, riskLevel, alertRecommended) {
+  return {
+    transactionId,
+    customerId: "customer-1",
+    transactionAmount: { amount: 120, currency: "PLN" },
+    merchantInfo: { merchantName: "Merchant" },
+    fraudScore: 0.1,
+    riskLevel,
+    alertRecommended,
+    scoredAt: "2026-05-11T10:00:00Z"
   };
 }

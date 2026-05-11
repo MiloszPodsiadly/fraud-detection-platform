@@ -8,6 +8,9 @@ const {
   refreshSession,
   listAlerts,
   listFraudCases,
+  listFraudCaseWorkQueue,
+  listGovernanceAdvisories,
+  getGovernanceAdvisoryAnalytics,
   listScoredTransactions,
   setApiSession
 } = vi.hoisted(() => ({
@@ -35,6 +38,9 @@ const {
   refreshSession: vi.fn(),
   listAlerts: vi.fn(),
   listFraudCases: vi.fn(),
+  listFraudCaseWorkQueue: vi.fn(),
+  listGovernanceAdvisories: vi.fn(),
+  getGovernanceAdvisoryAnalytics: vi.fn(),
   listScoredTransactions: vi.fn(),
   setApiSession: vi.fn()
 }));
@@ -42,7 +48,12 @@ const {
 vi.mock("./api/alertsApi.js", () => ({
   listAlerts,
   listFraudCases,
+  listFraudCaseWorkQueue,
+  listGovernanceAdvisories,
+  getGovernanceAdvisoryAnalytics,
   listScoredTransactions,
+  getGovernanceAdvisoryAudit: vi.fn(),
+  recordGovernanceAdvisoryAudit: vi.fn(),
   setApiSession
 }));
 
@@ -69,6 +80,16 @@ describe("App", () => {
     vi.clearAllMocks();
     callbackPath.value = true;
     refreshSession.mockResolvedValue({ userId: "", roles: [], extraAuthorities: [], authorities: [] });
+    listFraudCaseWorkQueue.mockResolvedValue({ content: [], size: 20, hasNext: false, nextCursor: null, sort: "createdAt,desc" });
+    listGovernanceAdvisories.mockResolvedValue({ status: "AVAILABLE", count: 0, retention_limit: 200, advisory_events: [] });
+    getGovernanceAdvisoryAnalytics.mockResolvedValue({
+      status: "AVAILABLE",
+      window: { from: null, to: null, days: 7 },
+      totals: { advisories: 0, reviewed: 0, open: 0 },
+      decision_distribution: {},
+      lifecycle_distribution: {},
+      review_timeliness: { status: "LOW_CONFIDENCE" }
+    });
     providerState.value = {
       kind: "oidc",
       label: "OIDC session",
@@ -107,6 +128,7 @@ describe("App", () => {
     await waitFor(() => expect(completeLoginCallback).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(listAlerts).toHaveBeenCalledTimes(1));
     expect(listFraudCases).toHaveBeenCalledTimes(1);
+    expect(listFraudCaseWorkQueue).toHaveBeenCalledTimes(1);
     expect(listScoredTransactions).toHaveBeenCalledTimes(1);
     expect(setApiSession).toHaveBeenCalled();
   });
@@ -130,6 +152,7 @@ describe("App", () => {
     expect(await screen.findAllByRole("heading", { name: "Session expired" })).toHaveLength(2);
     expect(listAlerts).not.toHaveBeenCalled();
     expect(listFraudCases).not.toHaveBeenCalled();
+    expect(listFraudCaseWorkQueue).not.toHaveBeenCalled();
     expect(listScoredTransactions).not.toHaveBeenCalled();
   });
 
@@ -155,6 +178,7 @@ describe("App", () => {
     await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(listAlerts).toHaveBeenCalledTimes(1));
     expect(listFraudCases).toHaveBeenCalledTimes(1);
+    expect(listFraudCaseWorkQueue).toHaveBeenCalledTimes(1);
     expect(listScoredTransactions).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
     expect(screen.queryByText("Loading session state...")).not.toBeInTheDocument();
