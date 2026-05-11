@@ -7,6 +7,7 @@ import com.frauddetection.alert.api.AddFraudCaseNoteRequest;
 import com.frauddetection.alert.api.AssignFraudCaseRequest;
 import com.frauddetection.alert.api.CloseFraudCaseRequest;
 import com.frauddetection.alert.api.CreateFraudCaseRequest;
+import com.frauddetection.alert.api.FraudCaseResponse;
 import com.frauddetection.alert.api.ReopenFraudCaseRequest;
 import com.frauddetection.alert.api.TransitionFraudCaseRequest;
 import com.frauddetection.alert.domain.FraudCaseAuditAction;
@@ -449,10 +450,10 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
         FraudCaseDocument created = createCase();
         AssignFraudCaseRequest request = new AssignFraudCaseRequest("investigator-1", "lead-1");
 
-        FraudCaseDocument first = service.assignCase(created.getCaseId(), request, "assign-key-1");
-        FraudCaseDocument replay = service.assignCase(created.getCaseId(), request, "assign-key-1");
+        FraudCaseResponse first = service.assignCase(created.getCaseId(), request, "assign-key-1");
+        FraudCaseResponse replay = service.assignCase(created.getCaseId(), request, "assign-key-1");
 
-        assertThat(replay.getAssignedInvestigatorId()).isEqualTo(first.getAssignedInvestigatorId());
+        assertThat(replay.assignedInvestigatorId()).isEqualTo(first.assignedInvestigatorId());
         assertThat(countAudit(created.getCaseId(), FraudCaseAuditAction.CASE_ASSIGNED)).isEqualTo(1);
         assertOneCompletedRecord("ASSIGN_FRAUD_CASE", created.getCaseId());
 
@@ -499,10 +500,10 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
         FraudCaseDocument created = createCase();
         TransitionFraudCaseRequest request = new TransitionFraudCaseRequest(FraudCaseStatus.IN_REVIEW, "analyst-1");
 
-        FraudCaseDocument first = service.transitionCase(created.getCaseId(), request, "transition-key-1");
-        FraudCaseDocument replay = service.transitionCase(created.getCaseId(), request, "transition-key-1");
+        FraudCaseResponse first = service.transitionCase(created.getCaseId(), request, "transition-key-1");
+        FraudCaseResponse replay = service.transitionCase(created.getCaseId(), request, "transition-key-1");
 
-        assertThat(replay.getStatus()).isEqualTo(first.getStatus()).isEqualTo(FraudCaseStatus.IN_REVIEW);
+        assertThat(replay.status()).isEqualTo(first.status()).isEqualTo(FraudCaseStatus.IN_REVIEW);
         assertThat(countAudit(created.getCaseId(), FraudCaseAuditAction.STATUS_CHANGED)).isEqualTo(1);
         assertOneCompletedRecord("TRANSITION_FRAUD_CASE", created.getCaseId());
 
@@ -524,10 +525,10 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
         service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.RESOLVED, "analyst-1"), key("transition"));
         CloseFraudCaseRequest request = new CloseFraudCaseRequest("Resolved", "lead-1");
 
-        FraudCaseDocument first = service.closeCase(created.getCaseId(), request, "close-key-replay");
-        FraudCaseDocument replay = service.closeCase(created.getCaseId(), request, "close-key-replay");
+        FraudCaseResponse first = service.closeCase(created.getCaseId(), request, "close-key-replay");
+        FraudCaseResponse replay = service.closeCase(created.getCaseId(), request, "close-key-replay");
 
-        assertThat(replay.getStatus()).isEqualTo(first.getStatus()).isEqualTo(FraudCaseStatus.CLOSED);
+        assertThat(replay.status()).isEqualTo(first.status()).isEqualTo(FraudCaseStatus.CLOSED);
         assertThat(countAudit(created.getCaseId(), FraudCaseAuditAction.CASE_CLOSED)).isEqualTo(1);
         assertOneCompletedRecord("CLOSE_FRAUD_CASE", created.getCaseId());
 
@@ -548,10 +549,10 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
         service.closeCase(created.getCaseId(), new CloseFraudCaseRequest("Resolved", "lead-1"), key("close"));
         ReopenFraudCaseRequest request = new ReopenFraudCaseRequest("New evidence", "lead-1");
 
-        FraudCaseDocument first = service.reopenCase(created.getCaseId(), request, "reopen-key-replay");
-        FraudCaseDocument replay = service.reopenCase(created.getCaseId(), request, "reopen-key-replay");
+        FraudCaseResponse first = service.reopenCase(created.getCaseId(), request, "reopen-key-replay");
+        FraudCaseResponse replay = service.reopenCase(created.getCaseId(), request, "reopen-key-replay");
 
-        assertThat(replay.getStatus()).isEqualTo(first.getStatus()).isEqualTo(FraudCaseStatus.REOPENED);
+        assertThat(replay.status()).isEqualTo(first.status()).isEqualTo(FraudCaseStatus.REOPENED);
         assertThat(countAudit(created.getCaseId(), FraudCaseAuditAction.CASE_REOPENED)).isEqualTo(1);
         assertOneCompletedRecord("REOPEN_FRAUD_CASE", created.getCaseId());
 
@@ -574,12 +575,12 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
                 "analyst-1"
         );
 
-        FraudCaseDocument first = service.createCase(request, "create-key-1");
-        FraudCaseDocument replay = service.createCase(request, "create-key-1");
+        FraudCaseResponse first = service.createCase(request, "create-key-1");
+        FraudCaseResponse replay = service.createCase(request, "create-key-1");
 
-        assertThat(replay.getCaseId()).isEqualTo(first.getCaseId());
+        assertThat(replay.caseId()).isEqualTo(first.caseId());
         assertThat(caseRepository.findAll()).hasSize(1);
-        assertThat(auditRepository.findByCaseIdOrderByOccurredAtAsc(first.getCaseId())).hasSize(1);
+        assertThat(auditRepository.findByCaseIdOrderByOccurredAtAsc(first.caseId())).hasSize(1);
     }
 
     @Test
@@ -700,13 +701,14 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
     }
 
     private FraudCaseDocument createCase(String alertId) {
-        return service.createCase(new CreateFraudCaseRequest(
+        FraudCaseResponse response = service.createCase(new CreateFraudCaseRequest(
                 List.of(alertId),
                 FraudCasePriority.HIGH,
                 RiskLevel.CRITICAL,
                 "Manual investigation",
                 "analyst-1"
         ), key("create"));
+        return caseRepository.findById(response.caseId()).orElseThrow();
     }
 
     private String key(String prefix) {

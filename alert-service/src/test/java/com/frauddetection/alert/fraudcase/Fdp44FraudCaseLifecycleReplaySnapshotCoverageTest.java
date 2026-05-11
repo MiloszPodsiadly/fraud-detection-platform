@@ -7,11 +7,14 @@ import com.frauddetection.alert.api.CloseFraudCaseRequest;
 import com.frauddetection.alert.api.CreateFraudCaseRequest;
 import com.frauddetection.alert.api.FraudCaseDecisionResponse;
 import com.frauddetection.alert.api.FraudCaseNoteResponse;
+import com.frauddetection.alert.api.FraudCaseResponse;
 import com.frauddetection.alert.api.ReopenFraudCaseRequest;
 import com.frauddetection.alert.api.TransitionFraudCaseRequest;
 import com.frauddetection.alert.domain.FraudCaseDecisionType;
 import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.domain.FraudCaseStatus;
+import com.frauddetection.alert.mapper.AlertResponseMapper;
+import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.service.FraudCaseLifecycleService;
 import com.frauddetection.common.events.enums.RiskLevel;
@@ -28,7 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class Fdp44FraudCaseLifecycleReplaySnapshotCoverageTest {
 
     private static final Set<Class<?>> SUPPORTED_REPLAY_RESPONSE_TYPES = Set.of(
-            FraudCaseDocument.class,
+            FraudCaseResponse.class,
             FraudCaseNoteResponse.class,
             FraudCaseDecisionResponse.class
     );
@@ -65,7 +68,7 @@ class Fdp44FraudCaseLifecycleReplaySnapshotCoverageTest {
         );
         Instant completedAt = Instant.parse("2026-05-11T10:00:15Z");
         Map<Class<?>, Object> examples = Map.of(
-                FraudCaseDocument.class, caseDocument(),
+                FraudCaseResponse.class, new FraudCaseResponseMapper(new AlertResponseMapper()).toResponse(caseDocument()),
                 FraudCaseNoteResponse.class, new FraudCaseNoteResponse(
                         "note-1",
                         "case-1",

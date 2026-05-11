@@ -2,6 +2,8 @@ package com.frauddetection.alert.fraudcase;
 
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.frauddetection.alert.api.FraudCaseDecisionResponse;
+import com.frauddetection.alert.api.FraudCaseNoteResponse;
 import com.frauddetection.alert.idempotency.SharedIdempotencyConflictPolicy;
 import com.frauddetection.alert.idempotency.SharedIdempotencyKeyPolicy;
 import com.frauddetection.alert.persistence.FraudCaseLifecycleIdempotencyRecordDocument;
@@ -61,6 +63,64 @@ class Fdp44FraudCaseLifecycleReplaySnapshotFailClosedTest {
         )).isInstanceOf(UnsupportedFraudCaseLifecycleReplaySnapshotException.class);
     }
 
+    @Test
+    void malformedExplicitSnapshotFailsClosedWithoutLegacyFallback() {
+        AtomicReference<FraudCaseLifecycleIdempotencyRecordDocument> stored = completedRecord("""
+                {"snapshotFormat":"FDP_44_REPLAY_SNAPSHOT","snapshotVersion":1,"snapshotType":"NOTE","action":"ADD_FRAUD_CASE_NOTE"}
+                """);
+        FraudCaseLifecycleIdempotencyService service = service(stored);
+
+        assertThatThrownBy(() -> service.execute(command(), () -> legacyNote("mutated"), FraudCaseNoteResponse.class))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("replay");
+    }
+
+    @Test
+    void unsupportedExplicitSnapshotVersionFailsClosed() {
+        AtomicReference<FraudCaseLifecycleIdempotencyRecordDocument> stored = completedRecord("""
+                {"snapshotFormat":"FDP_44_REPLAY_SNAPSHOT","snapshotVersion":2,"snapshotType":"NOTE","action":"ADD_FRAUD_CASE_NOTE","noteResponse":{"id":"note-1","caseId":"case-1","body":"legacy","createdBy":"analyst-1","createdAt":"2026-05-11T10:00:00Z","internalOnly":false}}
+                """);
+        FraudCaseLifecycleIdempotencyService service = service(stored);
+
+        assertThatThrownBy(() -> service.execute(command(), () -> legacyNote("mutated"), FraudCaseNoteResponse.class))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("replay");
+    }
+
+    @Test
+    void explicitSnapshotTypeMismatchFailsClosed() {
+        AtomicReference<FraudCaseLifecycleIdempotencyRecordDocument> stored = completedRecord("""
+                {"snapshotFormat":"FDP_44_REPLAY_SNAPSHOT","snapshotVersion":1,"snapshotType":"NOTE","action":"ADD_FRAUD_CASE_NOTE","noteResponse":{"id":"note-1","caseId":"case-1","body":"legacy","createdBy":"analyst-1","createdAt":"2026-05-11T10:00:00Z","internalOnly":false}}
+                """);
+        FraudCaseLifecycleIdempotencyService service = service(stored);
+
+        assertThatThrownBy(() -> service.execute(command(), () -> null, FraudCaseDecisionResponse.class))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("replay");
+    }
+
+    @Test
+    void trueLegacyRawSnapshotStillRestoresWhenShapeIsKnown() {
+        AtomicReference<FraudCaseLifecycleIdempotencyRecordDocument> stored = completedRecord("""
+                {"id":"note-1","caseId":"case-1","body":"legacy","createdBy":"analyst-1","createdAt":"2026-05-11T10:00:00Z","internalOnly":false}
+                """);
+        FraudCaseLifecycleIdempotencyService service = service(stored);
+
+        FraudCaseNoteResponse replay = service.execute(command(), () -> legacyNote("mutated"), FraudCaseNoteResponse.class);
+
+        assertThat(replay).isEqualTo(legacyNote("legacy"));
+    }
+
+    @Test
+    void randomCorruptedSnapshotFailsClosed() {
+        AtomicReference<FraudCaseLifecycleIdempotencyRecordDocument> stored = completedRecord("not-json");
+        FraudCaseLifecycleIdempotencyService service = service(stored);
+
+        assertThatThrownBy(() -> service.execute(command(), () -> legacyNote("mutated"), FraudCaseNoteResponse.class))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("replay");
+    }
+
     private FraudCaseLifecycleIdempotencyService service(
             AtomicReference<FraudCaseLifecycleIdempotencyRecordDocument> stored
     ) {
@@ -96,6 +156,32 @@ class Fdp44FraudCaseLifecycleReplaySnapshotFailClosedTest {
                 "case-1",
                 "request-hash-1",
                 Instant.parse("2026-05-11T10:00:00Z")
+        );
+    }
+
+    private AtomicReference<FraudCaseLifecycleIdempotencyRecordDocument> completedRecord(String snapshot) {
+        FraudCaseLifecycleIdempotencyRecordDocument record = new FraudCaseLifecycleIdempotencyRecordDocument();
+        record.setIdempotencyKeyHash(new SharedIdempotencyKeyPolicy().hashKey("unsupported-response-key"));
+        record.setAction("ADD_FRAUD_CASE_NOTE");
+        record.setActorId("analyst-1");
+        record.setCaseId("case-1");
+        record.setCaseIdScope("case-1");
+        record.setRequestHash("request-hash-1");
+        record.setStatus(FraudCaseLifecycleIdempotencyStatus.COMPLETED);
+        record.setCreatedAt(Instant.parse("2026-05-11T10:00:00Z"));
+        record.setCompletedAt(Instant.parse("2026-05-11T10:00:15Z"));
+        record.setResponsePayloadSnapshot(snapshot);
+        return new AtomicReference<>(record);
+    }
+
+    private FraudCaseNoteResponse legacyNote(String body) {
+        return new FraudCaseNoteResponse(
+                "note-1",
+                "case-1",
+                body,
+                "analyst-1",
+                Instant.parse("2026-05-11T10:00:00Z"),
+                false
         );
     }
 

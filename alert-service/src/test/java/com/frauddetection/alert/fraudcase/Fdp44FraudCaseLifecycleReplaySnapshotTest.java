@@ -4,11 +4,14 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.frauddetection.alert.api.FraudCaseDecisionResponse;
 import com.frauddetection.alert.api.FraudCaseNoteResponse;
+import com.frauddetection.alert.api.FraudCaseResponse;
 import com.frauddetection.alert.domain.FraudCaseDecisionType;
 import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.idempotency.SharedIdempotencyConflictPolicy;
 import com.frauddetection.alert.idempotency.SharedIdempotencyKeyPolicy;
+import com.frauddetection.alert.mapper.AlertResponseMapper;
+import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.persistence.FraudCaseLifecycleIdempotencyRecordDocument;
 import com.frauddetection.alert.persistence.FraudCaseLifecycleIdempotencyRepository;
@@ -61,10 +64,12 @@ class Fdp44FraudCaseLifecycleReplaySnapshotTest {
         assertThat(replay).isEqualTo(response);
         assertThat(mutationCalls).hasValue(1);
         assertThat(snapshot)
+                .contains("\"snapshotFormat\":\"FDP_44_REPLAY_SNAPSHOT\"")
+                .contains("\"snapshotVersion\":1")
                 .contains("\"snapshotType\":\"NOTE\"")
                 .contains("\"action\":\"ADD_FRAUD_CASE_NOTE\"")
                 .contains("\"caseId\":\"case-1\"")
-                .contains("\"noteId\":\"note-1\"")
+                .contains("\"id\":\"note-1\"")
                 .doesNotContain("raw-idempotency-key-123")
                 .doesNotContain("idempotencyKey")
                 .doesNotContain("idempotencyKeyHash")
@@ -97,15 +102,16 @@ class Fdp44FraudCaseLifecycleReplaySnapshotTest {
         document.setCreatedAt(Instant.parse("2026-05-11T09:59:00Z"));
         document.setUpdatedAt(Instant.parse("2026-05-11T10:00:00Z"));
 
-        FraudCaseLifecycleReplaySnapshot caseSnapshot = mapper.toSnapshot(createCommand, document, completedAt);
-        FraudCaseDocument restoredCase = mapper.toResponse(caseSnapshot, FraudCaseDocument.class);
+        FraudCaseResponse caseResponse = new FraudCaseResponseMapper(new AlertResponseMapper()).toResponse(document);
+        FraudCaseLifecycleReplaySnapshot caseSnapshot = mapper.toSnapshot(createCommand, caseResponse, completedAt);
+        FraudCaseResponse restoredCase = mapper.toResponse(caseSnapshot, FraudCaseResponse.class);
 
+        assertThat(caseSnapshot.snapshotFormat()).isEqualTo(FraudCaseLifecycleReplaySnapshot.FORMAT);
+        assertThat(caseSnapshot.snapshotVersion()).isEqualTo(FraudCaseLifecycleReplaySnapshot.VERSION);
         assertThat(caseSnapshot.snapshotType()).isEqualTo(FraudCaseLifecycleReplaySnapshotType.CASE);
-        assertThat(caseSnapshot.caseId()).isEqualTo("case-1");
-        assertThat(caseSnapshot.status()).isEqualTo(FraudCaseStatus.OPEN);
+        assertThat(caseSnapshot.caseResponse()).isEqualTo(caseResponse);
         assertThat(caseSnapshot.completedAt()).isEqualTo(completedAt);
-        assertThat(restoredCase.getCaseId()).isEqualTo(document.getCaseId());
-        assertThat(restoredCase.getStatus()).isEqualTo(document.getStatus());
+        assertThat(restoredCase).isEqualTo(caseResponse);
 
         FraudCaseDecisionResponse decision = new FraudCaseDecisionResponse(
                 "decision-1",
@@ -124,8 +130,7 @@ class Fdp44FraudCaseLifecycleReplaySnapshotTest {
         FraudCaseDecisionResponse restoredDecision = mapper.toResponse(decisionSnapshot, FraudCaseDecisionResponse.class);
 
         assertThat(decisionSnapshot.snapshotType()).isEqualTo(FraudCaseLifecycleReplaySnapshotType.DECISION);
-        assertThat(decisionSnapshot.decisionId()).isEqualTo("decision-1");
-        assertThat(decisionSnapshot.decisionType()).isEqualTo(FraudCaseDecisionType.FRAUD_CONFIRMED);
+        assertThat(decisionSnapshot.decisionResponse()).isEqualTo(decision);
         assertThat(restoredDecision).isEqualTo(decision);
     }
 

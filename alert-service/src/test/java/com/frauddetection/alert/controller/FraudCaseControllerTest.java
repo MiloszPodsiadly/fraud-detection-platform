@@ -61,12 +61,15 @@ class FraudCaseControllerTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private FraudCaseResponseMapper responseMapper;
+
     @MockBean
     private FraudCaseManagementService fraudCaseManagementService;
 
     @Test
     void shouldCreateFraudCase() throws Exception {
-        when(fraudCaseManagementService.createCase(any(), eq("create-key-1"))).thenReturn(caseDocument());
+        when(fraudCaseManagementService.createCase(any(), eq("create-key-1"))).thenReturn(responseMapper.toResponse(caseDocument()));
 
         CreateFraudCaseRequest request = new CreateFraudCaseRequest(
                 List.of("alert-1"),

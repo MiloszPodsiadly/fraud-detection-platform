@@ -234,7 +234,7 @@ jobs:
         run: docker version
 
       - name: Run FDP-44 fraud case idempotency hardening suite
-        run: mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=Fdp44FraudCaseLifecycleApiSurfaceStructuralTest,Fdp44FraudCaseLifecycleReplaySnapshotTest,Fdp44FraudCaseLifecycleReplaySnapshotFailClosedTest,Fdp44FraudCaseLifecycleReplaySnapshotCoverageTest,Fdp44FraudCaseIdempotencyRetentionOperationalTest,Fdp44FraudCaseIdempotencyOperationalDocsNoOverclaimTest,FraudCaseLifecycleIdempotencyServiceRaceTest,FraudCaseLifecycleIdempotencyGlobalKeyRegressionIntegrationTest,FraudCaseLifecycleIdempotencyConcurrencyIntegrationTest,FraudCaseLifecycleIdempotencyFailureIntegrationTest,AlertServiceMetricsTest" test
+        run: mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=Fdp44FraudCaseLifecycleApiSurfaceStructuralTest,Fdp44FraudCaseLifecycleReplaySnapshotTest,Fdp44FraudCaseLifecycleReplaySnapshotFailClosedTest,Fdp44FraudCaseLifecycleReplaySnapshotCoverageTest,Fdp44FraudCaseLifecycleReplayEquivalenceIntegrationTest,Fdp44FraudCaseIdempotencyRetentionOperationalTest,Fdp44FraudCaseIdempotencyOperationalDocsNoOverclaimTest,FraudCaseLifecycleIdempotencyServiceRaceTest,FraudCaseLifecycleIdempotencyGlobalKeyRegressionIntegrationTest,FraudCaseLifecycleIdempotencyConcurrencyIntegrationTest,FraudCaseLifecycleIdempotencyFailureIntegrationTest,AlertServiceMetricsTest" test
 
       - name: Verify FDP-44 proof suite reports
         run: |
@@ -249,6 +249,7 @@ jobs:
               "Fdp44FraudCaseLifecycleReplaySnapshotTest",
               "Fdp44FraudCaseLifecycleReplaySnapshotFailClosedTest",
               "Fdp44FraudCaseLifecycleReplaySnapshotCoverageTest",
+              "Fdp44FraudCaseLifecycleReplayEquivalenceIntegrationTest",
               "Fdp44FraudCaseIdempotencyRetentionOperationalTest",
               "Fdp44FraudCaseIdempotencyOperationalDocsNoOverclaimTest",
               "FraudCaseLifecycleIdempotencyServiceRaceTest",

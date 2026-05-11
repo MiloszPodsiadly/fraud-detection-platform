@@ -5,6 +5,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.frauddetection.alert.api.AddFraudCaseNoteRequest;
 import com.frauddetection.alert.api.CloseFraudCaseRequest;
 import com.frauddetection.alert.api.CreateFraudCaseRequest;
+import com.frauddetection.alert.api.FraudCaseResponse;
 import com.frauddetection.alert.domain.FraudCaseAuditAction;
 import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.domain.FraudCaseStatus;
@@ -184,7 +185,7 @@ class FraudCaseLifecycleIdempotencyGlobalKeyRegressionIntegrationTest extends Ab
     }
 
     private FraudCaseDocument createCase(String alertId) {
-        FraudCaseDocument created = service.createCase(new CreateFraudCaseRequest(
+        FraudCaseResponse created = service.createCase(new CreateFraudCaseRequest(
                 List.of(alertId),
                 FraudCasePriority.HIGH,
                 RiskLevel.CRITICAL,
@@ -192,7 +193,7 @@ class FraudCaseLifecycleIdempotencyGlobalKeyRegressionIntegrationTest extends Ab
                 "analyst-1"
         ), "create-helper-key-" + UUID.randomUUID());
         idempotencyRepository.deleteAll();
-        return created;
+        return caseRepository.findById(created.caseId()).orElseThrow();
     }
 
     private FraudCaseManagementService service(MongoRepositoryFactory repositoryFactory) {

@@ -63,6 +63,9 @@ class FraudCaseSecurityIntegrationTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private FraudCaseResponseMapper responseMapper;
+
     @MockBean
     private FraudCaseManagementService fraudCaseManagementService;
 
@@ -105,8 +108,8 @@ class FraudCaseSecurityIntegrationTest {
 
     @Test
     void shouldDenyMutationsForReadOnlyAuthorityAndAllowUpdateAuthorityOnBothPaths() throws Exception {
-        when(fraudCaseManagementService.createCase(any(), any())).thenReturn(caseDocument());
-        when(fraudCaseManagementService.assignCase(any(), any(), any())).thenReturn(caseDocument());
+        when(fraudCaseManagementService.createCase(any(), any())).thenReturn(responseMapper.toResponse(caseDocument()));
+        when(fraudCaseManagementService.assignCase(any(), any(), any())).thenReturn(responseMapper.toResponse(caseDocument()));
 
         mockMvc.perform(post("/api/v1/fraud-cases")
                         .with(userWith(AnalystAuthority.FRAUD_CASE_READ))

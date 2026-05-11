@@ -7,6 +7,7 @@ import com.frauddetection.alert.api.AddFraudCaseNoteRequest;
 import com.frauddetection.alert.api.CreateFraudCaseRequest;
 import com.frauddetection.alert.api.FraudCaseDecisionResponse;
 import com.frauddetection.alert.api.FraudCaseNoteResponse;
+import com.frauddetection.alert.api.FraudCaseResponse;
 import com.frauddetection.alert.domain.FraudCaseAuditAction;
 import com.frauddetection.alert.domain.FraudCaseDecisionType;
 import com.frauddetection.alert.domain.FraudCasePriority;
@@ -156,9 +157,9 @@ class FraudCaseLifecycleIdempotencyConcurrencyIntegrationTest extends AbstractIn
 
         List<ConcurrentResult<?>> results = runConcurrently(() -> service.createCase(request, "create-race-key"));
 
-        assertAllowedRaceOutcome(results, FraudCaseDocument.class, responses -> {
-            assertThat(responses).extracting(FraudCaseDocument::getCaseId).containsOnly(responses.getFirst().getCaseId());
-            assertThat(responses).extracting(FraudCaseDocument::getCaseNumber).containsOnly(responses.getFirst().getCaseNumber());
+        assertAllowedRaceOutcome(results, FraudCaseResponse.class, responses -> {
+            assertThat(responses).extracting(FraudCaseResponse::caseId).containsOnly(responses.getFirst().caseId());
+            assertThat(responses).extracting(FraudCaseResponse::caseNumber).containsOnly(responses.getFirst().caseNumber());
         });
         assertThat(caseRepository.findAll()).hasSize(1);
         FraudCaseDocument created = caseRepository.findAll().getFirst();
@@ -225,13 +226,14 @@ class FraudCaseLifecycleIdempotencyConcurrencyIntegrationTest extends AbstractIn
     }
 
     private FraudCaseDocument createCase() {
-        return service.createCase(new CreateFraudCaseRequest(
+        FraudCaseResponse response = service.createCase(new CreateFraudCaseRequest(
                 List.of("alert-1"),
                 FraudCasePriority.HIGH,
                 RiskLevel.CRITICAL,
                 "Manual investigation",
                 "analyst-1"
         ), "create-helper-key-" + UUID.randomUUID());
+        return caseRepository.findById(response.caseId()).orElseThrow();
     }
 
     private long countAudit(String caseId, FraudCaseAuditAction action) {

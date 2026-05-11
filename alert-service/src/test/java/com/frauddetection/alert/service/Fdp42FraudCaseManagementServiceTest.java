@@ -5,6 +5,7 @@ import com.frauddetection.alert.api.AddFraudCaseNoteRequest;
 import com.frauddetection.alert.api.AssignFraudCaseRequest;
 import com.frauddetection.alert.api.CloseFraudCaseRequest;
 import com.frauddetection.alert.api.CreateFraudCaseRequest;
+import com.frauddetection.alert.api.FraudCaseResponse;
 import com.frauddetection.alert.api.ReopenFraudCaseRequest;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -69,7 +70,7 @@ class Fdp42FraudCaseManagementServiceTest {
         when(fixture.fraudCaseRepository.save(any(FraudCaseDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(fixture.auditRepository.save(any(FraudCaseAuditEntryDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        FraudCaseDocument created = fixture.service.createCase(new CreateFraudCaseRequest(
+        FraudCaseResponse created = fixture.service.createCase(new CreateFraudCaseRequest(
                 List.of("alert-1"),
                 FraudCasePriority.HIGH,
                 RiskLevel.CRITICAL,
@@ -77,10 +78,10 @@ class Fdp42FraudCaseManagementServiceTest {
                 "analyst-1"
         ), "create-key-1");
 
-        assertThat(created.getCaseNumber()).startsWith("FC-");
-        assertThat(created.getStatus()).isEqualTo(FraudCaseStatus.OPEN);
-        assertThat(created.getLinkedAlertIds()).containsExactly("alert-1");
-        assertThat(created.getTransactionIds()).isEmpty();
+        assertThat(created.caseNumber()).startsWith("FC-");
+        assertThat(created.status()).isEqualTo(FraudCaseStatus.OPEN);
+        assertThat(created.linkedAlertIds()).containsExactly("alert-1");
+        assertThat(created.transactionIds()).isEmpty();
         verify(fixture.transactionRunner).runLocalCommit(any());
         ArgumentCaptor<FraudCaseAuditEntryDocument> auditCaptor = ArgumentCaptor.forClass(FraudCaseAuditEntryDocument.class);
         verify(fixture.auditRepository).save(auditCaptor.capture());
@@ -111,9 +112,9 @@ class Fdp42FraudCaseManagementServiceTest {
         when(fixture.auditRepository.save(any(FraudCaseAuditEntryDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(fixture.actorResolver.resolveActorId(eq("lead-1"), eq("ASSIGN_FRAUD_CASE"), eq("case-1"))).thenReturn("lead-1");
 
-        FraudCaseDocument assigned = fixture.service.assignCase("case-1", new AssignFraudCaseRequest("investigator-new", "lead-1"), "assign-key-1");
+        FraudCaseResponse assigned = fixture.service.assignCase("case-1", new AssignFraudCaseRequest("investigator-new", "lead-1"), "assign-key-1");
 
-        assertThat(assigned.getAssignedInvestigatorId()).isEqualTo("investigator-new");
+        assertThat(assigned.assignedInvestigatorId()).isEqualTo("investigator-new");
         ArgumentCaptor<FraudCaseAuditEntryDocument> auditCaptor = ArgumentCaptor.forClass(FraudCaseAuditEntryDocument.class);
         verify(fixture.auditRepository).save(auditCaptor.capture());
         assertThat(auditCaptor.getValue().getAction()).isEqualTo(FraudCaseAuditAction.CASE_REASSIGNED);
@@ -131,9 +132,9 @@ class Fdp42FraudCaseManagementServiceTest {
         when(fixture.auditRepository.save(any(FraudCaseAuditEntryDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(fixture.actorResolver.resolveActorId(eq("lead-1"), eq("ASSIGN_FRAUD_CASE"), eq("case-1"))).thenReturn("lead-1");
 
-        FraudCaseDocument assigned = fixture.service.assignCase("case-1", new AssignFraudCaseRequest("investigator-1", "lead-1"), "assign-key-2");
+        FraudCaseResponse assigned = fixture.service.assignCase("case-1", new AssignFraudCaseRequest("investigator-1", "lead-1"), "assign-key-2");
 
-        assertThat(assigned.getAssignedInvestigatorId()).isEqualTo("investigator-1");
+        assertThat(assigned.assignedInvestigatorId()).isEqualTo("investigator-1");
         ArgumentCaptor<FraudCaseAuditEntryDocument> auditCaptor = ArgumentCaptor.forClass(FraudCaseAuditEntryDocument.class);
         verify(fixture.auditRepository).save(auditCaptor.capture());
         assertThat(auditCaptor.getValue().getAction()).isEqualTo(FraudCaseAuditAction.CASE_REASSIGNED);
@@ -156,11 +157,11 @@ class Fdp42FraudCaseManagementServiceTest {
                 "analyst-1"
         );
 
-        FraudCaseDocument first = fixture.service.createCase(request, "create-key-2a");
-        FraudCaseDocument second = fixture.service.createCase(request, "create-key-2b");
+        FraudCaseResponse first = fixture.service.createCase(request, "create-key-2a");
+        FraudCaseResponse second = fixture.service.createCase(request, "create-key-2b");
 
-        assertThat(first.getCaseId()).isNotEqualTo(second.getCaseId());
-        assertThat(first.getCaseNumber()).isNotEqualTo(second.getCaseNumber());
+        assertThat(first.caseId()).isNotEqualTo(second.caseId());
+        assertThat(first.caseNumber()).isNotEqualTo(second.caseNumber());
         verify(fixture.auditRepository, times(2)).save(any(FraudCaseAuditEntryDocument.class));
     }
 
@@ -195,9 +196,9 @@ class Fdp42FraudCaseManagementServiceTest {
                 "resolved decision",
                 "analyst-1"
         ), "decision-key-resolved");
-        FraudCaseDocument closed = fixture.service.closeCase("case-1", new CloseFraudCaseRequest("Done", "lead-1"), "close-key-resolved");
+        FraudCaseResponse closed = fixture.service.closeCase("case-1", new CloseFraudCaseRequest("Done", "lead-1"), "close-key-resolved");
 
-        assertThat(closed.getStatus()).isEqualTo(FraudCaseStatus.CLOSED);
+        assertThat(closed.status()).isEqualTo(FraudCaseStatus.CLOSED);
         verify(fixture.noteRepository).save(any(FraudCaseNoteDocument.class));
         verify(fixture.decisionRepository).save(any(FraudCaseDecisionDocument.class));
         verify(fixture.auditRepository, times(3)).save(any(FraudCaseAuditEntryDocument.class));

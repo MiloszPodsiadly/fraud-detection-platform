@@ -25,6 +25,13 @@ operator docs.
 - Snapshot write path must fail closed if the lifecycle response type is unsupported.
 - Raw response fallback is allowed only on restore/read path for backward compatibility with pre-FDP-44 snapshots.
 - Raw response fallback must never be used for new snapshot writes.
+- First execution response JSON must equal replay response JSON for every fraud-case lifecycle mutation.
+- Case lifecycle replay uses the explicit `FraudCaseResponse` public response contract, not a partial reconstructed
+  `FraudCaseDocument`.
+- Explicit replay snapshots must fail closed for malformed payloads, unsupported versions, unsupported types, and
+  response type mismatches.
+- Legacy raw restore fallback is allowed only for positively identified pre-FDP-44 raw response shapes without snapshot
+  markers.
 - Replay snapshots must not include raw idempotency keys, idempotency key hashes, request hashes, lease owners, stack
   traces, or raw exception text.
 - Idempotency records use positive retention and `expiresAt` TTL. After retention and eventual Mongo TTL cleanup, retry
@@ -44,6 +51,9 @@ operator docs.
 - NO-GO if snapshot write path uses raw response fallback.
 - NO-GO if unsupported lifecycle response type is silently serialized.
 - NO-GO if a new lifecycle response type is added without replay snapshot mapper coverage.
+- NO-GO if replay response drops public response fields.
+- NO-GO if CASE replay reconstructs a partial persistence `FraudCaseDocument`.
+- NO-GO if selected-field equality is the only replay proof.
 
 ## Required CI
 
@@ -61,6 +71,7 @@ No merge while any required job is queued, pending, in progress, skipped, missin
 - `Fdp44FraudCaseLifecycleReplaySnapshotTest`
 - `Fdp44FraudCaseLifecycleReplaySnapshotFailClosedTest`
 - `Fdp44FraudCaseLifecycleReplaySnapshotCoverageTest`
+- `Fdp44FraudCaseLifecycleReplayEquivalenceIntegrationTest`
 - `Fdp44FraudCaseIdempotencyRetentionOperationalTest`
 - `Fdp44FraudCaseIdempotencyOperationalDocsNoOverclaimTest`
 - `FraudCaseLifecycleIdempotencyServiceRaceTest`
