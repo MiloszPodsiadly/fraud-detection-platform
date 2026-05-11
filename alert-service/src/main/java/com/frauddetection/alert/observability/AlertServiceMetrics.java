@@ -961,7 +961,7 @@ public class AlertServiceMetrics {
             return "failure";
         }
         return switch (outcome) {
-            case "success", "invalid_filter", "invalid_sort", "unauthorized", "failure" -> outcome;
+            case "success", "invalid_filter", "invalid_sort", "invalid_cursor", "unauthorized", "failure" -> outcome;
             default -> "failure";
         };
     }

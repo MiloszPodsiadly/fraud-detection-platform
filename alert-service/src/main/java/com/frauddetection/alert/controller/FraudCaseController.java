@@ -123,6 +123,7 @@ public class FraudCaseController {
             FraudCaseReadQueryPolicy.validateWorkQueueSingleValueParameters(requestParams);
             FraudCaseReadQueryPolicy.validateWorkQueuePagination(page, size);
             String cursor = firstValue(requestParams, "cursor");
+            FraudCaseReadQueryPolicy.validateCursorPageCombination(cursor, page);
             FraudCaseReadQueryPolicy.validateWorkQueueStringFilters(assignee, assignedInvestigatorId, linkedAlertId, sort, cursor);
             FraudCaseReadQueryPolicy.validateRange("createdAt", createdFrom, createdTo);
             FraudCaseReadQueryPolicy.validateRange("updatedAt", updatedFrom, updatedTo);
@@ -299,6 +300,11 @@ public class FraudCaseController {
     }
 
     private void recordInvalidWorkQueueQuery(FraudCaseWorkQueueQueryException exception, String sort) {
+        if ("INVALID_CURSOR".equals(exception.code()) || "INVALID_CURSOR_PAGE_COMBINATION".equals(exception.code())) {
+            metrics.recordFraudCaseWorkQueueRequest("invalid_cursor");
+            metrics.recordFraudCaseWorkQueueQuery("invalid_cursor", invalidSortMetricField(sort));
+            return;
+        }
         if (exception.code().startsWith("UNSUPPORTED_SORT")) {
             metrics.recordFraudCaseWorkQueueRequest("invalid_sort");
             metrics.recordFraudCaseWorkQueueQuery("invalid_sort", invalidSortMetricField(sort));

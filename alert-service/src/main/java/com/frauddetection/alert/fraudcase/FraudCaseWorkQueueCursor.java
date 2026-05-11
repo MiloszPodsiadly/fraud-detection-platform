@@ -5,6 +5,7 @@ public record FraudCaseWorkQueueCursor(
         String sortField,
         String sortDirection,
         String lastValue,
-        String lastId
+        String lastId,
+        String queryHash
 ) {
 }

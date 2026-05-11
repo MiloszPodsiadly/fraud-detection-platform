@@ -68,6 +68,15 @@ public final class FraudCaseReadQueryPolicy {
         }
     }
 
+    public static void validateCursorPageCombination(String cursor, int page) {
+        if (StringUtils.hasText(cursor) && page != 0) {
+            throw new FraudCaseWorkQueueQueryException(
+                    "INVALID_CURSOR_PAGE_COMBINATION",
+                    "Cursor mode cannot be combined with a non-zero page."
+            );
+        }
+    }
+
     public static void validateLegacyListPagination(int page, int size) {
         if (page < 0 || page > MAX_PAGE_NUMBER || size < 1 || size > MAX_PAGE_SIZE) {
             throw new FraudCaseWorkQueueQueryException("INVALID_PAGE_REQUEST", "Invalid fraud case list page request.");

@@ -14,7 +14,7 @@ import java.util.Locale;
 
 public class FraudCaseWorkQueueCursorCodec {
 
-    private static final int VERSION = 1;
+    public static final int VERSION = 1;
     private static final String HMAC_ALGORITHM = "HmacSHA256";
 
     private final ObjectMapper objectMapper;
@@ -36,10 +36,10 @@ public class FraudCaseWorkQueueCursorCodec {
         return new FraudCaseWorkQueueCursorCodec("local-test-work-queue-cursor-signing-secret");
     }
 
-    public String encode(Sort.Order sortOrder, FraudCaseDocument document) {
+    public String encode(Sort.Order sortOrder, FraudCaseDocument document, String queryHash) {
         String lastValue = value(document, sortOrder.getProperty());
         String lastId = document.getCaseId();
-        if (!StringUtils.hasText(lastValue) || !StringUtils.hasText(lastId)) {
+        if (!StringUtils.hasText(lastValue) || !StringUtils.hasText(lastId) || !StringUtils.hasText(queryHash)) {
             return null;
         }
         FraudCaseWorkQueueCursor cursor = new FraudCaseWorkQueueCursor(
@@ -47,7 +47,8 @@ public class FraudCaseWorkQueueCursorCodec {
                 sortOrder.getProperty(),
                 sortOrder.getDirection().name().toLowerCase(Locale.ROOT),
                 lastValue,
-                lastId
+                lastId,
+                queryHash
         );
         try {
             String payload = objectMapper.writeValueAsString(cursor);
@@ -59,7 +60,7 @@ public class FraudCaseWorkQueueCursorCodec {
         }
     }
 
-    public FraudCaseWorkQueueCursor decode(String encoded, Sort.Order requestedSort) {
+    public FraudCaseWorkQueueCursor decode(String encoded, Sort.Order requestedSort, String currentQueryHash) {
         if (!StringUtils.hasText(encoded)) {
             return null;
         }
@@ -73,6 +74,8 @@ public class FraudCaseWorkQueueCursorCodec {
             if (cursor.version() != VERSION
                     || !requestedSort.getProperty().equals(cursor.sortField())
                     || !requestedSort.getDirection().name().equalsIgnoreCase(cursor.sortDirection())
+                    || !StringUtils.hasText(cursor.queryHash())
+                    || !constantTimeEquals(currentQueryHash, cursor.queryHash())
                     || !StringUtils.hasText(cursor.lastValue())
                     || !StringUtils.hasText(cursor.lastId())) {
                 throw invalidCursor();

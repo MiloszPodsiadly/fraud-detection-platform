@@ -12,6 +12,7 @@ import com.frauddetection.alert.fraudcase.FraudCaseSearchCriteria;
 import com.frauddetection.alert.fraudcase.FraudCaseSearchRepository;
 import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueCursor;
 import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueCursorCodec;
+import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueCursorQueryFingerprint;
 import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueProperties;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.persistence.FraudCaseAuditEntryDocument;
@@ -166,7 +167,20 @@ public class FraudCaseQueryService {
                 linkedAlertId
         );
         Sort.Order effectiveSort = sortOrder == null ? primarySortOrder(pageable) : sortOrder;
-        FraudCaseWorkQueueCursor cursor = cursorCodec.decode(encodedCursor, effectiveSort);
+        String queryHash = FraudCaseWorkQueueCursorQueryFingerprint.hash(
+                status,
+                assignee,
+                priority,
+                riskLevel,
+                createdFrom,
+                createdTo,
+                updatedFrom,
+                updatedTo,
+                linkedAlertId,
+                effectiveSort,
+                FraudCaseWorkQueueCursorCodec.VERSION
+        );
+        FraudCaseWorkQueueCursor cursor = cursorCodec.decode(encodedCursor, effectiveSort, queryHash);
         var documentSlice = cursor == null
                 ? searchRepository.searchSlice(criteria, pageable)
                 : searchRepository.searchSliceAfter(criteria, pageable.getPageSize(), effectiveSort, cursor);
@@ -174,7 +188,7 @@ public class FraudCaseQueryService {
                 .map(document -> toWorkQueueItem(document, now))
                 .toList();
         String nextCursor = documentSlice.hasNext() && !documentSlice.getContent().isEmpty()
-                ? cursorCodec.encode(effectiveSort, documentSlice.getContent().getLast())
+                ? cursorCodec.encode(effectiveSort, documentSlice.getContent().getLast(), queryHash)
                 : null;
         return new FraudCaseWorkQueueSliceResponse(
                 content,
