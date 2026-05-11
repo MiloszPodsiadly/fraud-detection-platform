@@ -47,13 +47,16 @@ public class ReadAccessAuditResponseAdvice implements ResponseBodyAdvice<Object>
             ServerHttpResponse response
     ) {
         if (request instanceof ServletServerHttpRequest servletRequest) {
+            HttpServletRequest httpRequest = servletRequest.getServletRequest();
+            if (Boolean.TRUE.equals(httpRequest.getAttribute(AUDITED_ATTRIBUTE))) {
+                return body;
+            }
             ReadAccessAuditClassifier auditClassifier = classifier.getIfAvailable();
             ReadAccessResultCountExtractor countExtractor = resultCountExtractor.getIfAvailable();
             ReadAccessAuditService auditor = auditService.getIfAvailable();
             if (auditClassifier == null || countExtractor == null || auditor == null) {
                 return body;
             }
-            HttpServletRequest httpRequest = servletRequest.getServletRequest();
             HttpServletResponse httpResponse = response instanceof ServletServerHttpResponse servletResponse
                     ? servletResponse.getServletResponse()
                     : null;

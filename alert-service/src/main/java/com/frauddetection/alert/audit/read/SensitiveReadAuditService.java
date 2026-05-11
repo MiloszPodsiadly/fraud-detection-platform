@@ -1,6 +1,7 @@
 package com.frauddetection.alert.audit.read;
 
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -10,10 +11,21 @@ public class SensitiveReadAuditService {
 
     private final ReadAccessAuditService readAccessAuditService;
     private final SensitiveReadAuditPolicy policy;
+    private final ReadAccessAuditClassifier classifier;
 
     public SensitiveReadAuditService(ReadAccessAuditService readAccessAuditService, SensitiveReadAuditPolicy policy) {
+        this(readAccessAuditService, policy, new ReadAccessAuditClassifier());
+    }
+
+    @Autowired
+    public SensitiveReadAuditService(
+            ReadAccessAuditService readAccessAuditService,
+            SensitiveReadAuditPolicy policy,
+            ReadAccessAuditClassifier classifier
+    ) {
         this.readAccessAuditService = readAccessAuditService;
         this.policy = policy;
+        this.classifier = classifier;
     }
 
     public void audit(
@@ -44,14 +56,7 @@ public class SensitiveReadAuditService {
             ReadAccessAuditOutcome outcome,
             HttpServletRequest request
     ) {
-        ReadAccessAuditTarget target = new ReadAccessAuditTarget(
-                endpointCategory,
-                resourceType,
-                normalize(resourceId),
-                null,
-                null,
-                null
-        );
+        ReadAccessAuditTarget target = target(endpointCategory, resourceType, resourceId, request);
         int boundedResultCount = resultCount == null ? 0 : Math.max(0, Math.min(resultCount, 100));
         String correlationId = request == null ? null : request.getHeader("X-Correlation-Id");
         if (!policy.failClosed()) {
@@ -65,6 +70,23 @@ public class SensitiveReadAuditService {
         } catch (RuntimeException exception) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Sensitive read audit unavailable.");
         }
+    }
+
+    private ReadAccessAuditTarget target(
+            ReadAccessEndpointCategory endpointCategory,
+            ReadAccessResourceType resourceType,
+            String resourceId,
+            HttpServletRequest request
+    ) {
+        ReadAccessAuditTarget classified = request == null ? null : classifier.classify(request).orElse(null);
+        return new ReadAccessAuditTarget(
+                endpointCategory,
+                resourceType,
+                normalize(resourceId),
+                classified == null ? null : classified.queryHash(),
+                classified == null ? null : classified.page(),
+                classified == null ? null : classified.size()
+        );
     }
 
     private void markAudited(HttpServletRequest request) {
