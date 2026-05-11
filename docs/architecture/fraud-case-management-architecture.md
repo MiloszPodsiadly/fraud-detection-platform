@@ -66,8 +66,10 @@ not make those operations regulated commands, lease-fenced commands, or external
 - Same key, payload, backend actor, action, and scope replays the stored response snapshot.
 - Same key with different payload, actor, action, or scope is a local idempotency conflict.
 - Replay does not re-run the lifecycle mutation and does not append another audit entry.
-- Concurrent same-key requests do not duplicate the local lifecycle mutation, audit entry, or idempotency record.
+- Concurrent same-key requests do not duplicate lifecycle mutation, audit entry, or idempotency record.
   Depending on timing, the competing request may receive a stable replay response or an in-progress local conflict.
+- FDP-43 guarantees side-effect idempotency for local lifecycle operations, not deterministic concurrent response
+  timing.
 - In-progress duplicate operations return a local conflict response and can be retried later with the same key.
 - Raw idempotency keys and raw request payloads are not stored or exposed.
 - Response snapshots are runtime-bounded. Oversized snapshots fail closed inside the local transaction and roll back

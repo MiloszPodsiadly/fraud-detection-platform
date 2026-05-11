@@ -60,8 +60,9 @@ The local lifecycle POST endpoints require `X-Idempotency-Key`. Same key + same 
 and scope returns the stored response snapshot. Replay does not append another note, decision, case audit entry, or
 status transition. Same key with different payload, actor, action, or scope returns a local conflict.
 
-Concurrent same-key requests do not duplicate the local lifecycle mutation, audit entry, or idempotency record.
+Concurrent same-key requests do not duplicate lifecycle mutation, audit entry, or idempotency record.
 Depending on timing, the competing request may receive a stable replay response or an idempotency-in-progress conflict.
+FDP-43 guarantees side-effect idempotency for local lifecycle operations, not deterministic concurrent response timing.
 This is local lifecycle retry safety; it is not distributed locking, distributed ACID, lease fencing, regulated
 mutation finality, or global exactly-once execution.
 

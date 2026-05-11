@@ -14,10 +14,12 @@ FDP-43 adds shared idempotency primitives and local fraud-case lifecycle retry s
 - Same key + same payload + same actor/action/scope returns a stable replay response for create, assign, note,
   decision, transition, close, and reopen.
 - Same key with different payload, actor, action, or scope returns `409` and does not mutate.
-- Concurrent same-key requests create only one lifecycle mutation, audit entry, and idempotency record.
+- Concurrent same-key requests do not duplicate lifecycle mutation, audit entry, or idempotency record.
 - Depending on timing, the competing concurrent request may receive a stable replay response or
   `code:IDEMPOTENCY_KEY_IN_PROGRESS`; raw Mongo/Spring persistence exceptions must not escape normal same-key
   idempotency races.
+- FDP-43 guarantees side-effect idempotency for local lifecycle operations, not deterministic concurrent response
+  timing.
 - Idempotency record, lifecycle mutation, and audit append commit or roll back together under Mongo transaction mode `REQUIRED`.
 - Idempotency completion-save failure rolls back lifecycle mutation and audit append.
 - Oversized response snapshots fail closed and roll back lifecycle mutation, audit append, and idempotency record.

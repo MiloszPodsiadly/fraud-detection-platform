@@ -52,9 +52,11 @@ regulated mutation architecture. It does not route fraud-case lifecycle operatio
   re-execute the lifecycle mutation or append another audit entry.
 - Same key + different payload, actor, action, or scope returns `409` with `code:IDEMPOTENCY_KEY_CONFLICT`.
 - An in-progress same-key operation returns `409` with `code:IDEMPOTENCY_KEY_IN_PROGRESS`.
-- Concurrent same-key requests do not duplicate the local lifecycle mutation, audit entry, or idempotency record.
+- Concurrent same-key requests do not duplicate lifecycle mutation, audit entry, or idempotency record.
   Depending on timing, the competing request may receive a stable replay response or an idempotency-in-progress
   conflict. Clients should retry later with the same idempotency key after an in-progress response.
+- FDP-43 guarantees side-effect idempotency for local lifecycle operations, not deterministic concurrent response
+  timing.
 - Idempotency key hashes and request hashes are stored; raw idempotency keys and raw request payloads are not stored
   or exposed.
 - The idempotency record, lifecycle mutation, and audit append commit or roll back together when Mongo transactions
