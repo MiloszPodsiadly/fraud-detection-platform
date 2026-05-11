@@ -32,13 +32,18 @@ Unknown filters are rejected. Duplicate single-valued query params such as two `
 Date ranges where `from` is after `to` are rejected. FDP-45 does not add regex, free-text search, customer-id search,
 export, or unbounded list-all behavior.
 
+String filters are bounded before query construction. `assignee`, `assignedInvestigatorId`, and `linkedAlertId` are
+limited to 128 characters, while `sort` is limited to 64 characters. `assignee` and `assignedInvestigatorId` are
+trimmed before comparison; blank values are treated as absent, and non-blank mismatches are rejected. The comparison is
+case-sensitive and does not apply identity aliasing beyond trimming.
+
 ## Sorting And Pagination
 
 Supported sort fields are `createdAt`, `updatedAt`, `priority`, `riskLevel`, and `caseNumber`. Sort directions are `asc` and `desc`. The Mongo query path appends `_id ASC` as a deterministic tie-breaker.
 
-Pagination is bounded to page numbers `>= 0` and page sizes `1..100`. Invalid page requests fail with
-`INVALID_PAGE_REQUEST`. The dedicated work queue uses bounded slice pagination and does not perform an exact Mongo
-count for broad queues.
+Pagination is bounded to page numbers `0..1000` and page sizes `1..100`. Invalid page requests fail with
+`INVALID_PAGE_REQUEST` before repository access. The dedicated work queue uses bounded slice pagination and does not
+perform an exact Mongo count for broad queues.
 
 ## SLA Fields
 
@@ -56,7 +61,10 @@ The derived SLA and age values are not persisted.
 
 ## Index Readiness
 
-Existing indexed fields cover the FDP-45 query shape: `status`, `priority`, `riskLevel`, `assignedInvestigatorId`, `linkedAlertIds`, and `caseNumber`. Recommended operational indexes for larger datasets are compound indexes that align with the allowed filters plus stable sort fields, for example status or assignee with `createdAt` and `_id`.
+Existing indexed fields cover the FDP-45 query shape: `status`, `priority`, `riskLevel`, `assignedInvestigatorId`,
+`linkedAlertIds`, `caseNumber`, `createdAt`, and `updatedAt`. Required proof checks that every allowlisted stable sort
+field has an index. Recommended operational indexes for larger datasets are compound indexes that align with the
+allowed filters plus stable sort fields, for example status or assignee with `createdAt` and `_id`.
 
 These are readiness recommendations, not a claim that every production workload is fully optimized.
 
@@ -65,6 +73,10 @@ These are readiness recommendations, not a claim that every production workload 
 The work queue requires `FRAUD_CASE_READ`. Read-only users can read the queue but cannot perform fraud-case lifecycle
 mutations. Fraud-case audit history still requires `FRAUD_CASE_AUDIT_READ`. Work queue reads are recorded through the
 existing sensitive read-access audit path using bounded metadata only; metrics are not treated as audit evidence.
+Successful reads are audited as `SUCCESS`. Validation rejections such as unsupported filters, duplicate params, invalid
+ranges, overlong filters, or deep page requests are audited as `REJECTED`. Unexpected service or repository failures are
+audited as `FAILED`. These audit attempts use endpoint/resource metadata and result count only; raw filters and user
+supplied values are not stored.
 
 Metrics are low-cardinality:
 
@@ -79,3 +91,17 @@ values, exception messages, stack traces, request hashes, or idempotency keys.
 ## Non-Goals
 
 FDP-45 does not change lifecycle mutation semantics, idempotency semantics, audit mutation semantics, transaction boundaries, Kafka/outbox behavior, `RegulatedMutationCoordinator` routing, FDP-29 finality, global exactly-once guarantees, external finality, distributed ACID, export APIs, or bank certification claims.
+
+## Merge Gate
+
+FDP-45 is GO only when the current head SHA has all required CI jobs completed successfully, including backend,
+FDP-42, FDP-43, FDP-44, regulated mutation regression, and the FDP-45 work queue proof suite. The FDP-45 proof suite
+must include contract compatibility, pagination bounds, duplicate-param rejection, filter normalization/length checks,
+allowlisted sorting, index readiness, real Mongo filter/sort/page proof, SLA config/derived fields, read-only safety,
+security, low-cardinality metrics, read-access audit success/rejected/failed outcomes, OpenAPI truth, and no-overclaim
+docs proof.
+
+FDP-45 is NO-GO while any required job is pending, in progress, skipped, missing, cancelled, timed out, or failed. It is
+also NO-GO if the old `GET /api/v1/fraud-cases` contract drifts, the work queue performs unbounded list/export/exact
+count behavior, unsupported filters silently fall back, failed sensitive-read attempts are not audited, or docs claim
+mutation/idempotency/finality guarantees outside FDP-45 scope.

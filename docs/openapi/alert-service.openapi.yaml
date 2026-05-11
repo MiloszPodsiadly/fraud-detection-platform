@@ -982,25 +982,12 @@ paths:
             minimum: 1
             maximum: 100
             default: 20
-        - name: sort
-          in: query
-          required: false
-          description: Allowlisted stable sort in field,direction form. Supported fields are createdAt, updatedAt, priority, riskLevel, and caseNumber.
-          schema:
-            type: string
-            default: createdAt,desc
-            example: updatedAt,asc
         - name: status
           in: query
           required: false
           schema:
             $ref: "#/components/schemas/FraudCaseStatus"
         - name: assignee
-          in: query
-          required: false
-          schema:
-            type: string
-        - name: assignedInvestigatorId
           in: query
           required: false
           schema:
@@ -1022,18 +1009,6 @@ paths:
             type: string
             format: date-time
         - name: createdTo
-          in: query
-          required: false
-          schema:
-            type: string
-            format: date-time
-        - name: updatedFrom
-          in: query
-          required: false
-          schema:
-            type: string
-            format: date-time
-        - name: updatedTo
           in: query
           required: false
           schema:
@@ -1114,6 +1089,7 @@ paths:
           schema:
             type: integer
             minimum: 0
+            maximum: 1000
             default: 0
         - name: size
           in: query
@@ -1129,6 +1105,7 @@ paths:
           description: Allowlisted stable sort in field,direction form. Supported fields are createdAt, updatedAt, priority, riskLevel, and caseNumber.
           schema:
             type: string
+            maxLength: 64
             default: createdAt,desc
             example: updatedAt,asc
         - name: status
@@ -1141,11 +1118,13 @@ paths:
           required: false
           schema:
             type: string
+            maxLength: 128
         - name: assignedInvestigatorId
           in: query
           required: false
           schema:
             type: string
+            maxLength: 128
         - name: priority
           in: query
           required: false
@@ -1185,6 +1164,7 @@ paths:
           required: false
           schema:
             type: string
+            maxLength: 128
       responses:
         "200":
           description: Bounded fraud-case work queue slice returned.
@@ -1626,6 +1606,7 @@ paths:
           schema:
             type: integer
             minimum: 0
+            maximum: 1000
             default: 0
         - name: size
           in: query
