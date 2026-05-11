@@ -56,9 +56,11 @@ and does not claim FDP-42 analyst lifecycle audit semantics.
 
 ## Lifecycle Idempotency Policy
 
-The local lifecycle POST endpoints require `X-Idempotency-Key`. Same key + same payload + same backend actor/action
-and scope returns the stored response snapshot. Replay does not append another note, decision, case audit entry, or
-status transition. Same key with different payload, actor, action, or scope returns a local conflict.
+The local lifecycle POST endpoints require `X-Idempotency-Key`. The key is globally unique within the fraud-case
+lifecycle idempotency domain: storage uses one record per key hash, while action, resolved backend actor, scope, and
+request hash are conflict-checked claim fields. Same key + same payload + same resolved backend actor/action and scope
+returns the stored response snapshot. Replay does not append another note, decision, case audit entry, or status
+transition. Same key with different payload, actor, action, or scope returns a local conflict.
 
 Concurrent same-key requests do not duplicate lifecycle mutation, audit entry, or idempotency record.
 Depending on timing, the competing request may receive a stable replay response or an idempotency-in-progress conflict.
@@ -70,6 +72,11 @@ The idempotency record, lifecycle mutation, and fraud-case audit append commit o
 transactions are enabled with transaction-mode `REQUIRED`. Raw idempotency keys and raw request payloads are not
 stored or exposed; only key hashes, request hashes, bounded action/actor/scope metadata, and safe response snapshots
 are stored.
+
+Idempotency records are retained for `app.fraud-cases.idempotency.retention` (`PT24H` by default). After the retention
+window and eventual Mongo TTL deletion, retrying the same key may execute as a new lifecycle operation. Replay also
+requires a valid authenticated/resolved actor context; FDP-43 does not replay when actor resolution fails before
+idempotency lookup.
 
 Response snapshots are bounded at runtime. If a replay snapshot would exceed the configured limit, the lifecycle
 operation fails closed and rolls back the idempotency record, case mutation, and audit append.

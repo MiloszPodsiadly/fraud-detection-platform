@@ -11,6 +11,8 @@ FDP-43 adds shared idempotency primitives and local fraud-case lifecycle retry s
 - Shared canonical hashing and key validation are reused by local lifecycle idempotency.
 - `RegulatedMutationIntentHasher` remains backward compatible and delegates generic hashing to the shared hasher.
 - All lifecycle POST endpoints require `X-Idempotency-Key` at the HTTP contract level.
+- `X-Idempotency-Key` is globally unique within the fraud-case lifecycle idempotency domain; storage enforces one
+  record per key hash and stores action, actor, scope, and request hash as conflict-checked claim fields.
 - Same key + same payload + same actor/action/scope returns a stable replay response for create, assign, note,
   decision, transition, close, and reopen.
 - Same key with different payload, actor, action, or scope returns `409` and does not mutate.
@@ -23,6 +25,10 @@ FDP-43 adds shared idempotency primitives and local fraud-case lifecycle retry s
 - Idempotency record, lifecycle mutation, and audit append commit or roll back together under Mongo transaction mode `REQUIRED`.
 - Idempotency completion-save failure rolls back lifecycle mutation and audit append.
 - Oversized response snapshots fail closed and roll back lifecycle mutation, audit append, and idempotency record.
+- Idempotency records have a positive retention window. Retry after the retention window and eventual Mongo TTL
+  deletion may execute as a new lifecycle operation.
+- Replay is scoped to a successfully resolved backend actor/principal context; if actor resolution fails before the
+  idempotency lookup, FDP-43 does not replay without that valid actor context.
 - Raw idempotency keys and raw request payloads are not stored or exposed.
 - Raw idempotency keys, request hashes, payload hashes, stack traces, and exception class names are not exposed in
   HTTP idempotency error responses.

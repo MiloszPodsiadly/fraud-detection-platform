@@ -48,7 +48,9 @@ FDP-43 local lifecycle idempotency reuses shared canonical hashing, key validati
 regulated mutation architecture. It does not route fraud-case lifecycle operations through
 `RegulatedMutationCoordinator`.
 
-- Same key + same payload + same backend actor/action/scope returns the stored response snapshot and does not
+- `X-Idempotency-Key` is globally unique within the fraud-case lifecycle idempotency domain. The stored record is
+  looked up by key hash; action, backend actor, scope, and request hash are conflict-checked claim fields.
+- Same key + same payload + same resolved backend actor/action/scope returns the stored response snapshot and does not
   re-execute the lifecycle mutation or append another audit entry.
 - Same key + different payload, actor, action, or scope returns `409` with `code:IDEMPOTENCY_KEY_CONFLICT`.
 - An in-progress same-key operation returns `409` with `code:IDEMPOTENCY_KEY_IN_PROGRESS`.
@@ -61,6 +63,10 @@ regulated mutation architecture. It does not route fraud-case lifecycle operatio
   or exposed.
 - The idempotency record, lifecycle mutation, and audit append commit or roll back together when Mongo transactions
   are enabled with `app.regulated-mutations.transaction-mode=REQUIRED`.
+- Idempotency records are retained for `app.fraud-cases.idempotency.retention` (`PT24H` by default). After the
+  retention window and eventual Mongo TTL deletion, the same key may execute as a new lifecycle operation.
+- Replay requires a valid authenticated/resolved actor context. If actor resolution fails before lookup, the request
+  fails before replay and does not mutate.
 - Response snapshots are bounded at runtime. If the safe replay snapshot exceeds the configured limit, the local
   lifecycle operation fails closed with `code:IDEMPOTENCY_SNAPSHOT_TOO_LARGE` and the idempotency record, lifecycle
   mutation, and audit append roll back together.
@@ -109,7 +115,7 @@ Stable error details include `reason:FRAUD_CASE_VALIDATION_FAILED`, `reason:FRAU
 
 ## Duplicate Submit Semantics
 
-With the same `X-Idempotency-Key` and same payload, repeating `notes` or `decisions` replays the stored response and
+With the same `X-Idempotency-Key`, same resolved backend actor, same action/scope, and same payload, repeating `notes` or `decisions` replays the stored response and
 does not create another append-only record or audit entry. With a different idempotency key, each POST is a new local
 lifecycle command and follows normal lifecycle policy.
 

@@ -45,7 +45,8 @@ from API responses.
 - `FraudCaseDecisionDocument` is append-only.
 - `FraudCaseAuditEntryDocument` is append-only and ordered by `occurredAt`.
 - `FraudCaseLifecycleIdempotencyRecordDocument` stores hashed idempotency keys, request hashes, action/actor/scope,
-  bounded response snapshots, and local status. It does not store raw idempotency keys or raw request payloads.
+  bounded response snapshots, local status, and a TTL retention timestamp. It does not store raw idempotency keys or
+  raw request payloads.
 
 ## Transaction Direction
 
@@ -63,7 +64,9 @@ not make those operations regulated commands, lease-fenced commands, or external
 ## Local Idempotency Semantics
 
 - `X-Idempotency-Key` is required for lifecycle POST endpoints.
-- Same key, payload, backend actor, action, and scope replays the stored response snapshot.
+- `X-Idempotency-Key` is globally unique within the fraud-case lifecycle idempotency domain. The repository lookup is
+  by key hash only; action, backend actor, scope, and request hash are stored as claim fields and validated for replay.
+- Same key, payload, resolved backend actor, action, and scope replays the stored response snapshot.
 - Same key with different payload, actor, action, or scope is a local idempotency conflict.
 - Replay does not re-run the lifecycle mutation and does not append another audit entry.
 - Concurrent same-key requests do not duplicate lifecycle mutation, audit entry, or idempotency record.
@@ -72,6 +75,10 @@ not make those operations regulated commands, lease-fenced commands, or external
   timing.
 - In-progress duplicate operations return a local conflict response and can be retried later with the same key.
 - Raw idempotency keys and raw request payloads are not stored or exposed.
+- Records are retained for `app.fraud-cases.idempotency.retention` (`PT24H` by default). After the retention window
+  and eventual Mongo TTL deletion, retrying the same key may execute as a new lifecycle operation.
+- Replay requires a valid authenticated/resolved actor context; failed actor resolution fails before replay and does
+  not mutate.
 - Response snapshots are runtime-bounded. Oversized snapshots fail closed inside the local transaction and roll back
   the idempotency record, lifecycle mutation, and audit append.
 - Public HTTP lifecycle POSTs must call only service overloads that accept the resolved `X-Idempotency-Key`; overloads
