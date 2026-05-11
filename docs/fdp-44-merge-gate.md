@@ -21,8 +21,12 @@ operator docs.
 - Same-key same-claim retry does not create duplicate mutation/audit/idempotency record inside the active local
   retention window.
 - Identical concurrent response timing is not guaranteed.
-- Replay snapshots use explicit DTOs and must not include raw idempotency keys, idempotency key hashes, request hashes,
-  lease owners, stack traces, or raw exception text.
+- New FDP-44 idempotency snapshot writes must serialize only explicit `FraudCaseLifecycleReplaySnapshot` DTOs.
+- Snapshot write path must fail closed if the lifecycle response type is unsupported.
+- Raw response fallback is allowed only on restore/read path for backward compatibility with pre-FDP-44 snapshots.
+- Raw response fallback must never be used for new snapshot writes.
+- Replay snapshots must not include raw idempotency keys, idempotency key hashes, request hashes, lease owners, stack
+  traces, or raw exception text.
 - Idempotency records use positive retention and `expiresAt` TTL. After retention and eventual Mongo TTL cleanup, retry
   with the same key may execute as a new local lifecycle operation.
 - Metrics remain low-cardinality and must not label by actor id, case id, idempotency key, key hash, request hash, raw
@@ -37,6 +41,9 @@ operator docs.
 - Do not claim global exactly-once, distributed ACID, Kafka/outbox exactly-once, external finality, FDP-29 finality,
   lease fencing, WORM storage, legal notarization, bank certification, or deterministic concurrent response ordering.
 - Do not manually edit fraud-case lifecycle idempotency records.
+- NO-GO if snapshot write path uses raw response fallback.
+- NO-GO if unsupported lifecycle response type is silently serialized.
+- NO-GO if a new lifecycle response type is added without replay snapshot mapper coverage.
 
 ## Required CI
 
@@ -52,6 +59,8 @@ No merge while any required job is queued, pending, in progress, skipped, missin
 
 - `Fdp44FraudCaseLifecycleApiSurfaceStructuralTest`
 - `Fdp44FraudCaseLifecycleReplaySnapshotTest`
+- `Fdp44FraudCaseLifecycleReplaySnapshotFailClosedTest`
+- `Fdp44FraudCaseLifecycleReplaySnapshotCoverageTest`
 - `Fdp44FraudCaseIdempotencyRetentionOperationalTest`
 - `Fdp44FraudCaseIdempotencyOperationalDocsNoOverclaimTest`
 - `FraudCaseLifecycleIdempotencyServiceRaceTest`
