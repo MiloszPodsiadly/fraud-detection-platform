@@ -26,17 +26,22 @@ class Fdp45FraudCaseWorkQueueOpenApiContractTest {
                 .doesNotContain("updatedTo")
                 .doesNotContain("name: sort");
         assertThat(parameterNames(workQueueEndpoint))
-                .containsExactly("page", "size", "sort", "status", "assignee", "assignedInvestigatorId", "priority",
+                .containsExactly("page", "size", "sort", "cursor", "status", "assignee", "assignedInvestigatorId", "priority",
                         "riskLevel", "createdFrom", "createdTo", "updatedFrom", "updatedTo", "linkedAlertId");
         assertThat(workQueueEndpoint)
                 .contains("$ref: \"#/components/schemas/FraudCaseWorkQueueSlice\"")
+                .contains("Cursor/keyset pagination is recommended")
+                .contains("Clients must not parse cursor values")
+                .contains("INVALID_CURSOR")
                 .contains("maximum: 1000")
                 .contains("maximum: 100");
         assertThat(workQueueSchema)
                 .doesNotContain("totalElements")
                 .doesNotContain("totalPages")
                 .contains("hasNext")
-                .contains("nextPage");
+                .contains("nextPage")
+                .contains("nextCursor")
+                .contains("sort");
     }
 
     private List<String> parameterNames(String section) {

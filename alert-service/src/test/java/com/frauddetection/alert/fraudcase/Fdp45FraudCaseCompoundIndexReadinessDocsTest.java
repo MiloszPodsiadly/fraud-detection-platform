@@ -23,7 +23,8 @@ class Fdp45FraudCaseCompoundIndexReadinessDocsTest {
                 .contains("status + updatedat + _id")
                 .contains("assignedinvestigatorid + updatedat + _id")
                 .contains("minimum allowed-sort index readiness")
-                .contains("high-volume deployment recommendations")
+                .contains("ships compound index readiness")
+                .contains("compound index definitions in `fraudcasedocument`")
                 .contains("not a claim that every filter/sort combination is production-optimized");
         assertThat(docs)
                 .doesNotContain("every production workload is fully optimized");

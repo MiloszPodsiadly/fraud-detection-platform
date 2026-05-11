@@ -29,10 +29,13 @@ class Fdp45FraudCaseWorkQueueSlaConfigTest {
         assertThat(applicationYaml)
                 .contains("fraud-cases:")
                 .contains("work-queue:")
-                .contains("sla: ${FRAUD_CASE_WORK_QUEUE_SLA:PT24H}");
+                .contains("sla: ${FRAUD_CASE_WORK_QUEUE_SLA:PT24H}")
+                .contains("cursor-signing-secret: ${FRAUD_CASE_WORK_QUEUE_CURSOR_SIGNING_SECRET:");
         assertThat(applicationProdYaml)
                 .contains("sla: ${FRAUD_CASE_WORK_QUEUE_SLA}")
+                .contains("cursor-signing-secret: ${FRAUD_CASE_WORK_QUEUE_CURSOR_SIGNING_SECRET}")
                 .doesNotContain("FRAUD_CASE_WORK_QUEUE_SLA:PT24H");
+        assertThat(applicationProdYaml).doesNotContain("FRAUD_CASE_WORK_QUEUE_CURSOR_SIGNING_SECRET:");
         assertThat(new FraudCaseWorkQueueProperties(Duration.ofHours(24)).sla()).isEqualTo(Duration.ofHours(24));
     }
 

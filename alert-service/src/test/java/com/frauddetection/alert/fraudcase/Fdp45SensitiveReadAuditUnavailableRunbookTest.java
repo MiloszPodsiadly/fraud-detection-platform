@@ -22,6 +22,11 @@ class Fdp45SensitiveReadAuditUnavailableRunbookTest {
                 .contains("no raw identifiers")
                 .contains("do not add raw identifiers")
                 .contains("raw query strings")
+                .contains("workqueuesensitivereadauditunavailable")
+                .contains("low-cardinality labels")
+                .contains("forbidden labels")
+                .contains("endpoint_family")
+                .contains("queryhash")
                 .contains("503");
         assertThat(body)
                 .doesNotContain("case-1")

@@ -25,6 +25,7 @@ class Fdp45FraudCaseProdSlaConfigTest {
         String applicationYaml = Files.readString(projectRoot().resolve("alert-service/src/main/resources/application.yml"));
 
         assertThat(applicationYaml).contains("sla: ${FRAUD_CASE_WORK_QUEUE_SLA:PT24H}");
+        assertThat(applicationYaml).contains("cursor-signing-secret: ${FRAUD_CASE_WORK_QUEUE_CURSOR_SIGNING_SECRET:");
     }
 
     @Test
@@ -34,7 +35,10 @@ class Fdp45FraudCaseProdSlaConfigTest {
 
         assertThat(prodYaml).contains("sla: ${FRAUD_CASE_WORK_QUEUE_SLA}");
         assertThat(bankYaml).contains("sla: ${FRAUD_CASE_WORK_QUEUE_SLA}");
+        assertThat(prodYaml).contains("cursor-signing-secret: ${FRAUD_CASE_WORK_QUEUE_CURSOR_SIGNING_SECRET}");
+        assertThat(bankYaml).contains("cursor-signing-secret: ${FRAUD_CASE_WORK_QUEUE_CURSOR_SIGNING_SECRET}");
         assertThat(prodYaml + bankYaml).doesNotContain("FRAUD_CASE_WORK_QUEUE_SLA:PT24H");
+        assertThat(prodYaml + bankYaml).doesNotContain("FRAUD_CASE_WORK_QUEUE_CURSOR_SIGNING_SECRET:");
     }
 
     @Test
@@ -49,17 +53,35 @@ class Fdp45FraudCaseProdSlaConfigTest {
         contextRunner
                 .withPropertyValues("app.fraud-cases.work-queue.sla=not-a-duration")
                 .run(context -> assertThat(context).hasFailed());
+        contextRunner
+                .withPropertyValues("app.fraud-cases.work-queue.sla=PT8H")
+                .run(context -> assertThat(context).hasFailed());
     }
 
     @Test
     void explicitPositiveSlaShouldBind() {
         contextRunner
-                .withPropertyValues("app.fraud-cases.work-queue.sla=PT6H")
+                .withPropertyValues(
+                        "app.fraud-cases.work-queue.sla=PT6H",
+                        "app.fraud-cases.work-queue.cursor-signing-secret=test-work-queue-cursor-secret"
+                )
                 .run(context -> assertThat(context)
                         .hasNotFailed()
                         .getBean(FraudCaseWorkQueueProperties.class)
                         .extracting(FraudCaseWorkQueueProperties::sla)
                         .isEqualTo(Duration.ofHours(6)));
+        contextRunner
+                .withPropertyValues(
+                        "app.fraud-cases.work-queue.sla=PT8H",
+                        "app.fraud-cases.work-queue.cursor-signing-secret=test-work-queue-cursor-secret"
+                )
+                .run(context -> assertThat(context)
+                        .hasNotFailed()
+                        .getBean(FraudCaseWorkQueueProperties.class)
+                        .satisfies(properties -> {
+                            assertThat(properties.sla()).isEqualTo(Duration.ofHours(8));
+                            assertThat(properties.cursorSigningSecret()).isEqualTo("test-work-queue-cursor-secret");
+                        }));
     }
 
     private Path projectRoot() {
