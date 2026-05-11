@@ -33,8 +33,12 @@ FDP-43 adds shared idempotency primitives and local fraud-case lifecycle retry s
 - Raw idempotency keys, request hashes, payload hashes, stack traces, and exception class names are not exposed in
   HTTP idempotency error responses.
 - Shared primitive extraction does not break regulated mutation idempotency semantics.
+- Backend CI is green.
+- FDP-42 CI job `fdp42-fraud-case-management` is green and non-skipped.
+- Regulated mutation CI job `regulated-mutation-regression` is green and non-skipped.
 - FDP-43 CI job `fdp43-fraud-case-idempotency` is green and non-skipped.
-- FDP-42 fraud-case suite and regulated-mutation regression suite remain green.
+- No required GitHub Actions job is skipped.
+- No merge while any required GitHub Actions status is `in_progress`, queued, pending, or missing.
 
 ## No-Go
 
@@ -42,7 +46,8 @@ FDP-43 adds shared idempotency primitives and local fraud-case lifecycle retry s
 - FDP-43 must not introduce lease fencing, FDP-29 evidence-gated finalize, global exactly-once, Kafka/outbox exactly-once, distributed ACID, external finality, WORM storage, legal notarization, or bank certification claims.
 - FDP-43 must not create unrelated duplicate SHA-256 request hashing or key validation helpers outside the shared idempotency primitive layer.
 - No merge without concurrency proof.
-- No merge without CI FDP-43 job.
+- No merge without fully completed green CI for backend, `fdp42-fraud-case-management`,
+  `regulated-mutation-regression`, and `fdp43-fraud-case-idempotency`.
 - No bounded snapshot claim without runtime enforcement.
 - No missing idempotency key may reach the lifecycle mutation path.
 - Public fraud-case lifecycle controllers must not call non-idempotent compatibility overloads.
