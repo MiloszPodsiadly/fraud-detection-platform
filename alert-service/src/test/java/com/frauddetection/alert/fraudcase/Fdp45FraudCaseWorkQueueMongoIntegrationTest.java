@@ -68,8 +68,10 @@ class Fdp45FraudCaseWorkQueueMongoIntegrationTest {
         var second = repository.searchSlice(criteria, PageRequest.of(1, 2, Sort.by(Sort.Order.desc("createdAt"))));
         Sort.Order sortOrder = Sort.Order.desc("createdAt");
         FraudCaseWorkQueueCursorCodec cursorCodec = new FraudCaseWorkQueueCursorCodec("test-work-queue-cursor-secret");
-        String cursor = cursorCodec.encode(sortOrder, first.getContent().getLast());
-        var cursorSecond = repository.searchSliceAfter(criteria, 2, sortOrder, cursorCodec.decode(cursor, sortOrder));
+        String queryHash = FraudCaseWorkQueueCursorQueryFingerprint.hash(
+                null, null, null, null, null, null, null, null, null, sortOrder, FraudCaseWorkQueueCursorCodec.VERSION);
+        String cursor = cursorCodec.encode(sortOrder, first.getContent().getLast(), queryHash);
+        var cursorSecond = repository.searchSliceAfter(criteria, 2, sortOrder, cursorCodec.decode(cursor, sortOrder, queryHash));
 
         assertThat(first.getContent()).extracting(FraudCaseDocument::getCaseId)
                 .containsExactly("case-c", "case-a");

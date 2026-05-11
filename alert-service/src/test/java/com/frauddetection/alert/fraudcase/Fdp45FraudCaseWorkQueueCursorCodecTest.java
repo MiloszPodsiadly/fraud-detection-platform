@@ -21,33 +21,38 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class Fdp45FraudCaseWorkQueueCursorCodecTest {
 
     private static final String SECRET = "test-work-queue-cursor-secret";
+    private static final String QUERY_HASH = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     private final FraudCaseWorkQueueCursorCodec codec = new FraudCaseWorkQueueCursorCodec(SECRET);
 
     @Test
     void shouldRoundTripSignedOpaqueCursor() {
         Sort.Order sort = Sort.Order.desc("createdAt");
-        String encoded = codec.encode(sort, caseDocument("case-2", "2026-05-10T10:00:00Z"));
+        String encoded = codec.encode(sort, caseDocument("case-2", "2026-05-10T10:00:00Z"), QUERY_HASH);
 
-        FraudCaseWorkQueueCursor decoded = codec.decode(encoded, sort);
+        FraudCaseWorkQueueCursor decoded = codec.decode(encoded, sort, QUERY_HASH);
 
         assertThat(decoded.version()).isEqualTo(1);
         assertThat(decoded.sortField()).isEqualTo("createdAt");
         assertThat(decoded.sortDirection()).isEqualTo("desc");
         assertThat(decoded.lastValue()).isEqualTo("2026-05-10T10:00:00Z");
         assertThat(decoded.lastId()).isEqualTo("case-2");
+        assertThat(decoded.queryHash()).isEqualTo(QUERY_HASH);
     }
 
     @Test
     void shouldRejectInvalidTamperedSortMismatchAndUnsupportedVersionCursors() throws Exception {
         Sort.Order sort = Sort.Order.desc("createdAt");
-        String encoded = codec.encode(sort, caseDocument("case-2", "2026-05-10T10:00:00Z"));
+        String encoded = codec.encode(sort, caseDocument("case-2", "2026-05-10T10:00:00Z"), QUERY_HASH);
         String tampered = encoded.substring(0, encoded.length() - 1) + (encoded.endsWith("A") ? "B" : "A");
-        String unsupportedVersion = signedCursor(new FraudCaseWorkQueueCursor(99, "createdAt", "desc", "2026-05-10T10:00:00Z", "case-2"));
+        String unsupportedVersion = signedCursor(new FraudCaseWorkQueueCursor(99, "createdAt", "desc", "2026-05-10T10:00:00Z", "case-2", QUERY_HASH));
+        String missingQueryHash = signedCursor(new FraudCaseWorkQueueCursor(1, "createdAt", "desc", "2026-05-10T10:00:00Z", "case-2", null));
 
-        assertInvalid(() -> codec.decode("not-a-cursor", sort));
-        assertInvalid(() -> codec.decode(tampered, sort));
-        assertInvalid(() -> codec.decode(encoded, Sort.Order.asc("createdAt")));
-        assertInvalid(() -> codec.decode(unsupportedVersion, sort));
+        assertInvalid(() -> codec.decode("not-a-cursor", sort, QUERY_HASH));
+        assertInvalid(() -> codec.decode(tampered, sort, QUERY_HASH));
+        assertInvalid(() -> codec.decode(encoded, Sort.Order.asc("createdAt"), QUERY_HASH));
+        assertInvalid(() -> codec.decode(encoded, sort, "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"));
+        assertInvalid(() -> codec.decode(unsupportedVersion, sort, QUERY_HASH));
+        assertInvalid(() -> codec.decode(missingQueryHash, sort, QUERY_HASH));
     }
 
     private void assertInvalid(Runnable decode) {

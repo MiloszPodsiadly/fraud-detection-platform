@@ -31,8 +31,10 @@ class Fdp45FraudCaseWorkQueueOpenApiContractTest {
         assertThat(workQueueEndpoint)
                 .contains("$ref: \"#/components/schemas/FraudCaseWorkQueueSlice\"")
                 .contains("Cursor/keyset pagination is recommended")
-                .contains("Clients must not parse cursor values")
+                .contains("Cursor values are opaque, signed, versioned, bound to")
+                .contains("Changing filters or sort with a cursor returns INVALID_CURSOR")
                 .contains("INVALID_CURSOR")
+                .contains("INVALID_CURSOR_PAGE_COMBINATION")
                 .contains("maximum: 1000")
                 .contains("maximum: 100");
         assertThat(workQueueSchema)
