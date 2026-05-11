@@ -12,7 +12,7 @@ class Fdp45FraudCaseWorkQueueIndexReadinessTest {
 
     @Test
     void everyAllowedWorkQueueSortFieldShouldHaveIndexSupport() throws Exception {
-        for (String sortField : FraudCaseWorkQueueQueryPolicy.SORT_FIELDS) {
+        for (String sortField : FraudCaseReadQueryPolicy.SORT_FIELDS) {
             Field field = FraudCaseDocument.class.getDeclaredField(sortField);
             assertThat(field.getAnnotation(Indexed.class))
                     .as("Allowed work queue sort field must be indexed: " + sortField)

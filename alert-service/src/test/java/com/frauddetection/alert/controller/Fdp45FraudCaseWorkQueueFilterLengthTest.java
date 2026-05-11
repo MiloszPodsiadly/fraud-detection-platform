@@ -2,7 +2,7 @@ package com.frauddetection.alert.controller;
 
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueQueryException;
-import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueQueryPolicy;
+import com.frauddetection.alert.fraudcase.FraudCaseReadQueryPolicy;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
@@ -25,7 +25,7 @@ class Fdp45FraudCaseWorkQueueFilterLengthTest {
 
     @Test
     void shouldRejectOversizedStringFiltersWithoutEchoingRawValues() {
-        String longValue = "x".repeat(FraudCaseWorkQueueQueryPolicy.MAX_FILTER_VALUE_LENGTH + 1);
+        String longValue = "x".repeat(FraudCaseReadQueryPolicy.MAX_FILTER_VALUE_LENGTH + 1);
 
         assertFailureDoesNotEcho(() -> controller.workQueue(0, 20, "createdAt,desc", null, longValue, null,
                 null, null, null, null, null, null, null, null, new LinkedMultiValueMap<>()), longValue, "INVALID_FILTER");
@@ -35,7 +35,7 @@ class Fdp45FraudCaseWorkQueueFilterLengthTest {
 
     @Test
     void shouldRejectOversizedSortWithoutEchoingRawValue() {
-        String longSort = "createdAt" + "x".repeat(FraudCaseWorkQueueQueryPolicy.MAX_SORT_VALUE_LENGTH + 1);
+        String longSort = "createdAt" + "x".repeat(FraudCaseReadQueryPolicy.MAX_SORT_VALUE_LENGTH + 1);
 
         assertFailureDoesNotEcho(() -> controller.workQueue(0, 20, longSort, null, null, null,
                 null, null, null, null, null, null, null, null, new LinkedMultiValueMap<>()), longSort, "UNSUPPORTED_SORT_FIELD");

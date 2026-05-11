@@ -25,10 +25,14 @@ class Fdp45FraudCaseWorkQueueSlaConfigTest {
     @Test
     void shouldExposeProductionWorkQueueSlaConfigurationKey() throws Exception {
         String applicationYaml = Files.readString(projectRoot().resolve("alert-service/src/main/resources/application.yml"));
+        String applicationProdYaml = Files.readString(projectRoot().resolve("alert-service/src/main/resources/application-prod.yml"));
         assertThat(applicationYaml)
                 .contains("fraud-cases:")
                 .contains("work-queue:")
                 .contains("sla: ${FRAUD_CASE_WORK_QUEUE_SLA:PT24H}");
+        assertThat(applicationProdYaml)
+                .contains("sla: ${FRAUD_CASE_WORK_QUEUE_SLA}")
+                .doesNotContain("FRAUD_CASE_WORK_QUEUE_SLA:PT24H");
         assertThat(new FraudCaseWorkQueueProperties(Duration.ofHours(24)).sla()).isEqualTo(Duration.ofHours(24));
     }
 

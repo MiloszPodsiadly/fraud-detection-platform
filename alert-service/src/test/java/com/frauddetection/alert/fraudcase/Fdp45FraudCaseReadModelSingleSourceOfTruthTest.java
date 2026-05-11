@@ -15,12 +15,12 @@ class Fdp45FraudCaseReadModelSingleSourceOfTruthTest {
         String controller = read("controller/FraudCaseController.java");
         String queryService = read("service/FraudCaseQueryService.java");
         String searchRepository = read("fraudcase/MongoFraudCaseSearchRepository.java");
-        String queryPolicy = read("fraudcase/FraudCaseWorkQueueQueryPolicy.java");
+        String queryPolicy = read("fraudcase/FraudCaseReadQueryPolicy.java");
 
         assertThat(controller)
                 .contains("@GetMapping(\"/work-queue\")")
                 .contains("fraudCaseManagementService.workQueue(")
-                .contains("FraudCaseWorkQueueQueryPolicy")
+                .contains("FraudCaseReadQueryPolicy")
                 .doesNotContain("MongoTemplate")
                 .doesNotContain("Criteria.where")
                 .doesNotContain("new Query(");
@@ -33,7 +33,7 @@ class Fdp45FraudCaseReadModelSingleSourceOfTruthTest {
         assertThat(searchRepository)
                 .contains("class MongoFraudCaseSearchRepository")
                 .contains("searchSlice(")
-                .contains("stableSort(");
+                .contains("stableReadSort(");
         assertThat(queryPolicy)
                 .contains("Sort.Order.asc(TIE_BREAKER_FIELD)");
         assertThat(searchSliceMethod(searchRepository)).doesNotContain(".count(");

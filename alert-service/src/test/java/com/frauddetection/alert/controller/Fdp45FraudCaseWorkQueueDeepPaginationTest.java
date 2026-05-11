@@ -3,7 +3,7 @@ package com.frauddetection.alert.controller;
 import com.frauddetection.alert.api.FraudCaseWorkQueueSliceResponse;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueQueryException;
-import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueQueryPolicy;
+import com.frauddetection.alert.fraudcase.FraudCaseReadQueryPolicy;
 import com.frauddetection.alert.fraudcase.MongoFraudCaseSearchRepository;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
@@ -38,12 +38,12 @@ class Fdp45FraudCaseWorkQueueDeepPaginationTest {
     @Test
     void shouldAcceptConfiguredMaximumPageAndRejectDeepOffsetBeforeServiceCall() {
         when(service.workQueue(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(Pageable.class)))
-                .thenReturn(new FraudCaseWorkQueueSliceResponse(List.of(), FraudCaseWorkQueueQueryPolicy.MAX_PAGE_NUMBER, 100, false, null));
+                .thenReturn(new FraudCaseWorkQueueSliceResponse(List.of(), FraudCaseReadQueryPolicy.MAX_PAGE_NUMBER, 100, false, null));
 
         controller.workQueue(0, 100, "createdAt,desc", null, null, null, null, null, null, null, null, null, null, null, new LinkedMultiValueMap<>());
-        controller.workQueue(FraudCaseWorkQueueQueryPolicy.MAX_PAGE_NUMBER, 100, "createdAt,desc", null, null, null, null, null, null, null, null, null, null, null, new LinkedMultiValueMap<>());
+        controller.workQueue(FraudCaseReadQueryPolicy.MAX_PAGE_NUMBER, 100, "createdAt,desc", null, null, null, null, null, null, null, null, null, null, null, new LinkedMultiValueMap<>());
 
-        assertThatThrownBy(() -> controller.workQueue(FraudCaseWorkQueueQueryPolicy.MAX_PAGE_NUMBER + 1, 100, "createdAt,desc",
+        assertThatThrownBy(() -> controller.workQueue(FraudCaseReadQueryPolicy.MAX_PAGE_NUMBER + 1, 100, "createdAt,desc",
                 null, null, null, null, null, null, null, null, null, null, null, new LinkedMultiValueMap<>()))
                 .isInstanceOf(FraudCaseWorkQueueQueryException.class)
                 .extracting("code")
@@ -55,7 +55,7 @@ class Fdp45FraudCaseWorkQueueDeepPaginationTest {
                 .isEqualTo("INVALID_PAGE_REQUEST");
 
         verify(service, never()).workQueue(any(), any(), any(), any(), any(), any(), any(), any(), any(),
-                org.mockito.ArgumentMatchers.argThat(pageable -> pageable.getPageNumber() > FraudCaseWorkQueueQueryPolicy.MAX_PAGE_NUMBER));
+                org.mockito.ArgumentMatchers.argThat(pageable -> pageable.getPageNumber() > FraudCaseReadQueryPolicy.MAX_PAGE_NUMBER));
     }
 
     @Test
@@ -65,7 +65,7 @@ class Fdp45FraudCaseWorkQueueDeepPaginationTest {
 
         assertThatThrownBy(() -> repository.searchSlice(
                 new com.frauddetection.alert.fraudcase.FraudCaseSearchCriteria(null, null, null, null, null, null, null, null, null),
-                PageRequest.of(FraudCaseWorkQueueQueryPolicy.MAX_PAGE_NUMBER + 1, 100, Sort.by(Sort.Order.desc("createdAt")))
+                PageRequest.of(FraudCaseReadQueryPolicy.MAX_PAGE_NUMBER + 1, 100, Sort.by(Sort.Order.desc("createdAt")))
         ))
                 .isInstanceOf(FraudCaseWorkQueueQueryException.class)
                 .extracting("code")
