@@ -144,7 +144,7 @@ jobs:
         run: docker version
 
       - name: Run FDP-43 fraud case idempotency proof suite
-        run: mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=IdempotencyCanonicalHasherTest,SharedIdempotencyKeyPolicyTest,FraudCaseLifecycleIdempotencyConflictPolicyTest,Fdp43FraudCaseLifecycleIdempotencyArchitectureTest,Fdp43FraudCaseLifecyclePublicPathIdempotencyArchitectureTest,FraudCaseControllerTest,FraudCaseSecurityIntegrationTest,FraudCaseTransactionIntegrationTest,FraudCaseLifecycleIdempotencyConcurrencyIntegrationTest,FraudCaseLifecycleIdempotencyFailureIntegrationTest,RegulatedMutationIdempotencyPrimitiveCompatibilityTest" test
+        run: mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=IdempotencyCanonicalHasherTest,SharedIdempotencyKeyPolicyTest,FraudCaseLifecycleIdempotencyConflictPolicyTest,Fdp43FraudCaseLifecycleIdempotencyArchitectureTest,Fdp43FraudCaseLifecyclePublicPathIdempotencyArchitectureTest,FraudCaseControllerTest,FraudCaseSecurityIntegrationTest,FraudCaseTransactionIntegrationTest,FraudCaseLifecycleIdempotencyConcurrencyIntegrationTest,FraudCaseLifecycleIdempotencyFailureIntegrationTest,FraudCaseLifecycleIdempotencyServiceRaceTest,RegulatedMutationIdempotencyPrimitiveCompatibilityTest" test
 
       - name: Verify FDP-43 proof suite reports
         run: |
@@ -165,6 +165,7 @@ jobs:
               "FraudCaseTransactionIntegrationTest",
               "FraudCaseLifecycleIdempotencyConcurrencyIntegrationTest",
               "FraudCaseLifecycleIdempotencyFailureIntegrationTest",
+              "FraudCaseLifecycleIdempotencyServiceRaceTest",
               "RegulatedMutationIdempotencyPrimitiveCompatibilityTest",
           ]
 

@@ -15,6 +15,9 @@ FDP-43 adds shared idempotency primitives and local fraud-case lifecycle retry s
   decision, transition, close, and reopen.
 - Same key with different payload, actor, action, or scope returns `409` and does not mutate.
 - Concurrent same-key requests create only one lifecycle mutation, audit entry, and idempotency record.
+- Depending on timing, the competing concurrent request may receive a stable replay response or
+  `code:IDEMPOTENCY_KEY_IN_PROGRESS`; raw Mongo/Spring persistence exceptions must not escape normal same-key
+  idempotency races.
 - Idempotency record, lifecycle mutation, and audit append commit or roll back together under Mongo transaction mode `REQUIRED`.
 - Idempotency completion-save failure rolls back lifecycle mutation and audit append.
 - Oversized response snapshots fail closed and roll back lifecycle mutation, audit append, and idempotency record.
@@ -48,4 +51,9 @@ FDP-43 adds shared idempotency primitives and local fraud-case lifecycle retry s
 - `FraudCaseLifecycleIdempotencyFailureIntegrationTest`
 - `Fdp43FraudCaseLifecycleIdempotencyArchitectureTest`
 - `Fdp43FraudCaseLifecyclePublicPathIdempotencyArchitectureTest`
+- `FraudCaseLifecycleIdempotencyServiceRaceTest`
 - `RegulatedMutationIdempotencyPrimitiveCompatibilityTest`
+
+Source-scanning architecture tests are CI guardrails. They prevent accidental public-path usage of non-idempotent
+overloads, but they are not formal runtime or security boundaries. The authoritative proof for retry safety is the
+real Mongo concurrency and transaction integration suite plus API-level idempotency error tests.

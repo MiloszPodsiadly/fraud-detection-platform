@@ -60,6 +60,11 @@ The local lifecycle POST endpoints require `X-Idempotency-Key`. Same key + same 
 and scope returns the stored response snapshot. Replay does not append another note, decision, case audit entry, or
 status transition. Same key with different payload, actor, action, or scope returns a local conflict.
 
+Concurrent same-key requests do not duplicate the local lifecycle mutation, audit entry, or idempotency record.
+Depending on timing, the competing request may receive a stable replay response or an idempotency-in-progress conflict.
+This is local lifecycle retry safety; it is not distributed locking, distributed ACID, lease fencing, regulated
+mutation finality, or global exactly-once execution.
+
 The idempotency record, lifecycle mutation, and fraud-case audit append commit or roll back together when Mongo
 transactions are enabled with transaction-mode `REQUIRED`. Raw idempotency keys and raw request payloads are not
 stored or exposed; only key hashes, request hashes, bounded action/actor/scope metadata, and safe response snapshots
