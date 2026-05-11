@@ -1,12 +1,22 @@
 package com.frauddetection.alert.regulated;
 
+import com.frauddetection.alert.idempotency.SharedIdempotencyClaim;
+import com.frauddetection.alert.idempotency.SharedIdempotencyConflictPolicy;
 import com.frauddetection.alert.service.ConflictingIdempotencyKeyException;
 import org.springframework.stereotype.Service;
 
-import java.util.Objects;
-
 @Service
 public class RegulatedMutationConflictPolicy {
+
+    private final SharedIdempotencyConflictPolicy sharedConflictPolicy;
+
+    public RegulatedMutationConflictPolicy() {
+        this(new SharedIdempotencyConflictPolicy());
+    }
+
+    public RegulatedMutationConflictPolicy(SharedIdempotencyConflictPolicy sharedConflictPolicy) {
+        this.sharedConflictPolicy = sharedConflictPolicy;
+    }
 
     public <R, S> RegulatedMutationCommandDocument existingOrConflict(
             RegulatedMutationCommandDocument existing,
@@ -18,8 +28,20 @@ public class RegulatedMutationConflictPolicy {
         if (command == null) {
             throw new IllegalArgumentException("regulated mutation command is required");
         }
-        if (!Objects.equals(existing.getRequestHash(), command.requestHash())
-                || (existing.getIntentActorId() != null && !existing.getIntentActorId().equals(command.actorId()))) {
+        String existingActor = existing.getIntentActorId() == null ? command.actorId() : existing.getIntentActorId();
+        SharedIdempotencyClaim existingClaim = new SharedIdempotencyClaim(
+                existing.getRequestHash(),
+                command.action().name(),
+                existingActor,
+                command.resourceId()
+        );
+        SharedIdempotencyClaim candidateClaim = new SharedIdempotencyClaim(
+                command.requestHash(),
+                command.action().name(),
+                command.actorId(),
+                command.resourceId()
+        );
+        if (!sharedConflictPolicy.sameClaim(existingClaim, candidateClaim)) {
             throw new ConflictingIdempotencyKeyException();
         }
         return existing;

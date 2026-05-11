@@ -1033,11 +1033,24 @@ paths:
     post:
       summary: Create fraud case
       description: >-
-        Creates a local audited fraud case from one or more alert ids. This endpoint is not idempotent unless a future
-        contract explicitly states otherwise; clients must not blindly retry after an ambiguous network failure.
+        Creates a local audited fraud case from one or more alert ids. Requires X-Idempotency-Key for local lifecycle
+        idempotency. The key is globally unique within the fraud-case lifecycle idempotency domain. The same key with
+        the same payload, resolved backend actor, action, and create scope replays the stored response; the same key
+        with a different claim returns 409. This local lifecycle idempotency is not implemented
+        through RegulatedMutationCoordinator, is not FDP-29, is not lease fenced, is not global exactly-once, and does
+        not provide external finality.
       security:
         - bearerAuth: []
         - demoAuth: []
+      parameters:
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[A-Za-z0-9._:-]+$"
       requestBody:
         required: true
         content:
@@ -1057,6 +1070,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
   /api/v1/fraud-cases/{caseId}:
     get:
       summary: Get one fraud case
@@ -1133,8 +1148,12 @@ paths:
     post:
       summary: Assign fraud case
       description: >-
-        Assigns a fraud case through the local audited lifecycle service. This endpoint is not idempotent unless a
-        future contract explicitly states otherwise.
+        Assigns a fraud case through the local audited lifecycle service. Requires X-Idempotency-Key for local lifecycle
+        idempotency. The key is globally unique within the fraud-case lifecycle idempotency domain. The same key with
+        the same payload, resolved backend actor, action, and case scope replays the stored response; the same key
+        with a different claim returns 409. This local lifecycle idempotency is not implemented
+        through RegulatedMutationCoordinator, is not FDP-29, is not lease fenced, is not global exactly-once, and does
+        not provide external finality.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1146,6 +1165,14 @@ paths:
             type: string
             minLength: 1
             maxLength: 160
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[A-Za-z0-9._:-]+$"
       requestBody:
         required: true
         content:
@@ -1173,8 +1200,12 @@ paths:
     post:
       summary: Add fraud case note
       description: >-
-        Appends a fraud-case note through the local audited lifecycle service. This endpoint is not idempotent unless
-        a future contract explicitly states otherwise.
+        Appends a fraud-case note through the local audited lifecycle service. Requires X-Idempotency-Key for local
+        lifecycle idempotency. The key is globally unique within the fraud-case lifecycle idempotency domain. The same
+        key with the same payload, resolved backend actor, action, and case scope replays the stored response; the same
+        key with a different claim returns 409. This local lifecycle idempotency is not
+        implemented through RegulatedMutationCoordinator, is not FDP-29, is not lease fenced, is not global exactly-once,
+        and does not provide external finality.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1186,6 +1217,14 @@ paths:
             type: string
             minLength: 1
             maxLength: 160
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[A-Za-z0-9._:-]+$"
       requestBody:
         required: true
         content:
@@ -1213,8 +1252,12 @@ paths:
     post:
       summary: Add fraud case decision
       description: >-
-        Appends a fraud-case decision through the local audited lifecycle service. This endpoint is not idempotent
-        unless a future contract explicitly states otherwise.
+        Appends a fraud-case decision through the local audited lifecycle service. Requires X-Idempotency-Key for local
+        lifecycle idempotency. The key is globally unique within the fraud-case lifecycle idempotency domain. The same
+        key with the same payload, resolved backend actor, action, and case scope replays the stored response; the same
+        key with a different claim returns 409. This local lifecycle idempotency is not
+        implemented through RegulatedMutationCoordinator, is not FDP-29, is not lease fenced, is not global exactly-once,
+        and does not provide external finality.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1226,6 +1269,14 @@ paths:
             type: string
             minLength: 1
             maxLength: 160
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[A-Za-z0-9._:-]+$"
       requestBody:
         required: true
         content:
@@ -1253,8 +1304,12 @@ paths:
     post:
       summary: Transition fraud case
       description: >-
-        Transitions a fraud case through FraudCaseTransitionPolicy. This endpoint is not idempotent unless a future
-        contract explicitly states otherwise.
+        Transitions a fraud case through FraudCaseTransitionPolicy. Requires X-Idempotency-Key for local lifecycle
+        idempotency. The key is globally unique within the fraud-case lifecycle idempotency domain. The same key with
+        the same payload, resolved backend actor, action, and case scope replays the stored response; the same key
+        with a different claim returns 409. This local lifecycle idempotency is not implemented
+        through RegulatedMutationCoordinator, is not FDP-29, is not lease fenced, is not global exactly-once, and does
+        not provide external finality.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1266,6 +1321,14 @@ paths:
             type: string
             minLength: 1
             maxLength: 160
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[A-Za-z0-9._:-]+$"
       requestBody:
         required: true
         content:
@@ -1293,8 +1356,12 @@ paths:
     post:
       summary: Close fraud case
       description: >-
-        Closes a fraud case through FraudCaseTransitionPolicy. This endpoint is not idempotent unless a future
-        contract explicitly states otherwise.
+        Closes a fraud case through FraudCaseTransitionPolicy. Requires X-Idempotency-Key for local lifecycle
+        idempotency. The key is globally unique within the fraud-case lifecycle idempotency domain. The same key with
+        the same payload, resolved backend actor, action, and case scope replays the stored response; the same key
+        with a different claim returns 409. This local lifecycle idempotency is not implemented
+        through RegulatedMutationCoordinator, is not FDP-29, is not lease fenced, is not global exactly-once, and does
+        not provide external finality.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1306,6 +1373,14 @@ paths:
             type: string
             minLength: 1
             maxLength: 160
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[A-Za-z0-9._:-]+$"
       requestBody:
         required: true
         content:
@@ -1333,8 +1408,12 @@ paths:
     post:
       summary: Reopen fraud case
       description: >-
-        Reopens a fraud case through FraudCaseTransitionPolicy. This endpoint is not idempotent unless a future
-        contract explicitly states otherwise.
+        Reopens a fraud case through FraudCaseTransitionPolicy. Requires X-Idempotency-Key for local lifecycle
+        idempotency. The key is globally unique within the fraud-case lifecycle idempotency domain. The same key with
+        the same payload, resolved backend actor, action, and case scope replays the stored response; the same key
+        with a different claim returns 409. This local lifecycle idempotency is not implemented
+        through RegulatedMutationCoordinator, is not FDP-29, is not lease fenced, is not global exactly-once, and does
+        not provide external finality.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1346,6 +1425,14 @@ paths:
             type: string
             minLength: 1
             maxLength: 160
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[A-Za-z0-9._:-]+$"
       requestBody:
         required: true
         content:

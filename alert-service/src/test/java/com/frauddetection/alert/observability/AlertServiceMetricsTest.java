@@ -96,6 +96,41 @@ class AlertServiceMetricsTest {
     }
 
     @Test
+    void shouldUseLowCardinalityFraudCaseLifecycleIdempotencyOutcomeLabels() {
+        metrics.recordFraudCaseLifecycleIdempotencyOutcome("new");
+        metrics.recordFraudCaseLifecycleIdempotencyOutcome("replay");
+        metrics.recordFraudCaseLifecycleIdempotencyOutcome("conflict");
+        metrics.recordFraudCaseLifecycleIdempotencyOutcome("in_progress");
+        metrics.recordFraudCaseLifecycleIdempotencyOutcome("snapshot_too_large");
+        metrics.recordFraudCaseLifecycleIdempotencyOutcome("race_resolved");
+        metrics.recordFraudCaseLifecycleIdempotencyOutcome("case-123 actor-456 idempotency-key request-hash");
+
+        Meter meter = meterRegistry.get("fraud_case_lifecycle_idempotency_total")
+                .tag("outcome", "new")
+                .meter();
+
+        assertThat(meter.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactly("outcome");
+        assertThat(meterRegistry.get("fraud_case_lifecycle_idempotency_total")
+                .tag("outcome", "failure")
+                .counter()
+                .count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.getMeters())
+                .filteredOn(m -> m.getId().getName().equals("fraud_case_lifecycle_idempotency_total"))
+                .allSatisfy(m -> assertThat(m.getId().getTags().toString())
+                        .doesNotContain("caseId")
+                        .doesNotContain("actorId")
+                        .doesNotContain("idempotencyKey")
+                        .doesNotContain("idempotencyKeyHash")
+                        .doesNotContain("requestHash")
+                        .doesNotContain("case-123")
+                        .doesNotContain("actor-456")
+                        .doesNotContain("idempotency-key")
+                        .doesNotContain("request-hash"));
+    }
+
+    @Test
     void shouldUseLowCardinalityPlatformAuditPersistenceMetricLabels() {
         metrics.recordPlatformAuditEventPersisted(AuditAction.SUBMIT_ANALYST_DECISION, AuditOutcome.SUCCESS);
         metrics.recordPlatformAuditPersistenceFailure(AuditAction.SUBMIT_ANALYST_DECISION);

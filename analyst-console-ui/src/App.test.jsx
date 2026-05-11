@@ -127,7 +127,7 @@ describe("App", () => {
     render(<App />);
 
     await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
-    expect(screen.getAllByRole("heading", { name: "Session expired" })).toHaveLength(2);
+    expect(await screen.findAllByRole("heading", { name: "Session expired" })).toHaveLength(2);
     expect(listAlerts).not.toHaveBeenCalled();
     expect(listFraudCases).not.toHaveBeenCalled();
     expect(listScoredTransactions).not.toHaveBeenCalled();
