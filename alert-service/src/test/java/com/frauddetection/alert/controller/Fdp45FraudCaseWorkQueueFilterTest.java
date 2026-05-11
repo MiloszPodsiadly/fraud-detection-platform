@@ -20,6 +20,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -68,6 +69,20 @@ class Fdp45FraudCaseWorkQueueFilterTest {
                 .isInstanceOf(FraudCaseWorkQueueQueryException.class)
                 .extracting("code")
                 .isEqualTo("UNSUPPORTED_FILTER");
+    }
+
+    @Test
+    void shouldNormalizeAssigneeAliasesBeforeConflictCheckAndRepositoryQuery() {
+        when(service.workQueue(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(Pageable.class)))
+                .thenReturn(new FraudCaseWorkQueueSliceResponse(List.of(), 0, 20, false, null));
+
+        controller.workQueue(0, 20, "createdAt,desc", null, " investigator-1 ", "investigator-1", null, null,
+                null, null, null, null, null, null, params("assignee", " investigator-1 ", "assignedInvestigatorId", "investigator-1"));
+        controller.workQueue(0, 20, "createdAt,desc", null, "   ", " investigator-2 ", null, null,
+                null, null, null, null, null, null, params("assignee", "   ", "assignedInvestigatorId", " investigator-2 "));
+
+        verify(service).workQueue(any(), eq("investigator-1"), any(), any(), any(), any(), any(), any(), any(), any(Pageable.class));
+        verify(service).workQueue(any(), eq("investigator-2"), any(), any(), any(), any(), any(), any(), any(), any(Pageable.class));
     }
 
     private LinkedMultiValueMap<String, String> params(String... values) {

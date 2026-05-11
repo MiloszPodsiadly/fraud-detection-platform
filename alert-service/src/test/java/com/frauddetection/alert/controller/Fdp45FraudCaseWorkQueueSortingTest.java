@@ -2,7 +2,9 @@ package com.frauddetection.alert.controller;
 
 import com.frauddetection.alert.api.FraudCaseWorkQueueSliceResponse;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
+import com.frauddetection.alert.fraudcase.FraudCaseSearchCriteria;
 import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueQueryException;
+import com.frauddetection.alert.fraudcase.MongoFraudCaseSearchRepository;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
@@ -10,7 +12,9 @@ import com.frauddetection.alert.service.FraudCaseManagementService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.util.LinkedMultiValueMap;
 
 import java.util.List;
@@ -53,6 +57,21 @@ class Fdp45FraudCaseWorkQueueSortingTest {
                 .isInstanceOf(FraudCaseWorkQueueQueryException.class)
                 .extracting("code")
                 .isEqualTo("UNSUPPORTED_SORT_DIRECTION");
+    }
+
+    @Test
+    void repositoryShouldFailClosedWhenUnsupportedSortBypassesController() {
+        MongoTemplate mongoTemplate = mock(MongoTemplate.class);
+        MongoFraudCaseSearchRepository repository = new MongoFraudCaseSearchRepository(mongoTemplate);
+
+        assertThatThrownBy(() -> repository.searchSlice(
+                new FraudCaseSearchCriteria(null, null, null, null, null, null, null, null, null),
+                PageRequest.of(0, 20, Sort.by(Sort.Order.desc("customerId")))
+        ))
+                .isInstanceOf(FraudCaseWorkQueueQueryException.class)
+                .extracting("code")
+                .isEqualTo("UNSUPPORTED_SORT_FIELD");
+        org.mockito.Mockito.verify(mongoTemplate, org.mockito.Mockito.never()).find(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(Class.class));
     }
 
     private LinkedMultiValueMap<String, String> params(String... values) {
