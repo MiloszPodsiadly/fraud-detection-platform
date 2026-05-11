@@ -1,7 +1,13 @@
 package com.frauddetection.alert.fraudcase;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.frauddetection.alert.api.FraudCaseDecisionResponse;
+import com.frauddetection.alert.api.FraudCaseNoteResponse;
+import com.frauddetection.alert.api.FraudCaseResponse;
 import com.frauddetection.alert.idempotency.SharedIdempotencyKeyPolicy;
 import com.frauddetection.alert.idempotency.SharedInvalidIdempotencyKeyException;
 import com.frauddetection.alert.idempotency.SharedMissingIdempotencyKeyException;
@@ -17,6 +23,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.TransactionSystemException;
 import org.springframework.util.StringUtils;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
@@ -101,7 +108,7 @@ public class FraudCaseLifecycleIdempotencyService {
         this.keyPolicy = keyPolicy;
         this.conflictPolicy = conflictPolicy;
         this.transactionRunner = transactionRunner;
-        this.objectMapper = objectMapper;
+        this.objectMapper = objectMapper.copy().disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
         this.replaySnapshotMapper = new FraudCaseLifecycleReplaySnapshotMapper();
         this.maxResponseSnapshotBytes = maxResponseSnapshotBytes;
         this.retention = validateRetention(retention);
@@ -296,19 +303,86 @@ public class FraudCaseLifecycleIdempotencyService {
     }
 
     private <T> T restore(String snapshot, Class<T> responseType) {
+        JsonNode root;
         try {
-            FraudCaseLifecycleReplaySnapshot replaySnapshot = objectMapper.readValue(snapshot, FraudCaseLifecycleReplaySnapshot.class);
-            if (replaySnapshot.snapshotType() != null) {
-                return replaySnapshotMapper.toResponse(replaySnapshot, responseType);
-            }
-        } catch (JsonProcessingException exception) {
-            // Backward-compatible read for any existing pre-FDP-44 raw response snapshots.
-        }
-        try {
-            return objectMapper.readValue(snapshot, responseType);
+            root = objectMapper.readTree(snapshot);
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("Fraud case lifecycle idempotency response replay failed.", exception);
         }
+        if (isExplicitReplaySnapshot(root)) {
+            return restoreExplicitReplaySnapshot(root, responseType);
+        }
+        if (hasReplaySnapshotMarker(root)) {
+            throw new IllegalStateException("Fraud case lifecycle idempotency response replay failed.");
+        }
+        if (!isLegacyRawResponseShape(root, responseType)) {
+            throw new IllegalStateException("Fraud case lifecycle idempotency legacy response replay failed.");
+        }
+        try {
+            return objectMapper.readerFor(responseType)
+                    .without(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                    .readValue(root);
+        } catch (IOException exception) {
+            throw new IllegalStateException("Fraud case lifecycle idempotency response replay failed.", exception);
+        }
+    }
+
+    private <T> T restoreExplicitReplaySnapshot(JsonNode root, Class<T> responseType) {
+        try {
+            FraudCaseLifecycleReplaySnapshot replaySnapshot = objectMapper.treeToValue(root, FraudCaseLifecycleReplaySnapshot.class);
+            if (!FraudCaseLifecycleReplaySnapshot.FORMAT.equals(replaySnapshot.snapshotFormat())
+                    || replaySnapshot.snapshotVersion() != FraudCaseLifecycleReplaySnapshot.VERSION
+                    || replaySnapshot.snapshotType() == null) {
+                throw new IllegalStateException("Fraud case lifecycle idempotency response replay failed.");
+            }
+            return replaySnapshotMapper.toResponse(replaySnapshot, responseType);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("Fraud case lifecycle idempotency response replay failed.", exception);
+        }
+    }
+
+    private boolean isExplicitReplaySnapshot(JsonNode root) {
+        return root != null
+                && root.isObject()
+                && root.path("snapshotFormat").asText(null) != null
+                && FraudCaseLifecycleReplaySnapshot.FORMAT.equals(root.path("snapshotFormat").asText());
+    }
+
+    private boolean hasReplaySnapshotMarker(JsonNode root) {
+        return root != null
+                && root.isObject()
+                && (root.has("snapshotFormat") || root.has("snapshotVersion") || root.has("snapshotType"));
+    }
+
+    private <T> boolean isLegacyRawResponseShape(JsonNode root, Class<T> responseType) {
+        if (root == null || !root.isObject()) {
+            return false;
+        }
+        if (responseType == FraudCaseResponse.class) {
+            return hasText(root, "caseId") && hasText(root, "status") && root.has("createdAt");
+        }
+        if (responseType == FraudCaseNoteResponse.class) {
+            return hasText(root, "id")
+                    && hasText(root, "caseId")
+                    && root.has("body")
+                    && hasText(root, "createdBy")
+                    && root.has("createdAt")
+                    && root.has("internalOnly");
+        }
+        if (responseType == FraudCaseDecisionResponse.class) {
+            return hasText(root, "id")
+                    && hasText(root, "caseId")
+                    && hasText(root, "decisionType")
+                    && root.has("summary")
+                    && hasText(root, "createdBy")
+                    && root.has("createdAt");
+        }
+        return false;
+    }
+
+    private boolean hasText(JsonNode root, String fieldName) {
+        JsonNode value = root.get(fieldName);
+        return value != null && value.isTextual() && StringUtils.hasText(value.asText());
     }
 
     protected FraudCaseLifecycleIdempotencyRecordDocument saveRecord(FraudCaseLifecycleIdempotencyRecordDocument record) {

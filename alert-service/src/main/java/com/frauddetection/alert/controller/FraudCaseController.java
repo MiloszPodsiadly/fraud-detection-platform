@@ -99,7 +99,7 @@ public class FraudCaseController {
             @RequestHeader(name = "X-Idempotency-Key", required = true) String idempotencyKey,
             @Valid @RequestBody CreateFraudCaseRequest request
     ) {
-        return responseMapper.toResponse(fraudCaseManagementService.createCase(request, idempotencyKey));
+        return fraudCaseManagementService.createCase(request, idempotencyKey);
     }
 
     @GetMapping("/{caseId}")
@@ -113,7 +113,7 @@ public class FraudCaseController {
             @RequestHeader(name = "X-Idempotency-Key", required = true) String idempotencyKey,
             @Valid @RequestBody AssignFraudCaseRequest request
     ) {
-        return responseMapper.toResponse(fraudCaseManagementService.assignCase(caseId, request, idempotencyKey));
+        return fraudCaseManagementService.assignCase(caseId, request, idempotencyKey);
     }
 
     @PostMapping("/{caseId}/notes")
@@ -140,7 +140,7 @@ public class FraudCaseController {
             @RequestHeader(name = "X-Idempotency-Key", required = true) String idempotencyKey,
             @Valid @RequestBody TransitionFraudCaseRequest request
     ) {
-        return responseMapper.toResponse(fraudCaseManagementService.transitionCase(caseId, request, idempotencyKey));
+        return fraudCaseManagementService.transitionCase(caseId, request, idempotencyKey);
     }
 
     @PostMapping("/{caseId}/close")
@@ -149,7 +149,7 @@ public class FraudCaseController {
             @RequestHeader(name = "X-Idempotency-Key", required = true) String idempotencyKey,
             @Valid @RequestBody CloseFraudCaseRequest request
     ) {
-        return responseMapper.toResponse(fraudCaseManagementService.closeCase(caseId, request, idempotencyKey));
+        return fraudCaseManagementService.closeCase(caseId, request, idempotencyKey);
     }
 
     @PostMapping("/{caseId}/reopen")
@@ -158,7 +158,7 @@ public class FraudCaseController {
             @RequestHeader(name = "X-Idempotency-Key", required = true) String idempotencyKey,
             @Valid @RequestBody ReopenFraudCaseRequest request
     ) {
-        return responseMapper.toResponse(fraudCaseManagementService.reopenCase(caseId, request, idempotencyKey));
+        return fraudCaseManagementService.reopenCase(caseId, request, idempotencyKey);
     }
 
     @GetMapping("/{caseId}/audit")

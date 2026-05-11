@@ -7,6 +7,7 @@ import com.frauddetection.alert.api.CloseFraudCaseRequest;
 import com.frauddetection.alert.api.CreateFraudCaseRequest;
 import com.frauddetection.alert.api.FraudCaseDecisionResponse;
 import com.frauddetection.alert.api.FraudCaseNoteResponse;
+import com.frauddetection.alert.api.FraudCaseResponse;
 import com.frauddetection.alert.api.ReopenFraudCaseRequest;
 import com.frauddetection.alert.api.TransitionFraudCaseRequest;
 import com.frauddetection.alert.domain.FraudCaseAuditAction;
@@ -18,6 +19,8 @@ import com.frauddetection.alert.fraudcase.FraudCaseLifecycleIdempotencyService;
 import com.frauddetection.alert.fraudcase.FraudCaseNotFoundException;
 import com.frauddetection.alert.fraudcase.FraudCaseTransitionPolicy;
 import com.frauddetection.alert.idempotency.IdempotencyCanonicalHasher;
+import com.frauddetection.alert.mapper.AlertResponseMapper;
+import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.persistence.FraudCaseDecisionDocument;
 import com.frauddetection.alert.persistence.FraudCaseDecisionRepository;
@@ -54,6 +57,7 @@ public class FraudCaseLifecycleService {
     private final FraudCaseTransitionPolicy transitionPolicy;
     private final FraudCaseAuditService caseAuditService;
     private final FraudCaseLifecycleIdempotencyService idempotencyService;
+    private final FraudCaseResponseMapper responseMapper;
 
     @Autowired
     public FraudCaseLifecycleService(
@@ -65,7 +69,8 @@ public class FraudCaseLifecycleService {
             RegulatedMutationTransactionRunner transactionRunner,
             FraudCaseTransitionPolicy transitionPolicy,
             FraudCaseAuditService caseAuditService,
-            FraudCaseLifecycleIdempotencyService idempotencyService
+            FraudCaseLifecycleIdempotencyService idempotencyService,
+            FraudCaseResponseMapper responseMapper
     ) {
         this.fraudCaseRepository = fraudCaseRepository;
         this.alertRepository = alertRepository;
@@ -76,9 +81,35 @@ public class FraudCaseLifecycleService {
         this.transitionPolicy = transitionPolicy;
         this.caseAuditService = caseAuditService;
         this.idempotencyService = idempotencyService;
+        this.responseMapper = responseMapper;
     }
 
-    public FraudCaseDocument createCase(CreateFraudCaseRequest request, String idempotencyKey) {
+    public FraudCaseLifecycleService(
+            FraudCaseRepository fraudCaseRepository,
+            AlertRepository alertRepository,
+            FraudCaseNoteRepository noteRepository,
+            FraudCaseDecisionRepository decisionRepository,
+            AnalystActorResolver analystActorResolver,
+            RegulatedMutationTransactionRunner transactionRunner,
+            FraudCaseTransitionPolicy transitionPolicy,
+            FraudCaseAuditService caseAuditService,
+            FraudCaseLifecycleIdempotencyService idempotencyService
+    ) {
+        this(
+                fraudCaseRepository,
+                alertRepository,
+                noteRepository,
+                decisionRepository,
+                analystActorResolver,
+                transactionRunner,
+                transitionPolicy,
+                caseAuditService,
+                idempotencyService,
+                new FraudCaseResponseMapper(new AlertResponseMapper())
+        );
+    }
+
+    public FraudCaseResponse createCase(CreateFraudCaseRequest request, String idempotencyKey) {
         List<String> alertIds = normalizedIds(request.alertIds());
         transitionPolicy.validateCreate(alertIds, request.priority());
         String actorId = requiredActor(request.actorId(), "CREATE_FRAUD_CASE", "new");
@@ -123,11 +154,11 @@ public class FraudCaseLifecycleService {
                     saved.getStatus(),
                     Map.of("alertCount", String.valueOf(alertIds.size()), "caseNumber", caseNumber)
             );
-            return saved;
-        }, FraudCaseDocument.class);
+            return responseMapper.toResponse(saved);
+        }, FraudCaseResponse.class);
     }
 
-    public FraudCaseDocument assignCase(String caseId, AssignFraudCaseRequest request, String idempotencyKey) {
+    public FraudCaseResponse assignCase(String caseId, AssignFraudCaseRequest request, String idempotencyKey) {
         String actorId = requiredActor(request.actorId(), "ASSIGN_FRAUD_CASE", caseId);
         return execute(command(
                 idempotencyKey,
@@ -154,8 +185,8 @@ public class FraudCaseLifecycleService {
                             "newAssignee", request.assignedInvestigatorId()
                     )
             );
-            return saved;
-        }, FraudCaseDocument.class);
+            return responseMapper.toResponse(saved);
+        }, FraudCaseResponse.class);
     }
 
     public FraudCaseNoteResponse addNote(String caseId, AddFraudCaseNoteRequest request, String idempotencyKey) {
@@ -228,7 +259,7 @@ public class FraudCaseLifecycleService {
         }, FraudCaseDecisionResponse.class);
     }
 
-    public FraudCaseDocument transitionCase(String caseId, TransitionFraudCaseRequest request, String idempotencyKey) {
+    public FraudCaseResponse transitionCase(String caseId, TransitionFraudCaseRequest request, String idempotencyKey) {
         String actorId = requiredActor(request.actorId(), "TRANSITION_FRAUD_CASE", caseId);
         return execute(command(
                 idempotencyKey,
@@ -244,11 +275,11 @@ public class FraudCaseLifecycleService {
             document.setUpdatedAt(Instant.now());
             FraudCaseDocument saved = fraudCaseRepository.save(document);
             caseAuditService.append(caseId, actorId, FraudCaseAuditAction.STATUS_CHANGED, previousStatus, request.targetStatus(), Map.of());
-            return saved;
-        }, FraudCaseDocument.class);
+            return responseMapper.toResponse(saved);
+        }, FraudCaseResponse.class);
     }
 
-    public FraudCaseDocument closeCase(String caseId, CloseFraudCaseRequest request, String idempotencyKey) {
+    public FraudCaseResponse closeCase(String caseId, CloseFraudCaseRequest request, String idempotencyKey) {
         String actorId = requiredActor(request.actorId(), "CLOSE_FRAUD_CASE", caseId);
         return execute(command(
                 idempotencyKey,
@@ -274,11 +305,11 @@ public class FraudCaseLifecycleService {
                     FraudCaseStatus.CLOSED,
                     Map.of("reason", request.closureReason())
             );
-            return saved;
-        }, FraudCaseDocument.class);
+            return responseMapper.toResponse(saved);
+        }, FraudCaseResponse.class);
     }
 
-    public FraudCaseDocument reopenCase(String caseId, ReopenFraudCaseRequest request, String idempotencyKey) {
+    public FraudCaseResponse reopenCase(String caseId, ReopenFraudCaseRequest request, String idempotencyKey) {
         String actorId = requiredActor(request.actorId(), "REOPEN_FRAUD_CASE", caseId);
         return execute(command(
                 idempotencyKey,
@@ -303,8 +334,8 @@ public class FraudCaseLifecycleService {
                     FraudCaseStatus.REOPENED,
                     Map.of("reason", request.reason())
             );
-            return saved;
-        }, FraudCaseDocument.class);
+            return responseMapper.toResponse(saved);
+        }, FraudCaseResponse.class);
     }
 
     private FraudCaseDocument loadCase(String caseId) {

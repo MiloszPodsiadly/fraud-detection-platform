@@ -8,6 +8,7 @@ import com.frauddetection.alert.api.CreateFraudCaseRequest;
 import com.frauddetection.alert.api.FraudCaseAuditResponse;
 import com.frauddetection.alert.api.FraudCaseDecisionResponse;
 import com.frauddetection.alert.api.FraudCaseNoteResponse;
+import com.frauddetection.alert.api.FraudCaseResponse;
 import com.frauddetection.alert.api.FraudCaseSummaryResponse;
 import com.frauddetection.alert.api.ReopenFraudCaseRequest;
 import com.frauddetection.alert.api.TransitionFraudCaseRequest;
@@ -125,7 +126,7 @@ public class FraudCaseManagementService {
         return queryService.getCase(caseId);
     }
 
-    public FraudCaseDocument createCase(CreateFraudCaseRequest request, String idempotencyKey) {
+    public FraudCaseResponse createCase(CreateFraudCaseRequest request, String idempotencyKey) {
         return lifecycleService.createCase(request, idempotencyKey);
     }
 
@@ -142,7 +143,7 @@ public class FraudCaseManagementService {
         return queryService.searchCases(status, assignee, priority, riskLevel, createdFrom, createdTo, linkedAlertId, pageable);
     }
 
-    public FraudCaseDocument assignCase(String caseId, AssignFraudCaseRequest request, String idempotencyKey) {
+    public FraudCaseResponse assignCase(String caseId, AssignFraudCaseRequest request, String idempotencyKey) {
         return lifecycleService.assignCase(caseId, request, idempotencyKey);
     }
 
@@ -154,15 +155,15 @@ public class FraudCaseManagementService {
         return lifecycleService.addDecision(caseId, request, idempotencyKey);
     }
 
-    public FraudCaseDocument transitionCase(String caseId, TransitionFraudCaseRequest request, String idempotencyKey) {
+    public FraudCaseResponse transitionCase(String caseId, TransitionFraudCaseRequest request, String idempotencyKey) {
         return lifecycleService.transitionCase(caseId, request, idempotencyKey);
     }
 
-    public FraudCaseDocument closeCase(String caseId, CloseFraudCaseRequest request, String idempotencyKey) {
+    public FraudCaseResponse closeCase(String caseId, CloseFraudCaseRequest request, String idempotencyKey) {
         return lifecycleService.closeCase(caseId, request, idempotencyKey);
     }
 
-    public FraudCaseDocument reopenCase(String caseId, ReopenFraudCaseRequest request, String idempotencyKey) {
+    public FraudCaseResponse reopenCase(String caseId, ReopenFraudCaseRequest request, String idempotencyKey) {
         return lifecycleService.reopenCase(caseId, request, idempotencyKey);
     }
 
