@@ -1079,8 +1079,11 @@ paths:
       description: >-
         Returns a bounded investigator work queue slice using the existing FraudCaseQueryService and
         FraudCaseSearchRepository path. Cursor/keyset pagination is recommended for long traversal; page remains a
-        bounded offset compatibility mode with maximum page 1000. Clients must not parse cursor values. It is read-only,
-        audited as a sensitive read, rejects duplicate single-valued query params, derives SLA fields from
+        bounded offset compatibility mode with maximum page 1000. Cursor values are opaque, signed, versioned, bound to
+        the original filters and sort, and must not be parsed, logged, or used as metric labels by clients.
+        Changing filters or sort with a cursor returns INVALID_CURSOR. A cursor with page other than 0 returns
+        INVALID_CURSOR_PAGE_COMBINATION. Existing cursors may become invalid after cursor signing secret rotation. It
+        is read-only, audited as a sensitive read, rejects duplicate single-valued query params, derives SLA fields from
         app.fraud-cases.work-queue.sla, and does not perform an exact count.
       security:
         - bearerAuth: []
@@ -1089,7 +1092,7 @@ paths:
         - name: page
           in: query
           required: false
-          description: Bounded offset compatibility mode. Use cursor for long queue traversal.
+          description: Bounded offset compatibility mode. Use cursor for long queue traversal. Must be absent or 0 when cursor is supplied.
           schema:
             type: integer
             minimum: 0
@@ -1098,6 +1101,7 @@ paths:
         - name: size
           in: query
           required: false
+          description: Bounded slice size. Cursor is bound to filters and sort, not size; changing size within bounds is allowed.
           schema:
             type: integer
             minimum: 1
@@ -1106,7 +1110,7 @@ paths:
         - name: sort
           in: query
           required: false
-          description: Allowlisted stable sort in field,direction form. Supported fields are createdAt, updatedAt, priority, riskLevel, and caseNumber.
+          description: Allowlisted stable sort in field,direction form. Supported fields are createdAt, updatedAt, priority, riskLevel, and caseNumber. priority and riskLevel sorting uses stored enum value order, not a custom business severity ranking.
           schema:
             type: string
             maxLength: 64
@@ -1115,7 +1119,7 @@ paths:
         - name: cursor
           in: query
           required: false
-          description: Opaque signed cursor returned by the previous work queue response. Clients must not parse it; unsupported versions, tampering, or sort mismatches return INVALID_CURSOR.
+          description: Opaque signed versioned cursor returned by the previous work queue response. It is bound to the original filters and sort. Clients must not parse it; unsupported versions, tampering, filter mismatches, or sort mismatches return INVALID_CURSOR. Cursor with page other than 0 returns INVALID_CURSOR_PAGE_COMBINATION.
           schema:
             type: string
             maxLength: 2048
@@ -1184,7 +1188,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/FraudCaseWorkQueueSlice"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: Bad request. Includes INVALID_CURSOR when cursor validation, filter binding, or sort binding fails, and INVALID_CURSOR_PAGE_COMBINATION when cursor mode is combined with non-zero page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -2820,7 +2828,7 @@ components:
         nextCursor:
           type: string
           nullable: true
-          description: Opaque signed cursor for the next slice. Clients must not parse it.
+          description: Opaque signed cursor for the next slice. It is bound to the current filters and sort. Clients must not parse it.
         sort:
           type: string
           nullable: true

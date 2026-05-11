@@ -39,15 +39,21 @@ case-sensitive and does not apply identity aliasing beyond trimming.
 
 ## Sorting And Pagination
 
-Supported sort fields are `createdAt`, `updatedAt`, `priority`, `riskLevel`, and `caseNumber`. Sort directions are `asc` and `desc`. The Mongo query path appends `_id ASC` as a deterministic tie-breaker.
+Supported sort fields are `createdAt`, `updatedAt`, `priority`, `riskLevel`, and `caseNumber`. Sort directions are `asc` and `desc`. The Mongo query path appends `_id ASC` as a deterministic tie-breaker. `priority` and `riskLevel` sorting uses stored enum value order; FDP-45 does not claim a custom business severity ranking.
 
 Pagination is bounded to page numbers `0..1000` and page sizes `1..100`. Invalid page requests fail with
 `INVALID_PAGE_REQUEST` before repository access. The dedicated work queue uses bounded slice pagination and does not perform an exact Mongo count for broad queues.
 
 Cursor/keyset pagination is the recommended work queue traversal path. Requests may pass `cursor=<opaque cursor>`
-returned by the previous response. The cursor is signed, versioned, and tied to the requested sort; tampering,
-unsupported versions, malformed values, or sort mismatches fail closed with `INVALID_CURSOR`. Clients must not parse the
-cursor. Cursor mode uses a keyset predicate and does not call Mongo `skip(...)`.
+returned by the previous response. The cursor is signed, versioned, and bound to the canonical query shape: normalized
+filters plus sort field/direction. Changing filters or sort while presenting an existing cursor fails closed with
+`INVALID_CURSOR`; clients must restart traversal without a cursor when changing filters or sort. The cursor payload
+contains a signed query hash, but clients must not parse it and operators must not log the cursor, query hash, last
+value, or last id. Unsupported versions, malformed values, tampering, filter mismatches, or sort mismatches fail closed
+with `INVALID_CURSOR`. Cursor mode uses a keyset predicate and does not call Mongo `skip(...)`.
+
+Cursor mode and page mode are separate traversal contracts. `cursor` with missing/default `page=0` is accepted, but
+`cursor` with any non-zero page fails closed with `INVALID_CURSOR_PAGE_COMBINATION`. Size is not part of the cursor query hash. Clients may change `size` within `1..100`, although stable traversal is easiest when clients keep size unchanged between cursor requests.
 
 Page mode remains as bounded offset compatibility mode for exploratory use. Repeated requests near
 `MAX_PAGE_NUMBER=1000` should be treated as an operational signal to refine filters or use cursor traversal.
@@ -81,7 +87,8 @@ The SLA duration is explicitly configured by `app.fraud-cases.work-queue.sla` an
 startup. Local development may use the `application.yml` fallback value, but production-like profiles such as `prod` and
 `bank` require the `FRAUD_CASE_WORK_QUEUE_SLA` environment variable without a default. Cursor signing also requires
 `FRAUD_CASE_WORK_QUEUE_CURSOR_SIGNING_SECRET` in `prod` and `bank`; local development may use the `application.yml`
-fallback only. SLA is business policy, not persistence state. Closed or resolved fraud cases are `NOT_APPLICABLE`.
+fallback only. Production-like profiles reject known local cursor signing secrets. Rotating the cursor signing secret
+can invalidate existing cursors, so clients should restart traversal without cursor after rotation. SLA is business policy, not persistence state. Closed or resolved fraud cases are `NOT_APPLICABLE`.
 Missing timestamps are `UNKNOWN`. These values are not persisted and do not mutate fraud-case state, audit records,
 idempotency records, assignment, priority, or status. The derived SLA and age values are not persisted.
 
@@ -132,8 +139,10 @@ Metrics are low-cardinality:
 - `fraud_case_work_queue_page_size_bucket{endpoint_family}`
 
 Success metrics are recorded only after the service returns and read-access audit succeeds. Unexpected query/service
-failures record failure metrics. Metric labels must not include case ids, users, assignees, linked alert ids, raw filter
-values, exception messages, stack traces, request hashes, or idempotency keys.
+failures record failure metrics. Cursor misuse, tampering, filter/sort mismatch, or cursor/page conflicts record the
+low-cardinality `invalid_cursor` outcome. Metric labels must not include case ids, users, assignees, linked alert ids,
+raw filter values, raw query strings, cursor values, query hashes, last cursor values, last cursor ids, exception
+messages, stack traces, request hashes, or idempotency keys.
 
 Operational alerting for audit-unavailable fail-closed behavior is specified in
 `docs/runbooks/fdp-45-sensitive-read-audit-unavailable.md` as `WorkQueueSensitiveReadAuditUnavailable`. Metrics are not
@@ -148,7 +157,8 @@ FDP-45 does not change lifecycle mutation semantics, idempotency semantics, audi
 FDP-45 is GO only when the current head SHA has all required CI jobs completed successfully, including backend,
 FDP-42, FDP-43, FDP-44, regulated mutation regression, and the FDP-45 work queue proof suite. The FDP-45 proof suite
 must include contract compatibility, pagination bounds, duplicate-param rejection, filter normalization/length checks,
-allowlisted sorting, cursor/keyset traversal and tamper rejection, index readiness, real Mongo filter/sort/page proof,
+allowlisted sorting, cursor/keyset traversal, query binding, page/cursor conflict rejection, tamper rejection, profile
+secret safety, invalid-cursor observability, index readiness, real Mongo filter/sort/page proof,
 SLA config/derived fields, read-only safety, security, low-cardinality metrics, read-access audit
 success/rejected/failed outcomes, no duplicate work queue success audit, response-advice marker behavior, fail-closed
 audit precedence, OpenAPI truth, and no-overclaim docs proof.
