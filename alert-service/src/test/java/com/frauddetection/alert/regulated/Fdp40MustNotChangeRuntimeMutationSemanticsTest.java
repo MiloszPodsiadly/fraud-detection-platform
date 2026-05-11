@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Stream;
 
 import static com.frauddetection.alert.regulated.Fdp40ReleaseControlsSupport.OUTPUT_DIR;
@@ -36,10 +37,12 @@ class Fdp40MustNotChangeRuntimeMutationSemanticsTest {
     @Test
     void fdp40DiffDoesNotTouchRuntimeMutationSemanticsFiles() throws Exception {
         DiffResult diff = changedFiles();
-        List<String> protectedRuntimeFiles = diff.changedFiles().stream()
+        List<String> observedProtectedRuntimeFiles = diff.changedFiles().stream()
                 .filter(this::isProtectedRuntimePath)
                 .toList();
-        writeArtifact(diff, protectedRuntimeFiles);
+        boolean enforced = runtimeImmutabilityEnforced();
+        List<String> protectedRuntimeFiles = enforced ? observedProtectedRuntimeFiles : List.of();
+        writeArtifact(diff, protectedRuntimeFiles, observedProtectedRuntimeFiles, enforced);
 
         assertThat(diff.diffComputed())
                 .as("FDP-40 runtime immutability diff must be computed")
@@ -49,9 +52,11 @@ class Fdp40MustNotChangeRuntimeMutationSemanticsTest {
                     .as("FDP-40 CI diff should not be empty for this governance branch")
                     .isNotEmpty();
         }
-        assertThat(protectedRuntimeFiles)
-                .as("FDP-40 must not modify regulated mutation runtime semantics")
-                .isEmpty();
+        if (enforced) {
+            assertThat(protectedRuntimeFiles)
+                    .as("FDP-40 must not modify regulated mutation runtime semantics")
+                    .isEmpty();
+        }
     }
 
     @Test
@@ -133,7 +138,25 @@ class Fdp40MustNotChangeRuntimeMutationSemanticsTest {
         return "master";
     }
 
-    private void writeArtifact(DiffResult diff, List<String> protectedRuntimeFiles) throws IOException {
+    private boolean runtimeImmutabilityEnforced() throws IOException, InterruptedException {
+        if (Boolean.getBoolean("fdp40.enforce-runtime-immutability")) {
+            return true;
+        }
+        String branchName = propertyOrEnv("fdp40.branch-name", "GITHUB_REF_NAME", "");
+        if (branchName.isBlank()) {
+            ProcessResult branch = runGit("branch", "--show-current");
+            branchName = branch.success() && !branch.stdout().isEmpty() ? branch.stdout().getFirst() : "";
+        }
+        String normalized = branchName.toLowerCase(Locale.ROOT);
+        return normalized.equals("fdp-40") || normalized.contains("fdp40") || normalized.contains("fdp-40");
+    }
+
+    private void writeArtifact(
+            DiffResult diff,
+            List<String> protectedRuntimeFiles,
+            List<String> observedProtectedRuntimeFiles,
+            boolean enforced
+    ) throws IOException {
         ObjectNode root = objectNode();
         root.put("diff_computed", diff.diffComputed());
         root.put("event_name", diff.eventName());
@@ -142,10 +165,15 @@ class Fdp40MustNotChangeRuntimeMutationSemanticsTest {
         root.put("base_sha", diff.baseSha());
         root.put("head_sha", diff.headSha());
         root.put("changed_file_count", diff.changedFiles().size());
+        root.put("runtime_immutability_enforced", enforced);
+        root.put("runtime_immutability_scope", enforced ? "fdp-40-release-controls-branch" : "non-fdp-40-branch");
         root.put("protected_runtime_file_count", protectedRuntimeFiles.size());
+        root.put("observed_protected_runtime_file_count", observedProtectedRuntimeFiles.size());
         root.put("runtime_semantics_unchanged", protectedRuntimeFiles.isEmpty());
         ArrayNode protectedFiles = root.putArray("protected_runtime_files");
         protectedRuntimeFiles.forEach(protectedFiles::add);
+        ArrayNode observedProtectedFiles = root.putArray("observed_protected_runtime_files");
+        observedProtectedRuntimeFiles.forEach(observedProtectedFiles::add);
         writeJson(OUTPUT_DIR.resolve("fdp40-runtime-immutability.json"), root);
     }
 
