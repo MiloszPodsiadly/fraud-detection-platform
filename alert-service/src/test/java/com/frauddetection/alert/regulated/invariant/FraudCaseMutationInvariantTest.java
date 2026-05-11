@@ -138,7 +138,10 @@ class FraudCaseMutationInvariantTest {
                         auditRepository,
                         mock(FraudCaseSearchRepository.class),
                         responseMapper,
-                        new com.frauddetection.alert.fraudcase.FraudCaseWorkQueueProperties(java.time.Duration.ofHours(24))
+                        new com.frauddetection.alert.fraudcase.FraudCaseWorkQueueProperties(
+                                java.time.Duration.ofHours(24),
+                                "test-work-queue-cursor-secret"
+                        )
                 )
         );
 

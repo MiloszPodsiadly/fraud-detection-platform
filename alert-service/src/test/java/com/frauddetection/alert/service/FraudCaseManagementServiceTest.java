@@ -461,7 +461,10 @@ class FraudCaseManagementServiceTest {
                         auditRepository,
                         mock(FraudCaseSearchRepository.class),
                         responseMapper,
-                        new com.frauddetection.alert.fraudcase.FraudCaseWorkQueueProperties(java.time.Duration.ofHours(24))
+                        new com.frauddetection.alert.fraudcase.FraudCaseWorkQueueProperties(
+                                java.time.Duration.ofHours(24),
+                                "test-work-queue-cursor-secret"
+                        )
                 )
         );
     }
@@ -502,7 +505,10 @@ class FraudCaseManagementServiceTest {
                         auditRepository,
                         searchRepository,
                         responseMapper,
-                        new com.frauddetection.alert.fraudcase.FraudCaseWorkQueueProperties(java.time.Duration.ofHours(24))
+                        new com.frauddetection.alert.fraudcase.FraudCaseWorkQueueProperties(
+                                java.time.Duration.ofHours(24),
+                                "test-work-queue-cursor-secret"
+                        )
                 )
         );
     }

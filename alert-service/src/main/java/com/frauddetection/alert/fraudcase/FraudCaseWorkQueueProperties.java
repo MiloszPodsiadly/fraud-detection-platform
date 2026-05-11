@@ -8,7 +8,8 @@ import java.time.Duration;
 @ConfigurationProperties(prefix = "app.fraud-cases.work-queue")
 public record FraudCaseWorkQueueProperties(Duration sla, String cursorSigningSecret) {
 
-    public FraudCaseWorkQueueProperties(Duration sla) {
+    // Test-only constructor. Production binding must use FraudCaseWorkQueueProperties(Duration, String).
+    FraudCaseWorkQueueProperties(Duration sla) {
         this(sla, "local-test-work-queue-cursor-signing-secret");
     }
 

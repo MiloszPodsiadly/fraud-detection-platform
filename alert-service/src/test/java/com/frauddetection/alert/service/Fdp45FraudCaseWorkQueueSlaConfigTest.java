@@ -14,11 +14,11 @@ class Fdp45FraudCaseWorkQueueSlaConfigTest {
 
     @Test
     void shouldFailFastWhenWorkQueueSlaIsMissingZeroOrNegative() {
-        assertThatThrownBy(() -> new FraudCaseWorkQueueProperties(null))
+        assertThatThrownBy(() -> new FraudCaseWorkQueueProperties(null, "test-work-queue-cursor-secret"))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new FraudCaseWorkQueueProperties(Duration.ZERO))
+        assertThatThrownBy(() -> new FraudCaseWorkQueueProperties(Duration.ZERO, "test-work-queue-cursor-secret"))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new FraudCaseWorkQueueProperties(Duration.ofSeconds(-1)))
+        assertThatThrownBy(() -> new FraudCaseWorkQueueProperties(Duration.ofSeconds(-1), "test-work-queue-cursor-secret"))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -36,7 +36,8 @@ class Fdp45FraudCaseWorkQueueSlaConfigTest {
                 .contains("cursor-signing-secret: ${FRAUD_CASE_WORK_QUEUE_CURSOR_SIGNING_SECRET}")
                 .doesNotContain("FRAUD_CASE_WORK_QUEUE_SLA:PT24H");
         assertThat(applicationProdYaml).doesNotContain("FRAUD_CASE_WORK_QUEUE_CURSOR_SIGNING_SECRET:");
-        assertThat(new FraudCaseWorkQueueProperties(Duration.ofHours(24)).sla()).isEqualTo(Duration.ofHours(24));
+        assertThat(new FraudCaseWorkQueueProperties(Duration.ofHours(24), "test-work-queue-cursor-secret").sla())
+                .isEqualTo(Duration.ofHours(24));
     }
 
     private Path projectRoot() {

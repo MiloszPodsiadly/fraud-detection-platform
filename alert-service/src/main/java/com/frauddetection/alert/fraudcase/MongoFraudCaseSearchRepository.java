@@ -130,7 +130,7 @@ public class MongoFraudCaseSearchRepository implements FraudCaseSearchRepository
         return new Criteria().orOperator(primary, tieBreaker);
     }
 
-    private Object cursorValue(String field, String value) {
+    Object cursorValue(String field, String value) {
         return switch (field) {
             case "createdAt", "updatedAt" -> Instant.parse(value);
             case "priority" -> com.frauddetection.alert.domain.FraudCasePriority.valueOf(value);
