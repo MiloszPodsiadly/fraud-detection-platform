@@ -483,6 +483,45 @@ jobs:
       - name: Build UI
         run: npm run build
 
+  fdp46-fraud-case-work-queue-ui:
+    name: FDP-46 Fraud Case Work Queue UI
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs:
+      - frontend
+      - fdp45-fraud-case-work-queue-read-model
+
+    defaults:
+      run:
+        working-directory: analyst-console-ui
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: analyst-console-ui/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Ensure FDP-46 tests are not skipped
+        run: |
+          if grep -R "it\.skip\|describe\.skip\|test\.skip" src/components/FraudCaseWorkQueuePanel.test.jsx src/fraudCases/workQueueState.test.js src/api/alertsApi.test.js; then
+            echo "FDP-46 mandatory tests must not be skipped" >&2
+            exit 1
+          fi
+
+      - name: Run FDP-46 frontend tests
+        run: npm test -- --run
+
+      - name: Build FDP-46 UI
+        run: npm run build
+
   fdp28-proof:
     name: FDP-28 Docker Integration Proof
     runs-on: ubuntu-latest
