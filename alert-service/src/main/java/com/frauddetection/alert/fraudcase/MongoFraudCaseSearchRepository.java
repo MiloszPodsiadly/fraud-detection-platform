@@ -98,6 +98,7 @@ public class MongoFraudCaseSearchRepository implements FraudCaseSearchRepository
     }
 
     private Pageable guardPageSize(Pageable pageable) {
+        FraudCaseWorkQueueQueryPolicy.validatePagination(pageable.getPageNumber(), Math.min(pageable.getPageSize(), FraudCaseWorkQueueQueryPolicy.MAX_PAGE_SIZE));
         if (pageable.getPageSize() <= FraudCaseWorkQueueQueryPolicy.MAX_PAGE_SIZE) {
             return pageable;
         }

@@ -19,6 +19,7 @@ import com.frauddetection.alert.api.UpdateFraudCaseRequest;
 import com.frauddetection.alert.api.UpdateFraudCaseResponse;
 import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
 import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessAuditOutcome;
 import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.domain.FraudCasePriority;
@@ -83,6 +84,7 @@ public class FraudCaseController {
             @RequestParam(required = false) Instant createdTo,
             @RequestParam(required = false) String linkedAlertId
     ) {
+        FraudCaseWorkQueueQueryPolicy.validateLegacyListPagination(page, size);
         var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         var result = hasSearchFilters(status, assignee, priority, riskLevel, createdFrom, createdTo, linkedAlertId)
                 ? fraudCaseManagementService.searchCases(status, assignee, priority, riskLevel, createdFrom, createdTo, linkedAlertId, pageable)
@@ -120,6 +122,7 @@ public class FraudCaseController {
             FraudCaseWorkQueueQueryPolicy.validateAllowedParameters(requestParams);
             FraudCaseWorkQueueQueryPolicy.validateSingleValueParameters(requestParams);
             FraudCaseWorkQueueQueryPolicy.validatePagination(page, size);
+            FraudCaseWorkQueueQueryPolicy.validateStringFilters(assignee, assignedInvestigatorId, linkedAlertId, sort);
             FraudCaseWorkQueueQueryPolicy.validateRange("createdAt", createdFrom, createdTo);
             FraudCaseWorkQueueQueryPolicy.validateRange("updatedAt", updatedFrom, updatedTo);
             String normalizedAssignee = assignee(assignee, assignedInvestigatorId);
@@ -149,10 +152,12 @@ public class FraudCaseController {
             return result;
         } catch (FraudCaseWorkQueueQueryException exception) {
             recordInvalidWorkQueueQuery(exception, sort);
+            auditRejectedWorkQueueRead(request);
             throw exception;
         } catch (RuntimeException exception) {
             metrics.recordFraudCaseWorkQueueRequest("failure");
             metrics.recordFraudCaseWorkQueueQuery("failure", sortOrder == null ? "default" : sortOrder.getProperty());
+            auditFailedWorkQueueRead(request);
             throw exception;
         }
     }
@@ -239,12 +244,42 @@ public class FraudCaseController {
     }
 
     private String assignee(String assignee, String assignedInvestigatorId) {
-        if (StringUtils.hasText(assignee)
-                && StringUtils.hasText(assignedInvestigatorId)
-                && !assignee.equals(assignedInvestigatorId)) {
+        String normalizedAssignee = normalize(assignee);
+        String normalizedAssignedInvestigatorId = normalize(assignedInvestigatorId);
+        if (StringUtils.hasText(normalizedAssignee)
+                && StringUtils.hasText(normalizedAssignedInvestigatorId)
+                && !normalizedAssignee.equals(normalizedAssignedInvestigatorId)) {
             throw new FraudCaseWorkQueueQueryException("INVALID_FILTER", "Conflicting assignee filters.");
         }
-        return StringUtils.hasText(assignedInvestigatorId) ? assignedInvestigatorId : assignee;
+        return StringUtils.hasText(normalizedAssignedInvestigatorId) ? normalizedAssignedInvestigatorId : normalizedAssignee;
+    }
+
+    private String normalize(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private void auditRejectedWorkQueueRead(HttpServletRequest request) {
+        sensitiveReadAuditService.auditAttempt(
+                ReadAccessEndpointCategory.FRAUD_CASE_WORK_QUEUE,
+                ReadAccessResourceType.FRAUD_CASE,
+                null,
+                ReadAccessAuditOutcome.REJECTED,
+                request
+        );
+    }
+
+    private void auditFailedWorkQueueRead(HttpServletRequest request) {
+        sensitiveReadAuditService.auditAttempt(
+                ReadAccessEndpointCategory.FRAUD_CASE_WORK_QUEUE,
+                ReadAccessResourceType.FRAUD_CASE,
+                null,
+                ReadAccessAuditOutcome.FAILED,
+                request
+        );
     }
 
     private void recordInvalidWorkQueueQuery(FraudCaseWorkQueueQueryException exception, String sort) {

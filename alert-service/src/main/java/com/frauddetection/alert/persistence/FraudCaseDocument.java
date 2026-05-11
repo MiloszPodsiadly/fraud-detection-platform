@@ -51,7 +51,9 @@ public class FraudCaseDocument {
     private String aggregationWindow;
     private Instant firstTransactionAt;
     private Instant lastTransactionAt;
+    @Indexed
     private Instant createdAt;
+    @Indexed
     private Instant updatedAt;
     private Instant closedAt;
     private String closureReason;

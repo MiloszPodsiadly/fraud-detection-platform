@@ -14,6 +14,9 @@ import java.util.Set;
 public final class FraudCaseWorkQueueQueryPolicy {
 
     public static final int MAX_PAGE_SIZE = 100;
+    public static final int MAX_PAGE_NUMBER = 1000;
+    public static final int MAX_FILTER_VALUE_LENGTH = 128;
+    public static final int MAX_SORT_VALUE_LENGTH = 64;
     public static final String DEFAULT_SORT = "createdAt,desc";
     public static final String TIE_BREAKER_FIELD = "_id";
     public static final Set<String> ALLOWED_QUERY_PARAMS = Set.of(
@@ -58,8 +61,27 @@ public final class FraudCaseWorkQueueQueryPolicy {
     }
 
     public static void validatePagination(int page, int size) {
-        if (page < 0 || size < 1 || size > MAX_PAGE_SIZE) {
+        if (page < 0 || page > MAX_PAGE_NUMBER || size < 1 || size > MAX_PAGE_SIZE) {
             throw new FraudCaseWorkQueueQueryException("INVALID_PAGE_REQUEST", "Invalid fraud case work queue page request.");
+        }
+    }
+
+    public static void validateLegacyListPagination(int page, int size) {
+        if (page < 0 || size < 1 || size > MAX_PAGE_SIZE) {
+            throw new FraudCaseWorkQueueQueryException("INVALID_PAGE_REQUEST", "Invalid fraud case list page request.");
+        }
+    }
+
+    public static void validateStringFilters(String assignee, String assignedInvestigatorId, String linkedAlertId, String sort) {
+        validateLength(assignee, MAX_FILTER_VALUE_LENGTH, "INVALID_FILTER", "Invalid fraud case work queue filter.");
+        validateLength(assignedInvestigatorId, MAX_FILTER_VALUE_LENGTH, "INVALID_FILTER", "Invalid fraud case work queue filter.");
+        validateLength(linkedAlertId, MAX_FILTER_VALUE_LENGTH, "INVALID_FILTER", "Invalid fraud case work queue filter.");
+        validateLength(sort, MAX_SORT_VALUE_LENGTH, "UNSUPPORTED_SORT_FIELD", "Unsupported fraud case work queue sort field.");
+    }
+
+    private static void validateLength(String value, int maxLength, String code, String message) {
+        if (value != null && value.length() > maxLength) {
+            throw new FraudCaseWorkQueueQueryException(code, message);
         }
     }
 
@@ -92,6 +114,9 @@ public final class FraudCaseWorkQueueQueryPolicy {
     }
 
     public static Sort stableSort(Sort requestedSort) {
+        if (requestedSort == null || requestedSort.isUnsorted()) {
+            return Sort.by(sortOrder(DEFAULT_SORT), Sort.Order.asc(TIE_BREAKER_FIELD));
+        }
         Sort.Order primary = requestedSort.stream()
                 .filter(order -> SORT_FIELDS.contains(order.getProperty()))
                 .findFirst()

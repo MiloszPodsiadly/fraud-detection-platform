@@ -23,6 +23,27 @@ public class SensitiveReadAuditService {
             Integer resultCount,
             HttpServletRequest request
     ) {
+        audit(endpointCategory, resourceType, resourceId, resultCount, ReadAccessAuditOutcome.SUCCESS, request);
+    }
+
+    public void auditAttempt(
+            ReadAccessEndpointCategory endpointCategory,
+            ReadAccessResourceType resourceType,
+            String resourceId,
+            ReadAccessAuditOutcome outcome,
+            HttpServletRequest request
+    ) {
+        audit(endpointCategory, resourceType, resourceId, 0, outcome, request);
+    }
+
+    private void audit(
+            ReadAccessEndpointCategory endpointCategory,
+            ReadAccessResourceType resourceType,
+            String resourceId,
+            Integer resultCount,
+            ReadAccessAuditOutcome outcome,
+            HttpServletRequest request
+    ) {
         ReadAccessAuditTarget target = new ReadAccessAuditTarget(
                 endpointCategory,
                 resourceType,
@@ -34,13 +55,21 @@ public class SensitiveReadAuditService {
         int boundedResultCount = resultCount == null ? 0 : Math.max(0, Math.min(resultCount, 100));
         String correlationId = request == null ? null : request.getHeader("X-Correlation-Id");
         if (!policy.failClosed()) {
-            readAccessAuditService.audit(target, ReadAccessAuditOutcome.SUCCESS, boundedResultCount, correlationId);
+            readAccessAuditService.audit(target, outcome, boundedResultCount, correlationId);
+            markAudited(request);
             return;
         }
         try {
-            readAccessAuditService.auditOrThrow(target, ReadAccessAuditOutcome.SUCCESS, boundedResultCount, correlationId);
+            readAccessAuditService.auditOrThrow(target, outcome, boundedResultCount, correlationId);
+            markAudited(request);
         } catch (RuntimeException exception) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Sensitive read audit unavailable.");
+        }
+    }
+
+    private void markAudited(HttpServletRequest request) {
+        if (request != null) {
+            request.setAttribute(ReadAccessAuditResponseAdvice.AUDITED_ATTRIBUTE, Boolean.TRUE);
         }
     }
 
