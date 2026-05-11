@@ -233,6 +233,7 @@ class FraudCaseManagementServiceTest {
         service.listCases(PageRequest.of(0, 10));
         service.getCase("case-1");
         service.searchCases(FraudCaseStatus.OPEN, null, null, null, null, null, null, PageRequest.of(0, 10));
+        service.workQueue(FraudCaseStatus.OPEN, null, null, null, null, null, null, null, null, PageRequest.of(0, 10));
         service.createCase(null, "create-key");
         service.assignCase("case-1", null, "assign-key");
         service.addNote("case-1", null, "note-key");
@@ -246,6 +247,7 @@ class FraudCaseManagementServiceTest {
         verify(queryService).listCases(any(org.springframework.data.domain.Pageable.class));
         verify(queryService).getCase("case-1");
         verify(queryService).searchCases(FraudCaseStatus.OPEN, null, null, null, null, null, null, PageRequest.of(0, 10));
+        verify(queryService).workQueue(FraudCaseStatus.OPEN, null, null, null, null, null, null, null, null, PageRequest.of(0, 10));
         verify(queryService).auditTrail("case-1");
         verify(lifecycleService).createCase(null, "create-key");
         verify(lifecycleService).assignCase("case-1", null, "assign-key");

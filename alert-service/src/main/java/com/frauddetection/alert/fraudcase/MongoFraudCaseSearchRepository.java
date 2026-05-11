@@ -18,6 +18,13 @@ import java.util.List;
 public class MongoFraudCaseSearchRepository implements FraudCaseSearchRepository {
 
     private static final int MAX_PAGE_SIZE = 100;
+    private static final List<String> SORT_ALLOWLIST = List.of(
+            "createdAt",
+            "updatedAt",
+            "priority",
+            "riskLevel",
+            "caseNumber"
+    );
 
     private final MongoTemplate mongoTemplate;
 
@@ -32,7 +39,7 @@ public class MongoFraudCaseSearchRepository implements FraudCaseSearchRepository
         criteria(criteria).forEach(query::addCriteria);
         long total = mongoTemplate.count(query, FraudCaseDocument.class);
         query.with(guardedPageable);
-        query.with(Sort.by(Sort.Order.desc("createdAt"), Sort.Order.asc("_id")));
+        query.with(stableSort(guardedPageable.getSort()));
         List<FraudCaseDocument> content = mongoTemplate.find(query, FraudCaseDocument.class);
         return new PageImpl<>(content, guardedPageable, total);
     }
@@ -64,7 +71,25 @@ public class MongoFraudCaseSearchRepository implements FraudCaseSearchRepository
             }
             filters.add(createdAt);
         }
+        if (criteria.updatedFrom() != null || criteria.updatedTo() != null) {
+            Criteria updatedAt = Criteria.where("updatedAt");
+            if (criteria.updatedFrom() != null) {
+                updatedAt = updatedAt.gte(criteria.updatedFrom());
+            }
+            if (criteria.updatedTo() != null) {
+                updatedAt = updatedAt.lte(criteria.updatedTo());
+            }
+            filters.add(updatedAt);
+        }
         return filters;
+    }
+
+    private Sort stableSort(Sort requestedSort) {
+        Sort.Order primary = requestedSort.stream()
+                .filter(order -> SORT_ALLOWLIST.contains(order.getProperty()))
+                .findFirst()
+                .orElse(Sort.Order.desc("createdAt"));
+        return Sort.by(primary, Sort.Order.asc("_id"));
     }
 
     private Pageable guardPageSize(Pageable pageable) {

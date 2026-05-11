@@ -9,7 +9,7 @@ import com.frauddetection.alert.api.FraudCaseAuditResponse;
 import com.frauddetection.alert.api.FraudCaseDecisionResponse;
 import com.frauddetection.alert.api.FraudCaseNoteResponse;
 import com.frauddetection.alert.api.FraudCaseResponse;
-import com.frauddetection.alert.api.FraudCaseSummaryResponse;
+import com.frauddetection.alert.api.FraudCaseWorkQueueItemResponse;
 import com.frauddetection.alert.api.PagedResponse;
 import com.frauddetection.alert.api.ReopenFraudCaseRequest;
 import com.frauddetection.alert.api.TransitionFraudCaseRequest;
@@ -17,14 +17,16 @@ import com.frauddetection.alert.api.UpdateFraudCaseRequest;
 import com.frauddetection.alert.api.UpdateFraudCaseResponse;
 import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.domain.FraudCaseStatus;
+import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueQueryException;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.service.FraudCaseManagementService;
 import com.frauddetection.common.events.enums.RiskLevel;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.util.MultiValueMap;
+import org.springframework.util.StringUtils;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -37,61 +39,93 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
+import java.util.Locale;
 import java.util.List;
+import java.util.Set;
 
 @RestController
 @Validated
 @RequestMapping({"/api/v1/fraud-cases", "/api/fraud-cases"})
 public class FraudCaseController {
 
+    private static final int MAX_PAGE_SIZE = 100;
+    private static final Set<String> LIST_QUERY_PARAMS = Set.of(
+            "page",
+            "size",
+            "sort",
+            "status",
+            "assignee",
+            "assignedInvestigatorId",
+            "priority",
+            "riskLevel",
+            "createdFrom",
+            "createdTo",
+            "updatedFrom",
+            "updatedTo",
+            "linkedAlertId"
+    );
+    private static final Set<String> SORT_FIELDS = Set.of("createdAt", "updatedAt", "priority", "riskLevel", "caseNumber");
+
     private final FraudCaseManagementService fraudCaseManagementService;
     private final FraudCaseResponseMapper responseMapper;
+    private final AlertServiceMetrics metrics;
 
-    public FraudCaseController(FraudCaseManagementService fraudCaseManagementService, FraudCaseResponseMapper responseMapper) {
+    public FraudCaseController(
+            FraudCaseManagementService fraudCaseManagementService,
+            FraudCaseResponseMapper responseMapper,
+            AlertServiceMetrics metrics
+    ) {
         this.fraudCaseManagementService = fraudCaseManagementService;
         this.responseMapper = responseMapper;
+        this.metrics = metrics;
     }
 
     @GetMapping
-    public PagedResponse<FraudCaseSummaryResponse> listCases(
-            @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
+    public PagedResponse<FraudCaseWorkQueueItemResponse> listCases(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "createdAt,desc") String sort,
             @RequestParam(required = false) FraudCaseStatus status,
             @RequestParam(required = false) String assignee,
+            @RequestParam(required = false) String assignedInvestigatorId,
             @RequestParam(required = false) FraudCasePriority priority,
             @RequestParam(required = false) RiskLevel riskLevel,
             @RequestParam(required = false) Instant createdFrom,
             @RequestParam(required = false) Instant createdTo,
-            @RequestParam(required = false) String linkedAlertId
+            @RequestParam(required = false) Instant updatedFrom,
+            @RequestParam(required = false) Instant updatedTo,
+            @RequestParam(required = false) String linkedAlertId,
+            @RequestParam MultiValueMap<String, String> requestParams
     ) {
-        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
-        if (!hasSearchFilters(status, assignee, priority, riskLevel, createdFrom, createdTo, linkedAlertId)) {
-            var result = fraudCaseManagementService.listCases(pageable);
-            return new PagedResponse<>(
-                    result.getContent().stream().map(responseMapper::toSummary).toList(),
-                    result.getTotalElements(),
-                    result.getTotalPages(),
-                    result.getNumber(),
-                    result.getSize()
-            );
-        }
-        var result = fraudCaseManagementService.searchCases(
+        validateAllowedParameters(requestParams);
+        validatePagination(page, size);
+        validateRange("createdAt", createdFrom, createdTo);
+        validateRange("updatedAt", updatedFrom, updatedTo);
+        String normalizedAssignee = assignee(assignee, assignedInvestigatorId);
+        Sort.Order sortOrder = sortOrder(sort);
+        var pageable = PageRequest.of(page, size, Sort.by(sortOrder));
+        metrics.recordFraudCaseWorkQueueRequest("success");
+        metrics.recordFraudCaseWorkQueuePageSize(size);
+        var result = fraudCaseManagementService.workQueue(
                 status,
-                assignee,
+                normalizedAssignee,
                 priority,
                 riskLevel,
                 createdFrom,
                 createdTo,
+                updatedFrom,
+                updatedTo,
                 linkedAlertId,
                 pageable
         );
+        metrics.recordFraudCaseWorkQueueQuery("success", sortOrder.getProperty());
         return new PagedResponse<>(
                 result.getContent(),
                 result.getTotalElements(),
                 result.getTotalPages(),
                 result.getNumber(),
                 result.getSize()
-        );
+            );
     }
 
     @PostMapping
@@ -175,21 +209,58 @@ public class FraudCaseController {
         return fraudCaseManagementService.updateCase(caseId, request, idempotencyKey);
     }
 
-    private boolean hasSearchFilters(
-            FraudCaseStatus status,
-            String assignee,
-            FraudCasePriority priority,
-            RiskLevel riskLevel,
-            Instant createdFrom,
-            Instant createdTo,
-            String linkedAlertId
-    ) {
-        return status != null
-                || assignee != null
-                || priority != null
-                || riskLevel != null
-                || createdFrom != null
-                || createdTo != null
-                || linkedAlertId != null;
+    private void validateAllowedParameters(MultiValueMap<String, String> requestParams) {
+        List<String> unsupported = requestParams.keySet().stream()
+                .filter(param -> !LIST_QUERY_PARAMS.contains(param))
+                .toList();
+        if (!unsupported.isEmpty()) {
+            metrics.recordFraudCaseWorkQueueRequest("invalid_filter");
+            throw new FraudCaseWorkQueueQueryException("UNSUPPORTED_FILTER", "Unsupported fraud case work queue filter.");
+        }
+    }
+
+    private void validatePagination(int page, int size) {
+        if (page < 0 || size < 1 || size > MAX_PAGE_SIZE) {
+            metrics.recordFraudCaseWorkQueueRequest("invalid_filter");
+            throw new FraudCaseWorkQueueQueryException("INVALID_PAGE_REQUEST", "Invalid fraud case work queue page request.");
+        }
+    }
+
+    private void validateRange(String field, Instant from, Instant to) {
+        if (from != null && to != null && from.isAfter(to)) {
+            metrics.recordFraudCaseWorkQueueRequest("invalid_filter");
+            throw new FraudCaseWorkQueueQueryException("INVALID_FILTER_RANGE", "Invalid " + field + " filter range.");
+        }
+    }
+
+    private String assignee(String assignee, String assignedInvestigatorId) {
+        if (StringUtils.hasText(assignee)
+                && StringUtils.hasText(assignedInvestigatorId)
+                && !assignee.equals(assignedInvestigatorId)) {
+            metrics.recordFraudCaseWorkQueueRequest("invalid_filter");
+            throw new FraudCaseWorkQueueQueryException("INVALID_FILTER", "Conflicting assignee filters.");
+        }
+        return StringUtils.hasText(assignedInvestigatorId) ? assignedInvestigatorId : assignee;
+    }
+
+    private Sort.Order sortOrder(String sort) {
+        String value = StringUtils.hasText(sort) ? sort.trim() : "createdAt,desc";
+        String[] parts = value.split(",");
+        if (parts.length > 2 || !SORT_FIELDS.contains(parts[0])) {
+            metrics.recordFraudCaseWorkQueueRequest("invalid_sort");
+            metrics.recordFraudCaseWorkQueueQuery("invalid_sort", "default");
+            throw new FraudCaseWorkQueueQueryException("UNSUPPORTED_SORT_FIELD", "Unsupported fraud case work queue sort field.");
+        }
+        Sort.Direction direction = Sort.Direction.DESC;
+        if (parts.length == 2) {
+            try {
+                direction = Sort.Direction.fromString(parts[1].trim().toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException exception) {
+                metrics.recordFraudCaseWorkQueueRequest("invalid_sort");
+                metrics.recordFraudCaseWorkQueueQuery("invalid_sort", parts[0]);
+                throw new FraudCaseWorkQueueQueryException("UNSUPPORTED_SORT_DIRECTION", "Unsupported fraud case work queue sort direction.");
+            }
+        }
+        return new Sort.Order(direction, parts[0]);
     }
 }

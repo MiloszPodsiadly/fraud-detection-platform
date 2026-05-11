@@ -110,7 +110,8 @@ class AlertSecurityConfigJwtEnabledTest {
     void setUp() {
         when(alertManagementUseCase.listAlerts(any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
         when(transactionMonitoringUseCase.listScoredTransactions(any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
-        when(fraudCaseManagementService.listCases(any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
+        when(fraudCaseManagementService.workQueue(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of()));
         when(jwtDecoder.decode(startsWith("token-"))).thenAnswer(invocation -> switch (invocation.getArgument(0, String.class)) {
             case "token-analyst" -> jwt("analyst-1", List.of("fraud-analyst"));
             case "token-readonly" -> jwt("readonly-1", List.of("fraud-readonly-analyst"));

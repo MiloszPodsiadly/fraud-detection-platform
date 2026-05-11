@@ -2,6 +2,8 @@ package com.frauddetection.alert.security.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.api.FraudCaseAuditResponse;
+import com.frauddetection.alert.api.FraudCaseSlaStatus;
+import com.frauddetection.alert.api.FraudCaseWorkQueueItemResponse;
 import com.frauddetection.alert.controller.FraudCaseController;
 import com.frauddetection.alert.domain.FraudCaseAuditAction;
 import com.frauddetection.alert.domain.FraudCasePriority;
@@ -95,7 +97,8 @@ class FraudCaseSecurityIntegrationTest {
 
     @Test
     void shouldAllowReadAuthorityForCurrentAndLegacyReadPaths() throws Exception {
-        when(fraudCaseManagementService.listCases(any(Pageable.class))).thenReturn(new PageImpl<>(List.of(caseDocument())));
+        when(fraudCaseManagementService.workQueue(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(workQueueItem())));
         when(fraudCaseManagementService.getCase("case-1")).thenReturn(caseDocument());
 
         mockMvc.perform(get("/api/v1/fraud-cases").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
@@ -221,5 +224,23 @@ class FraudCaseSecurityIntegrationTest {
         document.setCreatedAt(Instant.parse("2026-05-10T10:00:00Z"));
         document.setUpdatedAt(Instant.parse("2026-05-10T10:00:00Z"));
         return document;
+    }
+
+    private FraudCaseWorkQueueItemResponse workQueueItem() {
+        return new FraudCaseWorkQueueItemResponse(
+                "case-1",
+                "FC-20260510-ABCDEF12",
+                FraudCaseStatus.OPEN,
+                FraudCasePriority.HIGH,
+                RiskLevel.CRITICAL,
+                null,
+                Instant.parse("2026-05-10T10:00:00Z"),
+                Instant.parse("2026-05-10T10:00:00Z"),
+                60L,
+                60L,
+                FraudCaseSlaStatus.WITHIN_SLA,
+                Instant.parse("2026-05-11T10:00:00Z"),
+                1
+        );
     }
 }

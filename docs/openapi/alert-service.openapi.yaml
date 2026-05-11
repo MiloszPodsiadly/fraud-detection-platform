@@ -961,8 +961,8 @@ paths:
     get:
       summary: List fraud cases
       description: >-
-        Returns a paged fraud-case list. Size is bounded to 100. When filters are present, search is delegated to the
-        fraud-case query service. This is a read-only endpoint and must not perform lifecycle mutation behavior.
+        Returns a bounded investigator work queue read model using the existing fraud-case query service and search
+        repository path. This is a read-only endpoint and must not perform lifecycle mutation behavior.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -982,12 +982,25 @@ paths:
             minimum: 1
             maximum: 100
             default: 20
+        - name: sort
+          in: query
+          required: false
+          description: Allowlisted stable sort in field,direction form. Supported fields are createdAt, updatedAt, priority, riskLevel, and caseNumber.
+          schema:
+            type: string
+            default: createdAt,desc
+            example: updatedAt,asc
         - name: status
           in: query
           required: false
           schema:
             $ref: "#/components/schemas/FraudCaseStatus"
         - name: assignee
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: assignedInvestigatorId
           in: query
           required: false
           schema:
@@ -1014,6 +1027,18 @@ paths:
           schema:
             type: string
             format: date-time
+        - name: updatedFrom
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: updatedTo
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
         - name: linkedAlertId
           in: query
           required: false
@@ -1021,11 +1046,11 @@ paths:
             type: string
       responses:
         "200":
-          description: Paged fraud cases returned.
+          description: Bounded fraud-case work queue items returned.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FraudCaseSummaryPage"
+                $ref: "#/components/schemas/FraudCaseWorkQueuePage"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -2680,6 +2705,75 @@ components:
           type: integer
         size:
           type: integer
+    FraudCaseWorkQueuePage:
+      type: object
+      additionalProperties: false
+      required: [content, totalElements, totalPages, page, size]
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/FraudCaseWorkQueueItemResponse"
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+        page:
+          type: integer
+        size:
+          type: integer
+    FraudCaseSlaStatus:
+      type: string
+      enum:
+        - NOT_APPLICABLE
+        - WITHIN_SLA
+        - NEAR_BREACH
+        - BREACHED
+        - UNKNOWN
+    FraudCaseWorkQueueItemResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        caseId:
+          type: string
+        caseNumber:
+          type: string
+          nullable: true
+        status:
+          $ref: "#/components/schemas/FraudCaseStatus"
+        priority:
+          $ref: "#/components/schemas/FraudCasePriority"
+        riskLevel:
+          $ref: "#/components/schemas/RiskLevel"
+        assignedInvestigatorId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        caseAgeSeconds:
+          type: integer
+          format: int64
+          nullable: true
+        lastUpdatedAgeSeconds:
+          type: integer
+          format: int64
+          nullable: true
+        slaStatus:
+          $ref: "#/components/schemas/FraudCaseSlaStatus"
+        slaDeadlineAt:
+          type: string
+          format: date-time
+          nullable: true
+        linkedAlertCount:
+          type: integer
+          minimum: 0
     FraudCaseSummaryResponse:
       type: object
       additionalProperties: false

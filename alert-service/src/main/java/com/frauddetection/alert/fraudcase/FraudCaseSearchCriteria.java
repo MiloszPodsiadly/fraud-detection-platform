@@ -13,6 +13,8 @@ public record FraudCaseSearchCriteria(
         RiskLevel riskLevel,
         Instant createdFrom,
         Instant createdTo,
+        Instant updatedFrom,
+        Instant updatedTo,
         String linkedAlertId
 ) {
 }

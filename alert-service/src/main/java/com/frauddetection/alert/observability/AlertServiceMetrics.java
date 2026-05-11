@@ -133,6 +133,29 @@ public class AlertServiceMetrics {
         ).increment();
     }
 
+    public void recordFraudCaseWorkQueueRequest(String outcome) {
+        counter(
+                "fraud_case_work_queue_requests_total",
+                "endpoint_family", "fraud_case_work_queue",
+                "outcome", normalizeFraudCaseWorkQueueOutcome(outcome)
+        ).increment();
+    }
+
+    public void recordFraudCaseWorkQueueQuery(String outcome, String sortField) {
+        counter(
+                "fraud_case_work_queue_query_total",
+                "outcome", normalizeFraudCaseWorkQueueOutcome(outcome),
+                "sort_field", normalizeFraudCaseWorkQueueSortField(sortField)
+        ).increment();
+    }
+
+    public void recordFraudCaseWorkQueuePageSize(int pageSize) {
+        DistributionSummary.builder("fraud_case_work_queue_page_size_bucket")
+                .tag("endpoint_family", "fraud_case_work_queue")
+                .register(meterRegistry)
+                .record(Math.max(0, pageSize));
+    }
+
     public void recordDecisionOutboxPublishConfirmationFailed() {
         counter(
                 "fraud_platform_decision_outbox_failures_total",
@@ -930,6 +953,26 @@ public class AlertServiceMetrics {
         return switch (outcome) {
             case "new", "replay", "conflict", "in_progress", "snapshot_too_large", "race_resolved", "failure" -> outcome;
             default -> "failure";
+        };
+    }
+
+    private String normalizeFraudCaseWorkQueueOutcome(String outcome) {
+        if (!StringUtils.hasText(outcome)) {
+            return "failure";
+        }
+        return switch (outcome) {
+            case "success", "invalid_filter", "invalid_sort", "unauthorized", "failure" -> outcome;
+            default -> "failure";
+        };
+    }
+
+    private String normalizeFraudCaseWorkQueueSortField(String sortField) {
+        if (!StringUtils.hasText(sortField)) {
+            return "default";
+        }
+        return switch (sortField) {
+            case "createdAt", "updatedAt", "priority", "riskLevel", "caseNumber", "default" -> sortField;
+            default -> "default";
         };
     }
 

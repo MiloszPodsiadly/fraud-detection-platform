@@ -2,7 +2,8 @@ package com.frauddetection.alert.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.api.CreateFraudCaseRequest;
-import com.frauddetection.alert.api.FraudCaseSummaryResponse;
+import com.frauddetection.alert.api.FraudCaseSlaStatus;
+import com.frauddetection.alert.api.FraudCaseWorkQueueItemResponse;
 import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
@@ -12,6 +13,7 @@ import com.frauddetection.alert.fraudcase.FraudCaseIdempotencyInProgressExceptio
 import com.frauddetection.alert.fraudcase.FraudCaseInvalidIdempotencyKeyException;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.service.FraudCaseManagementService;
 import com.frauddetection.common.events.enums.RiskLevel;
@@ -67,6 +69,9 @@ class FraudCaseControllerTest {
     @MockBean
     private FraudCaseManagementService fraudCaseManagementService;
 
+    @MockBean
+    private AlertServiceMetrics alertServiceMetrics;
+
     @Test
     void shouldCreateFraudCase() throws Exception {
         when(fraudCaseManagementService.createCase(any(), eq("create-key-1"))).thenReturn(responseMapper.toResponse(caseDocument()));
@@ -91,7 +96,7 @@ class FraudCaseControllerTest {
 
     @Test
     void shouldSearchFraudCases() throws Exception {
-        when(fraudCaseManagementService.searchCases(
+        when(fraudCaseManagementService.workQueue(
                 eq(FraudCaseStatus.OPEN),
                 any(),
                 any(),
@@ -99,23 +104,31 @@ class FraudCaseControllerTest {
                 any(),
                 any(),
                 any(),
+                any(),
+                any(),
                 any(Pageable.class)
-        )).thenReturn(new PageImpl<>(List.of(new FraudCaseSummaryResponse(
-                "case-1",
-                "FC-20260510-ABCDEF12",
-                FraudCaseStatus.OPEN,
-                FraudCasePriority.HIGH,
-                RiskLevel.CRITICAL,
-                "investigator-1",
-                List.of("alert-1"),
-                Instant.parse("2026-05-10T10:00:00Z"),
-                Instant.parse("2026-05-10T10:00:00Z")
-        ))));
+        )).thenReturn(new PageImpl<>(List.of(workQueueItem())));
 
         mockMvc.perform(get("/api/fraud-cases").param("status", "OPEN"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].caseId").value("case-1"))
+                .andExpect(jsonPath("$.content[0].linkedAlertCount").value(1))
                 .andExpect(jsonPath("$.totalElements").value(1));
+    }
+
+    @Test
+    void shouldRejectUnsupportedWorkQueueSortAndUnknownFilters() throws Exception {
+        mockMvc.perform(get("/api/fraud-cases").param("sort", "customerId,desc"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.details[0]").value("code:UNSUPPORTED_SORT_FIELD"));
+
+        mockMvc.perform(get("/api/fraud-cases").param("customerId", "customer-1"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.details[0]").value("code:UNSUPPORTED_FILTER"));
+
+        mockMvc.perform(get("/api/fraud-cases").param("size", "101"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.details[0]").value("code:INVALID_PAGE_REQUEST"));
     }
 
     @Test
@@ -260,5 +273,23 @@ class FraudCaseControllerTest {
         document.setCreatedAt(Instant.parse("2026-05-10T10:00:00Z"));
         document.setUpdatedAt(Instant.parse("2026-05-10T10:00:00Z"));
         return document;
+    }
+
+    private FraudCaseWorkQueueItemResponse workQueueItem() {
+        return new FraudCaseWorkQueueItemResponse(
+                "case-1",
+                "FC-20260510-ABCDEF12",
+                FraudCaseStatus.OPEN,
+                FraudCasePriority.HIGH,
+                RiskLevel.CRITICAL,
+                "investigator-1",
+                Instant.parse("2026-05-10T10:00:00Z"),
+                Instant.parse("2026-05-10T10:00:00Z"),
+                3600L,
+                3600L,
+                FraudCaseSlaStatus.WITHIN_SLA,
+                Instant.parse("2026-05-11T10:00:00Z"),
+                1
+        );
     }
 }

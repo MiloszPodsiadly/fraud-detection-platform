@@ -10,6 +10,7 @@ import com.frauddetection.alert.api.FraudCaseDecisionResponse;
 import com.frauddetection.alert.api.FraudCaseNoteResponse;
 import com.frauddetection.alert.api.FraudCaseResponse;
 import com.frauddetection.alert.api.FraudCaseSummaryResponse;
+import com.frauddetection.alert.api.FraudCaseWorkQueueItemResponse;
 import com.frauddetection.alert.api.ReopenFraudCaseRequest;
 import com.frauddetection.alert.api.TransitionFraudCaseRequest;
 import com.frauddetection.alert.domain.FraudCasePriority;
@@ -141,6 +142,21 @@ public class FraudCaseManagementService {
             Pageable pageable
     ) {
         return queryService.searchCases(status, assignee, priority, riskLevel, createdFrom, createdTo, linkedAlertId, pageable);
+    }
+
+    public Page<FraudCaseWorkQueueItemResponse> workQueue(
+            FraudCaseStatus status,
+            String assignee,
+            FraudCasePriority priority,
+            RiskLevel riskLevel,
+            Instant createdFrom,
+            Instant createdTo,
+            Instant updatedFrom,
+            Instant updatedTo,
+            String linkedAlertId,
+            Pageable pageable
+    ) {
+        return queryService.workQueue(status, assignee, priority, riskLevel, createdFrom, createdTo, updatedFrom, updatedTo, linkedAlertId, pageable);
     }
 
     public FraudCaseResponse assignCase(String caseId, AssignFraudCaseRequest request, String idempotencyKey) {
