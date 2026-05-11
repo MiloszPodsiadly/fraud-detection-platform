@@ -233,13 +233,13 @@ class FraudCaseManagementServiceTest {
         service.listCases(PageRequest.of(0, 10));
         service.getCase("case-1");
         service.searchCases(FraudCaseStatus.OPEN, null, null, null, null, null, null, PageRequest.of(0, 10));
-        service.createCase(null);
-        service.assignCase("case-1", null);
-        service.addNote("case-1", null);
-        service.addDecision("case-1", null);
-        service.transitionCase("case-1", null);
-        service.closeCase("case-1", null);
-        service.reopenCase("case-1", null);
+        service.createCase(null, "create-key");
+        service.assignCase("case-1", null, "assign-key");
+        service.addNote("case-1", null, "note-key");
+        service.addDecision("case-1", null, "decision-key");
+        service.transitionCase("case-1", null, "transition-key");
+        service.closeCase("case-1", null, "close-key");
+        service.reopenCase("case-1", null, "reopen-key");
         service.auditTrail("case-1");
 
         verify(queryService).listCases();
@@ -247,13 +247,13 @@ class FraudCaseManagementServiceTest {
         verify(queryService).getCase("case-1");
         verify(queryService).searchCases(FraudCaseStatus.OPEN, null, null, null, null, null, null, PageRequest.of(0, 10));
         verify(queryService).auditTrail("case-1");
-        verify(lifecycleService).createCase(null);
-        verify(lifecycleService).assignCase("case-1", null);
-        verify(lifecycleService).addNote("case-1", null);
-        verify(lifecycleService).addDecision("case-1", null);
-        verify(lifecycleService).transitionCase("case-1", null);
-        verify(lifecycleService).closeCase("case-1", null);
-        verify(lifecycleService).reopenCase("case-1", null);
+        verify(lifecycleService).createCase(null, "create-key");
+        verify(lifecycleService).assignCase("case-1", null, "assign-key");
+        verify(lifecycleService).addNote("case-1", null, "note-key");
+        verify(lifecycleService).addDecision("case-1", null, "decision-key");
+        verify(lifecycleService).transitionCase("case-1", null, "transition-key");
+        verify(lifecycleService).closeCase("case-1", null, "close-key");
+        verify(lifecycleService).reopenCase("case-1", null, "reopen-key");
     }
 
     @Test
@@ -450,7 +450,9 @@ class FraudCaseManagementServiceTest {
                         analystActorResolver,
                         transactionRunner,
                         new FraudCaseTransitionPolicy(),
-                        new FraudCaseAuditService(auditRepository)
+                        new FraudCaseAuditService(auditRepository),
+                        mock(com.frauddetection.alert.fraudcase.FraudCaseLifecycleIdempotencyService.class),
+                        responseMapper
                 ),
                 new FraudCaseQueryService(
                         fraudCaseRepository,
@@ -488,7 +490,9 @@ class FraudCaseManagementServiceTest {
                         analystActorResolver,
                         transactionRunner,
                         new FraudCaseTransitionPolicy(),
-                        new FraudCaseAuditService(auditRepository)
+                        new FraudCaseAuditService(auditRepository),
+                        mock(com.frauddetection.alert.fraudcase.FraudCaseLifecycleIdempotencyService.class),
+                        responseMapper
                 ),
                 new FraudCaseQueryService(
                         fraudCaseRepository,

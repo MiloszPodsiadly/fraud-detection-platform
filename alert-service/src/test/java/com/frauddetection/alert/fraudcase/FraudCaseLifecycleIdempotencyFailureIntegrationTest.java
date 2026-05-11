@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.frauddetection.alert.api.AddFraudCaseNoteRequest;
 import com.frauddetection.alert.api.CreateFraudCaseRequest;
+import com.frauddetection.alert.api.FraudCaseResponse;
 import com.frauddetection.alert.domain.FraudCaseAuditAction;
 import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.idempotency.SharedIdempotencyConflictPolicy;
@@ -135,13 +136,15 @@ class FraudCaseLifecycleIdempotencyFailureIntegrationTest extends AbstractIntegr
     }
 
     private FraudCaseDocument createCase() {
-        return service.createCase(new CreateFraudCaseRequest(
+        FraudCaseResponse created = service.createCase(new CreateFraudCaseRequest(
                 List.of("alert-1"),
                 FraudCasePriority.HIGH,
                 RiskLevel.CRITICAL,
                 "Manual investigation",
                 "analyst-1"
-        ));
+        ), "create-helper-key-" + UUID.randomUUID());
+        idempotencyRepository.deleteAll();
+        return caseRepository.findById(created.caseId()).orElseThrow();
     }
 
     private long countAudit(String caseId, FraudCaseAuditAction action) {
@@ -175,7 +178,8 @@ class FraudCaseLifecycleIdempotencyFailureIntegrationTest extends AbstractIntegr
                         transactionRunner,
                         new FraudCaseTransitionPolicy(),
                         new FraudCaseAuditService(auditRepository),
-                        idempotencyService
+                        idempotencyService,
+                        responseMapper
                 ),
                 new FraudCaseQueryService(caseRepository, auditRepository, searchRepository, responseMapper)
         );

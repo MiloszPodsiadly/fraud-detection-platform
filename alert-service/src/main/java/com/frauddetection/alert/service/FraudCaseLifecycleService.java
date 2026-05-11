@@ -7,6 +7,7 @@ import com.frauddetection.alert.api.CloseFraudCaseRequest;
 import com.frauddetection.alert.api.CreateFraudCaseRequest;
 import com.frauddetection.alert.api.FraudCaseDecisionResponse;
 import com.frauddetection.alert.api.FraudCaseNoteResponse;
+import com.frauddetection.alert.api.FraudCaseResponse;
 import com.frauddetection.alert.api.ReopenFraudCaseRequest;
 import com.frauddetection.alert.api.TransitionFraudCaseRequest;
 import com.frauddetection.alert.domain.FraudCaseAuditAction;
@@ -18,6 +19,7 @@ import com.frauddetection.alert.fraudcase.FraudCaseLifecycleIdempotencyService;
 import com.frauddetection.alert.fraudcase.FraudCaseNotFoundException;
 import com.frauddetection.alert.fraudcase.FraudCaseTransitionPolicy;
 import com.frauddetection.alert.idempotency.IdempotencyCanonicalHasher;
+import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.persistence.FraudCaseDecisionDocument;
 import com.frauddetection.alert.persistence.FraudCaseDecisionRepository;
@@ -54,29 +56,7 @@ public class FraudCaseLifecycleService {
     private final FraudCaseTransitionPolicy transitionPolicy;
     private final FraudCaseAuditService caseAuditService;
     private final FraudCaseLifecycleIdempotencyService idempotencyService;
-
-    public FraudCaseLifecycleService(
-            FraudCaseRepository fraudCaseRepository,
-            AlertRepository alertRepository,
-            FraudCaseNoteRepository noteRepository,
-            FraudCaseDecisionRepository decisionRepository,
-            AnalystActorResolver analystActorResolver,
-            RegulatedMutationTransactionRunner transactionRunner,
-            FraudCaseTransitionPolicy transitionPolicy,
-            FraudCaseAuditService caseAuditService
-    ) {
-        this(
-                fraudCaseRepository,
-                alertRepository,
-                noteRepository,
-                decisionRepository,
-                analystActorResolver,
-                transactionRunner,
-                transitionPolicy,
-                caseAuditService,
-                null
-        );
-    }
+    private final FraudCaseResponseMapper responseMapper;
 
     @Autowired
     public FraudCaseLifecycleService(
@@ -88,7 +68,8 @@ public class FraudCaseLifecycleService {
             RegulatedMutationTransactionRunner transactionRunner,
             FraudCaseTransitionPolicy transitionPolicy,
             FraudCaseAuditService caseAuditService,
-            FraudCaseLifecycleIdempotencyService idempotencyService
+            FraudCaseLifecycleIdempotencyService idempotencyService,
+            FraudCaseResponseMapper responseMapper
     ) {
         this.fraudCaseRepository = fraudCaseRepository;
         this.alertRepository = alertRepository;
@@ -99,26 +80,12 @@ public class FraudCaseLifecycleService {
         this.transitionPolicy = transitionPolicy;
         this.caseAuditService = caseAuditService;
         this.idempotencyService = idempotencyService;
+        this.responseMapper = responseMapper;
     }
 
-    /**
-     * Internal/backward-compatibility path only. Public HTTP lifecycle POST endpoints must use
-     * idempotency-key overloads. Guarded by the FDP-43 public-path architecture test.
-     */
-    @Deprecated(forRemoval = false)
-    public FraudCaseDocument createCase(CreateFraudCaseRequest request) {
-        return createCase(request, null, false);
-    }
-
-    public FraudCaseDocument createCase(CreateFraudCaseRequest request, String idempotencyKey) {
-        return createCase(request, idempotencyKey, true);
-    }
-
-    private FraudCaseDocument createCase(CreateFraudCaseRequest request, String idempotencyKey, boolean requireIdempotency) {
+    public FraudCaseResponse createCase(CreateFraudCaseRequest request, String idempotencyKey) {
         List<String> alertIds = normalizedIds(request.alertIds());
-        if (!requireIdempotency) {
-            transitionPolicy.validateCreate(alertIds, request.priority());
-        }
+        transitionPolicy.validateCreate(alertIds, request.priority());
         String actorId = requiredActor(request.actorId(), "CREATE_FRAUD_CASE", "new");
         return execute(command(
                 idempotencyKey,
@@ -161,24 +128,11 @@ public class FraudCaseLifecycleService {
                     saved.getStatus(),
                     Map.of("alertCount", String.valueOf(alertIds.size()), "caseNumber", caseNumber)
             );
-            return saved;
-        }, FraudCaseDocument.class, requireIdempotency);
+            return responseMapper.toResponse(saved);
+        }, FraudCaseResponse.class);
     }
 
-    /**
-     * Internal/backward-compatibility path only. Public HTTP lifecycle POST endpoints must use
-     * idempotency-key overloads. Guarded by the FDP-43 public-path architecture test.
-     */
-    @Deprecated(forRemoval = false)
-    public FraudCaseDocument assignCase(String caseId, AssignFraudCaseRequest request) {
-        return assignCase(caseId, request, null, false);
-    }
-
-    public FraudCaseDocument assignCase(String caseId, AssignFraudCaseRequest request, String idempotencyKey) {
-        return assignCase(caseId, request, idempotencyKey, true);
-    }
-
-    private FraudCaseDocument assignCase(String caseId, AssignFraudCaseRequest request, String idempotencyKey, boolean requireIdempotency) {
+    public FraudCaseResponse assignCase(String caseId, AssignFraudCaseRequest request, String idempotencyKey) {
         String actorId = requiredActor(request.actorId(), "ASSIGN_FRAUD_CASE", caseId);
         return execute(command(
                 idempotencyKey,
@@ -205,28 +159,13 @@ public class FraudCaseLifecycleService {
                             "newAssignee", request.assignedInvestigatorId()
                     )
             );
-            return saved;
-        }, FraudCaseDocument.class, requireIdempotency);
-    }
-
-    /**
-     * Internal/backward-compatibility path only. Public HTTP lifecycle POST endpoints must use
-     * idempotency-key overloads. Guarded by the FDP-43 public-path architecture test.
-     */
-    @Deprecated(forRemoval = false)
-    public FraudCaseNoteResponse addNote(String caseId, AddFraudCaseNoteRequest request) {
-        return addNote(caseId, request, null, false);
+            return responseMapper.toResponse(saved);
+        }, FraudCaseResponse.class);
     }
 
     public FraudCaseNoteResponse addNote(String caseId, AddFraudCaseNoteRequest request, String idempotencyKey) {
-        return addNote(caseId, request, idempotencyKey, true);
-    }
-
-    private FraudCaseNoteResponse addNote(String caseId, AddFraudCaseNoteRequest request, String idempotencyKey, boolean requireIdempotency) {
-        if (!requireIdempotency) {
-            FraudCaseDocument document = loadCase(caseId);
-            transitionPolicy.validateAddNote(document.getStatus(), request.body());
-        }
+        FraudCaseDocument current = loadCase(caseId);
+        transitionPolicy.validateAddNote(current.getStatus(), request.body());
         String actorId = requiredActor(request.actorId(), "ADD_FRAUD_CASE_NOTE", caseId);
         return execute(command(
                 idempotencyKey,
@@ -257,23 +196,10 @@ public class FraudCaseLifecycleService {
                     Map.of("noteId", savedNote.getId(), "internalOnly", String.valueOf(request.internalOnly()))
             );
             return toNoteResponse(savedNote);
-        }, FraudCaseNoteResponse.class, requireIdempotency);
-    }
-
-    /**
-     * Internal/backward-compatibility path only. Public HTTP lifecycle POST endpoints must use
-     * idempotency-key overloads. Guarded by the FDP-43 public-path architecture test.
-     */
-    @Deprecated(forRemoval = false)
-    public FraudCaseDecisionResponse addDecision(String caseId, AddFraudCaseDecisionRequest request) {
-        return addDecision(caseId, request, null, false);
+        }, FraudCaseNoteResponse.class);
     }
 
     public FraudCaseDecisionResponse addDecision(String caseId, AddFraudCaseDecisionRequest request, String idempotencyKey) {
-        return addDecision(caseId, request, idempotencyKey, true);
-    }
-
-    private FraudCaseDecisionResponse addDecision(String caseId, AddFraudCaseDecisionRequest request, String idempotencyKey, boolean requireIdempotency) {
         String actorId = requiredActor(request.actorId(), "ADD_FRAUD_CASE_DECISION", caseId);
         return execute(command(
                 idempotencyKey,
@@ -304,23 +230,10 @@ public class FraudCaseLifecycleService {
                     Map.of("decisionId", savedDecision.getId(), "decisionType", request.decisionType().name())
             );
             return toDecisionResponse(savedDecision);
-        }, FraudCaseDecisionResponse.class, requireIdempotency);
+        }, FraudCaseDecisionResponse.class);
     }
 
-    /**
-     * Internal/backward-compatibility path only. Public HTTP lifecycle POST endpoints must use
-     * idempotency-key overloads. Guarded by the FDP-43 public-path architecture test.
-     */
-    @Deprecated(forRemoval = false)
-    public FraudCaseDocument transitionCase(String caseId, TransitionFraudCaseRequest request) {
-        return transitionCase(caseId, request, null, false);
-    }
-
-    public FraudCaseDocument transitionCase(String caseId, TransitionFraudCaseRequest request, String idempotencyKey) {
-        return transitionCase(caseId, request, idempotencyKey, true);
-    }
-
-    private FraudCaseDocument transitionCase(String caseId, TransitionFraudCaseRequest request, String idempotencyKey, boolean requireIdempotency) {
+    public FraudCaseResponse transitionCase(String caseId, TransitionFraudCaseRequest request, String idempotencyKey) {
         String actorId = requiredActor(request.actorId(), "TRANSITION_FRAUD_CASE", caseId);
         return execute(command(
                 idempotencyKey,
@@ -336,24 +249,11 @@ public class FraudCaseLifecycleService {
             document.setUpdatedAt(Instant.now());
             FraudCaseDocument saved = fraudCaseRepository.save(document);
             caseAuditService.append(caseId, actorId, FraudCaseAuditAction.STATUS_CHANGED, previousStatus, request.targetStatus(), Map.of());
-            return saved;
-        }, FraudCaseDocument.class, requireIdempotency);
+            return responseMapper.toResponse(saved);
+        }, FraudCaseResponse.class);
     }
 
-    /**
-     * Internal/backward-compatibility path only. Public HTTP lifecycle POST endpoints must use
-     * idempotency-key overloads. Guarded by the FDP-43 public-path architecture test.
-     */
-    @Deprecated(forRemoval = false)
-    public FraudCaseDocument closeCase(String caseId, CloseFraudCaseRequest request) {
-        return closeCase(caseId, request, null, false);
-    }
-
-    public FraudCaseDocument closeCase(String caseId, CloseFraudCaseRequest request, String idempotencyKey) {
-        return closeCase(caseId, request, idempotencyKey, true);
-    }
-
-    private FraudCaseDocument closeCase(String caseId, CloseFraudCaseRequest request, String idempotencyKey, boolean requireIdempotency) {
+    public FraudCaseResponse closeCase(String caseId, CloseFraudCaseRequest request, String idempotencyKey) {
         String actorId = requiredActor(request.actorId(), "CLOSE_FRAUD_CASE", caseId);
         return execute(command(
                 idempotencyKey,
@@ -379,24 +279,11 @@ public class FraudCaseLifecycleService {
                     FraudCaseStatus.CLOSED,
                     Map.of("reason", request.closureReason())
             );
-            return saved;
-        }, FraudCaseDocument.class, requireIdempotency);
+            return responseMapper.toResponse(saved);
+        }, FraudCaseResponse.class);
     }
 
-    /**
-     * Internal/backward-compatibility path only. Public HTTP lifecycle POST endpoints must use
-     * idempotency-key overloads. Guarded by the FDP-43 public-path architecture test.
-     */
-    @Deprecated(forRemoval = false)
-    public FraudCaseDocument reopenCase(String caseId, ReopenFraudCaseRequest request) {
-        return reopenCase(caseId, request, null, false);
-    }
-
-    public FraudCaseDocument reopenCase(String caseId, ReopenFraudCaseRequest request, String idempotencyKey) {
-        return reopenCase(caseId, request, idempotencyKey, true);
-    }
-
-    private FraudCaseDocument reopenCase(String caseId, ReopenFraudCaseRequest request, String idempotencyKey, boolean requireIdempotency) {
+    public FraudCaseResponse reopenCase(String caseId, ReopenFraudCaseRequest request, String idempotencyKey) {
         String actorId = requiredActor(request.actorId(), "REOPEN_FRAUD_CASE", caseId);
         return execute(command(
                 idempotencyKey,
@@ -421,8 +308,8 @@ public class FraudCaseLifecycleService {
                     FraudCaseStatus.REOPENED,
                     Map.of("reason", request.reason())
             );
-            return saved;
-        }, FraudCaseDocument.class, requireIdempotency);
+            return responseMapper.toResponse(saved);
+        }, FraudCaseResponse.class);
     }
 
     private FraudCaseDocument loadCase(String caseId) {
@@ -477,12 +364,8 @@ public class FraudCaseLifecycleService {
     private <T> T execute(
             FraudCaseLifecycleIdempotencyCommand command,
             java.util.function.Supplier<T> mutation,
-            Class<T> responseType,
-            boolean requireIdempotency
+            Class<T> responseType
     ) {
-        if (!requireIdempotency) {
-            return transactionRunner.runLocalCommit(mutation);
-        }
         if (idempotencyService == null) {
             throw new IllegalStateException("Fraud-case lifecycle idempotency is required but not configured.");
         }

@@ -1,11 +1,14 @@
 package com.frauddetection.alert.service;
 
-import com.frauddetection.alert.api.AddFraudCaseNoteRequest;
 import com.frauddetection.alert.api.AddFraudCaseDecisionRequest;
+import com.frauddetection.alert.api.AddFraudCaseNoteRequest;
 import com.frauddetection.alert.api.AssignFraudCaseRequest;
 import com.frauddetection.alert.api.CloseFraudCaseRequest;
 import com.frauddetection.alert.api.CreateFraudCaseRequest;
+import com.frauddetection.alert.api.FraudCaseResponse;
 import com.frauddetection.alert.api.ReopenFraudCaseRequest;
+import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.frauddetection.alert.domain.FraudCaseAuditAction;
 import com.frauddetection.alert.domain.FraudCaseDecisionType;
 import com.frauddetection.alert.domain.FraudCasePriority;
@@ -15,6 +18,10 @@ import com.frauddetection.alert.fraudcase.FraudCaseConflictException;
 import com.frauddetection.alert.fraudcase.FraudCaseSearchRepository;
 import com.frauddetection.alert.fraudcase.FraudCaseTransitionPolicy;
 import com.frauddetection.alert.fraudcase.FraudCaseValidationException;
+import com.frauddetection.alert.fraudcase.FraudCaseLifecycleIdempotencyConflictPolicy;
+import com.frauddetection.alert.fraudcase.FraudCaseLifecycleIdempotencyService;
+import com.frauddetection.alert.idempotency.SharedIdempotencyConflictPolicy;
+import com.frauddetection.alert.idempotency.SharedIdempotencyKeyPolicy;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
@@ -27,6 +34,7 @@ import com.frauddetection.alert.persistence.FraudCaseDecisionRepository;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.persistence.FraudCaseNoteDocument;
 import com.frauddetection.alert.persistence.FraudCaseNoteRepository;
+import com.frauddetection.alert.persistence.FraudCaseLifecycleIdempotencyRepository;
 import com.frauddetection.alert.persistence.FraudCaseRepository;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
 import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
@@ -37,6 +45,7 @@ import com.frauddetection.common.events.enums.RiskLevel;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -61,18 +70,18 @@ class Fdp42FraudCaseManagementServiceTest {
         when(fixture.fraudCaseRepository.save(any(FraudCaseDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(fixture.auditRepository.save(any(FraudCaseAuditEntryDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        FraudCaseDocument created = fixture.service.createCase(new CreateFraudCaseRequest(
+        FraudCaseResponse created = fixture.service.createCase(new CreateFraudCaseRequest(
                 List.of("alert-1"),
                 FraudCasePriority.HIGH,
                 RiskLevel.CRITICAL,
                 "Manual investigation",
                 "analyst-1"
-        ));
+        ), "create-key-1");
 
-        assertThat(created.getCaseNumber()).startsWith("FC-");
-        assertThat(created.getStatus()).isEqualTo(FraudCaseStatus.OPEN);
-        assertThat(created.getLinkedAlertIds()).containsExactly("alert-1");
-        assertThat(created.getTransactionIds()).isEmpty();
+        assertThat(created.caseNumber()).startsWith("FC-");
+        assertThat(created.status()).isEqualTo(FraudCaseStatus.OPEN);
+        assertThat(created.linkedAlertIds()).containsExactly("alert-1");
+        assertThat(created.transactionIds()).isEmpty();
         verify(fixture.transactionRunner).runLocalCommit(any());
         ArgumentCaptor<FraudCaseAuditEntryDocument> auditCaptor = ArgumentCaptor.forClass(FraudCaseAuditEntryDocument.class);
         verify(fixture.auditRepository).save(auditCaptor.capture());
@@ -90,7 +99,7 @@ class Fdp42FraudCaseManagementServiceTest {
                 RiskLevel.HIGH,
                 null,
                 "analyst-1"
-        ))).isInstanceOf(FraudCaseValidationException.class);
+        ), "create-key-invalid")).isInstanceOf(FraudCaseValidationException.class);
     }
 
     @Test
@@ -103,9 +112,9 @@ class Fdp42FraudCaseManagementServiceTest {
         when(fixture.auditRepository.save(any(FraudCaseAuditEntryDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(fixture.actorResolver.resolveActorId(eq("lead-1"), eq("ASSIGN_FRAUD_CASE"), eq("case-1"))).thenReturn("lead-1");
 
-        FraudCaseDocument assigned = fixture.service.assignCase("case-1", new AssignFraudCaseRequest("investigator-new", "lead-1"));
+        FraudCaseResponse assigned = fixture.service.assignCase("case-1", new AssignFraudCaseRequest("investigator-new", "lead-1"), "assign-key-1");
 
-        assertThat(assigned.getAssignedInvestigatorId()).isEqualTo("investigator-new");
+        assertThat(assigned.assignedInvestigatorId()).isEqualTo("investigator-new");
         ArgumentCaptor<FraudCaseAuditEntryDocument> auditCaptor = ArgumentCaptor.forClass(FraudCaseAuditEntryDocument.class);
         verify(fixture.auditRepository).save(auditCaptor.capture());
         assertThat(auditCaptor.getValue().getAction()).isEqualTo(FraudCaseAuditAction.CASE_REASSIGNED);
@@ -123,9 +132,9 @@ class Fdp42FraudCaseManagementServiceTest {
         when(fixture.auditRepository.save(any(FraudCaseAuditEntryDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(fixture.actorResolver.resolveActorId(eq("lead-1"), eq("ASSIGN_FRAUD_CASE"), eq("case-1"))).thenReturn("lead-1");
 
-        FraudCaseDocument assigned = fixture.service.assignCase("case-1", new AssignFraudCaseRequest("investigator-1", "lead-1"));
+        FraudCaseResponse assigned = fixture.service.assignCase("case-1", new AssignFraudCaseRequest("investigator-1", "lead-1"), "assign-key-2");
 
-        assertThat(assigned.getAssignedInvestigatorId()).isEqualTo("investigator-1");
+        assertThat(assigned.assignedInvestigatorId()).isEqualTo("investigator-1");
         ArgumentCaptor<FraudCaseAuditEntryDocument> auditCaptor = ArgumentCaptor.forClass(FraudCaseAuditEntryDocument.class);
         verify(fixture.auditRepository).save(auditCaptor.capture());
         assertThat(auditCaptor.getValue().getAction()).isEqualTo(FraudCaseAuditAction.CASE_REASSIGNED);
@@ -134,7 +143,7 @@ class Fdp42FraudCaseManagementServiceTest {
     }
 
     @Test
-    void shouldCreateIndependentCasesForDuplicateCreateRequests() {
+    void shouldCreateIndependentCasesForDifferentIdempotencyKeys() {
         Fixture fixture = new Fixture();
         when(fixture.alertRepository.findAllById(List.of("alert-1"))).thenReturn(List.of(alert("alert-1")));
         when(fixture.actorResolver.resolveActorId(eq("analyst-1"), eq("CREATE_FRAUD_CASE"), eq("new"))).thenReturn("analyst-1");
@@ -148,11 +157,11 @@ class Fdp42FraudCaseManagementServiceTest {
                 "analyst-1"
         );
 
-        FraudCaseDocument first = fixture.service.createCase(request);
-        FraudCaseDocument second = fixture.service.createCase(request);
+        FraudCaseResponse first = fixture.service.createCase(request, "create-key-2a");
+        FraudCaseResponse second = fixture.service.createCase(request, "create-key-2b");
 
-        assertThat(first.getCaseId()).isNotEqualTo(second.getCaseId());
-        assertThat(first.getCaseNumber()).isNotEqualTo(second.getCaseNumber());
+        assertThat(first.caseId()).isNotEqualTo(second.caseId());
+        assertThat(first.caseNumber()).isNotEqualTo(second.caseNumber());
         verify(fixture.auditRepository, times(2)).save(any(FraudCaseAuditEntryDocument.class));
     }
 
@@ -163,7 +172,7 @@ class Fdp42FraudCaseManagementServiceTest {
         document.setStatus(FraudCaseStatus.CLOSED);
         when(fixture.fraudCaseRepository.findById("case-1")).thenReturn(Optional.of(document));
 
-        assertThatThrownBy(() -> fixture.service.addNote("case-1", new AddFraudCaseNoteRequest("note", false, "analyst-1")))
+        assertThatThrownBy(() -> fixture.service.addNote("case-1", new AddFraudCaseNoteRequest("note", false, "analyst-1"), "note-key-closed"))
                 .isInstanceOf(FraudCaseConflictException.class);
     }
 
@@ -181,15 +190,15 @@ class Fdp42FraudCaseManagementServiceTest {
         when(fixture.actorResolver.resolveActorId(eq("analyst-1"), eq("ADD_FRAUD_CASE_DECISION"), eq("case-1"))).thenReturn("analyst-1");
         when(fixture.actorResolver.resolveActorId(eq("lead-1"), eq("CLOSE_FRAUD_CASE"), eq("case-1"))).thenReturn("lead-1");
 
-        fixture.service.addNote("case-1", new AddFraudCaseNoteRequest("resolved note", false, "analyst-1"));
+        fixture.service.addNote("case-1", new AddFraudCaseNoteRequest("resolved note", false, "analyst-1"), "note-key-resolved");
         fixture.service.addDecision("case-1", new AddFraudCaseDecisionRequest(
                 FraudCaseDecisionType.NO_ACTION,
                 "resolved decision",
                 "analyst-1"
-        ));
-        FraudCaseDocument closed = fixture.service.closeCase("case-1", new CloseFraudCaseRequest("Done", "lead-1"));
+        ), "decision-key-resolved");
+        FraudCaseResponse closed = fixture.service.closeCase("case-1", new CloseFraudCaseRequest("Done", "lead-1"), "close-key-resolved");
 
-        assertThat(closed.getStatus()).isEqualTo(FraudCaseStatus.CLOSED);
+        assertThat(closed.status()).isEqualTo(FraudCaseStatus.CLOSED);
         verify(fixture.noteRepository).save(any(FraudCaseNoteDocument.class));
         verify(fixture.decisionRepository).save(any(FraudCaseDecisionDocument.class));
         verify(fixture.auditRepository, times(3)).save(any(FraudCaseAuditEntryDocument.class));
@@ -205,8 +214,8 @@ class Fdp42FraudCaseManagementServiceTest {
         when(fixture.auditRepository.save(any(FraudCaseAuditEntryDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(fixture.actorResolver.resolveActorId(eq("analyst-1"), eq("ADD_FRAUD_CASE_NOTE"), eq("case-1"))).thenReturn("analyst-1");
 
-        fixture.service.addNote("case-1", new AddFraudCaseNoteRequest("same note", false, "analyst-1"));
-        fixture.service.addNote("case-1", new AddFraudCaseNoteRequest("same note", false, "analyst-1"));
+        fixture.service.addNote("case-1", new AddFraudCaseNoteRequest("same note", false, "analyst-1"), "note-key-1");
+        fixture.service.addNote("case-1", new AddFraudCaseNoteRequest("same note", false, "analyst-1"), "note-key-2");
 
         ArgumentCaptor<FraudCaseNoteDocument> noteCaptor = ArgumentCaptor.forClass(FraudCaseNoteDocument.class);
         verify(fixture.noteRepository, times(2)).save(noteCaptor.capture());
@@ -234,8 +243,8 @@ class Fdp42FraudCaseManagementServiceTest {
                 "same decision",
                 "analyst-1"
         );
-        fixture.service.addDecision("case-1", request);
-        fixture.service.addDecision("case-1", request);
+        fixture.service.addDecision("case-1", request, "decision-key-1");
+        fixture.service.addDecision("case-1", request, "decision-key-2");
 
         ArgumentCaptor<FraudCaseDecisionDocument> decisionCaptor = ArgumentCaptor.forClass(FraudCaseDecisionDocument.class);
         verify(fixture.decisionRepository, times(2)).save(decisionCaptor.capture());
@@ -258,9 +267,9 @@ class Fdp42FraudCaseManagementServiceTest {
         when(fixture.auditRepository.save(any(FraudCaseAuditEntryDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(fixture.actorResolver.resolveActorId(eq("lead-1"), eq("CLOSE_FRAUD_CASE"), eq("case-1"))).thenReturn("lead-1");
 
-        fixture.service.closeCase("case-1", new CloseFraudCaseRequest("Resolved", "lead-1"));
+        fixture.service.closeCase("case-1", new CloseFraudCaseRequest("Resolved", "lead-1"), "close-key-1");
 
-        assertThatThrownBy(() -> fixture.service.closeCase("case-1", new CloseFraudCaseRequest("Resolved", "lead-1")))
+        assertThatThrownBy(() -> fixture.service.closeCase("case-1", new CloseFraudCaseRequest("Resolved", "lead-1"), "close-key-2"))
                 .isInstanceOf(FraudCaseConflictException.class);
         verify(fixture.auditRepository, times(1)).save(any(FraudCaseAuditEntryDocument.class));
     }
@@ -275,9 +284,9 @@ class Fdp42FraudCaseManagementServiceTest {
         when(fixture.auditRepository.save(any(FraudCaseAuditEntryDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(fixture.actorResolver.resolveActorId(eq("lead-1"), eq("REOPEN_FRAUD_CASE"), eq("case-1"))).thenReturn("lead-1");
 
-        fixture.service.reopenCase("case-1", new ReopenFraudCaseRequest("New evidence", "lead-1"));
+        fixture.service.reopenCase("case-1", new ReopenFraudCaseRequest("New evidence", "lead-1"), "reopen-key-1");
 
-        assertThatThrownBy(() -> fixture.service.reopenCase("case-1", new ReopenFraudCaseRequest("New evidence", "lead-1")))
+        assertThatThrownBy(() -> fixture.service.reopenCase("case-1", new ReopenFraudCaseRequest("New evidence", "lead-1"), "reopen-key-2"))
                 .isInstanceOf(FraudCaseConflictException.class);
         verify(fixture.auditRepository, times(1)).save(any(FraudCaseAuditEntryDocument.class));
     }
@@ -305,6 +314,18 @@ class Fdp42FraudCaseManagementServiceTest {
         private final FraudCaseNoteRepository noteRepository = mock(FraudCaseNoteRepository.class);
         private final FraudCaseDecisionRepository decisionRepository = mock(FraudCaseDecisionRepository.class);
         private final FraudCaseAuditRepository auditRepository = mock(FraudCaseAuditRepository.class);
+        private final FraudCaseLifecycleIdempotencyRepository idempotencyRepository = mock(
+                FraudCaseLifecycleIdempotencyRepository.class,
+                invocation -> {
+                    if ("findByIdempotencyKeyHash".equals(invocation.getMethod().getName())) {
+                        return Optional.empty();
+                    }
+                    if ("save".equals(invocation.getMethod().getName())) {
+                        return invocation.getArgument(0);
+                    }
+                    return org.mockito.Mockito.RETURNS_DEFAULTS.answer(invocation);
+                }
+        );
         private final FraudCaseSearchRepository searchRepository = mock(FraudCaseSearchRepository.class);
         private final AnalystActorResolver actorResolver = mock(AnalystActorResolver.class);
         private final AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
@@ -326,7 +347,17 @@ class Fdp42FraudCaseManagementServiceTest {
                         actorResolver,
                         transactionRunner,
                         new FraudCaseTransitionPolicy(),
-                        new FraudCaseAuditService(auditRepository)
+                        new FraudCaseAuditService(auditRepository),
+                        new FraudCaseLifecycleIdempotencyService(
+                                idempotencyRepository,
+                        new SharedIdempotencyKeyPolicy(),
+                        new FraudCaseLifecycleIdempotencyConflictPolicy(new SharedIdempotencyConflictPolicy()),
+                        transactionRunner,
+                                JsonMapper.builder().addModule(new JavaTimeModule()).build(),
+                                metrics,
+                                Duration.ofHours(24)
+                        ),
+                        responseMapper
                 ),
                 new FraudCaseQueryService(
                         fraudCaseRepository,

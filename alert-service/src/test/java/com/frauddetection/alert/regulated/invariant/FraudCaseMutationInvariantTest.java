@@ -129,7 +129,9 @@ class FraudCaseMutationInvariantTest {
                         actorResolver,
                         transactionRunner,
                         new FraudCaseTransitionPolicy(),
-                        new FraudCaseAuditService(auditRepository)
+                        new FraudCaseAuditService(auditRepository),
+                        mock(com.frauddetection.alert.fraudcase.FraudCaseLifecycleIdempotencyService.class),
+                        responseMapper
                 ),
                 new FraudCaseQueryService(
                         fraudCaseRepository,

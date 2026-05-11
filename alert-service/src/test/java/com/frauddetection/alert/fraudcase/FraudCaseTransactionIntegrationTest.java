@@ -7,6 +7,7 @@ import com.frauddetection.alert.api.AddFraudCaseNoteRequest;
 import com.frauddetection.alert.api.AssignFraudCaseRequest;
 import com.frauddetection.alert.api.CloseFraudCaseRequest;
 import com.frauddetection.alert.api.CreateFraudCaseRequest;
+import com.frauddetection.alert.api.FraudCaseResponse;
 import com.frauddetection.alert.api.ReopenFraudCaseRequest;
 import com.frauddetection.alert.api.TransitionFraudCaseRequest;
 import com.frauddetection.alert.domain.FraudCaseAuditAction;
@@ -86,6 +87,7 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
     private FraudCaseManagementService service;
     private SimpleMeterRegistry meterRegistry;
     private AlertServiceMetrics metrics;
+    private int idempotencyKeySequence;
 
     @BeforeEach
     void setUp() {
@@ -129,7 +131,7 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
     void shouldCommitAssignmentAndAuditTogether() {
         FraudCaseDocument created = createCase();
 
-        service.assignCase(created.getCaseId(), new AssignFraudCaseRequest("investigator-1", "lead-1"));
+        service.assignCase(created.getCaseId(), new AssignFraudCaseRequest("investigator-1", "lead-1"), key("assign"));
 
         assertThat(caseRepository.findById(created.getCaseId()).orElseThrow().getAssignedInvestigatorId())
                 .isEqualTo("investigator-1");
@@ -142,16 +144,16 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
     void shouldCommitNoteDecisionTransitionCloseAndReopenWithAudit() {
         FraudCaseDocument created = createCase();
 
-        service.addNote(created.getCaseId(), new AddFraudCaseNoteRequest("First note", true, "investigator-1"));
+        service.addNote(created.getCaseId(), new AddFraudCaseNoteRequest("First note", true, "investigator-1"), key("note"));
         service.addDecision(created.getCaseId(), new AddFraudCaseDecisionRequest(
                 FraudCaseDecisionType.NEEDS_MORE_INFO,
                 "Need second review",
                 "investigator-1"
-        ));
-        service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.IN_REVIEW, "investigator-1"));
-        service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.RESOLVED, "investigator-1"));
-        service.closeCase(created.getCaseId(), new CloseFraudCaseRequest("Resolved after review", "investigator-1"));
-        service.reopenCase(created.getCaseId(), new ReopenFraudCaseRequest("New evidence", "lead-1"));
+        ), key("decision"));
+        service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.IN_REVIEW, "investigator-1"), key("transition"));
+        service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.RESOLVED, "investigator-1"), key("transition"));
+        service.closeCase(created.getCaseId(), new CloseFraudCaseRequest("Resolved after review", "investigator-1"), key("close"));
+        service.reopenCase(created.getCaseId(), new ReopenFraudCaseRequest("New evidence", "lead-1"), key("reopen"));
 
         assertThat(noteRepository.findByCaseIdOrderByCreatedAtAsc(created.getCaseId())).hasSize(1);
         assertThat(decisionRepository.findByCaseIdOrderByCreatedAtAsc(created.getCaseId())).hasSize(1);
@@ -185,7 +187,7 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
         Instant originalUpdatedAt = caseRepository.findById(created.getCaseId()).orElseThrow().getUpdatedAt();
         service = service(new FailingFraudCaseAuditService(auditRepository));
 
-        assertThatThrownBy(() -> service.addNote(created.getCaseId(), new AddFraudCaseNoteRequest("Duplicate proof", false, "analyst-1")))
+        assertThatThrownBy(() -> service.addNote(created.getCaseId(), new AddFraudCaseNoteRequest("Duplicate proof", false, "analyst-1"), key("note")))
                 .isInstanceOf(IllegalStateException.class);
 
         assertThat(noteRepository.findByCaseIdOrderByCreatedAtAsc(created.getCaseId())).isEmpty();
@@ -202,7 +204,7 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
                 FraudCaseDecisionType.NO_ACTION,
                 "No action",
                 "analyst-1"
-        ))).isInstanceOf(IllegalStateException.class);
+        ), key("decision"))).isInstanceOf(IllegalStateException.class);
 
         assertThat(decisionRepository.findByCaseIdOrderByCreatedAtAsc(created.getCaseId())).isEmpty();
         assertThat(caseRepository.findById(created.getCaseId()).orElseThrow().getUpdatedAt()).isEqualTo(originalUpdatedAt);
@@ -215,7 +217,7 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
         long auditBefore = auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId()).size();
         service = service(new FailingFraudCaseAuditService(auditRepository));
 
-        assertThatThrownBy(() -> service.assignCase(created.getCaseId(), new AssignFraudCaseRequest("investigator-1", "lead-1")))
+        assertThatThrownBy(() -> service.assignCase(created.getCaseId(), new AssignFraudCaseRequest("investigator-1", "lead-1"), key("assign")))
                 .isInstanceOf(IllegalStateException.class);
 
         FraudCaseDocument persisted = caseRepository.findById(created.getCaseId()).orElseThrow();
@@ -231,7 +233,7 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
         long auditBefore = auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId()).size();
         service = service(new FailingFraudCaseAuditService(auditRepository));
 
-        assertThatThrownBy(() -> service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.IN_REVIEW, "analyst-1")))
+        assertThatThrownBy(() -> service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.IN_REVIEW, "analyst-1"), key("transition")))
                 .isInstanceOf(IllegalStateException.class);
 
         FraudCaseDocument persisted = caseRepository.findById(created.getCaseId()).orElseThrow();
@@ -243,13 +245,13 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
     @Test
     void shouldRollbackCloseWhenAuditAppendFails() {
         FraudCaseDocument created = createCase();
-        service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.IN_REVIEW, "analyst-1"));
-        service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.RESOLVED, "analyst-1"));
+        service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.IN_REVIEW, "analyst-1"), key("transition"));
+        service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.RESOLVED, "analyst-1"), key("transition"));
         Instant originalUpdatedAt = caseRepository.findById(created.getCaseId()).orElseThrow().getUpdatedAt();
         long auditBefore = auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId()).size();
         service = service(new FailingFraudCaseAuditService(auditRepository));
 
-        assertThatThrownBy(() -> service.closeCase(created.getCaseId(), new CloseFraudCaseRequest("Resolved", "lead-1")))
+        assertThatThrownBy(() -> service.closeCase(created.getCaseId(), new CloseFraudCaseRequest("Resolved", "lead-1"), key("close")))
                 .isInstanceOf(IllegalStateException.class);
 
         FraudCaseDocument persisted = caseRepository.findById(created.getCaseId()).orElseThrow();
@@ -263,16 +265,16 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
     @Test
     void shouldRollbackReopenWhenAuditAppendFails() {
         FraudCaseDocument created = createCase();
-        service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.IN_REVIEW, "analyst-1"));
-        service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.RESOLVED, "analyst-1"));
-        service.closeCase(created.getCaseId(), new CloseFraudCaseRequest("Resolved", "lead-1"));
+        service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.IN_REVIEW, "analyst-1"), key("transition"));
+        service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.RESOLVED, "analyst-1"), key("transition"));
+        service.closeCase(created.getCaseId(), new CloseFraudCaseRequest("Resolved", "lead-1"), key("close"));
         FraudCaseDocument closed = caseRepository.findById(created.getCaseId()).orElseThrow();
         Instant originalUpdatedAt = closed.getUpdatedAt();
         Instant originalClosedAt = closed.getClosedAt();
         long auditBefore = auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId()).size();
         service = service(new FailingFraudCaseAuditService(auditRepository));
 
-        assertThatThrownBy(() -> service.reopenCase(created.getCaseId(), new ReopenFraudCaseRequest("New evidence", "lead-1")))
+        assertThatThrownBy(() -> service.reopenCase(created.getCaseId(), new ReopenFraudCaseRequest("New evidence", "lead-1"), key("reopen")))
                 .isInstanceOf(IllegalStateException.class);
 
         FraudCaseDocument persisted = caseRepository.findById(created.getCaseId()).orElseThrow();
@@ -290,15 +292,15 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
         FraudCaseAuditEntryDocument firstEntry = afterCreate.get(0);
         Map<String, String> firstDetails = Map.copyOf(firstEntry.getDetails());
 
-        service.assignCase(created.getCaseId(), new AssignFraudCaseRequest("investigator-1", "lead-1"));
+        service.assignCase(created.getCaseId(), new AssignFraudCaseRequest("investigator-1", "lead-1"), key("assign"));
         assertThat(auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId())).hasSize(afterCreate.size() + 1);
-        service.addNote(created.getCaseId(), new AddFraudCaseNoteRequest("note", false, "investigator-1"));
+        service.addNote(created.getCaseId(), new AddFraudCaseNoteRequest("note", false, "investigator-1"), key("note"));
         assertThat(auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId())).hasSize(afterCreate.size() + 2);
         service.addDecision(created.getCaseId(), new AddFraudCaseDecisionRequest(
                 FraudCaseDecisionType.NO_ACTION,
                 "decision",
                 "investigator-1"
-        ));
+        ), key("decision"));
         assertThat(auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId())).hasSize(afterCreate.size() + 3);
 
         List<FraudCaseAuditEntryDocument> audits = auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId());
@@ -366,7 +368,7 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
                     assertThat(record.getCompletedAt()).isAfterOrEqualTo(record.getCreatedAt());
                     assertThat(record.getExpiresAt()).isEqualTo(record.getCreatedAt().plus(Duration.ofHours(24)));
                 });
-        assertThat(idempotencyOutcome("new")).isEqualTo(1.0d);
+        assertThat(idempotencyOutcome("new")).isEqualTo(2.0d);
         assertThat(idempotencyOutcome("replay")).isEqualTo(1.0d);
     }
 
@@ -402,7 +404,7 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
         assertThat(caseRepository.findById(created.getCaseId()).orElseThrow().getStatus()).isEqualTo(FraudCaseStatus.OPEN);
         assertThat(countAudit(created.getCaseId(), FraudCaseAuditAction.CASE_CLOSED)).isZero();
         assertThat(auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId())).hasSize(auditBefore);
-        assertThat(idempotencyRepository.findAll()).hasSize(1);
+        assertOneCompletedRecord("ADD_FRAUD_CASE_NOTE", created.getCaseId());
         assertThat(idempotencyOutcome("conflict")).isEqualTo(1.0d);
     }
 
@@ -422,7 +424,7 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
         assertThat(noteRepository.findByCaseIdOrderByCreatedAtAsc(secondCase.getCaseId())).isEmpty();
         assertThat(countAudit(secondCase.getCaseId(), FraudCaseAuditAction.NOTE_ADDED)).isZero();
         assertThat(auditRepository.findByCaseIdOrderByOccurredAtAsc(secondCase.getCaseId())).hasSize(secondCaseAuditBefore);
-        assertThat(idempotencyRepository.findAll()).hasSize(1);
+        assertOneCompletedRecord("ADD_FRAUD_CASE_NOTE", firstCase.getCaseId());
     }
 
     @Test
@@ -440,7 +442,7 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
         assertThat(noteRepository.findByCaseIdOrderByCreatedAtAsc(created.getCaseId())).hasSize(1);
         assertThat(countAudit(created.getCaseId(), FraudCaseAuditAction.NOTE_ADDED)).isEqualTo(1);
         assertThat(auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId())).hasSize(auditBefore);
-        assertThat(idempotencyRepository.findAll()).hasSize(1);
+        assertOneCompletedRecord("ADD_FRAUD_CASE_NOTE", created.getCaseId());
     }
 
     @Test
@@ -448,10 +450,10 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
         FraudCaseDocument created = createCase();
         AssignFraudCaseRequest request = new AssignFraudCaseRequest("investigator-1", "lead-1");
 
-        FraudCaseDocument first = service.assignCase(created.getCaseId(), request, "assign-key-1");
-        FraudCaseDocument replay = service.assignCase(created.getCaseId(), request, "assign-key-1");
+        FraudCaseResponse first = service.assignCase(created.getCaseId(), request, "assign-key-1");
+        FraudCaseResponse replay = service.assignCase(created.getCaseId(), request, "assign-key-1");
 
-        assertThat(replay.getAssignedInvestigatorId()).isEqualTo(first.getAssignedInvestigatorId());
+        assertThat(replay.assignedInvestigatorId()).isEqualTo(first.assignedInvestigatorId());
         assertThat(countAudit(created.getCaseId(), FraudCaseAuditAction.CASE_ASSIGNED)).isEqualTo(1);
         assertOneCompletedRecord("ASSIGN_FRAUD_CASE", created.getCaseId());
 
@@ -498,10 +500,10 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
         FraudCaseDocument created = createCase();
         TransitionFraudCaseRequest request = new TransitionFraudCaseRequest(FraudCaseStatus.IN_REVIEW, "analyst-1");
 
-        FraudCaseDocument first = service.transitionCase(created.getCaseId(), request, "transition-key-1");
-        FraudCaseDocument replay = service.transitionCase(created.getCaseId(), request, "transition-key-1");
+        FraudCaseResponse first = service.transitionCase(created.getCaseId(), request, "transition-key-1");
+        FraudCaseResponse replay = service.transitionCase(created.getCaseId(), request, "transition-key-1");
 
-        assertThat(replay.getStatus()).isEqualTo(first.getStatus()).isEqualTo(FraudCaseStatus.IN_REVIEW);
+        assertThat(replay.status()).isEqualTo(first.status()).isEqualTo(FraudCaseStatus.IN_REVIEW);
         assertThat(countAudit(created.getCaseId(), FraudCaseAuditAction.STATUS_CHANGED)).isEqualTo(1);
         assertOneCompletedRecord("TRANSITION_FRAUD_CASE", created.getCaseId());
 
@@ -519,14 +521,14 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
     @Test
     void shouldReplayAndConflictCloseByIdempotencyKey() {
         FraudCaseDocument created = createCase();
-        service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.IN_REVIEW, "analyst-1"));
-        service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.RESOLVED, "analyst-1"));
+        service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.IN_REVIEW, "analyst-1"), key("transition"));
+        service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.RESOLVED, "analyst-1"), key("transition"));
         CloseFraudCaseRequest request = new CloseFraudCaseRequest("Resolved", "lead-1");
 
-        FraudCaseDocument first = service.closeCase(created.getCaseId(), request, "close-key-replay");
-        FraudCaseDocument replay = service.closeCase(created.getCaseId(), request, "close-key-replay");
+        FraudCaseResponse first = service.closeCase(created.getCaseId(), request, "close-key-replay");
+        FraudCaseResponse replay = service.closeCase(created.getCaseId(), request, "close-key-replay");
 
-        assertThat(replay.getStatus()).isEqualTo(first.getStatus()).isEqualTo(FraudCaseStatus.CLOSED);
+        assertThat(replay.status()).isEqualTo(first.status()).isEqualTo(FraudCaseStatus.CLOSED);
         assertThat(countAudit(created.getCaseId(), FraudCaseAuditAction.CASE_CLOSED)).isEqualTo(1);
         assertOneCompletedRecord("CLOSE_FRAUD_CASE", created.getCaseId());
 
@@ -542,15 +544,15 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
     @Test
     void shouldReplayAndConflictReopenByIdempotencyKey() {
         FraudCaseDocument created = createCase();
-        service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.IN_REVIEW, "analyst-1"));
-        service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.RESOLVED, "analyst-1"));
-        service.closeCase(created.getCaseId(), new CloseFraudCaseRequest("Resolved", "lead-1"));
+        service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.IN_REVIEW, "analyst-1"), key("transition"));
+        service.transitionCase(created.getCaseId(), new TransitionFraudCaseRequest(FraudCaseStatus.RESOLVED, "analyst-1"), key("transition"));
+        service.closeCase(created.getCaseId(), new CloseFraudCaseRequest("Resolved", "lead-1"), key("close"));
         ReopenFraudCaseRequest request = new ReopenFraudCaseRequest("New evidence", "lead-1");
 
-        FraudCaseDocument first = service.reopenCase(created.getCaseId(), request, "reopen-key-replay");
-        FraudCaseDocument replay = service.reopenCase(created.getCaseId(), request, "reopen-key-replay");
+        FraudCaseResponse first = service.reopenCase(created.getCaseId(), request, "reopen-key-replay");
+        FraudCaseResponse replay = service.reopenCase(created.getCaseId(), request, "reopen-key-replay");
 
-        assertThat(replay.getStatus()).isEqualTo(first.getStatus()).isEqualTo(FraudCaseStatus.REOPENED);
+        assertThat(replay.status()).isEqualTo(first.status()).isEqualTo(FraudCaseStatus.REOPENED);
         assertThat(countAudit(created.getCaseId(), FraudCaseAuditAction.CASE_REOPENED)).isEqualTo(1);
         assertOneCompletedRecord("REOPEN_FRAUD_CASE", created.getCaseId());
 
@@ -573,12 +575,12 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
                 "analyst-1"
         );
 
-        FraudCaseDocument first = service.createCase(request, "create-key-1");
-        FraudCaseDocument replay = service.createCase(request, "create-key-1");
+        FraudCaseResponse first = service.createCase(request, "create-key-1");
+        FraudCaseResponse replay = service.createCase(request, "create-key-1");
 
-        assertThat(replay.getCaseId()).isEqualTo(first.getCaseId());
+        assertThat(replay.caseId()).isEqualTo(first.caseId());
         assertThat(caseRepository.findAll()).hasSize(1);
-        assertThat(auditRepository.findByCaseIdOrderByOccurredAtAsc(first.getCaseId())).hasSize(1);
+        assertThat(auditRepository.findByCaseIdOrderByOccurredAtAsc(first.caseId())).hasSize(1);
     }
 
     @Test
@@ -601,8 +603,8 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void shouldFailClosedWhenRequiredIdempotencyServiceIsMissing() {
-        service = service(new FraudCaseAuditService(auditRepository), IdempotencyServiceMode.NULL_IDEMPOTENCY);
         FraudCaseDocument created = createCase();
+        service = service(new FraudCaseAuditService(auditRepository), IdempotencyServiceMode.NULL_IDEMPOTENCY);
         int auditBefore = auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId()).size();
 
         assertThatThrownBy(() -> service.addNote(
@@ -614,19 +616,26 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
 
         assertThat(noteRepository.findByCaseIdOrderByCreatedAtAsc(created.getCaseId())).isEmpty();
         assertThat(auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId())).hasSize(auditBefore);
-        assertThat(idempotencyRepository.findAll()).isEmpty();
+        assertThat(idempotencyRepository.findAll())
+                .noneMatch(record -> "ADD_FRAUD_CASE_NOTE".equals(record.getAction()));
     }
 
     @Test
-    void shouldAllowInternalCompatibilityPathWhenIdempotencyServiceIsMissing() {
-        service = service(new FraudCaseAuditService(auditRepository), IdempotencyServiceMode.NULL_IDEMPOTENCY);
+    void shouldNotExposeInternalCompatibilityPathWhenIdempotencyServiceIsMissing() {
         FraudCaseDocument created = createCase();
+        service = service(new FraudCaseAuditService(auditRepository), IdempotencyServiceMode.NULL_IDEMPOTENCY);
 
-        service.addNote(created.getCaseId(), new AddFraudCaseNoteRequest("Internal note", false, "analyst-1"));
+        assertThatThrownBy(() -> service.addNote(
+                created.getCaseId(),
+                new AddFraudCaseNoteRequest("Internal note", false, "analyst-1"),
+                key("note")
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessage("Fraud-case lifecycle idempotency is required but not configured.");
 
-        assertThat(noteRepository.findByCaseIdOrderByCreatedAtAsc(created.getCaseId())).hasSize(1);
-        assertThat(countAudit(created.getCaseId(), FraudCaseAuditAction.NOTE_ADDED)).isEqualTo(1);
-        assertThat(idempotencyRepository.findAll()).isEmpty();
+        assertThat(noteRepository.findByCaseIdOrderByCreatedAtAsc(created.getCaseId())).isEmpty();
+        assertThat(countAudit(created.getCaseId(), FraudCaseAuditAction.NOTE_ADDED)).isZero();
+        assertThat(idempotencyRepository.findAll())
+                .noneMatch(record -> "ADD_FRAUD_CASE_NOTE".equals(record.getAction()));
     }
 
     @Test
@@ -692,13 +701,18 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
     }
 
     private FraudCaseDocument createCase(String alertId) {
-        return service.createCase(new CreateFraudCaseRequest(
+        FraudCaseResponse response = service.createCase(new CreateFraudCaseRequest(
                 List.of(alertId),
                 FraudCasePriority.HIGH,
                 RiskLevel.CRITICAL,
                 "Manual investigation",
                 "analyst-1"
-        ));
+        ), key("create"));
+        return caseRepository.findById(response.caseId()).orElseThrow();
+    }
+
+    private String key(String prefix) {
+        return prefix + "-test-key-" + (++idempotencyKeySequence);
     }
 
     private FraudCaseManagementService service(FraudCaseAuditService auditService) {
@@ -740,7 +754,8 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
                         transactionRunner,
                         new FraudCaseTransitionPolicy(),
                         auditService,
-                        idempotencyService
+                        idempotencyService,
+                        responseMapper
                 ),
                 new FraudCaseQueryService(
                         caseRepository,

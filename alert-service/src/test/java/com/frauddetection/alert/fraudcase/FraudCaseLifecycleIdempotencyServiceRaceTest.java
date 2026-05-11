@@ -1,6 +1,8 @@
 package com.frauddetection.alert.fraudcase;
 
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.frauddetection.alert.api.FraudCaseNoteResponse;
 import com.frauddetection.alert.idempotency.SharedIdempotencyConflictPolicy;
 import com.frauddetection.alert.idempotency.SharedIdempotencyKeyPolicy;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
@@ -29,6 +31,10 @@ import static org.mockito.Mockito.when;
 
 class FraudCaseLifecycleIdempotencyServiceRaceTest {
 
+    private static final String LEGACY_NOTE_JSON = """
+            {"id":"note-1","caseId":"case-1","body":"replayed","createdBy":"analyst-1","createdAt":"2026-05-11T10:00:00Z","internalOnly":false}
+            """;
+
     private static final FraudCaseLifecycleIdempotencyCommand COMMAND = new FraudCaseLifecycleIdempotencyCommand(
             "race-key-1",
             "ADD_FRAUD_CASE_NOTE",
@@ -41,14 +47,14 @@ class FraudCaseLifecycleIdempotencyServiceRaceTest {
     @Test
     void duplicateKeyRaceReplaysCompletedRecordWithoutLeakingRawException() {
         AtomicInteger mutationCalls = new AtomicInteger();
-        FraudCaseLifecycleIdempotencyService service = duplicateInsertService(existing("request-hash-1", "\"replayed\""));
+        FraudCaseLifecycleIdempotencyService service = duplicateInsertService(existing("request-hash-1", LEGACY_NOTE_JSON));
 
-        String response = service.execute(COMMAND, () -> {
+        FraudCaseNoteResponse response = service.execute(COMMAND, () -> {
             mutationCalls.incrementAndGet();
-            return "mutated";
-        }, String.class);
+            return note("mutated");
+        }, FraudCaseNoteResponse.class);
 
-        assertThat(response).isEqualTo("replayed");
+        assertThat(response.body()).isEqualTo("replayed");
         assertThat(mutationCalls).hasValue(0);
     }
 
@@ -127,11 +133,11 @@ class FraudCaseLifecycleIdempotencyServiceRaceTest {
         TransactionSystemException failure = new TransactionSystemException(
                 "Could not commit Mongo transaction after WriteConflict with TransientTransactionError"
         );
-        FraudCaseLifecycleIdempotencyService service = transactionFailureService(failure, existing("request-hash-1", "\"replayed\""));
+        FraudCaseLifecycleIdempotencyService service = transactionFailureService(failure, existing("request-hash-1", LEGACY_NOTE_JSON));
 
-        String response = service.execute(COMMAND, () -> "mutated", String.class);
+        FraudCaseNoteResponse response = service.execute(COMMAND, () -> note("mutated"), FraudCaseNoteResponse.class);
 
-        assertThat(response).isEqualTo("replayed");
+        assertThat(response.body()).isEqualTo("replayed");
     }
 
     @Test
@@ -141,7 +147,7 @@ class FraudCaseLifecycleIdempotencyServiceRaceTest {
                 new SharedIdempotencyKeyPolicy(),
                 new FraudCaseLifecycleIdempotencyConflictPolicy(new SharedIdempotencyConflictPolicy()),
                 transactionRunner(),
-                JsonMapper.builder().build(),
+                JsonMapper.builder().addModule(new JavaTimeModule()).build(),
                 FraudCaseLifecycleIdempotencyService.MAX_RESPONSE_SNAPSHOT_BYTES,
                 Duration.ZERO
         )).isInstanceOf(IllegalArgumentException.class)
@@ -166,14 +172,21 @@ class FraudCaseLifecycleIdempotencyServiceRaceTest {
                 new SharedIdempotencyKeyPolicy(),
                 new FraudCaseLifecycleIdempotencyConflictPolicy(new SharedIdempotencyConflictPolicy()),
                 transactionRunner(),
-                JsonMapper.builder().build(),
+                JsonMapper.builder().addModule(new JavaTimeModule()).build(),
                 FraudCaseLifecycleIdempotencyService.MAX_RESPONSE_SNAPSHOT_BYTES,
                 Duration.ofHours(24),
                 null,
                 Clock.fixed(completionTime, java.time.ZoneOffset.UTC)
         );
 
-        service.execute(COMMAND, () -> "mutated", String.class);
+        service.execute(COMMAND, () -> new FraudCaseNoteResponse(
+                "note-1",
+                "case-1",
+                "Completion clock proof note",
+                "analyst-1",
+                completionTime,
+                false
+        ), FraudCaseNoteResponse.class);
 
         assertThat(completedRecord.get().getCreatedAt()).isEqualTo(COMMAND.now());
         assertThat(completedRecord.get().getCompletedAt()).isEqualTo(completionTime);
@@ -249,6 +262,17 @@ class FraudCaseLifecycleIdempotencyServiceRaceTest {
         return document;
     }
 
+    private FraudCaseNoteResponse note(String body) {
+        return new FraudCaseNoteResponse(
+                "note-1",
+                "case-1",
+                body,
+                "analyst-1",
+                Instant.parse("2026-05-11T10:00:00Z"),
+                false
+        );
+    }
+
     private static final class DuplicateInsertFraudCaseLifecycleIdempotencyService
             extends FraudCaseLifecycleIdempotencyService {
 
@@ -267,7 +291,7 @@ class FraudCaseLifecycleIdempotencyServiceRaceTest {
                     keyPolicy,
                     conflictPolicy,
                     transactionRunner,
-                    JsonMapper.builder().build(),
+                    JsonMapper.builder().addModule(new JavaTimeModule()).build(),
                     MAX_RESPONSE_SNAPSHOT_BYTES,
                     DEFAULT_RETENTION,
                     metrics,
@@ -301,7 +325,14 @@ class FraudCaseLifecycleIdempotencyServiceRaceTest {
                 RegulatedMutationTransactionRunner transactionRunner,
                 FraudCaseLifecycleIdempotencyRecordDocument existing
         ) {
-            super(repository, keyPolicy, conflictPolicy, transactionRunner, JsonMapper.builder().build(), MAX_RESPONSE_SNAPSHOT_BYTES);
+            super(
+                    repository,
+                    keyPolicy,
+                    conflictPolicy,
+                    transactionRunner,
+                    JsonMapper.builder().addModule(new JavaTimeModule()).build(),
+                    MAX_RESPONSE_SNAPSHOT_BYTES
+            );
             this.existing = existing;
         }
 
