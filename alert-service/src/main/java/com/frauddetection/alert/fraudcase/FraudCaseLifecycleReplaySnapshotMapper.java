@@ -92,7 +92,7 @@ public class FraudCaseLifecycleReplaySnapshotMapper {
                     decision.summary()
             );
         }
-        return null;
+        throw new UnsupportedFraudCaseLifecycleReplaySnapshotException();
     }
 
     @SuppressWarnings("unchecked")

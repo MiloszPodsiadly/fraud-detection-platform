@@ -1,6 +1,8 @@
 package com.frauddetection.alert.fraudcase;
 
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.frauddetection.alert.api.FraudCaseNoteResponse;
 import com.frauddetection.alert.idempotency.SharedIdempotencyConflictPolicy;
 import com.frauddetection.alert.idempotency.SharedIdempotencyKeyPolicy;
 import com.frauddetection.alert.persistence.FraudCaseLifecycleIdempotencyRecordDocument;
@@ -53,7 +55,7 @@ class Fdp44FraudCaseIdempotencyRetentionOperationalTest {
                 new SharedIdempotencyKeyPolicy(),
                 new FraudCaseLifecycleIdempotencyConflictPolicy(new SharedIdempotencyConflictPolicy()),
                 transactionRunner,
-                JsonMapper.builder().build(),
+                JsonMapper.builder().addModule(new JavaTimeModule()).build(),
                 FraudCaseLifecycleIdempotencyService.MAX_RESPONSE_SNAPSHOT_BYTES,
                 retention,
                 null,
@@ -69,8 +71,15 @@ class Fdp44FraudCaseIdempotencyRetentionOperationalTest {
                         "request-hash-1",
                         createdAt
                 ),
-                () -> "ok",
-                String.class
+                () -> new FraudCaseNoteResponse(
+                        "note-1",
+                        "case-1",
+                        "Retention proof note",
+                        "analyst-1",
+                        completedAt,
+                        false
+                ),
+                FraudCaseNoteResponse.class
         );
 
         FraudCaseLifecycleIdempotencyRecordDocument completed = stored.get();

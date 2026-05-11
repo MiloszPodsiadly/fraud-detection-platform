@@ -1,6 +1,8 @@
 package com.frauddetection.alert.fraudcase;
 
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.frauddetection.alert.api.FraudCaseNoteResponse;
 import com.frauddetection.alert.idempotency.SharedIdempotencyConflictPolicy;
 import com.frauddetection.alert.idempotency.SharedIdempotencyKeyPolicy;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
@@ -141,7 +143,7 @@ class FraudCaseLifecycleIdempotencyServiceRaceTest {
                 new SharedIdempotencyKeyPolicy(),
                 new FraudCaseLifecycleIdempotencyConflictPolicy(new SharedIdempotencyConflictPolicy()),
                 transactionRunner(),
-                JsonMapper.builder().build(),
+                JsonMapper.builder().addModule(new JavaTimeModule()).build(),
                 FraudCaseLifecycleIdempotencyService.MAX_RESPONSE_SNAPSHOT_BYTES,
                 Duration.ZERO
         )).isInstanceOf(IllegalArgumentException.class)
@@ -166,14 +168,21 @@ class FraudCaseLifecycleIdempotencyServiceRaceTest {
                 new SharedIdempotencyKeyPolicy(),
                 new FraudCaseLifecycleIdempotencyConflictPolicy(new SharedIdempotencyConflictPolicy()),
                 transactionRunner(),
-                JsonMapper.builder().build(),
+                JsonMapper.builder().addModule(new JavaTimeModule()).build(),
                 FraudCaseLifecycleIdempotencyService.MAX_RESPONSE_SNAPSHOT_BYTES,
                 Duration.ofHours(24),
                 null,
                 Clock.fixed(completionTime, java.time.ZoneOffset.UTC)
         );
 
-        service.execute(COMMAND, () -> "mutated", String.class);
+        service.execute(COMMAND, () -> new FraudCaseNoteResponse(
+                "note-1",
+                "case-1",
+                "Completion clock proof note",
+                "analyst-1",
+                completionTime,
+                false
+        ), FraudCaseNoteResponse.class);
 
         assertThat(completedRecord.get().getCreatedAt()).isEqualTo(COMMAND.now());
         assertThat(completedRecord.get().getCompletedAt()).isEqualTo(completionTime);

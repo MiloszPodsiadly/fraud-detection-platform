@@ -284,8 +284,8 @@ public class FraudCaseLifecycleIdempotencyService {
 
     private String snapshot(FraudCaseLifecycleIdempotencyCommand command, Object response, Instant completedAt) {
         try {
-            Object snapshot = replaySnapshotMapper.toSnapshot(command, response, completedAt);
-            String serialized = objectMapper.writeValueAsString(snapshot == null ? response : snapshot);
+            FraudCaseLifecycleReplaySnapshot snapshot = replaySnapshotMapper.toSnapshot(command, response, completedAt);
+            String serialized = objectMapper.writeValueAsString(snapshot);
             if (serialized.getBytes(StandardCharsets.UTF_8).length > maxResponseSnapshotBytes) {
                 throw new FraudCaseIdempotencySnapshotTooLargeException();
             }
