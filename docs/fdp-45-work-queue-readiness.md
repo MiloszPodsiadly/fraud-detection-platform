@@ -42,8 +42,18 @@ case-sensitive and does not apply identity aliasing beyond trimming.
 Supported sort fields are `createdAt`, `updatedAt`, `priority`, `riskLevel`, and `caseNumber`. Sort directions are `asc` and `desc`. The Mongo query path appends `_id ASC` as a deterministic tie-breaker.
 
 Pagination is bounded to page numbers `0..1000` and page sizes `1..100`. Invalid page requests fail with
-`INVALID_PAGE_REQUEST` before repository access. The dedicated work queue uses bounded slice pagination and does not
-perform an exact Mongo count for broad queues.
+`INVALID_PAGE_REQUEST` before repository access. The dedicated work queue uses bounded slice pagination and does not perform an exact Mongo count for broad queues.
+
+This is bounded exploratory offset pagination, not an export-grade or unbounded browse contract. Repeated requests near
+`MAX_PAGE_NUMBER=1000` should be treated as an operational signal to refine filters or add a cursor/keyset follow-up.
+Low-cardinality alerting can watch for high-page work queue usage by endpoint family and outcome, but must not label by
+case id, assignee, linked alert id, raw query string, or request hash.
+
+The legacy list endpoints keep their `PagedResponse<FraudCaseSummaryResponse>` compatibility contract and therefore
+still perform exact count pagination. FDP-45 aligns their API boundary with the same `0..1000` and `1..100` bounds, but
+the legacy exact count remains compatibility debt. High-volume investigator queues should use the dedicated work queue
+slice endpoint. A future hardening item may move the legacy list contract to cursor/keyset pagination or a capped count
+after a versioned public API decision.
 
 ## SLA Fields
 
@@ -55,18 +65,29 @@ SLA values are derived at read time only:
 - `slaStatus` may be `WITHIN_SLA`, `NEAR_BREACH`, `BREACHED`, `NOT_APPLICABLE`, or `UNKNOWN`.
 
 The SLA duration is explicitly configured by `app.fraud-cases.work-queue.sla` and must be a positive duration at
-startup. Closed or resolved fraud cases are `NOT_APPLICABLE`. Missing timestamps are `UNKNOWN`. These values are not
-persisted and do not mutate fraud-case state, audit records, idempotency records, assignment, priority, or status.
-The derived SLA and age values are not persisted.
+startup. Local development may use the `application.yml` fallback value, but production-like profiles such as `prod` and
+`bank` require the `FRAUD_CASE_WORK_QUEUE_SLA` environment variable without a default. Closed or resolved fraud cases
+are `NOT_APPLICABLE`. Missing timestamps are `UNKNOWN`. These values are not persisted and do not mutate fraud-case
+state, audit records, idempotency records, assignment, priority, or status. The derived SLA and age values are not
+persisted.
 
 ## Index Readiness
 
 Existing indexed fields cover the FDP-45 query shape: `status`, `priority`, `riskLevel`, `assignedInvestigatorId`,
 `linkedAlertIds`, `caseNumber`, `createdAt`, and `updatedAt`. Required proof checks that every allowlisted stable sort
 field has an index. Recommended operational indexes for larger datasets are compound indexes that align with the
-allowed filters plus stable sort fields, for example status or assignee with `createdAt` and `_id`.
+allowed filters plus stable sort fields:
 
-These are readiness recommendations, not a claim that every production workload is fully optimized.
+- `status + createdAt + _id`
+- `assignedInvestigatorId + createdAt + _id`
+- `priority + createdAt + _id`
+- `riskLevel + createdAt + _id`
+- `linkedAlertIds + createdAt + _id`
+- `status + updatedAt + _id`
+- `assignedInvestigatorId + updatedAt + _id`
+
+FDP-45 ships minimum allowed-sort index readiness. These compound indexes are high-volume deployment recommendations,
+not a claim that every filter/sort combination is production-optimized.
 
 ## Security And Observability
 
@@ -88,7 +109,7 @@ case-id lists, exception messages, or stack traces.
 Rejected work queue reads normally return `400`. In fail-closed sensitive-read audit mode, if audit persistence is
 unavailable, rejected reads, failed reads, and successful reads return `503` instead. This is intentional: sensitive-read
 audit is mandatory in bank mode, and success metrics are recorded only after the read succeeds and the required audit
-write succeeds.
+write succeeds. The sensitive-read audit unavailable runbook is `docs/runbooks/fdp-45-sensitive-read-audit-unavailable.md`.
 
 Metrics are low-cardinality:
 
