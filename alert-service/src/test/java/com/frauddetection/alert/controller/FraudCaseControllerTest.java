@@ -239,7 +239,11 @@ class FraudCaseControllerTest {
                 .doesNotContain("progress-key")
                 .doesNotContain("requestHash")
                 .doesNotContain("FraudCaseIdempotencyInProgressException")
-                .doesNotContain("java.lang");
+                .doesNotContain("java.lang")
+                .doesNotContain("Mongo")
+                .doesNotContain("DuplicateKey")
+                .doesNotContain("DataAccess")
+                .doesNotContain("stackTrace");
     }
 
     private FraudCaseDocument caseDocument() {

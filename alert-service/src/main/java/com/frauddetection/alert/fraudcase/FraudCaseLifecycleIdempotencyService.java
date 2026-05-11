@@ -9,8 +9,10 @@ import com.frauddetection.alert.persistence.FraudCaseLifecycleIdempotencyRecordD
 import com.frauddetection.alert.persistence.FraudCaseLifecycleIdempotencyRepository;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.TransactionSystemException;
 import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
@@ -66,7 +68,19 @@ public class FraudCaseLifecycleIdempotencyService {
                 command.requestHash(),
                 command.now()
         );
-        return transactionRunner.runLocalCommit(() -> executeInTransaction(keyHash, normalizedCommand, mutation, responseType));
+        try {
+            return transactionRunner.runLocalCommit(() -> executeInTransaction(keyHash, normalizedCommand, mutation, responseType));
+        } catch (DataAccessException exception) {
+            if (!isIdempotencyRaceSignal(exception)) {
+                throw exception;
+            }
+            return resolveIdempotencyRace(keyHash, normalizedCommand, responseType);
+        } catch (TransactionSystemException exception) {
+            if (!isIdempotencyRaceSignal(exception)) {
+                throw exception;
+            }
+            return resolveIdempotencyRace(keyHash, normalizedCommand, responseType);
+        }
     }
 
     private <T> T executeInTransaction(
@@ -102,15 +116,11 @@ public class FraudCaseLifecycleIdempotencyService {
         record.setCreatedAt(command.now());
         try {
             saveRecord(record);
-        } catch (DuplicateKeyException exception) {
-            FraudCaseLifecycleIdempotencyRecordDocument existing = findRecord(
-                            keyHash,
-                            command.action(),
-                            command.actorId(),
-                            command.caseIdScope()
-                    )
-                    .orElseThrow(FraudCaseIdempotencyInProgressException::new);
-            return existingResponseOrConflict(existing, command, responseType);
+        } catch (DataAccessException exception) {
+            if (!isIdempotencyRaceSignal(exception)) {
+                throw exception;
+            }
+            return resolveIdempotencyRace(keyHash, command, responseType);
         }
         T response = mutation.get();
         record.setResponsePayloadSnapshot(snapshot(response));
@@ -119,6 +129,58 @@ public class FraudCaseLifecycleIdempotencyService {
         record.setCompletedAt(command.now());
         saveRecord(record);
         return response;
+    }
+
+    private <T> T resolveIdempotencyRace(
+            String keyHash,
+            FraudCaseLifecycleIdempotencyCommand command,
+            Class<T> responseType
+    ) {
+        FraudCaseLifecycleIdempotencyRecordDocument existing = findRecord(
+                        keyHash,
+                        command.action(),
+                        command.actorId(),
+                        command.caseIdScope()
+                )
+                .orElseThrow(FraudCaseIdempotencyInProgressException::new);
+        return existingResponseOrConflict(existing, command, responseType);
+    }
+
+    private boolean isIdempotencyRaceSignal(Throwable exception) {
+        return exception instanceof DuplicateKeyException
+                || containsDuplicateKeySignal(exception)
+                || containsWriteConflictSignal(exception);
+    }
+
+    private boolean containsDuplicateKeySignal(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            String className = current.getClass().getName();
+            String message = current.getMessage();
+            if (className.contains("DuplicateKey")
+                    || (message != null && message.toLowerCase(java.util.Locale.ROOT).contains("duplicate key"))) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private boolean containsWriteConflictSignal(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null) {
+                String normalized = message.toLowerCase(java.util.Locale.ROOT);
+                if (normalized.contains("write conflict")
+                        || normalized.contains("transienttransactionerror")
+                        || normalized.contains("could not commit mongo transaction")) {
+                    return true;
+                }
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private <T> T existingResponseOrConflict(

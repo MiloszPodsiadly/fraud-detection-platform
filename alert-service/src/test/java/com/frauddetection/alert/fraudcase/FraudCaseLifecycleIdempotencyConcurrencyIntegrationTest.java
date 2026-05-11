@@ -5,6 +5,8 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.frauddetection.alert.api.AddFraudCaseDecisionRequest;
 import com.frauddetection.alert.api.AddFraudCaseNoteRequest;
 import com.frauddetection.alert.api.CreateFraudCaseRequest;
+import com.frauddetection.alert.api.FraudCaseDecisionResponse;
+import com.frauddetection.alert.api.FraudCaseNoteResponse;
 import com.frauddetection.alert.domain.FraudCaseAuditAction;
 import com.frauddetection.alert.domain.FraudCaseDecisionType;
 import com.frauddetection.alert.domain.FraudCasePriority;
@@ -60,6 +62,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -114,7 +117,9 @@ class FraudCaseLifecycleIdempotencyConcurrencyIntegrationTest extends AbstractIn
 
         List<ConcurrentResult<?>> results = runConcurrently(() -> service.addNote(created.getCaseId(), request, "note-race-key"));
 
-        assertAllowedRaceOutcome(results);
+        assertAllowedRaceOutcome(results, FraudCaseNoteResponse.class, responses ->
+                assertThat(responses).extracting(FraudCaseNoteResponse::id).containsOnly(responses.getFirst().id())
+        );
         assertThat(noteRepository.findByCaseIdOrderByCreatedAtAsc(created.getCaseId())).hasSize(1);
         assertThat(countAudit(created.getCaseId(), FraudCaseAuditAction.NOTE_ADDED)).isEqualTo(1);
         assertOneCompletedRecord("ADD_FRAUD_CASE_NOTE", created.getCaseId());
@@ -131,7 +136,9 @@ class FraudCaseLifecycleIdempotencyConcurrencyIntegrationTest extends AbstractIn
 
         List<ConcurrentResult<?>> results = runConcurrently(() -> service.addDecision(created.getCaseId(), request, "decision-race-key"));
 
-        assertAllowedRaceOutcome(results);
+        assertAllowedRaceOutcome(results, FraudCaseDecisionResponse.class, responses ->
+                assertThat(responses).extracting(FraudCaseDecisionResponse::id).containsOnly(responses.getFirst().id())
+        );
         assertThat(decisionRepository.findByCaseIdOrderByCreatedAtAsc(created.getCaseId())).hasSize(1);
         assertThat(countAudit(created.getCaseId(), FraudCaseAuditAction.DECISION_ADDED)).isEqualTo(1);
         assertOneCompletedRecord("ADD_FRAUD_CASE_DECISION", created.getCaseId());
@@ -149,7 +156,10 @@ class FraudCaseLifecycleIdempotencyConcurrencyIntegrationTest extends AbstractIn
 
         List<ConcurrentResult<?>> results = runConcurrently(() -> service.createCase(request, "create-race-key"));
 
-        assertAllowedRaceOutcome(results);
+        assertAllowedRaceOutcome(results, FraudCaseDocument.class, responses -> {
+            assertThat(responses).extracting(FraudCaseDocument::getCaseId).containsOnly(responses.getFirst().getCaseId());
+            assertThat(responses).extracting(FraudCaseDocument::getCaseNumber).containsOnly(responses.getFirst().getCaseNumber());
+        });
         assertThat(caseRepository.findAll()).hasSize(1);
         FraudCaseDocument created = caseRepository.findAll().getFirst();
         assertThat(countAudit(created.getCaseId(), FraudCaseAuditAction.CASE_CREATED)).isEqualTo(1);
@@ -187,10 +197,31 @@ class FraudCaseLifecycleIdempotencyConcurrencyIntegrationTest extends AbstractIn
         };
     }
 
-    private void assertAllowedRaceOutcome(List<ConcurrentResult<?>> results) {
-        long successes = results.stream().filter(ConcurrentResult::isSuccess).count();
+    private <T> void assertAllowedRaceOutcome(
+            List<ConcurrentResult<?>> results,
+            Class<T> responseType,
+            Consumer<List<T>> replayStabilityAssertion
+    ) {
+        List<T> successes = results.stream()
+                .filter(ConcurrentResult::isSuccess)
+                .map(ConcurrentResult::value)
+                .map(responseType::cast)
+                .toList();
+        List<Throwable> failures = results.stream()
+                .filter(result -> !result.isSuccess())
+                .map(ConcurrentResult::error)
+                .toList();
         assertThat(results).hasSize(2);
-        assertThat(successes).isBetween(1L, 2L);
+        assertThat(successes).hasSizeBetween(1, 2);
+        assertThat(failures).hasSize(2 - successes.size());
+        assertThat(failures).allSatisfy(error ->
+                assertThat(error)
+                        .as("same-key loser must resolve to an idempotency-domain race outcome")
+                        .isInstanceOf(FraudCaseIdempotencyInProgressException.class)
+        );
+        if (successes.size() == 2) {
+            replayStabilityAssertion.accept(successes);
+        }
     }
 
     private FraudCaseDocument createCase() {
