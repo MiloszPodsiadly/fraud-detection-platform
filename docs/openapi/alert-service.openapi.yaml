@@ -1078,8 +1078,10 @@ paths:
       summary: List fraud case work queue
       description: >-
         Returns a bounded investigator work queue slice using the existing FraudCaseQueryService and
-        FraudCaseSearchRepository path. It is read-only, audited as a sensitive read, rejects duplicate single-valued
-        query params, derives SLA fields from app.fraud-cases.work-queue.sla, and does not perform an exact count.
+        FraudCaseSearchRepository path. Cursor/keyset pagination is recommended for long traversal; page remains a
+        bounded offset compatibility mode with maximum page 1000. Clients must not parse cursor values. It is read-only,
+        audited as a sensitive read, rejects duplicate single-valued query params, derives SLA fields from
+        app.fraud-cases.work-queue.sla, and does not perform an exact count.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1087,6 +1089,7 @@ paths:
         - name: page
           in: query
           required: false
+          description: Bounded offset compatibility mode. Use cursor for long queue traversal.
           schema:
             type: integer
             minimum: 0
@@ -1109,6 +1112,13 @@ paths:
             maxLength: 64
             default: createdAt,desc
             example: updatedAt,asc
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque signed cursor returned by the previous work queue response. Clients must not parse it; unsupported versions, tampering, or sort mismatches return INVALID_CURSOR.
+          schema:
+            type: string
+            maxLength: 2048
         - name: status
           in: query
           required: false
@@ -2806,6 +2816,15 @@ components:
         nextPage:
           type: integer
           nullable: true
+          description: Compatibility page-mode pointer. Null when cursor mode is used or there is no next page.
+        nextCursor:
+          type: string
+          nullable: true
+          description: Opaque signed cursor for the next slice. Clients must not parse it.
+        sort:
+          type: string
+          nullable: true
+          description: Stable sort used for this slice.
     FraudCaseSlaStatus:
       type: string
       enum:

@@ -325,7 +325,10 @@ jobs:
         run: docker version
 
       - name: Run FDP-45 fraud case work queue read model suite
-        run: mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=Fdp45FraudCaseReadModelSingleSourceOfTruthTest,Fdp45FraudCaseWorkQueuePaginationTest,Fdp45FraudCaseWorkQueueSortingTest,Fdp45FraudCaseWorkQueueFilterTest,Fdp45FraudCaseWorkQueueDuplicateParamTest,Fdp45FraudCaseWorkQueueSlaConfigTest,Fdp45FraudCaseProdSlaConfigTest,Fdp45FraudCaseWorkQueueSlaAgeTest,Fdp45FraudCaseWorkQueueReadOnlySafetyTest,Fdp45FraudCaseWorkQueueSecurityTest,Fdp45FraudCaseWorkQueueObservabilityTest,Fdp45FraudCaseWorkQueueFailureMetricsTest,Fdp45FraudCaseWorkQueueReadAccessAuditTest,Fdp45FraudCaseWorkQueueMongoIntegrationTest,Fdp45FraudCaseWorkQueueContractCompatibilityTest,Fdp45FraudCaseWorkQueueDocsNoOverclaimTest,Fdp45FraudCaseLegacyListValidationTest,Fdp45FraudCaseLegacyDeepPaginationValidationTest,Fdp45FraudCaseWorkQueueDeepPaginationTest,Fdp45FraudCaseWorkQueueIndexReadinessTest,Fdp45FraudCaseCompoundIndexReadinessDocsTest,Fdp45FraudCaseWorkQueueOpenApiContractTest,Fdp45FraudCaseWorkQueueFailedReadAuditTest,Fdp45FraudCaseWorkQueueFilterLengthTest,Fdp45FraudCaseWorkQueueNoDuplicateAuditAdviceTest,Fdp45ReadAccessAuditResponseAdviceMarkerTest,Fdp45FraudCaseWorkQueueAuditPrecedenceTest,Fdp45SensitiveReadAuditUnavailableRunbookTest,Fdp45FraudCaseReadPolicyNamingBoundaryTest,Fdp45FraudCaseLegacyExactCountCompatibilityDocsTest" test
+        run: >-
+          mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am
+          "-Dtest=Fdp45FraudCaseReadModelSingleSourceOfTruthTest,Fdp45FraudCaseWorkQueuePaginationTest,Fdp45FraudCaseWorkQueueSortingTest,Fdp45FraudCaseWorkQueueFilterTest,Fdp45FraudCaseWorkQueueDuplicateParamTest,Fdp45FraudCaseWorkQueueSlaConfigTest,Fdp45FraudCaseProdSlaConfigTest,Fdp45FraudCaseWorkQueueSlaAgeTest,Fdp45FraudCaseWorkQueueReadOnlySafetyTest,Fdp45FraudCaseWorkQueueSecurityTest,Fdp45FraudCaseWorkQueueObservabilityTest,Fdp45FraudCaseWorkQueueFailureMetricsTest,Fdp45FraudCaseWorkQueueReadAccessAuditTest,Fdp45FraudCaseWorkQueueMongoIntegrationTest,Fdp45FraudCaseWorkQueueContractCompatibilityTest,Fdp45FraudCaseWorkQueueDocsNoOverclaimTest,Fdp45FraudCaseLegacyListValidationTest,Fdp45FraudCaseLegacyDeepPaginationValidationTest,Fdp45FraudCaseWorkQueueDeepPaginationTest,Fdp45FraudCaseWorkQueueIndexReadinessTest,Fdp45FraudCaseCompoundIndexReadinessDocsTest,Fdp45FraudCaseWorkQueueOpenApiContractTest,Fdp45FraudCaseWorkQueueFailedReadAuditTest,Fdp45FraudCaseWorkQueueFilterLengthTest,Fdp45FraudCaseWorkQueueNoDuplicateAuditAdviceTest,Fdp45ReadAccessAuditResponseAdviceMarkerTest,Fdp45FraudCaseWorkQueueAuditPrecedenceTest,Fdp45SensitiveReadAuditUnavailableRunbookTest,Fdp45FraudCaseReadPolicyNamingBoundaryTest,Fdp45FraudCaseLegacyExactCountCompatibilityDocsTest,Fdp45FraudCaseLegacyPaginationReleaseNotesTest,Fdp45FraudCaseReadQueryPolicyContractTest,Fdp45FraudCaseWorkQueueCursorArchitectureTest,Fdp45FraudCaseWorkQueueCursorCodecTest,Fdp45FraudCaseWorkQueueCursorPaginationTest,SensitiveReadAuditServiceTest"
+          test
 
       - name: Verify FDP-45 proof suite reports
         run: |
@@ -366,6 +369,12 @@ jobs:
               "Fdp45SensitiveReadAuditUnavailableRunbookTest",
               "Fdp45FraudCaseReadPolicyNamingBoundaryTest",
               "Fdp45FraudCaseLegacyExactCountCompatibilityDocsTest",
+              "Fdp45FraudCaseLegacyPaginationReleaseNotesTest",
+              "Fdp45FraudCaseReadQueryPolicyContractTest",
+              "Fdp45FraudCaseWorkQueueCursorArchitectureTest",
+              "Fdp45FraudCaseWorkQueueCursorCodecTest",
+              "Fdp45FraudCaseWorkQueueCursorPaginationTest",
+              "SensitiveReadAuditServiceTest",
           ]
 
           xml_by_class = {}

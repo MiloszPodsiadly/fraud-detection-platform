@@ -39,3 +39,32 @@ Restore audit persistence first, then retry the work queue read. After recovery,
 normally and that failed/rejected attempts still produce bounded audit metadata. Capture evidence using low-cardinality
 metrics, deployment SHA, endpoint family, outcome, and timestamp windows only. No raw identifiers should be included in
 the incident evidence package.
+
+## Alert Specification
+
+Alert name: `WorkQueueSensitiveReadAuditUnavailable`
+
+Condition:
+
+- Work queue failures with audit-unavailable outcome exceed the configured threshold over 5 minutes, or
+- 503 rate on the work queue endpoint exceeds the configured threshold while audit-unavailable logs are present.
+
+Allowed low-cardinality labels:
+
+- `endpoint_family`
+- `outcome`
+- `service`
+- `environment`
+
+Forbidden labels:
+
+- `caseId`
+- `actorId`
+- `assignee`
+- `linkedAlertId`
+- `queryHash`
+- raw path
+- exception message
+
+Runbook links and evidence should include the deploy SHA, service health dashboard, and this runbook. Do not disable
+audit while resolving this alert.
