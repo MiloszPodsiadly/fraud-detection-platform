@@ -961,8 +961,8 @@ paths:
     get:
       summary: List fraud cases
       description: >-
-        Returns a bounded investigator work queue read model using the existing fraud-case query service and search
-        repository path. This is a read-only endpoint and must not perform lifecycle mutation behavior.
+        Returns the existing paged fraud-case summary contract for list/search clients. FDP-45 keeps this endpoint
+        compatible; investigator work queue fields are exposed only by /api/v1/fraud-cases/work-queue.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1046,11 +1046,11 @@ paths:
             type: string
       responses:
         "200":
-          description: Bounded fraud-case work queue items returned.
+          description: Paged fraud-case summaries returned.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FraudCaseWorkQueuePage"
+                $ref: "#/components/schemas/FraudCaseSummaryPage"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1097,6 +1097,107 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "409":
           $ref: "#/components/responses/Conflict"
+  /api/v1/fraud-cases/work-queue:
+    get:
+      summary: List fraud case work queue
+      description: >-
+        Returns a bounded investigator work queue slice using the existing FraudCaseQueryService and
+        FraudCaseSearchRepository path. It is read-only, audited as a sensitive read, rejects duplicate single-valued
+        query params, derives SLA fields from app.fraud-cases.work-queue.sla, and does not perform an exact count.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: sort
+          in: query
+          required: false
+          description: Allowlisted stable sort in field,direction form. Supported fields are createdAt, updatedAt, priority, riskLevel, and caseNumber.
+          schema:
+            type: string
+            default: createdAt,desc
+            example: updatedAt,asc
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/FraudCaseStatus"
+        - name: assignee
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: assignedInvestigatorId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: priority
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/FraudCasePriority"
+        - name: riskLevel
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/RiskLevel"
+        - name: createdFrom
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: createdTo
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: updatedFrom
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: updatedTo
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: linkedAlertId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Bounded fraud-case work queue slice returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FraudCaseWorkQueueSlice"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /api/v1/fraud-cases/{caseId}:
     get:
       summary: Get one fraud case
@@ -2705,24 +2806,24 @@ components:
           type: integer
         size:
           type: integer
-    FraudCaseWorkQueuePage:
+    FraudCaseWorkQueueSlice:
       type: object
       additionalProperties: false
-      required: [content, totalElements, totalPages, page, size]
+      required: [content, page, size, hasNext]
       properties:
         content:
           type: array
           items:
             $ref: "#/components/schemas/FraudCaseWorkQueueItemResponse"
-        totalElements:
-          type: integer
-          format: int64
-        totalPages:
-          type: integer
         page:
           type: integer
         size:
           type: integer
+        hasNext:
+          type: boolean
+        nextPage:
+          type: integer
+          nullable: true
     FraudCaseSlaStatus:
       type: string
       enum:
