@@ -754,7 +754,8 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
                         transactionRunner,
                         new FraudCaseTransitionPolicy(),
                         auditService,
-                        idempotencyService
+                        idempotencyService,
+                        responseMapper
                 ),
                 new FraudCaseQueryService(
                         caseRepository,

@@ -178,7 +178,8 @@ class FraudCaseLifecycleIdempotencyFailureIntegrationTest extends AbstractIntegr
                         transactionRunner,
                         new FraudCaseTransitionPolicy(),
                         new FraudCaseAuditService(auditRepository),
-                        idempotencyService
+                        idempotencyService,
+                        responseMapper
                 ),
                 new FraudCaseQueryService(caseRepository, auditRepository, searchRepository, responseMapper)
         );

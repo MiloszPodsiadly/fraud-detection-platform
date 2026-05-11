@@ -356,7 +356,8 @@ class Fdp42FraudCaseManagementServiceTest {
                                 JsonMapper.builder().addModule(new JavaTimeModule()).build(),
                                 metrics,
                                 Duration.ofHours(24)
-                        )
+                        ),
+                        responseMapper
                 ),
                 new FraudCaseQueryService(
                         fraudCaseRepository,

@@ -19,7 +19,6 @@ import com.frauddetection.alert.fraudcase.FraudCaseLifecycleIdempotencyService;
 import com.frauddetection.alert.fraudcase.FraudCaseNotFoundException;
 import com.frauddetection.alert.fraudcase.FraudCaseTransitionPolicy;
 import com.frauddetection.alert.idempotency.IdempotencyCanonicalHasher;
-import com.frauddetection.alert.mapper.AlertResponseMapper;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.persistence.FraudCaseDecisionDocument;
@@ -82,31 +81,6 @@ public class FraudCaseLifecycleService {
         this.caseAuditService = caseAuditService;
         this.idempotencyService = idempotencyService;
         this.responseMapper = responseMapper;
-    }
-
-    public FraudCaseLifecycleService(
-            FraudCaseRepository fraudCaseRepository,
-            AlertRepository alertRepository,
-            FraudCaseNoteRepository noteRepository,
-            FraudCaseDecisionRepository decisionRepository,
-            AnalystActorResolver analystActorResolver,
-            RegulatedMutationTransactionRunner transactionRunner,
-            FraudCaseTransitionPolicy transitionPolicy,
-            FraudCaseAuditService caseAuditService,
-            FraudCaseLifecycleIdempotencyService idempotencyService
-    ) {
-        this(
-                fraudCaseRepository,
-                alertRepository,
-                noteRepository,
-                decisionRepository,
-                analystActorResolver,
-                transactionRunner,
-                transitionPolicy,
-                caseAuditService,
-                idempotencyService,
-                new FraudCaseResponseMapper(new AlertResponseMapper())
-        );
     }
 
     public FraudCaseResponse createCase(CreateFraudCaseRequest request, String idempotencyKey) {

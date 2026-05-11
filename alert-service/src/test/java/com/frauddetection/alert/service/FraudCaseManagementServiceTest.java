@@ -451,7 +451,8 @@ class FraudCaseManagementServiceTest {
                         transactionRunner,
                         new FraudCaseTransitionPolicy(),
                         new FraudCaseAuditService(auditRepository),
-                        mock(com.frauddetection.alert.fraudcase.FraudCaseLifecycleIdempotencyService.class)
+                        mock(com.frauddetection.alert.fraudcase.FraudCaseLifecycleIdempotencyService.class),
+                        responseMapper
                 ),
                 new FraudCaseQueryService(
                         fraudCaseRepository,
@@ -490,7 +491,8 @@ class FraudCaseManagementServiceTest {
                         transactionRunner,
                         new FraudCaseTransitionPolicy(),
                         new FraudCaseAuditService(auditRepository),
-                        mock(com.frauddetection.alert.fraudcase.FraudCaseLifecycleIdempotencyService.class)
+                        mock(com.frauddetection.alert.fraudcase.FraudCaseLifecycleIdempotencyService.class),
+                        responseMapper
                 ),
                 new FraudCaseQueryService(
                         fraudCaseRepository,
