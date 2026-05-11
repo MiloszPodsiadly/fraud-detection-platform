@@ -165,6 +165,12 @@ class Fdp44FraudCaseLifecycleReplayEquivalenceIntegrationTest extends AbstractIn
 
         assertJsonEqual(first, replay);
         assertRichCaseFields(first);
+        JsonNode firstJson = objectMapper.valueToTree(first);
+        JsonNode replayJson = objectMapper.valueToTree(replay);
+        assertThat(firstJson.get("closedAt").asText()).isNotBlank();
+        assertThat(firstJson.get("closureReason").asText()).isEqualTo("Resolved with full context");
+        assertThat(replayJson.get("closedAt")).isEqualTo(firstJson.get("closedAt"));
+        assertThat(replayJson.get("closureReason")).isEqualTo(firstJson.get("closureReason"));
     }
 
     @Test
@@ -180,6 +186,12 @@ class Fdp44FraudCaseLifecycleReplayEquivalenceIntegrationTest extends AbstractIn
 
         assertJsonEqual(first, replay);
         assertRichCaseFields(first);
+        JsonNode firstJson = objectMapper.valueToTree(first);
+        JsonNode replayJson = objectMapper.valueToTree(replay);
+        assertThat(firstJson.get("closedAt").isNull()).isTrue();
+        assertThat(firstJson.get("closureReason").isNull()).isTrue();
+        assertThat(replayJson.get("closedAt").isNull()).isTrue();
+        assertThat(replayJson.get("closureReason").isNull()).isTrue();
     }
 
     @Test
@@ -218,18 +230,76 @@ class Fdp44FraudCaseLifecycleReplayEquivalenceIntegrationTest extends AbstractIn
 
     private void assertRichCaseFields(FraudCaseResponse response) {
         JsonNode json = objectMapper.valueToTree(response);
+        // This test is intentionally broad. If FraudCaseResponse gains a new public field,
+        // add a populated assertion here so replay equivalence remains regulator-defensible.
+        assertNoMissingRichFields(json);
+        assertThat(json.get("caseId").asText()).isNotBlank();
+        assertThat(json.get("caseNumber").asText()).startsWith("FC-20260511-");
         assertThat(json.get("customerId").asText()).isEqualTo("customer-rich");
         assertThat(json.get("suspicionType").asText()).isEqualTo("RAPID_TRANSFER_BURST_20K_PLN");
+        assertThat(json.get("status").asText()).isNotBlank();
+        assertThat(json.get("priority").asText()).isEqualTo("HIGH");
+        assertThat(json.get("riskLevel").asText()).isEqualTo("CRITICAL");
+        assertThat(json.get("linkedAlertIds")).hasSize(1);
+        assertThat(json.get("createdBy").asText()).isEqualTo("system");
+        assertThat(json.get("reason").asText()).isEqualTo("Multiple transfers exceeded threshold.");
         assertThat(json.get("thresholdPln").decimalValue()).isEqualByComparingTo("20000.00");
         assertThat(json.get("totalAmountPln").decimalValue()).isEqualByComparingTo("42500.25");
         assertThat(json.get("aggregationWindow").asText()).isEqualTo("PT5M");
         assertThat(json.get("firstTransactionAt").asText()).isEqualTo("2026-05-11T09:55:00Z");
         assertThat(json.get("lastTransactionAt").asText()).isEqualTo("2026-05-11T10:00:00Z");
+        assertThat(json.get("createdAt").asText()).isEqualTo("2026-05-11T09:54:00Z");
+        assertThat(json.get("updatedAt").asText()).isNotBlank();
         assertThat(json.get("analystId").asText()).isEqualTo("analyst-decision");
         assertThat(json.get("decisionReason").asText()).isEqualTo("Manual review confirmed pattern");
         assertThat(json.get("decisionTags")).hasSize(2);
+        assertThat(json.get("decidedAt").asText()).isEqualTo("2026-05-11T10:01:00Z");
+        assertThat(json.get("version").isNumber()).isTrue();
         assertThat(json.get("transactionIds")).hasSize(2);
         assertThat(json.get("transactions")).hasSize(1);
+        JsonNode transaction = json.get("transactions").get(0);
+        assertThat(transaction.get("transactionId").asText()).isEqualTo("tx-1");
+        assertThat(transaction.get("correlationId").asText()).isEqualTo("corr-1");
+        assertThat(transaction.get("transactionTimestamp").asText()).isEqualTo("2026-05-11T09:55:00Z");
+        assertThat(transaction.get("transactionAmount").get("amount").decimalValue()).isEqualByComparingTo("10000.10");
+        assertThat(transaction.get("transactionAmount").get("currency").asText()).isEqualTo("EUR");
+        assertThat(transaction.get("amountPln").decimalValue()).isEqualByComparingTo("43000.43");
+        assertThat(transaction.get("fraudScore").doubleValue()).isEqualTo(0.97d);
+        assertThat(transaction.get("riskLevel").asText()).isEqualTo("CRITICAL");
+    }
+
+    private void assertNoMissingRichFields(JsonNode json) {
+        assertThat(json.fieldNames())
+                .toIterable()
+                .contains(
+                        "caseId",
+                        "caseNumber",
+                        "customerId",
+                        "suspicionType",
+                        "status",
+                        "priority",
+                        "riskLevel",
+                        "linkedAlertIds",
+                        "assignedInvestigatorId",
+                        "createdBy",
+                        "reason",
+                        "thresholdPln",
+                        "totalAmountPln",
+                        "aggregationWindow",
+                        "firstTransactionAt",
+                        "lastTransactionAt",
+                        "createdAt",
+                        "updatedAt",
+                        "analystId",
+                        "decisionReason",
+                        "decisionTags",
+                        "decidedAt",
+                        "closedAt",
+                        "closureReason",
+                        "version",
+                        "transactionIds",
+                        "transactions"
+                );
     }
 
     private FraudCaseDocument richCase(String caseId, FraudCaseStatus status) {
@@ -306,7 +376,8 @@ class Fdp44FraudCaseLifecycleReplayEquivalenceIntegrationTest extends AbstractIn
                         transactionRunner,
                         new FraudCaseTransitionPolicy(),
                         new FraudCaseAuditService(auditRepository),
-                        idempotencyService
+                        idempotencyService,
+                        responseMapper
                 ),
                 new FraudCaseQueryService(
                         caseRepository,

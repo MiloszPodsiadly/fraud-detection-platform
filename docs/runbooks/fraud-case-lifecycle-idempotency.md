@@ -21,8 +21,10 @@ ordering.
   `IDEMPOTENCY_KEY_IN_PROGRESS`.
 - Idempotency records are retained for `app.fraud-cases.idempotency.retention`. After retention and eventual Mongo TTL
   cleanup, retry with the same key may execute as a new lifecycle operation.
-- Response snapshots are explicit replay DTOs. Raw idempotency keys, request hashes, lease owners, stack traces, and
-  raw exception text must not be stored in the replay snapshot or returned in idempotency errors.
+- FDP-44 stores the public lifecycle response DTO inside a versioned replay snapshot envelope.
+- The replay snapshot is safe because it stores only public response DTOs already returned by the endpoint, not
+  persistence documents, raw requests, raw keys, hashes, stack traces, or internal exception details.
+- Replay equivalence is proven by JSON equality between first execution and replay.
 
 ## Triage
 

@@ -21,7 +21,11 @@ operator docs.
 - Same-key same-claim retry does not create duplicate mutation/audit/idempotency record inside the active local
   retention window.
 - Identical concurrent response timing is not guaranteed.
-- New FDP-44 idempotency snapshot writes must serialize only explicit `FraudCaseLifecycleReplaySnapshot` DTOs.
+- New FDP-44 idempotency snapshot writes must serialize only explicit `FraudCaseLifecycleReplaySnapshot` envelopes.
+- FDP-44 stores the public lifecycle response DTO inside a versioned replay snapshot envelope.
+- The replay snapshot is safe because it stores only public response DTOs already returned by the endpoint, not
+  persistence documents, raw requests, raw keys, hashes, stack traces, or internal exception details.
+- Replay equivalence is proven by JSON equality between first execution and replay.
 - Snapshot write path must fail closed if the lifecycle response type is unsupported.
 - Raw response fallback is allowed only on restore/read path for backward compatibility with pre-FDP-44 snapshots.
 - Raw response fallback must never be used for new snapshot writes.
@@ -63,7 +67,9 @@ operator docs.
 - FDP-43 Fraud Case Idempotency
 - FDP-44 Fraud Case Idempotency Hardening
 
-No merge while any required job is queued, pending, in progress, skipped, missing, cancelled, or failed.
+FDP-44 is NO-GO while any required workflow is queued, pending, in_progress, skipped, missing, cancelled, or failed.
+Code review near-GO does not override incomplete CI. A regulated-bank merge gate requires complete green CI on the
+current head SHA.
 
 ## Verification
 
@@ -71,6 +77,7 @@ No merge while any required job is queued, pending, in progress, skipped, missin
 - `Fdp44FraudCaseLifecycleReplaySnapshotTest`
 - `Fdp44FraudCaseLifecycleReplaySnapshotFailClosedTest`
 - `Fdp44FraudCaseLifecycleReplaySnapshotCoverageTest`
+- `Fdp44FraudCaseLifecycleReplaySnapshotMapperStructuralTest`
 - `Fdp44FraudCaseLifecycleReplayEquivalenceIntegrationTest`
 - `Fdp44FraudCaseIdempotencyRetentionOperationalTest`
 - `Fdp44FraudCaseIdempotencyOperationalDocsNoOverclaimTest`

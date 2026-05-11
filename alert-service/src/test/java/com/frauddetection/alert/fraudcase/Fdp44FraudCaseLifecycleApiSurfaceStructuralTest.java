@@ -9,6 +9,8 @@ import com.frauddetection.alert.api.ReopenFraudCaseRequest;
 import com.frauddetection.alert.api.TransitionFraudCaseRequest;
 import com.frauddetection.alert.api.UpdateFraudCaseRequest;
 import com.frauddetection.alert.controller.FraudCaseController;
+import com.frauddetection.alert.mapper.AlertResponseMapper;
+import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
 import com.frauddetection.alert.service.FraudCaseLifecycleService;
 import com.frauddetection.alert.service.FraudCaseManagementService;
@@ -73,7 +75,12 @@ class Fdp44FraudCaseLifecycleApiSurfaceStructuralTest {
     void lifecycleIdempotencyIsRequiredByConstructionAndNotCoordinatorBacked() {
         assertThat(FraudCaseLifecycleIdempotencyService.class).hasAnnotation(Service.class);
 
-        assertThat(Arrays.stream(FraudCaseLifecycleService.class.getConstructors())
+        Constructor<?>[] publicConstructors = FraudCaseLifecycleService.class.getConstructors();
+        assertThat(publicConstructors).hasSize(1);
+        assertThat(Arrays.asList(publicConstructors[0].getParameterTypes()))
+                .contains(FraudCaseLifecycleIdempotencyService.class, FraudCaseResponseMapper.class)
+                .doesNotContain(RegulatedMutationCoordinator.class);
+        assertThat(Arrays.stream(publicConstructors)
                 .map(Constructor::getParameterTypes)
                 .allMatch(parameters -> Arrays.asList(parameters).contains(FraudCaseLifecycleIdempotencyService.class)))
                 .isTrue();
@@ -84,6 +91,17 @@ class Fdp44FraudCaseLifecycleApiSurfaceStructuralTest {
         assertNoFieldOfType(FraudCaseLifecycleService.class, RegulatedMutationCoordinator.class);
         assertNoFieldOfType(FraudCaseLifecycleIdempotencyService.class, RegulatedMutationCoordinator.class);
         assertNoConstructorParameterOfType(FraudCaseLifecycleIdempotencyService.class, RegulatedMutationCoordinator.class);
+    }
+
+    @Test
+    void lifecycleServicePublicConstructorUsesInjectedResponseMapperOnly() throws Exception {
+        String source = Files.readString(sourceRoot().resolve(Path.of("service", "FraudCaseLifecycleService.java")));
+
+        assertThat(source)
+                .contains("FraudCaseResponseMapper responseMapper")
+                .doesNotContain("new FraudCaseResponseMapper(")
+                .doesNotContain("new AlertResponseMapper(");
+        assertNoConstructorParameterOfType(FraudCaseLifecycleService.class, AlertResponseMapper.class);
     }
 
     @Test
