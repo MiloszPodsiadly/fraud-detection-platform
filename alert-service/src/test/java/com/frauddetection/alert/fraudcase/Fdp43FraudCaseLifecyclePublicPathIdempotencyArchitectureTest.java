@@ -59,24 +59,14 @@ class Fdp43FraudCaseLifecyclePublicPathIdempotencyArchitectureTest {
     }
 
     @Test
-    void compatibilityOverloadsMustBeMarkedDeprecatedAndInternalOnly() {
+    void publicCompatibilityOverloadsMustNotRemainOnLifecycleMutationServices() {
         String lifecycle = read(sourceRoot().resolve(Path.of("service", "FraudCaseLifecycleService.java")));
         String management = read(sourceRoot().resolve(Path.of("service", "FraudCaseManagementService.java")));
 
-        assertDeprecatedCompatibilityOverload(lifecycle, "public FraudCaseDocument createCase(CreateFraudCaseRequest request)");
-        assertDeprecatedCompatibilityOverload(lifecycle, "public FraudCaseDocument assignCase(String caseId, AssignFraudCaseRequest request)");
-        assertDeprecatedCompatibilityOverload(lifecycle, "public FraudCaseNoteResponse addNote(String caseId, AddFraudCaseNoteRequest request)");
-        assertDeprecatedCompatibilityOverload(lifecycle, "public FraudCaseDecisionResponse addDecision(String caseId, AddFraudCaseDecisionRequest request)");
-        assertDeprecatedCompatibilityOverload(lifecycle, "public FraudCaseDocument transitionCase(String caseId, TransitionFraudCaseRequest request)");
-        assertDeprecatedCompatibilityOverload(lifecycle, "public FraudCaseDocument closeCase(String caseId, CloseFraudCaseRequest request)");
-        assertDeprecatedCompatibilityOverload(lifecycle, "public FraudCaseDocument reopenCase(String caseId, ReopenFraudCaseRequest request)");
-        assertDeprecatedCompatibilityOverload(management, "public FraudCaseDocument createCase(CreateFraudCaseRequest request)");
-        assertDeprecatedCompatibilityOverload(management, "public FraudCaseDocument assignCase(String caseId, AssignFraudCaseRequest request)");
-        assertDeprecatedCompatibilityOverload(management, "public FraudCaseNoteResponse addNote(String caseId, AddFraudCaseNoteRequest request)");
-        assertDeprecatedCompatibilityOverload(management, "public FraudCaseDecisionResponse addDecision(String caseId, AddFraudCaseDecisionRequest request)");
-        assertDeprecatedCompatibilityOverload(management, "public FraudCaseDocument transitionCase(String caseId, TransitionFraudCaseRequest request)");
-        assertDeprecatedCompatibilityOverload(management, "public FraudCaseDocument closeCase(String caseId, CloseFraudCaseRequest request)");
-        assertDeprecatedCompatibilityOverload(management, "public FraudCaseDocument reopenCase(String caseId, ReopenFraudCaseRequest request)");
+        assertNoPublicNoKeyLifecycleOverloads(lifecycle);
+        assertNoPublicNoKeyLifecycleOverloads(management);
+        assertThat(lifecycle).doesNotContain("public UpdateFraudCaseResponse updateCase(String caseId, UpdateFraudCaseRequest request)");
+        assertThat(management).doesNotContain("public UpdateFraudCaseResponse updateCase(String caseId, UpdateFraudCaseRequest request)");
     }
 
     @Test
@@ -90,16 +80,15 @@ class Fdp43FraudCaseLifecyclePublicPathIdempotencyArchitectureTest {
                 .contains("all lifecycle post endpoints require `x-idempotency-key`");
     }
 
-    private void assertDeprecatedCompatibilityOverload(String source, String signature) {
-        int signatureIndex = source.indexOf(signature);
-        assertThat(signatureIndex).as(signature).isGreaterThan(0);
-        String prefix = source.substring(Math.max(0, signatureIndex - 400), signatureIndex);
-        assertThat(prefix).as(signature)
-                .contains("@Deprecated(forRemoval = false)")
-                .contains("Internal/backward-compatibility path only");
-        assertThat(compact(prefix)).as(signature)
-                .contains("public http lifecycle post endpoints must use")
-                .contains("idempotency-key overloads");
+    private void assertNoPublicNoKeyLifecycleOverloads(String source) {
+        assertThat(source)
+                .doesNotContain("public FraudCaseDocument createCase(CreateFraudCaseRequest request)")
+                .doesNotContain("public FraudCaseDocument assignCase(String caseId, AssignFraudCaseRequest request)")
+                .doesNotContain("public FraudCaseNoteResponse addNote(String caseId, AddFraudCaseNoteRequest request)")
+                .doesNotContain("public FraudCaseDecisionResponse addDecision(String caseId, AddFraudCaseDecisionRequest request)")
+                .doesNotContain("public FraudCaseDocument transitionCase(String caseId, TransitionFraudCaseRequest request)")
+                .doesNotContain("public FraudCaseDocument closeCase(String caseId, CloseFraudCaseRequest request)")
+                .doesNotContain("public FraudCaseDocument reopenCase(String caseId, ReopenFraudCaseRequest request)");
     }
 
     private String read(Path path) {

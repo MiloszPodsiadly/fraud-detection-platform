@@ -231,7 +231,7 @@ class FraudCaseLifecycleIdempotencyConcurrencyIntegrationTest extends AbstractIn
                 RiskLevel.CRITICAL,
                 "Manual investigation",
                 "analyst-1"
-        ));
+        ), "create-helper-key-" + UUID.randomUUID());
     }
 
     private long countAudit(String caseId, FraudCaseAuditAction action) {

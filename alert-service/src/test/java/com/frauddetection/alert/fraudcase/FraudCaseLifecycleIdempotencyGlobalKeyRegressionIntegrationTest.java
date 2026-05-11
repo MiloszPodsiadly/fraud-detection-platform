@@ -184,13 +184,15 @@ class FraudCaseLifecycleIdempotencyGlobalKeyRegressionIntegrationTest extends Ab
     }
 
     private FraudCaseDocument createCase(String alertId) {
-        return service.createCase(new CreateFraudCaseRequest(
+        FraudCaseDocument created = service.createCase(new CreateFraudCaseRequest(
                 List.of(alertId),
                 FraudCasePriority.HIGH,
                 RiskLevel.CRITICAL,
                 "Manual investigation",
                 "analyst-1"
-        ));
+        ), "create-helper-key-" + UUID.randomUUID());
+        idempotencyRepository.deleteAll();
+        return created;
     }
 
     private FraudCaseManagementService service(MongoRepositoryFactory repositoryFactory) {

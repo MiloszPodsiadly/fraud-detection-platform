@@ -135,13 +135,15 @@ class FraudCaseLifecycleIdempotencyFailureIntegrationTest extends AbstractIntegr
     }
 
     private FraudCaseDocument createCase() {
-        return service.createCase(new CreateFraudCaseRequest(
+        FraudCaseDocument created = service.createCase(new CreateFraudCaseRequest(
                 List.of("alert-1"),
                 FraudCasePriority.HIGH,
                 RiskLevel.CRITICAL,
                 "Manual investigation",
                 "analyst-1"
-        ));
+        ), "create-helper-key-" + UUID.randomUUID());
+        idempotencyRepository.deleteAll();
+        return created;
     }
 
     private long countAudit(String caseId, FraudCaseAuditAction action) {
