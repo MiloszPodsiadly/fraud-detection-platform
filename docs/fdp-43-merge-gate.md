@@ -16,6 +16,8 @@ FDP-43 adds shared idempotency primitives and local fraud-case lifecycle retry s
 - Same key + same payload + same actor/action/scope returns a stable replay response for create, assign, note,
   decision, transition, close, and reopen.
 - Same key with different payload, actor, action, or scope returns `409` and does not mutate.
+- PR #50 regression proof: same idempotency key reused across different action/scope/actor/payload returns conflict
+  and commits no mutation/audit; only one idempotency record remains.
 - Concurrent same-key requests do not duplicate lifecycle mutation, audit entry, or idempotency record.
 - Depending on timing, the competing concurrent request may receive a stable replay response or
   `code:IDEMPOTENCY_KEY_IN_PROGRESS`; raw Mongo/Spring persistence exceptions must not escape normal same-key
@@ -37,8 +39,10 @@ FDP-43 adds shared idempotency primitives and local fraud-case lifecycle retry s
 - FDP-42 CI job `fdp42-fraud-case-management` is green and non-skipped.
 - Regulated mutation CI job `regulated-mutation-regression` is green and non-skipped.
 - FDP-43 CI job `fdp43-fraud-case-idempotency` is green and non-skipped.
-- No required GitHub Actions job is skipped.
-- No merge while any required GitHub Actions status is `in_progress`, queued, pending, or missing.
+- Required GitHub Actions jobs are `Backend Maven Build`, `FDP-42 Fraud Case Management`,
+  `Regulated Mutation Regression Gate`, and `FDP-43 Fraud Case Idempotency`.
+- No merge while any required GitHub Actions job is queued, pending, `in_progress`, skipped, missing, cancelled,
+  or failed.
 
 ## No-Go
 
@@ -60,6 +64,7 @@ FDP-43 adds shared idempotency primitives and local fraud-case lifecycle retry s
 - `FraudCaseControllerTest`
 - `FraudCaseSecurityIntegrationTest`
 - `FraudCaseTransactionIntegrationTest`
+- `FraudCaseLifecycleIdempotencyGlobalKeyRegressionIntegrationTest`
 - `FraudCaseLifecycleIdempotencyConcurrencyIntegrationTest`
 - `FraudCaseLifecycleIdempotencyFailureIntegrationTest`
 - `Fdp43FraudCaseLifecycleIdempotencyArchitectureTest`
@@ -70,3 +75,15 @@ FDP-43 adds shared idempotency primitives and local fraud-case lifecycle retry s
 Source-scanning architecture tests are CI guardrails. They prevent accidental public-path usage of non-idempotent
 overloads, but they are not formal runtime or security boundaries. The authoritative proof for retry safety is the
 real Mongo concurrency and transaction integration suite plus API-level idempotency error tests.
+
+## PR #50 Regression Proof Matrix
+
+This is the mandatory regression test for the PR #50 scoped-lookup bug.
+
+| Invariant | Test class | Required assertion |
+| --- | --- | --- |
+| Same key different action conflicts | `FraudCaseLifecycleIdempotencyGlobalKeyRegressionIntegrationTest` | `addNote` then `closeCase` same key => domain conflict, no close mutation, no close audit, one idempotency record |
+| Same key different case scope conflicts | `FraudCaseLifecycleIdempotencyGlobalKeyRegressionIntegrationTest` | `addNote` case1 then `addNote` case2 same key => conflict, no case2 note/audit, one record |
+| Same key different actor conflicts | `FraudCaseLifecycleIdempotencyGlobalKeyRegressionIntegrationTest` | actor A then actor B same key => conflict, one note/audit, one record |
+| Same key different payload conflicts | `FraudCaseLifecycleIdempotencyGlobalKeyRegressionIntegrationTest` | text A then text B same key => conflict, one note/audit, one record |
+| Same key same claim replays | `FraudCaseLifecycleIdempotencyGlobalKeyRegressionIntegrationTest` | no duplicate mutation/audit, one record |
