@@ -39,14 +39,16 @@ case-sensitive and does not apply identity aliasing beyond trimming.
 
 ## Sorting And Pagination
 
-Supported sort fields are `createdAt`, `updatedAt`, `priority`, `riskLevel`, and `caseNumber`. Sort directions are `asc` and `desc`. The Mongo query path appends `_id ASC` as a deterministic tie-breaker. `priority` and `riskLevel` sorting uses stored enum value order; FDP-45 does not claim a custom business severity ranking.
+Supported sort fields are `createdAt`, `updatedAt`, `priority`, `riskLevel`, and `caseNumber`. Sort directions are `asc` and `desc`. The Mongo query path appends `_id ASC` as a deterministic tie-breaker. `priority` and `riskLevel` sorting uses stored enum value order; FDP-45 does not claim a custom business severity ranking. Analysts should use `priority` or `riskLevel` filters for strict queue buckets; a future branch may add explicit rank fields such as `priorityRank` or `riskLevelRank` if business-severity ordering is required.
 
 Pagination is bounded to page numbers `0..1000` and page sizes `1..100`. Invalid page requests fail with
 `INVALID_PAGE_REQUEST` before repository access. The dedicated work queue uses bounded slice pagination and does not perform an exact Mongo count for broad queues.
 
 Cursor/keyset pagination is the recommended work queue traversal path. Requests may pass `cursor=<opaque cursor>`
 returned by the previous response. The cursor is signed, versioned, and bound to the canonical query shape: normalized
-filters plus sort field/direction. Changing filters or sort while presenting an existing cursor fails closed with
+filters plus sort field/direction. The cursor is signed for integrity, not encrypted, and must not be treated as
+confidential storage. It may contain traversal fields such as the last sort value and last id inside the encoded
+payload. Changing filters or sort while presenting an existing cursor fails closed with
 `INVALID_CURSOR`; clients must restart traversal without a cursor when changing filters or sort. The cursor payload
 contains a signed query hash, but clients must not parse it and operators must not log the cursor, query hash, last
 value, or last id. Unsupported versions, malformed values, tampering, filter mismatches, or sort mismatches fail closed
@@ -54,6 +56,11 @@ with `INVALID_CURSOR`. Cursor mode uses a keyset predicate and does not call Mon
 
 Cursor mode and page mode are separate traversal contracts. `cursor` with missing/default `page=0` is accepted, but
 `cursor` with any non-zero page fails closed with `INVALID_CURSOR_PAGE_COMBINATION`. Size is not part of the cursor query hash. Clients may change `size` within `1..100`, although stable traversal is easiest when clients keep size unchanged between cursor requests.
+
+Cursor pagination is not snapshot isolation. It does not freeze the work queue, does not guarantee a historical
+point-in-time view, and does not add repeatable-read semantics. Concurrent inserts or fraud-case updates can move cases
+between pages. The cursor improves bounded traversal cost and binds continuation to the query/sort shape; FDP-45 does
+not change transaction boundaries or add read snapshot semantics.
 
 Page mode remains as bounded offset compatibility mode for exploratory use. Repeated requests near
 `MAX_PAGE_NUMBER=1000` should be treated as an operational signal to refine filters or use cursor traversal.
@@ -74,6 +81,12 @@ pagination or a capped count after a versioned public API decision.
 prevention safety boundary for the existing `PagedResponse` compatibility path. Deep operational browsing should use
 `/api/v1/fraud-cases/work-queue` or legacy `/api/fraud-cases/work-queue` with filters and cursor pagination.
 
+### Cursor traversal limits
+
+Work queue cursor mode is the preferred high-volume traversal path. The cursor is opaque, signed, not encrypted, bound
+to filters and sort, and not snapshot isolation. Offset page mode remains a bounded compatibility path for exploratory
+use only. Legacy exact count remains compatibility behavior, not the recommended high-volume path.
+
 ## SLA Fields
 
 SLA values are derived at read time only:
@@ -87,8 +100,13 @@ The SLA duration is explicitly configured by `app.fraud-cases.work-queue.sla` an
 startup. Local development may use the `application.yml` fallback value, but production-like profiles such as `prod` and
 `bank` require the `FRAUD_CASE_WORK_QUEUE_SLA` environment variable without a default. Cursor signing also requires
 `FRAUD_CASE_WORK_QUEUE_CURSOR_SIGNING_SECRET` in `prod` and `bank`; local development may use the `application.yml`
-fallback only. Production-like profiles reject known local cursor signing secrets. Rotating the cursor signing secret
-can invalidate existing cursors, so clients should restart traversal without cursor after rotation. SLA is business policy, not persistence state. Closed or resolved fraud cases are `NOT_APPLICABLE`.
+fallback only. The local default cursor signing secret exists only for local/test use. Production-like profiles reject
+known local cursor signing secrets. Rotating the cursor signing secret can invalidate existing cursors, so clients
+should restart traversal without cursor after rotation. Current FDP-45 supports one active cursor signing secret. A
+future hardening item may add a non-secret key id and a bounded multi-key verification window, but this branch does not
+implement KMS-backed rotation. The rotation runbook is
+`docs/runbooks/fdp-45-work-queue-cursor-secret-rotation.md`. SLA is business policy, not persistence state. Closed or
+resolved fraud cases are `NOT_APPLICABLE`.
 Missing timestamps are `UNKNOWN`. These values are not persisted and do not mutate fraud-case state, audit records,
 idempotency records, assignment, priority, or status. The derived SLA and age values are not persisted.
 
@@ -144,6 +162,11 @@ low-cardinality `invalid_cursor` outcome. Metric labels must not include case id
 raw filter values, raw query strings, cursor values, query hashes, last cursor values, last cursor ids, exception
 messages, stack traces, request hashes, or idempotency keys.
 
+`INVALID_CURSOR` can mean the cursor was tampered, produced with different filters, produced with different sort,
+malformed, signed with an older unsupported version, or invalidated by cursor signing secret rotation. Authenticated
+invalid cursor requests are rejected sensitive read attempts. Clients should preserve intended filters and sort, restart
+traversal without a cursor, and must not retry the same invalid cursor indefinitely.
+
 Operational alerting for audit-unavailable fail-closed behavior is specified in
 `docs/runbooks/fdp-45-sensitive-read-audit-unavailable.md` as `WorkQueueSensitiveReadAuditUnavailable`. Metrics are not
 audit evidence.
@@ -157,8 +180,8 @@ FDP-45 does not change lifecycle mutation semantics, idempotency semantics, audi
 FDP-45 is GO only when the current head SHA has all required CI jobs completed successfully, including backend,
 FDP-42, FDP-43, FDP-44, regulated mutation regression, and the FDP-45 work queue proof suite. The FDP-45 proof suite
 must include contract compatibility, pagination bounds, duplicate-param rejection, filter normalization/length checks,
-allowlisted sorting, cursor/keyset traversal, query binding, page/cursor conflict rejection, tamper rejection, profile
-secret safety, invalid-cursor observability, index readiness, real Mongo filter/sort/page proof,
+allowlisted sorting, sort-field cursor coverage, cursor/keyset traversal, cursor size-change behavior, query binding, page/cursor conflict rejection, tamper rejection, profile
+secret safety, invalid-cursor observability, invalid-cursor rejected-audit proof, index readiness, real Mongo filter/sort/page proof,
 SLA config/derived fields, read-only safety, security, low-cardinality metrics, read-access audit
 success/rejected/failed outcomes, no duplicate work queue success audit, response-advice marker behavior, fail-closed
 audit precedence, OpenAPI truth, and no-overclaim docs proof.

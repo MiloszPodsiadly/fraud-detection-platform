@@ -1079,10 +1079,11 @@ paths:
       description: >-
         Returns a bounded investigator work queue slice using the existing FraudCaseQueryService and
         FraudCaseSearchRepository path. Cursor/keyset pagination is recommended for long traversal; page remains a
-        bounded offset compatibility mode with maximum page 1000. Cursor values are opaque, signed, versioned, bound to
-        the original filters and sort, and must not be parsed, logged, or used as metric labels by clients.
-        Changing filters or sort with a cursor returns INVALID_CURSOR. A cursor with page other than 0 returns
-        INVALID_CURSOR_PAGE_COMBINATION. Existing cursors may become invalid after cursor signing secret rotation. It
+        bounded offset compatibility mode with maximum page 1000. Cursor values are opaque, signed, not encrypted,
+        versioned, bound to the original filters and sort, and must not be parsed, logged, used as confidential storage,
+        copied into audit payloads, or used as metric labels by clients. Cursor pagination is not snapshot isolation
+        and does not freeze the work queue. Changing filters or sort with a cursor returns INVALID_CURSOR. A cursor with
+        page other than 0 returns INVALID_CURSOR_PAGE_COMBINATION. Existing cursors may become invalid after cursor signing secret rotation. It
         is read-only, audited as a sensitive read, rejects duplicate single-valued query params, derives SLA fields from
         app.fraud-cases.work-queue.sla, and does not perform an exact count.
       security:
@@ -1119,7 +1120,7 @@ paths:
         - name: cursor
           in: query
           required: false
-          description: Opaque signed versioned cursor returned by the previous work queue response. It is bound to the original filters and sort. Clients must not parse it; unsupported versions, tampering, filter mismatches, or sort mismatches return INVALID_CURSOR. Cursor with page other than 0 returns INVALID_CURSOR_PAGE_COMBINATION.
+          description: Opaque signed, not encrypted, versioned cursor returned by the previous work queue response. It is bound to the original filters and sort, not size. Clients must not parse it, log it, treat it as confidential storage, or persist it long-term; unsupported versions, tampering, malformed values, secret rotation, filter mismatches, or sort mismatches return INVALID_CURSOR. Cursor with page other than 0 returns INVALID_CURSOR_PAGE_COMBINATION.
           schema:
             type: string
             maxLength: 2048
