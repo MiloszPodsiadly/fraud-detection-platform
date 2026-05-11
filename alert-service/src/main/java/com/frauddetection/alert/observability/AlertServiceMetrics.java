@@ -126,6 +126,13 @@ public class AlertServiceMetrics {
         ).increment();
     }
 
+    public void recordFraudCaseLifecycleIdempotencyOutcome(String outcome) {
+        counter(
+                "fraud_case_lifecycle_idempotency_total",
+                "outcome", normalizeFraudCaseLifecycleIdempotencyOutcome(outcome)
+        ).increment();
+    }
+
     public void recordDecisionOutboxPublishConfirmationFailed() {
         counter(
                 "fraud_platform_decision_outbox_failures_total",
@@ -916,6 +923,13 @@ public class AlertServiceMetrics {
         return switch (outcome) {
             case "RECOVERED", "STILL_PENDING", "RECOVERY_REQUIRED", "FAILED_TERMINAL" -> outcome;
             default -> "RECOVERY_REQUIRED";
+        };
+    }
+
+    private String normalizeFraudCaseLifecycleIdempotencyOutcome(String outcome) {
+        return switch (outcome) {
+            case "new", "replay", "conflict", "in_progress", "snapshot_too_large", "race_resolved", "failure" -> outcome;
+            default -> "failure";
         };
     }
 

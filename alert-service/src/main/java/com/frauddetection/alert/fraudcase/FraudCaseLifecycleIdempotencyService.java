@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.idempotency.SharedIdempotencyKeyPolicy;
 import com.frauddetection.alert.idempotency.SharedInvalidIdempotencyKeyException;
 import com.frauddetection.alert.idempotency.SharedMissingIdempotencyKeyException;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.FraudCaseLifecycleIdempotencyRecordDocument;
 import com.frauddetection.alert.persistence.FraudCaseLifecycleIdempotencyRepository;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
@@ -17,7 +18,9 @@ import org.springframework.transaction.TransactionSystemException;
 import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.function.Supplier;
 
 @Service
@@ -33,6 +36,8 @@ public class FraudCaseLifecycleIdempotencyService {
     private final ObjectMapper objectMapper;
     private final int maxResponseSnapshotBytes;
     private final Duration retention;
+    private final AlertServiceMetrics metrics;
+    private final Clock clock;
 
     @Autowired
     public FraudCaseLifecycleIdempotencyService(
@@ -41,9 +46,10 @@ public class FraudCaseLifecycleIdempotencyService {
             FraudCaseLifecycleIdempotencyConflictPolicy conflictPolicy,
             RegulatedMutationTransactionRunner transactionRunner,
             ObjectMapper objectMapper,
+            AlertServiceMetrics metrics,
             @Value("${app.fraud-cases.idempotency.retention:PT24H}") Duration retention
     ) {
-        this(repository, keyPolicy, conflictPolicy, transactionRunner, objectMapper, MAX_RESPONSE_SNAPSHOT_BYTES, retention);
+        this(repository, keyPolicy, conflictPolicy, transactionRunner, objectMapper, MAX_RESPONSE_SNAPSHOT_BYTES, retention, metrics, Clock.systemUTC());
     }
 
     FraudCaseLifecycleIdempotencyService(
@@ -53,7 +59,7 @@ public class FraudCaseLifecycleIdempotencyService {
             RegulatedMutationTransactionRunner transactionRunner,
             ObjectMapper objectMapper
     ) {
-        this(repository, keyPolicy, conflictPolicy, transactionRunner, objectMapper, MAX_RESPONSE_SNAPSHOT_BYTES, DEFAULT_RETENTION);
+        this(repository, keyPolicy, conflictPolicy, transactionRunner, objectMapper, MAX_RESPONSE_SNAPSHOT_BYTES, DEFAULT_RETENTION, null, Clock.systemUTC());
     }
 
     FraudCaseLifecycleIdempotencyService(
@@ -64,7 +70,7 @@ public class FraudCaseLifecycleIdempotencyService {
             ObjectMapper objectMapper,
             int maxResponseSnapshotBytes
     ) {
-        this(repository, keyPolicy, conflictPolicy, transactionRunner, objectMapper, maxResponseSnapshotBytes, DEFAULT_RETENTION);
+        this(repository, keyPolicy, conflictPolicy, transactionRunner, objectMapper, maxResponseSnapshotBytes, DEFAULT_RETENTION, null, Clock.systemUTC());
     }
 
     FraudCaseLifecycleIdempotencyService(
@@ -76,6 +82,20 @@ public class FraudCaseLifecycleIdempotencyService {
             int maxResponseSnapshotBytes,
             Duration retention
     ) {
+        this(repository, keyPolicy, conflictPolicy, transactionRunner, objectMapper, maxResponseSnapshotBytes, retention, null, Clock.systemUTC());
+    }
+
+    FraudCaseLifecycleIdempotencyService(
+            FraudCaseLifecycleIdempotencyRepository repository,
+            SharedIdempotencyKeyPolicy keyPolicy,
+            FraudCaseLifecycleIdempotencyConflictPolicy conflictPolicy,
+            RegulatedMutationTransactionRunner transactionRunner,
+            ObjectMapper objectMapper,
+            int maxResponseSnapshotBytes,
+            Duration retention,
+            AlertServiceMetrics metrics,
+            Clock clock
+    ) {
         this.repository = repository;
         this.keyPolicy = keyPolicy;
         this.conflictPolicy = conflictPolicy;
@@ -83,6 +103,8 @@ public class FraudCaseLifecycleIdempotencyService {
         this.objectMapper = objectMapper;
         this.maxResponseSnapshotBytes = maxResponseSnapshotBytes;
         this.retention = validateRetention(retention);
+        this.metrics = metrics;
+        this.clock = clock == null ? Clock.systemUTC() : clock;
     }
 
     public <T> T execute(FraudCaseLifecycleIdempotencyCommand command, Supplier<T> mutation, Class<T> responseType) {
@@ -117,13 +139,8 @@ public class FraudCaseLifecycleIdempotencyService {
             Supplier<T> mutation,
             Class<T> responseType
     ) {
-        return findRecord(
-                        keyHash,
-                        command.action(),
-                        command.actorId(),
-                        command.caseIdScope()
-                )
-                .map(existing -> existingResponseOrConflict(existing, command, responseType))
+        return findRecordByKeyHash(keyHash)
+                .map(existing -> existingResponseOrConflict(existing, command, responseType, false))
                 .orElseGet(() -> createAndExecute(keyHash, command, mutation, responseType));
     }
 
@@ -147,15 +164,30 @@ public class FraudCaseLifecycleIdempotencyService {
             saveRecord(record);
         } catch (DataAccessException exception) {
             if (!isIdempotencyRaceSignal(exception)) {
+                recordOutcome("failure");
                 throw exception;
             }
             return resolveIdempotencyRace(keyHash, command, responseType);
         }
         T response = mutation.get();
-        record.setResponsePayloadSnapshot(snapshot(response));
+        try {
+            record.setResponsePayloadSnapshot(snapshot(response));
+        } catch (FraudCaseIdempotencySnapshotTooLargeException exception) {
+            recordOutcome("snapshot_too_large");
+            throw exception;
+        } catch (RuntimeException exception) {
+            recordOutcome("failure");
+            throw exception;
+        }
         record.setStatus(FraudCaseLifecycleIdempotencyStatus.COMPLETED);
-        record.setCompletedAt(command.now());
-        saveRecord(record);
+        record.setCompletedAt(Instant.now(clock));
+        try {
+            saveRecord(record);
+        } catch (DataAccessException exception) {
+            recordOutcome("failure");
+            throw exception;
+        }
+        recordOutcome("new");
         return response;
     }
 
@@ -164,14 +196,10 @@ public class FraudCaseLifecycleIdempotencyService {
             FraudCaseLifecycleIdempotencyCommand command,
             Class<T> responseType
     ) {
-        FraudCaseLifecycleIdempotencyRecordDocument existing = findRecord(
-                        keyHash,
-                        command.action(),
-                        command.actorId(),
-                        command.caseIdScope()
-                )
+        recordOutcome("race_resolved");
+        FraudCaseLifecycleIdempotencyRecordDocument existing = findRecordByKeyHash(keyHash)
                 .orElseThrow(FraudCaseIdempotencyInProgressException::new);
-        return existingResponseOrConflict(existing, command, responseType);
+        return existingResponseOrConflict(existing, command, responseType, true);
     }
 
     private boolean isIdempotencyRaceSignal(Throwable exception) {
@@ -217,12 +245,26 @@ public class FraudCaseLifecycleIdempotencyService {
     private <T> T existingResponseOrConflict(
             FraudCaseLifecycleIdempotencyRecordDocument existing,
             FraudCaseLifecycleIdempotencyCommand command,
-            Class<T> responseType
+            Class<T> responseType,
+            boolean raceResolved
     ) {
-        conflictPolicy.validateSameOperation(existing, command);
+        try {
+            conflictPolicy.validateSameOperation(existing, command);
+        } catch (FraudCaseIdempotencyConflictException exception) {
+            if (!raceResolved) {
+                recordOutcome("conflict");
+            }
+            throw exception;
+        }
         if (existing.getStatus() == FraudCaseLifecycleIdempotencyStatus.COMPLETED
                 && StringUtils.hasText(existing.getResponsePayloadSnapshot())) {
+            if (!raceResolved) {
+                recordOutcome("replay");
+            }
             return restore(existing.getResponsePayloadSnapshot(), responseType);
+        }
+        if (!raceResolved) {
+            recordOutcome("in_progress");
         }
         throw new FraudCaseIdempotencyInProgressException();
     }
@@ -261,13 +303,16 @@ public class FraudCaseLifecycleIdempotencyService {
         return repository.save(record);
     }
 
-    protected java.util.Optional<FraudCaseLifecycleIdempotencyRecordDocument> findRecord(
-            String keyHash,
-            String action,
-            String actorId,
-            String caseIdScope
-    ) {
+    protected java.util.Optional<FraudCaseLifecycleIdempotencyRecordDocument> findRecordByKeyHash(String keyHash) {
+        // FDP-43 idempotency keys are globally unique within the fraud-case lifecycle idempotency domain.
+        // Do not scope lookup by action, actor, or case.
         return repository.findByIdempotencyKeyHash(keyHash);
+    }
+
+    private void recordOutcome(String outcome) {
+        if (metrics != null) {
+            metrics.recordFraudCaseLifecycleIdempotencyOutcome(outcome);
+        }
     }
 
     private Duration validateRetention(Duration retention) {

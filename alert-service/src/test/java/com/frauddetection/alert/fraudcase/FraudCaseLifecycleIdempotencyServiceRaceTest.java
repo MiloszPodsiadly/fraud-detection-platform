@@ -3,18 +3,22 @@ package com.frauddetection.alert.fraudcase;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.frauddetection.alert.idempotency.SharedIdempotencyConflictPolicy;
 import com.frauddetection.alert.idempotency.SharedIdempotencyKeyPolicy;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.FraudCaseLifecycleIdempotencyRecordDocument;
 import com.frauddetection.alert.persistence.FraudCaseLifecycleIdempotencyRepository;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.transaction.TransactionSystemException;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -55,6 +59,20 @@ class FraudCaseLifecycleIdempotencyServiceRaceTest {
         assertThatThrownBy(() -> service.execute(COMMAND, () -> "mutated", String.class))
                 .isInstanceOf(FraudCaseIdempotencyInProgressException.class)
                 .isNotInstanceOf(DuplicateKeyException.class);
+    }
+
+    @Test
+    void duplicateKeyRaceRecordsBoundedRaceResolvedMetric() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        FraudCaseLifecycleIdempotencyService service = duplicateInsertService(null, new AlertServiceMetrics(registry));
+
+        assertThatThrownBy(() -> service.execute(COMMAND, () -> "mutated", String.class))
+                .isInstanceOf(FraudCaseIdempotencyInProgressException.class);
+
+        assertThat(registry.get("fraud_case_lifecycle_idempotency_total")
+                .tag("outcome", "race_resolved")
+                .counter()
+                .count()).isEqualTo(1.0d);
     }
 
     @Test
@@ -130,15 +148,56 @@ class FraudCaseLifecycleIdempotencyServiceRaceTest {
                 .hasMessage("Fraud-case lifecycle idempotency retention must be positive.");
     }
 
+    @Test
+    void completedAtUsesCompletionClockWhileExpiryRemainsBasedOnCreatedAt() {
+        FraudCaseLifecycleIdempotencyRepository repository = mock(FraudCaseLifecycleIdempotencyRepository.class);
+        AtomicReference<FraudCaseLifecycleIdempotencyRecordDocument> completedRecord = new AtomicReference<>();
+        when(repository.findByIdempotencyKeyHash(any())).thenReturn(Optional.empty());
+        when(repository.save(any())).thenAnswer(invocation -> {
+            FraudCaseLifecycleIdempotencyRecordDocument record = invocation.getArgument(0);
+            if (record.getStatus() == FraudCaseLifecycleIdempotencyStatus.COMPLETED) {
+                completedRecord.set(record);
+            }
+            return record;
+        });
+        Instant completionTime = Instant.parse("2026-05-11T10:00:15Z");
+        FraudCaseLifecycleIdempotencyService service = new FraudCaseLifecycleIdempotencyService(
+                repository,
+                new SharedIdempotencyKeyPolicy(),
+                new FraudCaseLifecycleIdempotencyConflictPolicy(new SharedIdempotencyConflictPolicy()),
+                transactionRunner(),
+                JsonMapper.builder().build(),
+                FraudCaseLifecycleIdempotencyService.MAX_RESPONSE_SNAPSHOT_BYTES,
+                Duration.ofHours(24),
+                null,
+                Clock.fixed(completionTime, java.time.ZoneOffset.UTC)
+        );
+
+        service.execute(COMMAND, () -> "mutated", String.class);
+
+        assertThat(completedRecord.get().getCreatedAt()).isEqualTo(COMMAND.now());
+        assertThat(completedRecord.get().getCompletedAt()).isEqualTo(completionTime);
+        assertThat(completedRecord.get().getCompletedAt()).isAfterOrEqualTo(completedRecord.get().getCreatedAt());
+        assertThat(completedRecord.get().getExpiresAt()).isEqualTo(COMMAND.now().plus(Duration.ofHours(24)));
+    }
+
     private FraudCaseLifecycleIdempotencyService duplicateInsertService(
             FraudCaseLifecycleIdempotencyRecordDocument existing
+    ) {
+        return duplicateInsertService(existing, null);
+    }
+
+    private FraudCaseLifecycleIdempotencyService duplicateInsertService(
+            FraudCaseLifecycleIdempotencyRecordDocument existing,
+            AlertServiceMetrics metrics
     ) {
         return new DuplicateInsertFraudCaseLifecycleIdempotencyService(
                 mock(FraudCaseLifecycleIdempotencyRepository.class),
                 new SharedIdempotencyKeyPolicy(),
                 new FraudCaseLifecycleIdempotencyConflictPolicy(new SharedIdempotencyConflictPolicy()),
                 transactionRunner(),
-                existing
+                existing,
+                metrics
         );
     }
 
@@ -200,9 +259,20 @@ class FraudCaseLifecycleIdempotencyServiceRaceTest {
                 SharedIdempotencyKeyPolicy keyPolicy,
                 FraudCaseLifecycleIdempotencyConflictPolicy conflictPolicy,
                 RegulatedMutationTransactionRunner transactionRunner,
-                FraudCaseLifecycleIdempotencyRecordDocument existing
+                FraudCaseLifecycleIdempotencyRecordDocument existing,
+                AlertServiceMetrics metrics
         ) {
-            super(repository, keyPolicy, conflictPolicy, transactionRunner, JsonMapper.builder().build(), MAX_RESPONSE_SNAPSHOT_BYTES);
+            super(
+                    repository,
+                    keyPolicy,
+                    conflictPolicy,
+                    transactionRunner,
+                    JsonMapper.builder().build(),
+                    MAX_RESPONSE_SNAPSHOT_BYTES,
+                    DEFAULT_RETENTION,
+                    metrics,
+                    Clock.systemUTC()
+            );
             this.existing = existing;
         }
 
@@ -215,12 +285,7 @@ class FraudCaseLifecycleIdempotencyServiceRaceTest {
         }
 
         @Override
-        protected Optional<FraudCaseLifecycleIdempotencyRecordDocument> findRecord(
-                String keyHash,
-                String action,
-                String actorId,
-                String caseIdScope
-        ) {
+        protected Optional<FraudCaseLifecycleIdempotencyRecordDocument> findRecordByKeyHash(String keyHash) {
             return Optional.ofNullable(existing);
         }
     }
@@ -241,12 +306,7 @@ class FraudCaseLifecycleIdempotencyServiceRaceTest {
         }
 
         @Override
-        protected Optional<FraudCaseLifecycleIdempotencyRecordDocument> findRecord(
-                String keyHash,
-                String action,
-                String actorId,
-                String caseIdScope
-        ) {
+        protected Optional<FraudCaseLifecycleIdempotencyRecordDocument> findRecordByKeyHash(String keyHash) {
             return Optional.ofNullable(existing);
         }
     }
@@ -276,4 +336,5 @@ class FraudCaseLifecycleIdempotencyServiceRaceTest {
             return record;
         }
     }
+
 }

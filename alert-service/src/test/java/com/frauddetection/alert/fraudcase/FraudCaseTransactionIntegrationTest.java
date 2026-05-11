@@ -59,6 +59,7 @@ import org.springframework.data.mongodb.repository.support.MongoRepositoryFactor
 import org.springframework.test.context.junit.jupiter.EnabledIf;
 import org.springframework.transaction.PlatformTransactionManager;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Iterator;
@@ -83,6 +84,8 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
     private FraudCaseLifecycleIdempotencyRepository idempotencyRepository;
     private AlertRepository alertRepository;
     private FraudCaseManagementService service;
+    private SimpleMeterRegistry meterRegistry;
+    private AlertServiceMetrics metrics;
 
     @BeforeEach
     void setUp() {
@@ -360,8 +363,11 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
                 .first()
                 .satisfies(record -> {
                     assertThat(record.getStatus()).isEqualTo(FraudCaseLifecycleIdempotencyStatus.COMPLETED);
+                    assertThat(record.getCompletedAt()).isAfterOrEqualTo(record.getCreatedAt());
                     assertThat(record.getExpiresAt()).isEqualTo(record.getCreatedAt().plus(Duration.ofHours(24)));
                 });
+        assertThat(idempotencyOutcome("new")).isEqualTo(1.0d);
+        assertThat(idempotencyOutcome("replay")).isEqualTo(1.0d);
     }
 
     @Test
@@ -397,6 +403,7 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
         assertThat(countAudit(created.getCaseId(), FraudCaseAuditAction.CASE_CLOSED)).isZero();
         assertThat(auditRepository.findByCaseIdOrderByOccurredAtAsc(created.getCaseId())).hasSize(auditBefore);
         assertThat(idempotencyRepository.findAll()).hasSize(1);
+        assertThat(idempotencyOutcome("conflict")).isEqualTo(1.0d);
     }
 
     @Test
@@ -677,6 +684,7 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
         assertThat(caseRepository.findById(created.getCaseId()).orElseThrow().getUpdatedAt()).isEqualTo(originalUpdatedAt);
         assertThat(idempotencyRepository.findAll())
                 .noneMatch(record -> "ADD_FRAUD_CASE_NOTE".equals(record.getAction()));
+        assertThat(idempotencyOutcome("snapshot_too_large")).isEqualTo(1.0d);
     }
 
     private FraudCaseDocument createCase() {
@@ -698,7 +706,8 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
     }
 
     private FraudCaseManagementService service(FraudCaseAuditService auditService, IdempotencyServiceMode mode) {
-        AlertServiceMetrics metrics = new AlertServiceMetrics(new SimpleMeterRegistry());
+        meterRegistry = new SimpleMeterRegistry();
+        metrics = new AlertServiceMetrics(meterRegistry);
         var scoredTransactionRepository = new MongoRepositoryFactory(mongoTemplate).getRepository(ScoredTransactionRepository.class);
         var searchRepository = new MongoFraudCaseSearchRepository(mongoTemplate);
         var actorResolver = new AnalystActorResolver(new CurrentAnalystUser(), metrics);
@@ -712,6 +721,7 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
                         new FraudCaseLifecycleIdempotencyConflictPolicy(new SharedIdempotencyConflictPolicy()),
                         transactionRunner,
                         JsonMapper.builder().addModule(new JavaTimeModule()).build(),
+                        metrics,
                         mode
                 );
         return new FraudCaseManagementService(
@@ -747,6 +757,7 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
             FraudCaseLifecycleIdempotencyConflictPolicy conflictPolicy,
             RegulatedMutationTransactionRunner transactionRunner,
             JsonMapper objectMapper,
+            AlertServiceMetrics metrics,
             IdempotencyServiceMode mode
     ) {
         if (mode == IdempotencyServiceMode.FAIL_COMPLETION_SAVE) {
@@ -767,7 +778,10 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
                 conflictPolicy,
                 transactionRunner,
                 objectMapper,
-                snapshotLimit
+                snapshotLimit,
+                FraudCaseLifecycleIdempotencyService.DEFAULT_RETENTION,
+                metrics,
+                Clock.systemUTC()
         );
     }
 
@@ -798,6 +812,13 @@ class FraudCaseTransactionIntegrationTest extends AbstractIntegrationTest {
     private long countAudit(String caseId, FraudCaseAuditAction action) {
         return auditRepository.findByCaseIdOrderByOccurredAtAsc(caseId).stream()
                 .filter(entry -> entry.getAction() == action)
+                .count();
+    }
+
+    private double idempotencyOutcome(String outcome) {
+        return meterRegistry.get("fraud_case_lifecycle_idempotency_total")
+                .tag("outcome", outcome)
+                .counter()
                 .count();
     }
 

@@ -42,10 +42,16 @@ class Fdp43FraudCaseLifecycleIdempotencyArchitectureTest {
     @Test
     void lifecycleIdempotencyRepositoryMustLookupByGlobalKeyHashOnly() {
         String source = read(sourceRoot().resolve(Path.of("persistence", "FraudCaseLifecycleIdempotencyRepository.java")));
+        String service = read(sourceRoot().resolve(Path.of("fraudcase", "FraudCaseLifecycleIdempotencyService.java")));
 
         assertThat(source)
                 .contains("findByIdempotencyKeyHash(String idempotencyKeyHash)")
                 .doesNotContain("findByIdempotencyKeyHashAndActionAndActorIdAndCaseIdScope");
+        assertThat(service)
+                .contains("findRecordByKeyHash(String keyHash)")
+                .contains("Do not scope lookup by action, actor, or case.")
+                .doesNotContain("findRecord(String keyHash, String action")
+                .doesNotContain("findRecord(\n            String keyHash");
     }
 
     @Test
