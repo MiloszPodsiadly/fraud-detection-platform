@@ -22,6 +22,26 @@ class Fdp45FraudCaseWorkQueueCursorArchitectureTest {
                 .doesNotContain(".count(");
     }
 
+    @Test
+    void productionQueryServiceConstructorShouldUseConfiguredCursorSecret() throws IOException {
+        String service = Files.readString(sourceRoot().resolve("service/FraudCaseQueryService.java"))
+                .replace("\r\n", "\n");
+        String productionConstructor = method(
+                service,
+                "@Autowired",
+                "    FraudCaseQueryService(\n            FraudCaseRepository fraudCaseRepository,\n            FraudCaseAuditRepository auditRepository,\n            FraudCaseSearchRepository searchRepository,\n            FraudCaseResponseMapper responseMapper,\n            Clock clock,"
+        );
+        String properties = Files.readString(sourceRoot().resolve("fraudcase/FraudCaseWorkQueueProperties.java"));
+
+        assertThat(productionConstructor)
+                .contains("FraudCaseWorkQueueProperties workQueueProperties")
+                .contains("new FraudCaseWorkQueueCursorCodec(workQueueProperties.cursorSigningSecret())")
+                .doesNotContain("localDefault()");
+        assertThat(properties)
+                .contains("Test-only constructor")
+                .contains("Production binding must use FraudCaseWorkQueueProperties(Duration, String)");
+    }
+
     private String method(String source, String startNeedle, String endNeedle) {
         int start = source.indexOf(startNeedle);
         int end = source.indexOf(endNeedle, start);

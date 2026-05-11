@@ -21,6 +21,8 @@ class Fdp45FraudCaseWorkQueueDocsNoOverclaimTest {
                 .contains("not persisted")
                 .contains("does not change lifecycle mutation semantics")
                 .contains("does not change")
+                .contains("not snapshot isolation")
+                .contains("does not freeze the work queue")
                 .contains("global exactly-once")
                 .contains("external finality")
                 .contains("bank certification claims");
@@ -29,7 +31,12 @@ class Fdp45FraudCaseWorkQueueDocsNoOverclaimTest {
                 .doesNotContain("guarantees external finality")
                 .doesNotContain("bank certified")
                 .doesNotContain("distributed acid guarantee")
-                .doesNotContain("worm guaranteed");
+                .doesNotContain("worm guaranteed")
+                .doesNotContain("provides snapshot isolation")
+                .doesNotContain("guarantees snapshot isolation")
+                .doesNotContain("consistent snapshot")
+                .doesNotContain("frozen queue")
+                .doesNotContain("repeatable read");
     }
 
     private Path projectRoot() {
