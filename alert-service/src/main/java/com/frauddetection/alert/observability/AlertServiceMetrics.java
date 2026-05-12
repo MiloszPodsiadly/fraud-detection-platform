@@ -156,6 +156,22 @@ public class AlertServiceMetrics {
                 .record(Math.max(0, pageSize));
     }
 
+    public void recordScoredTransactionSearchRequest(String outcome, String filterBucket) {
+        counter(
+                "scored_transaction_search_requests_total",
+                "endpoint_family", "scored_transactions",
+                "outcome", normalizeScoredTransactionSearchOutcome(outcome),
+                "filter_bucket", normalizeScoredTransactionFilterBucket(filterBucket)
+        ).increment();
+    }
+
+    public void recordScoredTransactionSearchPageSize(int pageSize) {
+        DistributionSummary.builder("scored_transaction_search_page_size_bucket")
+                .tag("endpoint_family", "scored_transactions")
+                .register(meterRegistry)
+                .record(Math.max(0, pageSize));
+    }
+
     public void recordDecisionOutboxPublishConfirmationFailed() {
         counter(
                 "fraud_platform_decision_outbox_failures_total",
@@ -973,6 +989,26 @@ public class AlertServiceMetrics {
         return switch (sortField) {
             case "createdAt", "updatedAt", "priority", "riskLevel", "caseNumber", "default" -> sortField;
             default -> "default";
+        };
+    }
+
+    private String normalizeScoredTransactionSearchOutcome(String outcome) {
+        if (!StringUtils.hasText(outcome)) {
+            return "failure";
+        }
+        return switch (outcome) {
+            case "success", "rejected", "failure" -> outcome;
+            default -> "failure";
+        };
+    }
+
+    private String normalizeScoredTransactionFilterBucket(String filterBucket) {
+        if (!StringUtils.hasText(filterBucket)) {
+            return "none";
+        }
+        return switch (filterBucket) {
+            case "none", "query", "risk", "classification", "combined" -> filterBucket;
+            default -> "combined";
         };
     }
 

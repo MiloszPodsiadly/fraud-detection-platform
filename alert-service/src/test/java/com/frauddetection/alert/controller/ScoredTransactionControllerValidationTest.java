@@ -3,6 +3,8 @@ package com.frauddetection.alert.controller;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
 import com.frauddetection.alert.mapper.ScoredTransactionResponseMapper;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.service.ScoredTransactionSearchPolicy;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,6 +18,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -29,7 +32,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         }
 )
 @AutoConfigureMockMvc(addFilters = false)
-@Import({AlertResponseMapper.class, ScoredTransactionResponseMapper.class, AlertServiceExceptionHandler.class})
+@Import({AlertResponseMapper.class, ScoredTransactionResponseMapper.class, ScoredTransactionSearchPolicy.class, AlertServiceExceptionHandler.class})
 class ScoredTransactionControllerValidationTest {
 
     @Autowired
@@ -37,6 +40,9 @@ class ScoredTransactionControllerValidationTest {
 
     @MockBean
     private TransactionMonitoringUseCase transactionMonitoringUseCase;
+
+    @MockBean
+    private AlertServiceMetrics metrics;
 
     @Test
     void shouldRejectDeepPageBeforeSearch() throws Exception {
@@ -46,6 +52,7 @@ class ScoredTransactionControllerValidationTest {
                 .andExpect(status().isBadRequest());
 
         verifyNoInteractions(transactionMonitoringUseCase);
+        verify(metrics).recordScoredTransactionSearchRequest("rejected", "none");
     }
 
     @Test
@@ -62,5 +69,17 @@ class ScoredTransactionControllerValidationTest {
 
         assertThat(body).doesNotContain(rawQuery, "4111111111111111", "customer-secret");
         verifyNoInteractions(transactionMonitoringUseCase);
+        verify(metrics).recordScoredTransactionSearchRequest("rejected", "query");
+    }
+
+    @Test
+    void shouldRejectShortQueryInsteadOfWideningToUnfilteredList() throws Exception {
+        mockMvc.perform(get("/api/v1/transactions/scored")
+                        .queryParam("query", "ab")
+                        .queryParam("size", "25"))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(transactionMonitoringUseCase);
+        verify(metrics).recordScoredTransactionSearchRequest("rejected", "query");
     }
 }

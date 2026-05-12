@@ -1,5 +1,6 @@
 package com.frauddetection.alert.audit.read;
 
+import com.frauddetection.alert.service.ScoredTransactionSearchPolicy;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerMapping;
@@ -34,7 +35,7 @@ public class ReadAccessAuditClassifier {
             return Optional.of(target(ReadAccessEndpointCategory.FRAUD_CASE_DETAIL, ReadAccessResourceType.FRAUD_CASE, variables.get("caseId"), request));
         }
         if ("/api/v1/transactions/scored".equals(pattern)) {
-            return Optional.of(target(ReadAccessEndpointCategory.SCORED_TRANSACTION_LIST, ReadAccessResourceType.SCORED_TRANSACTION, null, request));
+            return Optional.of(target(ReadAccessEndpointCategory.SCORED_TRANSACTION_SEARCH, ReadAccessResourceType.SCORED_TRANSACTION, null, request));
         }
         if ("/governance/advisories".equals(pattern)) {
             return Optional.of(target(ReadAccessEndpointCategory.GOVERNANCE_ADVISORY_LIST, ReadAccessResourceType.GOVERNANCE_ADVISORY_LIST, null, request));
@@ -98,6 +99,10 @@ public class ReadAccessAuditClassifier {
     }
 
     private String canonicalQuery(HttpServletRequest request) {
+        String pattern = (String) request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
+        if ("/api/v1/transactions/scored".equals(pattern)) {
+            return ScoredTransactionSearchPolicy.canonicalAuditQuery(request.getParameterMap());
+        }
         Map<String, String[]> parameterMap = request.getParameterMap();
         if (parameterMap == null || parameterMap.isEmpty()) {
             return null;

@@ -24,7 +24,7 @@ class ReadAccessAuditClassifierTest {
 
         ReadAccessAuditTarget target = classifier.classify(request).orElseThrow();
 
-        assertThat(target.endpointCategory()).isEqualTo(ReadAccessEndpointCategory.SCORED_TRANSACTION_LIST);
+        assertThat(target.endpointCategory()).isEqualTo(ReadAccessEndpointCategory.SCORED_TRANSACTION_SEARCH);
         assertThat(target.resourceType()).isEqualTo(ReadAccessResourceType.SCORED_TRANSACTION);
         assertThat(target.resourceId()).isNull();
         assertThat(target.page()).isEqualTo(2);

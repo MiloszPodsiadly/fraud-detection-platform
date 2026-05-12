@@ -131,6 +131,47 @@ class AlertServiceMetricsTest {
     }
 
     @Test
+    void shouldUseLowCardinalityScoredTransactionSearchMetricLabels() {
+        metrics.recordScoredTransactionSearchRequest("success", "query");
+        metrics.recordScoredTransactionSearchRequest("rejected", "combined");
+        metrics.recordScoredTransactionSearchRequest("raw exception customer-123", "raw card query");
+        metrics.recordScoredTransactionSearchPageSize(25);
+
+        Meter success = meterRegistry.get("scored_transaction_search_requests_total")
+                .tag("endpoint_family", "scored_transactions")
+                .tag("outcome", "success")
+                .tag("filter_bucket", "query")
+                .meter();
+        Meter rejected = meterRegistry.get("scored_transaction_search_requests_total")
+                .tag("outcome", "rejected")
+                .tag("filter_bucket", "combined")
+                .meter();
+        Meter failure = meterRegistry.get("scored_transaction_search_requests_total")
+                .tag("outcome", "failure")
+                .tag("filter_bucket", "combined")
+                .meter();
+        Meter pageSize = meterRegistry.get("scored_transaction_search_page_size_bucket").meter();
+
+        assertThat(success.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactlyInAnyOrder("endpoint_family", "outcome", "filter_bucket");
+        assertThat(rejected.getId().getTags())
+                .extracting(Tag::getValue)
+                .contains("rejected", "combined");
+        assertThat(failure.getId().getTags())
+                .extracting(Tag::getValue)
+                .contains("failure", "combined");
+        assertThat(pageSize.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactly("endpoint_family");
+        assertThat(meterRegistry.getMeters())
+                .allSatisfy(meter -> assertThat(meter.getId().getTags().toString())
+                        .doesNotContain("customer-123")
+                        .doesNotContain("card")
+                        .doesNotContain("exception"));
+    }
+
+    @Test
     void shouldUseLowCardinalityPlatformAuditPersistenceMetricLabels() {
         metrics.recordPlatformAuditEventPersisted(AuditAction.SUBMIT_ANALYST_DECISION, AuditOutcome.SUCCESS);
         metrics.recordPlatformAuditPersistenceFailure(AuditAction.SUBMIT_ANALYST_DECISION);

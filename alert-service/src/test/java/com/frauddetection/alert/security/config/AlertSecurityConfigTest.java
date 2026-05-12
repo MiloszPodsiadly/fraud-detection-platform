@@ -89,6 +89,8 @@ import com.frauddetection.alert.service.AlertManagementUseCase;
 import com.frauddetection.alert.service.DecisionOutboxReconciliationController;
 import com.frauddetection.alert.service.DecisionOutboxReconciliationService;
 import com.frauddetection.alert.service.FraudCaseManagementService;
+import com.frauddetection.alert.service.ScoredTransactionSearchCriteria;
+import com.frauddetection.alert.service.ScoredTransactionSearchPolicy;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
 import com.frauddetection.alert.system.SystemTrustLevelController;
 import com.frauddetection.alert.trust.TrustIncidentController;
@@ -165,6 +167,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         AlertResponseMapper.class,
         FraudCaseResponseMapper.class,
         ScoredTransactionResponseMapper.class,
+        ScoredTransactionSearchPolicy.class,
         AlertServiceExceptionHandler.class
 })
 @ActiveProfiles("test")
@@ -416,6 +419,27 @@ class AlertSecurityConfigTest {
         when(transactionMonitoringUseCase.listScoredTransactions(any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
 
         mockMvc.perform(get("/api/v1/transactions/scored").with(demoUser("READ_ONLY_ANALYST")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isArray());
+    }
+
+    @Test
+    void shouldAuthorizeFilteredScoredTransactionSearchBeforeValidationDetails() throws Exception {
+        mockMvc.perform(get("/api/v1/transactions/scored")
+                        .queryParam("query", "ab"))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(get("/api/v1/transactions/scored")
+                        .queryParam("query", "customer-123")
+                        .with(authorities(AnalystAuthority.FRAUD_CASE_READ)))
+                .andExpect(status().isForbidden());
+
+        when(transactionMonitoringUseCase.listScoredTransactions(any(Pageable.class), any(ScoredTransactionSearchCriteria.class)))
+                .thenReturn(new PageImpl<>(List.of()));
+
+        mockMvc.perform(get("/api/v1/transactions/scored")
+                        .queryParam("query", "customer-123")
+                        .with(authorities(AnalystAuthority.TRANSACTION_MONITOR_READ)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isArray());
     }

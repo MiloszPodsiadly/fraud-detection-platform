@@ -44,7 +44,7 @@ class ReadAccessAuditResponseAdviceTest {
 
         verify(auditService).audit(
                 org.mockito.ArgumentMatchers.argThat(target ->
-                        target.endpointCategory() == ReadAccessEndpointCategory.SCORED_TRANSACTION_LIST
+                        target.endpointCategory() == ReadAccessEndpointCategory.SCORED_TRANSACTION_SEARCH
                                 && target.page() == 0
                                 && target.size() == 25),
                 org.mockito.ArgumentMatchers.eq(ReadAccessAuditOutcome.SUCCESS),

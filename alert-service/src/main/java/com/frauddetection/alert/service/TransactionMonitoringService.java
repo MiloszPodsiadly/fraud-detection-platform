@@ -56,8 +56,16 @@ public class TransactionMonitoringService implements TransactionMonitoringUseCas
         List<ScoredTransaction> content = mongoTemplate.find(query, ScoredTransactionDocument.class).stream()
                 .map(mapper::toDomain)
                 .toList();
-        long total = mongoTemplate.count(buildQuery(criteria), ScoredTransactionDocument.class);
+        long total = cappedTotal(criteria);
         return new PageImpl<>(content, pageable, total);
+    }
+
+    private long cappedTotal(ScoredTransactionSearchCriteria criteria) {
+        Query countProbe = buildQuery(criteria)
+                .limit(ScoredTransactionSearchPolicy.MAX_FILTERED_TOTAL_COUNT + 1);
+        countProbe.fields().include("_id");
+        int boundedCount = mongoTemplate.find(countProbe, ScoredTransactionDocument.class).size();
+        return Math.min(boundedCount, ScoredTransactionSearchPolicy.MAX_FILTERED_TOTAL_COUNT);
     }
 
     private Query buildQuery(ScoredTransactionSearchCriteria criteria) {
@@ -77,13 +85,13 @@ public class TransactionMonitoringService implements TransactionMonitoringUseCas
         if (!hasText(queryText)) {
             return;
         }
-        String pattern = Pattern.quote(queryText.trim());
+        String prefixPattern = "^" + Pattern.quote(queryText.trim());
+        String exactPattern = "^" + Pattern.quote(queryText.trim()) + "$";
         filters.add(new Criteria().orOperator(
-                Criteria.where("transactionId").regex(pattern, "i"),
-                Criteria.where("customerId").regex(pattern, "i"),
-                Criteria.where("merchantInfo.merchantId").regex(pattern, "i"),
-                Criteria.where("merchantInfo.merchantName").regex(pattern, "i"),
-                Criteria.where("transactionAmount.currency").regex(pattern, "i")
+                Criteria.where("transactionId").regex(prefixPattern, "i"),
+                Criteria.where("customerId").regex(prefixPattern, "i"),
+                Criteria.where("merchantInfo.merchantId").regex(prefixPattern, "i"),
+                Criteria.where("transactionAmount.currency").regex(exactPattern, "i")
         ));
     }
 

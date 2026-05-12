@@ -38,9 +38,12 @@ public class ReadAccessAuditFailureInterceptor implements HandlerInterceptor {
         if (auditClassifier == null || auditor == null) {
             return;
         }
+        ReadAccessAuditOutcome outcome = response.getStatus() >= 400 && response.getStatus() < 500
+                ? ReadAccessAuditOutcome.REJECTED
+                : ReadAccessAuditOutcome.FAILED;
         auditClassifier.classify(request).ifPresent(target -> auditor.audit(
                 target,
-                ReadAccessAuditOutcome.FAILED,
+                outcome,
                 0,
                 request.getHeader("X-Correlation-Id")
         ));

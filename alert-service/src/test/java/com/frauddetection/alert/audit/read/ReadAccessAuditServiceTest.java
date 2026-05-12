@@ -37,7 +37,7 @@ class ReadAccessAuditServiceTest {
                 AnalystRole.FRAUD_OPS_ADMIN.authorities()
         )));
         ReadAccessAuditTarget target = new ReadAccessAuditTarget(
-                ReadAccessEndpointCategory.SCORED_TRANSACTION_LIST,
+                ReadAccessEndpointCategory.SCORED_TRANSACTION_SEARCH,
                 ReadAccessResourceType.SCORED_TRANSACTION,
                 null,
                 "abc123",
@@ -57,7 +57,7 @@ class ReadAccessAuditServiceTest {
         assertThat(document.toString())
                 .doesNotContain("request", "response", "payload", "customerId", "accountId", "cardNumber", "token", "stack");
         assertThat(meterRegistry.get("fraud_platform_read_access_audit_events_persisted_total")
-                .tag("endpoint_category", "scored_transaction_list")
+                .tag("endpoint_category", "scored_transaction_search")
                 .tag("outcome", "success")
                 .counter()
                 .count()).isEqualTo(1.0);
