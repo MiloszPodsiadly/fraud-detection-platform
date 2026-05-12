@@ -63,11 +63,16 @@ Frontend guardrails:
 Backend guardrails:
 
 - `GET /api/v1/transactions/scored` bounds `size` to 100 and `page` to 1000;
-- blank or shorter-than-3 query text is treated as absent;
+- blank query text is treated as absent;
+- non-empty query text shorter than 3 characters is rejected with controlled `INVALID_FILTER` validation instead of widening to the unfiltered stream;
 - query text longer than 128 characters is rejected without echoing the raw query;
-- regex filtering uses quoted literals and is documented as bounded search readiness, not full-text search or export.
+- identifier-oriented filtering uses quoted prefix literals for `transactionId`, `customerId`, and `merchantInfo.merchantId`; currency matching is exact; merchant names are not searched in FDP-46;
+- filtered page totals are capped at 10,000 and must be treated as bounded navigation metadata, not an exact global count;
+- filtering is documented as bounded search readiness, not full-text search or export.
 
-Sensitive scored-transaction reads continue through the read-access audit response advice. Audit targets store endpoint category, bounded page/size metadata, and a query hash rather than raw query values.
+Sensitive scored-transaction reads continue through the read-access audit response advice. Audit targets store endpoint category `SCORED_TRANSACTION_SEARCH`, bounded page/size metadata, bounded result count, and a query hash rather than raw query values. Rejected validation reads are audited as `REJECTED`; unexpected query failures are audited as `FAILED`.
+
+Scored-transaction metrics use only low-cardinality labels: endpoint family, outcome, filter bucket, and page-size sample. Metrics do not include raw query text, IDs, currency, exception messages, or actor identifiers.
 
 ## Error Handling
 
@@ -88,5 +93,6 @@ The FDP-46 CI gate runs the frontend test suite and production build:
 
 - `npm test -- --run`
 - `npm run build`
+- `mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=ScoredTransactionControllerValidationTest,ScoredTransactionSearchPolicyTest,TransactionMonitoringServiceSearchTest,ReadAccessAuditClassifierTest,ReadAccessAuditEndpointTest,ReadAccessAuditServiceTest,ReadAccessAuditResponseAdviceTest,Fdp45ReadAccessAuditResponseAdviceMarkerTest,AlertServiceMetricsTest,AlertSecurityConfigTest" test`
 
-Required tests cover endpoint selection, request parameter minimization, cursor privacy, invalid cursor handling, no sensitive field rendering, no mutation/export controls, load-more append behavior, duplicate case de-duplication, and backend-driven filter/sort reload behavior.
+Required tests cover endpoint selection, request parameter minimization, cursor privacy, invalid cursor handling, no sensitive field rendering, no mutation/export controls, load-more append behavior, duplicate case de-duplication, backend-driven filter/sort reload behavior, scored-transaction query validation, capped filtered totals, audited sensitive search outcomes, low-cardinality scored search metrics, authorization precedence, and stale transaction stream response protection.

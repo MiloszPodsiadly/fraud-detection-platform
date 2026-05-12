@@ -522,6 +522,34 @@ jobs:
       - name: Build FDP-46 UI
         run: npm run build
 
+  fdp46-scored-transaction-filtering:
+    name: FDP-46 Scored Transaction Filtering
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs:
+      - fdp45-fraud-case-work-queue-read-model
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Ensure FDP-46 backend tests are not skipped
+        run: |
+          if grep -R "@Disabled" alert-service/src/test/java/com/frauddetection/alert/controller/ScoredTransactionControllerValidationTest.java alert-service/src/test/java/com/frauddetection/alert/service/ScoredTransactionSearchPolicyTest.java alert-service/src/test/java/com/frauddetection/alert/service/TransactionMonitoringServiceSearchTest.java alert-service/src/test/java/com/frauddetection/alert/audit/read/ReadAccessAuditEndpointTest.java alert-service/src/test/java/com/frauddetection/alert/observability/AlertServiceMetricsTest.java alert-service/src/test/java/com/frauddetection/alert/security/config/AlertSecurityConfigTest.java; then
+            echo "FDP-46 backend tests must not be disabled" >&2
+            exit 1
+          fi
+
+      - name: Run FDP-46 backend search and audit tests
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=ScoredTransactionControllerValidationTest,ScoredTransactionSearchPolicyTest,TransactionMonitoringServiceSearchTest,ReadAccessAuditClassifierTest,ReadAccessAuditEndpointTest,ReadAccessAuditServiceTest,ReadAccessAuditResponseAdviceTest,Fdp45ReadAccessAuditResponseAdviceMarkerTest,AlertServiceMetricsTest,AlertSecurityConfigTest" test
+
   fdp28-proof:
     name: FDP-28 Docker Integration Proof
     runs-on: ubuntu-latest

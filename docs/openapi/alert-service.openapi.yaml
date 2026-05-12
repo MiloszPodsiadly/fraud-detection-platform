@@ -1615,7 +1615,7 @@ paths:
   /api/v1/transactions/scored:
     get:
       summary: List scored transaction projections
-      description: Returns a bounded scored transaction page for an authenticated analyst. Alert-service records a best-effort sensitive read-access audit event with a hashed query shape, page/size, bounded result count, and backend-derived actor identity; audit persistence failure does not block the read response.
+      description: Returns a bounded scored transaction page for an authenticated analyst. Optional filters are bounded search-readiness controls, not full-text search or export. Blank query text is absent; non-empty query text shorter than 3 characters or longer than 128 characters is rejected with a controlled 400 response. Query filtering is limited to quoted identifier prefixes for transactionId, customerId, merchantInfo.merchantId, plus exact currency match; merchant names are not searched. Filtered totalElements/totalPages are capped at 10000 and must be treated as bounded navigation metadata, not exact global totals. Alert-service records a best-effort sensitive read-access audit event with endpoint category SCORED_TRANSACTION_SEARCH, hashed query shape, page/size, bounded result count, and backend-derived actor identity; audit persistence failure does not block the read response.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1635,7 +1635,29 @@ paths:
             type: integer
             minimum: 1
             maximum: 100
-            default: 20
+            default: 25
+        - name: query
+          in: query
+          required: false
+          description: Optional identifier-oriented search. Blank is absent; length 1-2 and length greater than 128 are rejected.
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 128
+        - name: riskLevel
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [ALL, LOW, MEDIUM, HIGH, CRITICAL]
+            default: ALL
+        - name: classification
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [ALL, LEGITIMATE, SUSPICIOUS]
+            default: ALL
       responses:
         "200":
           description: Scored transaction page returned.
@@ -1647,6 +1669,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "400":
+          $ref: "#/components/responses/BadRequest"
   /governance/advisories:
     get:
       summary: List governance advisories with derived lifecycle status
