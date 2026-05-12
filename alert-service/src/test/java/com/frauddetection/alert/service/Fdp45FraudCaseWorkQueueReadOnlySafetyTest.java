@@ -71,9 +71,11 @@ class Fdp45FraudCaseWorkQueueReadOnlySafetyTest {
                 Duration.ofHours(24)
         );
 
-        var summary = service.workQueueSummary();
+        var summary = service.globalFraudCaseSummary();
 
         assertThat(summary.totalFraudCases()).isEqualTo(46L);
+        assertThat(summary.scope()).isEqualTo("GLOBAL_FRAUD_CASES");
+        assertThat(summary.snapshotConsistentWithWorkQueue()).isFalse();
         verify(repository).count();
         verify(searchRepository, never()).search(any(), any());
         verify(searchRepository, never()).searchSlice(any(), any());

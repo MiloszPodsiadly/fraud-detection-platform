@@ -156,6 +156,17 @@ public class AlertServiceMetrics {
                 .record(Math.max(0, pageSize));
     }
 
+    public void recordFraudCaseWorkQueueSummaryOutcome(String outcome, Duration latency) {
+        String normalizedOutcome = normalizeFraudCaseWorkQueueSummaryOutcome(outcome);
+        counter(
+                "fraud_case_work_queue_summary_requests_total",
+                "outcome", normalizedOutcome
+        ).increment();
+        Timer.builder("fraud_case_work_queue_summary_latency_seconds")
+                .register(meterRegistry)
+                .record(latency == null || latency.isNegative() ? Duration.ZERO : latency);
+    }
+
     public void recordScoredTransactionSearchRequest(String outcome, String filterBucket) {
         counter(
                 "scored_transaction_search_requests_total",
@@ -978,6 +989,16 @@ public class AlertServiceMetrics {
         }
         return switch (outcome) {
             case "success", "invalid_filter", "invalid_sort", "invalid_cursor", "unauthorized", "failure" -> outcome;
+            default -> "failure";
+        };
+    }
+
+    private String normalizeFraudCaseWorkQueueSummaryOutcome(String outcome) {
+        if (!StringUtils.hasText(outcome)) {
+            return "failure";
+        }
+        return switch (outcome) {
+            case "success", "failure", "forbidden", "unauthorized" -> outcome;
             default -> "failure";
         };
     }

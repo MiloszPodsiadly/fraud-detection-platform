@@ -27,11 +27,12 @@ class Fdp45FraudCaseReadModelSingleSourceOfTruthTest {
                 .doesNotContain("new Query(");
         assertThat(summaryController)
                 .contains("@RequestMapping(\"/api/v1/fraud-cases/work-queue\")")
-                .contains("fraudCaseManagementService.workQueueSummary()")
+                .contains("fraudCaseQueryService.globalFraudCaseSummary()")
+                .doesNotContain("FraudCaseManagementService")
                 .doesNotContain("\"/api/fraud-cases");
         assertThat(queryService)
                 .contains("searchRepository.searchSlice(")
-                .contains("workQueueSummary()")
+                .contains("globalFraudCaseSummary()")
                 .contains("new FraudCaseSearchCriteria(")
                 .doesNotContain("MongoTemplate")
                 .doesNotContain("Criteria.where")

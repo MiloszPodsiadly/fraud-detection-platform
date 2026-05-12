@@ -202,8 +202,8 @@ public class FraudCaseQueryService {
         );
     }
 
-    public FraudCaseWorkQueueSummaryResponse workQueueSummary() {
-        return new FraudCaseWorkQueueSummaryResponse(fraudCaseRepository.count());
+    public FraudCaseWorkQueueSummaryResponse globalFraudCaseSummary() {
+        return new FraudCaseWorkQueueSummaryResponse(fraudCaseRepository.count(), clock.instant());
     }
 
     public List<FraudCaseAuditResponse> auditTrail(String caseId) {

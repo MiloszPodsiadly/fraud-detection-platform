@@ -21,6 +21,7 @@ import com.frauddetection.alert.security.error.ApiAccessDeniedHandler;
 import com.frauddetection.alert.security.error.ApiAuthenticationEntryPoint;
 import com.frauddetection.alert.security.error.SecurityErrorResponseWriter;
 import com.frauddetection.alert.service.FraudCaseManagementService;
+import com.frauddetection.alert.service.FraudCaseQueryService;
 import com.frauddetection.common.events.enums.RiskLevel;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -75,6 +76,9 @@ class FraudCaseSecurityIntegrationTest {
     private FraudCaseManagementService fraudCaseManagementService;
 
     @MockBean
+    private FraudCaseQueryService fraudCaseQueryService;
+
+    @MockBean
     private AlertServiceMetrics alertServiceMetrics;
 
     @MockBean
@@ -113,7 +117,8 @@ class FraudCaseSecurityIntegrationTest {
         when(fraudCaseManagementService.listCases(any(Pageable.class))).thenReturn(new PageImpl<>(List.of(caseDocument())));
         when(fraudCaseManagementService.workQueue(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(Pageable.class)))
                 .thenReturn(new com.frauddetection.alert.api.FraudCaseWorkQueueSliceResponse(List.of(workQueueItem()), 0, 20, false, null));
-        when(fraudCaseManagementService.workQueueSummary()).thenReturn(new FraudCaseWorkQueueSummaryResponse(42));
+        when(fraudCaseQueryService.globalFraudCaseSummary())
+                .thenReturn(new FraudCaseWorkQueueSummaryResponse(42, Instant.parse("2026-05-12T10:00:00Z")));
         when(fraudCaseManagementService.getCase("case-1")).thenReturn(caseDocument());
 
         mockMvc.perform(get("/api/v1/fraud-cases").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
@@ -124,7 +129,9 @@ class FraudCaseSecurityIntegrationTest {
                 .andExpect(jsonPath("$.content[0].linkedAlertCount").value(1));
         mockMvc.perform(get("/api/v1/fraud-cases/work-queue/summary").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.totalFraudCases").value(42));
+                .andExpect(jsonPath("$.totalFraudCases").value(42))
+                .andExpect(jsonPath("$.scope").value("GLOBAL_FRAUD_CASES"))
+                .andExpect(jsonPath("$.snapshotConsistentWithWorkQueue").value(false));
         mockMvc.perform(get("/api/fraud-cases/case-1").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.caseId").value("case-1"));
