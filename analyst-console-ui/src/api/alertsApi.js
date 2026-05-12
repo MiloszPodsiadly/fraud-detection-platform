@@ -94,10 +94,10 @@ export function listFraudCaseWorkQueue({
   appendOptionalParam(params, "riskLevel", riskLevel);
   appendOptionalParam(params, "assignee", assignee);
   appendOptionalParam(params, "assignedInvestigatorId", assignedInvestigatorId);
-  appendOptionalParam(params, "createdFrom", createdFrom);
-  appendOptionalParam(params, "createdTo", createdTo);
-  appendOptionalParam(params, "updatedFrom", updatedFrom);
-  appendOptionalParam(params, "updatedTo", updatedTo);
+  appendOptionalParam(params, "createdFrom", toUtcInstantParam(createdFrom));
+  appendOptionalParam(params, "createdTo", toUtcInstantParam(createdTo));
+  appendOptionalParam(params, "updatedFrom", toUtcInstantParam(updatedFrom));
+  appendOptionalParam(params, "updatedTo", toUtcInstantParam(updatedTo));
   appendOptionalParam(params, "linkedAlertId", linkedAlertId);
   params.set("sort", sort || "createdAt,desc");
 
@@ -186,4 +186,19 @@ function appendOptionalParam(params, name, value) {
     return;
   }
   params.set(name, normalized);
+}
+
+export function toUtcInstantParam(value) {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return null;
+  }
+  const date = new Date(String(value).trim());
+  if (Number.isNaN(date.getTime())) {
+    throw new ApiError({
+      status: 400,
+      error: "INVALID_LOCAL_DATETIME",
+      message: "Invalid local date filter."
+    });
+  }
+  return date.toISOString();
 }

@@ -111,6 +111,8 @@ export default function App() {
   const [sessionBootstrapPending, setSessionBootstrapPending] = useState(authProvider.kind === "oidc");
   const skipNextOidcBootstrapRef = useRef(false);
   const skipNextWorkQueueReloadRef = useRef(false);
+  const dashboardRequestSeqRef = useRef(0);
+  const workQueueRequestSeqRef = useRef(0);
 
   useEffect(() => {
     setApiSession(session, authProvider);
@@ -276,6 +278,8 @@ export default function App() {
   );
 
   async function loadDashboard(nextRequests = { transaction: transactionPageRequest, alert: alertPageRequest, fraudCase: fraudCasePageRequest }) {
+    const requestSeq = dashboardRequestSeqRef.current + 1;
+    dashboardRequestSeqRef.current = requestSeq;
     setIsLoading(true);
     setError(null);
     try {
@@ -284,24 +288,40 @@ export default function App() {
         listFraudCases(nextRequests.fraudCase),
         listScoredTransactions(nextRequests.transaction)
       ]);
+      if (dashboardRequestSeqRef.current !== requestSeq) {
+        return;
+      }
       setAlertPage(nextAlerts);
       setFraudCasePage(nextFraudCasePage);
       setTransactionPage(nextTransactionPage);
     } catch (apiError) {
+      if (dashboardRequestSeqRef.current !== requestSeq) {
+        return;
+      }
       setError(apiError);
       setSessionState(getSessionStateForApiError(session, apiError) || getSessionStateForProvider(session, authProvider));
     } finally {
-      setIsLoading(false);
+      if (dashboardRequestSeqRef.current === requestSeq) {
+        setIsLoading(false);
+      }
     }
   }
 
   async function loadFraudCaseWorkQueue(nextRequest = fraudCaseWorkQueueRequest) {
+    const requestSeq = workQueueRequestSeqRef.current + 1;
+    workQueueRequestSeqRef.current = requestSeq;
     setIsFraudCaseWorkQueueLoading(true);
     setFraudCaseWorkQueueError(null);
     try {
       const nextQueue = await listFraudCaseWorkQueue(nextRequest);
+      if (workQueueRequestSeqRef.current !== requestSeq) {
+        return;
+      }
       setFraudCaseWorkQueue((current) => mergeWorkQueueSlice(current, nextQueue, { append: Boolean(nextRequest.cursor) }));
     } catch (apiError) {
+      if (workQueueRequestSeqRef.current !== requestSeq) {
+        return;
+      }
       setFraudCaseWorkQueueError(apiError);
       setFraudCaseWorkQueue((current) => ({
         ...initialFraudCaseWorkQueue(),
@@ -314,7 +334,9 @@ export default function App() {
       }
       setSessionState(getSessionStateForApiError(session, apiError) || getSessionStateForProvider(session, authProvider));
     } finally {
-      setIsFraudCaseWorkQueueLoading(false);
+      if (workQueueRequestSeqRef.current === requestSeq) {
+        setIsFraudCaseWorkQueueLoading(false);
+      }
     }
   }
 
@@ -508,8 +530,8 @@ export default function App() {
             <small>Alert queue</small>
           </div>
           <div>
-            <span>{fraudCasePage.totalElements}</span>
-            <small>Fraud cases</small>
+            <span>{fraudCaseWorkQueue.content.length}</span>
+            <small>Loaded queue cases</small>
           </div>
         </div>
         <SessionBadge

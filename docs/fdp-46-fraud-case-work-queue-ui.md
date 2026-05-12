@@ -7,6 +7,7 @@ FDP-46 adds a read-only investigator work queue view to the analyst console. The
 - The UI uses `listFraudCaseWorkQueue()` and the `/api/v1/fraud-cases/work-queue` endpoint only.
 - The legacy `GET /api/v1/fraud-cases` list remains the existing fraud-case summary view and is not used for work queue semantics.
 - Work queue filtering and sorting are backend-driven. The UI does not perform partial client-side work queue filtering.
+- Header and work queue counters show loaded client slices only. They are not global totals unless the backend explicitly returns an aggregate in a future scope.
 
 ## Displayed Fields
 
@@ -39,6 +40,34 @@ The UI omits empty, null, undefined, and `ALL` filter values. Size is bounded to
 - `priority,asc`, `priority,desc`
 - `riskLevel,asc`, `riskLevel,desc`
 - `caseNumber,asc`, `caseNumber,desc`
+
+Work queue filters are draft-first. Changing a field does not issue a request until the analyst selects `Apply filters`. `Reset filters` clears the draft and loads the first slice. Applying or resetting filters clears cursor state and content before requesting a new first slice.
+
+Date fields use the analyst's local `datetime-local` input and are serialized as UTC instants at the API-client boundary. Invalid local date values are rejected before fetch.
+
+If a load-more response overlaps with already loaded case IDs, the UI de-duplicates rendered rows and shows `Queue changed while loading. Refresh from first slice.` The warning is cleared by refreshing from the first slice.
+
+Sort labels are neutral (`Priority descending`, `Priority ascending`, `Risk descending`, `Risk ascending`) and document ordering direction only.
+
+## Transaction Scoring Stream
+
+The transaction scoring stream is also backend-filtered. The UI keeps filter edits as a draft and sends them only on `Apply filters`; it does not filter the current page locally.
+
+Frontend guardrails:
+
+- query length is capped at 128 characters;
+- non-empty queries shorter than 3 characters are blocked before request state changes;
+- page size remains bounded by the existing pagination control;
+- no export, bulk action, raw query logging, or full-dataset client filtering is added.
+
+Backend guardrails:
+
+- `GET /api/v1/transactions/scored` bounds `size` to 100 and `page` to 1000;
+- blank or shorter-than-3 query text is treated as absent;
+- query text longer than 128 characters is rejected without echoing the raw query;
+- regex filtering uses quoted literals and is documented as bounded search readiness, not full-text search or export.
+
+Sensitive scored-transaction reads continue through the read-access audit response advice. Audit targets store endpoint category, bounded page/size metadata, and a query hash rather than raw query values.
 
 ## Error Handling
 

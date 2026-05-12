@@ -189,23 +189,33 @@ describe("alertsApi auth headers", () => {
       sort: "updatedAt,asc"
     }));
 
+    const createdFrom = "2026-05-01T10:00";
     await listFraudCaseWorkQueue({
       size: 50,
       status: "ALL",
       priority: "HIGH",
       riskLevel: "",
       assignee: " investigator-1 ",
-      createdFrom: "2026-05-01T10:00",
+      createdFrom,
       sort: "updatedAt,asc"
     });
 
+    const encodedCreatedFrom = encodeURIComponent(new Date(createdFrom).toISOString());
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/fraud-cases/work-queue?size=50&priority=HIGH&assignee=investigator-1&createdFrom=2026-05-01T10%3A00&sort=updatedAt%2Casc",
+      `/api/v1/fraud-cases/work-queue?size=50&priority=HIGH&assignee=investigator-1&createdFrom=${encodedCreatedFrom}&sort=updatedAt%2Casc`,
       expect.objectContaining({ headers: expect.objectContaining({ "Content-Type": "application/json" }) })
     );
     expect(fetchMock.mock.calls[0][0]).not.toContain("/api/v1/fraud-cases?");
     expect(fetchMock.mock.calls[0][0]).not.toContain("status=ALL");
     expect(fetchMock.mock.calls[0][0]).not.toContain("riskLevel=");
+  });
+
+  it("rejects invalid work queue local date filters before fetch", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ content: [] }));
+
+    expect(() => listFraudCaseWorkQueue({ createdFrom: "not-a-date" })).toThrow("Invalid local date filter.");
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("passes work queue cursor opaquely and never sends page with cursor", async () => {

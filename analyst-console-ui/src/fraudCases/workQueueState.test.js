@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  FRAUD_CASE_WORK_QUEUE_SORT_OPTIONS,
   initialFraudCaseWorkQueue,
   initialFraudCaseWorkQueueRequest,
   isInvalidWorkQueueCursorError,
@@ -47,7 +48,17 @@ describe("fraud case work queue state", () => {
     }, { append: true });
 
     expect(second.content.map((item) => item.caseId)).toEqual(["case-1", "case-2", "case-3"]);
+    expect(second.duplicateCaseIds).toEqual(["case-2"]);
     expect(second.hasNext).toBe(false);
+  });
+
+  it("uses neutral sort labels for priority and risk ordering", () => {
+    expect(FRAUD_CASE_WORK_QUEUE_SORT_OPTIONS).toEqual(expect.arrayContaining([
+      { value: "priority,desc", label: "Priority descending" },
+      { value: "priority,asc", label: "Priority ascending" },
+      { value: "riskLevel,desc", label: "Risk descending" },
+      { value: "riskLevel,asc", label: "Risk ascending" }
+    ]));
   });
 
   it("classifies invalid cursor and cursor-page-combination errors", () => {

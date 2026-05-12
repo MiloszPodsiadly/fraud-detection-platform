@@ -20,7 +20,7 @@ describe("FraudCaseWorkQueuePanel", () => {
     });
 
     expect(screen.getByRole("heading", { name: "Fraud Case Work Queue" })).toBeInTheDocument();
-    expect(screen.getByText("Read-only investigator queue")).toBeInTheDocument();
+    expect(screen.getByText(/Read-only investigator queue/)).toBeInTheDocument();
     expect(screen.getByText("CASE-2026-0001")).toBeInTheDocument();
     expect(screen.getByText("investigator-1")).toBeInTheDocument();
     expect(screen.getByText("NEAR BREACH")).toBeInTheDocument();
@@ -46,11 +46,11 @@ describe("FraudCaseWorkQueuePanel", () => {
       }
     });
 
-    expect(screen.getAllByText("case-1")).toHaveLength(1);
+    expect(screen.getByText("CASE-1")).toBeInTheDocument();
     expect(screen.queryByText("CASE-1 duplicate")).not.toBeInTheDocument();
   });
 
-  it("sends filter and sort changes back to backend state instead of filtering locally", () => {
+  it("applies filter and sort drafts only when requested", () => {
     const onRequestChange = vi.fn();
     renderPanel({
       onRequestChange,
@@ -63,17 +63,41 @@ describe("FraudCaseWorkQueuePanel", () => {
 
     expect(screen.getByText("Status: OPEN")).toBeInTheDocument();
     expect(screen.getByText("Priority: HIGH")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "OPEN" } });
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "CLOSED" } });
     fireEvent.change(screen.getByLabelText("Sort"), { target: { value: "updatedAt,asc" } });
-    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(onRequestChange).not.toHaveBeenCalled();
 
-    expect(onRequestChange).toHaveBeenCalledWith({ status: "OPEN" });
-    expect(onRequestChange).toHaveBeenCalledWith({ sort: "updatedAt,asc" });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
+
+    expect(onRequestChange).toHaveBeenCalledWith(expect.objectContaining({
+      status: "CLOSED",
+      sort: "updatedAt,asc",
+      cursor: null
+    }));
     expect(onRequestChange).toHaveBeenCalledWith(expect.objectContaining({
       status: "ALL",
       priority: "ALL",
+      cursor: null,
       sort: "createdAt,desc"
     }));
+  });
+
+  it("warns when an appended queue slice contains duplicate cases", () => {
+    const onRefreshFirstSlice = vi.fn();
+    renderPanel({
+      queue: {
+        content: [workQueueItem({ caseId: "case-1" })],
+        hasNext: true,
+        duplicateCaseIds: ["case-1"]
+      },
+      onRefreshFirstSlice
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Queue changed while loading.");
+    fireEvent.click(screen.getByRole("button", { name: "Refresh from first slice" }));
+
+    expect(onRefreshFirstSlice).toHaveBeenCalledTimes(1);
   });
 
   it("uses load more without exposing the cursor in DOM, URL, storage, or console", () => {

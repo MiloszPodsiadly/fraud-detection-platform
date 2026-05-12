@@ -5,10 +5,10 @@ export const FRAUD_CASE_WORK_QUEUE_SORT_OPTIONS = [
   { value: "createdAt,asc", label: "Created oldest" },
   { value: "updatedAt,desc", label: "Updated newest" },
   { value: "updatedAt,asc", label: "Updated oldest" },
-  { value: "priority,desc", label: "Priority high first" },
-  { value: "priority,asc", label: "Priority low first" },
-  { value: "riskLevel,desc", label: "Risk high first" },
-  { value: "riskLevel,asc", label: "Risk low first" },
+  { value: "priority,desc", label: "Priority descending" },
+  { value: "priority,asc", label: "Priority ascending" },
+  { value: "riskLevel,desc", label: "Risk descending" },
+  { value: "riskLevel,asc", label: "Risk ascending" },
   { value: "caseNumber,asc", label: "Case number A-Z" },
   { value: "caseNumber,desc", label: "Case number Z-A" }
 ];
@@ -19,7 +19,8 @@ export function initialFraudCaseWorkQueue() {
     size: 20,
     hasNext: false,
     nextCursor: null,
-    sort: DEFAULT_FRAUD_CASE_WORK_QUEUE_SORT
+    sort: DEFAULT_FRAUD_CASE_WORK_QUEUE_SORT,
+    duplicateCaseIds: []
   };
 }
 
@@ -42,13 +43,17 @@ export function initialFraudCaseWorkQueueRequest() {
 
 export function mergeWorkQueueSlice(currentQueue, nextSlice, { append = false } = {}) {
   const incoming = Array.isArray(nextSlice?.content) ? nextSlice.content : [];
-  const content = append ? dedupeByCaseId([...(currentQueue.content || []), ...incoming]) : dedupeByCaseId(incoming);
+  const { content, duplicateCaseIds } = dedupeByCaseIdWithDuplicates(
+    append ? [...(currentQueue.content || []), ...incoming] : incoming
+  );
+  const existingDuplicateCaseIds = append ? currentQueue.duplicateCaseIds || [] : [];
   return {
     content,
     size: nextSlice?.size ?? currentQueue.size ?? 20,
     hasNext: Boolean(nextSlice?.hasNext),
     nextCursor: nextSlice?.nextCursor || null,
-    sort: nextSlice?.sort || currentQueue.sort || DEFAULT_FRAUD_CASE_WORK_QUEUE_SORT
+    sort: nextSlice?.sort || currentQueue.sort || DEFAULT_FRAUD_CASE_WORK_QUEUE_SORT,
+    duplicateCaseIds: [...new Set([...existingDuplicateCaseIds, ...duplicateCaseIds])]
   };
 }
 
@@ -70,16 +75,23 @@ export function isInvalidWorkQueueCursorError(error) {
 }
 
 export function dedupeByCaseId(items) {
+  return dedupeByCaseIdWithDuplicates(items).content;
+}
+
+function dedupeByCaseIdWithDuplicates(items) {
   const seen = new Set();
-  return items.filter((item) => {
+  const duplicateCaseIds = [];
+  const content = items.filter((item) => {
     const key = item?.caseId;
     if (!key) {
       return true;
     }
     if (seen.has(key)) {
+      duplicateCaseIds.push(key);
       return false;
     }
     seen.add(key);
     return true;
   });
+  return { content, duplicateCaseIds };
 }

@@ -511,7 +511,7 @@ jobs:
 
       - name: Ensure FDP-46 tests are not skipped
         run: |
-          if grep -R "it\.skip\|describe\.skip\|test\.skip" src/components/FraudCaseWorkQueuePanel.test.jsx src/fraudCases/workQueueState.test.js src/api/alertsApi.test.js; then
+          if grep -R "it\.skip\|describe\.skip\|test\.skip" src/components/FraudCaseWorkQueuePanel.test.jsx src/fraudCases/workQueueState.test.js src/api/alertsApi.test.js src/pages/AlertsListPage.test.jsx src/App.test.jsx; then
             echo "FDP-46 mandatory tests must not be skipped" >&2
             exit 1
           fi
