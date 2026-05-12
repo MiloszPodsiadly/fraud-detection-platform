@@ -642,6 +642,60 @@ jobs:
             alert-service/target/surefire-reports/
             alert-service/target/failsafe-reports/
 
+  fdp47-analyst-console-ux-and-summary:
+    name: FDP-47 Analyst Console UX and Summary
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs:
+      - frontend
+      - fdp45-fraud-case-work-queue-read-model
+      - fdp46-fraud-case-work-queue-ui
+      - fdp46-scored-transaction-filtering
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: analyst-console-ui/package-lock.json
+
+      - name: Ensure FDP-47 tests are not skipped
+        run: |
+          if grep -R "@Disabled" alert-service/src/test/java/com/frauddetection/alert/controller/FraudCaseWorkQueueSummaryControllerTest.java alert-service/src/test/java/com/frauddetection/alert/audit/read/ReadAccessResultCountExtractorTest.java alert-service/src/test/java/com/frauddetection/alert/fraudcase/Fdp47FraudCaseWorkQueueSummaryContractTest.java alert-service/src/test/java/com/frauddetection/alert/observability/Fdp45FraudCaseWorkQueueObservabilityTest.java; then
+            echo "FDP-47 backend tests must not be disabled" >&2
+            exit 1
+          fi
+          if grep -R "it\.skip\|describe\.skip\|test\.skip" analyst-console-ui/src/App.test.jsx analyst-console-ui/src/pages/AlertsListPage.test.jsx analyst-console-ui/src/components/FraudCaseWorkQueuePanel.test.jsx; then
+            echo "FDP-47 frontend tests must not be skipped" >&2
+            exit 1
+          fi
+
+      - name: Run FDP-47 backend summary tests
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=FraudCaseWorkQueueSummaryControllerTest,ReadAccessAuditClassifierTest,ReadAccessResultCountExtractorTest,Fdp45FraudCaseReadModelSingleSourceOfTruthTest,Fdp45FraudCaseWorkQueueReadOnlySafetyTest,Fdp45FraudCaseWorkQueueOpenApiContractTest,Fdp47FraudCaseWorkQueueSummaryContractTest,Fdp45FraudCaseWorkQueueObservabilityTest,FraudCaseSecurityIntegrationTest" test
+
+      - name: Install frontend dependencies
+        working-directory: analyst-console-ui
+        run: npm ci
+
+      - name: Run FDP-47 frontend tests
+        working-directory: analyst-console-ui
+        run: npm test -- --run src/App.test.jsx src/pages/AlertsListPage.test.jsx src/components/FraudCaseWorkQueuePanel.test.jsx src/api/alertsApi.test.js
+
+      - name: Build FDP-47 UI
+        working-directory: analyst-console-ui
+        run: npm run build
+
   fdp36-real-chaos:
     name: FDP-36 Real Alert-Service Kill Proof
     runs-on: ubuntu-latest
