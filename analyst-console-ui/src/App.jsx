@@ -405,11 +405,11 @@ export default function App() {
   }
 
   function changeTransactionPage(page) {
-    setTransactionPageRequest((current) => ({ ...current, page }));
+    setTransactionPageRequest((current) => ({ ...current, page: Math.min(Math.max(Number(page) || 0, 0), 1000) }));
   }
 
   function changeTransactionPageSize(size) {
-    setTransactionPageRequest((current) => ({ ...current, page: 0, size }));
+    setTransactionPageRequest((current) => ({ ...current, page: 0, size: Math.min(Math.max(Number(size) || 25, 1), 100) }));
   }
 
   function changeTransactionFilters(filters) {

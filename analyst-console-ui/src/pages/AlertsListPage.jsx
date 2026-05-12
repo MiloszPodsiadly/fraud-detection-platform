@@ -163,6 +163,8 @@ export function AlertsListPage({
               size={transactionPage.size}
               totalPages={transactionPage.totalPages}
               totalElements={transactionPage.totalElements}
+              label={hasAppliedTransactionFilters(transactionPageRequest) ? "filtered scored transactions" : "scored transactions"}
+              totalLabel={hasAppliedTransactionFilters(transactionPageRequest) ? "capped" : "total"}
               onPageChange={onTransactionPageChange}
               onSizeChange={onTransactionPageSizeChange}
             />

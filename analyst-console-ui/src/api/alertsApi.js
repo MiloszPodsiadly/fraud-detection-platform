@@ -98,8 +98,8 @@ export function listFraudCaseWorkQueue({
 
 export function listScoredTransactions({ page = 0, size = 25, query, riskLevel, status, classification } = {}) {
   const params = new URLSearchParams({
-    page: String(page),
-    size: String(size)
+    page: String(Math.min(Math.max(Number(page) || 0, 0), 1000)),
+    size: String(Math.min(Math.max(Number(size) || 25, 1), 100))
   });
   appendOptionalParam(params, "query", query);
   appendOptionalParam(params, "riskLevel", riskLevel);

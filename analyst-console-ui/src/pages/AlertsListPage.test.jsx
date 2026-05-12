@@ -253,6 +253,57 @@ describe("AlertsListPage session lifecycle", () => {
     expect(screen.getByText("Search query must be 128 characters or less.")).toBeInTheDocument();
     expect(onTransactionFiltersChange).not.toHaveBeenCalled();
   });
+
+  it("does not present filtered capped transaction totals as exact global totals", () => {
+    render(
+      <AlertsListPage
+        alertPage={emptyPage(10)}
+        fraudCaseWorkQueue={emptyWorkQueue()}
+        fraudCaseWorkQueueRequest={emptyWorkQueueRequest()}
+        transactionPage={{
+          content: [scoredTransaction("txn-1", "LOW", false)],
+          totalElements: 10000,
+          totalPages: 400,
+          page: 0,
+          size: 25
+        }}
+        transactionPageRequest={{ page: 0, size: 25, query: "customer-123", riskLevel: "ALL", status: "ALL" }}
+        advisoryQueue={emptyAdvisoryQueue()}
+        advisoryQueueRequest={{ severity: "ALL", modelVersion: "", lifecycleStatus: "ALL", limit: 25 }}
+        governanceAnalytics={emptyAnalytics()}
+        analyticsWindowDays={7}
+        isLoading={false}
+        isFraudCaseWorkQueueLoading={false}
+        isGovernanceLoading={false}
+        isAnalyticsLoading={false}
+        error={null}
+        fraudCaseWorkQueueError={null}
+        governanceError={null}
+        analyticsError={null}
+        sessionState={{ status: SESSION_STATES.AUTHENTICATED }}
+        onRetry={vi.fn()}
+        onGovernanceRetry={vi.fn()}
+        onAnalyticsRetry={vi.fn()}
+        onFraudCaseWorkQueueRequestChange={vi.fn()}
+        onFraudCaseWorkQueueRetry={vi.fn()}
+        onFraudCaseWorkQueueRefreshFirstSlice={vi.fn()}
+        onFraudCaseWorkQueueLoadMore={vi.fn()}
+        onAdvisoryQueueRequestChange={vi.fn()}
+        onAnalyticsWindowDaysChange={vi.fn()}
+        onRecordGovernanceAudit={vi.fn()}
+        onTransactionFiltersChange={vi.fn()}
+        onTransactionPageChange={vi.fn()}
+        onTransactionPageSizeChange={vi.fn()}
+        onAlertPageChange={vi.fn()}
+        onAlertPageSizeChange={vi.fn()}
+        onOpenAlert={vi.fn()}
+        onOpenFraudCase={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("capped filtered scored transactions")).toBeInTheDocument();
+    expect(screen.queryByText("total scored transactions")).not.toBeInTheDocument();
+  });
 });
 
 function emptyPage(size) {
