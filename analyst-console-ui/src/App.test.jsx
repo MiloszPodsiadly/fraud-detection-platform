@@ -10,6 +10,7 @@ const {
   listFraudCaseWorkQueue,
   listGovernanceAdvisories,
   getGovernanceAdvisoryAnalytics,
+  getFraudCaseWorkQueueSummary,
   listScoredTransactions,
   setApiSession
 } = vi.hoisted(() => ({
@@ -39,6 +40,7 @@ const {
   listFraudCaseWorkQueue: vi.fn(),
   listGovernanceAdvisories: vi.fn(),
   getGovernanceAdvisoryAnalytics: vi.fn(),
+  getFraudCaseWorkQueueSummary: vi.fn(),
   listScoredTransactions: vi.fn(),
   setApiSession: vi.fn()
 }));
@@ -48,6 +50,7 @@ vi.mock("./api/alertsApi.js", () => ({
   listFraudCaseWorkQueue,
   listGovernanceAdvisories,
   getGovernanceAdvisoryAnalytics,
+  getFraudCaseWorkQueueSummary,
   listScoredTransactions,
   getGovernanceAdvisoryAudit: vi.fn(),
   recordGovernanceAdvisoryAudit: vi.fn(),
@@ -78,6 +81,7 @@ describe("App", () => {
     callbackPath.value = true;
     refreshSession.mockResolvedValue({ userId: "", roles: [], extraAuthorities: [], authorities: [] });
     listFraudCaseWorkQueue.mockResolvedValue({ content: [], size: 20, hasNext: false, nextCursor: null, sort: "createdAt,desc" });
+    getFraudCaseWorkQueueSummary.mockResolvedValue({ totalFraudCases: 0 });
     listGovernanceAdvisories.mockResolvedValue({ status: "AVAILABLE", count: 0, retention_limit: 200, advisory_events: [] });
     getGovernanceAdvisoryAnalytics.mockResolvedValue({
       status: "AVAILABLE",
@@ -124,6 +128,7 @@ describe("App", () => {
     await waitFor(() => expect(completeLoginCallback).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(listAlerts).toHaveBeenCalledTimes(1));
     expect(listFraudCaseWorkQueue).toHaveBeenCalledTimes(1);
+    expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1);
     expect(listScoredTransactions).toHaveBeenCalledTimes(1);
     expect(setApiSession).toHaveBeenCalled();
   });
@@ -144,9 +149,10 @@ describe("App", () => {
     render(<App />);
 
     await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
-    expect(await screen.findAllByRole("heading", { name: "Session expired" })).toHaveLength(2);
+    expect(await screen.findAllByText("The provider session expired or no longer has a usable access token.")).toHaveLength(2);
     expect(listAlerts).not.toHaveBeenCalled();
     expect(listFraudCaseWorkQueue).not.toHaveBeenCalled();
+    expect(getFraudCaseWorkQueueSummary).not.toHaveBeenCalled();
     expect(listScoredTransactions).not.toHaveBeenCalled();
   });
 
@@ -171,6 +177,7 @@ describe("App", () => {
     await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(listAlerts).toHaveBeenCalledTimes(1));
     expect(listFraudCaseWorkQueue).toHaveBeenCalledTimes(1);
+    expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1);
     expect(listScoredTransactions).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
     expect(screen.queryByText("Loading session state...")).not.toBeInTheDocument();
@@ -194,8 +201,9 @@ describe("App", () => {
     render(<App />);
 
     await waitFor(() => expect(listScoredTransactions).toHaveBeenCalledTimes(1));
-    fireEvent.change(screen.getAllByLabelText("Search")[1], { target: { value: "customer-123" } });
-    fireEvent.click(screen.getAllByRole("button", { name: "Apply filters" })[1]);
+    fireEvent.click(screen.getByRole("link", { name: "Transaction Scoring" }));
+    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "customer-123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(listScoredTransactions).toHaveBeenCalledTimes(2));
 
     secondTransactions.resolve(transactionPage("txn-new"));
@@ -224,8 +232,9 @@ describe("App", () => {
     render(<App />);
 
     await waitFor(() => expect(listScoredTransactions).toHaveBeenCalledTimes(1));
-    fireEvent.change(screen.getAllByLabelText("Search")[1], { target: { value: "customer-123" } });
-    fireEvent.click(screen.getAllByRole("button", { name: "Apply filters" })[1]);
+    fireEvent.click(screen.getByRole("link", { name: "Transaction Scoring" }));
+    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "customer-123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(listScoredTransactions).toHaveBeenCalledTimes(2));
 
     secondTransactions.resolve(transactionPage("txn-new"));

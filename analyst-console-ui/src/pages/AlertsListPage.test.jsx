@@ -7,6 +7,7 @@ describe("AlertsListPage session lifecycle", () => {
   it("renders a session-required panel instead of dashboard data when unauthenticated", () => {
     render(
       <AlertsListPage
+        workspacePage="fraudTransaction"
         alertPage={emptyPage(10)}
         fraudCaseWorkQueue={emptyWorkQueue()}
         fraudCaseWorkQueueRequest={emptyWorkQueueRequest()}
@@ -27,7 +28,9 @@ describe("AlertsListPage session lifecycle", () => {
         onRetry={vi.fn()}
         onGovernanceRetry={vi.fn()}
         onAnalyticsRetry={vi.fn()}
-        onFraudCaseWorkQueueRequestChange={vi.fn()}
+        onFraudCaseWorkQueueDraftChange={vi.fn()}
+        onFraudCaseWorkQueueApplyFilters={vi.fn()}
+        onFraudCaseWorkQueueResetFilters={vi.fn()}
         onFraudCaseWorkQueueRetry={vi.fn()}
         onFraudCaseWorkQueueRefreshFirstSlice={vi.fn()}
         onFraudCaseWorkQueueLoadMore={vi.fn()}
@@ -45,13 +48,16 @@ describe("AlertsListPage session lifecycle", () => {
       />
     );
 
-    expect(screen.getAllByRole("heading", { name: "Session required" })).toHaveLength(2);
+    expect(screen.getAllByRole("heading", { name: "Session required" })).toHaveLength(1);
+    expect(screen.queryByRole("heading", { name: "Alert review queue" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Transaction scoring stream" })).not.toBeInTheDocument();
     expect(screen.queryByText("No alerts match this view")).not.toBeInTheDocument();
   });
 
   it("renders an expired session panel for provider-backed expiry states", () => {
     render(
       <AlertsListPage
+        workspacePage="fraudTransaction"
         alertPage={emptyPage(10)}
         fraudCaseWorkQueue={emptyWorkQueue()}
         fraudCaseWorkQueueRequest={emptyWorkQueueRequest()}
@@ -72,7 +78,9 @@ describe("AlertsListPage session lifecycle", () => {
         onRetry={vi.fn()}
         onGovernanceRetry={vi.fn()}
         onAnalyticsRetry={vi.fn()}
-        onFraudCaseWorkQueueRequestChange={vi.fn()}
+        onFraudCaseWorkQueueDraftChange={vi.fn()}
+        onFraudCaseWorkQueueApplyFilters={vi.fn()}
+        onFraudCaseWorkQueueResetFilters={vi.fn()}
         onFraudCaseWorkQueueRetry={vi.fn()}
         onFraudCaseWorkQueueRefreshFirstSlice={vi.fn()}
         onFraudCaseWorkQueueLoadMore={vi.fn()}
@@ -90,13 +98,199 @@ describe("AlertsListPage session lifecycle", () => {
       />
     );
 
-    expect(screen.getAllByRole("heading", { name: "Session expired" })).toHaveLength(2);
+    expect(screen.getAllByRole("heading", { name: "Session expired" })).toHaveLength(1);
+    expect(screen.queryByRole("heading", { name: "Alert review queue" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Transaction scoring stream" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the session gate closed after an unauthorized retry error", () => {
+    render(
+      <AlertsListPage
+        workspacePage="analyst"
+        alertPage={emptyPage(10)}
+        fraudCaseWorkQueue={emptyWorkQueue()}
+        fraudCaseWorkQueueRequest={emptyWorkQueueRequest()}
+        transactionPage={emptyPage(25)}
+        advisoryQueue={emptyAdvisoryQueue()}
+        advisoryQueueRequest={{ severity: "ALL", modelVersion: "", lifecycleStatus: "ALL", limit: 25 }}
+        governanceAnalytics={emptyAnalytics()}
+        analyticsWindowDays={7}
+        isLoading={false}
+        isFraudCaseWorkQueueLoading={false}
+        isGovernanceLoading={false}
+        isAnalyticsLoading={false}
+        error={{ status: 401 }}
+        fraudCaseWorkQueueError={null}
+        governanceError={null}
+        analyticsError={null}
+        sessionState={{ status: SESSION_STATES.UNAUTHENTICATED }}
+        onRetry={vi.fn()}
+        onGovernanceRetry={vi.fn()}
+        onAnalyticsRetry={vi.fn()}
+        onFraudCaseWorkQueueDraftChange={vi.fn()}
+        onFraudCaseWorkQueueApplyFilters={vi.fn()}
+        onFraudCaseWorkQueueResetFilters={vi.fn()}
+        onFraudCaseWorkQueueRetry={vi.fn()}
+        onFraudCaseWorkQueueRefreshFirstSlice={vi.fn()}
+        onFraudCaseWorkQueueLoadMore={vi.fn()}
+        onAdvisoryQueueRequestChange={vi.fn()}
+        onAnalyticsWindowDaysChange={vi.fn()}
+        onRecordGovernanceAudit={vi.fn()}
+        onTransactionPageChange={vi.fn()}
+        onTransactionPageSizeChange={vi.fn()}
+        onAlertPageChange={vi.fn()}
+        onAlertPageSizeChange={vi.fn()}
+        onOpenAlert={vi.fn()}
+        onOpenFraudCase={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("heading", { name: "Session required" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Fraud Case Work Queue" })).not.toBeInTheDocument();
+  });
+
+  it("keeps fraud detection focused on alert review and moves transactions to a dedicated workspace", () => {
+    const { rerender } = render(
+      <AlertsListPage
+        workspacePage="fraudTransaction"
+        alertPage={emptyPage(10)}
+        fraudCaseWorkQueue={emptyWorkQueue()}
+        fraudCaseWorkQueueRequest={emptyWorkQueueRequest()}
+        transactionPage={emptyPage(25)}
+        advisoryQueue={emptyAdvisoryQueue()}
+        advisoryQueueRequest={{ severity: "ALL", modelVersion: "", lifecycleStatus: "ALL", limit: 25 }}
+        governanceAnalytics={emptyAnalytics()}
+        analyticsWindowDays={7}
+        isLoading={false}
+        isFraudCaseWorkQueueLoading={false}
+        isGovernanceLoading={false}
+        isAnalyticsLoading={false}
+        error={null}
+        fraudCaseWorkQueueError={null}
+        governanceError={null}
+        analyticsError={null}
+        sessionState={{ status: SESSION_STATES.AUTHENTICATED }}
+        onRetry={vi.fn()}
+        onGovernanceRetry={vi.fn()}
+        onAnalyticsRetry={vi.fn()}
+        onFraudCaseWorkQueueDraftChange={vi.fn()}
+        onFraudCaseWorkQueueApplyFilters={vi.fn()}
+        onFraudCaseWorkQueueResetFilters={vi.fn()}
+        onFraudCaseWorkQueueRetry={vi.fn()}
+        onFraudCaseWorkQueueRefreshFirstSlice={vi.fn()}
+        onFraudCaseWorkQueueLoadMore={vi.fn()}
+        onAdvisoryQueueRequestChange={vi.fn()}
+        onAnalyticsWindowDaysChange={vi.fn()}
+        onRecordGovernanceAudit={vi.fn()}
+        onTransactionPageChange={vi.fn()}
+        onTransactionPageSizeChange={vi.fn()}
+        onAlertPageChange={vi.fn()}
+        onAlertPageSizeChange={vi.fn()}
+        onOpenAlert={vi.fn()}
+        onOpenFraudCase={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("heading", { name: "Alert review queue" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Transaction scoring stream" })).not.toBeInTheDocument();
+
+    rerender(
+      <AlertsListPage
+        workspacePage="transactionScoring"
+        alertPage={emptyPage(10)}
+        fraudCaseWorkQueue={emptyWorkQueue()}
+        fraudCaseWorkQueueRequest={emptyWorkQueueRequest()}
+        transactionPage={emptyPage(25)}
+        advisoryQueue={emptyAdvisoryQueue()}
+        advisoryQueueRequest={{ severity: "ALL", modelVersion: "", lifecycleStatus: "ALL", limit: 25 }}
+        governanceAnalytics={emptyAnalytics()}
+        analyticsWindowDays={7}
+        isLoading={false}
+        isFraudCaseWorkQueueLoading={false}
+        isGovernanceLoading={false}
+        isAnalyticsLoading={false}
+        error={null}
+        fraudCaseWorkQueueError={null}
+        governanceError={null}
+        analyticsError={null}
+        sessionState={{ status: SESSION_STATES.AUTHENTICATED }}
+        onRetry={vi.fn()}
+        onGovernanceRetry={vi.fn()}
+        onAnalyticsRetry={vi.fn()}
+        onFraudCaseWorkQueueDraftChange={vi.fn()}
+        onFraudCaseWorkQueueApplyFilters={vi.fn()}
+        onFraudCaseWorkQueueResetFilters={vi.fn()}
+        onFraudCaseWorkQueueRetry={vi.fn()}
+        onFraudCaseWorkQueueRefreshFirstSlice={vi.fn()}
+        onFraudCaseWorkQueueLoadMore={vi.fn()}
+        onAdvisoryQueueRequestChange={vi.fn()}
+        onAnalyticsWindowDaysChange={vi.fn()}
+        onRecordGovernanceAudit={vi.fn()}
+        onTransactionPageChange={vi.fn()}
+        onTransactionPageSizeChange={vi.fn()}
+        onAlertPageChange={vi.fn()}
+        onAlertPageSizeChange={vi.fn()}
+        onOpenAlert={vi.fn()}
+        onOpenFraudCase={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("heading", { name: "Transaction scoring stream" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Alert review queue" })).not.toBeInTheDocument();
+  });
+
+  it("shows the backend global fraud case total instead of the loaded work queue slice size", () => {
+    render(
+      <AlertsListPage
+        workspacePage="analyst"
+        alertPage={emptyPage(10)}
+        fraudCaseTotalElements={46}
+        fraudCaseWorkQueue={{ ...emptyWorkQueue(), content: [{ caseId: "case-1" }] }}
+        fraudCaseWorkQueueRequest={emptyWorkQueueRequest()}
+        transactionPage={emptyPage(25)}
+        advisoryQueue={emptyAdvisoryQueue()}
+        advisoryQueueRequest={{ severity: "ALL", modelVersion: "", lifecycleStatus: "ALL", limit: 25 }}
+        governanceAnalytics={emptyAnalytics()}
+        analyticsWindowDays={7}
+        isLoading={false}
+        isFraudCaseWorkQueueLoading={false}
+        isGovernanceLoading={false}
+        isAnalyticsLoading={false}
+        error={null}
+        fraudCaseWorkQueueError={null}
+        governanceError={null}
+        analyticsError={null}
+        sessionState={{ status: SESSION_STATES.AUTHENTICATED }}
+        onRetry={vi.fn()}
+        onGovernanceRetry={vi.fn()}
+        onAnalyticsRetry={vi.fn()}
+        onFraudCaseWorkQueueDraftChange={vi.fn()}
+        onFraudCaseWorkQueueApplyFilters={vi.fn()}
+        onFraudCaseWorkQueueResetFilters={vi.fn()}
+        onFraudCaseWorkQueueRetry={vi.fn()}
+        onFraudCaseWorkQueueRefreshFirstSlice={vi.fn()}
+        onFraudCaseWorkQueueLoadMore={vi.fn()}
+        onAdvisoryQueueRequestChange={vi.fn()}
+        onAnalyticsWindowDaysChange={vi.fn()}
+        onRecordGovernanceAudit={vi.fn()}
+        onTransactionPageChange={vi.fn()}
+        onTransactionPageSizeChange={vi.fn()}
+        onAlertPageChange={vi.fn()}
+        onAlertPageSizeChange={vi.fn()}
+        onOpenAlert={vi.fn()}
+        onOpenFraudCase={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("link", { name: /Fraud cases\s*46/ })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Fraud cases\s*1/ })).not.toBeInTheDocument();
   });
 
   it("sends transaction monitor filters to request state instead of filtering only the current page", () => {
     const onTransactionFiltersChange = vi.fn();
     render(
       <AlertsListPage
+        workspacePage="transactionScoring"
         alertPage={emptyPage(10)}
         fraudCaseWorkQueue={emptyWorkQueue()}
         fraudCaseWorkQueueRequest={emptyWorkQueueRequest()}
@@ -124,7 +318,9 @@ describe("AlertsListPage session lifecycle", () => {
         onRetry={vi.fn()}
         onGovernanceRetry={vi.fn()}
         onAnalyticsRetry={vi.fn()}
-        onFraudCaseWorkQueueRequestChange={vi.fn()}
+        onFraudCaseWorkQueueDraftChange={vi.fn()}
+        onFraudCaseWorkQueueApplyFilters={vi.fn()}
+        onFraudCaseWorkQueueResetFilters={vi.fn()}
         onFraudCaseWorkQueueRetry={vi.fn()}
         onFraudCaseWorkQueueRefreshFirstSlice={vi.fn()}
         onFraudCaseWorkQueueLoadMore={vi.fn()}
@@ -141,10 +337,10 @@ describe("AlertsListPage session lifecycle", () => {
       />
     );
 
-    fireEvent.change(screen.getAllByLabelText("Risk", { selector: "select" })[2], { target: { value: "CRITICAL" } });
+    fireEvent.change(screen.getByLabelText("Risk", { selector: "select" }), { target: { value: "CRITICAL" } });
 
     expect(onTransactionFiltersChange).not.toHaveBeenCalled();
-    fireEvent.click(screen.getAllByRole("button", { name: "Apply filters" })[1]);
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
 
     expect(onTransactionFiltersChange).toHaveBeenCalledWith({
       page: 0,
@@ -160,6 +356,7 @@ describe("AlertsListPage session lifecycle", () => {
     const onTransactionFiltersChange = vi.fn();
     render(
       <AlertsListPage
+        workspacePage="transactionScoring"
         alertPage={emptyPage(10)}
         fraudCaseWorkQueue={emptyWorkQueue()}
         fraudCaseWorkQueueRequest={emptyWorkQueueRequest()}
@@ -181,7 +378,9 @@ describe("AlertsListPage session lifecycle", () => {
         onRetry={vi.fn()}
         onGovernanceRetry={vi.fn()}
         onAnalyticsRetry={vi.fn()}
-        onFraudCaseWorkQueueRequestChange={vi.fn()}
+        onFraudCaseWorkQueueDraftChange={vi.fn()}
+        onFraudCaseWorkQueueApplyFilters={vi.fn()}
+        onFraudCaseWorkQueueResetFilters={vi.fn()}
         onFraudCaseWorkQueueRetry={vi.fn()}
         onFraudCaseWorkQueueRefreshFirstSlice={vi.fn()}
         onFraudCaseWorkQueueLoadMore={vi.fn()}
@@ -198,8 +397,8 @@ describe("AlertsListPage session lifecycle", () => {
       />
     );
 
-    fireEvent.change(screen.getAllByLabelText("Search")[1], { target: { value: "ab" } });
-    fireEvent.click(screen.getAllByRole("button", { name: "Apply filters" })[1]);
+    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "ab" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
 
     expect(screen.getByText("Use at least 3 characters or clear search.")).toBeInTheDocument();
     expect(onTransactionFiltersChange).not.toHaveBeenCalled();
@@ -209,6 +408,7 @@ describe("AlertsListPage session lifecycle", () => {
     const onTransactionFiltersChange = vi.fn();
     render(
       <AlertsListPage
+        workspacePage="transactionScoring"
         alertPage={emptyPage(10)}
         fraudCaseWorkQueue={emptyWorkQueue()}
         fraudCaseWorkQueueRequest={emptyWorkQueueRequest()}
@@ -230,7 +430,9 @@ describe("AlertsListPage session lifecycle", () => {
         onRetry={vi.fn()}
         onGovernanceRetry={vi.fn()}
         onAnalyticsRetry={vi.fn()}
-        onFraudCaseWorkQueueRequestChange={vi.fn()}
+        onFraudCaseWorkQueueDraftChange={vi.fn()}
+        onFraudCaseWorkQueueApplyFilters={vi.fn()}
+        onFraudCaseWorkQueueResetFilters={vi.fn()}
         onFraudCaseWorkQueueRetry={vi.fn()}
         onFraudCaseWorkQueueRefreshFirstSlice={vi.fn()}
         onFraudCaseWorkQueueLoadMore={vi.fn()}
@@ -247,8 +449,8 @@ describe("AlertsListPage session lifecycle", () => {
       />
     );
 
-    fireEvent.change(screen.getAllByLabelText("Search")[1], { target: { value: "x".repeat(129) } });
-    fireEvent.click(screen.getAllByRole("button", { name: "Apply filters" })[1]);
+    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "x".repeat(129) } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
 
     expect(screen.getByText("Search query must be 128 characters or less.")).toBeInTheDocument();
     expect(onTransactionFiltersChange).not.toHaveBeenCalled();
@@ -257,6 +459,7 @@ describe("AlertsListPage session lifecycle", () => {
   it("does not present filtered capped transaction totals as exact global totals", () => {
     render(
       <AlertsListPage
+        workspacePage="transactionScoring"
         alertPage={emptyPage(10)}
         fraudCaseWorkQueue={emptyWorkQueue()}
         fraudCaseWorkQueueRequest={emptyWorkQueueRequest()}
@@ -284,7 +487,9 @@ describe("AlertsListPage session lifecycle", () => {
         onRetry={vi.fn()}
         onGovernanceRetry={vi.fn()}
         onAnalyticsRetry={vi.fn()}
-        onFraudCaseWorkQueueRequestChange={vi.fn()}
+        onFraudCaseWorkQueueDraftChange={vi.fn()}
+        onFraudCaseWorkQueueApplyFilters={vi.fn()}
+        onFraudCaseWorkQueueResetFilters={vi.fn()}
         onFraudCaseWorkQueueRetry={vi.fn()}
         onFraudCaseWorkQueueRefreshFirstSlice={vi.fn()}
         onFraudCaseWorkQueueLoadMore={vi.fn()}

@@ -13,9 +13,16 @@ import { TransactionMonitorTable } from "../components/TransactionMonitorTable.j
 import { SESSION_STATES } from "../auth/sessionState.js";
 
 export function AlertsListPage({
+  workspacePage = "analyst",
   alertPage,
+  fraudCaseTotalElements = 0,
   fraudCaseWorkQueue,
   fraudCaseWorkQueueRequest,
+  fraudCaseWorkQueueDraftFilters,
+  fraudCaseWorkQueueWarning,
+  fraudCaseWorkQueueFilterError,
+  fraudCaseWorkQueueLastRefreshedAt,
+  onWorkspaceChange,
   transactionPage,
   transactionPageRequest = { query: "", riskLevel: "ALL", status: "ALL" },
   advisoryQueue,
@@ -37,7 +44,9 @@ export function AlertsListPage({
   onGovernanceRetry,
   onAnalyticsRetry,
   onAdvisoryQueueRequestChange,
-  onFraudCaseWorkQueueRequestChange,
+  onFraudCaseWorkQueueDraftChange,
+  onFraudCaseWorkQueueApplyFilters,
+  onFraudCaseWorkQueueResetFilters,
   onFraudCaseWorkQueueRetry,
   onFraudCaseWorkQueueRefreshFirstSlice,
   onFraudCaseWorkQueueLoadMore,
@@ -77,22 +86,60 @@ export function AlertsListPage({
 
   const sessionBlocksDashboard = shouldBlockDashboard(sessionState, error);
   const workQueueError = sessionBlocksDashboard ? workQueueErrorForSession(sessionState) : fraudCaseWorkQueueError;
+  const showAnalyst = workspacePage === "analyst";
+  const showFraudTransaction = workspacePage === "fraudTransaction";
+  const showTransactionScoring = workspacePage === "transactionScoring";
+  const showCompliance = workspacePage === "compliance";
+  const showReports = workspacePage === "reports";
 
   return (
     <div className="dashboardGrid pageEnter">
-      <FraudCaseWorkQueuePanel
-        queue={fraudCaseWorkQueue}
-        request={fraudCaseWorkQueueRequest}
-        isLoading={isFraudCaseWorkQueueLoading}
-        error={workQueueError}
-        onRequestChange={onFraudCaseWorkQueueRequestChange}
-        onLoadMore={onFraudCaseWorkQueueLoadMore}
-        onRetry={onFraudCaseWorkQueueRetry}
-        onRefreshFirstSlice={onFraudCaseWorkQueueRefreshFirstSlice}
-        onOpenCase={onOpenFraudCase}
-      />
+      <nav className="workspaceTabs" aria-label="Analyst workspace sections">
+        <a href="?workspace=transaction-scoring" onClick={(event) => openWorkspace(event, onWorkspaceChange, "transactionScoring")}>
+          <span>Transactions</span>
+          <strong>{transactionPage.totalElements}</strong>
+        </a>
+        <a href="?workspace=fraud-transaction" onClick={(event) => openWorkspace(event, onWorkspaceChange, "fraudTransaction")}>
+          <span>Alerts</span>
+          <strong>{alertPage.totalElements}</strong>
+        </a>
+        <a href="/" onClick={(event) => openWorkspace(event, onWorkspaceChange, "analyst")}>
+          <span>Fraud cases</span>
+          <strong>{fraudCaseTotalElements}</strong>
+        </a>
+        <a href="?workspace=reports" onClick={(event) => openWorkspace(event, onWorkspaceChange, "reports")}>
+          <span>Audit analytics</span>
+          <strong>{governanceAnalytics?.totals?.advisories ?? 0}</strong>
+        </a>
+        <a href="?workspace=compliance" onClick={(event) => openWorkspace(event, onWorkspaceChange, "compliance")}>
+          <span>Governance</span>
+          <strong>{advisoryQueue.count || 0}</strong>
+        </a>
+      </nav>
 
-      <section className="panel">
+      {sessionBlocksDashboard && <SessionStatePanel sessionState={sessionState} onRetry={onRetry} />}
+
+      {!sessionBlocksDashboard && showAnalyst && (
+        <FraudCaseWorkQueuePanel
+          queue={fraudCaseWorkQueue}
+          request={fraudCaseWorkQueueRequest}
+          draftRequest={fraudCaseWorkQueueDraftFilters}
+          isLoading={isFraudCaseWorkQueueLoading}
+          error={workQueueError}
+          warning={fraudCaseWorkQueueWarning}
+          validationError={fraudCaseWorkQueueFilterError}
+          lastRefreshedAt={fraudCaseWorkQueueLastRefreshedAt}
+          onDraftChange={onFraudCaseWorkQueueDraftChange}
+          onApplyFilters={onFraudCaseWorkQueueApplyFilters}
+          onResetFilters={onFraudCaseWorkQueueResetFilters}
+          onLoadMore={onFraudCaseWorkQueueLoadMore}
+          onRetry={onFraudCaseWorkQueueRetry}
+          onRefreshFirstSlice={onFraudCaseWorkQueueRefreshFirstSlice}
+          onOpenCase={onOpenFraudCase}
+        />
+      )}
+
+      {!sessionBlocksDashboard && showFraudTransaction && <section className="panel" id="alert-queue">
         <div className="panelHeader">
           <div>
             <p className="eyebrow">Queue</p>
@@ -102,16 +149,15 @@ export function AlertsListPage({
 
         <FilterBar filters={filters} onChange={setFilters} />
 
-        {sessionBlocksDashboard && <SessionStatePanel sessionState={sessionState} onRetry={onRetry} />}
         {isLoading && <LoadingPanel label="Loading fraud alerts..." />}
-        {!sessionBlocksDashboard && !isLoading && error && <ErrorState error={error} onRetry={onRetry} />}
-        {!sessionBlocksDashboard && !isLoading && !error && filteredAlerts.length === 0 && (
+        {!isLoading && error && <ErrorState error={error} onRetry={onRetry} />}
+        {!isLoading && !error && filteredAlerts.length === 0 && (
           <EmptyState
             title="No alerts match this view"
             message="Adjust filters or generate synthetic high-risk traffic to populate the queue."
           />
         )}
-        {!sessionBlocksDashboard && !isLoading && !error && filteredAlerts.length > 0 && (
+        {!isLoading && !error && filteredAlerts.length > 0 && (
           <>
             <AlertTable alerts={filteredAlerts} onOpenAlert={onOpenAlert} />
             <PaginationControls
@@ -125,9 +171,9 @@ export function AlertsListPage({
             />
           </>
         )}
-      </section>
+      </section>}
 
-      <section className="panel">
+      {!sessionBlocksDashboard && showTransactionScoring && <section className="panel" id="transaction-stream">
         <div className="panelHeader">
           <div>
             <p className="eyebrow">Monitor</p>
@@ -146,16 +192,15 @@ export function AlertsListPage({
           onApply={onTransactionFiltersChange}
         />
 
-        {sessionBlocksDashboard && <SessionStatePanel sessionState={sessionState} onRetry={onRetry} />}
         {isLoading && <LoadingPanel label="Loading scored transactions..." />}
-        {!sessionBlocksDashboard && !isLoading && error && <ErrorState error={error} onRetry={onRetry} />}
-        {!sessionBlocksDashboard && !isLoading && !error && transactions.length === 0 && (
+        {!isLoading && error && <ErrorState error={error} onRetry={onRetry} />}
+        {!isLoading && !error && transactions.length === 0 && (
           <EmptyState
             title="No scored transactions match this view"
             message="Adjust filters or generate synthetic traffic to populate transaction monitoring."
           />
         )}
-        {!sessionBlocksDashboard && !isLoading && !error && transactions.length > 0 && (
+        {!isLoading && !error && transactions.length > 0 && (
           <>
             <TransactionMonitorTable transactions={transactions} />
             <PaginationControls
@@ -170,30 +215,42 @@ export function AlertsListPage({
             />
           </>
         )}
-      </section>
+      </section>}
 
-      <GovernanceAnalyticsPanel
-        analytics={governanceAnalytics}
-        windowDays={analyticsWindowDays}
-        isLoading={isAnalyticsLoading}
-        error={analyticsError}
-        onWindowDaysChange={onAnalyticsWindowDaysChange}
-        onRetry={onAnalyticsRetry}
-      />
+      {!sessionBlocksDashboard && showReports && (
+        <GovernanceAnalyticsPanel
+          analytics={governanceAnalytics}
+          windowDays={analyticsWindowDays}
+          isLoading={isAnalyticsLoading}
+          error={analyticsError}
+          onWindowDaysChange={onAnalyticsWindowDaysChange}
+          onRetry={onAnalyticsRetry}
+        />
+      )}
 
-      <GovernanceReviewQueue
-        advisoryQueue={advisoryQueue}
-        filters={advisoryQueueRequest}
-        isLoading={isGovernanceLoading}
-        error={governanceError}
-        auditHistories={governanceAuditHistories}
-        session={session}
-        onFiltersChange={onAdvisoryQueueRequestChange}
-        onRetry={onGovernanceRetry}
-        onRecordAudit={onRecordGovernanceAudit}
-      />
+      {!sessionBlocksDashboard && showCompliance && (
+        <GovernanceReviewQueue
+          advisoryQueue={advisoryQueue}
+          filters={advisoryQueueRequest}
+          isLoading={isGovernanceLoading}
+          error={governanceError}
+          auditHistories={governanceAuditHistories}
+          session={session}
+          onFiltersChange={onAdvisoryQueueRequestChange}
+          onRetry={onGovernanceRetry}
+          onRecordAudit={onRecordGovernanceAudit}
+        />
+      )}
     </div>
   );
+}
+
+function openWorkspace(event, onWorkspaceChange, page) {
+  if (!onWorkspaceChange) {
+    return;
+  }
+  event.preventDefault();
+  onWorkspaceChange(page);
 }
 
 function TransactionMonitorFilters({ request, onApply }) {
@@ -319,14 +376,12 @@ function workQueueErrorForSession(sessionState) {
 }
 
 function shouldBlockDashboard(sessionState, error) {
-  if (error) {
-    return false;
-  }
-
-  return [
+  const blockedSessionStates = [
     SESSION_STATES.UNAUTHENTICATED,
     SESSION_STATES.EXPIRED,
     SESSION_STATES.ACCESS_DENIED,
     SESSION_STATES.AUTH_ERROR
-  ].includes(sessionState?.status);
+  ];
+
+  return blockedSessionStates.includes(sessionState?.status) || [401, 403].includes(error?.status);
 }

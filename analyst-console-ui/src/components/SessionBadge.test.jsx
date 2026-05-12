@@ -18,7 +18,8 @@ describe("SessionBadge", () => {
     );
 
     expect(screen.getAllByText("reviewer-1")).toHaveLength(2);
-    expect(screen.getByText("REVIEWER access active via local demo session. 8 authorities available.")).toBeInTheDocument();
+    expect(screen.getByText("Authenticated")).toBeInTheDocument();
+    expect(screen.getByText("reviewer access active via local demo session. 8 authorities available.")).toBeInTheDocument();
     expect(screen.getByText("local/dev only")).toBeInTheDocument();
     expect(screen.getByText("Demo auth mode")).toBeInTheDocument();
     expect(screen.getByLabelText("Role")).toHaveValue("REVIEWER");
@@ -37,10 +38,10 @@ describe("SessionBadge", () => {
       />
     );
 
-    expect(screen.getByText("Not authenticated")).toBeInTheDocument();
-    expect(screen.getByText("Demo auth headers are disabled")).toBeInTheDocument();
-    expect(screen.getByText("headers off")).toBeInTheDocument();
-    expect(screen.getByText("Demo auth mode")).toBeInTheDocument();
+    expect(screen.getAllByText("Not authenticated")).toHaveLength(2);
+    expect(screen.getAllByText("Demo auth headers are disabled")).toHaveLength(2);
+    expect(screen.getAllByText("headers off")).toHaveLength(2);
+    expect(screen.getAllByText("Demo auth mode")).toHaveLength(2);
   });
 
   it("renders a read-only provider boundary for oidc-backed sessions", () => {
@@ -82,8 +83,8 @@ describe("SessionBadge", () => {
       />
     );
 
-    expect(screen.getByText("expired")).toBeInTheDocument();
-    expect(screen.getByText(/provider session expired/i)).toBeInTheDocument();
+    expect(screen.getAllByText("expired")).toHaveLength(2);
+    expect(screen.getAllByText(/provider session expired/i)).toHaveLength(2);
   });
 
   it("prefers lifecycle state over a stale session payload for oidc auth", () => {
@@ -96,8 +97,8 @@ describe("SessionBadge", () => {
       />
     );
 
-    expect(screen.getByText("Not authenticated")).toBeInTheDocument();
-    expect(screen.getByText("waiting for oidc")).toBeInTheDocument();
+    expect(screen.getAllByText("Not authenticated")).toHaveLength(2);
+    expect(screen.getAllByText("waiting for oidc")).toHaveLength(2);
     expect(screen.queryByRole("button", { name: "Sign out" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sign in with OIDC" })).toBeInTheDocument();
   });
