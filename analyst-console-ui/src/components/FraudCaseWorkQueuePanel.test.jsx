@@ -60,6 +60,26 @@ describe("FraudCaseWorkQueuePanel", () => {
     expect(within(cards).getByRole("button", { name: "Open fraud case CASE-2026-0001" })).toBeInTheDocument();
   });
 
+  it("renders loaded workflow stage counts without fake tab semantics", () => {
+    renderPanel({
+      queue: {
+        content: [
+          workQueueItem({ caseId: "case-1", caseNumber: "CASE-1", assignedInvestigatorId: "" }),
+          workQueueItem({ caseId: "case-2", caseNumber: "CASE-2", assignedInvestigatorId: "investigator-1" }),
+          workQueueItem({ caseId: "case-3", caseNumber: "CASE-3", status: "CLOSED" })
+        ],
+        hasNext: false
+      }
+    });
+
+    const stageCounts = screen.getByLabelText("Loaded fraud case workflow stage counts");
+    expect(within(stageCounts).getByText("Loaded unstarted")).toBeInTheDocument();
+    expect(within(stageCounts).getByText("Loaded in progress")).toBeInTheDocument();
+    expect(within(stageCounts).getByText("Loaded ready to submit")).toBeInTheDocument();
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+    expect(screen.queryAllByRole("tab")).toHaveLength(0);
+  });
+
   it("deduplicates duplicate case ids in the rendered table", () => {
     renderPanel({
       queue: {

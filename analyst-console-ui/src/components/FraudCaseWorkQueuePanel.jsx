@@ -85,16 +85,19 @@ export function FraudCaseWorkQueuePanel({
         </div>
       </div>
 
-      <div className="workQueueStageTabs" role="tablist" aria-label="Fraud case workflow stages">
-        <button className="workQueueStageTab workQueueStageTabActive" type="button" role="tab" aria-selected="true">
-          Unstarted <span>{stages.unstarted}</span>
-        </button>
-        <button className="workQueueStageTab" type="button" role="tab" aria-selected="false">
-          In Progress <span>{stages.inProgress}</span>
-        </button>
-        <button className="workQueueStageTab" type="button" role="tab" aria-selected="false">
-          Ready to Submit <span>{stages.readyToSubmit}</span>
-        </button>
+      <div className="workQueueStageStats" aria-label="Loaded fraud case workflow stage counts">
+        <span className="workQueueStageStat">
+          <strong>Loaded unstarted</strong>
+          <span>{stages.unstarted}</span>
+        </span>
+        <span className="workQueueStageStat">
+          <strong>Loaded in progress</strong>
+          <span>{stages.inProgress}</span>
+        </span>
+        <span className="workQueueStageStat">
+          <strong>Loaded ready to submit</strong>
+          <span>{stages.readyToSubmit}</span>
+        </span>
       </div>
 
       <div className="workQueueFilterShell">

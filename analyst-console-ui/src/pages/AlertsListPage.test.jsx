@@ -282,8 +282,59 @@ describe("AlertsListPage session lifecycle", () => {
       />
     );
 
-    expect(screen.getByRole("link", { name: /Fraud cases\s*46/ })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /Fraud cases\s*1/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /All fraud cases\s*46/ })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /All fraud cases\s*1/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/total queue cases/i)).not.toBeInTheDocument();
+  });
+
+  it("shows summary failure locally without hiding the loaded work queue", () => {
+    render(
+      <AlertsListPage
+        workspacePage="analyst"
+        alertPage={emptyPage(10)}
+        fraudCaseTotalElements={46}
+        fraudCaseSummaryError={{ status: 503, message: "summary unavailable" }}
+        fraudCaseWorkQueue={{ ...emptyWorkQueue(), content: [workQueueItem("CASE-1")] }}
+        fraudCaseWorkQueueRequest={emptyWorkQueueRequest()}
+        transactionPage={emptyPage(25)}
+        advisoryQueue={emptyAdvisoryQueue()}
+        advisoryQueueRequest={{ severity: "ALL", modelVersion: "", lifecycleStatus: "ALL", limit: 25 }}
+        governanceAnalytics={emptyAnalytics()}
+        analyticsWindowDays={7}
+        isLoading={false}
+        isFraudCaseWorkQueueLoading={false}
+        isGovernanceLoading={false}
+        isAnalyticsLoading={false}
+        error={null}
+        fraudCaseWorkQueueError={null}
+        governanceError={null}
+        analyticsError={null}
+        sessionState={{ status: SESSION_STATES.AUTHENTICATED }}
+        onRetry={vi.fn()}
+        onFraudCaseSummaryRetry={vi.fn()}
+        onGovernanceRetry={vi.fn()}
+        onAnalyticsRetry={vi.fn()}
+        onFraudCaseWorkQueueDraftChange={vi.fn()}
+        onFraudCaseWorkQueueApplyFilters={vi.fn()}
+        onFraudCaseWorkQueueResetFilters={vi.fn()}
+        onFraudCaseWorkQueueRetry={vi.fn()}
+        onFraudCaseWorkQueueRefreshFirstSlice={vi.fn()}
+        onFraudCaseWorkQueueLoadMore={vi.fn()}
+        onAdvisoryQueueRequestChange={vi.fn()}
+        onAnalyticsWindowDaysChange={vi.fn()}
+        onRecordGovernanceAudit={vi.fn()}
+        onTransactionPageChange={vi.fn()}
+        onTransactionPageSizeChange={vi.fn()}
+        onAlertPageChange={vi.fn()}
+        onAlertPageSizeChange={vi.fn()}
+        onOpenAlert={vi.fn()}
+        onOpenFraudCase={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("link", { name: /All fraud cases\s*Unavailable/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Global fraud case count unavailable." })).toBeInTheDocument();
+    expect(screen.getAllByText("CASE-1").length).toBeGreaterThan(0);
   });
 
   it("sends transaction monitor filters to request state instead of filtering only the current page", () => {
@@ -578,5 +629,23 @@ function scoredTransaction(transactionId, riskLevel, alertRecommended) {
     riskLevel,
     alertRecommended,
     scoredAt: "2026-05-11T10:00:00Z"
+  };
+}
+
+function workQueueItem(caseNumber) {
+  return {
+    caseId: caseNumber,
+    caseNumber,
+    status: "OPEN",
+    priority: "HIGH",
+    riskLevel: "CRITICAL",
+    assignedInvestigatorId: "",
+    createdAt: "2026-05-11T10:00:00Z",
+    updatedAt: "2026-05-11T11:00:00Z",
+    caseAgeSeconds: 7200,
+    lastUpdatedAgeSeconds: 600,
+    slaStatus: "NEAR_BREACH",
+    slaDeadlineAt: "2026-05-12T10:00:00Z",
+    linkedAlertCount: 1
   };
 }

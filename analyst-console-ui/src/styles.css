@@ -862,45 +862,44 @@ code {
   align-self: center;
 }
 
-.workQueueStageTabs {
-  display: flex;
-  align-items: center;
+.workQueueStageStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.65rem;
-  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
   margin: 0 0 1rem;
 }
 
-.workQueueStageTab {
-  display: inline-flex;
+.workQueueStageStat {
+  display: flex;
   align-items: center;
-  gap: 0.55rem;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
+  justify-content: space-between;
+  gap: 0.65rem;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.78);
   color: #475569;
-  padding: 0.85rem 1rem;
-  font-weight: 900;
+  padding: 0.8rem 0.9rem;
+  min-width: 0;
 }
 
-.workQueueStageTab span {
+.workQueueStageStat strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.72rem;
+}
+
+.workQueueStageStat span {
   display: inline-grid;
   place-items: center;
-  min-width: 1.5rem;
-  height: 1.5rem;
+  min-width: 1.55rem;
+  height: 1.55rem;
   border-radius: 999px;
-  background: rgba(15, 23, 42, 0.08);
-  color: #64748b;
-  font-size: 0.78rem;
-}
-
-.workQueueStageTabActive {
-  border-color: var(--blue);
-  color: var(--blue);
-}
-
-.workQueueStageTabActive span {
   background: rgba(37, 99, 235, 0.12);
   color: var(--blue);
+  font-weight: 800;
+  font-size: 0.78rem;
 }
 
 .workQueueFilters {
@@ -2342,8 +2341,9 @@ button:focus-visible,
     display: grid;
   }
 
-  .workQueueStageTabs {
+  .workQueueStageStats {
     overflow-x: auto;
+    grid-template-columns: repeat(3, minmax(10rem, 1fr));
   }
 
   .fraudCaseCounter,

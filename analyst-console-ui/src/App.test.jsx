@@ -110,7 +110,7 @@ describe("App", () => {
     };
   });
 
-  it("handles the dedicated OIDC callback path before loading dashboard data", async () => {
+  it("handles the dedicated OIDC callback path before loading active workspace data", async () => {
     completeLoginCallback.mockImplementation(async () => {
       callbackPath.value = false;
       return {
@@ -126,10 +126,10 @@ describe("App", () => {
     render(<App />);
 
     await waitFor(() => expect(completeLoginCallback).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(listAlerts).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
+    expect(listAlerts).not.toHaveBeenCalled();
     expect(listFraudCaseWorkQueue).toHaveBeenCalledTimes(1);
-    expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1);
-    expect(listScoredTransactions).toHaveBeenCalledTimes(1);
+    expect(listScoredTransactions).not.toHaveBeenCalled();
     expect(setApiSession).toHaveBeenCalled();
   });
 
@@ -156,7 +156,7 @@ describe("App", () => {
     expect(listScoredTransactions).not.toHaveBeenCalled();
   });
 
-  it("loads dashboard data once after an authenticated oidc bootstrap without flipping the session badge back to loading", async () => {
+  it("loads analyst workspace data once after an authenticated oidc bootstrap without flipping the session badge back to loading", async () => {
     callbackPath.value = false;
     refreshSession.mockResolvedValue({
       userId: "subject-1",
@@ -175,12 +175,32 @@ describe("App", () => {
     render(<App />);
 
     await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(listAlerts).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
+    expect(listAlerts).not.toHaveBeenCalled();
     expect(listFraudCaseWorkQueue).toHaveBeenCalledTimes(1);
-    expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1);
-    expect(listScoredTransactions).toHaveBeenCalledTimes(1);
+    expect(listScoredTransactions).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
     expect(screen.queryByText("Loading session state...")).not.toBeInTheDocument();
+  });
+
+  it("keeps transaction scoring usable when the fraud case global summary fails", async () => {
+    callbackPath.value = false;
+    refreshSession.mockResolvedValue(authenticatedSession());
+    providerState.value = {
+      ...providerState.value,
+      getSessionState: () => ({ status: "authenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
+    };
+    getFraudCaseWorkQueueSummary.mockRejectedValue({ status: 503, message: "summary unavailable" });
+    listScoredTransactions.mockResolvedValue(transactionPage("txn-visible"));
+
+    render(<App />);
+
+    await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("link", { name: "Transaction Scoring" }));
+
+    expect(await screen.findByText("txn-visible")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Session required" })).not.toBeInTheDocument();
   });
 
   it("keeps the newest transaction stream response when an older request resolves later", async () => {
@@ -200,8 +220,8 @@ describe("App", () => {
 
     render(<App />);
 
-    await waitFor(() => expect(listScoredTransactions).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole("link", { name: "Transaction Scoring" }));
+    await waitFor(() => expect(listScoredTransactions).toHaveBeenCalledTimes(1));
     fireEvent.change(screen.getByLabelText("Search"), { target: { value: "customer-123" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(listScoredTransactions).toHaveBeenCalledTimes(2));
@@ -231,8 +251,8 @@ describe("App", () => {
 
     render(<App />);
 
-    await waitFor(() => expect(listScoredTransactions).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole("link", { name: "Transaction Scoring" }));
+    await waitFor(() => expect(listScoredTransactions).toHaveBeenCalledTimes(1));
     fireEvent.change(screen.getByLabelText("Search"), { target: { value: "customer-123" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(listScoredTransactions).toHaveBeenCalledTimes(2));

@@ -16,6 +16,8 @@ export function AlertsListPage({
   workspacePage = "analyst",
   alertPage,
   fraudCaseTotalElements = 0,
+  fraudCaseSummaryError,
+  isFraudCaseSummaryLoading = false,
   fraudCaseWorkQueue,
   fraudCaseWorkQueueRequest,
   fraudCaseWorkQueueDraftFilters,
@@ -41,6 +43,7 @@ export function AlertsListPage({
   session,
   sessionState,
   onRetry,
+  onFraudCaseSummaryRetry,
   onGovernanceRetry,
   onAnalyticsRetry,
   onAdvisoryQueueRequestChange,
@@ -86,6 +89,9 @@ export function AlertsListPage({
 
   const sessionBlocksDashboard = shouldBlockDashboard(sessionState, error);
   const workQueueError = sessionBlocksDashboard ? workQueueErrorForSession(sessionState) : fraudCaseWorkQueueError;
+  const fraudCaseSummaryLabel = fraudCaseSummaryError
+    ? "Unavailable"
+    : String(fraudCaseTotalElements ?? 0);
   const showAnalyst = workspacePage === "analyst";
   const showFraudTransaction = workspacePage === "fraudTransaction";
   const showTransactionScoring = workspacePage === "transactionScoring";
@@ -103,9 +109,14 @@ export function AlertsListPage({
           <span>Alerts</span>
           <strong>{alertPage.totalElements}</strong>
         </a>
-        <a href="/" onClick={(event) => openWorkspace(event, onWorkspaceChange, "analyst")}>
-          <span>Fraud cases</span>
-          <strong>{fraudCaseTotalElements}</strong>
+        <a
+          href="/"
+          title="Global point-in-time fraud case count. It is not filter-scoped and may differ from the loaded work queue slice."
+          aria-label={`All fraud cases ${fraudCaseSummaryLabel}`}
+          onClick={(event) => openWorkspace(event, onWorkspaceChange, "analyst")}
+        >
+          <span>All fraud cases</span>
+          <strong>{isFraudCaseSummaryLoading ? "..." : fraudCaseSummaryLabel}</strong>
         </a>
         <a href="?workspace=reports" onClick={(event) => openWorkspace(event, onWorkspaceChange, "reports")}>
           <span>Audit analytics</span>
@@ -137,6 +148,16 @@ export function AlertsListPage({
           onRefreshFirstSlice={onFraudCaseWorkQueueRefreshFirstSlice}
           onOpenCase={onOpenFraudCase}
         />
+      )}
+
+      {!sessionBlocksDashboard && showAnalyst && fraudCaseSummaryError && (
+        <div className="statePanel warningPanel" role="status">
+          <h3>Global fraud case count unavailable.</h3>
+          <p>The work queue can still load. Retry only the global point-in-time summary.</p>
+          <button className="secondaryButton" type="button" onClick={onFraudCaseSummaryRetry}>
+            Retry summary
+          </button>
+        </div>
       )}
 
       {!sessionBlocksDashboard && showFraudTransaction && <section className="panel" id="alert-queue">
