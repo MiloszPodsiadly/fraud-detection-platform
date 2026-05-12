@@ -8,9 +8,9 @@ import com.frauddetection.alert.service.ScoredTransactionSearchCriteria;
 import com.frauddetection.alert.service.ScoredTransactionSearchPolicy;
 import com.frauddetection.alert.service.ScoredTransactionSearchValidationException;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
-import jakarta.validation.constraints.Pattern;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.util.MultiValueMap;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -41,18 +41,23 @@ public class ScoredTransactionController {
 
     @GetMapping("/scored")
     public PagedResponse<ScoredTransactionResponse> listScoredTransactions(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "25") int size,
-            @RequestParam(required = false) String query,
-            @RequestParam(defaultValue = "ALL") @Pattern(regexp = "ALL|LOW|MEDIUM|HIGH|CRITICAL") String riskLevel,
-            @RequestParam(defaultValue = "ALL") @Pattern(regexp = "ALL|LEGITIMATE|SUSPICIOUS") String classification
+            @RequestParam MultiValueMap<String, String> rawParams
     ) {
         ScoredTransactionSearchCriteria criteria;
+        int page;
+        int size;
         try {
+            searchPolicy.validateParameters(rawParams);
+            page = searchPolicy.page(rawParams);
+            size = searchPolicy.size(rawParams);
             searchPolicy.validatePageAndSize(page, size);
-            criteria = searchPolicy.criteria(query, riskLevel, classification);
+            criteria = searchPolicy.criteria(
+                    searchPolicy.value(rawParams, "query"),
+                    searchPolicy.value(rawParams, "riskLevel"),
+                    searchPolicy.value(rawParams, "classification")
+            );
         } catch (ScoredTransactionSearchValidationException exception) {
-            metrics.recordScoredTransactionSearchRequest("rejected", searchPolicy.filterBucket(query, riskLevel, classification));
+            metrics.recordScoredTransactionSearchRequest("rejected", searchPolicy.filterBucket(rawParams));
             throw exception;
         }
         String filterBucket = searchPolicy.filterBucket(criteria);

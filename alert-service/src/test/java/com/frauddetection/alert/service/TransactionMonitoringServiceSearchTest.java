@@ -4,6 +4,8 @@ import com.frauddetection.alert.domain.ScoredTransaction;
 import com.frauddetection.alert.mapper.ScoredTransactionDocumentMapper;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
+import com.frauddetection.common.events.enums.RiskLevel;
+import org.bson.Document;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.PageRequest;
@@ -26,7 +28,8 @@ class TransactionMonitoringServiceSearchTest {
     private final ScoredTransactionRepository repository = mock(ScoredTransactionRepository.class);
     private final ScoredTransactionDocumentMapper mapper = mock(ScoredTransactionDocumentMapper.class);
     private final MongoTemplate mongoTemplate = mock(MongoTemplate.class);
-    private final TransactionMonitoringService service = new TransactionMonitoringService(repository, mapper, mongoTemplate);
+    private final ScoredTransactionSearchPolicy searchPolicy = new ScoredTransactionSearchPolicy();
+    private final TransactionMonitoringService service = new TransactionMonitoringService(repository, mapper, mongoTemplate, searchPolicy);
 
     @Test
     void shouldUseBoundedCountProbeForFilteredSearch() {
@@ -55,7 +58,7 @@ class TransactionMonitoringServiceSearchTest {
 
         var result = service.listScoredTransactions(
                 PageRequest.of(0, 25),
-                new ScoredTransactionSearchCriteria("customer-1", "ALL", "ALL")
+                new ScoredTransactionSearchCriteria("customer-1", null, null)
         );
 
         assertThat(result.getContent()).containsExactly(domain);
@@ -69,14 +72,14 @@ class TransactionMonitoringServiceSearchTest {
     }
 
     @Test
-    void shouldSearchOnlyAllowlistedIdentifierFields() {
+    void shouldSearchOnlyNormalizedIndexedIdentifierFields() {
         when(mongoTemplate.find(any(Query.class), eq(ScoredTransactionDocument.class)))
                 .thenReturn(List.of())
                 .thenReturn(List.of());
 
         service.listScoredTransactions(
                 PageRequest.of(0, 25),
-                new ScoredTransactionSearchCriteria("risk merchant", "ALL", "ALL")
+                new ScoredTransactionSearchCriteria("Risk Merchant", null, null)
         );
 
         ArgumentCaptor<Query> queryCaptor = ArgumentCaptor.forClass(Query.class);
@@ -84,8 +87,29 @@ class TransactionMonitoringServiceSearchTest {
         String queryJson = queryCaptor.getAllValues().get(0).getQueryObject().toJson();
 
         assertThat(queryJson)
-                .contains("transactionId", "customerId", "merchantInfo.merchantId", "transactionAmount.currency")
-                .doesNotContain("merchantInfo.merchantName");
+                .contains("transactionIdSearch", "customerIdSearch", "merchantIdSearch", "currencySearch")
+                .contains("risk merchant")
+                .doesNotContain("Risk Merchant", "merchantInfo.merchantName", "transactionAmount.currency", "$options", "\"i\"");
+    }
+
+    @Test
+    void shouldUseTypedRiskAndClassificationCriteria() {
+        when(mongoTemplate.find(any(Query.class), eq(ScoredTransactionDocument.class)))
+                .thenReturn(List.of())
+                .thenReturn(List.of());
+
+        service.listScoredTransactions(
+                PageRequest.of(0, 25),
+                new ScoredTransactionSearchCriteria(null, RiskLevel.CRITICAL, true)
+        );
+
+        ArgumentCaptor<Query> queryCaptor = ArgumentCaptor.forClass(Query.class);
+        verify(mongoTemplate, org.mockito.Mockito.times(2)).find(queryCaptor.capture(), eq(ScoredTransactionDocument.class));
+        Document queryDocument = queryCaptor.getAllValues().get(0).getQueryObject();
+        List<Document> filters = queryDocument.getList("$and", Document.class);
+
+        assertThat(filters).anySatisfy(filter -> assertThat(filter).containsEntry("riskLevel", RiskLevel.CRITICAL));
+        assertThat(filters).anySatisfy(filter -> assertThat(filter).containsEntry("alertRecommended", true));
     }
 
     private ScoredTransactionDocument document(String transactionId) {

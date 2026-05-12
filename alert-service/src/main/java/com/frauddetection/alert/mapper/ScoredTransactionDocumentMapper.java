@@ -6,6 +6,7 @@ import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.util.Locale;
 
 @Component
 public class ScoredTransactionDocumentMapper {
@@ -19,6 +20,10 @@ public class ScoredTransactionDocumentMapper {
         document.setScoredAt(resolveScoredAt(event));
         document.setTransactionAmount(event.transactionAmount());
         document.setMerchantInfo(event.merchantInfo());
+        document.setTransactionIdSearch(normalizeSearchValue(event.transactionId()));
+        document.setCustomerIdSearch(normalizeSearchValue(event.customerId()));
+        document.setMerchantIdSearch(normalizeSearchValue(event.merchantInfo() == null ? null : event.merchantInfo().merchantId()));
+        document.setCurrencySearch(normalizeSearchValue(event.transactionAmount() == null ? null : event.transactionAmount().currency()));
         document.setFraudScore(event.fraudScore());
         document.setRiskLevel(event.riskLevel());
         document.setAlertRecommended(event.alertRecommended());
@@ -50,5 +55,12 @@ public class ScoredTransactionDocumentMapper {
             return event.createdAt();
         }
         return Instant.now();
+    }
+
+    private String normalizeSearchValue(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim().toLowerCase(Locale.ROOT);
     }
 }

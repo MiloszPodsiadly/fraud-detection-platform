@@ -5,6 +5,7 @@ public record ReadAccessAuditTarget(
         ReadAccessResourceType resourceType,
         String resourceId,
         String queryHash,
+        String filterBucket,
         Integer page,
         Integer size
 ) {

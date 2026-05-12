@@ -13,6 +13,7 @@ public record ReadAccessAuditEvent(
         String resourceId,
         ReadAccessEndpointCategory endpointCategory,
         String queryHash,
+        String filterBucket,
         Integer page,
         Integer size,
         int resultCount,

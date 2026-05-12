@@ -82,4 +82,46 @@ class ScoredTransactionControllerValidationTest {
         verifyNoInteractions(transactionMonitoringUseCase);
         verify(metrics).recordScoredTransactionSearchRequest("rejected", "query");
     }
+
+    @Test
+    void shouldRejectUnknownParameterWithoutCallingService() throws Exception {
+        String body = mockMvc.perform(get("/api/v1/transactions/scored")
+                        .queryParam("customerId", "customer-secret"))
+                .andExpect(status().isBadRequest())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        assertThat(body).doesNotContain("customer-secret");
+        verifyNoInteractions(transactionMonitoringUseCase);
+        verify(metrics).recordScoredTransactionSearchRequest("rejected", "none");
+    }
+
+    @Test
+    void shouldRejectDuplicateSingleValueParameterWithoutCallingService() throws Exception {
+        String body = mockMvc.perform(get("/api/v1/transactions/scored")
+                        .queryParam("riskLevel", "HIGH", "LOW"))
+                .andExpect(status().isBadRequest())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        assertThat(body).doesNotContain("HIGH", "LOW");
+        verifyNoInteractions(transactionMonitoringUseCase);
+        verify(metrics).recordScoredTransactionSearchRequest("rejected", "risk");
+    }
+
+    @Test
+    void shouldRejectInvalidClassificationWithoutRawValue() throws Exception {
+        String body = mockMvc.perform(get("/api/v1/transactions/scored")
+                        .queryParam("classification", "CONFIRMED"))
+                .andExpect(status().isBadRequest())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        assertThat(body).doesNotContain("CONFIRMED");
+        verifyNoInteractions(transactionMonitoringUseCase);
+        verify(metrics).recordScoredTransactionSearchRequest("rejected", "classification");
+    }
 }

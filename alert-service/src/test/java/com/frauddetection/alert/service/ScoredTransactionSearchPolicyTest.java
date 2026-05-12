@@ -1,6 +1,8 @@
 package com.frauddetection.alert.service;
 
+import com.frauddetection.common.events.enums.RiskLevel;
 import org.junit.jupiter.api.Test;
+import org.springframework.util.LinkedMultiValueMap;
 
 import java.util.Map;
 
@@ -30,13 +32,49 @@ class ScoredTransactionSearchPolicyTest {
 
     @Test
     void shouldTrimBoundedQueryAndKeepSelectedFilters() {
-        ScoredTransactionSearchCriteria criteria = policy.criteria(" customer-1 ", " CRITICAL ", " SUSPICIOUS ");
+        ScoredTransactionSearchCriteria criteria = policy.criteria(" Customer-1 ", " CRITICAL ", " SUSPICIOUS ");
 
         assertThat(criteria.query()).isEqualTo("customer-1");
-        assertThat(criteria.riskLevel()).isEqualTo("CRITICAL");
-        assertThat(criteria.classification()).isEqualTo("SUSPICIOUS");
+        assertThat(criteria.riskLevel()).isEqualTo(RiskLevel.CRITICAL);
+        assertThat(criteria.alertRecommended()).isTrue();
         assertThat(criteria.hasFilters()).isTrue();
         assertThat(policy.filterBucket(criteria)).isEqualTo("combined");
+    }
+
+    @Test
+    void shouldRejectInvalidEnumsAndNormalizeLowercaseValues() {
+        ScoredTransactionSearchCriteria criteria = policy.criteria(null, "critical", "legitimate");
+
+        assertThat(criteria.riskLevel()).isEqualTo(RiskLevel.CRITICAL);
+        assertThat(criteria.alertRecommended()).isFalse();
+
+        assertThatThrownBy(() -> policy.criteria(null, "SEVERE", "ALL"))
+                .isInstanceOf(ScoredTransactionSearchValidationException.class);
+        assertThatThrownBy(() -> policy.criteria(null, "ALL", "CONFIRMED"))
+                .isInstanceOf(ScoredTransactionSearchValidationException.class);
+    }
+
+    @Test
+    void shouldRejectUnknownAndDuplicateParameters() {
+        LinkedMultiValueMap<String, String> unknown = new LinkedMultiValueMap<>();
+        unknown.add("customerId", "customer-1");
+        assertThatThrownBy(() -> policy.validateParameters(unknown))
+                .isInstanceOf(ScoredTransactionSearchValidationException.class);
+
+        LinkedMultiValueMap<String, String> duplicate = new LinkedMultiValueMap<>();
+        duplicate.add("query", "customer-1");
+        duplicate.add("query", "customer-2");
+        assertThatThrownBy(() -> policy.validateParameters(duplicate))
+                .isInstanceOf(ScoredTransactionSearchValidationException.class);
+    }
+
+    @Test
+    void shouldRejectInvalidNumericParameters() {
+        LinkedMultiValueMap<String, String> parameters = new LinkedMultiValueMap<>();
+        parameters.add("page", "not-a-number");
+
+        assertThatThrownBy(() -> policy.page(parameters))
+                .isInstanceOf(ScoredTransactionSearchValidationException.class);
     }
 
     @Test

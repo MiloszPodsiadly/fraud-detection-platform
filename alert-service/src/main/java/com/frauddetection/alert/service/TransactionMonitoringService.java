@@ -4,7 +4,6 @@ import com.frauddetection.alert.domain.ScoredTransaction;
 import com.frauddetection.alert.mapper.ScoredTransactionDocumentMapper;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
-import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -24,15 +23,18 @@ public class TransactionMonitoringService implements TransactionMonitoringUseCas
     private final ScoredTransactionRepository repository;
     private final ScoredTransactionDocumentMapper mapper;
     private final MongoTemplate mongoTemplate;
+    private final ScoredTransactionSearchPolicy searchPolicy;
 
     public TransactionMonitoringService(
             ScoredTransactionRepository repository,
             ScoredTransactionDocumentMapper mapper,
-            MongoTemplate mongoTemplate
+            MongoTemplate mongoTemplate,
+            ScoredTransactionSearchPolicy searchPolicy
     ) {
         this.repository = repository;
         this.mapper = mapper;
         this.mongoTemplate = mongoTemplate;
+        this.searchPolicy = searchPolicy;
     }
 
     @Override
@@ -72,7 +74,7 @@ public class TransactionMonitoringService implements TransactionMonitoringUseCas
         List<Criteria> filters = new ArrayList<>();
         addQueryFilter(filters, criteria.query());
         addRiskFilter(filters, criteria.riskLevel());
-        addClassificationFilter(filters, criteria.classification());
+        addClassificationFilter(filters, criteria.alertRecommended());
 
         Query query = new Query();
         if (!filters.isEmpty()) {
@@ -85,36 +87,29 @@ public class TransactionMonitoringService implements TransactionMonitoringUseCas
         if (!hasText(queryText)) {
             return;
         }
-        String prefixPattern = "^" + Pattern.quote(queryText.trim());
-        String exactPattern = "^" + Pattern.quote(queryText.trim()) + "$";
+        String normalizedQuery = searchPolicy.normalizeQueryForSearch(queryText);
+        String prefixPattern = "^" + Pattern.quote(normalizedQuery);
+        String exactPattern = "^" + Pattern.quote(normalizedQuery) + "$";
         filters.add(new Criteria().orOperator(
-                Criteria.where("transactionId").regex(prefixPattern, "i"),
-                Criteria.where("customerId").regex(prefixPattern, "i"),
-                Criteria.where("merchantInfo.merchantId").regex(prefixPattern, "i"),
-                Criteria.where("transactionAmount.currency").regex(exactPattern, "i")
+                Criteria.where("transactionIdSearch").regex(prefixPattern),
+                Criteria.where("customerIdSearch").regex(prefixPattern),
+                Criteria.where("merchantIdSearch").regex(prefixPattern),
+                Criteria.where("currencySearch").regex(exactPattern)
         ));
     }
 
-    private void addRiskFilter(List<Criteria> filters, String riskLevel) {
-        if (!isSelected(riskLevel)) {
+    private void addRiskFilter(List<Criteria> filters, com.frauddetection.common.events.enums.RiskLevel riskLevel) {
+        if (riskLevel == null) {
             return;
         }
-        filters.add(Criteria.where("riskLevel").is(RiskLevel.valueOf(riskLevel.trim())));
+        filters.add(Criteria.where("riskLevel").is(riskLevel));
     }
 
-    private void addClassificationFilter(List<Criteria> filters, String classification) {
-        if (!isSelected(classification)) {
+    private void addClassificationFilter(List<Criteria> filters, Boolean alertRecommended) {
+        if (alertRecommended == null) {
             return;
         }
-        if ("SUSPICIOUS".equalsIgnoreCase(classification.trim())) {
-            filters.add(Criteria.where("alertRecommended").is(true));
-        } else if ("LEGITIMATE".equalsIgnoreCase(classification.trim())) {
-            filters.add(Criteria.where("alertRecommended").is(false));
-        }
-    }
-
-    private static boolean isSelected(String value) {
-        return hasText(value) && !"ALL".equalsIgnoreCase(value.trim());
+        filters.add(Criteria.where("alertRecommended").is(alertRecommended));
     }
 
     private static boolean hasText(String value) {

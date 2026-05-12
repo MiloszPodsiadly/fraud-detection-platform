@@ -1,10 +1,15 @@
 package com.frauddetection.alert.service;
 
+import com.frauddetection.common.events.enums.RiskLevel;
 import org.springframework.stereotype.Component;
+import org.springframework.util.MultiValueMap;
 import org.springframework.util.StringUtils;
 
 import java.util.Arrays;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 
 @Component
@@ -15,13 +20,56 @@ public class ScoredTransactionSearchPolicy {
     public static final int MAX_PAGE_SIZE = 100;
     public static final int MAX_PAGE_NUMBER = 1000;
     public static final int MAX_FILTERED_TOTAL_COUNT = 10_000;
+    private static final Set<String> ALLOWED_PARAMETERS = Set.of("page", "size", "query", "riskLevel", "classification");
 
     public ScoredTransactionSearchCriteria criteria(String query, String riskLevel, String classification) {
         return new ScoredTransactionSearchCriteria(
                 normalizeQuery(query),
-                normalizeSelection(riskLevel),
-                normalizeSelection(classification)
+                normalizeRiskLevel(riskLevel),
+                normalizeClassification(classification)
         );
+    }
+
+    public void validateParameters(MultiValueMap<String, String> parameters) {
+        validateAllowedParameters(parameters);
+        validateSingleValueParameters(parameters);
+    }
+
+    public void validateAllowedParameters(MultiValueMap<String, String> parameters) {
+        if (parameters == null) {
+            return;
+        }
+        for (String name : parameters.keySet()) {
+            if (!ALLOWED_PARAMETERS.contains(name)) {
+                throw invalid();
+            }
+        }
+    }
+
+    public void validateSingleValueParameters(MultiValueMap<String, String> parameters) {
+        if (parameters == null) {
+            return;
+        }
+        for (String name : ALLOWED_PARAMETERS) {
+            if (parameters.getOrDefault(name, List.of()).size() > 1) {
+                throw invalid();
+            }
+        }
+    }
+
+    public int page(MultiValueMap<String, String> parameters) {
+        return intParameter(parameters, "page", 0);
+    }
+
+    public int size(MultiValueMap<String, String> parameters) {
+        return intParameter(parameters, "size", 25);
+    }
+
+    public String value(MultiValueMap<String, String> parameters, String name) {
+        if (parameters == null || !parameters.containsKey(name) || parameters.get(name).isEmpty()) {
+            return null;
+        }
+        return parameters.getFirst(name);
     }
 
     public void validatePageAndSize(int page, int size) {
@@ -33,13 +81,17 @@ public class ScoredTransactionSearchPolicy {
         }
     }
 
+    public String normalizeQueryForSearch(String value) {
+        return normalizeQuery(value);
+    }
+
     public String filterBucket(ScoredTransactionSearchCriteria criteria) {
         if (criteria == null || !criteria.hasFilters()) {
             return "none";
         }
         boolean query = StringUtils.hasText(criteria.query());
-        boolean risk = isSelected(criteria.riskLevel());
-        boolean classification = isSelected(criteria.classification());
+        boolean risk = criteria.riskLevel() != null;
+        boolean classification = criteria.alertRecommended() != null;
         int selected = (query ? 1 : 0) + (risk ? 1 : 0) + (classification ? 1 : 0);
         if (selected > 1) {
             return "combined";
@@ -74,6 +126,10 @@ public class ScoredTransactionSearchPolicy {
             return "classification";
         }
         return "none";
+    }
+
+    public String filterBucket(MultiValueMap<String, String> parameters) {
+        return filterBucket(value(parameters, "query"), value(parameters, "riskLevel"), value(parameters, "classification"));
     }
 
     public static String canonicalAuditQuery(Map<String, String[]> parameterMap) {
@@ -115,10 +171,10 @@ public class ScoredTransactionSearchPolicy {
             if (trimmed.length() < MIN_QUERY_LENGTH || trimmed.length() > MAX_QUERY_LENGTH) {
                 return "invalid_length";
             }
-            return trimmed.toLowerCase();
+            return trimmed.toLowerCase(Locale.ROOT);
         }
         if ("riskLevel".equals(name) || "classification".equals(name)) {
-            return value.trim().toUpperCase();
+            return value.trim().toUpperCase(Locale.ROOT);
         }
         if ("page".equals(name) || "size".equals(name)) {
             return value.trim();
@@ -134,14 +190,41 @@ public class ScoredTransactionSearchPolicy {
         if (trimmed.length() < MIN_QUERY_LENGTH || trimmed.length() > MAX_QUERY_LENGTH) {
             throw invalid();
         }
-        return trimmed;
+        return trimmed.toLowerCase(Locale.ROOT);
     }
 
-    private String normalizeSelection(String value) {
-        if (!StringUtils.hasText(value)) {
-            return "ALL";
+    private RiskLevel normalizeRiskLevel(String value) {
+        if (!isSelected(value)) {
+            return null;
         }
-        return value.trim();
+        try {
+            return RiskLevel.valueOf(value.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException exception) {
+            throw invalid();
+        }
+    }
+
+    private Boolean normalizeClassification(String value) {
+        if (!isSelected(value)) {
+            return null;
+        }
+        return switch (value.trim().toUpperCase(Locale.ROOT)) {
+            case "SUSPICIOUS" -> true;
+            case "LEGITIMATE" -> false;
+            default -> throw invalid();
+        };
+    }
+
+    private int intParameter(MultiValueMap<String, String> parameters, String name, int defaultValue) {
+        String value = value(parameters, name);
+        if (!StringUtils.hasText(value)) {
+            return defaultValue;
+        }
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException exception) {
+            throw invalid();
+        }
     }
 
     private boolean isSelected(String value) {

@@ -21,13 +21,30 @@ public class ScoredTransactionDocument {
     private Instant transactionTimestamp;
 
     @Indexed
+    private String transactionIdSearch;
+
+    @Indexed
+    private String customerIdSearch;
+
+    @Indexed
+    private String merchantIdSearch;
+
+    @Indexed
+    private String currencySearch;
+
+    @Indexed
     private Instant scoredAt;
 
     private Money transactionAmount;
     private MerchantInfo merchantInfo;
     private Double fraudScore;
+
+    @Indexed
     private RiskLevel riskLevel;
+
+    @Indexed
     private Boolean alertRecommended;
+
     private List<String> reasonCodes;
 
     public String getTransactionId() { return transactionId; }
@@ -38,6 +55,14 @@ public class ScoredTransactionDocument {
     public void setCorrelationId(String correlationId) { this.correlationId = correlationId; }
     public Instant getTransactionTimestamp() { return transactionTimestamp; }
     public void setTransactionTimestamp(Instant transactionTimestamp) { this.transactionTimestamp = transactionTimestamp; }
+    public String getTransactionIdSearch() { return transactionIdSearch; }
+    public void setTransactionIdSearch(String transactionIdSearch) { this.transactionIdSearch = transactionIdSearch; }
+    public String getCustomerIdSearch() { return customerIdSearch; }
+    public void setCustomerIdSearch(String customerIdSearch) { this.customerIdSearch = customerIdSearch; }
+    public String getMerchantIdSearch() { return merchantIdSearch; }
+    public void setMerchantIdSearch(String merchantIdSearch) { this.merchantIdSearch = merchantIdSearch; }
+    public String getCurrencySearch() { return currencySearch; }
+    public void setCurrencySearch(String currencySearch) { this.currencySearch = currencySearch; }
     public Instant getScoredAt() { return scoredAt; }
     public void setScoredAt(Instant scoredAt) { this.scoredAt = scoredAt; }
     public Money getTransactionAmount() { return transactionAmount; }

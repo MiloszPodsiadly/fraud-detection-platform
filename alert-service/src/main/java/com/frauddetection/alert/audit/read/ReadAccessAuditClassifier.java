@@ -63,9 +63,30 @@ public class ReadAccessAuditClassifier {
                 resourceType,
                 normalize(resourceId),
                 queryHash(request),
+                filterBucket(category, request),
                 intParameter(request, "page"),
                 intParameter(request, "size")
         );
+    }
+
+    private String filterBucket(ReadAccessEndpointCategory category, HttpServletRequest request) {
+        if (category != ReadAccessEndpointCategory.SCORED_TRANSACTION_SEARCH) {
+            return null;
+        }
+        return new ScoredTransactionSearchPolicy().filterBucket(requestParameters(request));
+    }
+
+    private org.springframework.util.MultiValueMap<String, String> requestParameters(HttpServletRequest request) {
+        org.springframework.util.LinkedMultiValueMap<String, String> parameters = new org.springframework.util.LinkedMultiValueMap<>();
+        request.getParameterMap().forEach((name, values) -> {
+            if (values == null) {
+                return;
+            }
+            for (String value : values) {
+                parameters.add(name, value);
+            }
+        });
+        return parameters;
     }
 
     private Integer intParameter(HttpServletRequest request, String name) {
