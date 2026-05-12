@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   listAlerts,
-  listFraudCases,
   listFraudCaseWorkQueue,
   listGovernanceAdvisories,
   getGovernanceAdvisoryAnalytics,
@@ -44,14 +43,6 @@ export default function App() {
     size: 10
   });
   const [alertPageRequest, setAlertPageRequest] = useState({ page: 0, size: 10 });
-  const [fraudCasePage, setFraudCasePage] = useState({
-    content: [],
-    totalElements: 0,
-    totalPages: 0,
-    page: 0,
-    size: 4
-  });
-  const [fraudCasePageRequest, setFraudCasePageRequest] = useState({ page: 0, size: 4 });
   const [fraudCaseWorkQueue, setFraudCaseWorkQueue] = useState(initialFraudCaseWorkQueue);
   const [fraudCaseWorkQueueRequest, setFraudCaseWorkQueueRequest] = useState(initialFraudCaseWorkQueueRequest);
   const [transactionPage, setTransactionPage] = useState({
@@ -183,8 +174,8 @@ export default function App() {
       return;
     }
     setApiSession(session, authProvider);
-    loadDashboard({ transaction: transactionPageRequest, alert: alertPageRequest, fraudCase: fraudCasePageRequest });
-  }, [authProvider, transactionPageRequest, alertPageRequest, fraudCasePageRequest, handlingOidcCallback, session, sessionBootstrapPending]);
+    loadDashboard({ transaction: transactionPageRequest, alert: alertPageRequest });
+  }, [authProvider, transactionPageRequest, alertPageRequest, handlingOidcCallback, session, sessionBootstrapPending]);
 
   useEffect(() => {
     if (handlingOidcCallback || sessionBootstrapPending) {
@@ -277,22 +268,20 @@ export default function App() {
     [alertPage.content, selectedAlertId]
   );
 
-  async function loadDashboard(nextRequests = { transaction: transactionPageRequest, alert: alertPageRequest, fraudCase: fraudCasePageRequest }) {
+  async function loadDashboard(nextRequests = { transaction: transactionPageRequest, alert: alertPageRequest }) {
     const requestSeq = dashboardRequestSeqRef.current + 1;
     dashboardRequestSeqRef.current = requestSeq;
     setIsLoading(true);
     setError(null);
     try {
-      const [nextAlerts, nextFraudCasePage, nextTransactionPage] = await Promise.all([
+      const [nextAlerts, nextTransactionPage] = await Promise.all([
         listAlerts(nextRequests.alert),
-        listFraudCases(nextRequests.fraudCase),
         listScoredTransactions(nextRequests.transaction)
       ]);
       if (dashboardRequestSeqRef.current !== requestSeq) {
         return;
       }
       setAlertPage(nextAlerts);
-      setFraudCasePage(nextFraudCasePage);
       setTransactionPage(nextTransactionPage);
     } catch (apiError) {
       if (dashboardRequestSeqRef.current !== requestSeq) {
@@ -403,7 +392,7 @@ export default function App() {
   }
 
   function refreshDashboard() {
-    loadDashboard({ transaction: transactionPageRequest, alert: alertPageRequest, fraudCase: fraudCasePageRequest });
+    loadDashboard({ transaction: transactionPageRequest, alert: alertPageRequest });
     refreshFraudCaseWorkQueueFromStart();
     if (!shouldBlockDashboardFetch(sessionState)) {
       loadGovernanceQueue(advisoryQueueRequest);
@@ -437,14 +426,6 @@ export default function App() {
 
   function changeAlertPageSize(size) {
     setAlertPageRequest({ page: 0, size });
-  }
-
-  function changeFraudCasePage(page) {
-    setFraudCasePageRequest((current) => ({ ...current, page }));
-  }
-
-  function changeFraudCasePageSize(size) {
-    setFraudCasePageRequest({ page: 0, size });
   }
 
   function changeFraudCaseWorkQueueRequest(patch) {
@@ -561,7 +542,6 @@ export default function App() {
         ) : (
           <AlertsListPage
             alertPage={alertPage}
-            fraudCasePage={fraudCasePage}
             fraudCaseWorkQueue={fraudCaseWorkQueue}
             fraudCaseWorkQueueRequest={fraudCaseWorkQueueRequest}
             transactionPage={transactionPage}
@@ -596,8 +576,6 @@ export default function App() {
             onTransactionPageSizeChange={changeTransactionPageSize}
             onAlertPageChange={changeAlertPage}
             onAlertPageSizeChange={changeAlertPageSize}
-            onFraudCasePageChange={changeFraudCasePage}
-            onFraudCasePageSizeChange={changeFraudCasePageSize}
             onOpenAlert={openAlert}
             onOpenFraudCase={openFraudCase}
           />

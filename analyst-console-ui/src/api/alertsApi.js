@@ -63,14 +63,6 @@ export function listAlerts({ page = 0, size = 10 } = {}) {
   return request(`/api/v1/alerts?${params.toString()}`);
 }
 
-export function listFraudCases({ page = 0, size = 4 } = {}) {
-  const params = new URLSearchParams({
-    page: String(page),
-    size: String(size)
-  });
-  return request(`/api/v1/fraud-cases?${params.toString()}`);
-}
-
 export function listFraudCaseWorkQueue({
   size = 20,
   cursor,

@@ -8,7 +8,6 @@ describe("AlertsListPage session lifecycle", () => {
     render(
       <AlertsListPage
         alertPage={emptyPage(10)}
-        fraudCasePage={emptyPage(4)}
         fraudCaseWorkQueue={emptyWorkQueue()}
         fraudCaseWorkQueueRequest={emptyWorkQueueRequest()}
         transactionPage={emptyPage(25)}
@@ -54,7 +53,6 @@ describe("AlertsListPage session lifecycle", () => {
     render(
       <AlertsListPage
         alertPage={emptyPage(10)}
-        fraudCasePage={emptyPage(4)}
         fraudCaseWorkQueue={emptyWorkQueue()}
         fraudCaseWorkQueueRequest={emptyWorkQueueRequest()}
         transactionPage={emptyPage(25)}
@@ -204,6 +202,55 @@ describe("AlertsListPage session lifecycle", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Apply filters" })[1]);
 
     expect(screen.getByText("Use at least 3 characters or clear search.")).toBeInTheDocument();
+    expect(onTransactionFiltersChange).not.toHaveBeenCalled();
+  });
+
+  it("blocks too-long transaction monitor searches before request state changes", () => {
+    const onTransactionFiltersChange = vi.fn();
+    render(
+      <AlertsListPage
+        alertPage={emptyPage(10)}
+        fraudCaseWorkQueue={emptyWorkQueue()}
+        fraudCaseWorkQueueRequest={emptyWorkQueueRequest()}
+        transactionPage={emptyPage(25)}
+        transactionPageRequest={{ page: 0, size: 10, query: "", riskLevel: "ALL", status: "ALL" }}
+        advisoryQueue={emptyAdvisoryQueue()}
+        advisoryQueueRequest={{ severity: "ALL", modelVersion: "", lifecycleStatus: "ALL", limit: 25 }}
+        governanceAnalytics={emptyAnalytics()}
+        analyticsWindowDays={7}
+        isLoading={false}
+        isFraudCaseWorkQueueLoading={false}
+        isGovernanceLoading={false}
+        isAnalyticsLoading={false}
+        error={null}
+        fraudCaseWorkQueueError={null}
+        governanceError={null}
+        analyticsError={null}
+        sessionState={{ status: SESSION_STATES.AUTHENTICATED }}
+        onRetry={vi.fn()}
+        onGovernanceRetry={vi.fn()}
+        onAnalyticsRetry={vi.fn()}
+        onFraudCaseWorkQueueRequestChange={vi.fn()}
+        onFraudCaseWorkQueueRetry={vi.fn()}
+        onFraudCaseWorkQueueRefreshFirstSlice={vi.fn()}
+        onFraudCaseWorkQueueLoadMore={vi.fn()}
+        onAdvisoryQueueRequestChange={vi.fn()}
+        onAnalyticsWindowDaysChange={vi.fn()}
+        onRecordGovernanceAudit={vi.fn()}
+        onTransactionFiltersChange={onTransactionFiltersChange}
+        onTransactionPageChange={vi.fn()}
+        onTransactionPageSizeChange={vi.fn()}
+        onAlertPageChange={vi.fn()}
+        onAlertPageSizeChange={vi.fn()}
+        onOpenAlert={vi.fn()}
+        onOpenFraudCase={vi.fn()}
+      />
+    );
+
+    fireEvent.change(screen.getAllByLabelText("Search")[1], { target: { value: "x".repeat(129) } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Apply filters" })[1]);
+
+    expect(screen.getByText("Search query must be 128 characters or less.")).toBeInTheDocument();
     expect(onTransactionFiltersChange).not.toHaveBeenCalled();
   });
 });
