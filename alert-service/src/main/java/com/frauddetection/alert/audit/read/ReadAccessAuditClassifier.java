@@ -31,6 +31,9 @@ public class ReadAccessAuditClassifier {
         if ("/api/v1/fraud-cases/work-queue".equals(pattern) || "/api/fraud-cases/work-queue".equals(pattern)) {
             return Optional.of(target(ReadAccessEndpointCategory.FRAUD_CASE_WORK_QUEUE, ReadAccessResourceType.FRAUD_CASE, null, request));
         }
+        if ("/api/v1/fraud-cases/work-queue/summary".equals(pattern)) {
+            return Optional.of(target(ReadAccessEndpointCategory.FRAUD_CASE_WORK_QUEUE_SUMMARY, ReadAccessResourceType.FRAUD_CASE, null, request));
+        }
         if ("/api/v1/fraud-cases/{caseId}".equals(pattern)) {
             return Optional.of(target(ReadAccessEndpointCategory.FRAUD_CASE_DETAIL, ReadAccessResourceType.FRAUD_CASE, variables.get("caseId"), request));
         }

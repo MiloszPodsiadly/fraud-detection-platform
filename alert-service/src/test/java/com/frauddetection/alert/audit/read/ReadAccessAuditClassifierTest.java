@@ -47,6 +47,18 @@ class ReadAccessAuditClassifierTest {
     }
 
     @Test
+    void shouldClassifyFraudCaseWorkQueueSummaryAsCurrentV1ReadOnlyEndpoint() {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/fraud-cases/work-queue/summary");
+        request.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/api/v1/fraud-cases/work-queue/summary");
+
+        ReadAccessAuditTarget target = classifier.classify(request).orElseThrow();
+
+        assertThat(target.endpointCategory()).isEqualTo(ReadAccessEndpointCategory.FRAUD_CASE_WORK_QUEUE_SUMMARY);
+        assertThat(target.resourceType()).isEqualTo(ReadAccessResourceType.FRAUD_CASE);
+        assertThat(target.resourceId()).isNull();
+    }
+
+    @Test
     void shouldClassifyGovernanceAdvisoryListReadWithoutRawFilters() {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/governance/advisories");
         request.setQueryString("severity=HIGH&model_version=2026-04-21.trained.v1&limit=25");

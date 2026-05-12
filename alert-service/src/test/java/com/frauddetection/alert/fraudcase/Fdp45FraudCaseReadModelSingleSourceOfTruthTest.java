@@ -13,6 +13,7 @@ class Fdp45FraudCaseReadModelSingleSourceOfTruthTest {
     @Test
     void workQueueUsesExistingQueryServiceAndSearchRepositoryOnly() throws IOException {
         String controller = read("controller/FraudCaseController.java");
+        String summaryController = read("controller/FraudCaseWorkQueueSummaryController.java");
         String queryService = read("service/FraudCaseQueryService.java");
         String searchRepository = read("fraudcase/MongoFraudCaseSearchRepository.java");
         String queryPolicy = read("fraudcase/FraudCaseReadQueryPolicy.java");
@@ -24,8 +25,13 @@ class Fdp45FraudCaseReadModelSingleSourceOfTruthTest {
                 .doesNotContain("MongoTemplate")
                 .doesNotContain("Criteria.where")
                 .doesNotContain("new Query(");
+        assertThat(summaryController)
+                .contains("@RequestMapping(\"/api/v1/fraud-cases/work-queue\")")
+                .contains("fraudCaseManagementService.workQueueSummary()")
+                .doesNotContain("\"/api/fraud-cases");
         assertThat(queryService)
                 .contains("searchRepository.searchSlice(")
+                .contains("workQueueSummary()")
                 .contains("new FraudCaseSearchCriteria(")
                 .doesNotContain("MongoTemplate")
                 .doesNotContain("Criteria.where")

@@ -5,6 +5,7 @@ import com.frauddetection.alert.api.FraudCaseSlaStatus;
 import com.frauddetection.alert.api.FraudCaseSummaryResponse;
 import com.frauddetection.alert.api.FraudCaseWorkQueueItemResponse;
 import com.frauddetection.alert.api.FraudCaseWorkQueueSliceResponse;
+import com.frauddetection.alert.api.FraudCaseWorkQueueSummaryResponse;
 import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.fraudcase.FraudCaseNotFoundException;
@@ -199,6 +200,10 @@ public class FraudCaseQueryService {
                 nextCursor,
                 formatSort(effectiveSort)
         );
+    }
+
+    public FraudCaseWorkQueueSummaryResponse workQueueSummary() {
+        return new FraudCaseWorkQueueSummaryResponse(fraudCaseRepository.count());
     }
 
     public List<FraudCaseAuditResponse> auditTrail(String caseId) {
