@@ -1198,6 +1198,30 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+  /api/v1/fraud-cases/work-queue/summary:
+    get:
+      summary: Get global fraud case work queue summary
+      description: >-
+        Returns a point-in-time global count of fraud cases for analyst console navigation. The summary is
+        not filter-scoped, not cursor-scoped, not page-scoped, not used for pagination metadata, and not
+        snapshot-consistent with any loaded work queue slice. Clients must display it as an all/global fraud-case
+        count that may differ from the loaded queue slice. The endpoint is read-only and audited as
+        FRAUD_CASE_WORK_QUEUE_SUMMARY; audit result count represents one aggregate summary response, not the number
+        of fraud cases. No legacy alias is supported.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      responses:
+        "200":
+          description: Global fraud-case summary returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FraudCaseWorkQueueSummaryResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /api/v1/fraud-cases/{caseId}:
     get:
       summary: Get one fraud case
@@ -2858,6 +2882,32 @@ components:
           type: string
           nullable: true
           description: Stable sort used for this slice.
+    FraudCaseWorkQueueSummaryResponse:
+      type: object
+      additionalProperties: false
+      required: [totalFraudCases, generatedAt, scope, snapshotConsistentWithWorkQueue]
+      description: >-
+        Point-in-time global fraud-case count for analyst console navigation. It is not filter-scoped,
+        not cursor-scoped, not page-scoped, not used for pagination metadata, and not snapshot-consistent
+        with loaded work queue slices.
+      properties:
+        totalFraudCases:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Global fraud-case count at generatedAt.
+        generatedAt:
+          type: string
+          format: date-time
+          description: Server-side timestamp for the point-in-time global count.
+        scope:
+          type: string
+          enum: [GLOBAL_FRAUD_CASES]
+          description: Explicit scope marker for the global fraud-case summary.
+        snapshotConsistentWithWorkQueue:
+          type: boolean
+          enum: [false]
+          description: Always false. The summary is not snapshot-consistent with any work queue slice.
     FraudCaseSlaStatus:
       type: string
       enum:
