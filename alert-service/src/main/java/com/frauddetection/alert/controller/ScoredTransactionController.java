@@ -8,6 +8,7 @@ import com.frauddetection.alert.service.TransactionMonitoringUseCase;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.validation.annotation.Validated;
@@ -34,9 +35,9 @@ public class ScoredTransactionController {
 
     @GetMapping("/scored")
     public PagedResponse<ScoredTransactionResponse> listScoredTransactions(
-            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "0") @Min(0) @Max(1000) int page,
             @RequestParam(defaultValue = "25") @Min(1) @Max(100) int size,
-            @RequestParam(required = false) String query,
+            @RequestParam(required = false) @Size(max = ScoredTransactionSearchCriteria.MAX_QUERY_LENGTH) String query,
             @RequestParam(defaultValue = "ALL") @Pattern(regexp = "ALL|LOW|MEDIUM|HIGH|CRITICAL") String riskLevel,
             @RequestParam(defaultValue = "ALL") @Pattern(regexp = "ALL|LEGITIMATE|SUSPICIOUS") String classification
     ) {
