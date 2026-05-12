@@ -4,6 +4,7 @@ export function PaginationControls({
   totalPages,
   totalElements,
   label = "transactions",
+  totalLabel = "total",
   pageSizeOptions = [10, 25, 50, 100],
   onPageChange,
   onSizeChange
@@ -16,7 +17,7 @@ export function PaginationControls({
     <div className="paginationBar">
       <div>
         <strong>{totalElements}</strong>
-        <span> total {label}</span>
+        <span> {totalLabel} {label}</span>
       </div>
       <div className="paginationActions">
         <label className="pageSizeControl">

@@ -10,4 +10,8 @@ public interface TransactionMonitoringUseCase {
     void recordScoredTransaction(TransactionScoredEvent event);
 
     Page<ScoredTransaction> listScoredTransactions(Pageable pageable);
+
+    default Page<ScoredTransaction> listScoredTransactions(Pageable pageable, ScoredTransactionSearchCriteria criteria) {
+        return listScoredTransactions(pageable);
+    }
 }

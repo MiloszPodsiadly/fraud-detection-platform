@@ -3,7 +3,9 @@ import {
   getGovernanceAdvisoryAnalytics,
   getGovernanceAdvisoryAudit,
   listAlerts,
+  listFraudCaseWorkQueue,
   listGovernanceAdvisories,
+  listScoredTransactions,
   recordGovernanceAdvisoryAudit,
   setApiSession
 } from "./alertsApi.js";
@@ -176,6 +178,141 @@ describe("alertsApi auth headers", () => {
       })
     }));
     expect(fetchMock.mock.calls[1][1].body).not.toContain("actor");
+  });
+
+  it("calls only the dedicated fraud case work queue endpoint with allowlisted non-empty params", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      content: [],
+      size: 50,
+      hasNext: false,
+      nextCursor: null,
+      sort: "updatedAt,asc"
+    }));
+
+    const createdFrom = "2026-05-01T10:00";
+    await listFraudCaseWorkQueue({
+      size: 50,
+      status: "ALL",
+      priority: "HIGH",
+      riskLevel: "",
+      assignee: " investigator-1 ",
+      createdFrom,
+      sort: "updatedAt,asc"
+    });
+
+    const encodedCreatedFrom = encodeURIComponent(new Date(createdFrom).toISOString());
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/v1/fraud-cases/work-queue?size=50&priority=HIGH&assignee=investigator-1&createdFrom=${encodedCreatedFrom}&sort=updatedAt%2Casc`,
+      expect.objectContaining({ headers: expect.objectContaining({ "Content-Type": "application/json" }) })
+    );
+    expect(fetchMock.mock.calls[0][0]).not.toContain("/api/v1/fraud-cases?");
+    expect(fetchMock.mock.calls[0][0]).not.toContain("status=ALL");
+    expect(fetchMock.mock.calls[0][0]).not.toContain("riskLevel=");
+  });
+
+  it("rejects invalid work queue local date filters before fetch", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ content: [] }));
+
+    expect(() => listFraudCaseWorkQueue({ createdFrom: "not-a-date" })).toThrow("Invalid local date filter.");
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("passes work queue cursor opaquely and never sends page with cursor", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      content: [],
+      size: 20,
+      hasNext: false
+    }));
+    const cursor = "opaque.cursor/with+symbols==";
+
+    await listFraudCaseWorkQueue({ cursor, size: 20, sort: "createdAt,desc" });
+
+    const url = fetchMock.mock.calls[0][0];
+    expect(url).toContain("cursor=opaque.cursor%2Fwith%2Bsymbols%3D%3D");
+    expect(url).not.toContain("page=");
+  });
+
+  it("sends scored transaction filters as backend query params", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      content: [],
+      totalElements: 0,
+      totalPages: 0,
+      page: 0,
+      size: 25
+    }));
+
+    await listScoredTransactions({
+      page: 2,
+      size: 25,
+      query: " customer-1 ",
+      riskLevel: "CRITICAL",
+      status: "SUSPICIOUS"
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/transactions/scored?page=2&size=25&query=customer-1&riskLevel=CRITICAL&classification=SUSPICIOUS",
+      expect.objectContaining({ headers: expect.objectContaining({ "Content-Type": "application/json" }) })
+    );
+  });
+
+  it("surfaces work queue security and cursor errors without endpoint fallback", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      error: "INVALID_CURSOR",
+      message: "INVALID_CURSOR"
+    }, 400));
+
+    await expect(listFraudCaseWorkQueue({ cursor: "bad", sort: "createdAt,desc" })).rejects.toMatchObject({
+      status: 400,
+      error: "INVALID_CURSOR"
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toContain("/api/v1/fraud-cases/work-queue?");
+  });
+
+  it("sends fraud case update with required idempotency header", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      operation_status: "COMMITTED",
+      updated_case: { caseId: "case-1", status: "CLOSED" }
+    }));
+    const { updateFraudCase } = await import("./alertsApi.js");
+
+    await updateFraudCase("case-1", {
+      status: "CLOSED",
+      analystId: "analyst-1",
+      decisionReason: "Reviewed",
+      tags: ["reviewed"]
+    }, { idempotencyKey: "fraud-case-update-case-1-key" });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/fraud-cases/case-1", expect.objectContaining({
+      method: "PATCH",
+      headers: expect.objectContaining({
+        "Content-Type": "application/json",
+        "X-Idempotency-Key": "fraud-case-update-case-1-key"
+      })
+    }));
+  });
+
+  it("sends analyst decision with idempotency header", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      resultingStatus: "RESOLVED"
+    }));
+    const { submitAnalystDecision } = await import("./alertsApi.js");
+
+    await submitAnalystDecision("alert-1", {
+      analystId: "analyst-1",
+      decision: "MARKED_LEGITIMATE",
+      decisionReason: "Reviewed",
+      tags: ["manual-review"]
+    }, { idempotencyKey: "alert-decision-alert-1-key" });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/alerts/alert-1/decision", expect.objectContaining({
+      method: "POST",
+      headers: expect.objectContaining({
+        "Content-Type": "application/json",
+        "X-Idempotency-Key": "alert-decision-alert-1-key"
+      })
+    }));
   });
 });
 

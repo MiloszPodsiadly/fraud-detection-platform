@@ -51,6 +51,9 @@ public record ReadAccessAuditEventDocument(
         @Field("query_hash")
         String queryHash,
 
+        @Field("filter_bucket")
+        String filterBucket,
+
         @Field("page")
         Integer page,
 
@@ -84,6 +87,7 @@ public record ReadAccessAuditEventDocument(
                 event.resourceId(),
                 event.endpointCategory(),
                 event.queryHash(),
+                event.filterBucket(),
                 event.page(),
                 event.size(),
                 event.resultCount(),

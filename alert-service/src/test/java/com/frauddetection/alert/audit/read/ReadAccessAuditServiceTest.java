@@ -37,10 +37,11 @@ class ReadAccessAuditServiceTest {
                 AnalystRole.FRAUD_OPS_ADMIN.authorities()
         )));
         ReadAccessAuditTarget target = new ReadAccessAuditTarget(
-                ReadAccessEndpointCategory.SCORED_TRANSACTION_LIST,
+                ReadAccessEndpointCategory.SCORED_TRANSACTION_SEARCH,
                 ReadAccessResourceType.SCORED_TRANSACTION,
                 null,
                 "abc123",
+                "query",
                 0,
                 100
         );
@@ -54,10 +55,11 @@ class ReadAccessAuditServiceTest {
         assertThat(document.resultCount()).isEqualTo(100);
         assertThat(document.createdAt()).isEqualTo(document.occurredAt());
         assertThat(document.actorRoles()).containsExactly("FRAUD_OPS_ADMIN");
+        assertThat(document.filterBucket()).isEqualTo("query");
         assertThat(document.toString())
                 .doesNotContain("request", "response", "payload", "customerId", "accountId", "cardNumber", "token", "stack");
         assertThat(meterRegistry.get("fraud_platform_read_access_audit_events_persisted_total")
-                .tag("endpoint_category", "scored_transaction_list")
+                .tag("endpoint_category", "scored_transaction_search")
                 .tag("outcome", "success")
                 .counter()
                 .count()).isEqualTo(1.0);
@@ -75,6 +77,7 @@ class ReadAccessAuditServiceTest {
         ReadAccessAuditTarget target = new ReadAccessAuditTarget(
                 ReadAccessEndpointCategory.GOVERNANCE_ADVISORY_ANALYTICS,
                 ReadAccessResourceType.GOVERNANCE_ADVISORY_ANALYTICS,
+                null,
                 null,
                 null,
                 null,
@@ -104,6 +107,7 @@ class ReadAccessAuditServiceTest {
                 null,
                 null,
                 null,
+                null,
                 1
         );
 
@@ -123,6 +127,7 @@ class ReadAccessAuditServiceTest {
                 ReadAccessEndpointCategory.ALERT_DETAIL,
                 ReadAccessResourceType.ALERT,
                 "alert-1",
+                null,
                 null,
                 null,
                 null

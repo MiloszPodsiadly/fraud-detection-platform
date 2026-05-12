@@ -32,6 +32,7 @@ export function AnalystDecisionForm({ alertId, summary, session, canSubmit, disa
     setResult(null);
 
     try {
+      const idempotencyKey = createDecisionIdempotencyKey(alertId);
       const response = await submitAnalystDecision(alertId, {
         analystId,
         decision,
@@ -40,6 +41,8 @@ export function AnalystDecisionForm({ alertId, summary, session, canSubmit, disa
         decisionMetadata: {
           source: "analyst-console-ui"
         }
+      }, {
+        idempotencyKey
       });
       setResult(response);
       await onSubmitted();
@@ -118,4 +121,11 @@ export function AnalystDecisionForm({ alertId, summary, session, canSubmit, disa
       </button>
     </form>
   );
+}
+
+function createDecisionIdempotencyKey(alertId) {
+  if (globalThis.crypto?.randomUUID) {
+    return `alert-decision-${alertId}-${globalThis.crypto.randomUUID()}`;
+  }
+  return `alert-decision-${alertId}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }

@@ -84,6 +84,7 @@ public class SensitiveReadAuditService {
                 resourceType,
                 normalize(resourceId),
                 classified == null ? null : classified.queryHash(),
+                classified == null ? null : classified.filterBucket(),
                 classified == null ? null : classified.page(),
                 classified == null ? null : classified.size()
         );

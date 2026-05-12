@@ -1,10 +1,12 @@
 package com.frauddetection.alert.audit.read;
 
 import com.frauddetection.alert.api.PagedResponse;
+import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.security.authorization.AnalystRole;
 import com.frauddetection.alert.security.principal.AnalystPrincipal;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
+import com.frauddetection.alert.service.ScoredTransactionSearchValidationException;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -56,7 +58,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         ReadAccessAuditService.class,
         ReadAccessAuditResponseAdvice.class,
         ReadAccessAuditFailureInterceptor.class,
-        ReadAccessAuditWebConfig.class
+        ReadAccessAuditWebConfig.class,
+        AlertServiceExceptionHandler.class
 })
 class ReadAccessAuditEndpointTest {
 
@@ -109,7 +112,7 @@ class ReadAccessAuditEndpointTest {
                 .containsExactly(
                         ReadAccessEndpointCategory.ALERT_DETAIL,
                         ReadAccessEndpointCategory.FRAUD_CASE_DETAIL,
-                        ReadAccessEndpointCategory.SCORED_TRANSACTION_LIST,
+                        ReadAccessEndpointCategory.SCORED_TRANSACTION_SEARCH,
                         ReadAccessEndpointCategory.GOVERNANCE_ADVISORY_LIST,
                         ReadAccessEndpointCategory.GOVERNANCE_ADVISORY_DETAIL,
                         ReadAccessEndpointCategory.GOVERNANCE_ADVISORY_AUDIT_HISTORY,
@@ -123,12 +126,36 @@ class ReadAccessAuditEndpointTest {
             assertThat(document.schemaVersion()).isEqualTo(1);
         });
         assertThat(documents.stream()
-                .filter(document -> document.endpointCategory() == ReadAccessEndpointCategory.SCORED_TRANSACTION_LIST)
+                .filter(document -> document.endpointCategory() == ReadAccessEndpointCategory.SCORED_TRANSACTION_SEARCH)
                 .findFirst()
                 .orElseThrow()
                 .resultCount()).isEqualTo(2);
         assertThat(documents.toString())
                 .doesNotContain("4111111111111111", "card_number", "alert payload", "customer-1", "account-1", "review note");
+    }
+
+    @Test
+    void shouldAuditRejectedAndFailedScoredTransactionSearchWithoutRawQuery() throws Exception {
+        mockMvc.perform(get("/api/v1/transactions/scored")
+                        .queryParam("query", "zz"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/v1/transactions/scored")
+                        .queryParam("query", "fail-customer-123"))
+                .andExpect(status().isInternalServerError());
+
+        ArgumentCaptor<ReadAccessAuditEventDocument> captor = ArgumentCaptor.forClass(ReadAccessAuditEventDocument.class);
+        verify(repository, org.mockito.Mockito.times(2)).save(captor.capture());
+
+        assertThat(captor.getAllValues()).extracting(ReadAccessAuditEventDocument::endpointCategory)
+                .containsExactly(ReadAccessEndpointCategory.SCORED_TRANSACTION_SEARCH, ReadAccessEndpointCategory.SCORED_TRANSACTION_SEARCH);
+        assertThat(captor.getAllValues()).extracting(ReadAccessAuditEventDocument::outcome)
+                .containsExactly(ReadAccessAuditOutcome.REJECTED, ReadAccessAuditOutcome.FAILED);
+        assertThat(captor.getAllValues()).allSatisfy(document -> {
+            assertThat(document.queryHash()).hasSize(32);
+            assertThat(document.resultCount()).isZero();
+        });
+        assertThat(captor.getAllValues().toString())
+                .doesNotContain("zz", "fail-customer-123", "query=");
     }
 
     @Test
@@ -165,8 +192,15 @@ class ReadAccessAuditEndpointTest {
         @GetMapping("/api/v1/transactions/scored")
         PagedResponse<Map<String, Object>> scoredTransactions(
                 @RequestParam(defaultValue = "0") int page,
-                @RequestParam(defaultValue = "25") int size
+                @RequestParam(defaultValue = "25") int size,
+                @RequestParam(required = false) String query
         ) {
+            if ("zz".equals(query)) {
+                throw new ScoredTransactionSearchValidationException("INVALID_FILTER");
+            }
+            if ("fail-customer-123".equals(query)) {
+                throw new IllegalStateException("mongo unavailable");
+            }
             return new PagedResponse<>(
                     List.of(Map.of("transactionId", "txn-1"), Map.of("transactionId", "txn-2")),
                     2,

@@ -94,32 +94,6 @@ export function SessionBadge({ session, sessionState, authProvider, onSessionCha
         </div>
       </div>
 
-      <label>
-        User
-        <input
-          value={session.userId}
-          onChange={changeUserId}
-          placeholder="analyst.local"
-          disabled={!provider.supportsSessionEditing}
-        />
-      </label>
-
-      <label>
-        Role
-        <select value={activeRole} onChange={changeRole} disabled={!provider.supportsSessionEditing}>
-          <option value="">Unauthenticated</option>
-          {ROLE_OPTIONS.map((role) => (
-            <option key={role} value={role}>{role}</option>
-          ))}
-        </select>
-      </label>
-
-      {!provider.supportsSessionEditing && (
-        <p className="sessionHint">
-          Session values come from the configured auth provider. Login redirect is active; session hydration stays behind the provider seam.
-        </p>
-      )}
-
       {!authenticated && oidcProvider && typeof provider.beginLogin === "function" && (
         <button
           type="button"
@@ -141,21 +115,53 @@ export function SessionBadge({ session, sessionState, authProvider, onSessionCha
         <p className="sessionHint" role="alert">{providerActionError}</p>
       )}
 
-      {authenticated && (
-        <div className="sessionFacts">
-          <span className="sessionFact"><strong>User</strong> {session.userId}</span>
-          <span className="sessionFact"><strong>Role</strong> {roleSummary}</span>
-          <span className="sessionFact"><strong>Authorities</strong> {authorityCount}</span>
-        </div>
-      )}
+      <details className="sessionDetails">
+        <summary>Session details</summary>
 
-      {authenticated && (
-        <div className="authorityList" aria-label="Session authorities">
-          {(ROLE_AUTHORITIES[activeRole] || session.authorities).map((authority) => (
-            <span className="tag" key={authority}>{authority}</span>
-          ))}
-        </div>
-      )}
+        <div className="sessionDetailsPanel">
+          <label>
+            User
+            <input
+              value={session.userId}
+              onChange={changeUserId}
+              placeholder="analyst.local"
+              disabled={!provider.supportsSessionEditing}
+            />
+          </label>
+
+          <label>
+            Role
+            <select value={activeRole} onChange={changeRole} disabled={!provider.supportsSessionEditing}>
+              <option value="">Unauthenticated</option>
+              {ROLE_OPTIONS.map((role) => (
+                <option key={role} value={role}>{role}</option>
+              ))}
+            </select>
+          </label>
+
+          {!provider.supportsSessionEditing && (
+            <p className="sessionHint">
+              Session values come from the configured auth provider. Login redirect is active; session hydration stays behind the provider.
+            </p>
+          )}
+
+          {authenticated && (
+            <div className="sessionFacts">
+              <span className="sessionFact"><strong>User</strong> {session.userId}</span>
+              <span className="sessionFact"><strong>Role</strong> {roleSummary}</span>
+              <span className="sessionFact"><strong>Authorities</strong> {authorityCount}</span>
+            </div>
+          )}
+
+          {authenticated && (
+            <div className="authorityList" aria-label="Session authorities">
+              {(ROLE_AUTHORITIES[activeRole] || session.authorities).map((authority) => (
+                <span className="tag" key={authority}>{authority}</span>
+              ))}
+            </div>
+          )}
+          </div>
+      </details>
     </section>
   );
 }

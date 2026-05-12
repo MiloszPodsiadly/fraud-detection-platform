@@ -25,6 +25,7 @@ import com.frauddetection.alert.governance.audit.InvalidGovernanceAuditRequestEx
 import com.frauddetection.alert.governance.audit.InvalidGovernanceAuditDecisionException;
 import com.frauddetection.alert.regulated.MissingIdempotencyKeyException;
 import com.frauddetection.alert.service.ConflictingIdempotencyKeyException;
+import com.frauddetection.alert.service.ScoredTransactionSearchValidationException;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -245,6 +246,13 @@ public class AlertServiceExceptionHandler {
 
     @ExceptionHandler(FraudCaseWorkQueueQueryException.class)
     public ResponseEntity<ApiErrorResponse> handleFraudCaseWorkQueueQuery(FraudCaseWorkQueueQueryException exception) {
+        return ResponseEntity.badRequest().body(
+                new ApiErrorResponse(Instant.now(), 400, "Bad Request", exception.getMessage(), List.of("code:" + exception.code()))
+        );
+    }
+
+    @ExceptionHandler(ScoredTransactionSearchValidationException.class)
+    public ResponseEntity<ApiErrorResponse> handleScoredTransactionSearchValidation(ScoredTransactionSearchValidationException exception) {
         return ResponseEntity.badRequest().body(
                 new ApiErrorResponse(Instant.now(), 400, "Bad Request", exception.getMessage(), List.of("code:" + exception.code()))
         );

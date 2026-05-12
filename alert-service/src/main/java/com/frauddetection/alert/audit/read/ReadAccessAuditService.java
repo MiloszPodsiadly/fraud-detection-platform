@@ -93,6 +93,7 @@ public class ReadAccessAuditService {
                 target.resourceId(),
                 target.endpointCategory(),
                 target.queryHash(),
+                target.filterBucket(),
                 target.page(),
                 target.size(),
                 Math.max(0, Math.min(resultCount, MAX_RESULT_COUNT)),

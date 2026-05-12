@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { getFraudCase, updateFraudCase } from "../api/alertsApi.js";
 import { AUTHORITIES, hasAuthority } from "../auth/session.js";
 import { ErrorState } from "../components/ErrorState.jsx";
@@ -13,12 +13,14 @@ export function FraudCaseDetailsPage({ caseId, session, onBack, onCaseUpdated })
   const [fraudCase, setFraudCase] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [expandedTransactionId, setExpandedTransactionId] = useState(null);
   const [form, setForm] = useState({
     status: "IN_REVIEW",
     analystId: "",
     decisionReason: "",
     tags: "rapid-transfer, grouped-low-risk"
   });
+  const [decisionIdempotencyKey, setDecisionIdempotencyKey] = useState("");
   const [submitState, setSubmitState] = useState({ isSubmitting: false, error: "", success: "" });
 
   useEffect(() => {
@@ -33,35 +35,15 @@ export function FraudCaseDetailsPage({ caseId, session, onBack, onCaseUpdated })
       setFraudCase(nextCase);
       setForm({
         status: nextCase.status === "OPEN" ? "IN_REVIEW" : nextCase.status,
-        analystId: session.userId || nextCase.analystId || "",
+        analystId: session.userId || nextCase.analystId || nextCase.assignedInvestigatorId || "",
         decisionReason: nextCase.decisionReason || "",
         tags: (nextCase.decisionTags || ["rapid-transfer", "grouped-low-risk"]).join(", ")
       });
+      setDecisionIdempotencyKey("");
     } catch (apiError) {
       setError(apiError.message);
     } finally {
       setIsLoading(false);
-    }
-  }
-
-  async function submitDecision(event) {
-    event.preventDefault();
-    if (!canUpdateCase) {
-      return;
-    }
-    setSubmitState({ isSubmitting: true, error: "", success: "" });
-    try {
-      const updated = await updateFraudCase(caseId, {
-        status: form.status,
-        analystId: session.userId,
-        decisionReason: form.decisionReason,
-        tags: form.tags.split(",").map((tag) => tag.trim()).filter(Boolean)
-      });
-      setFraudCase(updated);
-      setSubmitState({ isSubmitting: false, error: "", success: "Fraud case updated." });
-      onCaseUpdated();
-    } catch (apiError) {
-      setSubmitState({ isSubmitting: false, error: apiError.message, success: "" });
     }
   }
 
@@ -75,6 +57,43 @@ export function FraudCaseDetailsPage({ caseId, session, onBack, onCaseUpdated })
 
   const canUpdateCase = hasAuthority(session, AUTHORITIES.FRAUD_CASE_UPDATE);
   const actionDisabled = submitState.isSubmitting || !canUpdateCase;
+
+  function changeForm(patch) {
+    setForm((current) => ({ ...current, ...patch }));
+    setDecisionIdempotencyKey("");
+    setSubmitState((current) => ({ ...current, error: "", success: "" }));
+  }
+
+  async function submitDecision(event) {
+    event.preventDefault();
+    if (!canUpdateCase) {
+      return;
+    }
+    const idempotencyKey = decisionIdempotencyKey || createDecisionIdempotencyKey(caseId);
+    setDecisionIdempotencyKey(idempotencyKey);
+    setSubmitState({ isSubmitting: true, error: "", success: "" });
+    try {
+      const response = await updateFraudCase(caseId, {
+        status: form.status,
+        analystId: session.userId || form.analystId,
+        decisionReason: form.decisionReason,
+        tags: form.tags.split(",").map((tag) => tag.trim()).filter(Boolean)
+      }, { idempotencyKey });
+      const updatedCase = response?.updated_case || response?.updatedCase || response?.current_case_snapshot || response?.currentCaseSnapshot || response;
+      setFraudCase(updatedCase);
+      setForm({
+        status: updatedCase.status === "OPEN" ? "IN_REVIEW" : updatedCase.status,
+        analystId: session.userId || updatedCase.analystId || updatedCase.assignedInvestigatorId || "",
+        decisionReason: updatedCase.decisionReason || "",
+        tags: (updatedCase.decisionTags || []).join(", ")
+      });
+      setDecisionIdempotencyKey("");
+      setSubmitState({ isSubmitting: false, error: "", success: "Case decision saved." });
+      onCaseUpdated?.();
+    } catch (apiError) {
+      setSubmitState({ isSubmitting: false, error: apiError.message, success: "" });
+    }
+  }
 
   return (
     <div className="pageEnter">
@@ -126,19 +145,74 @@ export function FraudCaseDetailsPage({ caseId, session, onBack, onCaseUpdated })
                     <th>PLN</th>
                     <th>Timestamp</th>
                     <th className="numericCell">Score</th>
+                    <th>Details</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(fraudCase.transactions || []).map((transaction) => (
-                    <tr key={transaction.transactionId}>
-                      <td><RiskBadge riskLevel={transaction.riskLevel} /></td>
-                      <td>{transaction.transactionId}</td>
-                      <td>{formatAmount(transaction.transactionAmount)}</td>
-                      <td>{formatPln(transaction.amountPln)}</td>
-                      <td>{formatDateTime(transaction.transactionTimestamp)}</td>
-                      <td className="numericCell">{formatScore(transaction.fraudScore)}</td>
-                    </tr>
-                  ))}
+                  {(fraudCase.transactions || []).map((transaction) => {
+                    const expanded = expandedTransactionId === transaction.transactionId;
+                    return (
+                      <Fragment key={transaction.transactionId}>
+                        <tr key={transaction.transactionId}>
+                          <td><RiskBadge riskLevel={transaction.riskLevel} /></td>
+                          <td>
+                            <strong>{transaction.transactionId}</strong>
+                            <span>{transaction.correlationId || "No correlation"}</span>
+                          </td>
+                          <td>{formatAmount(transaction.transactionAmount)}</td>
+                          <td>{formatPln(transaction.amountPln)}</td>
+                          <td>{formatDateTime(transaction.transactionTimestamp)}</td>
+                          <td className="numericCell">{formatScore(transaction.fraudScore)}</td>
+                          <td>
+                            <button
+                              className="rowButton compactButton"
+                              type="button"
+                              aria-expanded={expanded}
+                              onClick={() => setExpandedTransactionId(expanded ? null : transaction.transactionId)}
+                            >
+                              {expanded ? "Hide" : "Details"}
+                            </button>
+                          </td>
+                        </tr>
+                        {expanded && (
+                          <tr className="transactionDetailRow" key={`${transaction.transactionId}-details`}>
+                            <td colSpan="7">
+                              <dl className="transactionDetailGrid">
+                                <div>
+                                  <dt>Transaction ID</dt>
+                                  <dd>{transaction.transactionId}</dd>
+                                </div>
+                                <div>
+                                  <dt>Correlation ID</dt>
+                                  <dd>{transaction.correlationId || "Not supplied"}</dd>
+                                </div>
+                                <div>
+                                  <dt>Original amount</dt>
+                                  <dd>{formatAmount(transaction.transactionAmount)}</dd>
+                                </div>
+                                <div>
+                                  <dt>PLN amount</dt>
+                                  <dd>{formatPln(transaction.amountPln)}</dd>
+                                </div>
+                                <div>
+                                  <dt>Fraud score</dt>
+                                  <dd>{formatScore(transaction.fraudScore)}</dd>
+                                </div>
+                                <div>
+                                  <dt>Risk level</dt>
+                                  <dd>{transaction.riskLevel || "UNKNOWN"}</dd>
+                                </div>
+                                <div>
+                                  <dt>Timestamp</dt>
+                                  <dd>{formatDateTime(transaction.transactionTimestamp)}</dd>
+                                </div>
+                              </dl>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -158,7 +232,7 @@ export function FraudCaseDetailsPage({ caseId, session, onBack, onCaseUpdated })
           <form className="decisionForm" onSubmit={submitDecision}>
             <label>
               Status
-              <select value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value }))} disabled={actionDisabled}>
+              <select value={form.status} onChange={(event) => changeForm({ status: event.target.value })} disabled={actionDisabled}>
                 {CASE_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
               </select>
             </label>
@@ -168,11 +242,11 @@ export function FraudCaseDetailsPage({ caseId, session, onBack, onCaseUpdated })
             </label>
             <label>
               Reason
-              <textarea rows="5" required value={form.decisionReason} onChange={(event) => setForm((current) => ({ ...current, decisionReason: event.target.value }))} disabled={actionDisabled} />
+              <textarea rows="5" required value={form.decisionReason} onChange={(event) => changeForm({ decisionReason: event.target.value })} disabled={actionDisabled} />
             </label>
             <label>
               Tags
-              <input value={form.tags} onChange={(event) => setForm((current) => ({ ...current, tags: event.target.value }))} disabled={actionDisabled} />
+              <input value={form.tags} onChange={(event) => changeForm({ tags: event.target.value })} disabled={actionDisabled} />
             </label>
             {submitState.error && <p className="formError">{submitState.error}</p>}
             {submitState.success && <p className="formSuccess">{submitState.success}</p>}
@@ -180,10 +254,37 @@ export function FraudCaseDetailsPage({ caseId, session, onBack, onCaseUpdated })
               {submitState.isSubmitting ? "Saving..." : "Save case decision"}
             </button>
           </form>
+
+          <div className="caseStatePanel">
+            <h3>Current decision</h3>
+            <dl className="caseStateList">
+              <div>
+                <dt>Status</dt>
+                <dd><span className="statusPill">{fraudCase.status || "UNKNOWN"}</span></dd>
+              </div>
+              <div>
+                <dt>Assigned investigator</dt>
+                <dd>{fraudCase.assignedInvestigatorId || fraudCase.analystId || "Unassigned"}</dd>
+              </div>
+              <div>
+                <dt>Decision reason</dt>
+                <dd>{fraudCase.decisionReason || fraudCase.closureReason || "Not recorded"}</dd>
+              </div>
+              <div>
+                <dt>Updated</dt>
+                <dd>{formatDateTime(fraudCase.updatedAt)}</dd>
+              </div>
+            </dl>
+          </div>
         </aside>
       </div>
     </div>
   );
+}
+
+function createDecisionIdempotencyKey(caseId) {
+  const random = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `fraud-case-update-${caseId}-${random}`;
 }
 
 function formatPln(value) {

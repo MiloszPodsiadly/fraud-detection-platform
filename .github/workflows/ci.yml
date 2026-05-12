@@ -483,6 +483,111 @@ jobs:
       - name: Build UI
         run: npm run build
 
+  fdp46-fraud-case-work-queue-ui:
+    name: FDP-46 Fraud Case Work Queue UI
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs:
+      - frontend
+      - fdp45-fraud-case-work-queue-read-model
+
+    defaults:
+      run:
+        working-directory: analyst-console-ui
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: analyst-console-ui/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Ensure FDP-46 tests are not skipped
+        run: |
+          if grep -R "it\.skip\|describe\.skip\|test\.skip" src/components/FraudCaseWorkQueuePanel.test.jsx src/fraudCases/workQueueState.test.js src/api/alertsApi.test.js src/pages/AlertsListPage.test.jsx src/App.test.jsx; then
+            echo "FDP-46 mandatory tests must not be skipped" >&2
+            exit 1
+          fi
+
+      - name: Run FDP-46 frontend tests
+        run: npm test -- --run
+
+      - name: Build FDP-46 UI
+        run: npm run build
+
+  fdp46-scored-transaction-filtering:
+    name: FDP-46 Scored Transaction Filtering
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs:
+      - fdp45-fraud-case-work-queue-read-model
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Ensure FDP-46 backend tests are not skipped
+        run: |
+          if grep -R "@Disabled" alert-service/src/test/java/com/frauddetection/alert/controller/ScoredTransactionControllerValidationTest.java alert-service/src/test/java/com/frauddetection/alert/service/ScoredTransactionSearchPolicyTest.java alert-service/src/test/java/com/frauddetection/alert/service/TransactionMonitoringServiceSearchTest.java alert-service/src/test/java/com/frauddetection/alert/mapper/ScoredTransactionDocumentMapperTest.java alert-service/src/test/java/com/frauddetection/alert/service/ScoredTransactionSearchIndexReadinessTest.java alert-service/src/test/java/com/frauddetection/alert/audit/read/ReadAccessAuditEndpointTest.java alert-service/src/test/java/com/frauddetection/alert/observability/AlertServiceMetricsTest.java alert-service/src/test/java/com/frauddetection/alert/security/config/AlertSecurityConfigTest.java; then
+            echo "FDP-46 backend tests must not be disabled" >&2
+            exit 1
+          fi
+
+      - name: Run FDP-46 backend search and audit tests
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=ScoredTransactionControllerValidationTest,ScoredTransactionSearchPolicyTest,TransactionMonitoringServiceSearchTest,ScoredTransactionDocumentMapperTest,ScoredTransactionSearchIndexReadinessTest,ReadAccessAuditClassifierTest,ReadAccessAuditEndpointTest,ReadAccessAuditServiceTest,ReadAccessAuditResponseAdviceTest,Fdp45ReadAccessAuditResponseAdviceMarkerTest,AlertServiceMetricsTest,AlertSecurityConfigTest" test
+
+      - name: Verify FDP-46 backend test reports
+        if: always()
+        run: |
+          python - <<'PY'
+          import pathlib
+          import sys
+          import xml.etree.ElementTree as ET
+
+          required = {
+              "com.frauddetection.alert.controller.ScoredTransactionControllerValidationTest",
+              "com.frauddetection.alert.service.ScoredTransactionSearchPolicyTest",
+              "com.frauddetection.alert.service.TransactionMonitoringServiceSearchTest",
+              "com.frauddetection.alert.mapper.ScoredTransactionDocumentMapperTest",
+              "com.frauddetection.alert.service.ScoredTransactionSearchIndexReadinessTest",
+              "com.frauddetection.alert.audit.read.ReadAccessAuditClassifierTest",
+              "com.frauddetection.alert.audit.read.ReadAccessAuditEndpointTest",
+              "com.frauddetection.alert.audit.read.ReadAccessAuditServiceTest",
+              "com.frauddetection.alert.audit.read.ReadAccessAuditResponseAdviceTest",
+              "com.frauddetection.alert.audit.read.Fdp45ReadAccessAuditResponseAdviceMarkerTest",
+              "com.frauddetection.alert.observability.AlertServiceMetricsTest",
+              "com.frauddetection.alert.security.config.AlertSecurityConfigTest",
+          }
+          reports = pathlib.Path("alert-service/target/surefire-reports")
+          for class_name in sorted(required):
+              report = reports / f"TEST-{class_name}.xml"
+              if not report.exists():
+                  print(f"Missing FDP-46 Surefire XML: {report}", file=sys.stderr)
+                  sys.exit(1)
+              root = ET.parse(report).getroot()
+              tests = int(root.attrib.get("tests", "0"))
+              skipped = int(root.attrib.get("skipped", "0"))
+              failures = int(root.attrib.get("failures", "0"))
+              errors = int(root.attrib.get("errors", "0"))
+              if tests <= 0 or skipped > 0 or failures > 0 or errors > 0:
+                  print(f"FDP-46 test class did not fully execute: {class_name} tests={tests} skipped={skipped} failures={failures} errors={errors}", file=sys.stderr)
+                  sys.exit(1)
+          PY
+
   fdp28-proof:
     name: FDP-28 Docker Integration Proof
     runs-on: ubuntu-latest
