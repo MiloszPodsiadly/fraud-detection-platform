@@ -725,7 +725,7 @@ jobs:
 
       - name: Ensure FDP-48 tests are not skipped
         run: |
-          if grep -R "@Disabled" alert-service/src/test/java/com/frauddetection/alert/security/config/BffSessionSecurityIntegrationTest.java alert-service/src/test/java/com/frauddetection/alert/security/auth/BffSecurityPropertiesTest.java alert-service/src/test/java/com/frauddetection/alert/security/auth/BffLogoutSuccessHandlerTest.java alert-service/src/test/java/com/frauddetection/alert/security/auth/OidcAnalystAuthoritiesMapperTest.java alert-service/src/test/java/com/frauddetection/alert/security/config/AlertSecurityConfigJwtEnabledTest.java; then
+          if grep -R "@Disabled" alert-service/src/test/java/com/frauddetection/alert/security/config/BffSessionSecurityIntegrationTest.java alert-service/src/test/java/com/frauddetection/alert/security/auth/BffSecurityPropertiesTest.java alert-service/src/test/java/com/frauddetection/alert/security/auth/BffLogoutSuccessHandlerTest.java alert-service/src/test/java/com/frauddetection/alert/security/auth/OidcAnalystAuthoritiesMapperTest.java alert-service/src/test/java/com/frauddetection/alert/security/config/AlertSecurityConfigJwtEnabledTest.java alert-service/src/test/java/com/frauddetection/alert/observability/AlertServiceMetricsTest.java; then
             echo "FDP-48 backend tests must not be disabled" >&2
             exit 1
           fi
@@ -735,7 +735,7 @@ jobs:
           fi
 
       - name: Run FDP-48 backend BFF security tests
-        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=BffSessionSecurityIntegrationTest,BffSecurityPropertiesTest,BffLogoutSuccessHandlerTest,OidcAnalystAuthoritiesMapperTest,AlertSecurityConfigJwtEnabledTest" test
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=BffSessionSecurityIntegrationTest,BffSecurityPropertiesTest,BffLogoutSuccessHandlerTest,OidcAnalystAuthoritiesMapperTest,AlertSecurityConfigJwtEnabledTest,AlertServiceMetricsTest" test
 
       - name: Verify FDP-48 backend reports
         run: |
@@ -750,6 +750,7 @@ jobs:
               "com.frauddetection.alert.security.auth.BffLogoutSuccessHandlerTest",
               "com.frauddetection.alert.security.auth.OidcAnalystAuthoritiesMapperTest",
               "com.frauddetection.alert.security.config.AlertSecurityConfigJwtEnabledTest",
+              "com.frauddetection.alert.observability.AlertServiceMetricsTest",
           }
           reports = pathlib.Path("alert-service/target/surefire-reports")
           for class_name in sorted(required):
@@ -774,6 +775,10 @@ jobs:
       - name: Run FDP-48 frontend lifecycle tests
         working-directory: analyst-console-ui
         run: npm test -- --run src/auth/authProvider.test.js src/api/alertsApi.test.js src/fraudCases/useFraudCaseWorkQueue.test.js src/fraudCases/useFraudCaseWorkQueueSummary.test.js src/workspace/workspaceDataHooks.test.js src/workspace/useWorkspaceRoute.test.js --reporter=default --reporter=junit --outputFile=./test-results/fdp48-vitest.xml
+
+      - name: Guard FDP-48 API client boundary
+        working-directory: analyst-console-ui
+        run: npm run check:api-client-boundary
 
       - name: Verify FDP-48 frontend report
         working-directory: analyst-console-ui

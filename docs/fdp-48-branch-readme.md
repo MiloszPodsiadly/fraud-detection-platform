@@ -50,21 +50,33 @@ FDP-48 hardens the Analyst Console frontend request lifecycle and reduces `App.j
 
 ## Deployment Boundary
 
-FDP-48 provides a BFF session-auth foundation for the Docker/OIDC and production-like browser flow. It is not a complete enterprise IAM hardening package.
+FDP-48 provides a Docker/OIDC and production-like browser BFF foundation. It is not complete production enterprise IAM hardening.
 
-Production deployment requires environment-specific configuration for:
+Production deployment requirements:
 
 - allowed provider logout origins
 - allowed post-logout redirect origins
-- issuer, client, and client-secret material
+- issuer URI configured per environment
+- client ID and client secret from secure environment or secret store
 - HTTPS-only ingress
-- Secure cookie behavior
+- Secure session cookie
 - SameSite policy
 - reverse proxy forwarded headers
 - session timeout policy
 - IdP operational monitoring
+- local/dev/test profile escape hatches must not be active in bank/prod profiles
 
-Local/dev/test profiles may allow localhost and local defaults. Production or bank profiles must not use local/dev/test profile escape hatches. Direct SPA OIDC remains compatibility/local mode, not the Docker/OIDC BFF default.
+Local/dev/test profiles may allow localhost and local defaults. Direct SPA OIDC remains compatibility/local mode, not the Docker/OIDC BFF default. Demo auth is local-only. Browser BFF mode must not attach `Authorization` bearer headers; direct bearer JWT clients remain supported as API clients, not as browser BFF mode.
+
+## /api/v1/session Bootstrap Contract
+
+`GET /api/v1/session` is intentionally public. It exists for browser session bootstrap, not authorization enforcement; backend Spring Security remains the enforcement source for every business endpoint.
+
+The endpoint may return CSRF metadata for anonymous sessions. The CSRF token is browser-readable request metadata for cookie-backed unsafe requests. It is not authentication material, not an access token, not a refresh token, not an ID token, not a JWT, and not a bearer credential.
+
+The response must be `Cache-Control: no-store`. It must never include raw OIDC claims, profile, email, provider group lists, access tokens, refresh tokens, ID tokens, bearer credentials, JWTs, or session IDs. Authenticated responses contain normalized `userId`, `roles`, and `authorities` only. Anonymous responses do not carry a usable user identity.
+
+Current `sessionStatus` values are `AUTHENTICATED` and `ANONYMOUS`. Unknown future values must be handled fail-closed by the frontend.
 
 ## CSRF Semantics
 
@@ -96,7 +108,7 @@ Do not overclaim:
 Backend:
 
 ```bash
-mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=BffSessionSecurityIntegrationTest,BffSecurityPropertiesTest,BffLogoutSuccessHandlerTest,OidcAnalystAuthoritiesMapperTest,AlertSecurityConfigJwtEnabledTest" test
+mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=BffSessionSecurityIntegrationTest,BffSecurityPropertiesTest,BffLogoutSuccessHandlerTest,OidcAnalystAuthoritiesMapperTest,AlertSecurityConfigJwtEnabledTest,AlertServiceMetricsTest" test
 ```
 
 Frontend:
@@ -104,13 +116,16 @@ Frontend:
 ```bash
 cd analyst-console-ui
 npm test -- --run src/auth/authProvider.test.js src/api/alertsApi.test.js src/fraudCases/useFraudCaseWorkQueue.test.js src/fraudCases/useFraudCaseWorkQueueSummary.test.js src/workspace/workspaceDataHooks.test.js src/workspace/useWorkspaceRoute.test.js
+npm run check:api-client-boundary
 npm run build
 ```
 
 ## Completed Hardening
 
 - `alertsApi.js` uses `createAlertsApiClient({ session, authProvider })`; workspace requests no longer share module-level session/provider state.
+- Auth-sensitive workspace hooks receive an injected per-session `apiClient`; CI blocks direct default-wrapper API imports in those hooks and `App.jsx`.
 - Security configuration is split into endpoint authorization rules, BFF session setup, JWT resource-server setup, and demo-auth setup while keeping one explicit `SecurityFilterChain`.
+- `/api/v1/session`, `/bff/logout`, CSRF rejection, invalid-principal, and OIDC authority-mapping miss metrics use low-cardinality labels only.
 - BFF production hardening remains deployment-specific and documented as required deployment configuration, not implemented by local defaults.
 - Direct SPA OIDC remains a local compatibility mode. Production-like browser deployments should use BFF auth.
 - Governance hook cancellation parity is covered by the FDP-48 workspace hook tests and should stay mandatory in CI.

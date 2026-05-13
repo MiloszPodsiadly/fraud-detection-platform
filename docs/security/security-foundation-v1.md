@@ -557,6 +557,29 @@ CSRF and deployment boundaries:
 - Production deployment still requires environment-specific allowed logout origins, issuer/client/client-secret configuration, HTTPS-only ingress, Secure cookies, SameSite policy, forwarded-header handling, session timeout policy, and IdP operational monitoring.
 - Local/dev/test profile localhost allowances are non-production escape hatches only.
 
+### `/api/v1/session` Bootstrap Contract
+
+`GET /api/v1/session` is a public browser bootstrap endpoint. It tells the SPA whether a BFF-backed browser session exists and which normalized roles/authorities the UI may display. It is not the enforcement boundary; Spring Security route authorization remains authoritative for every protected API call.
+
+The response may include CSRF request metadata for same-origin browser writes. That CSRF value is not an access token, refresh token, ID token, JWT, bearer credential, or general-purpose secret. It must not be persisted in browser storage by the console.
+
+The endpoint must remain `no-store` and must not return provider raw material such as raw OIDC claims, profile payloads, email, provider groups, access tokens, refresh tokens, ID tokens, JWTs, bearer values, full session identifiers, or arbitrary IdP payloads. Authenticated responses expose only normalized identity and authorization hints. Anonymous responses expose no usable identity.
+
+Current `sessionStatus` values are `AUTHENTICATED` and `ANONYMOUS`. Frontend code must treat unknown future values as closed session states until explicitly supported.
+
+### Adding Backend Routes
+
+When adding a new browser or analyst endpoint:
+
+- put public routes before protected routes only when they are intentionally public;
+- add protected API routes with explicit authority requirements before deny guardrails;
+- keep unknown backend-looking routes under `/api/**`, `/api/v1/**`, `/governance/**`, `/system/**`, and `/bff/**` fail-closed;
+- keep the SPA fallback narrow and GET-only;
+- add or update route-order regression tests when a matcher group changes;
+- do not rely on frontend gating as authorization.
+
+Metrics added for session bootstrap, BFF logout, CSRF rejection, invalid principals, and OIDC mapping misses must stay low-cardinality. They must not include user IDs, actor IDs, resource IDs, tokens, session IDs, raw URLs, exception messages, or raw claim values.
+
 ## 401/403 Error Contract
 
 Security failures use the same `ApiErrorResponse` shape as other `alert-service` API errors:
