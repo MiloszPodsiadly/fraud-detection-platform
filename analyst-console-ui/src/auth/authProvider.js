@@ -99,10 +99,10 @@ export function createBffAuthProvider(fetchSession = defaultFetchSession, naviga
       return true;
     },
     persistSession(session) {
-      snapshot = normalizeBffSessionSnapshot({
+      snapshot = {
         ...snapshot,
-        session
-      });
+        session: normalizeSession(session)
+      };
     },
     getRequestHeaders() {
       return csrfHeaders(snapshot.csrf);
@@ -206,18 +206,32 @@ async function defaultFetchSession() {
 }
 
 function normalizeBffSessionSnapshot(input = {}) {
-  const session = input.authenticated
-    ? normalizeSession({
-        userId: input.userId,
-        roles: input.roles,
-        extraAuthorities: input.authorities
-      })
-    : normalizeSession(input.session || {});
+  const hasSessionStatus = Object.prototype.hasOwnProperty.call(input, "sessionStatus");
+  const sessionStatus = hasSessionStatus
+    ? String(input.sessionStatus || "").trim().toUpperCase()
+    : Object.keys(input).length === 0 ? "ANONYMOUS" : "";
+  let session = normalizeSession({});
+  let status = SESSION_STATES.AUTH_ERROR;
+
+  if (sessionStatus === "AUTHENTICATED") {
+    session = normalizeSession({
+      userId: input.userId,
+      roles: input.roles,
+      extraAuthorities: input.authorities
+    });
+    status = session.userId ? SESSION_STATES.AUTHENTICATED : SESSION_STATES.AUTH_ERROR;
+    if (!session.userId) {
+      session = normalizeSession({});
+    }
+  } else if (sessionStatus === "ANONYMOUS") {
+    status = SESSION_STATES.UNAUTHENTICATED;
+  }
+
   return {
     session,
     csrf: normalizeCsrf(input.csrf),
     state: {
-      status: session.userId ? SESSION_STATES.AUTHENTICATED : SESSION_STATES.UNAUTHENTICATED
+      status
     }
   };
 }
@@ -240,12 +254,16 @@ function csrfHeaders(csrf) {
 export function normalizeLogoutUrl(payload) {
   const logoutUrl = typeof payload?.logoutUrl === "string" ? payload.logoutUrl.trim() : "";
   if (!logoutUrl) {
-    return "/";
+    throw new Error("Logout redirect URL is not trusted.");
+  }
+  if (logoutUrl.startsWith("//")) {
+    throw new Error("Logout redirect URL is not trusted.");
   }
   if (logoutUrl.startsWith("/") && !logoutUrl.startsWith("//")) {
     return logoutUrl;
   }
   const baseUrl = typeof window !== "undefined" ? window.location.origin : "http://localhost:4173";
+  const hasScheme = /^[a-z][a-z\d+.-]*:/i.test(logoutUrl);
   let parsed;
   try {
     parsed = new URL(logoutUrl, baseUrl);
@@ -255,18 +273,10 @@ export function normalizeLogoutUrl(payload) {
   if (!["http:", "https:"].includes(parsed.protocol)) {
     throw new Error("Logout redirect URL is not trusted.");
   }
-  const hostname = parsed.hostname.toLowerCase();
-  const isLocalHost = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
-  const isAllowedLocalOidc = isLocalHost && ["8086", "4173", "5173"].includes(parsed.port || defaultPort(parsed.protocol));
-  const currentOrigin = typeof window !== "undefined" ? window.location.origin : null;
-  if (parsed.origin === currentOrigin || isAllowedLocalOidc) {
-    return parsed.toString();
+  if (!hasScheme) {
+    return logoutUrl;
   }
-  throw new Error("Logout redirect URL is not trusted.");
-}
-
-function defaultPort(protocol) {
-  return protocol === "https:" ? "443" : "80";
+  return parsed.toString();
 }
 
 function defaultNavigate(url) {

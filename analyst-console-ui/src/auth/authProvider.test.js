@@ -99,6 +99,7 @@ describe("authProvider", () => {
     const fetchSession = vi.fn()
       .mockResolvedValueOnce({
         authenticated: true,
+        sessionStatus: "AUTHENTICATED",
         userId: "server-user-1",
         roles: ["FRAUD_OPS_ADMIN"],
         authorities: ["alert:read"],
@@ -124,6 +125,84 @@ describe("authProvider", () => {
     expect(authHeadersForSession(provider).Authorization).toBeUndefined();
     expect(provider.getSessionState()).toEqual({
       status: SESSION_STATES.AUTHENTICATED
+    });
+  });
+
+  it("uses backend bff sessionStatus as the session lifecycle source", async () => {
+    const provider = createBffAuthProvider(vi.fn().mockResolvedValue({
+      authenticated: true,
+      sessionStatus: "AUTHENTICATED",
+      userId: "server-user-1",
+      roles: ["FRAUD_OPS_ADMIN"],
+      authorities: ["alert:read"]
+    }));
+
+    await expect(provider.refreshSession()).resolves.toMatchObject({
+      userId: "server-user-1",
+      roles: ["FRAUD_OPS_ADMIN"]
+    });
+    expect(provider.getSessionState()).toEqual({
+      status: SESSION_STATES.AUTHENTICATED
+    });
+  });
+
+  it("fails closed when bff sessionStatus is authenticated but userId is missing", async () => {
+    const provider = createBffAuthProvider(vi.fn().mockResolvedValue({
+      authenticated: true,
+      sessionStatus: "AUTHENTICATED",
+      userId: " ",
+      roles: ["FRAUD_OPS_ADMIN"],
+      authorities: ["alert:read"]
+    }));
+
+    await expect(provider.refreshSession()).resolves.toMatchObject({
+      userId: ""
+    });
+    expect(provider.getSessionState()).toEqual({
+      status: SESSION_STATES.AUTH_ERROR
+    });
+  });
+
+  it("treats anonymous bff sessionStatus as unauthenticated without inferring from user fields", async () => {
+    const provider = createBffAuthProvider(vi.fn().mockResolvedValue({
+      authenticated: false,
+      sessionStatus: "ANONYMOUS",
+      userId: "server-user-1",
+      roles: ["FRAUD_OPS_ADMIN"],
+      authorities: ["alert:read"]
+    }));
+
+    await provider.refreshSession();
+
+    expect(provider.getInitialSession().userId).toBe("");
+    expect(provider.getSessionState()).toEqual({
+      status: SESSION_STATES.UNAUTHENTICATED
+    });
+  });
+
+  it("fails closed when bff sessionStatus is missing or unknown", async () => {
+    const missingStatusProvider = createBffAuthProvider(vi.fn().mockResolvedValue({
+      authenticated: true,
+      userId: "server-user-1",
+      roles: ["FRAUD_OPS_ADMIN"]
+    }));
+    const unknownStatusProvider = createBffAuthProvider(vi.fn().mockResolvedValue({
+      authenticated: true,
+      sessionStatus: "PARTIAL",
+      userId: "server-user-1",
+      roles: ["FRAUD_OPS_ADMIN"]
+    }));
+
+    await missingStatusProvider.refreshSession();
+    await unknownStatusProvider.refreshSession();
+
+    expect(missingStatusProvider.getInitialSession().userId).toBe("");
+    expect(missingStatusProvider.getSessionState()).toEqual({
+      status: SESSION_STATES.AUTH_ERROR
+    });
+    expect(unknownStatusProvider.getInitialSession().userId).toBe("");
+    expect(unknownStatusProvider.getSessionState()).toEqual({
+      status: SESSION_STATES.AUTH_ERROR
     });
   });
 
@@ -159,6 +238,7 @@ describe("authProvider", () => {
   it("redirects bff logout through the provider logout endpoint", async () => {
     const fetchSession = vi.fn().mockResolvedValue({
       authenticated: true,
+      sessionStatus: "AUTHENTICATED",
       userId: "server-user-1",
       roles: ["FRAUD_OPS_ADMIN"],
       authorities: ["alert:read"],
@@ -196,6 +276,7 @@ describe("authProvider", () => {
   it("keeps the bff session when logout fails", async () => {
     const fetchSession = vi.fn().mockResolvedValue({
       authenticated: true,
+      sessionStatus: "AUTHENTICATED",
       userId: "server-user-1",
       roles: ["FRAUD_OPS_ADMIN"],
       authorities: ["alert:read"],
@@ -223,6 +304,7 @@ describe("authProvider", () => {
   it("fails closed when bff logout lacks csrf for an authenticated session", async () => {
     const fetchSession = vi.fn().mockResolvedValue({
       authenticated: true,
+      sessionStatus: "AUTHENTICATED",
       userId: "server-user-1",
       roles: ["FRAUD_OPS_ADMIN"],
       authorities: ["alert:read"]
@@ -240,9 +322,10 @@ describe("authProvider", () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
-  it("rejects untrusted bff logout redirects", async () => {
+  it("accepts backend-vetted external https bff logout redirects", async () => {
     const fetchSession = vi.fn().mockResolvedValue({
       authenticated: true,
+      sessionStatus: "AUTHENTICATED",
       userId: "server-user-1",
       roles: ["FRAUD_OPS_ADMIN"],
       authorities: ["alert:read"],
@@ -254,18 +337,24 @@ describe("authProvider", () => {
     const navigate = vi.fn();
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ logoutUrl: "https://evil.example.test/logout" })
+      json: async () => ({ logoutUrl: "https://issuer.bank.example/realms/fraud/protocol/openid-connect/logout" })
     }));
     const provider = createBffAuthProvider(fetchSession, navigate);
 
     await provider.refreshSession();
-    await expect(provider.beginLogout()).rejects.toThrow("Logout redirect URL is not trusted.");
+    await provider.beginLogout();
 
-    expect(provider.getInitialSession().userId).toBe("server-user-1");
-    expect(navigate).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledWith("https://issuer.bank.example/realms/fraud/protocol/openid-connect/logout");
   });
 
-  it("rejects protocol-relative and unsafe bff logout redirects", () => {
+  it("accepts relative bff logout redirects returned by the backend", () => {
+    expect(normalizeLogoutUrl({ logoutUrl: "/signed-out" })).toBe("/signed-out");
+    expect(normalizeLogoutUrl({ logoutUrl: "signed-out" })).toBe("signed-out");
+  });
+
+  it("rejects empty, protocol-relative, malformed, and unsafe bff logout redirects", () => {
+    expect(() => normalizeLogoutUrl({ logoutUrl: "" }))
+      .toThrow("Logout redirect URL is not trusted.");
     expect(() => normalizeLogoutUrl({ logoutUrl: "//evil.example.test/logout" }))
       .toThrow("Logout redirect URL is not trusted.");
     expect(() => normalizeLogoutUrl({ logoutUrl: "javascript:alert(1)" }))
@@ -273,6 +362,8 @@ describe("authProvider", () => {
     expect(() => normalizeLogoutUrl({ logoutUrl: "data:text/html,logout" }))
       .toThrow("Logout redirect URL is not trusted.");
     expect(() => normalizeLogoutUrl({ logoutUrl: "file:///tmp/logout" }))
+      .toThrow("Logout redirect URL is not trusted.");
+    expect(() => normalizeLogoutUrl({ logoutUrl: "https://[" }))
       .toThrow("Logout redirect URL is not trusted.");
   });
 
