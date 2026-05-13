@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { listFraudCaseWorkQueue, setApiSession } from "../api/alertsApi.js";
+import { isAbortError } from "../api/alertsApi.js";
 import {
   initialFraudCaseWorkQueue,
   initialFraudCaseWorkQueueRequest,
@@ -14,6 +14,7 @@ export function useFraudCaseWorkQueue({
   enabled = true,
   session,
   authProvider,
+  apiClient,
   onSessionError = noop
 } = {}) {
   const [queue, setQueue] = useState(initialFraudCaseWorkQueue);
@@ -25,23 +26,20 @@ export function useFraudCaseWorkQueue({
   const [filterError, setFilterError] = useState(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState(null);
   const requestSeqRef = useRef(0);
+  const abortControllerRef = useRef(null);
   const skipNextReloadRef = useRef(false);
-  const sessionRef = useRef(session);
-  const authProviderRef = useRef(authProvider);
-
-  useEffect(() => {
-    sessionRef.current = session;
-    authProviderRef.current = authProvider;
-  }, [authProvider, session]);
+  const sessionIdentity = `${authProvider?.kind || "none"}:${session?.userId || ""}`;
 
   const loadQueue = useCallback(async (request, { append = false } = {}) => {
+    abortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
     const requestSeq = requestSeqRef.current + 1;
     requestSeqRef.current = requestSeq;
     setIsLoading(true);
     setError(null);
     try {
-      setApiSession(sessionRef.current, authProviderRef.current);
-      const nextQueue = await listFraudCaseWorkQueue(request);
+      const nextQueue = await apiClient.listFraudCaseWorkQueue(request, { signal: abortController.signal });
       if (requestSeqRef.current !== requestSeq) {
         return;
       }
@@ -53,6 +51,9 @@ export function useFraudCaseWorkQueue({
       setLastRefreshedAt(new Date().toISOString());
     } catch (apiError) {
       if (requestSeqRef.current !== requestSeq) {
+        return;
+      }
+      if (isAbortError(apiError)) {
         return;
       }
       setError(apiError);
@@ -71,12 +72,23 @@ export function useFraudCaseWorkQueue({
     } finally {
       if (requestSeqRef.current === requestSeq) {
         setIsLoading(false);
+        if (abortControllerRef.current === abortController) {
+          abortControllerRef.current = null;
+        }
       }
     }
-  }, [onSessionError]);
+  }, [apiClient, onSessionError]);
 
   useEffect(() => {
     if (!enabled) {
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
+      requestSeqRef.current += 1;
+      setQueue(initialFraudCaseWorkQueue());
+      setError(null);
+      setWarning(null);
+      setFilterError(null);
+      setLastRefreshedAt(null);
       setIsLoading(false);
       return;
     }
@@ -85,7 +97,13 @@ export function useFraudCaseWorkQueue({
       return;
     }
     loadQueue(committedFilters, { append: Boolean(committedFilters.cursor) });
-  }, [enabled, committedFilters, loadQueue]);
+  }, [enabled, committedFilters, loadQueue, sessionIdentity]);
+
+  useEffect(() => () => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    requestSeqRef.current += 1;
+  }, []);
 
   function updateDraftFilter(name, value) {
     setDraftFilters((current) => resetWorkQueueRequestForFilterChange(current, { [name]: value }));

@@ -1,27 +1,31 @@
 package com.frauddetection.alert.security.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.frauddetection.alert.security.auth.BffLogoutSuccessHandler;
+import com.frauddetection.alert.security.auth.BffSecurityProperties;
 import com.frauddetection.alert.security.auth.DemoAuthFilter;
 import com.frauddetection.alert.security.auth.JwtAnalystAuthenticationConverter;
-import com.frauddetection.alert.security.authorization.AnalystAuthority;
+import com.frauddetection.alert.security.auth.OidcAnalystAuthoritiesMapper;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.security.error.ApiAccessDeniedHandler;
 import com.frauddetection.alert.security.error.ApiAuthenticationEntryPoint;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.HttpMethod;
+import org.springframework.core.env.Environment;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 @Configuration
 @EnableWebSecurity
+@EnableConfigurationProperties(BffSecurityProperties.class)
 public class AlertSecurityConfig {
 
     /**
@@ -35,8 +39,8 @@ public class AlertSecurityConfig {
      * - governance advisory audit endpoints, which record authenticated operator review only
      *
      * Fallback:
-     * - unknown /api/v1/** routes are denied explicitly
-     * - non-API routes remain permitted for local UI/static usage
+     * - unknown backend-looking routes are denied explicitly
+     * - only allowlisted SPA/static/OAuth routes remain public
      */
 
     @Bean
@@ -47,106 +51,75 @@ public class AlertSecurityConfig {
     }
 
     @Bean
+    BffLogoutSuccessHandler bffLogoutSuccessHandler(
+            BffSecurityProperties bffSecurityProperties,
+            ObjectMapper objectMapper,
+            AlertServiceMetrics metrics
+    ) {
+        return new BffLogoutSuccessHandler(bffSecurityProperties, objectMapper, metrics);
+    }
+
+    @Bean
+    AlertEndpointAuthorizationRules alertEndpointAuthorizationRules() {
+        return new AlertEndpointAuthorizationRules();
+    }
+
+    @Bean
+    BffSessionSecurityConfigurer bffSessionSecurityConfigurer() {
+        return new BffSessionSecurityConfigurer();
+    }
+
+    @Bean
+    JwtResourceServerSecurityConfigurer jwtResourceServerSecurityConfigurer() {
+        return new JwtResourceServerSecurityConfigurer();
+    }
+
+    @Bean
+    DemoAuthSecurityConfigurer demoAuthSecurityConfigurer() {
+        return new DemoAuthSecurityConfigurer();
+    }
+
+    @Bean
     SecurityFilterChain alertSecurityFilterChain(
             HttpSecurity http,
             ObjectProvider<DemoAuthFilter> demoAuthFilter,
             ObjectProvider<JwtDecoder> jwtDecoder,
             ObjectProvider<JwtAnalystAuthenticationConverter> jwtAnalystAuthenticationConverter,
+            ObjectProvider<OidcAnalystAuthoritiesMapper> oidcAnalystAuthoritiesMapper,
+            BffSecurityProperties bffSecurityProperties,
+            BffLogoutSuccessHandler bffLogoutSuccessHandler,
+            AlertEndpointAuthorizationRules endpointAuthorizationRules,
+            BffSessionSecurityConfigurer bffSessionSecurityConfigurer,
+            JwtResourceServerSecurityConfigurer jwtResourceServerSecurityConfigurer,
+            DemoAuthSecurityConfigurer demoAuthSecurityConfigurer,
+            Environment environment,
             ApiAuthenticationEntryPoint authenticationEntryPoint,
             ApiAccessDeniedHandler accessDeniedHandler
     ) throws Exception {
+        boolean bffEnabled = bffSecurityProperties.enabled();
+        bffSecurityProperties.validate(environment);
         http
-                .csrf(AbstractHttpConfigurer::disable)
                 .cors(Customizer.withDefaults())
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .sessionManagement(session -> session.sessionCreationPolicy(
+                        bffEnabled ? SessionCreationPolicy.IF_REQUIRED : SessionCreationPolicy.STATELESS))
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(authenticationEntryPoint)
                         .accessDeniedHandler(accessDeniedHandler)
                 )
-                .authorizeHttpRequests(authorize -> authorize
-                        // Public technical endpoints for local orchestration and health checks.
-                        .requestMatchers("/actuator/health/**", "/actuator/info").permitAll()
+                .authorizeHttpRequests(endpointAuthorizationRules::configure);
 
-                        // Protected analyst business endpoints.
-                        .requestMatchers(HttpMethod.GET, "/api/v1/alerts").hasAuthority(AnalystAuthority.ALERT_READ)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/alerts/{alertId}").hasAuthority(AnalystAuthority.ALERT_READ)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/alerts/{alertId}/assistant-summary").hasAuthority(AnalystAuthority.ASSISTANT_SUMMARY_READ)
-                        .requestMatchers(HttpMethod.POST, "/api/v1/alerts/{alertId}/decision").hasAuthority(AnalystAuthority.ALERT_DECISION_SUBMIT)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/fraud-cases").hasAuthority(AnalystAuthority.FRAUD_CASE_READ)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/fraud-cases/work-queue").hasAuthority(AnalystAuthority.FRAUD_CASE_READ)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/fraud-cases/work-queue/summary").hasAuthority(AnalystAuthority.FRAUD_CASE_READ)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/fraud-cases/{caseId}").hasAuthority(AnalystAuthority.FRAUD_CASE_READ)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/fraud-cases/{caseId}/audit").hasAuthority(AnalystAuthority.FRAUD_CASE_AUDIT_READ)
-                        .requestMatchers(HttpMethod.POST, "/api/v1/fraud-cases").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
-                        .requestMatchers(HttpMethod.POST, "/api/v1/fraud-cases/{caseId}/assign").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
-                        .requestMatchers(HttpMethod.POST, "/api/v1/fraud-cases/{caseId}/notes").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
-                        .requestMatchers(HttpMethod.POST, "/api/v1/fraud-cases/{caseId}/decisions").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
-                        .requestMatchers(HttpMethod.POST, "/api/v1/fraud-cases/{caseId}/transition").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
-                        .requestMatchers(HttpMethod.POST, "/api/v1/fraud-cases/{caseId}/close").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
-                        .requestMatchers(HttpMethod.POST, "/api/v1/fraud-cases/{caseId}/reopen").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
-                        .requestMatchers(HttpMethod.PATCH, "/api/v1/fraud-cases/{caseId}").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
-                        .requestMatchers(HttpMethod.GET, "/api/fraud-cases").hasAuthority(AnalystAuthority.FRAUD_CASE_READ)
-                        .requestMatchers(HttpMethod.GET, "/api/fraud-cases/work-queue").hasAuthority(AnalystAuthority.FRAUD_CASE_READ)
-                        .requestMatchers(HttpMethod.GET, "/api/fraud-cases/{caseId}").hasAuthority(AnalystAuthority.FRAUD_CASE_READ)
-                        .requestMatchers(HttpMethod.GET, "/api/fraud-cases/{caseId}/audit").hasAuthority(AnalystAuthority.FRAUD_CASE_AUDIT_READ)
-                        .requestMatchers(HttpMethod.POST, "/api/fraud-cases").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
-                        .requestMatchers(HttpMethod.POST, "/api/fraud-cases/{caseId}/assign").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
-                        .requestMatchers(HttpMethod.POST, "/api/fraud-cases/{caseId}/notes").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
-                        .requestMatchers(HttpMethod.POST, "/api/fraud-cases/{caseId}/decisions").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
-                        .requestMatchers(HttpMethod.POST, "/api/fraud-cases/{caseId}/transition").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
-                        .requestMatchers(HttpMethod.POST, "/api/fraud-cases/{caseId}/close").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
-                        .requestMatchers(HttpMethod.POST, "/api/fraud-cases/{caseId}/reopen").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
-                        .requestMatchers(HttpMethod.PATCH, "/api/fraud-cases/{caseId}").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/transactions/scored").hasAuthority(AnalystAuthority.TRANSACTION_MONITOR_READ)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/audit/events").hasAuthority(AnalystAuthority.AUDIT_READ)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/audit/integrity").hasAuthority(AnalystAuthority.AUDIT_READ)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/audit/integrity/external").hasAuthority(AnalystAuthority.AUDIT_VERIFY)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/audit/integrity/external/coverage").hasAuthority(AnalystAuthority.AUDIT_VERIFY)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/audit/evidence/export").hasAuthority(AnalystAuthority.AUDIT_EXPORT)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/audit/trust/attestation").hasAuthority(AnalystAuthority.AUDIT_VERIFY)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/audit/trust/keys").hasAuthority(AnalystAuthority.AUDIT_VERIFY)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/audit/degradations").hasAuthority(AnalystAuthority.AUDIT_VERIFY)
-                        .requestMatchers(HttpMethod.POST, "/api/v1/audit/degradations/{auditId}/resolve").hasAuthority(AnalystAuthority.AUDIT_DEGRADATION_RESOLVE)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/decision-outbox/unknown-confirmations").hasAuthority(AnalystAuthority.AUDIT_VERIFY)
-                        .requestMatchers(HttpMethod.POST, "/api/v1/decision-outbox/unknown-confirmations/{alertId}/resolve").hasAuthority(AnalystAuthority.DECISION_OUTBOX_RECONCILE)
-                        .requestMatchers(HttpMethod.POST, "/api/v1/regulated-mutations/recover").hasAuthority(AnalystAuthority.REGULATED_MUTATION_RECOVER)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/regulated-mutations/recovery/backlog").hasAnyAuthority(AnalystAuthority.REGULATED_MUTATION_RECOVER, AnalystAuthority.AUDIT_VERIFY)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/outbox/recovery/backlog").hasAuthority(AnalystAuthority.OUTBOX_INSPECT)
-                        .requestMatchers(HttpMethod.POST, "/api/v1/outbox/recovery/run").hasAuthority(AnalystAuthority.OUTBOX_RECOVER)
-                        .requestMatchers(HttpMethod.POST, "/api/v1/outbox/{eventId}/resolve-confirmation").hasAuthority(AnalystAuthority.OUTBOX_RESOLVE)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/trust/incidents").hasAuthority(AnalystAuthority.TRUST_INCIDENT_READ)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/trust/incidents/signals/preview").hasAuthority(AnalystAuthority.TRUST_INCIDENT_READ)
-                        .requestMatchers(HttpMethod.POST, "/api/v1/trust/incidents/refresh").hasAnyAuthority(AnalystAuthority.TRUST_INCIDENT_REFRESH, AnalystAuthority.TRUST_INCIDENT_RESOLVE)
-                        .requestMatchers(HttpMethod.POST, "/api/v1/trust/incidents/{incidentId}/ack").hasAuthority(AnalystAuthority.TRUST_INCIDENT_ACK)
-                        .requestMatchers(HttpMethod.POST, "/api/v1/trust/incidents/{incidentId}/resolve").hasAuthority(AnalystAuthority.TRUST_INCIDENT_RESOLVE)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/regulated-mutations/by-command/{commandId}").hasAnyAuthority(AnalystAuthority.REGULATED_MUTATION_RECOVER, AnalystAuthority.AUDIT_VERIFY)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/regulated-mutations/by-idempotency-hash/{hash}").hasAnyAuthority(AnalystAuthority.REGULATED_MUTATION_RECOVER, AnalystAuthority.AUDIT_VERIFY)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/regulated-mutations/{idempotencyKey}").hasAnyAuthority(AnalystAuthority.REGULATED_MUTATION_RECOVER, AnalystAuthority.AUDIT_VERIFY)
-                        .requestMatchers(HttpMethod.GET, "/system/trust-level").hasAuthority(AnalystAuthority.AUDIT_VERIFY)
-                        .requestMatchers(HttpMethod.GET, "/governance/advisories/analytics").hasAuthority(AnalystAuthority.TRANSACTION_MONITOR_READ)
-                        .requestMatchers(HttpMethod.GET, "/governance/advisories").hasAuthority(AnalystAuthority.TRANSACTION_MONITOR_READ)
-                        .requestMatchers(HttpMethod.GET, "/governance/advisories/{eventId}").hasAuthority(AnalystAuthority.TRANSACTION_MONITOR_READ)
-                        .requestMatchers(HttpMethod.GET, "/governance/advisories/{eventId}/audit").hasAuthority(AnalystAuthority.TRANSACTION_MONITOR_READ)
-                        .requestMatchers(HttpMethod.POST, "/governance/advisories/{eventId}/audit").hasAuthority(AnalystAuthority.GOVERNANCE_ADVISORY_AUDIT_WRITE)
-
-                        // Guardrail for future analyst endpoints added under /api/v1/** without explicit rules.
-                        .requestMatchers("/api/v1/**").denyAll()
-
-                        // Keep non-business routes open for local UI/static delivery.
-                        .anyRequest().permitAll()
-                );
-
-        // Production auth path: enable JWT Resource Server only when a decoder is configured.
-        if (jwtDecoder.getIfAvailable() != null) {
-            http.oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt
-                    .jwtAuthenticationConverter(token -> jwtAnalystAuthenticationConverter
-                            .getObject()
-                            .convert(token))
-            ));
-        }
-
-        // Local/dev auth path: demo headers remain an explicit opt-in adapter.
-        demoAuthFilter.ifAvailable(filter -> http.addFilterBefore(filter, UsernamePasswordAuthenticationFilter.class));
+        bffSessionSecurityConfigurer.configure(
+                http,
+                bffEnabled,
+                oidcAnalystAuthoritiesMapper,
+                bffLogoutSuccessHandler
+        );
+        jwtResourceServerSecurityConfigurer.configure(
+                http,
+                jwtDecoder,
+                jwtAnalystAuthenticationConverter
+        );
+        demoAuthSecurityConfigurer.configure(http, demoAuthFilter);
         return http.build();
     }
 }

@@ -21,20 +21,32 @@ services:
         condition: service_started
     environment:
       APP_SECURITY_DEMO_AUTH_ENABLED: "false"
+      APP_SECURITY_BFF_ENABLED: "true"
+      APP_SECURITY_BFF_CLIENT_ID: analyst-console-ui
+      APP_SECURITY_BFF_POST_LOGOUT_REDIRECT_URI: http://localhost:4173/
+      APP_SECURITY_BFF_PROVIDER_LOGOUT_URI: http://localhost:8086/realms/fraud-detection/protocol/openid-connect/logout
+      APP_SECURITY_BFF_ALLOWED_PROVIDER_LOGOUT_ORIGINS: http://localhost:8086
+      APP_SECURITY_BFF_ALLOWED_POST_LOGOUT_REDIRECT_ORIGINS: http://localhost:4173
       APP_SECURITY_JWT_ENABLED: "true"
       APP_SECURITY_JWT_ISSUER_URI: http://localhost:8086/realms/fraud-detection
       APP_SECURITY_JWT_JWK_SET_URI: http://keycloak:8080/realms/fraud-detection/protocol/openid-connect/certs
       APP_SECURITY_JWT_USER_ID_CLAIM: sub
       APP_SECURITY_JWT_ACCESS_CLAIM: groups
+      SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_KEYCLOAK_AUTHORIZATION_URI: http://localhost:8086/realms/fraud-detection/protocol/openid-connect/auth
+      SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_KEYCLOAK_TOKEN_URI: http://keycloak:8080/realms/fraud-detection/protocol/openid-connect/token
+      SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/fraud-detection/protocol/openid-connect/certs
+      SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_KEYCLOAK_USER_INFO_URI: http://keycloak:8080/realms/fraud-detection/protocol/openid-connect/userinfo
+      SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_KEYCLOAK_USER_NAME_ATTRIBUTE: sub
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_KEYCLOAK_CLIENT_ID: analyst-console-ui
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_KEYCLOAK_CLIENT_AUTHENTICATION_METHOD: none
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_KEYCLOAK_AUTHORIZATION_GRANT_TYPE: authorization_code
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_KEYCLOAK_REDIRECT_URI: "{baseUrl}/login/oauth2/code/{registrationId}"
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_KEYCLOAK_SCOPE: openid,profile,email
+      SERVER_FORWARD_HEADERS_STRATEGY: framework
 
   analyst-console-ui:
     build:
       context: ..
       dockerfile: deployment/Dockerfile.frontend
       args:
-        VITE_AUTH_PROVIDER: oidc
-        VITE_OIDC_AUTHORITY: http://localhost:8086/realms/fraud-detection
-        VITE_OIDC_CLIENT_ID: analyst-console-ui
-        VITE_OIDC_REDIRECT_URI: http://localhost:4173/auth/callback
-        VITE_OIDC_POST_LOGOUT_REDIRECT_URI: http://localhost:4173/
-        VITE_OIDC_SCOPE: openid profile email
+        VITE_AUTH_PROVIDER: bff

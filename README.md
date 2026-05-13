@@ -660,29 +660,31 @@ Imported local realm:
 How this differs from the default quickstart:
 
 - default `deployment/docker-compose.yml` keeps `alert-service` on demo auth
-- `deployment/docker-compose.oidc.yml` adds local Keycloak and switches `alert-service` to JWT validation for analyst APIs
-- `deployment/docker-compose.oidc.yml` also rebuilds `analyst-console-ui` with OIDC-specific `VITE_*` values for the Docker UI on `http://localhost:4173`
+- `deployment/docker-compose.oidc.yml` adds local Keycloak and switches `alert-service` to JWT validation plus server-backed BFF session auth for analyst APIs
+- `deployment/docker-compose.oidc.yml` also rebuilds `analyst-console-ui` with BFF auth for the Docker UI on `http://localhost:4173`
 
 #### Local OIDC Login Flow
 
 - click `Sign in with OIDC`
 - browser redirects to Keycloak
 - log in with one of the local test users
-- Keycloak redirects back to `/auth/callback`
-- `oidc-client-ts` completes the callback and restores the provider-backed session
-- session becomes authenticated in the SPA
+- Keycloak redirects back to `/login/oauth2/code/keycloak`
+- `alert-service` completes the callback and creates a server-backed analyst session
+- the SPA hydrates identity from `GET /api/v1/session`
+- the SPA treats backend `sessionStatus` as the BFF session lifecycle source
 - frontend may normalize provider `groups` into existing UI role labels for UX, but backend JWT validation remains authoritative for RBAC
-- API calls use `Authorization: Bearer <access_token>`
+- browser API calls use same-origin session cookies and CSRF metadata; React `fetch` does not attach `Authorization: Bearer ...`
 
 Text architecture diagram:
 
 ```text
 Browser
   -> Keycloak (login)
-  -> redirect /auth/callback
-  -> SPA (oidc-client-ts)
-  -> Authorization: Bearer
-  -> alert-service (JWT Resource Server)
+  -> redirect /login/oauth2/code/keycloak
+  -> alert-service (OAuth2 Login / server session)
+  -> SPA (GET /api/v1/session)
+  -> same-origin cookie + CSRF
+  -> alert-service (session / JWT-capable Resource Server)
   -> RBAC enforcement
 ```
 
@@ -701,12 +703,13 @@ This keeps issuer validation enabled while still letting the backend fetch keys 
 
 Docker UI OIDC settings in this override:
 
-- `VITE_AUTH_PROVIDER=oidc`
-- `VITE_OIDC_AUTHORITY=http://localhost:8086/realms/fraud-detection`
-- `VITE_OIDC_CLIENT_ID=analyst-console-ui`
-- `VITE_OIDC_REDIRECT_URI=http://localhost:4173/auth/callback`
-- `VITE_OIDC_POST_LOGOUT_REDIRECT_URI=http://localhost:4173/`
-- `VITE_OIDC_SCOPE=openid profile email`
+- `VITE_AUTH_PROVIDER=bff`
+- `APP_SECURITY_BFF_ENABLED=true`
+- `APP_SECURITY_BFF_CLIENT_ID=analyst-console-ui`
+- `APP_SECURITY_BFF_ALLOWED_PROVIDER_LOGOUT_ORIGINS=http://localhost:8086`
+- `APP_SECURITY_BFF_ALLOWED_POST_LOGOUT_REDIRECT_ORIGINS=http://localhost:4173`
+- Spring OAuth2 client registration `keycloak`
+- redirect URI `http://localhost:4173/login/oauth2/code/keycloak`
 
 Test users:
 
@@ -722,8 +725,11 @@ These credentials are local-only and must not be reused outside local test envir
 #### Manual verification
 
 - login redirect works
-- callback completes on `/auth/callback`
-- bearer token is present in API requests
+- callback completes on `/login/oauth2/code/keycloak`
+- browser API requests do not include an `Authorization` header in Docker BFF mode
+- `/api/v1/session` exposes identity, authorities, `sessionStatus`, and CSRF metadata only; it does not expose access, refresh, or ID tokens
+- CSRF metadata is not authentication material. It is not an access token, refresh token, ID token, JWT, bearer credential, or secret; it is browser-readable request metadata for cookie-backed unsafe requests.
+- BFF logout trust is enforced by backend allowlists. The frontend only rejects empty, malformed, protocol-relative, or dangerous-scheme logout URLs returned from `/bff/logout`.
 - `readonly` receives `403` on write actions
 - logout works
 - expired session shows the correct UI state
@@ -736,7 +742,9 @@ These credentials are local-only and must not be reused outside local test envir
 - no token refresh flow
 - service-to-service auth uses the internal service-auth foundation for configured ML/governance calls; local Docker may use explicit `DISABLED_LOCAL_ONLY`, the token-validator Docker override exercises compatibility `TOKEN_VALIDATOR`, `deployment/docker-compose.service-identity-rs256.yml` exercises production-target `JWT_SERVICE_IDENTITY`, and `deployment/docker-compose.service-identity-mtls.yml` exercises FDP-18 internal mTLS service identity; this is not enterprise IAM or automated certificate lifecycle management
 - no production IdP config
-- tokens are managed by `oidc-client-ts` for local/dev use, not as hardened production storage
+- BFF mode is a Docker/OIDC and production-like browser auth foundation, not complete enterprise IAM hardening. Production deployments still need environment-specific allowed logout origins, issuer/client/client-secret settings, HTTPS ingress, Secure/SameSite cookie policy, forwarded-header handling, session timeout policy, and IdP monitoring.
+- direct SPA OIDC mode still exists for development, but Docker OIDC mode uses the BFF session path to avoid browser-side bearer API calls
+- browser DevTools can still show bearer headers in direct SPA OIDC mode; the Docker BFF mode avoids browser-side bearer API requests instead of trying to hide them
 
 Keycloak is available at:
 
@@ -794,7 +802,7 @@ To verify the FDP-23 trust-authority JWT client path together with OIDC and the 
 docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml -f deployment/docker-compose.service-identity-mtls.yml -f deployment/docker-compose.trust-authority-jwt.yml up --build -d
 ```
 
-Expected results: browser/user APIs use OIDC, Java service calls into ML/governance use mTLS, and alert-service calls into `audit-trust-authority` use RS256 bearer JWTs signed by `alert-key-1`. The trust authority validates the local JWKS, `kid`, issuer, audience, token freshness, authorities, caller allowlist, and service-to-key binding. The local fixture private key is mounted only into alert-service; trust-authority receives public verification material only. This is still local Docker verification, not trust-authority mTLS, not enterprise IAM, not KMS/HSM, and not legal notarization.
+Expected results: browser/user APIs use the OIDC-backed BFF session path, Java service calls into ML/governance use mTLS, and alert-service calls into `audit-trust-authority` use RS256 bearer JWTs signed by `alert-key-1`. In browser DevTools, same-origin Analyst Console API requests should carry cookies and CSRF metadata, not `Authorization: Bearer ...`. The trust authority validates the local JWKS, `kid`, issuer, audience, token freshness, authorities, caller allowlist, and service-to-key binding. The local fixture private key is mounted only into alert-service; trust-authority receives public verification material only. This is still local Docker verification, not trust-authority mTLS, not enterprise IAM, not KMS/HSM, and not legal notarization.
 
 ## FDP-18 mTLS Service Identity
 
@@ -947,10 +955,12 @@ Security UX:
 - `src/auth/authProvider.js` is the provider boundary for request headers and session persistence.
 - `src/auth/oidcClient.js` is the SDK-facing OIDC adapter boundary.
 - `src/auth/oidcSessionSource.js` is the real provider-backed session source that normalizes `profile`, `access_token`, and expiry state into the stable UI session contract.
+- BFF mode obtains normalized identity and CSRF metadata from `GET /api/v1/session`; it does not expose bearer tokens to the React API client.
 - The UI sends auth headers from one provider-based API injection point.
 - Any frontend group-to-role normalization is UX only; backend authority checks remain the enforcement contract.
 - Session lifecycle states distinguish `loading`, `authenticated`, `unauthenticated`, `expired`, `access_denied`, and `auth_error`.
-- OIDC mode supports login redirect, callback handling, local session bootstrap from provider-managed storage, bearer propagation, logout redirect, and expired-session UX without silent refresh.
+- OIDC/direct-token mode supports login redirect, callback handling, local session bootstrap from provider-managed storage, bearer propagation, logout redirect, and expired-session UX without silent refresh.
+- Docker OIDC browser mode uses the BFF path: cookie-backed requests use explicit same-origin credentials and CSRF, and logout fails closed on backend failure or untrusted redirect URLs.
 - The Docker OIDC override rebuilds the frontend with exact callback URLs for `http://localhost:4173`.
 - Write actions are disabled when the session lacks the required authority.
 - HTTP 401 can render a session-required or session-expired state depending on the known lifecycle context.
@@ -966,8 +976,8 @@ Full details: [Security Foundation v1](docs/security/security-foundation-v1.md).
 Current non-production gaps:
 
 - Internal service-auth foundation is implemented for configured ML/governance calls through RS256 JWT service identity, FDP-18 internal mTLS service identity, compatibility token validation, and an explicit local/dev bypass mode; it is not enterprise IAM or automated certificate lifecycle management.
-- The frontend still uses demo auth by default in development.
-- The frontend OIDC path is a local OIDC integration and foundation for production auth, but it does not yet implement silent refresh or production deployment hardening.
+- The frontend still supports demo auth for local development, but production-like builds default to BFF auth and reject implicit demo auth unless explicitly overridden for local use.
+- The direct frontend OIDC path is a local integration and compatibility mode; the Docker browser flow uses the BFF pattern so bearer tokens are not attached by React fetch calls.
 - Request DTOs still accept `analystId` for compatibility, although secured write paths use the principal as actor source of truth.
 
 Planned production path:
@@ -975,7 +985,7 @@ Planned production path:
 - Configure real issuer/JWK settings per environment.
 - Configure externally managed CA, service certificates, and private-key material for FDP-18 mTLS deployments.
 - Finalize IdP claim naming and group/role mapping for deployment.
-- Harden the existing frontend OIDC flow for deployment environments while preserving the `userId`/`roles`/`authorities` UI contract and lifecycle states.
+- Continue hardening deployment-specific IdP configuration while preserving the `userId`/`roles`/`authorities` UI contract and lifecycle states.
 - Define audit retention/export policy if compliance requirements need long-term searchable audit history.
 
 Migration notes: [Security Foundation v1](docs/security/security-foundation-v1.md).

@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { submitAnalystDecision } from "../api/alertsApi.js";
 import { AUTHORITIES } from "../auth/session.js";
 import { formatScore } from "../utils/format.js";
 import { PermissionNotice } from "./SecurityStatePanels.jsx";
@@ -12,7 +11,7 @@ const DECISIONS = [
   "ESCALATED"
 ];
 
-export function AnalystDecisionForm({ alertId, summary, session, canSubmit, disabled, onSubmitted }) {
+export function AnalystDecisionForm({ alertId, summary, session, apiClient, canSubmit, disabled, onSubmitted }) {
   const [decision, setDecision] = useState("REQUIRE_MORE_EVIDENCE");
   const [decisionReason, setDecisionReason] = useState("");
   const [tags, setTags] = useState("manual-review");
@@ -33,7 +32,7 @@ export function AnalystDecisionForm({ alertId, summary, session, canSubmit, disa
 
     try {
       const idempotencyKey = createDecisionIdempotencyKey(alertId);
-      const response = await submitAnalystDecision(alertId, {
+      const response = await apiClient.submitAnalystDecision(alertId, {
         analystId,
         decision,
         decisionReason: decisionReason.trim(),

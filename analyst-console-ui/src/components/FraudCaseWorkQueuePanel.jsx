@@ -1,19 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { formatDateTime } from "../utils/format.js";
-import { formatAgeAgo, formatDurationFromSeconds } from "../fraudCases/workQueueFormat.js";
 import {
   dedupeByCaseId,
   DEFAULT_FRAUD_CASE_WORK_QUEUE_SORT,
   FRAUD_CASE_WORK_QUEUE_SORT_OPTIONS,
   initialFraudCaseWorkQueueRequest
 } from "../fraudCases/workQueueState.js";
-import { WorkQueueBadge } from "./fraudCaseWorkQueue/WorkQueueBadge.jsx";
+import { WorkQueueActiveChips } from "./fraudCaseWorkQueue/WorkQueueActiveChips.jsx";
+import { WorkQueueCards } from "./fraudCaseWorkQueue/WorkQueueCards.jsx";
 import { WorkQueueErrorPanel } from "./fraudCaseWorkQueue/WorkQueueErrorPanel.jsx";
+import { WorkQueueFilters } from "./fraudCaseWorkQueue/WorkQueueFilters.jsx";
+import { WorkQueueFooter } from "./fraudCaseWorkQueue/WorkQueueFooter.jsx";
 import { WorkQueueStageStats } from "./fraudCaseWorkQueue/WorkQueueStageStats.jsx";
+import { WorkQueueTable } from "./fraudCaseWorkQueue/WorkQueueTable.jsx";
 
-const STATUS_OPTIONS = ["ALL", "OPEN", "IN_REVIEW", "ESCALATED", "RESOLVED", "CLOSED", "REOPENED"];
-const PRIORITY_OPTIONS = ["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"];
-const RISK_OPTIONS = ["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"];
 export function FraudCaseWorkQueuePanel({
   queue,
   request,
@@ -51,10 +50,6 @@ export function FraudCaseWorkQueuePanel({
       alertPanelRef.current.focus();
     }
   }, [error, invalidCursor]);
-
-  function updateField(name, value) {
-    onDraftChange(name, value);
-  }
 
   return (
     <section className="panel workQueuePanel" id="work-queue" aria-labelledby="fraud-case-work-queue-title">
@@ -120,79 +115,11 @@ export function FraudCaseWorkQueuePanel({
         </div>
 
         {filtersExpanded && (
-          <div className="workQueueFilters" aria-label="Fraud case work queue filters">
-            <label>
-              Status
-              <select value={effectiveDraft.status} onChange={(event) => updateField("status", event.target.value)}>
-                {STATUS_OPTIONS.map((status) => <option key={status}>{status}</option>)}
-              </select>
-            </label>
-            <label>
-              Priority
-              <select value={effectiveDraft.priority} onChange={(event) => updateField("priority", event.target.value)}>
-                {PRIORITY_OPTIONS.map((priority) => <option key={priority}>{priority}</option>)}
-              </select>
-            </label>
-            <label>
-              Risk
-              <select value={effectiveDraft.riskLevel} onChange={(event) => updateField("riskLevel", event.target.value)}>
-                {RISK_OPTIONS.map((risk) => <option key={risk}>{risk}</option>)}
-              </select>
-            </label>
-            <label>
-              Assigned investigator
-              <input
-                value={effectiveDraft.assignee}
-                onChange={(event) => updateField("assignee", event.target.value)}
-                placeholder="Investigator ID"
-              />
-            </label>
-            <label>
-              Created from
-              <input type="datetime-local" value={effectiveDraft.createdFrom} onChange={(event) => updateField("createdFrom", event.target.value)} />
-            </label>
-            <label>
-              Created to
-              <input type="datetime-local" value={effectiveDraft.createdTo} onChange={(event) => updateField("createdTo", event.target.value)} />
-            </label>
-            <label>
-              Updated from
-              <input type="datetime-local" value={effectiveDraft.updatedFrom} onChange={(event) => updateField("updatedFrom", event.target.value)} />
-            </label>
-            <label>
-              Updated to
-              <input type="datetime-local" value={effectiveDraft.updatedTo} onChange={(event) => updateField("updatedTo", event.target.value)} />
-            </label>
-            <label>
-              Linked alert
-              <input value={effectiveDraft.linkedAlertId} onChange={(event) => updateField("linkedAlertId", event.target.value)} placeholder="Alert ID" />
-            </label>
-            <label>
-              Sort
-              <select value={effectiveDraft.sort} onChange={(event) => updateField("sort", event.target.value)}>
-                {FRAUD_CASE_WORK_QUEUE_SORT_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Slice size
-              <select value={effectiveDraft.size} onChange={(event) => updateField("size", Number(event.target.value))}>
-                {[20, 50, 100].map((size) => <option key={size} value={size}>{size}</option>)}
-              </select>
-            </label>
-          </div>
+          <WorkQueueFilters draftRequest={effectiveDraft} onDraftChange={onDraftChange} />
         )}
         {validationError && <p className="formError">{validationError}</p>}
 
-        <div className="workQueueChips" aria-label="Applied fraud case work queue filters">
-          <span className="tag">Sort: {appliedSortLabel}</span>
-          {activeFilters.length === 0 ? (
-            <span className="tag">All queue cases</span>
-          ) : activeFilters.map((filter) => (
-            <span className="tag" key={filter}>{filter}</span>
-          ))}
-        </div>
+        <WorkQueueActiveChips activeFilters={activeFilters} appliedSortLabel={appliedSortLabel} />
       </div>
 
       <div className="srOnly" aria-live="polite">
@@ -220,144 +147,18 @@ export function FraudCaseWorkQueuePanel({
 
       {!error && (
         <>
-          <div className="tableWrap workQueueTableWrap">
-            <table className="alertTable workQueueTable" aria-label="Fraud case work queue table">
-              <caption>Read-only fraud case work queue</caption>
-              <thead>
-                <tr>
-                  <th scope="col">Case</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">Priority</th>
-                  <th scope="col">Risk</th>
-                  <th scope="col">Assignee</th>
-                  <th scope="col">Age</th>
-                  <th scope="col">Updated</th>
-                  <th scope="col">SLA</th>
-                  <th scope="col">Alerts</th>
-                  <th scope="col">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {isLoading && items.length === 0 && <SkeletonRows />}
-                {!isLoading && items.length === 0 && (
-                  <tr>
-                    <td colSpan={10}>
-                      <div className="statePanel workQueueEmptyState">
-                        <h3>No cases match the current queue view.</h3>
-                        <p>Adjust filters or refresh from the first slice.</p>
-                      </div>
-                    </td>
-                  </tr>
-                )}
-                {items.map((item) => (
-                  <WorkQueueRow item={item} key={item.caseId} onOpenCase={onOpenCase} />
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="workQueueCards" aria-label="Fraud case work queue cards">
-            {isLoading && items.length === 0 && <SkeletonCards />}
-            {!isLoading && items.length === 0 && (
-              <div className="statePanel workQueueEmptyState">
-                <h3>No cases match the current queue view.</h3>
-                <p>Adjust filters or refresh from the first slice.</p>
-              </div>
-            )}
-            {items.map((item) => (
-              <WorkQueueCard item={item} key={item.caseId} onOpenCase={onOpenCase} />
-            ))}
-          </div>
-
-          <div className="workQueueFooter">
-            <span>{queue.hasNext ? "More cases available" : "End of loaded queue"} - {appliedSortLabel}</span>
-            <button
-              className="secondaryButton"
-              type="button"
-              disabled={!queue.hasNext || isLoading}
-              onClick={onLoadMore}
-              aria-label="Load more fraud cases"
-            >
-              {isLoading ? "Loading..." : "Load more"}
-            </button>
-          </div>
+          <WorkQueueTable items={items} isLoading={isLoading} onOpenCase={onOpenCase} />
+          <WorkQueueCards items={items} isLoading={isLoading} onOpenCase={onOpenCase} />
+          <WorkQueueFooter
+            hasNext={queue.hasNext}
+            isLoading={isLoading}
+            appliedSortLabel={appliedSortLabel}
+            onLoadMore={onLoadMore}
+          />
         </>
       )}
     </section>
   );
-}
-
-function WorkQueueRow({ item, onOpenCase }) {
-  const caseLabel = item.caseNumber || "Unknown case";
-  return (
-    <tr tabIndex={0}>
-      <td>
-        <div className="workQueueCaseCell">
-          <strong>{caseLabel}</strong>
-        </div>
-      </td>
-      <td><WorkQueueBadge type="status" value={item.status} /></td>
-      <td><WorkQueueBadge type="priority" value={item.priority} /></td>
-      <td><WorkQueueBadge type="risk" value={item.riskLevel} /></td>
-      <td>{item.assignedInvestigatorId || "Unassigned"}</td>
-      <td><strong>{formatDurationFromSeconds(item.caseAgeSeconds)}</strong></td>
-      <td>{formatAgeAgo(item.lastUpdatedAgeSeconds)}</td>
-      <td>
-        <WorkQueueBadge type="sla" value={item.slaStatus} />
-        <span>{formatDateTime(item.slaDeadlineAt)}</span>
-      </td>
-      <td className="numericCell">{item.linkedAlertCount ?? 0}</td>
-      <td>
-        <button className="rowButton" type="button" onClick={() => onOpenCase(item.caseId)} aria-label={`Open fraud case ${caseLabel}`}>
-          Open case
-        </button>
-      </td>
-    </tr>
-  );
-}
-
-function WorkQueueCard({ item, onOpenCase }) {
-  const caseLabel = item.caseNumber || "Unknown case";
-  return (
-    <article className="workQueueCard">
-      <div className="workQueueCardHeader">
-        <strong>{caseLabel}</strong>
-        <WorkQueueBadge type="sla" value={item.slaStatus} />
-      </div>
-      <dl>
-        <div><dt>Status</dt><dd><WorkQueueBadge type="status" value={item.status} /></dd></div>
-        <div><dt>Priority</dt><dd><WorkQueueBadge type="priority" value={item.priority} /></dd></div>
-        <div><dt>Risk</dt><dd><WorkQueueBadge type="risk" value={item.riskLevel} /></dd></div>
-        <div><dt>Assignee</dt><dd>{item.assignedInvestigatorId || "Unassigned"}</dd></div>
-        <div><dt>Age</dt><dd>{formatDurationFromSeconds(item.caseAgeSeconds)}</dd></div>
-        <div><dt>Updated</dt><dd>{formatAgeAgo(item.lastUpdatedAgeSeconds)}</dd></div>
-        <div><dt>Alerts</dt><dd>{item.linkedAlertCount ?? 0}</dd></div>
-      </dl>
-      <button className="rowButton" type="button" onClick={() => onOpenCase(item.caseId)} aria-label={`Open fraud case ${caseLabel}`}>
-        Open case
-      </button>
-    </article>
-  );
-}
-
-function SkeletonRows() {
-  return Array.from({ length: 5 }, (_, index) => (
-    <tr className="skeletonRow" key={index}>
-      {Array.from({ length: 10 }, (__, cellIndex) => (
-        <td key={cellIndex}><span className="skeletonBlock" /></td>
-      ))}
-    </tr>
-  ));
-}
-
-function SkeletonCards() {
-  return Array.from({ length: 3 }, (_, index) => (
-    <div className="workQueueCard skeletonCard" key={index}>
-      <span className="skeletonBlock" />
-      <span className="skeletonBlock" />
-      <span className="skeletonBlock" />
-    </div>
-  ));
 }
 
 function isInvalidCursorError(error) {

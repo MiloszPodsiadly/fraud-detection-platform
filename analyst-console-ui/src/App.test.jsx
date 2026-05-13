@@ -11,8 +11,8 @@ const {
   listGovernanceAdvisories,
   getGovernanceAdvisoryAnalytics,
   getFraudCaseWorkQueueSummary,
-  listScoredTransactions,
-  setApiSession
+  isAbortError,
+  listScoredTransactions
 } = vi.hoisted(() => ({
   callbackPath: { value: true },
   completeLoginCallback: vi.fn(),
@@ -41,20 +41,30 @@ const {
   listGovernanceAdvisories: vi.fn(),
   getGovernanceAdvisoryAnalytics: vi.fn(),
   getFraudCaseWorkQueueSummary: vi.fn(),
-  listScoredTransactions: vi.fn(),
-  setApiSession: vi.fn()
+  isAbortError: (error) => error?.name === "AbortError",
+  listScoredTransactions: vi.fn()
 }));
 
 vi.mock("./api/alertsApi.js", () => ({
+  createAlertsApiClient: () => ({
+    listAlerts,
+    listFraudCaseWorkQueue,
+    listGovernanceAdvisories,
+    getGovernanceAdvisoryAnalytics,
+    getFraudCaseWorkQueueSummary,
+    listScoredTransactions,
+    getGovernanceAdvisoryAudit: vi.fn(),
+    recordGovernanceAdvisoryAudit: vi.fn()
+  }),
   listAlerts,
   listFraudCaseWorkQueue,
   listGovernanceAdvisories,
   getGovernanceAdvisoryAnalytics,
   getFraudCaseWorkQueueSummary,
+  isAbortError,
   listScoredTransactions,
   getGovernanceAdvisoryAudit: vi.fn(),
-  recordGovernanceAdvisoryAudit: vi.fn(),
-  setApiSession
+  recordGovernanceAdvisoryAudit: vi.fn()
 }));
 
 vi.mock("./auth/authProvider.js", () => ({
@@ -137,7 +147,6 @@ describe("App", () => {
       riskLevel: "ALL",
       status: "ALL"
     });
-    expect(setApiSession).toHaveBeenCalled();
   });
 
   it("does not load dashboard data when oidc bootstrap reports an expired session", async () => {
@@ -216,7 +225,7 @@ describe("App", () => {
     expect(screen.queryByRole("heading", { name: "Session required" })).not.toBeInTheDocument();
   });
 
-  it("fetches the visible global fraud case summary when transaction scoring is the initial workspace", async () => {
+  it("does not fetch fraud case summary when transaction scoring is the initial workspace", async () => {
     callbackPath.value = false;
     window.history.replaceState({}, "", "/?workspace=transaction-scoring");
     refreshSession.mockResolvedValue(authenticatedSession());
@@ -230,11 +239,11 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByText("txn-visible")).toBeInTheDocument();
-    expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1);
+    expect(getFraudCaseWorkQueueSummary).not.toHaveBeenCalled();
     expect(listFraudCaseWorkQueue).not.toHaveBeenCalled();
   });
 
-  it("keeps the visible fraud case summary when navigating into the fraud case workspace", async () => {
+  it("loads the fraud case summary when navigating into the fraud case workspace", async () => {
     callbackPath.value = false;
     window.history.replaceState({}, "", "/?workspace=transaction-scoring");
     refreshSession.mockResolvedValue(authenticatedSession());
@@ -249,8 +258,7 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByText("txn-visible")).toBeInTheDocument();
-    await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
-    expect(await screen.findByRole("link", { name: /Global fraud cases\s*47/ })).toBeInTheDocument();
+    expect(getFraudCaseWorkQueueSummary).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("link", { name: "Fraud Case" }));
 
@@ -258,7 +266,7 @@ describe("App", () => {
     expect(await screen.findByRole("link", { name: /Global fraud cases\s*47/ })).toBeInTheDocument();
   });
 
-  it("refreshes visible navigation counters after switching away from the fraud case workspace", async () => {
+  it("does not retry fraud case summary after switching away from the fraud case workspace", async () => {
     callbackPath.value = false;
     refreshSession.mockResolvedValue(authenticatedSession());
     providerState.value = {
@@ -277,7 +285,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
 
     await waitFor(() => expect(listScoredTransactions).toHaveBeenCalledTimes(3));
-    expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(2);
+    expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1);
     expect(listFraudCaseWorkQueue).toHaveBeenCalledTimes(1);
   });
 

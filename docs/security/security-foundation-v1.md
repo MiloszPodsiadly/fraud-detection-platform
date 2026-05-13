@@ -29,7 +29,7 @@ Frontend:
 - Auth request header generation is now behind `src/auth/authProvider.js`.
 - `src/auth/oidcClient.js` is the SDK-facing OIDC adapter boundary.
 - `src/auth/oidcSessionSource.js` is now a real provider-backed session source for local Keycloak.
-- Local OIDC login flow is implemented for browser login, callback handling, bearer propagation, and logout.
+- Local OIDC login flow is implemented for browser login, callback handling, BFF-backed browser sessions, direct bearer compatibility, and logout.
 - Security states distinguish `loading`, `authenticated`, `unauthenticated`, `expired`, `access_denied`, `auth_error`, and missing-permission action states.
 - Frontend action gating is UX only; backend authorization remains authoritative.
 - A small contract guard test checks that frontend authority names stay aligned with backend `AnalystAuthority` constants.
@@ -491,9 +491,10 @@ Session behavior:
 - HTTP 401 can render a session-required or session-expired panel depending on known lifecycle context
 - HTTP 403 shows an access-denied panel
 
-The frontend now supports two local auth modes:
+The frontend now supports three local auth modes:
 
 - demo auth as the default quickstart
+- BFF auth through `alert-service` server-side OIDC login when `VITE_AUTH_PROVIDER=bff`
 - OIDC auth through local Keycloak when `VITE_AUTH_PROVIDER=oidc`
 
 Current provider boundary:
@@ -502,10 +503,25 @@ Current provider boundary:
 - `src/auth/demoSession.js` remains the local editable source.
 - `src/auth/oidcClient.js` hides `oidc-client-ts` behind a small adapter surface.
 - `src/auth/oidcSessionSource.js` normalizes a provider snapshot into UI session, token, and lifecycle state.
-- bearer token propagation is active through the provider/header boundary
+- `GET /api/v1/session` is intentionally public for session bootstrap and exposes normalized BFF identity, authorities, and CSRF metadata without exposing tokens.
+- `GET /api/v1/session` includes `sessionStatus` for lifecycle rendering. The current values are `AUTHENTICATED` and `ANONYMOUS`; the frontend treats this backend value as authoritative and fails closed for unknown values.
+- CSRF metadata from `GET /api/v1/session` is only a cookie-backed request header value for the BFF path. It is not an access token, refresh token, ID token, JWT, bearer credential, or secret, and it is not stored in browser storage by the console.
+- bearer token propagation remains available only in direct OIDC compatibility mode through the provider/header boundary
 - `SessionBadge` can render both editable demo mode and read-only provider-driven mode, including auth mode, identity, role, authority scope, login, and logout actions.
 
-Local OIDC browser flow:
+Local BFF browser flow:
+
+```text
+Browser
+  -> alert-service /oauth2/authorization/keycloak
+  -> Keycloak (login)
+  -> alert-service session
+  -> SPA GET /api/v1/session
+  -> cookie + CSRF requests
+  -> alert-service RBAC enforcement
+```
+
+Direct local OIDC compatibility flow:
 
 ```text
 Browser
@@ -525,9 +541,44 @@ Current OIDC lifecycle behavior:
 - backend JWT validation and authority checks remain authoritative for RBAC
 - expired provider sessions render the dedicated `expired` UI state
 - expired, unauthenticated, access-denied, and auth-error states block automatic dashboard fetches
-- logout clears the local provider-backed session view and then redirects to IdP logout
+- BFF logout requires CSRF, validates the provider and post-logout redirect origins on the backend, and clears local session state only after a successful backend logout response. The frontend is not the origin-policy authority; it only rejects empty, malformed, protocol-relative, or dangerous-scheme logout URLs.
+- direct OIDC logout clears the local provider-backed session view and then redirects to IdP logout
 - no silent refresh is implemented in v1
-- Docker OIDC mode rebuilds `analyst-console-ui` with exact `VITE_OIDC_*` callback/logout URLs for the nginx UI on `http://localhost:4173`
+- Docker OIDC mode rebuilds `analyst-console-ui` with `VITE_AUTH_PROVIDER=bff` for the nginx UI on `http://localhost:4173`
+- BFF logout uses configured provider and post-logout redirect origin allowlists. Localhost HTTP is accepted only for local/dev/test style stacks.
+- Unknown backend-looking routes under `/api/**`, `/api/v1/**`, `/governance/**`, `/system/**`, `/bff/**`, and non-public actuator routes are denied unless explicitly allowlisted.
+
+CSRF and deployment boundaries:
+
+- `/api/v1/session` must remain `Cache-Control: no-store`.
+- `/api/v1/session` must never expose raw claims, profile, email, provider groups, access tokens, refresh tokens, ID tokens, JWTs, or full OIDC payloads.
+- CSRF does not protect against XSS. The BFF pattern relies on same-origin cookies plus a custom CSRF header for unsafe requests, together with browser and CORS constraints.
+- FDP-48 is a Docker/OIDC and production-like browser auth foundation, not full enterprise IAM hardening.
+- Production deployment still requires environment-specific allowed logout origins, issuer/client/client-secret configuration, HTTPS-only ingress, Secure cookies, SameSite policy, forwarded-header handling, session timeout policy, and IdP operational monitoring.
+- Local/dev/test profile localhost allowances are non-production escape hatches only.
+
+### `/api/v1/session` Bootstrap Contract
+
+`GET /api/v1/session` is a public browser bootstrap endpoint. It tells the SPA whether a BFF-backed browser session exists and which normalized roles/authorities the UI may display. It is not the enforcement boundary; Spring Security route authorization remains authoritative for every protected API call.
+
+The response may include CSRF request metadata for same-origin browser writes. That CSRF value is not an access token, refresh token, ID token, JWT, bearer credential, or general-purpose secret. It must not be persisted in browser storage by the console.
+
+The endpoint must remain `no-store` and must not return provider raw material such as raw OIDC claims, profile payloads, email, provider groups, access tokens, refresh tokens, ID tokens, JWTs, bearer values, full session identifiers, or arbitrary IdP payloads. Authenticated responses expose only normalized identity and authorization hints. Anonymous responses expose no usable identity.
+
+Current `sessionStatus` values are `AUTHENTICATED` and `ANONYMOUS`. Frontend code must treat unknown future values as closed session states until explicitly supported.
+
+### Adding Backend Routes
+
+When adding a new browser or analyst endpoint:
+
+- put public routes before protected routes only when they are intentionally public;
+- add protected API routes with explicit authority requirements before deny guardrails;
+- keep unknown backend-looking routes under `/api/**`, `/api/v1/**`, `/governance/**`, `/system/**`, and `/bff/**` fail-closed;
+- keep the SPA fallback narrow and GET-only;
+- add or update route-order regression tests when a matcher group changes;
+- do not rely on frontend gating as authorization.
+
+Metrics added for session bootstrap, BFF logout, CSRF rejection, invalid principals, and OIDC mapping misses must stay low-cardinality. They must not include user IDs, actor IDs, resource IDs, tokens, session IDs, raw URLs, exception messages, or raw claim values.
 
 ## 401/403 Error Contract
 
@@ -622,17 +673,19 @@ Reviewers should check:
 - Durable audit storage is not WORM/immutable archive storage, legal notarization, legal non-repudiation, SIEM integration, long-term archival policy, regulator-ready evidence package, or HSM/KMS signing. FDP-20 external anchoring extends tamper evidence outside the primary MongoDB boundary, but the local-file sink is not certified immutable storage and does not create legal non-repudiation.
 - FDP-21 trust attestation is a derived trust assessment over FDP-19/FDP-20 signals. FDP-23 adds a separate local trust authority for external anchor hash signatures, but local keys remain development/verification material only. Neither FDP-21 nor FDP-23 is KMS/HSM signing, legal notarization, WORM storage, SIEM integration, or a compliance archive.
 - No SIEM audit export/integration yet.
-- The frontend still defaults to demo auth unless OIDC env vars are set explicitly.
-- The frontend OIDC path is a local OIDC integration and foundation for production auth, not a production-ready SSO setup.
+- The frontend still supports demo auth for local quickstart, but production-like builds default to BFF auth and reject implicit demo auth unless explicitly allowed for local use.
+- The direct frontend OIDC path is a local compatibility mode. The Docker browser path uses BFF auth so React API calls do not attach bearer tokens.
 - No silent refresh or session management hardening is shipped for deployment environments yet.
 - Backend and frontend currently duplicate authority names.
 - `analystId` is still accepted in write DTOs for compatibility.
-- `anyRequest().permitAll()` intentionally leaves non-API local routes public; protected business APIs are under `/api/v1/**`.
+- Public browser routing is intentionally narrow: health/session/OAuth/static assets and known SPA fallback routes are public, while unknown backend-looking routes fail closed.
+- `alertsApi.js` uses session-scoped `createAlertsApiClient({ session, authProvider })`; request helpers no longer depend on mutable module-level session/provider state.
+- `AlertSecurityConfig` keeps one explicit `SecurityFilterChain`, with endpoint authorization, BFF session setup, JWT resource-server setup, and demo-auth setup split into dedicated config collaborators.
 
 ## Suggested Next Steps
 
 1. Wire real JWT issuer/JWK configuration per environment and finalize deployment claim names.
-2. Harden the existing frontend OIDC client path for deployment environments and finalize operational login/logout behavior.
+2. Apply deployment-specific BFF/IdP configuration per environment: allowed origins, HTTPS ingress, secure cookies, forwarded headers, session timeout, and IdP monitoring.
 3. Remove request-body actor fields once API compatibility allows it.
 4. Define audit retention/export policy if compliance requirements need long-term searchable audit history.
 5. Decide whether a shared security module is justified after another service needs the same model.

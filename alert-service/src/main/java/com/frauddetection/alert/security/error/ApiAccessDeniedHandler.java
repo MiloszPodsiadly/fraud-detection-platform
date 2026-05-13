@@ -7,6 +7,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.csrf.CsrfException;
 import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.stereotype.Component;
 
@@ -27,6 +28,12 @@ public class ApiAccessDeniedHandler implements AccessDeniedHandler {
     public void handle(HttpServletRequest request, HttpServletResponse response, AccessDeniedException accessDeniedException)
             throws IOException, ServletException {
         var authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (accessDeniedException instanceof CsrfException) {
+            metrics.recordBffCsrfRejection(request);
+            if (request.getRequestURI() != null && request.getRequestURI().startsWith("/bff/logout")) {
+                metrics.recordBffLogoutRequest("rejected", "none");
+            }
+        }
         metrics.recordAccessDenied(request, authentication);
         responseWriter.write(
                 response,

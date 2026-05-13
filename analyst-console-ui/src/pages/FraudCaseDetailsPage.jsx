@@ -1,5 +1,4 @@
 import { Fragment, useEffect, useState } from "react";
-import { getFraudCase, updateFraudCase } from "../api/alertsApi.js";
 import { AUTHORITIES, hasAuthority } from "../auth/session.js";
 import { ErrorState } from "../components/ErrorState.jsx";
 import { LoadingPanel } from "../components/LoadingPanel.jsx";
@@ -9,7 +8,7 @@ import { formatAmount, formatDateTime, formatScore } from "../utils/format.js";
 
 const CASE_STATUSES = ["IN_REVIEW", "CONFIRMED_FRAUD", "FALSE_POSITIVE", "CLOSED"];
 
-export function FraudCaseDetailsPage({ caseId, session, onBack, onCaseUpdated }) {
+export function FraudCaseDetailsPage({ caseId, session, apiClient, onBack, onCaseUpdated }) {
   const [fraudCase, setFraudCase] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
@@ -31,7 +30,7 @@ export function FraudCaseDetailsPage({ caseId, session, onBack, onCaseUpdated })
     setIsLoading(true);
     setError("");
     try {
-      const nextCase = await getFraudCase(caseId);
+      const nextCase = await apiClient.getFraudCase(caseId);
       setFraudCase(nextCase);
       setForm({
         status: nextCase.status === "OPEN" ? "IN_REVIEW" : nextCase.status,
@@ -73,7 +72,7 @@ export function FraudCaseDetailsPage({ caseId, session, onBack, onCaseUpdated })
     setDecisionIdempotencyKey(idempotencyKey);
     setSubmitState({ isSubmitting: true, error: "", success: "" });
     try {
-      const response = await updateFraudCase(caseId, {
+      const response = await apiClient.updateFraudCase(caseId, {
         status: form.status,
         analystId: session.userId || form.analystId,
         decisionReason: form.decisionReason,

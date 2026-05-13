@@ -15,6 +15,7 @@ import { SESSION_STATES } from "../auth/sessionState.js";
 export function AlertsListPage({
   workspacePage = "analyst",
   workspaceCounters = { alerts: 0, transactions: 0 },
+  canReadFraudCases,
   alertPage,
   fraudCaseSummary = { totalFraudCases: 0 },
   fraudCaseTotalElements,
@@ -113,6 +114,7 @@ export function AlertsListPage({
   const showTransactionScoring = workspacePage === "transactionScoring";
   const showCompliance = workspacePage === "compliance";
   const showReports = workspacePage === "reports";
+  const fraudCaseAccessDenied = showAnalyst && canReadFraudCases === false;
 
   return (
     <div className="dashboardGrid pageEnter">
@@ -146,7 +148,14 @@ export function AlertsListPage({
 
       {sessionBlocksDashboard && <SessionStatePanel sessionState={sessionState} onRetry={onRetry} />}
 
-      {!sessionBlocksDashboard && showAnalyst && (
+      {!sessionBlocksDashboard && fraudCaseAccessDenied && (
+        <div className="statePanel" role="alert">
+          <h3>Fraud case access denied.</h3>
+          <p>This session does not include fraud case read authority.</p>
+        </div>
+      )}
+
+      {!sessionBlocksDashboard && showAnalyst && !fraudCaseAccessDenied && (
         <FraudCaseWorkQueuePanel
           queue={fraudCaseWorkQueue}
           request={fraudCaseWorkQueueRequest}
@@ -166,7 +175,7 @@ export function AlertsListPage({
         />
       )}
 
-      {!sessionBlocksDashboard && showAnalyst && fraudCaseSummaryError && (
+      {!sessionBlocksDashboard && showAnalyst && !fraudCaseAccessDenied && fraudCaseSummaryError && (
         <div className="statePanel warningPanel" role="status">
           <h3>Global fraud case count unavailable.</h3>
           <p>The work queue can still load. Retry only the global point-in-time summary.</p>
