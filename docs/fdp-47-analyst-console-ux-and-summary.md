@@ -20,6 +20,10 @@ The analyst console labels the global count as all/global fraud cases. Loaded qu
 
 Summary loading errors are isolated to the summary UI. They must not block the fraud-case work queue, fraud transaction workspace, transaction scoring workspace, compliance workspace, or reports workspace.
 
+The analyst console only fetches this summary when the Fraud Case workspace needs to display the global count. Other workspaces must not call the summary endpoint just to render navigation.
+
+Summary request metrics are controller-level, post-auth observations for `success` and unexpected `failure`. Spring Security rejects unauthenticated or unauthorized summary requests before the controller executes; those 401/403 outcomes are covered by security tests and read-access/security logs, not by the controller summary metric.
+
 ## Non-Goals
 
 FDP-47 does not add snapshot consistency between summary and queue slices, does not reintroduce exact count pagination for the work queue slice, does not add a legacy summary alias, and does not change mutation or idempotency semantics.
