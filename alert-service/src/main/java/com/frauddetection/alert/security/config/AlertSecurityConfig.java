@@ -1,11 +1,16 @@
 package com.frauddetection.alert.security.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.security.auth.DemoAuthFilter;
 import com.frauddetection.alert.security.auth.JwtAnalystAuthenticationConverter;
+import com.frauddetection.alert.security.auth.BffSecurityProperties;
+import com.frauddetection.alert.security.auth.BffLogoutSuccessHandler;
+import com.frauddetection.alert.security.auth.OidcAnalystAuthoritiesMapper;
 import com.frauddetection.alert.security.authorization.AnalystAuthority;
 import com.frauddetection.alert.security.error.ApiAccessDeniedHandler;
 import com.frauddetection.alert.security.error.ApiAuthenticationEntryPoint;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -18,10 +23,15 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.util.StringUtils;
+
+import jakarta.servlet.http.HttpServletRequest;
 
 @Configuration
 @EnableWebSecurity
+@EnableConfigurationProperties(BffSecurityProperties.class)
 public class AlertSecurityConfig {
 
     /**
@@ -47,18 +57,30 @@ public class AlertSecurityConfig {
     }
 
     @Bean
+    BffLogoutSuccessHandler bffLogoutSuccessHandler(
+            BffSecurityProperties bffSecurityProperties,
+            ObjectMapper objectMapper
+    ) {
+        return new BffLogoutSuccessHandler(bffSecurityProperties, objectMapper);
+    }
+
+    @Bean
     SecurityFilterChain alertSecurityFilterChain(
             HttpSecurity http,
             ObjectProvider<DemoAuthFilter> demoAuthFilter,
             ObjectProvider<JwtDecoder> jwtDecoder,
             ObjectProvider<JwtAnalystAuthenticationConverter> jwtAnalystAuthenticationConverter,
+            ObjectProvider<OidcAnalystAuthoritiesMapper> oidcAnalystAuthoritiesMapper,
+            BffSecurityProperties bffSecurityProperties,
+            BffLogoutSuccessHandler bffLogoutSuccessHandler,
             ApiAuthenticationEntryPoint authenticationEntryPoint,
             ApiAccessDeniedHandler accessDeniedHandler
     ) throws Exception {
+        boolean bffEnabled = bffSecurityProperties.enabled();
         http
-                .csrf(AbstractHttpConfigurer::disable)
                 .cors(Customizer.withDefaults())
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .sessionManagement(session -> session.sessionCreationPolicy(
+                        bffEnabled ? SessionCreationPolicy.IF_REQUIRED : SessionCreationPolicy.STATELESS))
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(authenticationEntryPoint)
                         .accessDeniedHandler(accessDeniedHandler)
@@ -66,6 +88,7 @@ public class AlertSecurityConfig {
                 .authorizeHttpRequests(authorize -> authorize
                         // Public technical endpoints for local orchestration and health checks.
                         .requestMatchers("/actuator/health/**", "/actuator/info").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/session").permitAll()
 
                         // Protected analyst business endpoints.
                         .requestMatchers(HttpMethod.GET, "/api/v1/alerts").hasAuthority(AnalystAuthority.ALERT_READ)
@@ -136,6 +159,27 @@ public class AlertSecurityConfig {
                         .anyRequest().permitAll()
                 );
 
+        if (bffEnabled) {
+            http
+                    .csrf(csrf -> csrf
+                            .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                            .ignoringRequestMatchers(this::hasBearerAuthorization)
+                    )
+                    .oauth2Login(oauth2 -> oauth2
+                            .userInfoEndpoint(userInfo -> userInfo
+                                    .userAuthoritiesMapper(oidcAnalystAuthoritiesMapper.getObject()))
+                            .defaultSuccessUrl("/", true)
+                    )
+                    .logout(logout -> logout
+                            .logoutUrl("/bff/logout")
+                            .invalidateHttpSession(true)
+                            .deleteCookies("JSESSIONID", "XSRF-TOKEN")
+                            .logoutSuccessHandler(bffLogoutSuccessHandler)
+                    );
+        } else {
+            http.csrf(AbstractHttpConfigurer::disable);
+        }
+
         // Production auth path: enable JWT Resource Server only when a decoder is configured.
         if (jwtDecoder.getIfAvailable() != null) {
             http.oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt
@@ -148,5 +192,10 @@ public class AlertSecurityConfig {
         // Local/dev auth path: demo headers remain an explicit opt-in adapter.
         demoAuthFilter.ifAvailable(filter -> http.addFilterBefore(filter, UsernamePasswordAuthenticationFilter.class));
         return http.build();
+    }
+
+    private boolean hasBearerAuthorization(HttpServletRequest request) {
+        String authorization = request.getHeader("Authorization");
+        return StringUtils.hasText(authorization) && authorization.regionMatches(true, 0, "Bearer ", 0, 7);
     }
 }
