@@ -1,5 +1,6 @@
 package com.frauddetection.alert.security.auth;
 
+import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.security.authorization.AnalystRole;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -21,9 +22,15 @@ import java.util.stream.Stream;
 public class OidcAnalystAuthoritiesMapper implements GrantedAuthoritiesMapper {
 
     private final JwtSecurityProperties properties;
+    private final AlertServiceMetrics metrics;
 
-    public OidcAnalystAuthoritiesMapper(JwtSecurityProperties properties) {
+    public OidcAnalystAuthoritiesMapper(JwtSecurityProperties properties, AlertServiceMetrics metrics) {
         this.properties = properties;
+        this.metrics = metrics;
+    }
+
+    OidcAnalystAuthoritiesMapper(JwtSecurityProperties properties) {
+        this(properties, null);
     }
 
     @Override
@@ -35,6 +42,11 @@ public class OidcAnalystAuthoritiesMapper implements GrantedAuthoritiesMapper {
                 .map(properties.roleMapping()::get)
                 .filter(java.util.Objects::nonNull)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
+        boolean hasUnmappedAccessValue = externalAccessValues.stream()
+                .anyMatch(accessValue -> !properties.roleMapping().containsKey(accessValue));
+        if (hasUnmappedAccessValue && metrics != null) {
+            metrics.recordOidcAuthorityMappingMiss(properties.accessClaim());
+        }
         return Stream.concat(
                         roles.stream().flatMap(role -> role.authorities().stream()),
                         roles.stream().map(role -> "ROLE_" + role.name())

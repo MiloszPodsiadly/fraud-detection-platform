@@ -1,6 +1,7 @@
 package com.frauddetection.alert.security.session;
 
 import com.frauddetection.alert.security.authorization.AnalystRole;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
@@ -19,13 +20,16 @@ import static org.springframework.http.HttpStatus.UNAUTHORIZED;
 public class AnalystSessionController {
 
     private final CurrentAnalystUser currentAnalystUser;
+    private final AlertServiceMetrics metrics;
 
-    public AnalystSessionController(CurrentAnalystUser currentAnalystUser) {
+    public AnalystSessionController(CurrentAnalystUser currentAnalystUser, AlertServiceMetrics metrics) {
         this.currentAnalystUser = currentAnalystUser;
+        this.metrics = metrics;
     }
 
     @GetMapping("/api/v1/session")
     public ResponseEntity<AnalystSessionResponse> session(CsrfToken csrfToken) {
+        boolean csrfPresent = csrfToken != null && StringUtils.hasText(csrfToken.getToken());
         AnalystSessionResponse response = currentAnalystUser.get()
                 .map(principal -> new AnalystSessionResponse(
                         true,
@@ -36,6 +40,7 @@ public class AnalystSessionController {
                         csrf(csrfToken)
                 ))
                 .orElseGet(() -> new AnalystSessionResponse(false, "ANONYMOUS", "", List.of(), List.of(), csrf(csrfToken)));
+        metrics.recordAnalystSessionRequest(response.authenticated() ? "authenticated" : "anonymous", csrfPresent);
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
                 .header(HttpHeaders.PRAGMA, "no-cache")
@@ -44,6 +49,8 @@ public class AnalystSessionController {
 
     private String requireUserId(String userId) {
         if (!StringUtils.hasText(userId)) {
+            metrics.recordAnalystSessionRequest("auth_error", false);
+            metrics.recordAnalystSessionInvalidPrincipal("other");
             throw new ResponseStatusException(UNAUTHORIZED, "Authenticated session does not expose a usable subject.");
         }
         return userId.trim();

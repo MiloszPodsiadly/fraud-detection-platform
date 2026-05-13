@@ -9,9 +9,11 @@ import com.frauddetection.alert.regulated.RegulatedMutationState;
 import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -169,6 +171,68 @@ class AlertServiceMetricsTest {
                         .doesNotContain("customer-123")
                         .doesNotContain("card")
                         .doesNotContain("exception"));
+    }
+
+    @Test
+    void shouldUseLowCardinalityBffSessionSecurityMetricLabels() {
+        MockHttpServletRequest fraudCaseRequest = new MockHttpServletRequest("PATCH", "/api/v1/fraud-cases/case-1");
+        metrics.recordAnalystSessionRequest("authenticated", true);
+        metrics.recordAnalystSessionRequest("anonymous", false);
+        metrics.recordAnalystSessionInvalidPrincipal("oidc");
+        metrics.recordBffLogoutRequest("success", "provider");
+        metrics.recordBffLogoutRequest("rejected", "https://issuer.bank.example/logout?client_id=x");
+        metrics.recordBffCsrfRejection(fraudCaseRequest);
+        metrics.recordOidcAuthorityMappingMiss("groups");
+
+        assertThat(meterRegistry.get("analyst_session_requests_total")
+                .tag("outcome", "authenticated")
+                .tag("csrf", "present")
+                .counter()
+                .count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.get("analyst_session_requests_total")
+                .tag("outcome", "anonymous")
+                .tag("csrf", "absent")
+                .counter()
+                .count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.get("analyst_session_invalid_principal_total")
+                .tag("principal_type", "oidc")
+                .counter()
+                .count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.get("bff_logout_requests_total")
+                .tag("outcome", "success")
+                .tag("redirect", "provider")
+                .counter()
+                .count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.get("bff_logout_requests_total")
+                .tag("outcome", "rejected")
+                .tag("redirect", "none")
+                .counter()
+                .count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.get("bff_csrf_rejections_total")
+                .tag("path_bucket", "fraud_case")
+                .counter()
+                .count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.get("oidc_authority_mapping_misses_total")
+                .tag("claim", "groups")
+                .tag("outcome", "ignored")
+                .counter()
+                .count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.getMeters())
+                .filteredOn(meter -> Set.of(
+                        "analyst_session_requests_total",
+                        "analyst_session_invalid_principal_total",
+                        "bff_logout_requests_total",
+                        "bff_csrf_rejections_total",
+                        "oidc_authority_mapping_misses_total"
+                ).contains(meter.getId().getName()))
+                .allSatisfy(meter -> assertThat(meter.getId().getTags().toString())
+                        .doesNotContain("case-1")
+                        .doesNotContain("issuer.bank.example")
+                        .doesNotContain("client_id")
+                        .doesNotContain("userId")
+                        .doesNotContain("authorities")
+                        .doesNotContain("token")
+                        .doesNotContain("sessionId"));
     }
 
     @Test

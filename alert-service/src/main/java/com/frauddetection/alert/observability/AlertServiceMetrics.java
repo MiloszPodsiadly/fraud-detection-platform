@@ -789,6 +789,44 @@ public class AlertServiceMetrics {
         ).increment();
     }
 
+    public void recordAnalystSessionRequest(String outcome, boolean csrfPresent) {
+        counter(
+                "analyst_session_requests_total",
+                "outcome", normalizeAnalystSessionOutcome(outcome),
+                "csrf", csrfPresent ? "present" : "absent"
+        ).increment();
+    }
+
+    public void recordAnalystSessionInvalidPrincipal(String principalType) {
+        counter(
+                "analyst_session_invalid_principal_total",
+                "principal_type", normalizePrincipalType(principalType)
+        ).increment();
+    }
+
+    public void recordBffLogoutRequest(String outcome, String redirect) {
+        counter(
+                "bff_logout_requests_total",
+                "outcome", normalizeBffLogoutOutcome(outcome),
+                "redirect", normalizeBffLogoutRedirect(redirect)
+        ).increment();
+    }
+
+    public void recordBffCsrfRejection(HttpServletRequest request) {
+        counter(
+                "bff_csrf_rejections_total",
+                "path_bucket", csrfPathBucket(request)
+        ).increment();
+    }
+
+    public void recordOidcAuthorityMappingMiss(String claimName) {
+        counter(
+                "oidc_authority_mapping_misses_total",
+                "claim", normalizeOidcClaimName(claimName),
+                "outcome", "ignored"
+        ).increment();
+    }
+
     public void recordAccessDenied(HttpServletRequest request, Authentication authentication) {
         counter(
                 "fraud.security.access.denied",
@@ -877,6 +915,61 @@ public class AlertServiceMetrics {
             return "actuator";
         }
         return "unknown";
+    }
+
+    private String normalizeAnalystSessionOutcome(String outcome) {
+        return switch (outcome) {
+            case "authenticated", "anonymous", "auth_error", "failure" -> outcome;
+            default -> "failure";
+        };
+    }
+
+    private String normalizePrincipalType(String principalType) {
+        return switch (principalType) {
+            case "oidc", "oauth2", "jwt", "other" -> principalType;
+            default -> "other";
+        };
+    }
+
+    private String normalizeBffLogoutOutcome(String outcome) {
+        return switch (outcome) {
+            case "success", "rejected", "failure" -> outcome;
+            default -> "failure";
+        };
+    }
+
+    private String normalizeBffLogoutRedirect(String redirect) {
+        return switch (redirect) {
+            case "provider", "local", "none" -> redirect;
+            default -> "none";
+        };
+    }
+
+    private String csrfPathBucket(HttpServletRequest request) {
+        String path = request == null ? "" : request.getRequestURI();
+        if (path == null) {
+            return "other";
+        }
+        if (path.startsWith("/api/v1/fraud-cases") || path.startsWith("/api/fraud-cases")) {
+            return "fraud_case";
+        }
+        if (path.startsWith("/api/v1/alerts")) {
+            return "alert";
+        }
+        if (path.startsWith("/governance")) {
+            return "governance";
+        }
+        if (path.startsWith("/api/")) {
+            return "api";
+        }
+        return "other";
+    }
+
+    private String normalizeOidcClaimName(String claimName) {
+        if (!StringUtils.hasText(claimName)) {
+            return "unknown";
+        }
+        return claimName.trim().replaceAll("[^A-Za-z0-9._:-]+", "_");
     }
 
     private String normalize(Enum<?> value) {

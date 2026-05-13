@@ -11,6 +11,8 @@ import java.util.Set;
 class AlertEndpointAuthorizationRules {
 
     void configure(AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry authorize) {
+        // Matcher order is security-critical: public routes, explicit protected routes, deny guardrails,
+        // narrow GET-only SPA fallback, then anyRequest denyAll.
         authorize
                 // Public technical endpoints for local orchestration and health checks.
                 .requestMatchers("/actuator/health/**", "/actuator/info").permitAll()

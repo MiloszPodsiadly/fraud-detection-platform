@@ -6,6 +6,7 @@ import com.frauddetection.alert.security.auth.BffSecurityProperties;
 import com.frauddetection.alert.security.auth.DemoAuthFilter;
 import com.frauddetection.alert.security.auth.JwtAnalystAuthenticationConverter;
 import com.frauddetection.alert.security.auth.OidcAnalystAuthoritiesMapper;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.security.error.ApiAccessDeniedHandler;
 import com.frauddetection.alert.security.error.ApiAuthenticationEntryPoint;
 import org.springframework.beans.factory.ObjectProvider;
@@ -52,9 +53,10 @@ public class AlertSecurityConfig {
     @Bean
     BffLogoutSuccessHandler bffLogoutSuccessHandler(
             BffSecurityProperties bffSecurityProperties,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            AlertServiceMetrics metrics
     ) {
-        return new BffLogoutSuccessHandler(bffSecurityProperties, objectMapper);
+        return new BffLogoutSuccessHandler(bffSecurityProperties, objectMapper, metrics);
     }
 
     @Bean

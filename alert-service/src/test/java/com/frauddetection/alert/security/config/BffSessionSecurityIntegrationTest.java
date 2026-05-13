@@ -122,7 +122,17 @@ class BffSessionSecurityIntegrationTest {
                 .andExpect(jsonPath("$.refresh_token").doesNotExist())
                 .andExpect(jsonPath("$.id_token").doesNotExist())
                 .andExpect(jsonPath("$.jwt").doesNotExist())
-                .andExpect(jsonPath("$.claims").doesNotExist());
+                .andExpect(jsonPath("$.claims").doesNotExist())
+                .andExpect(content().string(not(containsString("accessToken"))))
+                .andExpect(content().string(not(containsString("refreshToken"))))
+                .andExpect(content().string(not(containsString("idToken"))))
+                .andExpect(content().string(not(containsString("claims"))))
+                .andExpect(content().string(not(containsString("groups"))))
+                .andExpect(content().string(not(containsString("email"))))
+                .andExpect(content().string(not(containsString("profile"))))
+                .andExpect(content().string(not(containsString("sessionId"))));
+
+        verify(alertServiceMetrics).recordAnalystSessionRequest("anonymous", true);
     }
 
     @Test
@@ -146,7 +156,16 @@ class BffSessionSecurityIntegrationTest {
                 .andExpect(content().string(not(containsString("refresh_token"))))
                 .andExpect(content().string(not(containsString("id_token"))))
                 .andExpect(content().string(not(containsString("jwt"))))
-                .andExpect(content().string(not(containsString("claims"))));
+                .andExpect(content().string(not(containsString("claims"))))
+                .andExpect(content().string(not(containsString("accessToken"))))
+                .andExpect(content().string(not(containsString("refreshToken"))))
+                .andExpect(content().string(not(containsString("idToken"))))
+                .andExpect(content().string(not(containsString("groups"))))
+                .andExpect(content().string(not(containsString("email"))))
+                .andExpect(content().string(not(containsString("profile"))))
+                .andExpect(content().string(not(containsString("sessionId"))));
+
+        verify(alertServiceMetrics).recordAnalystSessionRequest("authenticated", true);
     }
 
     @Test
@@ -158,6 +177,9 @@ class BffSessionSecurityIntegrationTest {
                 ))))
                 .andExpect(status().isUnauthorized())
                 .andExpect(content().string(not(containsString("\"authenticated\":true"))));
+
+        verify(alertServiceMetrics).recordAnalystSessionRequest("auth_error", false);
+        verify(alertServiceMetrics).recordAnalystSessionInvalidPrincipal("other");
     }
 
     @Test
@@ -170,6 +192,7 @@ class BffSessionSecurityIntegrationTest {
                 .andExpect(status().isForbidden());
 
         verify(fraudCaseManagementService, never()).updateCase(any(), any(), any());
+        verify(alertServiceMetrics).recordBffCsrfRejection(any());
     }
 
     @Test
@@ -253,12 +276,17 @@ class BffSessionSecurityIntegrationTest {
                 .andExpect(jsonPath("$.logoutUrl").value(containsString("/protocol/openid-connect/logout")))
                 .andExpect(content().string(not(containsString("Bearer"))))
                 .andExpect(content().string(not(containsString("id_token"))));
+
+        verify(alertServiceMetrics).recordBffLogoutRequest("success", "provider");
     }
 
     @Test
     void logoutMissingCsrfIsRejected() throws Exception {
         mockMvc.perform(post("/bff/logout").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
                 .andExpect(status().isForbidden());
+
+        verify(alertServiceMetrics).recordBffCsrfRejection(any());
+        verify(alertServiceMetrics).recordBffLogoutRequest("rejected", "none");
     }
 
     @Test
@@ -274,6 +302,12 @@ class BffSessionSecurityIntegrationTest {
                 .andExpect(status().isInternalServerError());
 
         mockMvc.perform(get("/analyst-console"))
+                .andExpect(status().isInternalServerError());
+
+        mockMvc.perform(get("/assets/app.js"))
+                .andExpect(status().isInternalServerError());
+
+        mockMvc.perform(get("/actuator/health"))
                 .andExpect(status().isInternalServerError());
 
         mockMvc.perform(get("/api/v1/session"))
@@ -296,6 +330,9 @@ class BffSessionSecurityIntegrationTest {
 
         mockMvc.perform(get("/bff/not-a-real-endpoint").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
                 .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/random-backend-looking-route").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -304,6 +341,27 @@ class BffSessionSecurityIntegrationTest {
                 .andExpect(status().isForbidden());
 
         mockMvc.perform(get("/governance/advisories").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(post("/governance/advisories/event-1/audit")
+                        .with(userWith(AnalystAuthority.TRANSACTION_MONITOR_READ))
+                        .with(csrf()))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/v1/fraud-cases/work-queue")
+                        .with(userWith(AnalystAuthority.ALERT_READ)))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void narrowSpaFallbackAllowsOnlyKnownGetRoutes() throws Exception {
+        mockMvc.perform(get("/fraud-case"))
+                .andExpect(status().isInternalServerError());
+
+        mockMvc.perform(get("/reports"))
+                .andExpect(status().isInternalServerError());
+
+        mockMvc.perform(post("/reports").with(userWith(AnalystAuthority.FRAUD_CASE_READ)).with(csrf()))
                 .andExpect(status().isForbidden());
     }
 
