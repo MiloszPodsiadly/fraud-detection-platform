@@ -503,9 +503,9 @@ Current provider boundary:
 - `src/auth/demoSession.js` remains the local editable source.
 - `src/auth/oidcClient.js` hides `oidc-client-ts` behind a small adapter surface.
 - `src/auth/oidcSessionSource.js` normalizes a provider snapshot into UI session, token, and lifecycle state.
-- `GET /api/v1/session` exposes normalized BFF identity, authorities, and CSRF metadata without exposing tokens.
-- `GET /api/v1/session` includes `sessionStatus` for lifecycle rendering. The current values are `AUTHENTICATED` and `ANONYMOUS`.
-- CSRF metadata from `GET /api/v1/session` is only a cookie-backed request header value for the BFF path. It is not bearer auth material and is not stored in browser storage by the console.
+- `GET /api/v1/session` is intentionally public for session bootstrap and exposes normalized BFF identity, authorities, and CSRF metadata without exposing tokens.
+- `GET /api/v1/session` includes `sessionStatus` for lifecycle rendering. The current values are `AUTHENTICATED` and `ANONYMOUS`; the frontend treats this backend value as authoritative and fails closed for unknown values.
+- CSRF metadata from `GET /api/v1/session` is only a cookie-backed request header value for the BFF path. It is not an access token, refresh token, ID token, JWT, bearer credential, or secret, and it is not stored in browser storage by the console.
 - bearer token propagation remains available only in direct OIDC compatibility mode through the provider/header boundary
 - `SessionBadge` can render both editable demo mode and read-only provider-driven mode, including auth mode, identity, role, authority scope, login, and logout actions.
 
@@ -541,12 +541,21 @@ Current OIDC lifecycle behavior:
 - backend JWT validation and authority checks remain authoritative for RBAC
 - expired provider sessions render the dedicated `expired` UI state
 - expired, unauthenticated, access-denied, and auth-error states block automatic dashboard fetches
-- BFF logout requires CSRF, validates the backend-provided redirect, and clears local session state only after a successful backend logout response
+- BFF logout requires CSRF, validates the provider and post-logout redirect origins on the backend, and clears local session state only after a successful backend logout response. The frontend is not the origin-policy authority; it only rejects empty, malformed, protocol-relative, or dangerous-scheme logout URLs.
 - direct OIDC logout clears the local provider-backed session view and then redirects to IdP logout
 - no silent refresh is implemented in v1
 - Docker OIDC mode rebuilds `analyst-console-ui` with `VITE_AUTH_PROVIDER=bff` for the nginx UI on `http://localhost:4173`
 - BFF logout uses configured provider and post-logout redirect origin allowlists. Localhost HTTP is accepted only for local/dev/test style stacks.
 - Unknown backend-looking routes under `/api/**`, `/api/v1/**`, `/governance/**`, `/system/**`, `/bff/**`, and non-public actuator routes are denied unless explicitly allowlisted.
+
+CSRF and deployment boundaries:
+
+- `/api/v1/session` must remain `Cache-Control: no-store`.
+- `/api/v1/session` must never expose raw claims, profile, email, provider groups, access tokens, refresh tokens, ID tokens, JWTs, or full OIDC payloads.
+- CSRF does not protect against XSS. The BFF pattern relies on same-origin cookies plus a custom CSRF header for unsafe requests, together with browser and CORS constraints.
+- FDP-48 is a Docker/OIDC and production-like browser auth foundation, not full enterprise IAM hardening.
+- Production deployment still requires environment-specific allowed logout origins, issuer/client/client-secret configuration, HTTPS-only ingress, Secure cookies, SameSite policy, forwarded-header handling, session timeout policy, and IdP operational monitoring.
+- Local/dev/test profile localhost allowances are non-production escape hatches only.
 
 ## 401/403 Error Contract
 
@@ -647,11 +656,13 @@ Reviewers should check:
 - Backend and frontend currently duplicate authority names.
 - `analystId` is still accepted in write DTOs for compatibility.
 - Public browser routing is intentionally narrow: health/session/OAuth/static assets and known SPA fallback routes are public, while unknown backend-looking routes fail closed.
+- `alertsApi.js` uses session-scoped `createAlertsApiClient({ session, authProvider })`; request helpers no longer depend on mutable module-level session/provider state.
+- `AlertSecurityConfig` keeps one explicit `SecurityFilterChain`, with endpoint authorization, BFF session setup, JWT resource-server setup, and demo-auth setup split into dedicated config collaborators.
 
 ## Suggested Next Steps
 
 1. Wire real JWT issuer/JWK configuration per environment and finalize deployment claim names.
-2. Harden deployment-specific BFF/IdP configuration and finalize operational login/logout behavior.
+2. Apply deployment-specific BFF/IdP configuration per environment: allowed origins, HTTPS ingress, secure cookies, forwarded headers, session timeout, and IdP monitoring.
 3. Remove request-body actor fields once API compatibility allows it.
 4. Define audit retention/export policy if compliance requirements need long-term searchable audit history.
 5. Decide whether a shared security module is justified after another service needs the same model.

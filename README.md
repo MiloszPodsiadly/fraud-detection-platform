@@ -671,6 +671,7 @@ How this differs from the default quickstart:
 - Keycloak redirects back to `/login/oauth2/code/keycloak`
 - `alert-service` completes the callback and creates a server-backed analyst session
 - the SPA hydrates identity from `GET /api/v1/session`
+- the SPA treats backend `sessionStatus` as the BFF session lifecycle source
 - frontend may normalize provider `groups` into existing UI role labels for UX, but backend JWT validation remains authoritative for RBAC
 - browser API calls use same-origin session cookies and CSRF metadata; React `fetch` does not attach `Authorization: Bearer ...`
 
@@ -727,6 +728,8 @@ These credentials are local-only and must not be reused outside local test envir
 - callback completes on `/login/oauth2/code/keycloak`
 - browser API requests do not include an `Authorization` header in Docker BFF mode
 - `/api/v1/session` exposes identity, authorities, `sessionStatus`, and CSRF metadata only; it does not expose access, refresh, or ID tokens
+- CSRF metadata is not authentication material. It is not an access token, refresh token, ID token, JWT, bearer credential, or secret; it is browser-readable request metadata for cookie-backed unsafe requests.
+- BFF logout trust is enforced by backend allowlists. The frontend only rejects empty, malformed, protocol-relative, or dangerous-scheme logout URLs returned from `/bff/logout`.
 - `readonly` receives `403` on write actions
 - logout works
 - expired session shows the correct UI state
@@ -739,6 +742,7 @@ These credentials are local-only and must not be reused outside local test envir
 - no token refresh flow
 - service-to-service auth uses the internal service-auth foundation for configured ML/governance calls; local Docker may use explicit `DISABLED_LOCAL_ONLY`, the token-validator Docker override exercises compatibility `TOKEN_VALIDATOR`, `deployment/docker-compose.service-identity-rs256.yml` exercises production-target `JWT_SERVICE_IDENTITY`, and `deployment/docker-compose.service-identity-mtls.yml` exercises FDP-18 internal mTLS service identity; this is not enterprise IAM or automated certificate lifecycle management
 - no production IdP config
+- BFF mode is a Docker/OIDC and production-like browser auth foundation, not complete enterprise IAM hardening. Production deployments still need environment-specific allowed logout origins, issuer/client/client-secret settings, HTTPS ingress, Secure/SameSite cookie policy, forwarded-header handling, session timeout policy, and IdP monitoring.
 - direct SPA OIDC mode still exists for development, but Docker OIDC mode uses the BFF session path to avoid browser-side bearer API calls
 - browser DevTools can still show bearer headers in direct SPA OIDC mode; the Docker BFF mode avoids browser-side bearer API requests instead of trying to hide them
 
