@@ -660,29 +660,30 @@ Imported local realm:
 How this differs from the default quickstart:
 
 - default `deployment/docker-compose.yml` keeps `alert-service` on demo auth
-- `deployment/docker-compose.oidc.yml` adds local Keycloak and switches `alert-service` to JWT validation for analyst APIs
-- `deployment/docker-compose.oidc.yml` also rebuilds `analyst-console-ui` with OIDC-specific `VITE_*` values for the Docker UI on `http://localhost:4173`
+- `deployment/docker-compose.oidc.yml` adds local Keycloak and switches `alert-service` to JWT validation plus server-backed BFF session auth for analyst APIs
+- `deployment/docker-compose.oidc.yml` also rebuilds `analyst-console-ui` with BFF auth for the Docker UI on `http://localhost:4173`
 
 #### Local OIDC Login Flow
 
 - click `Sign in with OIDC`
 - browser redirects to Keycloak
 - log in with one of the local test users
-- Keycloak redirects back to `/auth/callback`
-- `oidc-client-ts` completes the callback and restores the provider-backed session
-- session becomes authenticated in the SPA
+- Keycloak redirects back to `/login/oauth2/code/keycloak`
+- `alert-service` completes the callback and creates a server-backed analyst session
+- the SPA hydrates identity from `GET /api/v1/session`
 - frontend may normalize provider `groups` into existing UI role labels for UX, but backend JWT validation remains authoritative for RBAC
-- API calls use `Authorization: Bearer <access_token>`
+- browser API calls use same-origin session cookies and CSRF metadata; React `fetch` does not attach `Authorization: Bearer ...`
 
 Text architecture diagram:
 
 ```text
 Browser
   -> Keycloak (login)
-  -> redirect /auth/callback
-  -> SPA (oidc-client-ts)
-  -> Authorization: Bearer
-  -> alert-service (JWT Resource Server)
+  -> redirect /login/oauth2/code/keycloak
+  -> alert-service (OAuth2 Login / server session)
+  -> SPA (GET /api/v1/session)
+  -> same-origin cookie + CSRF
+  -> alert-service (session / JWT-capable Resource Server)
   -> RBAC enforcement
 ```
 
@@ -701,12 +702,10 @@ This keeps issuer validation enabled while still letting the backend fetch keys 
 
 Docker UI OIDC settings in this override:
 
-- `VITE_AUTH_PROVIDER=oidc`
-- `VITE_OIDC_AUTHORITY=http://localhost:8086/realms/fraud-detection`
-- `VITE_OIDC_CLIENT_ID=analyst-console-ui`
-- `VITE_OIDC_REDIRECT_URI=http://localhost:4173/auth/callback`
-- `VITE_OIDC_POST_LOGOUT_REDIRECT_URI=http://localhost:4173/`
-- `VITE_OIDC_SCOPE=openid profile email`
+- `VITE_AUTH_PROVIDER=bff`
+- `APP_SECURITY_BFF_ENABLED=true`
+- Spring OAuth2 client registration `keycloak`
+- redirect URI `http://localhost:4173/login/oauth2/code/keycloak`
 
 Test users:
 
@@ -722,8 +721,8 @@ These credentials are local-only and must not be reused outside local test envir
 #### Manual verification
 
 - login redirect works
-- callback completes on `/auth/callback`
-- bearer token is present in API requests
+- callback completes on `/login/oauth2/code/keycloak`
+- browser API requests do not include an `Authorization` header in Docker BFF mode
 - `readonly` receives `403` on write actions
 - logout works
 - expired session shows the correct UI state
@@ -736,7 +735,7 @@ These credentials are local-only and must not be reused outside local test envir
 - no token refresh flow
 - service-to-service auth uses the internal service-auth foundation for configured ML/governance calls; local Docker may use explicit `DISABLED_LOCAL_ONLY`, the token-validator Docker override exercises compatibility `TOKEN_VALIDATOR`, `deployment/docker-compose.service-identity-rs256.yml` exercises production-target `JWT_SERVICE_IDENTITY`, and `deployment/docker-compose.service-identity-mtls.yml` exercises FDP-18 internal mTLS service identity; this is not enterprise IAM or automated certificate lifecycle management
 - no production IdP config
-- tokens are managed by `oidc-client-ts` for local/dev use, not as hardened production storage
+- direct SPA OIDC mode still exists for development, but Docker OIDC mode uses the BFF session path to avoid browser-side bearer API calls
 
 Keycloak is available at:
 
@@ -794,7 +793,7 @@ To verify the FDP-23 trust-authority JWT client path together with OIDC and the 
 docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml -f deployment/docker-compose.service-identity-mtls.yml -f deployment/docker-compose.trust-authority-jwt.yml up --build -d
 ```
 
-Expected results: browser/user APIs use OIDC, Java service calls into ML/governance use mTLS, and alert-service calls into `audit-trust-authority` use RS256 bearer JWTs signed by `alert-key-1`. The trust authority validates the local JWKS, `kid`, issuer, audience, token freshness, authorities, caller allowlist, and service-to-key binding. The local fixture private key is mounted only into alert-service; trust-authority receives public verification material only. This is still local Docker verification, not trust-authority mTLS, not enterprise IAM, not KMS/HSM, and not legal notarization.
+Expected results: browser/user APIs use the OIDC-backed BFF session path, Java service calls into ML/governance use mTLS, and alert-service calls into `audit-trust-authority` use RS256 bearer JWTs signed by `alert-key-1`. In browser DevTools, same-origin Analyst Console API requests should carry cookies and CSRF metadata, not `Authorization: Bearer ...`. The trust authority validates the local JWKS, `kid`, issuer, audience, token freshness, authorities, caller allowlist, and service-to-key binding. The local fixture private key is mounted only into alert-service; trust-authority receives public verification material only. This is still local Docker verification, not trust-authority mTLS, not enterprise IAM, not KMS/HSM, and not legal notarization.
 
 ## FDP-18 mTLS Service Identity
 
