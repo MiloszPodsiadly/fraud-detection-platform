@@ -35,7 +35,7 @@ export function GovernanceReviewQueue({
   }
 
   return (
-    <section className="panel governanceQueuePanel">
+    <section className="panel governanceQueuePanel" id="governance-review">
       <div className="panelHeader">
         <div>
           <p className="eyebrow">Governance</p>

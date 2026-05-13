@@ -32,7 +32,7 @@ export function GovernanceAnalyticsPanel({
   const maxLifecycle = Math.max(1, ...LIFECYCLE_STATUSES.map((status) => Number(lifecycleDistribution[status] || 0)));
 
   return (
-    <section className="panel governanceAnalyticsPanel">
+    <section className="panel governanceAnalyticsPanel" id="audit-analytics">
       <div className="panelHeader">
         <div>
           <p className="eyebrow">Audit analytics</p>

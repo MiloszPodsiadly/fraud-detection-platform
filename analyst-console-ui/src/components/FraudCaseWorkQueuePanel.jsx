@@ -1,90 +1,77 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { formatDateTime } from "../utils/format.js";
+import { formatAgeAgo, formatDurationFromSeconds } from "../fraudCases/workQueueFormat.js";
 import {
   dedupeByCaseId,
   DEFAULT_FRAUD_CASE_WORK_QUEUE_SORT,
-  FRAUD_CASE_WORK_QUEUE_SORT_OPTIONS
+  FRAUD_CASE_WORK_QUEUE_SORT_OPTIONS,
+  initialFraudCaseWorkQueueRequest
 } from "../fraudCases/workQueueState.js";
+import { WorkQueueBadge } from "./fraudCaseWorkQueue/WorkQueueBadge.jsx";
+import { WorkQueueErrorPanel } from "./fraudCaseWorkQueue/WorkQueueErrorPanel.jsx";
+import { WorkQueueStageStats } from "./fraudCaseWorkQueue/WorkQueueStageStats.jsx";
 
-const STATUS_OPTIONS = ["ALL", "OPEN", "IN_REVIEW", "CONFIRMED_FRAUD", "FALSE_POSITIVE", "CLOSED", "REOPENED"];
+const STATUS_OPTIONS = ["ALL", "OPEN", "IN_REVIEW", "ESCALATED", "RESOLVED", "CLOSED", "REOPENED"];
 const PRIORITY_OPTIONS = ["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"];
 const RISK_OPTIONS = ["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"];
-
 export function FraudCaseWorkQueuePanel({
   queue,
   request,
+  draftRequest,
   isLoading,
   error,
-  onRequestChange,
+  warning,
+  validationError,
+  lastRefreshedAt,
+  onDraftChange,
+  onApplyFilters,
+  onResetFilters,
   onLoadMore,
   onRetry,
   onRefreshFirstSlice,
   onOpenCase
 }) {
   const items = dedupeByCaseId(queue.content || []);
+  const [filtersExpanded, setFiltersExpanded] = useState(true);
+  const alertPanelRef = useRef(null);
   const invalidCursor = isInvalidCursorError(error);
-  const stats = workQueueStats(items);
+  const stages = workQueueStages(items);
   const activeFilters = activeFilterLabels(request);
-  const [draftRequest, setDraftRequest] = useState(() => editableWorkQueueRequest(request));
-  const [validationError, setValidationError] = useState(null);
   const appliedSortLabel = sortLabelFor(request.sort);
+  const effectiveDraft = draftRequest || initialFraudCaseWorkQueueRequest();
   const draftChanged = useMemo(
-    () => !sameEditableRequest(draftRequest, editableWorkQueueRequest(request)),
-    [draftRequest, request]
+    () => !sameEditableRequest(effectiveDraft, editableWorkQueueRequest(request)),
+    [effectiveDraft, request]
   );
-  const duplicateCaseIds = queue.duplicateCaseIds || [];
+  const hasInvalidFilters = Boolean(validationError);
+  const hasDuplicateWarning = warning?.type === "DUPLICATE_SLICE" || (queue.duplicateCaseIds || []).length > 0;
 
   useEffect(() => {
-    setDraftRequest(editableWorkQueueRequest(request));
-    setValidationError(null);
-  }, [request]);
+    if ((error?.status === 403 || error?.status === 503 || invalidCursor) && alertPanelRef.current) {
+      alertPanelRef.current.focus();
+    }
+  }, [error, invalidCursor]);
 
   function updateField(name, value) {
-    setDraftRequest((current) => ({
-      ...current,
-      [name]: value
-    }));
-    setValidationError(null);
-  }
-
-  function applyFilters() {
-    const nextValidationError = validateDraftRequest(draftRequest);
-    if (nextValidationError) {
-      setValidationError(nextValidationError);
-      return;
-    }
-    onRequestChange({ ...draftRequest, cursor: null });
-  }
-
-  function resetFilters() {
-    const nextRequest = editableWorkQueueRequest({
-      size: 20,
-      status: "ALL",
-      priority: "ALL",
-      riskLevel: "ALL",
-      assignee: "",
-      createdFrom: "",
-      createdTo: "",
-      updatedFrom: "",
-      updatedTo: "",
-      linkedAlertId: "",
-      sort: DEFAULT_FRAUD_CASE_WORK_QUEUE_SORT
-    });
-    setDraftRequest(nextRequest);
-    setValidationError(null);
-    onRequestChange({ ...nextRequest, cursor: null });
+    onDraftChange(name, value);
   }
 
   return (
-    <section className="panel workQueuePanel" aria-labelledby="fraud-case-work-queue-title">
-      <div className="panelHeader">
+    <section className="panel workQueuePanel" id="work-queue" aria-labelledby="fraud-case-work-queue-title">
+      <div className="panelHeader workQueuePanelHeader">
         <div>
           <p className="eyebrow">Fraud cases</p>
           <h2 id="fraud-case-work-queue-title">Fraud Case Work Queue</h2>
           <p className="sectionCopy">Read-only investigator queue. Counts reflect loaded cases only.</p>
         </div>
         <div className="workQueueHeaderActions">
-          <button className="secondaryButton" type="button" onClick={onRetry} disabled={isLoading}>
+          <button
+            className="secondaryButton"
+            type="button"
+            onClick={onRetry}
+            disabled={isLoading}
+            aria-label="Refresh fraud case work queue from first slice"
+          >
             Refresh
           </button>
           <div className="workQueueCounter">
@@ -94,81 +81,111 @@ export function FraudCaseWorkQueuePanel({
         </div>
       </div>
 
-      <div className="workQueueSummary" aria-label="Fraud case work queue summary">
-        <SummaryMetric label="Loaded open" value={stats.open} tone="neutral" />
-        <SummaryMetric label="Loaded critical" value={stats.critical} tone="critical" />
-        <SummaryMetric label="Loaded near breach" value={stats.nearBreach} tone="warning" />
-        <SummaryMetric label="Loaded breached" value={stats.breached} tone="critical" />
-        <SummaryMetric label="Loaded unassigned" value={stats.unassigned} tone="muted" />
-      </div>
+      <WorkQueueStageStats stages={stages} />
 
-      <div className="workQueueFilters" aria-label="Fraud case work queue filters">
-        <label>
-          Status
-          <select value={draftRequest.status} onChange={(event) => updateField("status", event.target.value)}>
-            {STATUS_OPTIONS.map((status) => <option key={status}>{status}</option>)}
-          </select>
-        </label>
-        <label>
-          Priority
-          <select value={draftRequest.priority} onChange={(event) => updateField("priority", event.target.value)}>
-            {PRIORITY_OPTIONS.map((priority) => <option key={priority}>{priority}</option>)}
-          </select>
-        </label>
-        <label>
-          Risk
-          <select value={draftRequest.riskLevel} onChange={(event) => updateField("riskLevel", event.target.value)}>
-            {RISK_OPTIONS.map((risk) => <option key={risk}>{risk}</option>)}
-          </select>
-        </label>
-        <label>
-          Assigned investigator
-          <input
-            value={draftRequest.assignee}
-            onChange={(event) => updateField("assignee", event.target.value)}
-            placeholder="Investigator ID"
-          />
-        </label>
-        <label>
-          Created from
-          <input type="datetime-local" value={draftRequest.createdFrom} onChange={(event) => updateField("createdFrom", event.target.value)} />
-        </label>
-        <label>
-          Created to
-          <input type="datetime-local" value={draftRequest.createdTo} onChange={(event) => updateField("createdTo", event.target.value)} />
-        </label>
-        <label>
-          Updated from
-          <input type="datetime-local" value={draftRequest.updatedFrom} onChange={(event) => updateField("updatedFrom", event.target.value)} />
-        </label>
-        <label>
-          Updated to
-          <input type="datetime-local" value={draftRequest.updatedTo} onChange={(event) => updateField("updatedTo", event.target.value)} />
-        </label>
-        <label>
-          Linked alert
-          <input value={draftRequest.linkedAlertId} onChange={(event) => updateField("linkedAlertId", event.target.value)} placeholder="Alert ID" />
-        </label>
-        <label>
-          Sort
-          <select value={draftRequest.sort} onChange={(event) => updateField("sort", event.target.value)}>
-            {FRAUD_CASE_WORK_QUEUE_SORT_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Slice size
-          <select value={draftRequest.size} onChange={(event) => updateField("size", Number(event.target.value))}>
-            {[20, 50, 100].map((size) => <option key={size} value={size}>{size}</option>)}
-          </select>
-        </label>
-      </div>
-      <p className="sectionCopy workQueueFilterNote">Date filters use your local time and are sent as UTC instants.</p>
-      {validationError && <p className="formError">{validationError}</p>}
+      <div className="workQueueFilterShell">
+        <div className="workQueueToolbar workQueueFilterHeader">
+          <div>
+            <h3>Filters</h3>
+            <p className="sectionCopy">Date filters use your local time and are sent as UTC instants.</p>
+          </div>
+          <div className="workQueueToolbarActions">
+            <button
+              className="secondaryButton compactButton"
+              type="button"
+              onClick={() => setFiltersExpanded((current) => !current)}
+              aria-expanded={filtersExpanded}
+            >
+              {filtersExpanded ? "Hide filters" : "Show filters"}
+            </button>
+            <button
+              className="secondaryButton compactButton"
+              type="button"
+              onClick={onApplyFilters}
+              disabled={isLoading || !draftChanged || hasInvalidFilters}
+              aria-label="Apply fraud case work queue filters"
+            >
+              Apply filters
+            </button>
+            <button
+              className="secondaryButton compactButton"
+              type="button"
+              onClick={onResetFilters}
+              disabled={isLoading || (!draftChanged && activeFilters.length === 0)}
+              aria-label="Reset fraud case work queue filters"
+            >
+              Reset filters
+            </button>
+          </div>
+        </div>
 
-      <div className="workQueueToolbar" aria-label="Fraud case work queue active filters">
-        <div className="workQueueChips">
+        {filtersExpanded && (
+          <div className="workQueueFilters" aria-label="Fraud case work queue filters">
+            <label>
+              Status
+              <select value={effectiveDraft.status} onChange={(event) => updateField("status", event.target.value)}>
+                {STATUS_OPTIONS.map((status) => <option key={status}>{status}</option>)}
+              </select>
+            </label>
+            <label>
+              Priority
+              <select value={effectiveDraft.priority} onChange={(event) => updateField("priority", event.target.value)}>
+                {PRIORITY_OPTIONS.map((priority) => <option key={priority}>{priority}</option>)}
+              </select>
+            </label>
+            <label>
+              Risk
+              <select value={effectiveDraft.riskLevel} onChange={(event) => updateField("riskLevel", event.target.value)}>
+                {RISK_OPTIONS.map((risk) => <option key={risk}>{risk}</option>)}
+              </select>
+            </label>
+            <label>
+              Assigned investigator
+              <input
+                value={effectiveDraft.assignee}
+                onChange={(event) => updateField("assignee", event.target.value)}
+                placeholder="Investigator ID"
+              />
+            </label>
+            <label>
+              Created from
+              <input type="datetime-local" value={effectiveDraft.createdFrom} onChange={(event) => updateField("createdFrom", event.target.value)} />
+            </label>
+            <label>
+              Created to
+              <input type="datetime-local" value={effectiveDraft.createdTo} onChange={(event) => updateField("createdTo", event.target.value)} />
+            </label>
+            <label>
+              Updated from
+              <input type="datetime-local" value={effectiveDraft.updatedFrom} onChange={(event) => updateField("updatedFrom", event.target.value)} />
+            </label>
+            <label>
+              Updated to
+              <input type="datetime-local" value={effectiveDraft.updatedTo} onChange={(event) => updateField("updatedTo", event.target.value)} />
+            </label>
+            <label>
+              Linked alert
+              <input value={effectiveDraft.linkedAlertId} onChange={(event) => updateField("linkedAlertId", event.target.value)} placeholder="Alert ID" />
+            </label>
+            <label>
+              Sort
+              <select value={effectiveDraft.sort} onChange={(event) => updateField("sort", event.target.value)}>
+                {FRAUD_CASE_WORK_QUEUE_SORT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Slice size
+              <select value={effectiveDraft.size} onChange={(event) => updateField("size", Number(event.target.value))}>
+                {[20, 50, 100].map((size) => <option key={size} value={size}>{size}</option>)}
+              </select>
+            </label>
+          </div>
+        )}
+        {validationError && <p className="formError">{validationError}</p>}
+
+        <div className="workQueueChips" aria-label="Applied fraud case work queue filters">
           <span className="tag">Sort: {appliedSortLabel}</span>
           {activeFilters.length === 0 ? (
             <span className="tag">All queue cases</span>
@@ -176,98 +193,91 @@ export function FraudCaseWorkQueuePanel({
             <span className="tag" key={filter}>{filter}</span>
           ))}
         </div>
-        <div className="workQueueToolbarActions">
-          <button className="secondaryButton compactButton" type="button" onClick={applyFilters} disabled={isLoading || !draftChanged}>
-            Apply filters
-          </button>
-          <button className="secondaryButton compactButton" type="button" onClick={resetFilters} disabled={isLoading || (!draftChanged && activeFilters.length === 0)}>
-            Reset filters
-          </button>
-        </div>
       </div>
 
-      {duplicateCaseIds.length > 0 && (
+      <div className="srOnly" aria-live="polite">
+        {isLoading ? "Loading fraud case work queue" : lastRefreshedAt ? "Work queue refreshed" : ""}
+      </div>
+
+      {hasDuplicateWarning && (
         <div className="statePanel warningPanel" role="alert">
           <h3>Queue changed while loading.</h3>
-          <p>Refresh from first slice.</p>
-          <button className="secondaryButton" type="button" onClick={onRefreshFirstSlice}>
+          <p>Some duplicate rows were skipped. Refresh from the first slice for a clean view.</p>
+          <button className="secondaryButton" type="button" onClick={onRefreshFirstSlice} aria-label="Refresh fraud case work queue from first slice">
             Refresh from first slice
           </button>
         </div>
       )}
 
-      {isLoading && items.length === 0 && (
-        <div className="statePanel">
-          <div className="spinner" />
-          <p>Loading fraud case work queue...</p>
-        </div>
-      )}
-
       {!isLoading && error && (
-        <WorkQueueError error={error} invalidCursor={invalidCursor} onRetry={invalidCursor ? onRefreshFirstSlice : onRetry} />
+        <WorkQueueErrorPanel
+          refTarget={alertPanelRef}
+          error={error}
+          invalidCursor={invalidCursor}
+          onRetry={invalidCursor ? onRefreshFirstSlice : onRetry}
+        />
       )}
 
-      {!isLoading && !error && items.length === 0 && (
-        <div className="statePanel">
-          <h3>No fraud cases in this queue view</h3>
-          <p>Adjust the read filters to inspect another bounded queue slice.</p>
-        </div>
-      )}
-
-      {!error && items.length > 0 && (
+      {!error && (
         <>
-          <div className="tableWrap">
-            <table className="alertTable workQueueTable">
+          <div className="tableWrap workQueueTableWrap">
+            <table className="alertTable workQueueTable" aria-label="Fraud case work queue table">
+              <caption>Read-only fraud case work queue</caption>
               <thead>
                 <tr>
-                  <th>Case</th>
-                  <th>Status</th>
-                  <th>Priority</th>
-                  <th>Risk</th>
-                  <th>Investigator</th>
-                  <th>Age</th>
-                  <th>SLA</th>
-                  <th>Alerts</th>
-                  <th>Updated</th>
-                  <th>Action</th>
+                  <th scope="col">Case</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Priority</th>
+                  <th scope="col">Risk</th>
+                  <th scope="col">Assignee</th>
+                  <th scope="col">Age</th>
+                  <th scope="col">Updated</th>
+                  <th scope="col">SLA</th>
+                  <th scope="col">Alerts</th>
+                  <th scope="col">Action</th>
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => (
-                  <tr key={item.caseId}>
-                    <td>
-                      <div className="workQueueCaseCell">
-                        <strong>{item.caseNumber || item.caseId}</strong>
-                        {!item.caseNumber && <span>Case ID</span>}
+                {isLoading && items.length === 0 && <SkeletonRows />}
+                {!isLoading && items.length === 0 && (
+                  <tr>
+                    <td colSpan={10}>
+                      <div className="statePanel workQueueEmptyState">
+                        <h3>No cases match the current queue view.</h3>
+                        <p>Adjust filters or refresh from the first slice.</p>
                       </div>
                     </td>
-                    <td><span className="statusPill">{item.status || "UNKNOWN"}</span></td>
-                    <td><span className={`priorityPill priority${item.priority || "UNKNOWN"}`}>{item.priority || "UNKNOWN"}</span></td>
-                    <td><span className={`riskBadge risk${item.riskLevel || "UNKNOWN"}`}>{item.riskLevel || "UNKNOWN"}</span></td>
-                    <td>{item.assignedInvestigatorId || "Unassigned"}</td>
-                    <td>
-                      <strong>{formatDuration(item.caseAgeSeconds)}</strong>
-                      <span>Updated {formatDuration(item.lastUpdatedAgeSeconds)} ago</span>
-                    </td>
-                    <td>
-                      <span className={`slaBadge sla${item.slaStatus || "UNKNOWN"}`}>{formatSlaStatus(item.slaStatus)}</span>
-                      <span>{formatDateTime(item.slaDeadlineAt)}</span>
-                    </td>
-                    <td className="numericCell">{item.linkedAlertCount ?? 0}</td>
-                    <td>{formatDateTime(item.updatedAt || item.createdAt)}</td>
-                    <td>
-                      <button className="rowButton" type="button" onClick={() => onOpenCase(item.caseId)}>
-                        Open case
-                      </button>
-                    </td>
                   </tr>
+                )}
+                {items.map((item) => (
+                  <WorkQueueRow item={item} key={item.caseId} onOpenCase={onOpenCase} />
                 ))}
               </tbody>
             </table>
           </div>
+
+          <div className="workQueueCards" aria-label="Fraud case work queue cards">
+            {isLoading && items.length === 0 && <SkeletonCards />}
+            {!isLoading && items.length === 0 && (
+              <div className="statePanel workQueueEmptyState">
+                <h3>No cases match the current queue view.</h3>
+                <p>Adjust filters or refresh from the first slice.</p>
+              </div>
+            )}
+            {items.map((item) => (
+              <WorkQueueCard item={item} key={item.caseId} onOpenCase={onOpenCase} />
+            ))}
+          </div>
+
           <div className="workQueueFooter">
-            <span>{queue.hasNext ? "More cases available" : "End of current queue slice"} - {appliedSortLabel}</span>
-            <button className="secondaryButton" type="button" disabled={!queue.hasNext || isLoading} onClick={onLoadMore}>
+            <span>{queue.hasNext ? "More cases available" : "End of loaded queue"} - {appliedSortLabel}</span>
+            <button
+              className="secondaryButton"
+              type="button"
+              disabled={!queue.hasNext || isLoading}
+              onClick={onLoadMore}
+              aria-label="Load more fraud cases"
+            >
               {isLoading ? "Loading..." : "Load more"}
             </button>
           </div>
@@ -277,45 +287,77 @@ export function FraudCaseWorkQueuePanel({
   );
 }
 
-function SummaryMetric({ label, value, tone }) {
+function WorkQueueRow({ item, onOpenCase }) {
+  const caseLabel = item.caseNumber || "Unknown case";
   return (
-    <div className={`workQueueMetric workQueueMetric${tone}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
+    <tr tabIndex={0}>
+      <td>
+        <div className="workQueueCaseCell">
+          <strong>{caseLabel}</strong>
+        </div>
+      </td>
+      <td><WorkQueueBadge type="status" value={item.status} /></td>
+      <td><WorkQueueBadge type="priority" value={item.priority} /></td>
+      <td><WorkQueueBadge type="risk" value={item.riskLevel} /></td>
+      <td>{item.assignedInvestigatorId || "Unassigned"}</td>
+      <td><strong>{formatDurationFromSeconds(item.caseAgeSeconds)}</strong></td>
+      <td>{formatAgeAgo(item.lastUpdatedAgeSeconds)}</td>
+      <td>
+        <WorkQueueBadge type="sla" value={item.slaStatus} />
+        <span>{formatDateTime(item.slaDeadlineAt)}</span>
+      </td>
+      <td className="numericCell">{item.linkedAlertCount ?? 0}</td>
+      <td>
+        <button className="rowButton" type="button" onClick={() => onOpenCase(item.caseId)} aria-label={`Open fraud case ${caseLabel}`}>
+          Open case
+        </button>
+      </td>
+    </tr>
   );
 }
 
-function WorkQueueError({ error, invalidCursor, onRetry }) {
-  const message = messageForWorkQueueError(error, invalidCursor);
+function WorkQueueCard({ item, onOpenCase }) {
+  const caseLabel = item.caseNumber || "Unknown case";
   return (
-    <div className="statePanel errorPanel">
-      <h3>{message.title}</h3>
-      <p>{message.body}</p>
-      <button className="secondaryButton" type="button" onClick={onRetry}>
-        {invalidCursor ? "Refresh queue" : "Try again"}
+    <article className="workQueueCard">
+      <div className="workQueueCardHeader">
+        <strong>{caseLabel}</strong>
+        <WorkQueueBadge type="sla" value={item.slaStatus} />
+      </div>
+      <dl>
+        <div><dt>Status</dt><dd><WorkQueueBadge type="status" value={item.status} /></dd></div>
+        <div><dt>Priority</dt><dd><WorkQueueBadge type="priority" value={item.priority} /></dd></div>
+        <div><dt>Risk</dt><dd><WorkQueueBadge type="risk" value={item.riskLevel} /></dd></div>
+        <div><dt>Assignee</dt><dd>{item.assignedInvestigatorId || "Unassigned"}</dd></div>
+        <div><dt>Age</dt><dd>{formatDurationFromSeconds(item.caseAgeSeconds)}</dd></div>
+        <div><dt>Updated</dt><dd>{formatAgeAgo(item.lastUpdatedAgeSeconds)}</dd></div>
+        <div><dt>Alerts</dt><dd>{item.linkedAlertCount ?? 0}</dd></div>
+      </dl>
+      <button className="rowButton" type="button" onClick={() => onOpenCase(item.caseId)} aria-label={`Open fraud case ${caseLabel}`}>
+        Open case
       </button>
-    </div>
+    </article>
   );
 }
 
-function messageForWorkQueueError(error, invalidCursor) {
-  if (error?.status === 401) {
-    return { title: "Sign-in required", body: "Start a valid session before loading the fraud case work queue." };
-  }
-  if (error?.status === 403) {
-    return { title: "Access denied", body: "You do not have access to the fraud case work queue." };
-  }
-  if (error?.status === 503) {
-    return { title: "Work queue unavailable", body: "The fraud case work queue is fail-closed because a required service is unavailable." };
-  }
-  if (invalidCursor) {
-    return { title: "Queue position expired", body: "The queue position is no longer valid. Refresh the queue to load the first slice with the current filters." };
-  }
-  if (error?.status === 400) {
-    return { title: "Invalid work queue request", body: error.message || "Adjust the filter or sort selection and retry." };
-  }
-  return { title: "Unable to load work queue", body: error?.message || "Network error while loading the fraud case work queue." };
+function SkeletonRows() {
+  return Array.from({ length: 5 }, (_, index) => (
+    <tr className="skeletonRow" key={index}>
+      {Array.from({ length: 10 }, (__, cellIndex) => (
+        <td key={cellIndex}><span className="skeletonBlock" /></td>
+      ))}
+    </tr>
+  ));
+}
+
+function SkeletonCards() {
+  return Array.from({ length: 3 }, (_, index) => (
+    <div className="workQueueCard skeletonCard" key={index}>
+      <span className="skeletonBlock" />
+      <span className="skeletonBlock" />
+      <span className="skeletonBlock" />
+    </div>
+  ));
 }
 
 function isInvalidCursorError(error) {
@@ -326,46 +368,17 @@ function isInvalidCursorError(error) {
   );
 }
 
-function formatDuration(seconds) {
-  if (seconds === null || seconds === undefined) {
-    return "Not available";
-  }
-  const totalSeconds = Math.max(0, Number(seconds));
-  const days = Math.floor(totalSeconds / 86400);
-  const hours = Math.floor((totalSeconds % 86400) / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  if (days > 0) {
-    return `${days}d ${hours}h`;
-  }
-  if (hours > 0) {
-    return `${hours}h ${minutes}m`;
-  }
-  return `${minutes}m`;
-}
-
-function formatSlaStatus(status) {
-  return String(status || "UNKNOWN").replaceAll("_", " ");
-}
-
-function workQueueStats(items) {
-  return items.reduce((stats, item) => {
-    if (["OPEN", "IN_REVIEW", "REOPENED"].includes(item.status)) {
-      stats.open += 1;
+function workQueueStages(items) {
+  return items.reduce((stages, item) => {
+    if (["RESOLVED", "CLOSED"].includes(item.status)) {
+      stages.readyToSubmit += 1;
+    } else if (item.assignedInvestigatorId || ["IN_REVIEW", "ESCALATED"].includes(item.status)) {
+      stages.inProgress += 1;
+    } else {
+      stages.unstarted += 1;
     }
-    if (item.riskLevel === "CRITICAL") {
-      stats.critical += 1;
-    }
-    if (item.slaStatus === "NEAR_BREACH") {
-      stats.nearBreach += 1;
-    }
-    if (item.slaStatus === "BREACHED") {
-      stats.breached += 1;
-    }
-    if (!item.assignedInvestigatorId) {
-      stats.unassigned += 1;
-    }
-    return stats;
-  }, { open: 0, critical: 0, nearBreach: 0, breached: 0, unassigned: 0 });
+    return stages;
+  }, { unstarted: 0, inProgress: 0, readyToSubmit: 0 });
 }
 
 function activeFilterLabels(request) {
@@ -373,12 +386,12 @@ function activeFilterLabels(request) {
   addFilter(filters, "Status", request.status);
   addFilter(filters, "Priority", request.priority);
   addFilter(filters, "Risk", request.riskLevel);
-  addFilter(filters, "Investigator", request.assignee, "filter set");
-  addFilter(filters, "Created from", request.createdFrom, "local time set");
-  addFilter(filters, "Created to", request.createdTo, "local time set");
-  addFilter(filters, "Updated from", request.updatedFrom, "local time set");
-  addFilter(filters, "Updated to", request.updatedTo, "local time set");
-  addFilter(filters, "Alert", request.linkedAlertId, "filter set");
+  addFilter(filters, "Assignee", request.assignee, "set");
+  addFilter(filters, "Created from", request.createdFrom, "set");
+  addFilter(filters, "Created to", request.createdTo, "set");
+  addFilter(filters, "Updated from", request.updatedFrom, "set");
+  addFilter(filters, "Updated to", request.updatedTo, "set");
+  addFilter(filters, "Linked alert", request.linkedAlertId, "set");
   return filters;
 }
 
@@ -389,7 +402,7 @@ function addFilter(filters, label, value, displayValue = value) {
 }
 
 function sortLabelFor(sort) {
-  return FRAUD_CASE_WORK_QUEUE_SORT_OPTIONS.find((option) => option.value === sort)?.label || sort;
+  return FRAUD_CASE_WORK_QUEUE_SORT_OPTIONS.find((option) => option.value === sort)?.label || sort || DEFAULT_FRAUD_CASE_WORK_QUEUE_SORT;
 }
 
 function editableWorkQueueRequest(request = {}) {
@@ -410,18 +423,4 @@ function editableWorkQueueRequest(request = {}) {
 
 function sameEditableRequest(left, right) {
   return JSON.stringify(editableWorkQueueRequest(left)) === JSON.stringify(editableWorkQueueRequest(right));
-}
-
-function validateDraftRequest(request) {
-  const dateFields = [
-    ["Created from", request.createdFrom],
-    ["Created to", request.createdTo],
-    ["Updated from", request.updatedFrom],
-    ["Updated to", request.updatedTo]
-  ];
-  const invalidDate = dateFields.find(([, value]) => value && Number.isNaN(new Date(value).getTime()));
-  if (invalidDate) {
-    return `${invalidDate[0]} is not a valid local date and time.`;
-  }
-  return null;
 }

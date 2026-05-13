@@ -1,17 +1,22 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { FraudCaseWorkQueuePanel } from "./FraudCaseWorkQueuePanel.jsx";
 
 describe("FraudCaseWorkQueuePanel", () => {
-  it("renders only minimal work queue fields and no mutation/export controls", () => {
+  it("renders the analyst table columns and minimal allowed fields", () => {
     renderPanel({
       queue: {
         content: [
           workQueueItem({
             customerId: "customer-secret",
             transactionIds: ["tx-secret"],
+            merchantName: "Sensitive Merchant",
+            amount: "9999.00",
             rawReason: "raw fraud reason",
-            linkedAlertIds: ["alert-secret"]
+            linkedAlertIds: ["alert-secret"],
+            cursor: "raw-cursor",
+            auditDetails: "audit-internal",
+            idempotencyKey: "idem-secret"
           })
         ],
         hasNext: false,
@@ -19,23 +24,63 @@ describe("FraudCaseWorkQueuePanel", () => {
       }
     });
 
-    expect(screen.getByRole("heading", { name: "Fraud Case Work Queue" })).toBeInTheDocument();
-    expect(screen.getByText(/Read-only investigator queue/)).toBeInTheDocument();
-    expect(screen.getByText("CASE-2026-0001")).toBeInTheDocument();
-    expect(screen.getByText("investigator-1")).toBeInTheDocument();
-    expect(screen.getByText("NEAR BREACH")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open case" })).toBeInTheDocument();
-    expect(screen.queryByText("customer-secret")).not.toBeInTheDocument();
-    expect(screen.queryByText("tx-secret")).not.toBeInTheDocument();
-    expect(screen.queryByText("raw fraud reason")).not.toBeInTheDocument();
-    expect(screen.queryByText("alert-secret")).not.toBeInTheDocument();
-    expect(screen.queryByText("opaque-next-cursor")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /assign/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /close/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /export|csv|bulk|copy/i })).not.toBeInTheDocument();
+    const table = screen.getByRole("table", { name: "Fraud case work queue table" });
+    expect(within(table).getByRole("columnheader", { name: "Case" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "Status" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "Priority" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "Risk" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "Assignee" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "Age" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "Updated" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "SLA" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "Alerts" })).toBeInTheDocument();
+    expect(within(table).getByText("CASE-2026-0001")).toBeInTheDocument();
+    expect(within(table).getByText("investigator-1")).toBeInTheDocument();
+    expect(within(table).getByText("NEAR BREACH")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Open fraud case CASE-2026-0001" }).length).toBeGreaterThan(0);
+    expect(document.body).not.toHaveTextContent("customer-secret");
+    expect(document.body).not.toHaveTextContent("tx-secret");
+    expect(document.body).not.toHaveTextContent("Sensitive Merchant");
+    expect(document.body).not.toHaveTextContent("9999.00");
+    expect(document.body).not.toHaveTextContent("raw fraud reason");
+    expect(document.body).not.toHaveTextContent("alert-secret");
+    expect(document.body).not.toHaveTextContent("opaque-next-cursor");
+    expect(document.body).not.toHaveTextContent("audit-internal");
+    expect(document.body).not.toHaveTextContent("idem-secret");
+    expect(screen.queryByRole("button", { name: /assign|close|export|csv|bulk|copy/i })).not.toBeInTheDocument();
   });
 
-  it("deduplicates duplicate case ids in the rendered list", () => {
+  it("renders mobile cards with the same allowed fields", () => {
+    renderPanel();
+
+    const cards = screen.getByLabelText("Fraud case work queue cards");
+    expect(within(cards).getByText("CASE-2026-0001")).toBeInTheDocument();
+    expect(within(cards).getByText("Unassigned")).toBeInTheDocument();
+    expect(within(cards).getByText("2h 0m")).toBeInTheDocument();
+    expect(within(cards).getByRole("button", { name: "Open fraud case CASE-2026-0001" })).toBeInTheDocument();
+  });
+
+  it("renders loaded workflow stage counts without fake tab semantics", () => {
+    renderPanel({
+      queue: {
+        content: [
+          workQueueItem({ caseId: "case-1", caseNumber: "CASE-1", assignedInvestigatorId: "" }),
+          workQueueItem({ caseId: "case-2", caseNumber: "CASE-2", assignedInvestigatorId: "investigator-1" }),
+          workQueueItem({ caseId: "case-3", caseNumber: "CASE-3", status: "CLOSED" })
+        ],
+        hasNext: false
+      }
+    });
+
+    const stageCounts = screen.getByLabelText("Loaded fraud case workflow stage counts");
+    expect(within(stageCounts).getByText("Loaded unstarted")).toBeInTheDocument();
+    expect(within(stageCounts).getByText("Loaded in progress")).toBeInTheDocument();
+    expect(within(stageCounts).getByText("Loaded ready to submit")).toBeInTheDocument();
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+    expect(screen.queryAllByRole("tab")).toHaveLength(0);
+  });
+
+  it("deduplicates duplicate case ids in the rendered table", () => {
     renderPanel({
       queue: {
         content: [
@@ -46,41 +91,48 @@ describe("FraudCaseWorkQueuePanel", () => {
       }
     });
 
-    expect(screen.getByText("CASE-1")).toBeInTheDocument();
+    expect(screen.getAllByText("CASE-1")).toHaveLength(2);
     expect(screen.queryByText("CASE-1 duplicate")).not.toBeInTheDocument();
   });
 
-  it("applies filter and sort drafts only when requested", () => {
-    const onRequestChange = vi.fn();
+  it("keeps filter drafts controlled and applies only on explicit action", () => {
+    const onDraftChange = vi.fn();
+    const onApplyFilters = vi.fn();
     renderPanel({
-      onRequestChange,
       request: {
         ...defaultRequest(),
         status: "OPEN",
         priority: "HIGH"
-      }
+      },
+      draftRequest: {
+        ...defaultRequest(),
+        status: "CLOSED",
+        priority: "HIGH"
+      },
+      onDraftChange,
+      onApplyFilters
     });
 
     expect(screen.getByText("Status: OPEN")).toBeInTheDocument();
-    expect(screen.getByText("Priority: HIGH")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "CLOSED" } });
-    fireEvent.change(screen.getByLabelText("Sort"), { target: { value: "updatedAt,asc" } });
-    expect(onRequestChange).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "REOPENED" } });
+    expect(onDraftChange).toHaveBeenCalledWith("status", "REOPENED");
+    expect(onApplyFilters).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
-    fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply fraud case work queue filters" }));
+    expect(onApplyFilters).toHaveBeenCalledTimes(1);
+  });
 
-    expect(onRequestChange).toHaveBeenCalledWith(expect.objectContaining({
-      status: "CLOSED",
-      sort: "updatedAt,asc",
-      cursor: null
-    }));
-    expect(onRequestChange).toHaveBeenCalledWith(expect.objectContaining({
-      status: "ALL",
-      priority: "ALL",
-      cursor: null,
-      sort: "createdAt,desc"
-    }));
+  it("disables apply when filters are invalid", () => {
+    renderPanel({
+      draftRequest: {
+        ...defaultRequest(),
+        createdFrom: "invalid"
+      },
+      validationError: "Created from is not a valid local date and time."
+    });
+
+    expect(screen.getByText("Created from is not a valid local date and time.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apply fraud case work queue filters" })).toBeDisabled();
   });
 
   it("warns when an appended queue slice contains duplicate cases", () => {
@@ -95,7 +147,7 @@ describe("FraudCaseWorkQueuePanel", () => {
     });
 
     expect(screen.getByRole("alert")).toHaveTextContent("Queue changed while loading.");
-    fireEvent.click(screen.getByRole("button", { name: "Refresh from first slice" }));
+    fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "Refresh fraud case work queue from first slice" }));
 
     expect(onRefreshFirstSlice).toHaveBeenCalledTimes(1);
   });
@@ -112,7 +164,7 @@ describe("FraudCaseWorkQueuePanel", () => {
       onLoadMore
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    fireEvent.click(screen.getByRole("button", { name: "Load more fraud cases" }));
 
     expect(onLoadMore).toHaveBeenCalledTimes(1);
     expect(document.body).not.toHaveTextContent("opaque-sensitive-cursor");
@@ -124,10 +176,10 @@ describe("FraudCaseWorkQueuePanel", () => {
   });
 
   it.each([
-    [{ status: 401 }, "Sign-in required", "Start a valid session before loading the fraud case work queue."],
-    [{ status: 403 }, "Access denied", "You do not have access to the fraud case work queue."],
-    [{ status: 503 }, "Work queue unavailable", "fail-closed"],
-    [{ status: 400, error: "INVALID_CURSOR" }, "Queue position expired", "Refresh queue"],
+    [{ status: 401 }, "Session required", "No analyst session is currently active."],
+    [{ status: 403 }, "Access denied", "Your session does not include FRAUD_CASE_READ."],
+    [{ status: 503 }, "Work queue temporarily unavailable", "Sensitive-read audit is fail-closed."],
+    [{ status: 400, error: "INVALID_CURSOR" }, "Queue position expired", "Refresh from the first slice"],
     [{ status: 400, error: "INVALID_SORT", message: "INVALID_SORT" }, "Invalid work queue request", "INVALID_SORT"]
   ])("renders controlled error state for %o", (error, title, expectedText) => {
     renderPanel({ queue: { content: [], hasNext: false }, error });
@@ -135,15 +187,32 @@ describe("FraudCaseWorkQueuePanel", () => {
     expect(screen.getByRole("heading", { name: title })).toBeInTheDocument();
     expect(screen.getByText(new RegExp(expectedText))).toBeInTheDocument();
   });
+
+  it("marks regulated failure states with alert role", () => {
+    renderPanel({ queue: { content: [], hasNext: false }, error: { status: 503 } });
+    expect(screen.getByRole("alert")).toHaveTextContent("Work queue temporarily unavailable");
+  });
+
+  it("renders skeleton rows while initially loading", () => {
+    renderPanel({ queue: { content: [], hasNext: false }, isLoading: true });
+    expect(screen.getByText("Loading fraud case work queue")).toBeInTheDocument();
+    expect(screen.getAllByText("", { selector: ".skeletonBlock" }).length).toBeGreaterThan(0);
+  });
 });
 
 function renderPanel(overrides = {}) {
   const props = {
-    queue: { content: [workQueueItem()], hasNext: false, nextCursor: null, sort: "createdAt,desc", size: 20 },
+    queue: { content: [workQueueItem({ assignedInvestigatorId: "" })], hasNext: false, nextCursor: null, sort: "createdAt,desc", size: 20 },
     request: defaultRequest(),
+    draftRequest: defaultRequest(),
     isLoading: false,
     error: null,
-    onRequestChange: vi.fn(),
+    warning: null,
+    validationError: null,
+    lastRefreshedAt: null,
+    onDraftChange: vi.fn(),
+    onApplyFilters: vi.fn(),
+    onResetFilters: vi.fn(),
     onLoadMore: vi.fn(),
     onRetry: vi.fn(),
     onRefreshFirstSlice: vi.fn(),

@@ -96,6 +96,10 @@ export function listFraudCaseWorkQueue({
   return request(`/api/v1/fraud-cases/work-queue?${params.toString()}`);
 }
 
+export function getFraudCaseWorkQueueSummary() {
+  return request("/api/v1/fraud-cases/work-queue/summary");
+}
+
 export function listScoredTransactions({ page = 0, size = 25, query, riskLevel, status, classification } = {}) {
   const params = new URLSearchParams({
     page: String(Math.min(Math.max(Number(page) || 0, 0), 1000)),

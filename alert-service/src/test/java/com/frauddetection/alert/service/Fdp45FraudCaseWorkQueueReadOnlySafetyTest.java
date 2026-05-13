@@ -55,4 +55,31 @@ class Fdp45FraudCaseWorkQueueReadOnlySafetyTest {
         verify(auditRepository, never()).save(any());
         verify(repository, never()).delete(any());
     }
+
+    @Test
+    void shouldExposeGlobalFraudCaseCountWithoutReadingLegacyListOrMutatingState() {
+        FraudCaseRepository repository = mock(FraudCaseRepository.class);
+        FraudCaseAuditRepository auditRepository = mock(FraudCaseAuditRepository.class);
+        FraudCaseSearchRepository searchRepository = mock(FraudCaseSearchRepository.class);
+        when(repository.count()).thenReturn(46L);
+        FraudCaseQueryService service = new FraudCaseQueryService(
+                repository,
+                auditRepository,
+                searchRepository,
+                new FraudCaseResponseMapper(new AlertResponseMapper()),
+                Clock.systemUTC(),
+                Duration.ofHours(24)
+        );
+
+        var summary = service.globalFraudCaseSummary();
+
+        assertThat(summary.totalFraudCases()).isEqualTo(46L);
+        assertThat(summary.scope()).isEqualTo("GLOBAL_FRAUD_CASES");
+        assertThat(summary.snapshotConsistentWithWorkQueue()).isFalse();
+        verify(repository).count();
+        verify(searchRepository, never()).search(any(), any());
+        verify(searchRepository, never()).searchSlice(any(), any());
+        verify(repository, never()).save(any(FraudCaseDocument.class));
+        verify(auditRepository, never()).save(any());
+    }
 }

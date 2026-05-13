@@ -10,6 +10,7 @@ const {
   listFraudCaseWorkQueue,
   listGovernanceAdvisories,
   getGovernanceAdvisoryAnalytics,
+  getFraudCaseWorkQueueSummary,
   listScoredTransactions,
   setApiSession
 } = vi.hoisted(() => ({
@@ -39,6 +40,7 @@ const {
   listFraudCaseWorkQueue: vi.fn(),
   listGovernanceAdvisories: vi.fn(),
   getGovernanceAdvisoryAnalytics: vi.fn(),
+  getFraudCaseWorkQueueSummary: vi.fn(),
   listScoredTransactions: vi.fn(),
   setApiSession: vi.fn()
 }));
@@ -48,6 +50,7 @@ vi.mock("./api/alertsApi.js", () => ({
   listFraudCaseWorkQueue,
   listGovernanceAdvisories,
   getGovernanceAdvisoryAnalytics,
+  getFraudCaseWorkQueueSummary,
   listScoredTransactions,
   getGovernanceAdvisoryAudit: vi.fn(),
   recordGovernanceAdvisoryAudit: vi.fn(),
@@ -75,9 +78,11 @@ import App from "./App.jsx";
 describe("App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.history.replaceState({}, "", "/");
     callbackPath.value = true;
     refreshSession.mockResolvedValue({ userId: "", roles: [], extraAuthorities: [], authorities: [] });
     listFraudCaseWorkQueue.mockResolvedValue({ content: [], size: 20, hasNext: false, nextCursor: null, sort: "createdAt,desc" });
+    getFraudCaseWorkQueueSummary.mockResolvedValue(summary(0));
     listGovernanceAdvisories.mockResolvedValue({ status: "AVAILABLE", count: 0, retention_limit: 200, advisory_events: [] });
     getGovernanceAdvisoryAnalytics.mockResolvedValue({
       status: "AVAILABLE",
@@ -106,7 +111,7 @@ describe("App", () => {
     };
   });
 
-  it("handles the dedicated OIDC callback path before loading dashboard data", async () => {
+  it("handles the dedicated OIDC callback path before loading active workspace and navigation counters", async () => {
     completeLoginCallback.mockImplementation(async () => {
       callbackPath.value = false;
       return {
@@ -122,9 +127,16 @@ describe("App", () => {
     render(<App />);
 
     await waitFor(() => expect(completeLoginCallback).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(listAlerts).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
+    expect(listAlerts).toHaveBeenCalledWith({ page: 0, size: 1 });
     expect(listFraudCaseWorkQueue).toHaveBeenCalledTimes(1);
-    expect(listScoredTransactions).toHaveBeenCalledTimes(1);
+    expect(listScoredTransactions).toHaveBeenCalledWith({
+      page: 0,
+      size: 1,
+      query: "",
+      riskLevel: "ALL",
+      status: "ALL"
+    });
     expect(setApiSession).toHaveBeenCalled();
   });
 
@@ -144,13 +156,14 @@ describe("App", () => {
     render(<App />);
 
     await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
-    expect(await screen.findAllByRole("heading", { name: "Session expired" })).toHaveLength(2);
+    expect(await screen.findAllByText("The provider session expired or no longer has a usable access token.")).toHaveLength(2);
     expect(listAlerts).not.toHaveBeenCalled();
     expect(listFraudCaseWorkQueue).not.toHaveBeenCalled();
+    expect(getFraudCaseWorkQueueSummary).not.toHaveBeenCalled();
     expect(listScoredTransactions).not.toHaveBeenCalled();
   });
 
-  it("loads dashboard data once after an authenticated oidc bootstrap without flipping the session badge back to loading", async () => {
+  it("loads analyst workspace data once after an authenticated oidc bootstrap without flipping the session badge back to loading", async () => {
     callbackPath.value = false;
     refreshSession.mockResolvedValue({
       userId: "subject-1",
@@ -169,11 +182,125 @@ describe("App", () => {
     render(<App />);
 
     await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(listAlerts).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
+    expect(listAlerts).toHaveBeenCalledWith({ page: 0, size: 1 });
     expect(listFraudCaseWorkQueue).toHaveBeenCalledTimes(1);
-    expect(listScoredTransactions).toHaveBeenCalledTimes(1);
+    expect(listScoredTransactions).toHaveBeenCalledWith({
+      page: 0,
+      size: 1,
+      query: "",
+      riskLevel: "ALL",
+      status: "ALL"
+    });
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
     expect(screen.queryByText("Loading session state...")).not.toBeInTheDocument();
+  });
+
+  it("keeps transaction scoring usable when the fraud case global summary fails", async () => {
+    callbackPath.value = false;
+    refreshSession.mockResolvedValue(authenticatedSession());
+    providerState.value = {
+      ...providerState.value,
+      getSessionState: () => ({ status: "authenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
+    };
+    getFraudCaseWorkQueueSummary.mockRejectedValue({ status: 503, message: "summary unavailable" });
+    listScoredTransactions.mockResolvedValue(transactionPage("txn-visible"));
+
+    render(<App />);
+
+    await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("link", { name: "Transaction Scoring" }));
+
+    expect(await screen.findByText("txn-visible")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Session required" })).not.toBeInTheDocument();
+  });
+
+  it("fetches the visible global fraud case summary when transaction scoring is the initial workspace", async () => {
+    callbackPath.value = false;
+    window.history.replaceState({}, "", "/?workspace=transaction-scoring");
+    refreshSession.mockResolvedValue(authenticatedSession());
+    providerState.value = {
+      ...providerState.value,
+      getSessionState: () => ({ status: "authenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
+    };
+    listScoredTransactions.mockResolvedValue(transactionPage("txn-visible"));
+
+    render(<App />);
+
+    expect(await screen.findByText("txn-visible")).toBeInTheDocument();
+    expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1);
+    expect(listFraudCaseWorkQueue).not.toHaveBeenCalled();
+  });
+
+  it("keeps the visible fraud case summary when navigating into the fraud case workspace", async () => {
+    callbackPath.value = false;
+    window.history.replaceState({}, "", "/?workspace=transaction-scoring");
+    refreshSession.mockResolvedValue(authenticatedSession());
+    providerState.value = {
+      ...providerState.value,
+      getSessionState: () => ({ status: "authenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
+    };
+    listScoredTransactions.mockResolvedValue(transactionPage("txn-visible"));
+    getFraudCaseWorkQueueSummary.mockResolvedValue(summary(47));
+
+    render(<App />);
+
+    expect(await screen.findByText("txn-visible")).toBeInTheDocument();
+    await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole("link", { name: /Global fraud cases\s*47/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("link", { name: "Fraud Case" }));
+
+    await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole("link", { name: /Global fraud cases\s*47/ })).toBeInTheDocument();
+  });
+
+  it("refreshes visible navigation counters after switching away from the fraud case workspace", async () => {
+    callbackPath.value = false;
+    refreshSession.mockResolvedValue(authenticatedSession());
+    providerState.value = {
+      ...providerState.value,
+      getSessionState: () => ({ status: "authenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
+    };
+    listScoredTransactions.mockResolvedValue(transactionPage("txn-visible"));
+    getFraudCaseWorkQueueSummary.mockResolvedValue(summary(47));
+
+    render(<App />);
+
+    await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("link", { name: "Transaction Scoring" }));
+    expect(await screen.findByText("txn-visible")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => expect(listScoredTransactions).toHaveBeenCalledTimes(3));
+    expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(2);
+    expect(listFraudCaseWorkQueue).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps workspace state synchronized with browser back and forward navigation", async () => {
+    callbackPath.value = false;
+    refreshSession.mockResolvedValue(authenticatedSession());
+    providerState.value = {
+      ...providerState.value,
+      getSessionState: () => ({ status: "authenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
+    };
+    listScoredTransactions.mockResolvedValue(transactionPage("txn-visible"));
+
+    render(<App />);
+
+    await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("link", { name: "Transaction Scoring" }));
+    expect(await screen.findByText("txn-visible")).toBeInTheDocument();
+
+    window.history.pushState({}, "", "/");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+
+    expect(await screen.findByRole("heading", { name: "Fraud Case Work Queue" })).toBeInTheDocument();
   });
 
   it("keeps the newest transaction stream response when an older request resolves later", async () => {
@@ -193,9 +320,10 @@ describe("App", () => {
 
     render(<App />);
 
+    fireEvent.click(screen.getByRole("link", { name: "Transaction Scoring" }));
     await waitFor(() => expect(listScoredTransactions).toHaveBeenCalledTimes(1));
-    fireEvent.change(screen.getAllByLabelText("Search")[1], { target: { value: "customer-123" } });
-    fireEvent.click(screen.getAllByRole("button", { name: "Apply filters" })[1]);
+    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "customer-123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(listScoredTransactions).toHaveBeenCalledTimes(2));
 
     secondTransactions.resolve(transactionPage("txn-new"));
@@ -223,9 +351,10 @@ describe("App", () => {
 
     render(<App />);
 
+    fireEvent.click(screen.getByRole("link", { name: "Transaction Scoring" }));
     await waitFor(() => expect(listScoredTransactions).toHaveBeenCalledTimes(1));
-    fireEvent.change(screen.getAllByLabelText("Search")[1], { target: { value: "customer-123" } });
-    fireEvent.click(screen.getAllByRole("button", { name: "Apply filters" })[1]);
+    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "customer-123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(listScoredTransactions).toHaveBeenCalledTimes(2));
 
     secondTransactions.resolve(transactionPage("txn-new"));
@@ -272,5 +401,14 @@ function transactionPage(transactionId) {
     totalPages: 1,
     page: 0,
     size: 25
+  };
+}
+
+function summary(totalFraudCases) {
+  return {
+    totalFraudCases,
+    generatedAt: "2026-05-12T10:00:00Z",
+    scope: "GLOBAL_FRAUD_CASES",
+    snapshotConsistentWithWorkQueue: false
   };
 }

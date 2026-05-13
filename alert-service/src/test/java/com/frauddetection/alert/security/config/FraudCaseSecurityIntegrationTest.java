@@ -4,8 +4,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.api.FraudCaseAuditResponse;
 import com.frauddetection.alert.api.FraudCaseSlaStatus;
 import com.frauddetection.alert.api.FraudCaseWorkQueueItemResponse;
+import com.frauddetection.alert.api.FraudCaseWorkQueueSummaryResponse;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.controller.FraudCaseController;
+import com.frauddetection.alert.controller.FraudCaseWorkQueueSummaryController;
 import com.frauddetection.alert.domain.FraudCaseAuditAction;
 import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.domain.FraudCaseStatus;
@@ -19,6 +21,7 @@ import com.frauddetection.alert.security.error.ApiAccessDeniedHandler;
 import com.frauddetection.alert.security.error.ApiAuthenticationEntryPoint;
 import com.frauddetection.alert.security.error.SecurityErrorResponseWriter;
 import com.frauddetection.alert.service.FraudCaseManagementService;
+import com.frauddetection.alert.service.FraudCaseQueryService;
 import com.frauddetection.common.events.enums.RiskLevel;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -48,7 +51,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(FraudCaseController.class)
+@WebMvcTest({FraudCaseController.class, FraudCaseWorkQueueSummaryController.class})
 @Import({
         AlertSecurityConfig.class,
         ApiAuthenticationEntryPoint.class,
@@ -73,6 +76,9 @@ class FraudCaseSecurityIntegrationTest {
     private FraudCaseManagementService fraudCaseManagementService;
 
     @MockBean
+    private FraudCaseQueryService fraudCaseQueryService;
+
+    @MockBean
     private AlertServiceMetrics alertServiceMetrics;
 
     @MockBean
@@ -81,6 +87,9 @@ class FraudCaseSecurityIntegrationTest {
     @Test
     void shouldRequireAuthenticationForFraudCaseReadAndMutationEndpoints() throws Exception {
         mockMvc.perform(get("/api/v1/fraud-cases"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.details[0]").value("reason:missing_credentials"));
+        mockMvc.perform(get("/api/v1/fraud-cases/work-queue/summary"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.details[0]").value("reason:missing_credentials"));
 
@@ -97,6 +106,10 @@ class FraudCaseSecurityIntegrationTest {
                         .with(userWith(AnalystAuthority.TRANSACTION_MONITOR_READ)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.details[0]").value("reason:insufficient_authority"));
+        mockMvc.perform(get("/api/v1/fraud-cases/work-queue/summary")
+                        .with(userWith(AnalystAuthority.TRANSACTION_MONITOR_READ)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.details[0]").value("reason:insufficient_authority"));
     }
 
     @Test
@@ -104,6 +117,8 @@ class FraudCaseSecurityIntegrationTest {
         when(fraudCaseManagementService.listCases(any(Pageable.class))).thenReturn(new PageImpl<>(List.of(caseDocument())));
         when(fraudCaseManagementService.workQueue(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(Pageable.class)))
                 .thenReturn(new com.frauddetection.alert.api.FraudCaseWorkQueueSliceResponse(List.of(workQueueItem()), 0, 20, false, null));
+        when(fraudCaseQueryService.globalFraudCaseSummary())
+                .thenReturn(new FraudCaseWorkQueueSummaryResponse(42, Instant.parse("2026-05-12T10:00:00Z")));
         when(fraudCaseManagementService.getCase("case-1")).thenReturn(caseDocument());
 
         mockMvc.perform(get("/api/v1/fraud-cases").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
@@ -112,6 +127,11 @@ class FraudCaseSecurityIntegrationTest {
         mockMvc.perform(get("/api/v1/fraud-cases/work-queue").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].linkedAlertCount").value(1));
+        mockMvc.perform(get("/api/v1/fraud-cases/work-queue/summary").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalFraudCases").value(42))
+                .andExpect(jsonPath("$.scope").value("GLOBAL_FRAUD_CASES"))
+                .andExpect(jsonPath("$.snapshotConsistentWithWorkQueue").value(false));
         mockMvc.perform(get("/api/fraud-cases/case-1").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.caseId").value("case-1"));

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getGovernanceAdvisoryAnalytics,
   getGovernanceAdvisoryAudit,
+  getFraudCaseWorkQueueSummary,
   listAlerts,
   listFraudCaseWorkQueue,
   listGovernanceAdvisories,
@@ -208,6 +209,21 @@ describe("alertsApi auth headers", () => {
     expect(fetchMock.mock.calls[0][0]).not.toContain("/api/v1/fraud-cases?");
     expect(fetchMock.mock.calls[0][0]).not.toContain("status=ALL");
     expect(fetchMock.mock.calls[0][0]).not.toContain("riskLevel=");
+  });
+
+  it("loads fraud case work queue summary from the current v1 endpoint only", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      totalFraudCases: 46
+    }));
+
+    await getFraudCaseWorkQueueSummary();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/fraud-cases/work-queue/summary",
+      expect.objectContaining({ headers: expect.objectContaining({ "Content-Type": "application/json" }) })
+    );
+    expect(fetchMock.mock.calls[0][0]).not.toContain("/api/fraud-cases");
+    expect(fetchMock.mock.calls[0][0]).not.toContain("/api/v1/fraud-cases?");
   });
 
   it("rejects invalid work queue local date filters before fetch", async () => {
