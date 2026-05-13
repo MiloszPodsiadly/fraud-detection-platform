@@ -206,6 +206,57 @@ describe("authProvider", () => {
     });
   });
 
+  it("fails closed for future bff session statuses without widening the contract", async () => {
+    for (const sessionStatus of ["EXPIRED", "AUTH_UNAVAILABLE", "MISCONFIGURED"]) {
+      const provider = createBffAuthProvider(vi.fn().mockResolvedValue({
+        authenticated: false,
+        sessionStatus,
+        userId: "server-user-1",
+        roles: ["FRAUD_OPS_ADMIN"],
+        authorities: ["alert:read"]
+      }));
+
+      await provider.refreshSession();
+
+      expect(provider.getInitialSession()).toMatchObject({
+        userId: "",
+        roles: [],
+        authorities: []
+      });
+      expect(provider.getSessionState()).toEqual({
+        status: SESSION_STATES.AUTH_ERROR
+      });
+    }
+  });
+
+  it("treats an empty bff session response as anonymous bootstrap", async () => {
+    const provider = createBffAuthProvider(vi.fn().mockResolvedValue({}));
+
+    await provider.refreshSession();
+
+    expect(provider.getInitialSession().userId).toBe("");
+    expect(provider.getSessionState()).toEqual({
+      status: SESSION_STATES.UNAUTHENTICATED
+    });
+  });
+
+  it("normalizes backend roles and authorities as session hints without granting unknown roles", async () => {
+    const provider = createBffAuthProvider(vi.fn().mockResolvedValue({
+      authenticated: true,
+      sessionStatus: "AUTHENTICATED",
+      userId: "server-user-1",
+      roles: ["UNKNOWN_ROLE"],
+      authorities: ["unknown:capability"]
+    }));
+
+    await expect(provider.refreshSession()).resolves.toMatchObject({
+      userId: "server-user-1",
+      roles: [],
+      authorities: ["unknown:capability"]
+    });
+    expect(authHeadersForSession(provider).Authorization).toBeUndefined();
+  });
+
   it("fetches bff session with same-origin credentials and no authorization header", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -348,12 +399,28 @@ describe("authProvider", () => {
   });
 
   it("accepts relative bff logout redirects returned by the backend", () => {
+    expect(normalizeLogoutUrl({ logoutUrl: "/" })).toBe("/");
+    expect(normalizeLogoutUrl({ logoutUrl: "/logged-out" })).toBe("/logged-out");
     expect(normalizeLogoutUrl({ logoutUrl: "/signed-out" })).toBe("/signed-out");
     expect(normalizeLogoutUrl({ logoutUrl: "signed-out" })).toBe("signed-out");
   });
 
+  it("accepts backend-vetted absolute https and local http bff logout redirects", () => {
+    expect(normalizeLogoutUrl({
+      logoutUrl: "https://issuer.bank.example/logout?client_id=x"
+    })).toBe("https://issuer.bank.example/logout?client_id=x");
+    expect(normalizeLogoutUrl({
+      logoutUrl: "https://console.bank.example/logged-out"
+    })).toBe("https://console.bank.example/logged-out");
+    expect(normalizeLogoutUrl({
+      logoutUrl: "http://localhost:8086/realms/fraud-detection/protocol/openid-connect/logout"
+    })).toBe("http://localhost:8086/realms/fraud-detection/protocol/openid-connect/logout");
+  });
+
   it("rejects empty, protocol-relative, malformed, and unsafe bff logout redirects", () => {
     expect(() => normalizeLogoutUrl({ logoutUrl: "" }))
+      .toThrow("Logout redirect URL is not trusted.");
+    expect(() => normalizeLogoutUrl({ logoutUrl: "   " }))
       .toThrow("Logout redirect URL is not trusted.");
     expect(() => normalizeLogoutUrl({ logoutUrl: "//evil.example.test/logout" }))
       .toThrow("Logout redirect URL is not trusted.");

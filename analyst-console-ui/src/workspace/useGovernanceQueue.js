@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getGovernanceAdvisoryAudit, isAbortError, listGovernanceAdvisories } from "../api/alertsApi.js";
+import { isAbortError } from "../api/alertsApi.js";
 
 const INITIAL_QUEUE = {
   status: "UNAVAILABLE",
@@ -33,12 +33,8 @@ export function useGovernanceQueue({ enabled = true, apiClient } = {}) {
     setIsLoading(true);
     setError(null);
     try {
-      const client = apiClient || {
-        listGovernanceAdvisories,
-        getGovernanceAdvisoryAudit
-      };
-      const nextQueue = await client.listGovernanceAdvisories(nextRequest, { signal: abortController.signal });
-      const histories = await loadAuditHistories(client, nextQueue.advisory_events || [], abortController.signal);
+      const nextQueue = await apiClient.listGovernanceAdvisories(nextRequest, { signal: abortController.signal });
+      const histories = await loadAuditHistories(apiClient, nextQueue.advisory_events || [], abortController.signal);
       if (requestSeqRef.current !== requestSeq) {
         return null;
       }

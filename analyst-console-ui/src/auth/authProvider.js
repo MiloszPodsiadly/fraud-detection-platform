@@ -252,6 +252,8 @@ function csrfHeaders(csrf) {
 }
 
 export function normalizeLogoutUrl(payload) {
+  // Frontend performs syntax/dangerous-scheme sanity checks only.
+  // Backend BFF logout origin validation is the source of trust.
   const logoutUrl = typeof payload?.logoutUrl === "string" ? payload.logoutUrl.trim() : "";
   if (!logoutUrl) {
     throw new Error("Logout redirect URL is not trusted.");

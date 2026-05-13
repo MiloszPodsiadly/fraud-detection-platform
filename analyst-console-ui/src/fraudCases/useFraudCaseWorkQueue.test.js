@@ -15,7 +15,7 @@ describe("useFraudCaseWorkQueue", () => {
   });
 
   it("loads the first slice when enabled", async () => {
-    const { result } = renderHook(() => useFraudCaseWorkQueue({ enabled: true, session: { userId: "u1" }, authProvider: { kind: "demo" } }));
+    const { result } = renderHook(() => useFraudCaseWorkQueue({ enabled: true, session: { userId: "u1" }, authProvider: { kind: "demo" }, apiClient: workQueueApiClient }));
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -31,7 +31,7 @@ describe("useFraudCaseWorkQueue", () => {
     listFraudCaseWorkQueue
       .mockResolvedValueOnce(slice([{ caseId: "case-1" }], { nextCursor: "cursor-2", hasNext: true }))
       .mockResolvedValueOnce(slice([{ caseId: "case-2" }], { nextCursor: null, hasNext: false }));
-    const { result } = renderHook(() => useFraudCaseWorkQueue({ enabled: true }));
+    const { result } = renderHook(() => useFraudCaseWorkQueue({ enabled: true, apiClient: workQueueApiClient }));
     await waitFor(() => expect(result.current.queue.content).toHaveLength(1));
 
     act(() => result.current.loadMore());
@@ -41,7 +41,7 @@ describe("useFraudCaseWorkQueue", () => {
   });
 
   it("apply filters resets cursor and content", async () => {
-    const { result } = renderHook(() => useFraudCaseWorkQueue({ enabled: true }));
+    const { result } = renderHook(() => useFraudCaseWorkQueue({ enabled: true, apiClient: workQueueApiClient }));
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     listFraudCaseWorkQueue.mockResolvedValueOnce(slice([{ caseId: "case-filtered" }]));
 
@@ -56,7 +56,7 @@ describe("useFraudCaseWorkQueue", () => {
   });
 
   it("reset filters clears filters and cursor", async () => {
-    const { result } = renderHook(() => useFraudCaseWorkQueue({ enabled: true }));
+    const { result } = renderHook(() => useFraudCaseWorkQueue({ enabled: true, apiClient: workQueueApiClient }));
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     listFraudCaseWorkQueue.mockResolvedValueOnce(slice([]));
 
@@ -72,7 +72,7 @@ describe("useFraudCaseWorkQueue", () => {
     listFraudCaseWorkQueue
       .mockResolvedValueOnce(slice([{ caseId: "case-1" }], { nextCursor: "bad-cursor", hasNext: true }))
       .mockRejectedValueOnce(invalidCursor);
-    const { result } = renderHook(() => useFraudCaseWorkQueue({ enabled: true }));
+    const { result } = renderHook(() => useFraudCaseWorkQueue({ enabled: true, apiClient: workQueueApiClient }));
     await waitFor(() => expect(result.current.queue.nextCursor).toBe("bad-cursor"));
 
     act(() => result.current.loadMore());
@@ -89,7 +89,7 @@ describe("useFraudCaseWorkQueue", () => {
     listFraudCaseWorkQueue
       .mockReturnValueOnce(first)
       .mockResolvedValueOnce(slice([{ caseId: "new" }]));
-    const { result } = renderHook(() => useFraudCaseWorkQueue({ enabled: true }));
+    const { result } = renderHook(() => useFraudCaseWorkQueue({ enabled: true, apiClient: workQueueApiClient }));
 
     act(() => result.current.refreshFirstSlice());
     resolveFirst(slice([{ caseId: "old" }]));
@@ -102,7 +102,7 @@ describe("useFraudCaseWorkQueue", () => {
     listFraudCaseWorkQueue
       .mockReturnValueOnce(first.promise)
       .mockResolvedValueOnce(slice([{ caseId: "filtered" }]));
-    const { result } = renderHook(() => useFraudCaseWorkQueue({ enabled: true }));
+    const { result } = renderHook(() => useFraudCaseWorkQueue({ enabled: true, apiClient: workQueueApiClient }));
     await waitFor(() => expect(listFraudCaseWorkQueue).toHaveBeenCalledTimes(1));
     const firstSignal = listFraudCaseWorkQueue.mock.calls[0][1].signal;
 
@@ -117,7 +117,7 @@ describe("useFraudCaseWorkQueue", () => {
     const pending = deferred();
     listFraudCaseWorkQueue.mockReturnValue(pending.promise);
 
-    const { result, unmount } = renderHook(() => useFraudCaseWorkQueue({ enabled: true }));
+    const { result, unmount } = renderHook(() => useFraudCaseWorkQueue({ enabled: true, apiClient: workQueueApiClient }));
     await waitFor(() => expect(listFraudCaseWorkQueue).toHaveBeenCalledTimes(1));
     const signal = listFraudCaseWorkQueue.mock.calls[0][1].signal;
 
@@ -130,7 +130,7 @@ describe("useFraudCaseWorkQueue", () => {
   it("ignores AbortError without exposing a network error", async () => {
     listFraudCaseWorkQueue.mockRejectedValue(new DOMException("aborted", "AbortError"));
 
-    const { result } = renderHook(() => useFraudCaseWorkQueue({ enabled: true }));
+    const { result } = renderHook(() => useFraudCaseWorkQueue({ enabled: true, apiClient: workQueueApiClient }));
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.error).toBeNull();
@@ -138,7 +138,7 @@ describe("useFraudCaseWorkQueue", () => {
 
   it("clears loaded queue state when disabled", async () => {
     const { result, rerender } = renderHook(
-      ({ enabled }) => useFraudCaseWorkQueue({ enabled, session: { userId: "u1" }, authProvider: { kind: "bff" } }),
+      ({ enabled }) => useFraudCaseWorkQueue({ enabled, session: { userId: "u1" }, authProvider: { kind: "bff" }, apiClient: workQueueApiClient }),
       { initialProps: { enabled: true } }
     );
     await waitFor(() => expect(result.current.queue.content).toEqual([{ caseId: "case-1" }]));
@@ -163,6 +163,10 @@ function slice(content, overrides = {}) {
   };
 }
 
+const workQueueApiClient = {
+  listFraudCaseWorkQueue
+};
+
 function deferred() {
   let resolve;
   let reject;
@@ -172,3 +176,4 @@ function deferred() {
   });
   return { promise, resolve, reject };
 }
+

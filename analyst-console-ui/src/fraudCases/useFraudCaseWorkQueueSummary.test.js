@@ -18,7 +18,8 @@ describe("useFraudCaseWorkQueueSummary", () => {
     const { result } = renderHook(() => useFraudCaseWorkQueueSummary({
       enabled: true,
       session: { userId: "u1" },
-      authProvider: { kind: "oidc" }
+      authProvider: { kind: "oidc" },
+      apiClient: summaryApiClient
     }));
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
@@ -28,7 +29,7 @@ describe("useFraudCaseWorkQueueSummary", () => {
   });
 
   it("does not call the summary endpoint while disabled", () => {
-    renderHook(() => useFraudCaseWorkQueueSummary({ enabled: false }));
+    renderHook(() => useFraudCaseWorkQueueSummary({ enabled: false, apiClient: summaryApiClient }));
 
     expect(getFraudCaseWorkQueueSummary).not.toHaveBeenCalled();
   });
@@ -37,7 +38,7 @@ describe("useFraudCaseWorkQueueSummary", () => {
     const apiError = { status: 403, message: "forbidden" };
     getFraudCaseWorkQueueSummary.mockRejectedValue(apiError);
 
-    const { result } = renderHook(() => useFraudCaseWorkQueueSummary({ enabled: true }));
+    const { result } = renderHook(() => useFraudCaseWorkQueueSummary({ enabled: true, apiClient: summaryApiClient }));
 
     await waitFor(() => expect(result.current.error).toBe(apiError));
     expect(result.current.summary.totalFraudCases).toBe(0);
@@ -47,7 +48,7 @@ describe("useFraudCaseWorkQueueSummary", () => {
     getFraudCaseWorkQueueSummary
       .mockRejectedValueOnce({ status: 503, message: "down" })
       .mockResolvedValueOnce(summary(50));
-    const { result } = renderHook(() => useFraudCaseWorkQueueSummary({ enabled: true }));
+    const { result } = renderHook(() => useFraudCaseWorkQueueSummary({ enabled: true, apiClient: summaryApiClient }));
     await waitFor(() => expect(result.current.error?.status).toBe(503));
 
     await act(async () => {
@@ -59,7 +60,7 @@ describe("useFraudCaseWorkQueueSummary", () => {
   });
 
   it("does not call summary endpoint when authority gate is false", () => {
-    renderHook(() => useFraudCaseWorkQueueSummary({ enabled: true, canReadFraudCases: false }));
+    renderHook(() => useFraudCaseWorkQueueSummary({ enabled: true, canReadFraudCases: false, apiClient: summaryApiClient }));
 
     expect(getFraudCaseWorkQueueSummary).not.toHaveBeenCalled();
   });
@@ -69,7 +70,7 @@ describe("useFraudCaseWorkQueueSummary", () => {
     getFraudCaseWorkQueueSummary
       .mockReturnValueOnce(first.promise)
       .mockResolvedValueOnce(summary(51));
-    const { result } = renderHook(() => useFraudCaseWorkQueueSummary({ enabled: true, canReadFraudCases: true }));
+    const { result } = renderHook(() => useFraudCaseWorkQueueSummary({ enabled: true, canReadFraudCases: true, apiClient: summaryApiClient }));
     await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
     const firstSignal = getFraudCaseWorkQueueSummary.mock.calls[0][0].signal;
 
@@ -84,7 +85,7 @@ describe("useFraudCaseWorkQueueSummary", () => {
   it("ignores AbortError without exposing a local error", async () => {
     getFraudCaseWorkQueueSummary.mockRejectedValue(new DOMException("aborted", "AbortError"));
 
-    const { result } = renderHook(() => useFraudCaseWorkQueueSummary({ enabled: true }));
+    const { result } = renderHook(() => useFraudCaseWorkQueueSummary({ enabled: true, apiClient: summaryApiClient }));
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.error).toBeNull();
@@ -96,7 +97,8 @@ describe("useFraudCaseWorkQueueSummary", () => {
         enabled: true,
         canReadFraudCases,
         session: { userId: "u1" },
-        authProvider: { kind: "bff" }
+        authProvider: { kind: "bff" },
+        apiClient: summaryApiClient
       }),
       { initialProps: { canReadFraudCases: true } }
     );
@@ -117,6 +119,10 @@ function summary(totalFraudCases) {
     snapshotConsistentWithWorkQueue: false
   };
 }
+
+const summaryApiClient = {
+  getFraudCaseWorkQueueSummary
+};
 
 function deferred() {
   let resolve;

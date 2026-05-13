@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { isAbortError, listFraudCaseWorkQueue } from "../api/alertsApi.js";
+import { isAbortError } from "../api/alertsApi.js";
 import {
   initialFraudCaseWorkQueue,
   initialFraudCaseWorkQueueRequest,
@@ -39,7 +39,7 @@ export function useFraudCaseWorkQueue({
     setIsLoading(true);
     setError(null);
     try {
-      const nextQueue = await (apiClient?.listFraudCaseWorkQueue || listFraudCaseWorkQueue)(request, { signal: abortController.signal });
+      const nextQueue = await apiClient.listFraudCaseWorkQueue(request, { signal: abortController.signal });
       if (requestSeqRef.current !== requestSeq) {
         return;
       }

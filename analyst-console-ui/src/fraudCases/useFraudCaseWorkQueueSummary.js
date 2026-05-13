@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getFraudCaseWorkQueueSummary, isAbortError } from "../api/alertsApi.js";
+import { isAbortError } from "../api/alertsApi.js";
 
 const INITIAL_SUMMARY = {
   totalFraudCases: 0,
@@ -31,7 +31,7 @@ export function useFraudCaseWorkQueueSummary({ enabled, canReadFraudCases, sessi
     setError(null);
 
     try {
-      const nextSummary = await (apiClient?.getFraudCaseWorkQueueSummary || getFraudCaseWorkQueueSummary)({ signal: abortController.signal });
+      const nextSummary = await apiClient.getFraudCaseWorkQueueSummary({ signal: abortController.signal });
       if (requestSeqRef.current !== requestSeq) {
         return;
       }

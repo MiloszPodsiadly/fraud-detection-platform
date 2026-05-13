@@ -6,6 +6,7 @@
   "scripts": {
     "generate:authorities": "node ../scripts/generate-frontend-authorities.mjs",
     "check:authorities": "node ../scripts/generate-frontend-authorities.mjs --check",
+    "check:api-client-boundary": "node ../scripts/check-fdp48-api-client-boundary.mjs",
     "dev": "npm run generate:authorities && vite --host 127.0.0.1",
     "build": "npm run generate:authorities && vite build",
     "preview": "vite preview --host 127.0.0.1",

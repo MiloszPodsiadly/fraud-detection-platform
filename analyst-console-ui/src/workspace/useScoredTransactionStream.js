@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { isAbortError, listScoredTransactions } from "../api/alertsApi.js";
+import { isAbortError } from "../api/alertsApi.js";
 
 const INITIAL_TRANSACTION_PAGE = {
   content: [],
@@ -35,7 +35,7 @@ export function useScoredTransactionStream({ enabled = true, session, authProvid
     setIsLoading(true);
     setError(null);
     try {
-      const nextPage = await (apiClient?.listScoredTransactions || listScoredTransactions)(nextRequest, { signal: abortController.signal });
+      const nextPage = await apiClient.listScoredTransactions(nextRequest, { signal: abortController.signal });
       if (requestSeqRef.current !== requestSeq) {
         return null;
       }

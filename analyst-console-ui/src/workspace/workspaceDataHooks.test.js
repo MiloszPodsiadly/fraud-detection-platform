@@ -39,7 +39,7 @@ describe("workspace data hooks", () => {
   });
 
   it("does not fetch alert queue while disabled", () => {
-    renderHook(() => useAlertQueue({ enabled: false }));
+    renderHook(() => useAlertQueue({ enabled: false, apiClient: workspaceApiClient }));
 
     expect(listAlerts).not.toHaveBeenCalled();
   });
@@ -47,7 +47,7 @@ describe("workspace data hooks", () => {
   it("loads alert queue when enabled", async () => {
     listAlerts.mockResolvedValue(page([{ alertId: "alert-1" }], { totalElements: 1 }));
 
-    const { result } = renderHook(() => useAlertQueue({ enabled: true }));
+    const { result } = renderHook(() => useAlertQueue({ enabled: true, apiClient: workspaceApiClient }));
 
     await waitFor(() => expect(result.current.page.content).toEqual([{ alertId: "alert-1" }]));
     expect(result.current.page.totalElements).toBe(1);
@@ -55,7 +55,7 @@ describe("workspace data hooks", () => {
 
   it("aborts scored transaction request on unmount", async () => {
     listScoredTransactions.mockReturnValue(new Promise(() => {}));
-    const { unmount } = renderHook(() => useScoredTransactionStream({ enabled: true }));
+    const { unmount } = renderHook(() => useScoredTransactionStream({ enabled: true, apiClient: workspaceApiClient }));
     await waitFor(() => expect(listScoredTransactions).toHaveBeenCalledTimes(1));
     const signal = listScoredTransactions.mock.calls[0][1].signal;
 
@@ -66,7 +66,7 @@ describe("workspace data hooks", () => {
 
   it("ignores scored transaction AbortError", async () => {
     listScoredTransactions.mockRejectedValue(new DOMException("aborted", "AbortError"));
-    const { result } = renderHook(() => useScoredTransactionStream({ enabled: true }));
+    const { result } = renderHook(() => useScoredTransactionStream({ enabled: true, apiClient: workspaceApiClient }));
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.error).toBeNull();
@@ -74,7 +74,8 @@ describe("workspace data hooks", () => {
 
   it("clears alert queue state when disabled after data was loaded", async () => {
     listAlerts.mockResolvedValue(page([{ alertId: "alert-1" }], { totalElements: 1 }));
-    const { result, rerender } = renderHook(({ enabled }) => useAlertQueue({ enabled }), {
+    const apiClient = workspaceApiClient;
+    const { result, rerender } = renderHook(({ enabled }) => useAlertQueue({ enabled, apiClient }), {
       initialProps: { enabled: true }
     });
     await waitFor(() => expect(result.current.page.content).toEqual([{ alertId: "alert-1" }]));
@@ -87,7 +88,8 @@ describe("workspace data hooks", () => {
 
   it("clears scored transaction state when disabled after data was loaded", async () => {
     listScoredTransactions.mockResolvedValue(page([{ transactionId: "txn-1" }], { totalElements: 1 }));
-    const { result, rerender } = renderHook(({ enabled }) => useScoredTransactionStream({ enabled }), {
+    const apiClient = workspaceApiClient;
+    const { result, rerender } = renderHook(({ enabled }) => useScoredTransactionStream({ enabled, apiClient }), {
       initialProps: { enabled: true }
     });
     await waitFor(() => expect(result.current.page.content).toEqual([{ transactionId: "txn-1" }]));
@@ -104,7 +106,8 @@ describe("workspace data hooks", () => {
       count: 1,
       advisory_events: [{ event_id: "event-1" }]
     });
-    const { result, rerender } = renderHook(({ enabled }) => useGovernanceQueue({ enabled }), {
+    const apiClient = workspaceApiClient;
+    const { result, rerender } = renderHook(({ enabled }) => useGovernanceQueue({ enabled, apiClient }), {
       initialProps: { enabled: true }
     });
     await waitFor(() => expect(result.current.queue.count).toBe(1));
@@ -117,7 +120,8 @@ describe("workspace data hooks", () => {
   });
 
   it("clears governance analytics state when disabled after data was loaded", async () => {
-    const { result, rerender } = renderHook(({ enabled }) => useGovernanceAnalytics({ enabled }), {
+    const apiClient = workspaceApiClient;
+    const { result, rerender } = renderHook(({ enabled }) => useGovernanceAnalytics({ enabled, apiClient }), {
       initialProps: { enabled: true }
     });
     await waitFor(() => expect(result.current.analytics.totals.advisories).toBe(1));
@@ -130,7 +134,7 @@ describe("workspace data hooks", () => {
 
   it("aborts governance queue requests on unmount", async () => {
     listGovernanceAdvisories.mockReturnValue(new Promise(() => {}));
-    const { unmount } = renderHook(() => useGovernanceQueue({ enabled: true }));
+    const { unmount } = renderHook(() => useGovernanceQueue({ enabled: true, apiClient: workspaceApiClient }));
     await waitFor(() => expect(listGovernanceAdvisories).toHaveBeenCalledTimes(1));
     const signal = listGovernanceAdvisories.mock.calls[0][1].signal;
 
@@ -142,7 +146,7 @@ describe("workspace data hooks", () => {
 
   it("aborts previous governance queue request on refresh", async () => {
     listGovernanceAdvisories.mockReturnValue(new Promise(() => {}));
-    const { result } = renderHook(() => useGovernanceQueue({ enabled: true }));
+    const { result } = renderHook(() => useGovernanceQueue({ enabled: true, apiClient: workspaceApiClient }));
     await waitFor(() => expect(listGovernanceAdvisories).toHaveBeenCalledTimes(1));
     const firstSignal = listGovernanceAdvisories.mock.calls[0][1].signal;
 
@@ -157,7 +161,7 @@ describe("workspace data hooks", () => {
 
   it("ignores governance queue AbortError", async () => {
     listGovernanceAdvisories.mockRejectedValue(new DOMException("aborted", "AbortError"));
-    const { result } = renderHook(() => useGovernanceQueue({ enabled: true }));
+    const { result } = renderHook(() => useGovernanceQueue({ enabled: true, apiClient: workspaceApiClient }));
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.error).toBeNull();
@@ -170,7 +174,7 @@ describe("workspace data hooks", () => {
     listGovernanceAdvisories
       .mockReturnValueOnce(first.promise)
       .mockReturnValueOnce(second.promise);
-    const { result } = renderHook(() => useGovernanceQueue({ enabled: true }));
+    const { result } = renderHook(() => useGovernanceQueue({ enabled: true, apiClient: workspaceApiClient }));
     await waitFor(() => expect(listGovernanceAdvisories).toHaveBeenCalledTimes(1));
 
     act(() => result.current.setRequest((current) => ({ ...current, severity: "HIGH" })));
@@ -195,7 +199,7 @@ describe("workspace data hooks", () => {
     });
     getGovernanceAdvisoryAudit.mockResolvedValue({ status: "AVAILABLE", audit_events: [] });
 
-    renderHook(() => useGovernanceQueue({ enabled: true }));
+    renderHook(() => useGovernanceQueue({ enabled: true, apiClient: workspaceApiClient }));
 
     await waitFor(() => expect(getGovernanceAdvisoryAudit).toHaveBeenCalledWith(
       "event-1",
@@ -205,7 +209,7 @@ describe("workspace data hooks", () => {
 
   it("aborts governance analytics requests on unmount", async () => {
     getGovernanceAdvisoryAnalytics.mockReturnValue(new Promise(() => {}));
-    const { unmount } = renderHook(() => useGovernanceAnalytics({ enabled: true }));
+    const { unmount } = renderHook(() => useGovernanceAnalytics({ enabled: true, apiClient: workspaceApiClient }));
     await waitFor(() => expect(getGovernanceAdvisoryAnalytics).toHaveBeenCalledTimes(1));
     const signal = getGovernanceAdvisoryAnalytics.mock.calls[0][1].signal;
 
@@ -217,7 +221,8 @@ describe("workspace data hooks", () => {
 
   it("aborts governance analytics on disable", async () => {
     getGovernanceAdvisoryAnalytics.mockReturnValue(new Promise(() => {}));
-    const { rerender } = renderHook(({ enabled }) => useGovernanceAnalytics({ enabled }), {
+    const apiClient = workspaceApiClient;
+    const { rerender } = renderHook(({ enabled }) => useGovernanceAnalytics({ enabled, apiClient }), {
       initialProps: { enabled: true }
     });
     await waitFor(() => expect(getGovernanceAdvisoryAnalytics).toHaveBeenCalledTimes(1));
@@ -230,7 +235,7 @@ describe("workspace data hooks", () => {
 
   it("ignores governance analytics AbortError", async () => {
     getGovernanceAdvisoryAnalytics.mockRejectedValue(new DOMException("aborted", "AbortError"));
-    const { result } = renderHook(() => useGovernanceAnalytics({ enabled: true }));
+    const { result } = renderHook(() => useGovernanceAnalytics({ enabled: true, apiClient: workspaceApiClient }));
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.error).toBeNull();
@@ -243,7 +248,7 @@ describe("workspace data hooks", () => {
     getGovernanceAdvisoryAnalytics
       .mockReturnValueOnce(first.promise)
       .mockReturnValueOnce(second.promise);
-    const { result } = renderHook(() => useGovernanceAnalytics({ enabled: true }));
+    const { result } = renderHook(() => useGovernanceAnalytics({ enabled: true, apiClient: workspaceApiClient }));
     await waitFor(() => expect(getGovernanceAdvisoryAnalytics).toHaveBeenCalledTimes(1));
 
     act(() => result.current.setWindowDays(14));
@@ -281,6 +286,14 @@ function analyticsWithTotal(advisories) {
     review_timeliness: { status: "LOW_CONFIDENCE" }
   };
 }
+
+const workspaceApiClient = {
+  getGovernanceAdvisoryAnalytics,
+  getGovernanceAdvisoryAudit,
+  listAlerts,
+  listGovernanceAdvisories,
+  listScoredTransactions
+};
 
 function deferred() {
   let resolve;

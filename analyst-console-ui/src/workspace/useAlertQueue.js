@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { isAbortError, listAlerts } from "../api/alertsApi.js";
+import { isAbortError } from "../api/alertsApi.js";
 
 const INITIAL_ALERT_PAGE = {
   content: [],
@@ -27,7 +27,7 @@ export function useAlertQueue({ enabled = true, session, authProvider, apiClient
     setIsLoading(true);
     setError(null);
     try {
-      const nextPage = await (apiClient?.listAlerts || listAlerts)(nextRequest, { signal: abortController.signal });
+      const nextPage = await apiClient.listAlerts(nextRequest, { signal: abortController.signal });
       if (requestSeqRef.current !== requestSeq) {
         return null;
       }

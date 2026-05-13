@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getGovernanceAdvisoryAnalytics, isAbortError } from "../api/alertsApi.js";
+import { isAbortError } from "../api/alertsApi.js";
 
 const INITIAL_ANALYTICS = {
   status: "UNAVAILABLE",
@@ -31,7 +31,7 @@ export function useGovernanceAnalytics({ enabled = true, apiClient } = {}) {
     setIsLoading(true);
     setError(null);
     try {
-      const nextAnalytics = await (apiClient?.getGovernanceAdvisoryAnalytics || getGovernanceAdvisoryAnalytics)({ windowDays: days }, { signal: abortController.signal });
+      const nextAnalytics = await apiClient.getGovernanceAdvisoryAnalytics({ windowDays: days }, { signal: abortController.signal });
       if (requestSeqRef.current !== requestSeq) {
         return null;
       }
