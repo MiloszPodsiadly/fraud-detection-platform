@@ -22,7 +22,8 @@
       "frontchannelLogout": true,
       "redirectUris": [
         "http://localhost:5173/auth/callback",
-        "http://localhost:4173/auth/callback"
+        "http://localhost:4173/auth/callback",
+        "http://localhost:4173/login/oauth2/code/keycloak"
       ],
       "webOrigins": [
         "http://localhost:5173",

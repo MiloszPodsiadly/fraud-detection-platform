@@ -136,6 +136,11 @@ app:
   security:
     demo-auth:
       enabled: ${APP_SECURITY_DEMO_AUTH_ENABLED:false}
+    bff:
+      enabled: ${APP_SECURITY_BFF_ENABLED:false}
+      post-logout-redirect-uri: ${APP_SECURITY_BFF_POST_LOGOUT_REDIRECT_URI:/}
+      provider-logout-uri: ${APP_SECURITY_BFF_PROVIDER_LOGOUT_URI:}
+      client-id: ${APP_SECURITY_BFF_CLIENT_ID:analyst-console-ui}
     jwt:
       enabled: ${APP_SECURITY_JWT_ENABLED:false}
       required: ${APP_SECURITY_JWT_REQUIRED:false}
