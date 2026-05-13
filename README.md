@@ -946,10 +946,12 @@ Security UX:
 - `src/auth/authProvider.js` is the provider boundary for request headers and session persistence.
 - `src/auth/oidcClient.js` is the SDK-facing OIDC adapter boundary.
 - `src/auth/oidcSessionSource.js` is the real provider-backed session source that normalizes `profile`, `access_token`, and expiry state into the stable UI session contract.
+- BFF mode obtains normalized identity and CSRF metadata from `GET /api/v1/session`; it does not expose bearer tokens to the React API client.
 - The UI sends auth headers from one provider-based API injection point.
 - Any frontend group-to-role normalization is UX only; backend authority checks remain the enforcement contract.
 - Session lifecycle states distinguish `loading`, `authenticated`, `unauthenticated`, `expired`, `access_denied`, and `auth_error`.
-- OIDC mode supports login redirect, callback handling, local session bootstrap from provider-managed storage, bearer propagation, logout redirect, and expired-session UX without silent refresh.
+- OIDC/direct-token mode supports login redirect, callback handling, local session bootstrap from provider-managed storage, bearer propagation, logout redirect, and expired-session UX without silent refresh.
+- Docker OIDC browser mode uses the BFF path: cookie-backed requests use explicit same-origin credentials and CSRF, and logout fails closed on backend failure or untrusted redirect URLs.
 - The Docker OIDC override rebuilds the frontend with exact callback URLs for `http://localhost:4173`.
 - Write actions are disabled when the session lacks the required authority.
 - HTTP 401 can render a session-required or session-expired state depending on the known lifecycle context.
@@ -965,8 +967,8 @@ Full details: [Security Foundation v1](docs/security/security-foundation-v1.md).
 Current non-production gaps:
 
 - Internal service-auth foundation is implemented for configured ML/governance calls through RS256 JWT service identity, FDP-18 internal mTLS service identity, compatibility token validation, and an explicit local/dev bypass mode; it is not enterprise IAM or automated certificate lifecycle management.
-- The frontend still uses demo auth by default in development.
-- The frontend OIDC path is a local OIDC integration and foundation for production auth, but it does not yet implement silent refresh or production deployment hardening.
+- The frontend still supports demo auth for local development, but production-like builds default to BFF auth and reject implicit demo auth unless explicitly overridden for local use.
+- The direct frontend OIDC path is a local integration and compatibility mode; the Docker browser flow uses the BFF pattern so bearer tokens are not attached by React fetch calls.
 - Request DTOs still accept `analystId` for compatibility, although secured write paths use the principal as actor source of truth.
 
 Planned production path:
@@ -974,7 +976,7 @@ Planned production path:
 - Configure real issuer/JWK settings per environment.
 - Configure externally managed CA, service certificates, and private-key material for FDP-18 mTLS deployments.
 - Finalize IdP claim naming and group/role mapping for deployment.
-- Harden the existing frontend OIDC flow for deployment environments while preserving the `userId`/`roles`/`authorities` UI contract and lifecycle states.
+- Continue hardening deployment-specific IdP configuration while preserving the `userId`/`roles`/`authorities` UI contract and lifecycle states.
 - Define audit retention/export policy if compliance requirements need long-term searchable audit history.
 
 Migration notes: [Security Foundation v1](docs/security/security-foundation-v1.md).

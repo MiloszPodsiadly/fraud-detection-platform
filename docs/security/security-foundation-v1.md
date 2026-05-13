@@ -29,7 +29,7 @@ Frontend:
 - Auth request header generation is now behind `src/auth/authProvider.js`.
 - `src/auth/oidcClient.js` is the SDK-facing OIDC adapter boundary.
 - `src/auth/oidcSessionSource.js` is now a real provider-backed session source for local Keycloak.
-- Local OIDC login flow is implemented for browser login, callback handling, bearer propagation, and logout.
+- Local OIDC login flow is implemented for browser login, callback handling, BFF-backed browser sessions, direct bearer compatibility, and logout.
 - Security states distinguish `loading`, `authenticated`, `unauthenticated`, `expired`, `access_denied`, `auth_error`, and missing-permission action states.
 - Frontend action gating is UX only; backend authorization remains authoritative.
 - A small contract guard test checks that frontend authority names stay aligned with backend `AnalystAuthority` constants.
@@ -491,9 +491,10 @@ Session behavior:
 - HTTP 401 can render a session-required or session-expired panel depending on known lifecycle context
 - HTTP 403 shows an access-denied panel
 
-The frontend now supports two local auth modes:
+The frontend now supports three local auth modes:
 
 - demo auth as the default quickstart
+- BFF auth through `alert-service` server-side OIDC login when `VITE_AUTH_PROVIDER=bff`
 - OIDC auth through local Keycloak when `VITE_AUTH_PROVIDER=oidc`
 
 Current provider boundary:
@@ -502,10 +503,23 @@ Current provider boundary:
 - `src/auth/demoSession.js` remains the local editable source.
 - `src/auth/oidcClient.js` hides `oidc-client-ts` behind a small adapter surface.
 - `src/auth/oidcSessionSource.js` normalizes a provider snapshot into UI session, token, and lifecycle state.
-- bearer token propagation is active through the provider/header boundary
+- `GET /api/v1/session` exposes normalized BFF identity, authorities, and CSRF metadata without exposing tokens.
+- bearer token propagation remains available only in direct OIDC compatibility mode through the provider/header boundary
 - `SessionBadge` can render both editable demo mode and read-only provider-driven mode, including auth mode, identity, role, authority scope, login, and logout actions.
 
-Local OIDC browser flow:
+Local BFF browser flow:
+
+```text
+Browser
+  -> alert-service /oauth2/authorization/keycloak
+  -> Keycloak (login)
+  -> alert-service session
+  -> SPA GET /api/v1/session
+  -> cookie + CSRF requests
+  -> alert-service RBAC enforcement
+```
+
+Direct local OIDC compatibility flow:
 
 ```text
 Browser
@@ -525,9 +539,10 @@ Current OIDC lifecycle behavior:
 - backend JWT validation and authority checks remain authoritative for RBAC
 - expired provider sessions render the dedicated `expired` UI state
 - expired, unauthenticated, access-denied, and auth-error states block automatic dashboard fetches
-- logout clears the local provider-backed session view and then redirects to IdP logout
+- BFF logout requires CSRF, validates the backend-provided redirect, and clears local session state only after a successful backend logout response
+- direct OIDC logout clears the local provider-backed session view and then redirects to IdP logout
 - no silent refresh is implemented in v1
-- Docker OIDC mode rebuilds `analyst-console-ui` with exact `VITE_OIDC_*` callback/logout URLs for the nginx UI on `http://localhost:4173`
+- Docker OIDC mode rebuilds `analyst-console-ui` with `VITE_AUTH_PROVIDER=bff` for the nginx UI on `http://localhost:4173`
 
 ## 401/403 Error Contract
 
@@ -622,8 +637,8 @@ Reviewers should check:
 - Durable audit storage is not WORM/immutable archive storage, legal notarization, legal non-repudiation, SIEM integration, long-term archival policy, regulator-ready evidence package, or HSM/KMS signing. FDP-20 external anchoring extends tamper evidence outside the primary MongoDB boundary, but the local-file sink is not certified immutable storage and does not create legal non-repudiation.
 - FDP-21 trust attestation is a derived trust assessment over FDP-19/FDP-20 signals. FDP-23 adds a separate local trust authority for external anchor hash signatures, but local keys remain development/verification material only. Neither FDP-21 nor FDP-23 is KMS/HSM signing, legal notarization, WORM storage, SIEM integration, or a compliance archive.
 - No SIEM audit export/integration yet.
-- The frontend still defaults to demo auth unless OIDC env vars are set explicitly.
-- The frontend OIDC path is a local OIDC integration and foundation for production auth, not a production-ready SSO setup.
+- The frontend still supports demo auth for local quickstart, but production-like builds default to BFF auth and reject implicit demo auth unless explicitly allowed for local use.
+- The direct frontend OIDC path is a local compatibility mode. The Docker browser path uses BFF auth so React API calls do not attach bearer tokens.
 - No silent refresh or session management hardening is shipped for deployment environments yet.
 - Backend and frontend currently duplicate authority names.
 - `analystId` is still accepted in write DTOs for compatibility.
@@ -632,7 +647,7 @@ Reviewers should check:
 ## Suggested Next Steps
 
 1. Wire real JWT issuer/JWK configuration per environment and finalize deployment claim names.
-2. Harden the existing frontend OIDC client path for deployment environments and finalize operational login/logout behavior.
+2. Harden deployment-specific BFF/IdP configuration and finalize operational login/logout behavior.
 3. Remove request-body actor fields once API compatibility allows it.
 4. Define audit retention/export policy if compliance requirements need long-term searchable audit history.
 5. Decide whether a shared security module is justified after another service needs the same model.
