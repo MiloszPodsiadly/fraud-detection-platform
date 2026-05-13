@@ -24,7 +24,9 @@ class Fdp47FraudCaseWorkQueueSummaryContractTest {
                 .contains("not used for pagination metadata")
                 .contains("not snapshot-consistent")
                 .contains("snapshotConsistentWithWorkQueue")
-                .contains("FRAUD_CASE_WORK_QUEUE_SUMMARY");
+                .contains("FRAUD_CASE_WORK_QUEUE_SUMMARY")
+                .contains("post-auth observations")
+                .contains("401/403 outcomes are covered by security tests");
         assertThat(combined.toLowerCase())
                 .doesNotContain("snapshot-consistent global")
                 .doesNotContain("filter-scoped total")
