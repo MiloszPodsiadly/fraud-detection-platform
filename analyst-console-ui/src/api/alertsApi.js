@@ -3,6 +3,8 @@ import { authHeadersForSession } from "../auth/authHeaders.js";
 import { getConfiguredAuthProvider } from "../auth/authProvider.js";
 
 const API_BASE_URL = import.meta.env.VITE_ALERT_API_BASE_URL ?? "";
+// Temporary process-wide bridge while workspaces still call the legacy module API.
+// The next step is a per-workspace createApiClient so provider/session state cannot be shared globally.
 let activeSession = null;
 let activeAuthProvider = getConfiguredAuthProvider();
 

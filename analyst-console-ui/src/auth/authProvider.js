@@ -237,7 +237,7 @@ function csrfHeaders(csrf) {
   };
 }
 
-function normalizeLogoutUrl(payload) {
+export function normalizeLogoutUrl(payload) {
   const logoutUrl = typeof payload?.logoutUrl === "string" ? payload.logoutUrl.trim() : "";
   if (!logoutUrl) {
     return "/";

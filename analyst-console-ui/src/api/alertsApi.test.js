@@ -8,7 +8,9 @@ import {
   listGovernanceAdvisories,
   listScoredTransactions,
   recordGovernanceAdvisoryAudit,
-  setApiSession
+  setApiSession,
+  submitAnalystDecision,
+  updateFraudCase
 } from "./alertsApi.js";
 import { normalizeSession } from "../auth/session.js";
 import { createBffAuthProvider, createDemoAuthProvider, createOidcAuthProvider } from "../auth/authProvider.js";
@@ -228,17 +230,7 @@ describe("alertsApi auth headers", () => {
 
   it("uses same-origin credentials and csrf without authorization for bff requests", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ content: [] }));
-    const authProvider = createBffAuthProvider(vi.fn().mockResolvedValue({
-      authenticated: true,
-      userId: "server-user-1",
-      roles: ["FRAUD_OPS_ADMIN"],
-      authorities: ["alert:read"],
-      csrf: {
-        headerName: "X-CSRF-TOKEN",
-        token: "csrf-1"
-      }
-    }));
-    await authProvider.refreshSession();
+    const authProvider = await refreshedBffProvider("X-CSRF-TOKEN", "csrf-1");
 
     setApiSession(normalizeSession({ userId: "server-user-1", roles: ["FRAUD_OPS_ADMIN"] }), authProvider);
     await listAlerts();
@@ -254,23 +246,31 @@ describe("alertsApi auth headers", () => {
     expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty("X-Demo-User-Id");
   });
 
+  it("uses bff credentials without authorization for all FDP-48 read paths", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => Promise.resolve(jsonResponse({ content: [] })));
+    const authProvider = await refreshedBffProvider("X-CSRF-TOKEN", "csrf-read");
+    setApiSession(normalizeSession({ userId: "server-user-1", roles: ["FRAUD_OPS_ADMIN"] }), authProvider);
+
+    await listAlerts();
+    await listFraudCaseWorkQueue();
+    await getFraudCaseWorkQueueSummary();
+    await listScoredTransactions();
+    await listGovernanceAdvisories();
+    await getGovernanceAdvisoryAnalytics();
+
+    for (const [, options] of fetchMock.mock.calls) {
+      expect(options.credentials).toBe("same-origin");
+      expect(options.headers.Authorization).toBeUndefined();
+      expect(options.headers).not.toHaveProperty("X-Demo-User-Id");
+    }
+  });
+
   it("sends bff csrf and same-origin credentials for mutating requests", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
       operation_status: "COMMITTED",
       updated_case: { caseId: "case-1", status: "CLOSED" }
     }));
-    const authProvider = createBffAuthProvider(vi.fn().mockResolvedValue({
-      authenticated: true,
-      userId: "server-user-1",
-      roles: ["FRAUD_OPS_ADMIN"],
-      authorities: ["fraud-case:update"],
-      csrf: {
-        headerName: "X-XSRF-TOKEN",
-        token: "csrf-2"
-      }
-    }));
-    await authProvider.refreshSession();
-    const { updateFraudCase } = await import("./alertsApi.js");
+    const authProvider = await refreshedBffProvider("X-XSRF-TOKEN", "csrf-2");
 
     setApiSession(normalizeSession({ userId: "server-user-1", roles: ["FRAUD_OPS_ADMIN"] }), authProvider);
     await updateFraudCase("case-1", {
@@ -290,6 +290,81 @@ describe("alertsApi auth headers", () => {
       })
     }));
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined();
+  });
+
+  it("uses bff csrf and no authorization for alert and governance mutations", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => Promise.resolve(jsonResponse({
+      operation_status: "COMMITTED"
+    })));
+    const authProvider = await refreshedBffProvider("X-XSRF-TOKEN", "csrf-mutation");
+    setApiSession(normalizeSession({ userId: "server-user-1", roles: ["FRAUD_OPS_ADMIN"] }), authProvider);
+
+    await submitAnalystDecision("alert-1", {
+      analystId: "server-user-1",
+      decision: "MARKED_LEGITIMATE",
+      decisionReason: "Reviewed",
+      tags: []
+    }, { idempotencyKey: "alert-decision-alert-1-key" });
+    await recordGovernanceAdvisoryAudit("event-1", {
+      decision: "ACKNOWLEDGED",
+      note: "Reviewed by operator"
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/v1/alerts/alert-1/decision", expect.objectContaining({
+      method: "POST",
+      credentials: "same-origin",
+      headers: expect.objectContaining({
+        "X-XSRF-TOKEN": "csrf-mutation",
+        "X-Idempotency-Key": "alert-decision-alert-1-key"
+      })
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/governance/advisories/event-1/audit", expect.objectContaining({
+      method: "POST",
+      credentials: "same-origin",
+      headers: expect.objectContaining({
+        "X-XSRF-TOKEN": "csrf-mutation"
+      })
+    }));
+    for (const [, options] of fetchMock.mock.calls) {
+      expect(options.headers.Authorization).toBeUndefined();
+    }
+  });
+
+  it("uses the latest active provider when switching from oidc to bff", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => Promise.resolve(jsonResponse({ content: [] })));
+    const oidcProvider = createOidcAuthProvider(createInMemoryOidcSessionSource({
+      accessToken: "oidc-token-123",
+      session: { userId: "oidc-analyst", roles: ["ANALYST"] }
+    }));
+    const bffProvider = await refreshedBffProvider("X-CSRF-TOKEN", "csrf-current");
+
+    setApiSession(normalizeSession({ userId: "oidc-analyst", roles: ["ANALYST"] }), oidcProvider);
+    await listAlerts();
+    setApiSession(normalizeSession({ userId: "server-user-1", roles: ["FRAUD_OPS_ADMIN"] }), bffProvider);
+    await listAlerts();
+
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer oidc-token-123");
+    expect(fetchMock.mock.calls[1][1].credentials).toBe("same-origin");
+    expect(fetchMock.mock.calls[1][1].headers.Authorization).toBeUndefined();
+    expect(fetchMock.mock.calls[1][1].headers["X-CSRF-TOKEN"]).toBe("csrf-current");
+  });
+
+  it("does not leak stale bff csrf when switching back to oidc", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => Promise.resolve(jsonResponse({ content: [] })));
+    const bffProvider = await refreshedBffProvider("X-CSRF-TOKEN", "csrf-stale");
+    const oidcProvider = createOidcAuthProvider(createInMemoryOidcSessionSource({
+      accessToken: "oidc-token-456",
+      session: { userId: "oidc-analyst", roles: ["ANALYST"] }
+    }));
+
+    setApiSession(normalizeSession({ userId: "server-user-1", roles: ["FRAUD_OPS_ADMIN"] }), bffProvider);
+    await listAlerts();
+    setApiSession(normalizeSession({ userId: "oidc-analyst", roles: ["ANALYST"] }), oidcProvider);
+    await listAlerts();
+
+    expect(fetchMock.mock.calls[1][1].headers.Authorization).toBe("Bearer oidc-token-456");
+    expect(fetchMock.mock.calls[1][1].headers).not.toHaveProperty("X-CSRF-TOKEN");
+    expect(fetchMock.mock.calls[1][1]).not.toHaveProperty("credentials");
   });
 
   it("passes AbortSignal to list endpoints", async () => {
@@ -375,8 +450,6 @@ describe("alertsApi auth headers", () => {
       operation_status: "COMMITTED",
       updated_case: { caseId: "case-1", status: "CLOSED" }
     }));
-    const { updateFraudCase } = await import("./alertsApi.js");
-
     await updateFraudCase("case-1", {
       status: "CLOSED",
       analystId: "analyst-1",
@@ -397,8 +470,6 @@ describe("alertsApi auth headers", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
       resultingStatus: "RESOLVED"
     }));
-    const { submitAnalystDecision } = await import("./alertsApi.js");
-
     await submitAnalystDecision("alert-1", {
       analystId: "analyst-1",
       decision: "MARKED_LEGITIMATE",
@@ -415,6 +486,21 @@ describe("alertsApi auth headers", () => {
     }));
   });
 });
+
+async function refreshedBffProvider(headerName = "X-CSRF-TOKEN", token = "csrf-1") {
+  const authProvider = createBffAuthProvider(vi.fn().mockResolvedValue({
+    authenticated: true,
+    userId: "server-user-1",
+    roles: ["FRAUD_OPS_ADMIN"],
+    authorities: ["alert:read", "fraud-case:update", "governance-advisory:audit:write"],
+    csrf: {
+      headerName,
+      token
+    }
+  }));
+  await authProvider.refreshSession();
+  return authProvider;
+}
 
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), {

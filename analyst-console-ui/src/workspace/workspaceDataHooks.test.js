@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getGovernanceAdvisoryAnalytics,
@@ -128,6 +128,82 @@ describe("workspace data hooks", () => {
     await waitFor(() => expect(result.current.analytics.totals.advisories).toBe(0));
     expect(result.current.error).toBeNull();
   });
+
+  it("aborts governance queue requests on unmount", async () => {
+    listGovernanceAdvisories.mockReturnValue(new Promise(() => {}));
+    const { unmount } = renderHook(() => useGovernanceQueue({ enabled: true }));
+    await waitFor(() => expect(listGovernanceAdvisories).toHaveBeenCalledTimes(1));
+    const signal = listGovernanceAdvisories.mock.calls[0][1].signal;
+
+    unmount();
+
+    expect(signal.aborted).toBe(true);
+  });
+
+  it("ignores governance queue AbortError", async () => {
+    listGovernanceAdvisories.mockRejectedValue(new DOMException("aborted", "AbortError"));
+    const { result } = renderHook(() => useGovernanceQueue({ enabled: true }));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.error).toBeNull();
+    expect(result.current.queue.count).toBe(0);
+  });
+
+  it("prevents stale governance queue responses from overwriting latest state", async () => {
+    const first = deferred();
+    const second = deferred();
+    listGovernanceAdvisories
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const { result } = renderHook(() => useGovernanceQueue({ enabled: true }));
+    await waitFor(() => expect(listGovernanceAdvisories).toHaveBeenCalledTimes(1));
+
+    act(() => result.current.setRequest((current) => ({ ...current, severity: "HIGH" })));
+    await waitFor(() => expect(listGovernanceAdvisories).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      second.resolve({ status: "AVAILABLE", count: 2, advisory_events: [{ event_id: "event-2" }] });
+    });
+    await waitFor(() => expect(result.current.queue.count).toBe(2));
+    await act(async () => {
+      first.resolve({ status: "AVAILABLE", count: 1, advisory_events: [{ event_id: "event-1" }] });
+    });
+
+    expect(result.current.queue.count).toBe(2);
+    expect(result.current.queue.advisory_events).toEqual([{ event_id: "event-2" }]);
+  });
+
+  it("aborts governance analytics requests on unmount", async () => {
+    getGovernanceAdvisoryAnalytics.mockReturnValue(new Promise(() => {}));
+    const { unmount } = renderHook(() => useGovernanceAnalytics({ enabled: true }));
+    await waitFor(() => expect(getGovernanceAdvisoryAnalytics).toHaveBeenCalledTimes(1));
+    const signal = getGovernanceAdvisoryAnalytics.mock.calls[0][1].signal;
+
+    unmount();
+
+    expect(signal.aborted).toBe(true);
+  });
+
+  it("prevents stale governance analytics responses from overwriting latest state", async () => {
+    const first = deferred();
+    const second = deferred();
+    getGovernanceAdvisoryAnalytics
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const { result } = renderHook(() => useGovernanceAnalytics({ enabled: true }));
+    await waitFor(() => expect(getGovernanceAdvisoryAnalytics).toHaveBeenCalledTimes(1));
+
+    act(() => result.current.setWindowDays(14));
+    await waitFor(() => expect(getGovernanceAdvisoryAnalytics).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      second.resolve(analyticsWithTotal(2));
+    });
+    await waitFor(() => expect(result.current.analytics.totals.advisories).toBe(2));
+    await act(async () => {
+      first.resolve(analyticsWithTotal(1));
+    });
+
+    expect(result.current.analytics.totals.advisories).toBe(2);
+  });
 });
 
 function page(content, overrides = {}) {
@@ -139,4 +215,25 @@ function page(content, overrides = {}) {
     size: 25,
     ...overrides
   };
+}
+
+function analyticsWithTotal(advisories) {
+  return {
+    status: "AVAILABLE",
+    window: { days: 7 },
+    totals: { advisories, reviewed: advisories, open: 0 },
+    decision_distribution: {},
+    lifecycle_distribution: {},
+    review_timeliness: { status: "LOW_CONFIDENCE" }
+  };
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
 }

@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createBffAuthProvider, createDemoAuthProvider, createOidcAuthProvider, resolveAuthProviderKind } from "./authProvider.js";
+import {
+  createBffAuthProvider,
+  createDemoAuthProvider,
+  createOidcAuthProvider,
+  normalizeLogoutUrl,
+  resolveAuthProviderKind
+} from "./authProvider.js";
 import { authHeadersForSession } from "./authHeaders.js";
 import { createOidcSessionSource, normalizeOidcSessionSnapshot } from "./oidcSessionSource.js";
 import { SESSION_STATES } from "./sessionState.js";
@@ -121,6 +127,35 @@ describe("authProvider", () => {
     });
   });
 
+  it("fetches bff session with same-origin credentials and no authorization header", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        authenticated: true,
+        sessionStatus: "AUTHENTICATED",
+        userId: "server-user-1",
+        roles: ["FRAUD_OPS_ADMIN"],
+        authorities: ["alert:read"],
+        csrf: {
+          headerName: "X-CSRF-TOKEN",
+          token: "csrf-1"
+        }
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = createBffAuthProvider();
+
+    await provider.refreshSession();
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/session", {
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json"
+      }
+    });
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined();
+  });
+
   it("redirects bff logout through the provider logout endpoint", async () => {
     const fetchSession = vi.fn().mockResolvedValue({
       authenticated: true,
@@ -228,6 +263,17 @@ describe("authProvider", () => {
 
     expect(provider.getInitialSession().userId).toBe("server-user-1");
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("rejects protocol-relative and unsafe bff logout redirects", () => {
+    expect(() => normalizeLogoutUrl({ logoutUrl: "//evil.example.test/logout" }))
+      .toThrow("Logout redirect URL is not trusted.");
+    expect(() => normalizeLogoutUrl({ logoutUrl: "javascript:alert(1)" }))
+      .toThrow("Logout redirect URL is not trusted.");
+    expect(() => normalizeLogoutUrl({ logoutUrl: "data:text/html,logout" }))
+      .toThrow("Logout redirect URL is not trusted.");
+    expect(() => normalizeLogoutUrl({ logoutUrl: "file:///tmp/logout" }))
+      .toThrow("Logout redirect URL is not trusted.");
   });
 
   it("defaults production-like builds to bff and rejects implicit demo auth", () => {
