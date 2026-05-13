@@ -59,6 +59,8 @@ export function useGovernanceAnalytics({ enabled = true } = {}) {
       abortControllerRef.current?.abort();
       abortControllerRef.current = null;
       requestSeqRef.current += 1;
+      setAnalytics(INITIAL_ANALYTICS);
+      setError(null);
       setIsLoading(false);
       return;
     }

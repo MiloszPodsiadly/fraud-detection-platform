@@ -23,6 +23,7 @@ export function useAlertQueue({ enabled = true, session, authProvider } = {}) {
     sessionRef.current = session;
     authProviderRef.current = authProvider;
   }, [authProvider, session]);
+  const sessionIdentity = `${authProvider?.kind || "none"}:${session?.userId || ""}`;
 
   const load = useCallback(async (nextRequest = request) => {
     abortControllerRef.current?.abort();
@@ -62,11 +63,13 @@ export function useAlertQueue({ enabled = true, session, authProvider } = {}) {
       abortControllerRef.current?.abort();
       abortControllerRef.current = null;
       requestSeqRef.current += 1;
+      setPage(INITIAL_ALERT_PAGE);
+      setError(null);
       setIsLoading(false);
       return;
     }
     load(request);
-  }, [enabled, load, request]);
+  }, [enabled, load, request, sessionIdentity]);
 
   useEffect(() => () => {
     abortControllerRef.current?.abort();

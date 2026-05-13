@@ -137,6 +137,21 @@ describe("useFraudCaseWorkQueue", () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.error).toBeNull();
   });
+
+  it("clears loaded queue state when disabled", async () => {
+    const { result, rerender } = renderHook(
+      ({ enabled }) => useFraudCaseWorkQueue({ enabled, session: { userId: "u1" }, authProvider: { kind: "bff" } }),
+      { initialProps: { enabled: true } }
+    );
+    await waitFor(() => expect(result.current.queue.content).toEqual([{ caseId: "case-1" }]));
+
+    rerender({ enabled: false });
+
+    await waitFor(() => expect(result.current.queue.content).toEqual([]));
+    expect(result.current.error).toBeNull();
+    expect(result.current.warning).toBeNull();
+    expect(result.current.lastRefreshedAt).toBeNull();
+  });
 });
 
 function slice(content, overrides = {}) {

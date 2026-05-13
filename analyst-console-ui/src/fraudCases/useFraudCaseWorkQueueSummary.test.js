@@ -91,6 +91,24 @@ describe("useFraudCaseWorkQueueSummary", () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.error).toBeNull();
   });
+
+  it("clears summary when authority gate is lost after data was loaded", async () => {
+    const { result, rerender } = renderHook(
+      ({ canReadFraudCases }) => useFraudCaseWorkQueueSummary({
+        enabled: true,
+        canReadFraudCases,
+        session: { userId: "u1" },
+        authProvider: { kind: "bff" }
+      }),
+      { initialProps: { canReadFraudCases: true } }
+    );
+    await waitFor(() => expect(result.current.summary.totalFraudCases).toBe(46));
+
+    rerender({ canReadFraudCases: false });
+
+    await waitFor(() => expect(result.current.summary.totalFraudCases).toBe(0));
+    expect(result.current.error).toBeNull();
+  });
 });
 
 function summary(totalFraudCases) {

@@ -19,9 +19,13 @@ async function request(path, options = {}) {
     ...fetchOptions
   } = options;
   const authHeaders = includeAuth ? authHeadersForSession(activeAuthProvider, activeSession) : {};
+  const credentialOptions = activeAuthProvider?.kind === "bff"
+    ? { credentials: fetchOptions.credentials || "same-origin" }
+    : {};
   let response;
   try {
     response = await fetch(`${baseUrl}${path}`, {
+      ...credentialOptions,
       ...fetchOptions,
       headers: {
         "Content-Type": "application/json",

@@ -64,6 +64,9 @@ export function useGovernanceQueue({ enabled = true } = {}) {
       abortControllerRef.current?.abort();
       abortControllerRef.current = null;
       requestSeqRef.current += 1;
+      setQueue(INITIAL_QUEUE);
+      setAuditHistories({});
+      setError(null);
       setIsLoading(false);
       return;
     }

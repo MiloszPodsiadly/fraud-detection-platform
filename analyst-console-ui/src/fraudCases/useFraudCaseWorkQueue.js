@@ -34,6 +34,7 @@ export function useFraudCaseWorkQueue({
     sessionRef.current = session;
     authProviderRef.current = authProvider;
   }, [authProvider, session]);
+  const sessionIdentity = `${authProvider?.kind || "none"}:${session?.userId || ""}`;
 
   const loadQueue = useCallback(async (request, { append = false } = {}) => {
     abortControllerRef.current?.abort();
@@ -90,6 +91,11 @@ export function useFraudCaseWorkQueue({
       abortControllerRef.current?.abort();
       abortControllerRef.current = null;
       requestSeqRef.current += 1;
+      setQueue(initialFraudCaseWorkQueue());
+      setError(null);
+      setWarning(null);
+      setFilterError(null);
+      setLastRefreshedAt(null);
       setIsLoading(false);
       return;
     }
@@ -98,7 +104,7 @@ export function useFraudCaseWorkQueue({
       return;
     }
     loadQueue(committedFilters, { append: Boolean(committedFilters.cursor) });
-  }, [enabled, committedFilters, loadQueue]);
+  }, [enabled, committedFilters, loadQueue, sessionIdentity]);
 
   useEffect(() => () => {
     abortControllerRef.current?.abort();

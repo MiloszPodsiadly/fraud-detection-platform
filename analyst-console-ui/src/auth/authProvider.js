@@ -4,7 +4,7 @@ import { createOidcSessionSource, oidcAuthHeaders, snapshotFromOidcUser } from "
 import { normalizeSession } from "./session.js";
 import { SESSION_STATES } from "./sessionState.js";
 
-const AUTH_PROVIDER_KIND = (import.meta.env.VITE_AUTH_PROVIDER || "demo").trim().toLowerCase();
+const AUTH_PROVIDER_KIND = resolveAuthProviderKind(import.meta.env);
 export const DEMO_PROVIDER_FALLBACK = Object.freeze({
   kind: "demo",
   label: "Local demo session",
@@ -24,8 +24,31 @@ export function getConfiguredAuthProvider() {
   return createDemoAuthProvider();
 }
 
+export function resolveAuthProviderKind(env = {}) {
+  const configured = typeof env.VITE_AUTH_PROVIDER === "string" ? env.VITE_AUTH_PROVIDER.trim().toLowerCase() : "";
+  const allowDemo = env.VITE_ALLOW_DEMO_AUTH === "true";
+  const productionLike = env.PROD === true || env.MODE === "production";
+  if (configured === "bff" || configured === "oidc") {
+    return configured;
+  }
+  if (configured === "demo") {
+    if (productionLike && !allowDemo) {
+      throw new Error("Demo auth provider is not allowed for production-like frontend builds.");
+    }
+    return "demo";
+  }
+  if (configured) {
+    if (productionLike) {
+      throw new Error(`Unsupported production auth provider: ${configured}.`);
+    }
+    return "demo";
+  }
+  return productionLike ? "bff" : "demo";
+}
+
 export function createBffAuthProvider(fetchSession = defaultFetchSession, navigate = defaultNavigate) {
   let snapshot = normalizeBffSessionSnapshot({});
+  let logoutError = null;
 
   return {
     kind: "bff",
@@ -50,20 +73,27 @@ export function createBffAuthProvider(fetchSession = defaultFetchSession, naviga
       return Promise.resolve();
     },
     async beginLogout() {
-      let logoutUrl = "/";
-      try {
-        const response = await fetch("/bff/logout", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: csrfHeaders(snapshot.csrf)
-        });
-        if (response.ok) {
-          logoutUrl = normalizeLogoutUrl(await response.json().catch(() => ({})));
-        }
-      } finally {
-        snapshot = normalizeBffSessionSnapshot({});
-        navigate(logoutUrl);
+      logoutError = null;
+      const headers = csrfHeaders(snapshot.csrf);
+      if (snapshot.session.userId && Object.keys(headers).length === 0) {
+        logoutError = new Error("Logout requires a current CSRF token.");
+        throw logoutError;
       }
+      const response = await fetch("/bff/logout", {
+        method: "POST",
+        credentials: "same-origin",
+        headers
+      });
+      if (!response.ok) {
+        logoutError = new Error(`Logout request failed with status ${response.status}.`);
+        throw logoutError;
+      }
+      const logoutUrl = normalizeLogoutUrl(await response.json().catch(() => ({})));
+      snapshot = normalizeBffSessionSnapshot({});
+      navigate(logoutUrl);
+    },
+    getLogoutError() {
+      return logoutError;
     },
     hasLoginConfiguration() {
       return true;
@@ -212,10 +242,31 @@ function normalizeLogoutUrl(payload) {
   if (!logoutUrl) {
     return "/";
   }
-  if (logoutUrl.startsWith("/") || logoutUrl.startsWith("http://") || logoutUrl.startsWith("https://")) {
+  if (logoutUrl.startsWith("/") && !logoutUrl.startsWith("//")) {
     return logoutUrl;
   }
-  return "/";
+  const baseUrl = typeof window !== "undefined" ? window.location.origin : "http://localhost:4173";
+  let parsed;
+  try {
+    parsed = new URL(logoutUrl, baseUrl);
+  } catch {
+    throw new Error("Logout redirect URL is not trusted.");
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error("Logout redirect URL is not trusted.");
+  }
+  const hostname = parsed.hostname.toLowerCase();
+  const isLocalHost = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+  const isAllowedLocalOidc = isLocalHost && ["8086", "4173", "5173"].includes(parsed.port || defaultPort(parsed.protocol));
+  const currentOrigin = typeof window !== "undefined" ? window.location.origin : null;
+  if (parsed.origin === currentOrigin || isAllowedLocalOidc) {
+    return parsed.toString();
+  }
+  throw new Error("Logout redirect URL is not trusted.");
+}
+
+function defaultPort(protocol) {
+  return protocol === "https:" ? "443" : "80";
 }
 
 function defaultNavigate(url) {

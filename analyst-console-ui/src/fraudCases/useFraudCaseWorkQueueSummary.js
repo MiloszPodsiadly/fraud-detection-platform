@@ -21,6 +21,7 @@ export function useFraudCaseWorkQueueSummary({ enabled, canReadFraudCases, sessi
     sessionRef.current = session;
     authProviderRef.current = authProvider;
   }, [authProvider, session]);
+  const sessionIdentity = `${authProvider?.kind || "none"}:${session?.userId || ""}`;
 
   const loadSummary = useCallback(async () => {
     if (!enabled || canReadFraudCases === false) {
@@ -66,12 +67,13 @@ export function useFraudCaseWorkQueueSummary({ enabled, canReadFraudCases, sessi
       abortControllerRef.current?.abort();
       abortControllerRef.current = null;
       requestSeqRef.current += 1;
+      setSummary(INITIAL_SUMMARY);
       setIsLoading(false);
       setError(null);
       return;
     }
     loadSummary();
-  }, [canReadFraudCases, enabled, loadSummary]);
+  }, [canReadFraudCases, enabled, loadSummary, sessionIdentity]);
 
   useEffect(() => () => {
     abortControllerRef.current?.abort();
