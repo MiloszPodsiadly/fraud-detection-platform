@@ -13,7 +13,7 @@ export function SessionBadge({ session, sessionState, authProvider, onSessionCha
   const roleSummary = displayRoleSummary(session.roles);
   const authorityCount = session.authorities?.length || 0;
   const provider = authProvider || DEMO_PROVIDER_FALLBACK;
-  const oidcProvider = provider.kind === "oidc";
+  const providerBackedSession = provider.kind === "oidc" || provider.kind === "bff";
   const description = authenticated
     ? authenticatedDescription(roleSummary, authorityCount, provider)
     : getSessionStateDescription({ status: lifecycleState }, provider);
@@ -75,7 +75,7 @@ export function SessionBadge({ session, sessionState, authProvider, onSessionCha
         )}
       </div>
 
-      {!authenticated && oidcProvider && typeof provider.beginLogin === "function" && (
+      {!authenticated && providerBackedSession && typeof provider.beginLogin === "function" && (
         <button
           type="button"
           className="secondaryButton"
@@ -86,7 +86,7 @@ export function SessionBadge({ session, sessionState, authProvider, onSessionCha
         </button>
       )}
 
-      {authenticated && oidcProvider && typeof provider.beginLogout === "function" && (
+      {authenticated && providerBackedSession && typeof provider.beginLogout === "function" && (
         <button type="button" className="secondaryButton" onClick={startOidcLogout}>
           Sign out
         </button>

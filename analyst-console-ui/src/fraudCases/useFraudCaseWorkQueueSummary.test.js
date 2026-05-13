@@ -5,6 +5,7 @@ import { useFraudCaseWorkQueueSummary } from "./useFraudCaseWorkQueueSummary.js"
 
 vi.mock("../api/alertsApi.js", () => ({
   getFraudCaseWorkQueueSummary: vi.fn(),
+  isAbortError: (error) => error?.name === "AbortError",
   setApiSession: vi.fn()
 }));
 
@@ -58,6 +59,38 @@ describe("useFraudCaseWorkQueueSummary", () => {
     await waitFor(() => expect(result.current.summary.totalFraudCases).toBe(50));
     expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(2);
   });
+
+  it("does not call summary endpoint when authority gate is false", () => {
+    renderHook(() => useFraudCaseWorkQueueSummary({ enabled: true, canReadFraudCases: false }));
+
+    expect(getFraudCaseWorkQueueSummary).not.toHaveBeenCalled();
+  });
+
+  it("aborts previous summary request when retry supersedes it", async () => {
+    const first = deferred();
+    getFraudCaseWorkQueueSummary
+      .mockReturnValueOnce(first.promise)
+      .mockResolvedValueOnce(summary(51));
+    const { result } = renderHook(() => useFraudCaseWorkQueueSummary({ enabled: true, canReadFraudCases: true }));
+    await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
+    const firstSignal = getFraudCaseWorkQueueSummary.mock.calls[0][0].signal;
+
+    await act(async () => {
+      await result.current.retry();
+    });
+
+    expect(firstSignal.aborted).toBe(true);
+    await waitFor(() => expect(result.current.summary.totalFraudCases).toBe(51));
+  });
+
+  it("ignores AbortError without exposing a local error", async () => {
+    getFraudCaseWorkQueueSummary.mockRejectedValue(new DOMException("aborted", "AbortError"));
+
+    const { result } = renderHook(() => useFraudCaseWorkQueueSummary({ enabled: true }));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.error).toBeNull();
+  });
 });
 
 function summary(totalFraudCases) {
@@ -67,4 +100,14 @@ function summary(totalFraudCases) {
     scope: "GLOBAL_FRAUD_CASES",
     snapshotConsistentWithWorkQueue: false
   };
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
 }

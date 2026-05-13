@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { listFraudCaseWorkQueue, setApiSession } from "../api/alertsApi.js";
+import { isAbortError, listFraudCaseWorkQueue, setApiSession } from "../api/alertsApi.js";
 import {
   initialFraudCaseWorkQueue,
   initialFraudCaseWorkQueueRequest,
@@ -25,6 +25,7 @@ export function useFraudCaseWorkQueue({
   const [filterError, setFilterError] = useState(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState(null);
   const requestSeqRef = useRef(0);
+  const abortControllerRef = useRef(null);
   const skipNextReloadRef = useRef(false);
   const sessionRef = useRef(session);
   const authProviderRef = useRef(authProvider);
@@ -35,13 +36,16 @@ export function useFraudCaseWorkQueue({
   }, [authProvider, session]);
 
   const loadQueue = useCallback(async (request, { append = false } = {}) => {
+    abortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
     const requestSeq = requestSeqRef.current + 1;
     requestSeqRef.current = requestSeq;
     setIsLoading(true);
     setError(null);
     try {
       setApiSession(sessionRef.current, authProviderRef.current);
-      const nextQueue = await listFraudCaseWorkQueue(request);
+      const nextQueue = await listFraudCaseWorkQueue(request, { signal: abortController.signal });
       if (requestSeqRef.current !== requestSeq) {
         return;
       }
@@ -53,6 +57,9 @@ export function useFraudCaseWorkQueue({
       setLastRefreshedAt(new Date().toISOString());
     } catch (apiError) {
       if (requestSeqRef.current !== requestSeq) {
+        return;
+      }
+      if (isAbortError(apiError)) {
         return;
       }
       setError(apiError);
@@ -71,12 +78,18 @@ export function useFraudCaseWorkQueue({
     } finally {
       if (requestSeqRef.current === requestSeq) {
         setIsLoading(false);
+        if (abortControllerRef.current === abortController) {
+          abortControllerRef.current = null;
+        }
       }
     }
   }, [onSessionError]);
 
   useEffect(() => {
     if (!enabled) {
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
+      requestSeqRef.current += 1;
       setIsLoading(false);
       return;
     }
@@ -86,6 +99,12 @@ export function useFraudCaseWorkQueue({
     }
     loadQueue(committedFilters, { append: Boolean(committedFilters.cursor) });
   }, [enabled, committedFilters, loadQueue]);
+
+  useEffect(() => () => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    requestSeqRef.current += 1;
+  }, []);
 
   function updateDraftFilter(name, value) {
     setDraftFilters((current) => resetWorkQueueRequestForFilterChange(current, { [name]: value }));

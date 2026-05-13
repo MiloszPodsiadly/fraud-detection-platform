@@ -5,6 +5,7 @@ import { useFraudCaseWorkQueue } from "./useFraudCaseWorkQueue.js";
 
 vi.mock("../api/alertsApi.js", () => ({
   listFraudCaseWorkQueue: vi.fn(),
+  isAbortError: (error) => error?.name === "AbortError",
   setApiSession: vi.fn()
 }));
 
@@ -20,7 +21,10 @@ describe("useFraudCaseWorkQueue", () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(setApiSession).toHaveBeenCalled();
-    expect(listFraudCaseWorkQueue).toHaveBeenCalledWith(expect.objectContaining({ cursor: null, size: 20 }));
+    expect(listFraudCaseWorkQueue).toHaveBeenCalledWith(
+      expect.objectContaining({ cursor: null, size: 20 }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
     expect(result.current.queue.content).toEqual([{ caseId: "case-1" }]);
     expect(result.current.lastRefreshedAt).toBeTruthy();
   });
@@ -47,7 +51,10 @@ describe("useFraudCaseWorkQueue", () => {
     act(() => result.current.applyFilters());
 
     await waitFor(() => expect(result.current.queue.content).toEqual([{ caseId: "case-filtered" }]));
-    expect(listFraudCaseWorkQueue).toHaveBeenLastCalledWith(expect.objectContaining({ status: "OPEN", cursor: null }));
+    expect(listFraudCaseWorkQueue).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: "OPEN", cursor: null }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
   });
 
   it("reset filters clears filters and cursor", async () => {
@@ -91,6 +98,45 @@ describe("useFraudCaseWorkQueue", () => {
 
     await waitFor(() => expect(result.current.queue.content).toEqual([{ caseId: "new" }]));
   });
+
+  it("aborts the previous request when filters are applied", async () => {
+    const first = deferred();
+    listFraudCaseWorkQueue
+      .mockReturnValueOnce(first.promise)
+      .mockResolvedValueOnce(slice([{ caseId: "filtered" }]));
+    const { result } = renderHook(() => useFraudCaseWorkQueue({ enabled: true }));
+    await waitFor(() => expect(listFraudCaseWorkQueue).toHaveBeenCalledTimes(1));
+    const firstSignal = listFraudCaseWorkQueue.mock.calls[0][1].signal;
+
+    act(() => result.current.updateDraftFilter("status", "OPEN"));
+    act(() => result.current.applyFilters());
+
+    expect(firstSignal.aborted).toBe(true);
+    await waitFor(() => expect(result.current.queue.content).toEqual([{ caseId: "filtered" }]));
+  });
+
+  it("aborts in-flight request on unmount and ignores AbortError", async () => {
+    const pending = deferred();
+    listFraudCaseWorkQueue.mockReturnValue(pending.promise);
+
+    const { result, unmount } = renderHook(() => useFraudCaseWorkQueue({ enabled: true }));
+    await waitFor(() => expect(listFraudCaseWorkQueue).toHaveBeenCalledTimes(1));
+    const signal = listFraudCaseWorkQueue.mock.calls[0][1].signal;
+
+    unmount();
+
+    expect(signal.aborted).toBe(true);
+    expect(result.current.error).toBeNull();
+  });
+
+  it("ignores AbortError without exposing a network error", async () => {
+    listFraudCaseWorkQueue.mockRejectedValue(new DOMException("aborted", "AbortError"));
+
+    const { result } = renderHook(() => useFraudCaseWorkQueue({ enabled: true }));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.error).toBeNull();
+  });
 });
 
 function slice(content, overrides = {}) {
@@ -102,4 +148,14 @@ function slice(content, overrides = {}) {
     sort: "createdAt,desc",
     ...overrides
   };
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
 }

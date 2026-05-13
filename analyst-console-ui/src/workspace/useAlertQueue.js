@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getFraudCaseWorkQueueSummary, isAbortError, setApiSession } from "../api/alertsApi.js";
+import { isAbortError, listAlerts, setApiSession } from "../api/alertsApi.js";
 
-const INITIAL_SUMMARY = {
-  totalFraudCases: 0,
-  generatedAt: null,
-  scope: "GLOBAL_FRAUD_CASES",
-  snapshotConsistentWithWorkQueue: false
+const INITIAL_ALERT_PAGE = {
+  content: [],
+  totalElements: 0,
+  totalPages: 0,
+  page: 0,
+  size: 10
 };
 
-export function useFraudCaseWorkQueueSummary({ enabled, canReadFraudCases, session, authProvider } = {}) {
-  const [summary, setSummary] = useState(INITIAL_SUMMARY);
+export function useAlertQueue({ enabled = true, session, authProvider } = {}) {
+  const [page, setPage] = useState(INITIAL_ALERT_PAGE);
+  const [request, setRequest] = useState({ page: 0, size: 10 });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const requestSeqRef = useRef(0);
@@ -22,12 +24,7 @@ export function useFraudCaseWorkQueueSummary({ enabled, canReadFraudCases, sessi
     authProviderRef.current = authProvider;
   }, [authProvider, session]);
 
-  const loadSummary = useCallback(async () => {
-    if (!enabled || canReadFraudCases === false) {
-      setIsLoading(false);
-      return;
-    }
-
+  const load = useCallback(async (nextRequest = request) => {
     abortControllerRef.current?.abort();
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
@@ -35,22 +32,20 @@ export function useFraudCaseWorkQueueSummary({ enabled, canReadFraudCases, sessi
     requestSeqRef.current = requestSeq;
     setIsLoading(true);
     setError(null);
-
     try {
       setApiSession(sessionRef.current, authProviderRef.current);
-      const nextSummary = await getFraudCaseWorkQueueSummary({ signal: abortController.signal });
+      const nextPage = await listAlerts(nextRequest, { signal: abortController.signal });
       if (requestSeqRef.current !== requestSeq) {
-        return;
+        return null;
       }
-      setSummary({ ...INITIAL_SUMMARY, ...nextSummary });
+      setPage(nextPage);
+      return nextPage;
     } catch (apiError) {
-      if (requestSeqRef.current !== requestSeq) {
-        return;
-      }
-      if (isAbortError(apiError)) {
-        return;
+      if (requestSeqRef.current !== requestSeq || isAbortError(apiError)) {
+        return null;
       }
       setError(apiError);
+      return null;
     } finally {
       if (requestSeqRef.current === requestSeq) {
         setIsLoading(false);
@@ -59,30 +54,31 @@ export function useFraudCaseWorkQueueSummary({ enabled, canReadFraudCases, sessi
         }
       }
     }
-  }, [canReadFraudCases, enabled]);
+    return null;
+  }, [request]);
 
   useEffect(() => {
-    if (!enabled || canReadFraudCases === false) {
+    if (!enabled) {
       abortControllerRef.current?.abort();
       abortControllerRef.current = null;
       requestSeqRef.current += 1;
       setIsLoading(false);
-      setError(null);
       return;
     }
-    loadSummary();
-  }, [canReadFraudCases, enabled, loadSummary]);
+    load(request);
+  }, [enabled, load, request]);
 
   useEffect(() => () => {
     abortControllerRef.current?.abort();
-    abortControllerRef.current = null;
     requestSeqRef.current += 1;
   }, []);
 
   return {
-    summary,
+    page,
+    request,
     isLoading,
     error,
-    retry: loadSummary
+    setRequest,
+    refresh: () => load(request)
   };
 }

@@ -1,10 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
-import { createDemoAuthProvider, createOidcAuthProvider } from "./authProvider.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createBffAuthProvider, createDemoAuthProvider, createOidcAuthProvider } from "./authProvider.js";
 import { authHeadersForSession } from "./authHeaders.js";
 import { createOidcSessionSource, normalizeOidcSessionSnapshot } from "./oidcSessionSource.js";
 import { SESSION_STATES } from "./sessionState.js";
 
 describe("authProvider", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("keeps demo as the editable default provider", () => {
     const provider = createDemoAuthProvider();
 
@@ -83,5 +87,74 @@ describe("authProvider", () => {
     await expect(provider.beginLogout()).resolves.toBe("logout-started");
     expect(clearSpy).toHaveBeenCalledTimes(2);
     expect(provider.hasLoginConfiguration()).toBe(true);
+  });
+
+  it("prepares bff provider without exposing bearer auth headers", async () => {
+    const fetchSession = vi.fn()
+      .mockResolvedValueOnce({
+        authenticated: true,
+        userId: "server-user-1",
+        roles: ["FRAUD_OPS_ADMIN"],
+        authorities: ["alert:read"],
+        csrf: {
+          headerName: "X-CSRF-TOKEN",
+          token: "csrf-1"
+        }
+      });
+    const provider = createBffAuthProvider(fetchSession);
+
+    expect(provider.kind).toBe("bff");
+    expect(provider.requiresSessionBootstrap).toBe(true);
+    expect(provider.supportsSessionEditing).toBe(false);
+    expect(authHeadersForSession(provider)).toEqual({});
+
+    await expect(provider.refreshSession()).resolves.toMatchObject({
+      userId: "server-user-1",
+      roles: ["FRAUD_OPS_ADMIN"]
+    });
+    expect(authHeadersForSession(provider)).toEqual({
+      "X-CSRF-TOKEN": "csrf-1"
+    });
+    expect(authHeadersForSession(provider).Authorization).toBeUndefined();
+    expect(provider.getSessionState()).toEqual({
+      status: SESSION_STATES.AUTHENTICATED
+    });
+  });
+
+  it("redirects bff logout through the provider logout endpoint", async () => {
+    const fetchSession = vi.fn().mockResolvedValue({
+      authenticated: true,
+      userId: "server-user-1",
+      roles: ["FRAUD_OPS_ADMIN"],
+      authorities: ["alert:read"],
+      csrf: {
+        headerName: "X-CSRF-TOKEN",
+        token: "csrf-1"
+      }
+    });
+    const navigate = vi.fn();
+    const logoutFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        logoutUrl: "http://localhost:8086/realms/fraud-detection/protocol/openid-connect/logout?client_id=analyst-console-ui"
+      })
+    });
+    vi.stubGlobal("fetch", logoutFetch);
+    const provider = createBffAuthProvider(fetchSession, navigate);
+
+    await provider.refreshSession();
+    await provider.beginLogout();
+
+    expect(logoutFetch).toHaveBeenCalledWith("/bff/logout", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "X-CSRF-TOKEN": "csrf-1"
+      }
+    });
+    expect(logoutFetch.mock.calls[0][1].headers.Authorization).toBeUndefined();
+    expect(navigate).toHaveBeenCalledWith(
+      "http://localhost:8086/realms/fraud-detection/protocol/openid-connect/logout?client_id=analyst-console-ui"
+    );
   });
 });

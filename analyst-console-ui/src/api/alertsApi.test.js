@@ -226,6 +226,24 @@ describe("alertsApi auth headers", () => {
     expect(fetchMock.mock.calls[0][0]).not.toContain("/api/v1/fraud-cases?");
   });
 
+  it("passes AbortSignal to list endpoints", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ content: [] }));
+    const abortController = new AbortController();
+
+    await listAlerts({ page: 1, size: 5 }, { signal: abortController.signal });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/alerts?page=1&size=5", expect.objectContaining({
+      signal: abortController.signal
+    }));
+  });
+
+  it("propagates AbortError without converting it to ApiError", async () => {
+    const abortError = new DOMException("The operation was aborted.", "AbortError");
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(abortError);
+
+    await expect(listScoredTransactions({}, { signal: new AbortController().signal })).rejects.toBe(abortError);
+  });
+
   it("rejects invalid work queue local date filters before fetch", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ content: [] }));
 

@@ -19,14 +19,22 @@ async function request(path, options = {}) {
     ...fetchOptions
   } = options;
   const authHeaders = includeAuth ? authHeadersForSession(activeAuthProvider, activeSession) : {};
-  const response = await fetch(`${baseUrl}${path}`, {
-    ...fetchOptions,
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders,
-      ...headers
+  let response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      ...fetchOptions,
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders,
+        ...headers
+      }
+    });
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error;
     }
-  });
+    throw error;
+  }
 
   if (!response.ok) {
     const fallback = `Request failed with status ${response.status}`;
@@ -55,12 +63,16 @@ async function request(path, options = {}) {
   return response.json();
 }
 
-export function listAlerts({ page = 0, size = 10 } = {}) {
+export function isAbortError(error) {
+  return error?.name === "AbortError";
+}
+
+export function listAlerts({ page = 0, size = 10 } = {}, { signal } = {}) {
   const params = new URLSearchParams({
     page: String(page),
     size: String(size)
   });
-  return request(`/api/v1/alerts?${params.toString()}`);
+  return request(`/api/v1/alerts?${params.toString()}`, { signal });
 }
 
 export function listFraudCaseWorkQueue({
@@ -77,7 +89,7 @@ export function listFraudCaseWorkQueue({
   updatedTo,
   linkedAlertId,
   sort = "createdAt,desc"
-} = {}) {
+} = {}, { signal } = {}) {
   const params = new URLSearchParams();
   params.set("size", String(Math.min(Math.max(Number(size) || 20, 1), 100)));
   appendOptionalParam(params, "cursor", cursor);
@@ -93,14 +105,14 @@ export function listFraudCaseWorkQueue({
   appendOptionalParam(params, "linkedAlertId", linkedAlertId);
   params.set("sort", sort || "createdAt,desc");
 
-  return request(`/api/v1/fraud-cases/work-queue?${params.toString()}`);
+  return request(`/api/v1/fraud-cases/work-queue?${params.toString()}`, { signal });
 }
 
-export function getFraudCaseWorkQueueSummary() {
-  return request("/api/v1/fraud-cases/work-queue/summary");
+export function getFraudCaseWorkQueueSummary({ signal } = {}) {
+  return request("/api/v1/fraud-cases/work-queue/summary", { signal });
 }
 
-export function listScoredTransactions({ page = 0, size = 25, query, riskLevel, status, classification } = {}) {
+export function listScoredTransactions({ page = 0, size = 25, query, riskLevel, status, classification } = {}, { signal } = {}) {
   const params = new URLSearchParams({
     page: String(Math.min(Math.max(Number(page) || 0, 0), 1000)),
     size: String(Math.min(Math.max(Number(size) || 25, 1), 100))
@@ -108,10 +120,10 @@ export function listScoredTransactions({ page = 0, size = 25, query, riskLevel, 
   appendOptionalParam(params, "query", query);
   appendOptionalParam(params, "riskLevel", riskLevel);
   appendOptionalParam(params, "classification", classification || status);
-  return request(`/api/v1/transactions/scored?${params.toString()}`);
+  return request(`/api/v1/transactions/scored?${params.toString()}`, { signal });
 }
 
-export function listGovernanceAdvisories({ severity = "ALL", modelVersion = "", lifecycleStatus = "ALL", limit = 25 } = {}) {
+export function listGovernanceAdvisories({ severity = "ALL", modelVersion = "", lifecycleStatus = "ALL", limit = 25 } = {}, { signal } = {}) {
   const params = new URLSearchParams({
     limit: String(limit)
   });
@@ -124,18 +136,18 @@ export function listGovernanceAdvisories({ severity = "ALL", modelVersion = "", 
   if (lifecycleStatus && lifecycleStatus !== "ALL") {
     params.set("lifecycle_status", lifecycleStatus);
   }
-  return request(`/governance/advisories?${params.toString()}`);
+  return request(`/governance/advisories?${params.toString()}`, { signal });
 }
 
-export function getGovernanceAdvisoryAnalytics({ windowDays = 7 } = {}) {
+export function getGovernanceAdvisoryAnalytics({ windowDays = 7 } = {}, { signal } = {}) {
   const params = new URLSearchParams({
     window_days: String(windowDays)
   });
-  return request(`/governance/advisories/analytics?${params.toString()}`);
+  return request(`/governance/advisories/analytics?${params.toString()}`, { signal });
 }
 
-export function getGovernanceAdvisoryAudit(eventId) {
-  return request(`/governance/advisories/${encodeURIComponent(eventId)}/audit`);
+export function getGovernanceAdvisoryAudit(eventId, { signal } = {}) {
+  return request(`/governance/advisories/${encodeURIComponent(eventId)}/audit`, { signal });
 }
 
 export function recordGovernanceAdvisoryAudit(eventId, audit) {
