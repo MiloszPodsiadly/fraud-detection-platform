@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { getAlert, getAssistantSummary } from "../api/alertsApi.js";
 import { AUTHORITIES, hasAuthority } from "../auth/session.js";
 import { AnalystDecisionForm } from "../components/AnalystDecisionForm.jsx";
 import { AssistantSummaryPanel } from "../components/AssistantSummaryPanel.jsx";
@@ -11,7 +10,7 @@ import { RiskBadge } from "../components/RiskBadge.jsx";
 import { TransactionSummary } from "../components/TransactionSummary.jsx";
 import { formatDateTime, formatScore } from "../utils/format.js";
 
-export function AlertDetailsPage({ alertId, alertSummary, session, onBack, onDecisionSubmitted }) {
+export function AlertDetailsPage({ alertId, alertSummary, session, apiClient, onBack, onDecisionSubmitted }) {
   const [alert, setAlert] = useState(null);
   const [assistantSummary, setAssistantSummary] = useState(null);
   const [isAssistantLoading, setIsAssistantLoading] = useState(false);
@@ -29,7 +28,7 @@ export function AlertDetailsPage({ alertId, alertSummary, session, onBack, onDec
     setAssistantSummary(null);
     setAssistantError("");
     try {
-      const nextAlert = await getAlert(alertId);
+      const nextAlert = await apiClient.getAlert(alertId);
       setAlert(nextAlert);
       loadAssistantSummary();
     } catch (apiError) {
@@ -43,7 +42,7 @@ export function AlertDetailsPage({ alertId, alertSummary, session, onBack, onDec
     setIsAssistantLoading(true);
     setAssistantError("");
     try {
-      setAssistantSummary(await getAssistantSummary(alertId));
+      setAssistantSummary(await apiClient.getAssistantSummary(alertId));
     } catch (apiError) {
       setAssistantError(apiError.message);
     } finally {
@@ -131,6 +130,7 @@ export function AlertDetailsPage({ alertId, alertSummary, session, onBack, onDec
         <AnalystDecisionForm
           alertId={alertId}
           session={session}
+          apiClient={apiClient}
           canSubmit={hasAuthority(session, AUTHORITIES.ALERT_DECISION_SUBMIT)}
           disabled={isLoading || Boolean(error)}
           summary={alert || alertSummary}

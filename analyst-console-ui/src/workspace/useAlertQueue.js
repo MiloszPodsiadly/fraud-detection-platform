@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { isAbortError, listAlerts, setApiSession } from "../api/alertsApi.js";
+import { isAbortError, listAlerts } from "../api/alertsApi.js";
 
 const INITIAL_ALERT_PAGE = {
   content: [],
@@ -9,20 +9,13 @@ const INITIAL_ALERT_PAGE = {
   size: 10
 };
 
-export function useAlertQueue({ enabled = true, session, authProvider } = {}) {
+export function useAlertQueue({ enabled = true, session, authProvider, apiClient } = {}) {
   const [page, setPage] = useState(INITIAL_ALERT_PAGE);
   const [request, setRequest] = useState({ page: 0, size: 10 });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const requestSeqRef = useRef(0);
   const abortControllerRef = useRef(null);
-  const sessionRef = useRef(session);
-  const authProviderRef = useRef(authProvider);
-
-  useEffect(() => {
-    sessionRef.current = session;
-    authProviderRef.current = authProvider;
-  }, [authProvider, session]);
   const sessionIdentity = `${authProvider?.kind || "none"}:${session?.userId || ""}`;
 
   const load = useCallback(async (nextRequest = request) => {
@@ -34,8 +27,7 @@ export function useAlertQueue({ enabled = true, session, authProvider } = {}) {
     setIsLoading(true);
     setError(null);
     try {
-      setApiSession(sessionRef.current, authProviderRef.current);
-      const nextPage = await listAlerts(nextRequest, { signal: abortController.signal });
+      const nextPage = await (apiClient?.listAlerts || listAlerts)(nextRequest, { signal: abortController.signal });
       if (requestSeqRef.current !== requestSeq) {
         return null;
       }
@@ -56,7 +48,7 @@ export function useAlertQueue({ enabled = true, session, authProvider } = {}) {
       }
     }
     return null;
-  }, [request]);
+  }, [apiClient, request]);
 
   useEffect(() => {
     if (!enabled) {

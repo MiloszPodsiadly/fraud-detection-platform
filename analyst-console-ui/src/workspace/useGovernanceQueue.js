@@ -15,7 +15,7 @@ const INITIAL_REQUEST = {
   limit: 25
 };
 
-export function useGovernanceQueue({ enabled = true } = {}) {
+export function useGovernanceQueue({ enabled = true, apiClient } = {}) {
   const [queue, setQueue] = useState(INITIAL_QUEUE);
   const [request, setRequest] = useState(INITIAL_REQUEST);
   const [auditHistories, setAuditHistories] = useState({});
@@ -33,8 +33,12 @@ export function useGovernanceQueue({ enabled = true } = {}) {
     setIsLoading(true);
     setError(null);
     try {
-      const nextQueue = await listGovernanceAdvisories(nextRequest, { signal: abortController.signal });
-      const histories = await loadAuditHistories(nextQueue.advisory_events || [], abortController.signal);
+      const client = apiClient || {
+        listGovernanceAdvisories,
+        getGovernanceAdvisoryAudit
+      };
+      const nextQueue = await client.listGovernanceAdvisories(nextRequest, { signal: abortController.signal });
+      const histories = await loadAuditHistories(client, nextQueue.advisory_events || [], abortController.signal);
       if (requestSeqRef.current !== requestSeq) {
         return null;
       }
@@ -57,7 +61,7 @@ export function useGovernanceQueue({ enabled = true } = {}) {
       }
     }
     return null;
-  }, [request]);
+  }, [apiClient, request]);
 
   useEffect(() => {
     if (!enabled) {
@@ -81,11 +85,11 @@ export function useGovernanceQueue({ enabled = true } = {}) {
   return { queue, request, auditHistories, isLoading, error, setRequest, setQueue, setAuditHistories, refresh: () => load(request) };
 }
 
-async function loadAuditHistories(events, signal) {
+async function loadAuditHistories(apiClient, events, signal) {
   const histories = {};
   await Promise.all(events.map(async (event) => {
     try {
-      histories[event.event_id] = await getGovernanceAdvisoryAudit(event.event_id, { signal });
+      histories[event.event_id] = await apiClient.getGovernanceAdvisoryAudit(event.event_id, { signal });
     } catch (apiError) {
       if (isAbortError(apiError)) {
         throw apiError;

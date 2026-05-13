@@ -18,8 +18,7 @@ vi.mock("../api/alertsApi.js", () => ({
   isAbortError: (error) => error?.name === "AbortError",
   listAlerts: vi.fn(),
   listGovernanceAdvisories: vi.fn(),
-  listScoredTransactions: vi.fn(),
-  setApiSession: vi.fn()
+  listScoredTransactions: vi.fn()
 }));
 
 describe("workspace data hooks", () => {
@@ -135,9 +134,25 @@ describe("workspace data hooks", () => {
     await waitFor(() => expect(listGovernanceAdvisories).toHaveBeenCalledTimes(1));
     const signal = listGovernanceAdvisories.mock.calls[0][1].signal;
 
+    expect(signal).toBeInstanceOf(AbortSignal);
     unmount();
 
     expect(signal.aborted).toBe(true);
+  });
+
+  it("aborts previous governance queue request on refresh", async () => {
+    listGovernanceAdvisories.mockReturnValue(new Promise(() => {}));
+    const { result } = renderHook(() => useGovernanceQueue({ enabled: true }));
+    await waitFor(() => expect(listGovernanceAdvisories).toHaveBeenCalledTimes(1));
+    const firstSignal = listGovernanceAdvisories.mock.calls[0][1].signal;
+
+    act(() => {
+      result.current.refresh();
+    });
+    await waitFor(() => expect(listGovernanceAdvisories).toHaveBeenCalledTimes(2));
+
+    expect(firstSignal.aborted).toBe(true);
+    expect(listGovernanceAdvisories.mock.calls[1][1].signal).toBeInstanceOf(AbortSignal);
   });
 
   it("ignores governance queue AbortError", async () => {
@@ -172,15 +187,54 @@ describe("workspace data hooks", () => {
     expect(result.current.queue.advisory_events).toEqual([{ event_id: "event-2" }]);
   });
 
+  it("passes governance queue abort signal to advisory audit history requests", async () => {
+    listGovernanceAdvisories.mockResolvedValue({
+      status: "AVAILABLE",
+      count: 1,
+      advisory_events: [{ event_id: "event-1" }]
+    });
+    getGovernanceAdvisoryAudit.mockResolvedValue({ status: "AVAILABLE", audit_events: [] });
+
+    renderHook(() => useGovernanceQueue({ enabled: true }));
+
+    await waitFor(() => expect(getGovernanceAdvisoryAudit).toHaveBeenCalledWith(
+      "event-1",
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    ));
+  });
+
   it("aborts governance analytics requests on unmount", async () => {
     getGovernanceAdvisoryAnalytics.mockReturnValue(new Promise(() => {}));
     const { unmount } = renderHook(() => useGovernanceAnalytics({ enabled: true }));
     await waitFor(() => expect(getGovernanceAdvisoryAnalytics).toHaveBeenCalledTimes(1));
     const signal = getGovernanceAdvisoryAnalytics.mock.calls[0][1].signal;
 
+    expect(signal).toBeInstanceOf(AbortSignal);
     unmount();
 
     expect(signal.aborted).toBe(true);
+  });
+
+  it("aborts governance analytics on disable", async () => {
+    getGovernanceAdvisoryAnalytics.mockReturnValue(new Promise(() => {}));
+    const { rerender } = renderHook(({ enabled }) => useGovernanceAnalytics({ enabled }), {
+      initialProps: { enabled: true }
+    });
+    await waitFor(() => expect(getGovernanceAdvisoryAnalytics).toHaveBeenCalledTimes(1));
+    const signal = getGovernanceAdvisoryAnalytics.mock.calls[0][1].signal;
+
+    rerender({ enabled: false });
+
+    expect(signal.aborted).toBe(true);
+  });
+
+  it("ignores governance analytics AbortError", async () => {
+    getGovernanceAdvisoryAnalytics.mockRejectedValue(new DOMException("aborted", "AbortError"));
+    const { result } = renderHook(() => useGovernanceAnalytics({ enabled: true }));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.error).toBeNull();
+    expect(result.current.analytics.totals.advisories).toBe(0);
   });
 
   it("prevents stale governance analytics responses from overwriting latest state", async () => {

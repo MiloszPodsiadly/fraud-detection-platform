@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getFraudCaseWorkQueueSummary, isAbortError, setApiSession } from "../api/alertsApi.js";
+import { getFraudCaseWorkQueueSummary, isAbortError } from "../api/alertsApi.js";
 
 const INITIAL_SUMMARY = {
   totalFraudCases: 0,
@@ -8,19 +8,12 @@ const INITIAL_SUMMARY = {
   snapshotConsistentWithWorkQueue: false
 };
 
-export function useFraudCaseWorkQueueSummary({ enabled, canReadFraudCases, session, authProvider } = {}) {
+export function useFraudCaseWorkQueueSummary({ enabled, canReadFraudCases, session, authProvider, apiClient } = {}) {
   const [summary, setSummary] = useState(INITIAL_SUMMARY);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const requestSeqRef = useRef(0);
   const abortControllerRef = useRef(null);
-  const sessionRef = useRef(session);
-  const authProviderRef = useRef(authProvider);
-
-  useEffect(() => {
-    sessionRef.current = session;
-    authProviderRef.current = authProvider;
-  }, [authProvider, session]);
   const sessionIdentity = `${authProvider?.kind || "none"}:${session?.userId || ""}`;
 
   const loadSummary = useCallback(async () => {
@@ -38,8 +31,7 @@ export function useFraudCaseWorkQueueSummary({ enabled, canReadFraudCases, sessi
     setError(null);
 
     try {
-      setApiSession(sessionRef.current, authProviderRef.current);
-      const nextSummary = await getFraudCaseWorkQueueSummary({ signal: abortController.signal });
+      const nextSummary = await (apiClient?.getFraudCaseWorkQueueSummary || getFraudCaseWorkQueueSummary)({ signal: abortController.signal });
       if (requestSeqRef.current !== requestSeq) {
         return;
       }
@@ -60,7 +52,7 @@ export function useFraudCaseWorkQueueSummary({ enabled, canReadFraudCases, sessi
         }
       }
     }
-  }, [canReadFraudCases, enabled]);
+  }, [apiClient, canReadFraudCases, enabled]);
 
   useEffect(() => {
     if (!enabled || canReadFraudCases === false) {

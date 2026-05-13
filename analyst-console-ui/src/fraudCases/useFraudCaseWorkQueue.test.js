@@ -1,12 +1,11 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { listFraudCaseWorkQueue, setApiSession } from "../api/alertsApi.js";
+import { listFraudCaseWorkQueue } from "../api/alertsApi.js";
 import { useFraudCaseWorkQueue } from "./useFraudCaseWorkQueue.js";
 
 vi.mock("../api/alertsApi.js", () => ({
   listFraudCaseWorkQueue: vi.fn(),
-  isAbortError: (error) => error?.name === "AbortError",
-  setApiSession: vi.fn()
+  isAbortError: (error) => error?.name === "AbortError"
 }));
 
 describe("useFraudCaseWorkQueue", () => {
@@ -20,7 +19,6 @@ describe("useFraudCaseWorkQueue", () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    expect(setApiSession).toHaveBeenCalled();
     expect(listFraudCaseWorkQueue).toHaveBeenCalledWith(
       expect.objectContaining({ cursor: null, size: 20 }),
       expect.objectContaining({ signal: expect.any(AbortSignal) })

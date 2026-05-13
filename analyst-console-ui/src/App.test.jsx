@@ -12,8 +12,7 @@ const {
   getGovernanceAdvisoryAnalytics,
   getFraudCaseWorkQueueSummary,
   isAbortError,
-  listScoredTransactions,
-  setApiSession
+  listScoredTransactions
 } = vi.hoisted(() => ({
   callbackPath: { value: true },
   completeLoginCallback: vi.fn(),
@@ -43,11 +42,20 @@ const {
   getGovernanceAdvisoryAnalytics: vi.fn(),
   getFraudCaseWorkQueueSummary: vi.fn(),
   isAbortError: (error) => error?.name === "AbortError",
-  listScoredTransactions: vi.fn(),
-  setApiSession: vi.fn()
+  listScoredTransactions: vi.fn()
 }));
 
 vi.mock("./api/alertsApi.js", () => ({
+  createAlertsApiClient: () => ({
+    listAlerts,
+    listFraudCaseWorkQueue,
+    listGovernanceAdvisories,
+    getGovernanceAdvisoryAnalytics,
+    getFraudCaseWorkQueueSummary,
+    listScoredTransactions,
+    getGovernanceAdvisoryAudit: vi.fn(),
+    recordGovernanceAdvisoryAudit: vi.fn()
+  }),
   listAlerts,
   listFraudCaseWorkQueue,
   listGovernanceAdvisories,
@@ -56,8 +64,7 @@ vi.mock("./api/alertsApi.js", () => ({
   isAbortError,
   listScoredTransactions,
   getGovernanceAdvisoryAudit: vi.fn(),
-  recordGovernanceAdvisoryAudit: vi.fn(),
-  setApiSession
+  recordGovernanceAdvisoryAudit: vi.fn()
 }));
 
 vi.mock("./auth/authProvider.js", () => ({
@@ -140,7 +147,6 @@ describe("App", () => {
       riskLevel: "ALL",
       status: "ALL"
     });
-    expect(setApiSession).toHaveBeenCalled();
   });
 
   it("does not load dashboard data when oidc bootstrap reports an expired session", async () => {

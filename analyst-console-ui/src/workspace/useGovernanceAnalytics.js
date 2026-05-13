@@ -14,7 +14,7 @@ const INITIAL_ANALYTICS = {
   }
 };
 
-export function useGovernanceAnalytics({ enabled = true } = {}) {
+export function useGovernanceAnalytics({ enabled = true, apiClient } = {}) {
   const [analytics, setAnalytics] = useState(INITIAL_ANALYTICS);
   const [windowDays, setWindowDays] = useState(7);
   const [isLoading, setIsLoading] = useState(false);
@@ -31,7 +31,7 @@ export function useGovernanceAnalytics({ enabled = true } = {}) {
     setIsLoading(true);
     setError(null);
     try {
-      const nextAnalytics = await getGovernanceAdvisoryAnalytics({ windowDays: days }, { signal: abortController.signal });
+      const nextAnalytics = await (apiClient?.getGovernanceAdvisoryAnalytics || getGovernanceAdvisoryAnalytics)({ windowDays: days }, { signal: abortController.signal });
       if (requestSeqRef.current !== requestSeq) {
         return null;
       }
@@ -52,7 +52,7 @@ export function useGovernanceAnalytics({ enabled = true } = {}) {
       }
     }
     return null;
-  }, [windowDays]);
+  }, [apiClient, windowDays]);
 
   useEffect(() => {
     if (!enabled) {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { isAbortError, listScoredTransactions, setApiSession } from "../api/alertsApi.js";
+import { isAbortError, listScoredTransactions } from "../api/alertsApi.js";
 
 const INITIAL_TRANSACTION_PAGE = {
   content: [],
@@ -17,20 +17,13 @@ const INITIAL_TRANSACTION_REQUEST = {
   status: "ALL"
 };
 
-export function useScoredTransactionStream({ enabled = true, session, authProvider } = {}) {
+export function useScoredTransactionStream({ enabled = true, session, authProvider, apiClient } = {}) {
   const [page, setPage] = useState(INITIAL_TRANSACTION_PAGE);
   const [request, setRequest] = useState(INITIAL_TRANSACTION_REQUEST);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const requestSeqRef = useRef(0);
   const abortControllerRef = useRef(null);
-  const sessionRef = useRef(session);
-  const authProviderRef = useRef(authProvider);
-
-  useEffect(() => {
-    sessionRef.current = session;
-    authProviderRef.current = authProvider;
-  }, [authProvider, session]);
   const sessionIdentity = `${authProvider?.kind || "none"}:${session?.userId || ""}`;
 
   const load = useCallback(async (nextRequest = request) => {
@@ -42,8 +35,7 @@ export function useScoredTransactionStream({ enabled = true, session, authProvid
     setIsLoading(true);
     setError(null);
     try {
-      setApiSession(sessionRef.current, authProviderRef.current);
-      const nextPage = await listScoredTransactions(nextRequest, { signal: abortController.signal });
+      const nextPage = await (apiClient?.listScoredTransactions || listScoredTransactions)(nextRequest, { signal: abortController.signal });
       if (requestSeqRef.current !== requestSeq) {
         return null;
       }
@@ -64,7 +56,7 @@ export function useScoredTransactionStream({ enabled = true, session, authProvid
       }
     }
     return null;
-  }, [request]);
+  }, [apiClient, request]);
 
   useEffect(() => {
     if (!enabled) {

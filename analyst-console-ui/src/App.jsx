@@ -1,11 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  listAlerts,
-  listScoredTransactions,
-  getGovernanceAdvisoryAudit,
-  recordGovernanceAdvisoryAudit,
-  setApiSession
-} from "./api/alertsApi.js";
+import { createAlertsApiClient } from "./api/alertsApi.js";
 import { getConfiguredAuthProvider } from "./auth/authProvider.js";
 import { isOidcCallbackPath } from "./auth/oidcClient.js";
 import { normalizeSession } from "./auth/session.js";
@@ -41,6 +35,7 @@ export default function App() {
   });
   const [session, setSession] = useState(() => authProvider.getInitialSession());
   const [sessionState, setSessionState] = useState(() => getSessionStateForProvider(authProvider.getInitialSession(), authProvider));
+  const apiClient = useMemo(() => createAlertsApiClient({ session, authProvider }), [authProvider, session]);
   const [callbackError, setCallbackError] = useState(null);
   const handlingOidcCallback = authProvider.kind === "oidc" && isOidcCallbackPath();
   const [sessionBootstrapPending, setSessionBootstrapPending] = useState(Boolean(authProvider.requiresSessionBootstrap) || authProvider.kind === "oidc");
@@ -59,33 +54,38 @@ export default function App() {
     enabled: workQueueEnabled,
     session,
     authProvider,
+    apiClient,
     onSessionError: handleWorkQueueSessionError
   });
   const fraudCaseWorkQueueSummaryState = useFraudCaseWorkQueueSummary({
     enabled: summaryEnabled,
     canReadFraudCases,
     session,
-    authProvider
+    authProvider,
+    apiClient
   });
   const alertQueueState = useAlertQueue({
     enabled: workspacePage === "fraudTransaction" && workspaceNavigationEnabled,
     session,
-    authProvider
+    authProvider,
+    apiClient
   });
   const transactionStreamState = useScoredTransactionStream({
     enabled: workspacePage === "transactionScoring" && workspaceNavigationEnabled,
     session,
-    authProvider
+    authProvider,
+    apiClient
   });
   const governanceQueueState = useGovernanceQueue({
-    enabled: workspacePage === "compliance" && workspaceNavigationEnabled
+    enabled: workspacePage === "compliance" && workspaceNavigationEnabled,
+    apiClient
   });
   const governanceAnalyticsState = useGovernanceAnalytics({
-    enabled: workspacePage === "reports" && workspaceNavigationEnabled
+    enabled: workspacePage === "reports" && workspaceNavigationEnabled,
+    apiClient
   });
 
   useEffect(() => {
-    setApiSession(session, authProvider);
     authProvider.persistSession(session);
     setSessionState(getSessionStateForProvider(session, authProvider));
   }, [authProvider, session]);
@@ -142,12 +142,11 @@ export default function App() {
     if (!workspaceNavigationEnabled) {
       return;
     }
-    setApiSession(session, authProvider);
     loadWorkspaceCounters({
       includeAlerts: workspacePage !== "fraudTransaction",
       includeTransactions: workspacePage !== "transactionScoring"
     });
-  }, [authProvider, session, workspaceNavigationEnabled, workspacePage]);
+  }, [apiClient, workspaceNavigationEnabled, workspacePage]);
 
   useEffect(() => {
     if (!handlingOidcCallback || typeof authProvider.completeLoginCallback !== "function") {
@@ -204,12 +203,12 @@ export default function App() {
   async function loadWorkspaceCounters({ includeAlerts = true, includeTransactions = true } = {}) {
     const requests = [];
     if (includeAlerts) {
-      requests.push(["alerts", listAlerts({ page: 0, size: 1 })]);
+      requests.push(["alerts", apiClient.listAlerts({ page: 0, size: 1 })]);
     }
     if (includeTransactions) {
       requests.push([
         "transactions",
-        listScoredTransactions({
+        apiClient.listScoredTransactions({
           page: 0,
           size: 1,
           query: "",
@@ -242,8 +241,8 @@ export default function App() {
   }
 
   async function recordGovernanceAudit(eventId, audit) {
-    await recordGovernanceAdvisoryAudit(eventId, audit);
-    const nextHistory = await getGovernanceAdvisoryAudit(eventId);
+    await apiClient.recordGovernanceAdvisoryAudit(eventId, audit);
+    const nextHistory = await apiClient.getGovernanceAdvisoryAudit(eventId);
     governanceQueueState.setAuditHistories((current) => ({
       ...current,
       [eventId]: nextHistory
@@ -409,6 +408,7 @@ export default function App() {
             alertId={selectedAlertId}
             alertSummary={selectedAlertSummary}
             session={session}
+            apiClient={apiClient}
             onBack={closeAlert}
             onDecisionSubmitted={refreshDashboard}
           />
@@ -416,6 +416,7 @@ export default function App() {
           <FraudCaseDetailsPage
             caseId={selectedFraudCaseId}
             session={session}
+            apiClient={apiClient}
             onBack={closeFraudCase}
             onCaseUpdated={refreshDashboard}
           />

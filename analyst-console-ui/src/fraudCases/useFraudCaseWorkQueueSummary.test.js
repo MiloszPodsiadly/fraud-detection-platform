@@ -1,12 +1,11 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getFraudCaseWorkQueueSummary, setApiSession } from "../api/alertsApi.js";
+import { getFraudCaseWorkQueueSummary } from "../api/alertsApi.js";
 import { useFraudCaseWorkQueueSummary } from "./useFraudCaseWorkQueueSummary.js";
 
 vi.mock("../api/alertsApi.js", () => ({
   getFraudCaseWorkQueueSummary: vi.fn(),
-  isAbortError: (error) => error?.name === "AbortError",
-  setApiSession: vi.fn()
+  isAbortError: (error) => error?.name === "AbortError"
 }));
 
 describe("useFraudCaseWorkQueueSummary", () => {
@@ -24,7 +23,6 @@ describe("useFraudCaseWorkQueueSummary", () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    expect(setApiSession).toHaveBeenCalledWith({ userId: "u1" }, { kind: "oidc" });
     expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1);
     expect(result.current.summary.totalFraudCases).toBe(46);
   });

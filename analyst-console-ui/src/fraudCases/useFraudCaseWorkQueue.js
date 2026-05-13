@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { isAbortError, listFraudCaseWorkQueue, setApiSession } from "../api/alertsApi.js";
+import { isAbortError, listFraudCaseWorkQueue } from "../api/alertsApi.js";
 import {
   initialFraudCaseWorkQueue,
   initialFraudCaseWorkQueueRequest,
@@ -14,6 +14,7 @@ export function useFraudCaseWorkQueue({
   enabled = true,
   session,
   authProvider,
+  apiClient,
   onSessionError = noop
 } = {}) {
   const [queue, setQueue] = useState(initialFraudCaseWorkQueue);
@@ -27,13 +28,6 @@ export function useFraudCaseWorkQueue({
   const requestSeqRef = useRef(0);
   const abortControllerRef = useRef(null);
   const skipNextReloadRef = useRef(false);
-  const sessionRef = useRef(session);
-  const authProviderRef = useRef(authProvider);
-
-  useEffect(() => {
-    sessionRef.current = session;
-    authProviderRef.current = authProvider;
-  }, [authProvider, session]);
   const sessionIdentity = `${authProvider?.kind || "none"}:${session?.userId || ""}`;
 
   const loadQueue = useCallback(async (request, { append = false } = {}) => {
@@ -45,8 +39,7 @@ export function useFraudCaseWorkQueue({
     setIsLoading(true);
     setError(null);
     try {
-      setApiSession(sessionRef.current, authProviderRef.current);
-      const nextQueue = await listFraudCaseWorkQueue(request, { signal: abortController.signal });
+      const nextQueue = await (apiClient?.listFraudCaseWorkQueue || listFraudCaseWorkQueue)(request, { signal: abortController.signal });
       if (requestSeqRef.current !== requestSeq) {
         return;
       }
@@ -84,7 +77,7 @@ export function useFraudCaseWorkQueue({
         }
       }
     }
-  }, [onSessionError]);
+  }, [apiClient, onSessionError]);
 
   useEffect(() => {
     if (!enabled) {
