@@ -52,6 +52,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.oidcLogin;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -209,6 +210,33 @@ class BffSessionSecurityIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(updateFraudCaseRequest())))
                 .andExpect(status().isForbidden());
+
+        verify(fraudCaseManagementService, never()).updateCase(any(), any(), any());
+    }
+
+    @Test
+    void statelessBearerMutationWithoutSessionCookieIsNotRejectedByCsrf() throws Exception {
+        when(fraudCaseManagementService.updateCase(eq("case-1"), any(), eq("case-update-1")))
+                .thenReturn(updateFraudCaseResponse());
+
+        mockMvc.perform(patch("/api/v1/fraud-cases/case-1")
+                        .with(jwt().authorities(new SimpleGrantedAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)))
+                        .header("Authorization", "Bearer token-admin")
+                        .header("X-Idempotency-Key", "case-update-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(updateFraudCaseRequest())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.case_id").value("case-1"));
+    }
+
+    @Test
+    void malformedBearerWithoutValidAuthenticationCannotReachBusinessLayer() throws Exception {
+        mockMvc.perform(patch("/api/v1/fraud-cases/case-1")
+                        .header("Authorization", "Bearer malformed")
+                        .header("X-Idempotency-Key", "case-update-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(updateFraudCaseRequest())))
+                .andExpect(status().isUnauthorized());
 
         verify(fraudCaseManagementService, never()).updateCase(any(), any(), any());
     }
