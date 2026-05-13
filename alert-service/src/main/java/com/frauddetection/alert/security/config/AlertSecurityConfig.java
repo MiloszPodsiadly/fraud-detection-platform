@@ -13,6 +13,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -27,6 +28,7 @@ import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.util.StringUtils;
 
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 
 @Configuration
@@ -73,10 +75,12 @@ public class AlertSecurityConfig {
             ObjectProvider<OidcAnalystAuthoritiesMapper> oidcAnalystAuthoritiesMapper,
             BffSecurityProperties bffSecurityProperties,
             BffLogoutSuccessHandler bffLogoutSuccessHandler,
+            Environment environment,
             ApiAuthenticationEntryPoint authenticationEntryPoint,
             ApiAccessDeniedHandler accessDeniedHandler
     ) throws Exception {
         boolean bffEnabled = bffSecurityProperties.enabled();
+        bffSecurityProperties.validate(environment);
         http
                 .cors(Customizer.withDefaults())
                 .sessionManagement(session -> session.sessionCreationPolicy(
@@ -159,43 +163,79 @@ public class AlertSecurityConfig {
                         .anyRequest().permitAll()
                 );
 
-        if (bffEnabled) {
-            http
-                    .csrf(csrf -> csrf
-                            .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
-                            .ignoringRequestMatchers(this::hasBearerAuthorization)
-                    )
-                    .oauth2Login(oauth2 -> oauth2
-                            .userInfoEndpoint(userInfo -> userInfo
-                                    .userAuthoritiesMapper(oidcAnalystAuthoritiesMapper.getObject()))
-                            .defaultSuccessUrl("/", true)
-                    )
-                    .logout(logout -> logout
-                            .logoutUrl("/bff/logout")
-                            .invalidateHttpSession(true)
-                            .deleteCookies("JSESSIONID", "XSRF-TOKEN")
-                            .logoutSuccessHandler(bffLogoutSuccessHandler)
-                    );
-        } else {
-            http.csrf(AbstractHttpConfigurer::disable);
-        }
+        configureBffSessionMode(http, bffEnabled, oidcAnalystAuthoritiesMapper, bffLogoutSuccessHandler);
 
-        // Production auth path: enable JWT Resource Server only when a decoder is configured.
-        if (jwtDecoder.getIfAvailable() != null) {
-            http.oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt
-                    .jwtAuthenticationConverter(token -> jwtAnalystAuthenticationConverter
-                            .getObject()
-                            .convert(token))
-            ));
-        }
+        configureJwtResourceServer(http, jwtDecoder, jwtAnalystAuthenticationConverter);
 
-        // Local/dev auth path: demo headers remain an explicit opt-in adapter.
-        demoAuthFilter.ifAvailable(filter -> http.addFilterBefore(filter, UsernamePasswordAuthenticationFilter.class));
+        configureDemoAuth(http, demoAuthFilter);
         return http.build();
     }
 
-    private boolean hasBearerAuthorization(HttpServletRequest request) {
+    private void configureBffSessionMode(
+            HttpSecurity http,
+            boolean bffEnabled,
+            ObjectProvider<OidcAnalystAuthoritiesMapper> oidcAnalystAuthoritiesMapper,
+            BffLogoutSuccessHandler bffLogoutSuccessHandler
+    ) throws Exception {
+        if (!bffEnabled) {
+            http.csrf(AbstractHttpConfigurer::disable);
+            return;
+        }
+        http
+                .csrf(csrf -> csrf
+                        .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                        .ignoringRequestMatchers(this::isStatelessBearerRequest)
+                )
+                .oauth2Login(oauth2 -> oauth2
+                        .userInfoEndpoint(userInfo -> userInfo
+                                .userAuthoritiesMapper(oidcAnalystAuthoritiesMapper.getObject()))
+                        .defaultSuccessUrl("/", true)
+                )
+                .logout(logout -> logout
+                        .logoutUrl("/bff/logout")
+                        .invalidateHttpSession(true)
+                        .deleteCookies("JSESSIONID", "XSRF-TOKEN")
+                        .logoutSuccessHandler(bffLogoutSuccessHandler)
+                );
+    }
+
+    private void configureJwtResourceServer(
+            HttpSecurity http,
+            ObjectProvider<JwtDecoder> jwtDecoder,
+            ObjectProvider<JwtAnalystAuthenticationConverter> jwtAnalystAuthenticationConverter
+    ) throws Exception {
+        if (jwtDecoder.getIfAvailable() == null) {
+            return;
+        }
+        http.oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt
+                .jwtAuthenticationConverter(token -> jwtAnalystAuthenticationConverter
+                        .getObject()
+                        .convert(token))
+        ));
+    }
+
+    private void configureDemoAuth(HttpSecurity http, ObjectProvider<DemoAuthFilter> demoAuthFilter) {
+        // Local/dev auth path: demo headers remain an explicit opt-in adapter.
+        demoAuthFilter.ifAvailable(filter -> http.addFilterBefore(filter, UsernamePasswordAuthenticationFilter.class));
+    }
+
+    private boolean isStatelessBearerRequest(HttpServletRequest request) {
         String authorization = request.getHeader("Authorization");
-        return StringUtils.hasText(authorization) && authorization.regionMatches(true, 0, "Bearer ", 0, 7);
+        return StringUtils.hasText(authorization)
+                && authorization.regionMatches(true, 0, "Bearer ", 0, 7)
+                && !hasCookie(request, "JSESSIONID");
+    }
+
+    private boolean hasCookie(HttpServletRequest request, String cookieName) {
+        Cookie[] cookies = request.getCookies();
+        if (cookies == null) {
+            return false;
+        }
+        for (Cookie cookie : cookies) {
+            if (cookieName.equals(cookie.getName()) && StringUtils.hasText(cookie.getValue())) {
+                return true;
+            }
+        }
+        return false;
     }
 }
