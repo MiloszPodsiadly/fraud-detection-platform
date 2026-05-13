@@ -78,10 +78,11 @@ import App from "./App.jsx";
 describe("App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.history.replaceState({}, "", "/");
     callbackPath.value = true;
     refreshSession.mockResolvedValue({ userId: "", roles: [], extraAuthorities: [], authorities: [] });
     listFraudCaseWorkQueue.mockResolvedValue({ content: [], size: 20, hasNext: false, nextCursor: null, sort: "createdAt,desc" });
-    getFraudCaseWorkQueueSummary.mockResolvedValue({ totalFraudCases: 0 });
+    getFraudCaseWorkQueueSummary.mockResolvedValue(summary(0));
     listGovernanceAdvisories.mockResolvedValue({ status: "AVAILABLE", count: 0, retention_limit: 200, advisory_events: [] });
     getGovernanceAdvisoryAnalytics.mockResolvedValue({
       status: "AVAILABLE",
@@ -203,6 +204,91 @@ describe("App", () => {
     expect(screen.queryByRole("heading", { name: "Session required" })).not.toBeInTheDocument();
   });
 
+  it("does not fetch the fraud case summary when transaction scoring is the initial workspace", async () => {
+    callbackPath.value = false;
+    window.history.replaceState({}, "", "/?workspace=transaction-scoring");
+    refreshSession.mockResolvedValue(authenticatedSession());
+    providerState.value = {
+      ...providerState.value,
+      getSessionState: () => ({ status: "authenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
+    };
+    listScoredTransactions.mockResolvedValue(transactionPage("txn-visible"));
+
+    render(<App />);
+
+    expect(await screen.findByText("txn-visible")).toBeInTheDocument();
+    expect(getFraudCaseWorkQueueSummary).not.toHaveBeenCalled();
+    expect(listFraudCaseWorkQueue).not.toHaveBeenCalled();
+  });
+
+  it("loads the fraud case summary when navigating into the fraud case workspace", async () => {
+    callbackPath.value = false;
+    window.history.replaceState({}, "", "/?workspace=transaction-scoring");
+    refreshSession.mockResolvedValue(authenticatedSession());
+    providerState.value = {
+      ...providerState.value,
+      getSessionState: () => ({ status: "authenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
+    };
+    listScoredTransactions.mockResolvedValue(transactionPage("txn-visible"));
+    getFraudCaseWorkQueueSummary.mockResolvedValue(summary(47));
+
+    render(<App />);
+
+    expect(await screen.findByText("txn-visible")).toBeInTheDocument();
+    expect(getFraudCaseWorkQueueSummary).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("link", { name: "Fraud Case" }));
+
+    await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole("link", { name: /Global fraud cases\s*47/ })).toBeInTheDocument();
+  });
+
+  it("does not retry fraud case summary after switching away from the fraud case workspace", async () => {
+    callbackPath.value = false;
+    refreshSession.mockResolvedValue(authenticatedSession());
+    providerState.value = {
+      ...providerState.value,
+      getSessionState: () => ({ status: "authenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
+    };
+    listScoredTransactions.mockResolvedValue(transactionPage("txn-visible"));
+    getFraudCaseWorkQueueSummary.mockResolvedValue(summary(47));
+
+    render(<App />);
+
+    await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("link", { name: "Transaction Scoring" }));
+    expect(await screen.findByText("txn-visible")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => expect(listScoredTransactions).toHaveBeenCalledTimes(2));
+    expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps workspace state synchronized with browser back and forward navigation", async () => {
+    callbackPath.value = false;
+    refreshSession.mockResolvedValue(authenticatedSession());
+    providerState.value = {
+      ...providerState.value,
+      getSessionState: () => ({ status: "authenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
+    };
+    listScoredTransactions.mockResolvedValue(transactionPage("txn-visible"));
+
+    render(<App />);
+
+    await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("link", { name: "Transaction Scoring" }));
+    expect(await screen.findByText("txn-visible")).toBeInTheDocument();
+
+    window.history.pushState({}, "", "/");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+
+    expect(await screen.findByRole("heading", { name: "Fraud Case Work Queue" })).toBeInTheDocument();
+  });
+
   it("keeps the newest transaction stream response when an older request resolves later", async () => {
     callbackPath.value = false;
     refreshSession.mockResolvedValue(authenticatedSession());
@@ -301,5 +387,14 @@ function transactionPage(transactionId) {
     totalPages: 1,
     page: 0,
     size: 25
+  };
+}
+
+function summary(totalFraudCases) {
+  return {
+    totalFraudCases,
+    generatedAt: "2026-05-12T10:00:00Z",
+    scope: "GLOBAL_FRAUD_CASES",
+    snapshotConsistentWithWorkQueue: false
   };
 }

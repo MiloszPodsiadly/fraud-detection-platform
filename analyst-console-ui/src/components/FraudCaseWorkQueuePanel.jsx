@@ -7,17 +7,13 @@ import {
   FRAUD_CASE_WORK_QUEUE_SORT_OPTIONS,
   initialFraudCaseWorkQueueRequest
 } from "../fraudCases/workQueueState.js";
+import { WorkQueueBadge } from "./fraudCaseWorkQueue/WorkQueueBadge.jsx";
+import { WorkQueueErrorPanel } from "./fraudCaseWorkQueue/WorkQueueErrorPanel.jsx";
+import { WorkQueueStageStats } from "./fraudCaseWorkQueue/WorkQueueStageStats.jsx";
 
 const STATUS_OPTIONS = ["ALL", "OPEN", "IN_REVIEW", "ESCALATED", "RESOLVED", "CLOSED", "REOPENED"];
 const PRIORITY_OPTIONS = ["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"];
 const RISK_OPTIONS = ["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"];
-const BADGE_VALUES = {
-  status: ["OPEN", "IN_REVIEW", "ESCALATED", "RESOLVED", "CLOSED", "REOPENED"],
-  priority: ["LOW", "MEDIUM", "HIGH", "CRITICAL"],
-  risk: ["LOW", "MEDIUM", "HIGH", "CRITICAL"],
-  sla: ["WITHIN_SLA", "NEAR_BREACH", "BREACHED", "NOT_APPLICABLE"]
-};
-
 export function FraudCaseWorkQueuePanel({
   queue,
   request,
@@ -85,20 +81,7 @@ export function FraudCaseWorkQueuePanel({
         </div>
       </div>
 
-      <div className="workQueueStageStats" aria-label="Loaded fraud case workflow stage counts">
-        <span className="workQueueStageStat">
-          <strong>Loaded unstarted</strong>
-          <span>{stages.unstarted}</span>
-        </span>
-        <span className="workQueueStageStat">
-          <strong>Loaded in progress</strong>
-          <span>{stages.inProgress}</span>
-        </span>
-        <span className="workQueueStageStat">
-          <strong>Loaded ready to submit</strong>
-          <span>{stages.readyToSubmit}</span>
-        </span>
-      </div>
+      <WorkQueueStageStats stages={stages} />
 
       <div className="workQueueFilterShell">
         <div className="workQueueToolbar workQueueFilterHeader">
@@ -227,7 +210,7 @@ export function FraudCaseWorkQueuePanel({
       )}
 
       {!isLoading && error && (
-        <WorkQueueError
+        <WorkQueueErrorPanel
           refTarget={alertPanelRef}
           error={error}
           invalidCursor={invalidCursor}
@@ -313,14 +296,14 @@ function WorkQueueRow({ item, onOpenCase }) {
           <strong>{caseLabel}</strong>
         </div>
       </td>
-      <td><QueueBadge type="status" value={item.status} /></td>
-      <td><QueueBadge type="priority" value={item.priority} /></td>
-      <td><QueueBadge type="risk" value={item.riskLevel} /></td>
+      <td><WorkQueueBadge type="status" value={item.status} /></td>
+      <td><WorkQueueBadge type="priority" value={item.priority} /></td>
+      <td><WorkQueueBadge type="risk" value={item.riskLevel} /></td>
       <td>{item.assignedInvestigatorId || "Unassigned"}</td>
       <td><strong>{formatDurationFromSeconds(item.caseAgeSeconds)}</strong></td>
       <td>{formatAgeAgo(item.lastUpdatedAgeSeconds)}</td>
       <td>
-        <QueueBadge type="sla" value={item.slaStatus} />
+        <WorkQueueBadge type="sla" value={item.slaStatus} />
         <span>{formatDateTime(item.slaDeadlineAt)}</span>
       </td>
       <td className="numericCell">{item.linkedAlertCount ?? 0}</td>
@@ -339,12 +322,12 @@ function WorkQueueCard({ item, onOpenCase }) {
     <article className="workQueueCard">
       <div className="workQueueCardHeader">
         <strong>{caseLabel}</strong>
-        <QueueBadge type="sla" value={item.slaStatus} />
+        <WorkQueueBadge type="sla" value={item.slaStatus} />
       </div>
       <dl>
-        <div><dt>Status</dt><dd><QueueBadge type="status" value={item.status} /></dd></div>
-        <div><dt>Priority</dt><dd><QueueBadge type="priority" value={item.priority} /></dd></div>
-        <div><dt>Risk</dt><dd><QueueBadge type="risk" value={item.riskLevel} /></dd></div>
+        <div><dt>Status</dt><dd><WorkQueueBadge type="status" value={item.status} /></dd></div>
+        <div><dt>Priority</dt><dd><WorkQueueBadge type="priority" value={item.priority} /></dd></div>
+        <div><dt>Risk</dt><dd><WorkQueueBadge type="risk" value={item.riskLevel} /></dd></div>
         <div><dt>Assignee</dt><dd>{item.assignedInvestigatorId || "Unassigned"}</dd></div>
         <div><dt>Age</dt><dd>{formatDurationFromSeconds(item.caseAgeSeconds)}</dd></div>
         <div><dt>Updated</dt><dd>{formatAgeAgo(item.lastUpdatedAgeSeconds)}</dd></div>
@@ -355,20 +338,6 @@ function WorkQueueCard({ item, onOpenCase }) {
       </button>
     </article>
   );
-}
-
-function QueueBadge({ type, value }) {
-  const normalized = normalizeBadgeValue(type, value);
-  return (
-    <span className={`queueBadge queueBadge${type} queueBadge${type}${normalized}`}>
-      {normalized.replaceAll("_", " ")}
-    </span>
-  );
-}
-
-function normalizeBadgeValue(type, value) {
-  const normalized = String(value || "UNKNOWN").trim().toUpperCase();
-  return BADGE_VALUES[type]?.includes(normalized) ? normalized : "UNKNOWN";
 }
 
 function SkeletonRows() {
@@ -389,53 +358,6 @@ function SkeletonCards() {
       <span className="skeletonBlock" />
     </div>
   ));
-}
-
-function WorkQueueError({ refTarget, error, invalidCursor, onRetry }) {
-  const message = messageForWorkQueueError(error, invalidCursor);
-  const isAlert = error?.status === 403 || error?.status === 503 || invalidCursor;
-  const buttonLabel = invalidCursor ? "Refresh from first slice" : "Try again";
-  return (
-    <div
-      className={error?.status === 401 ? "statePanel workQueueSessionPanel" : "statePanel errorPanel"}
-      role={isAlert ? "alert" : undefined}
-      tabIndex={-1}
-      ref={refTarget}
-    >
-      <h3>{message.title}</h3>
-      <p>{message.body}</p>
-      <button
-        className="secondaryButton"
-        type="button"
-        onClick={onRetry}
-        aria-label={invalidCursor ? "Refresh fraud case work queue from first slice" : "Retry fraud case work queue"}
-      >
-        {buttonLabel}
-      </button>
-    </div>
-  );
-}
-
-function messageForWorkQueueError(error, invalidCursor) {
-  if (error?.status === 401) {
-    return {
-      title: "Session required",
-      body: "No analyst session is currently active. Sign in with the configured provider, then retry this workspace."
-    };
-  }
-  if (error?.status === 403) {
-    return { title: "Access denied", body: "Your session does not include FRAUD_CASE_READ." };
-  }
-  if (error?.status === 503) {
-    return { title: "Work queue temporarily unavailable", body: "Sensitive-read audit is fail-closed. Try again after the service recovers." };
-  }
-  if (invalidCursor) {
-    return { title: "Queue position expired", body: "Refresh from the first slice to continue with the latest results." };
-  }
-  if (error?.status === 400) {
-    return { title: "Invalid work queue request", body: error.message || "Adjust the filter or sort selection and retry." };
-  }
-  return { title: "Unable to load work queue", body: error?.message || "Network error while loading the fraud case work queue." };
 }
 
 function isInvalidCursorError(error) {

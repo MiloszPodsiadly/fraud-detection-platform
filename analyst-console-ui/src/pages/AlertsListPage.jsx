@@ -15,7 +15,8 @@ import { SESSION_STATES } from "../auth/sessionState.js";
 export function AlertsListPage({
   workspacePage = "analyst",
   alertPage,
-  fraudCaseTotalElements = 0,
+  fraudCaseSummary = { totalFraudCases: 0 },
+  fraudCaseTotalElements,
   fraudCaseSummaryError,
   isFraudCaseSummaryLoading = false,
   fraudCaseWorkQueue,
@@ -89,10 +90,22 @@ export function AlertsListPage({
 
   const sessionBlocksDashboard = shouldBlockDashboard(sessionState, error);
   const workQueueError = sessionBlocksDashboard ? workQueueErrorForSession(sessionState) : fraudCaseWorkQueueError;
+  const showAnalyst = workspacePage === "analyst";
+  const fraudCaseGlobalCount = fraudCaseSummary?.totalFraudCases ?? fraudCaseTotalElements ?? 0;
   const fraudCaseSummaryLabel = fraudCaseSummaryError
     ? "Unavailable"
-    : String(fraudCaseTotalElements ?? 0);
-  const showAnalyst = workspacePage === "analyst";
+    : String(fraudCaseGlobalCount);
+  const fraudCaseSummaryGeneratedAt = fraudCaseSummary?.generatedAt
+    ? new Date(fraudCaseSummary.generatedAt).toLocaleString()
+    : null;
+  const fraudCaseSummaryHint = [
+    "Global point-in-time fraud case count.",
+    "It is not filter-scoped, cursor-scoped, page-scoped, or pagination metadata.",
+    fraudCaseSummary?.snapshotConsistentWithWorkQueue === false
+      ? "It is not snapshot-consistent with the loaded work queue slice."
+      : null,
+    fraudCaseSummaryGeneratedAt ? `Generated at ${fraudCaseSummaryGeneratedAt}.` : null
+  ].filter(Boolean).join(" ");
   const showFraudTransaction = workspacePage === "fraudTransaction";
   const showTransactionScoring = workspacePage === "transactionScoring";
   const showCompliance = workspacePage === "compliance";
@@ -111,12 +124,12 @@ export function AlertsListPage({
         </a>
         <a
           href="/"
-          title="Global point-in-time fraud case count. It is not filter-scoped and may differ from the loaded work queue slice."
-          aria-label={`All fraud cases ${fraudCaseSummaryLabel}`}
+          title={showAnalyst ? fraudCaseSummaryHint : "Open the fraud case workspace."}
+          aria-label={showAnalyst ? `Global fraud cases ${fraudCaseSummaryLabel}` : "Open fraud case workspace"}
           onClick={(event) => openWorkspace(event, onWorkspaceChange, "analyst")}
         >
-          <span>All fraud cases</span>
-          <strong>{isFraudCaseSummaryLoading ? "..." : fraudCaseSummaryLabel}</strong>
+          <span>Global fraud cases</span>
+          <strong>{showAnalyst ? (isFraudCaseSummaryLoading ? "..." : fraudCaseSummaryLabel) : "Open"}</strong>
         </a>
         <a href="?workspace=reports" onClick={(event) => openWorkspace(event, onWorkspaceChange, "reports")}>
           <span>Audit analytics</span>

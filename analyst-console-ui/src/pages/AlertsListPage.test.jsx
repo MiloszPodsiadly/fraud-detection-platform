@@ -244,7 +244,7 @@ describe("AlertsListPage session lifecycle", () => {
       <AlertsListPage
         workspacePage="analyst"
         alertPage={emptyPage(10)}
-        fraudCaseTotalElements={46}
+        fraudCaseSummary={summary(46)}
         fraudCaseWorkQueue={{ ...emptyWorkQueue(), content: [{ caseId: "case-1" }] }}
         fraudCaseWorkQueueRequest={emptyWorkQueueRequest()}
         transactionPage={emptyPage(25)}
@@ -282,8 +282,11 @@ describe("AlertsListPage session lifecycle", () => {
       />
     );
 
-    expect(screen.getByRole("link", { name: /All fraud cases\s*46/ })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /All fraud cases\s*1/ })).not.toBeInTheDocument();
+    const globalCountLink = screen.getByRole("link", { name: /Global fraud cases\s*46/ });
+    expect(globalCountLink).toBeInTheDocument();
+    expect(globalCountLink).toHaveAttribute("title", expect.stringContaining("not snapshot-consistent with the loaded work queue slice"));
+    expect(globalCountLink).toHaveAttribute("title", expect.stringContaining("Generated at"));
+    expect(screen.queryByRole("link", { name: /Global fraud cases\s*1/ })).not.toBeInTheDocument();
     expect(screen.queryByText(/total queue cases/i)).not.toBeInTheDocument();
   });
 
@@ -292,7 +295,7 @@ describe("AlertsListPage session lifecycle", () => {
       <AlertsListPage
         workspacePage="analyst"
         alertPage={emptyPage(10)}
-        fraudCaseTotalElements={46}
+        fraudCaseSummary={summary(46)}
         fraudCaseSummaryError={{ status: 503, message: "summary unavailable" }}
         fraudCaseWorkQueue={{ ...emptyWorkQueue(), content: [workQueueItem("CASE-1")] }}
         fraudCaseWorkQueueRequest={emptyWorkQueueRequest()}
@@ -332,9 +335,56 @@ describe("AlertsListPage session lifecycle", () => {
       />
     );
 
-    expect(screen.getByRole("link", { name: /All fraud cases\s*Unavailable/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Global fraud cases\s*Unavailable/ })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Global fraud case count unavailable." })).toBeInTheDocument();
     expect(screen.getAllByText("CASE-1").length).toBeGreaterThan(0);
+  });
+
+  it("does not display a stale global fraud case count outside the fraud case workspace", () => {
+    render(
+      <AlertsListPage
+        workspacePage="transactionScoring"
+        alertPage={emptyPage(10)}
+        fraudCaseSummary={summary(46)}
+        fraudCaseWorkQueue={{ ...emptyWorkQueue(), content: [{ caseId: "case-1" }] }}
+        fraudCaseWorkQueueRequest={emptyWorkQueueRequest()}
+        transactionPage={emptyPage(25)}
+        advisoryQueue={emptyAdvisoryQueue()}
+        advisoryQueueRequest={{ severity: "ALL", modelVersion: "", lifecycleStatus: "ALL", limit: 25 }}
+        governanceAnalytics={emptyAnalytics()}
+        analyticsWindowDays={7}
+        isLoading={false}
+        isFraudCaseWorkQueueLoading={false}
+        isGovernanceLoading={false}
+        isAnalyticsLoading={false}
+        error={null}
+        fraudCaseWorkQueueError={null}
+        governanceError={null}
+        analyticsError={null}
+        sessionState={{ status: SESSION_STATES.AUTHENTICATED }}
+        onRetry={vi.fn()}
+        onGovernanceRetry={vi.fn()}
+        onAnalyticsRetry={vi.fn()}
+        onFraudCaseWorkQueueDraftChange={vi.fn()}
+        onFraudCaseWorkQueueApplyFilters={vi.fn()}
+        onFraudCaseWorkQueueResetFilters={vi.fn()}
+        onFraudCaseWorkQueueRetry={vi.fn()}
+        onFraudCaseWorkQueueRefreshFirstSlice={vi.fn()}
+        onFraudCaseWorkQueueLoadMore={vi.fn()}
+        onAdvisoryQueueRequestChange={vi.fn()}
+        onAnalyticsWindowDaysChange={vi.fn()}
+        onRecordGovernanceAudit={vi.fn()}
+        onTransactionPageChange={vi.fn()}
+        onTransactionPageSizeChange={vi.fn()}
+        onAlertPageChange={vi.fn()}
+        onAlertPageSizeChange={vi.fn()}
+        onOpenAlert={vi.fn()}
+        onOpenFraudCase={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("link", { name: "Open fraud case workspace" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Global fraud cases\s*46/ })).not.toBeInTheDocument();
   });
 
   it("sends transaction monitor filters to request state instead of filtering only the current page", () => {
@@ -647,5 +697,14 @@ function workQueueItem(caseNumber) {
     slaStatus: "NEAR_BREACH",
     slaDeadlineAt: "2026-05-12T10:00:00Z",
     linkedAlertCount: 1
+  };
+}
+
+function summary(totalFraudCases) {
+  return {
+    totalFraudCases,
+    generatedAt: "2026-05-12T10:00:00Z",
+    scope: "GLOBAL_FRAUD_CASES",
+    snapshotConsistentWithWorkQueue: false
   };
 }
