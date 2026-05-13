@@ -504,6 +504,8 @@ Current provider boundary:
 - `src/auth/oidcClient.js` hides `oidc-client-ts` behind a small adapter surface.
 - `src/auth/oidcSessionSource.js` normalizes a provider snapshot into UI session, token, and lifecycle state.
 - `GET /api/v1/session` exposes normalized BFF identity, authorities, and CSRF metadata without exposing tokens.
+- `GET /api/v1/session` includes `sessionStatus` for lifecycle rendering. The current values are `AUTHENTICATED` and `ANONYMOUS`.
+- CSRF metadata from `GET /api/v1/session` is only a cookie-backed request header value for the BFF path. It is not bearer auth material and is not stored in browser storage by the console.
 - bearer token propagation remains available only in direct OIDC compatibility mode through the provider/header boundary
 - `SessionBadge` can render both editable demo mode and read-only provider-driven mode, including auth mode, identity, role, authority scope, login, and logout actions.
 
@@ -543,6 +545,8 @@ Current OIDC lifecycle behavior:
 - direct OIDC logout clears the local provider-backed session view and then redirects to IdP logout
 - no silent refresh is implemented in v1
 - Docker OIDC mode rebuilds `analyst-console-ui` with `VITE_AUTH_PROVIDER=bff` for the nginx UI on `http://localhost:4173`
+- BFF logout uses configured provider and post-logout redirect origin allowlists. Localhost HTTP is accepted only for local/dev/test style stacks.
+- Unknown backend-looking routes under `/api/**`, `/api/v1/**`, `/governance/**`, `/system/**`, `/bff/**`, and non-public actuator routes are denied unless explicitly allowlisted.
 
 ## 401/403 Error Contract
 
@@ -642,7 +646,7 @@ Reviewers should check:
 - No silent refresh or session management hardening is shipped for deployment environments yet.
 - Backend and frontend currently duplicate authority names.
 - `analystId` is still accepted in write DTOs for compatibility.
-- `anyRequest().permitAll()` intentionally leaves non-API local routes public; protected business APIs are under `/api/v1/**`.
+- Public browser routing is intentionally narrow: health/session/OAuth/static assets and known SPA fallback routes are public, while unknown backend-looking routes fail closed.
 
 ## Suggested Next Steps
 

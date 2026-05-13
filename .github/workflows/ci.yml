@@ -725,12 +725,12 @@ jobs:
 
       - name: Ensure FDP-48 tests are not skipped
         run: |
-          if grep -R "@Disabled" alert-service/src/test/java/com/frauddetection/alert/security/config/BffSessionSecurityIntegrationTest.java alert-service/src/test/java/com/frauddetection/alert/security/auth/BffSecurityPropertiesTest.java alert-service/src/test/java/com/frauddetection/alert/security/auth/BffLogoutSuccessHandlerTest.java; then
+          if grep -R "@Disabled" alert-service/src/test/java/com/frauddetection/alert/security/config/BffSessionSecurityIntegrationTest.java alert-service/src/test/java/com/frauddetection/alert/security/auth/BffSecurityPropertiesTest.java alert-service/src/test/java/com/frauddetection/alert/security/auth/BffLogoutSuccessHandlerTest.java alert-service/src/test/java/com/frauddetection/alert/security/config/AlertSecurityConfigJwtEnabledTest.java; then
             echo "FDP-48 backend tests must not be disabled" >&2
             exit 1
           fi
-          if grep -R "it\.skip\|describe\.skip\|test\.skip" analyst-console-ui/src/auth/authProvider.test.js analyst-console-ui/src/api/alertsApi.test.js analyst-console-ui/src/fraudCases/useFraudCaseWorkQueue.test.js analyst-console-ui/src/fraudCases/useFraudCaseWorkQueueSummary.test.js analyst-console-ui/src/workspace/workspaceDataHooks.test.js; then
-            echo "FDP-48 frontend tests must not be skipped" >&2
+          if grep -R "it\.skip\|describe\.skip\|test\.skip\|it\.only\|describe\.only\|test\.only" analyst-console-ui/src/auth/authProvider.test.js analyst-console-ui/src/api/alertsApi.test.js analyst-console-ui/src/fraudCases/useFraudCaseWorkQueue.test.js analyst-console-ui/src/fraudCases/useFraudCaseWorkQueueSummary.test.js analyst-console-ui/src/workspace/workspaceDataHooks.test.js; then
+            echo "FDP-48 frontend tests must not be skipped or focused" >&2
             exit 1
           fi
 
@@ -772,7 +772,19 @@ jobs:
 
       - name: Run FDP-48 frontend lifecycle tests
         working-directory: analyst-console-ui
-        run: npm test -- --run src/auth/authProvider.test.js src/api/alertsApi.test.js src/fraudCases/useFraudCaseWorkQueue.test.js src/fraudCases/useFraudCaseWorkQueueSummary.test.js src/workspace/workspaceDataHooks.test.js
+        run: npm test -- --run src/auth/authProvider.test.js src/api/alertsApi.test.js src/fraudCases/useFraudCaseWorkQueue.test.js src/fraudCases/useFraudCaseWorkQueueSummary.test.js src/workspace/workspaceDataHooks.test.js --reporter=default --reporter=junit --outputFile=./test-results/fdp48-vitest.xml
+
+      - name: Verify FDP-48 frontend report
+        working-directory: analyst-console-ui
+        run: |
+          test -f test-results/fdp48-vitest.xml
+          grep -q "authProvider.test.js" test-results/fdp48-vitest.xml
+          grep -q "alertsApi.test.js" test-results/fdp48-vitest.xml
+          grep -q "workspaceDataHooks.test.js" test-results/fdp48-vitest.xml
+          if grep -q 'skipped="[1-9]' test-results/fdp48-vitest.xml; then
+            echo "FDP-48 frontend tests must not be skipped" >&2
+            exit 1
+          fi
 
       - name: Build FDP-48 UI
         working-directory: analyst-console-ui

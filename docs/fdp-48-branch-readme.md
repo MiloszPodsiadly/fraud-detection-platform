@@ -8,11 +8,15 @@ FDP-48 hardens the Analyst Console frontend request lifecycle and reduces `App.j
 
 - Adds an optional server-backed BFF session mode for the Docker/OIDC Analyst Console.
 - `GET /api/v1/session` exposes only normalized session identity, roles, authorities, and CSRF metadata.
+- `GET /api/v1/session` returns a low-cardinality `sessionStatus` value (`AUTHENTICATED` or `ANONYMOUS`) for UI lifecycle decisions.
+- CSRF metadata in `/api/v1/session` is request metadata for the cookie-backed BFF path. It is not an access token, refresh token, ID token, or bearer credential.
 - `GET /api/v1/session` is returned with `Cache-Control: no-store` and fails closed when an authenticated principal has no usable subject.
 - OIDC login is handled by `alert-service` server-side session auth when `APP_SECURITY_BFF_ENABLED=true`.
 - Existing bearer JWT resource-server behavior remains available for direct API clients and non-BFF modes.
 - Cookie-backed BFF mutations require CSRF; adding `Authorization: Bearer ...` to a session-cookie request does not make it stateless.
-- BFF logout validates configured provider/logout redirects and clears cookies only through the backend logout endpoint.
+- BFF logout validates configured provider and post-logout redirect origins from allowlists and clears cookies only through the backend logout endpoint.
+- BFF mode default-denies unknown backend-looking routes. Only explicit business endpoints, public health/session/OAuth routes, static assets, and narrow SPA fallback routes are allowed.
+- BFF `client-id` must be configured outside local/dev/test profiles; local defaulting exists only for developer stacks.
 - No lifecycle mutation changes.
 - No idempotency, coordinator, outbox, Kafka, or finality changes.
 
@@ -52,6 +56,7 @@ FDP-48 hardens the Analyst Console frontend request lifecycle and reduces `App.j
 - Workspace-specific failures remain local to the active workspace.
 - CI must be green on the current head SHA.
 - Required FDP-48 CI job: `FDP-48 BFF Session & Request Lifecycle`.
+- The FDP-48 CI job must fail when required backend reports are missing and when required frontend tests are skipped, focused, missing from the JUnit report, failed, or not run.
 
 ## Required FDP-48 Checks
 
@@ -76,3 +81,5 @@ npm run build
 - CSRF tokens are transient request metadata, not localStorage/sessionStorage state.
 - Direct bearer API clients remain supported through the existing resource-server path.
 - This branch does not claim browser DevTools can hide headers. It removes browser-side bearer API calls in BFF mode.
+- Direct SPA OIDC remains a local/compatibility path. Production-like browser deployments should use the cookie-backed BFF pattern.
+- Follow-up refactor: replace the module-level `alertsApi` provider/session bridge with a per-workspace API client factory.

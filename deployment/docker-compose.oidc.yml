@@ -25,6 +25,8 @@ services:
       APP_SECURITY_BFF_CLIENT_ID: analyst-console-ui
       APP_SECURITY_BFF_POST_LOGOUT_REDIRECT_URI: http://localhost:4173/
       APP_SECURITY_BFF_PROVIDER_LOGOUT_URI: http://localhost:8086/realms/fraud-detection/protocol/openid-connect/logout
+      APP_SECURITY_BFF_ALLOWED_PROVIDER_LOGOUT_ORIGINS: http://localhost:8086
+      APP_SECURITY_BFF_ALLOWED_POST_LOGOUT_REDIRECT_ORIGINS: http://localhost:4173
       APP_SECURITY_JWT_ENABLED: "true"
       APP_SECURITY_JWT_ISSUER_URI: http://localhost:8086/realms/fraud-detection
       APP_SECURITY_JWT_JWK_SET_URI: http://keycloak:8080/realms/fraud-detection/protocol/openid-connect/certs

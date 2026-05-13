@@ -704,6 +704,9 @@ Docker UI OIDC settings in this override:
 
 - `VITE_AUTH_PROVIDER=bff`
 - `APP_SECURITY_BFF_ENABLED=true`
+- `APP_SECURITY_BFF_CLIENT_ID=analyst-console-ui`
+- `APP_SECURITY_BFF_ALLOWED_PROVIDER_LOGOUT_ORIGINS=http://localhost:8086`
+- `APP_SECURITY_BFF_ALLOWED_POST_LOGOUT_REDIRECT_ORIGINS=http://localhost:4173`
 - Spring OAuth2 client registration `keycloak`
 - redirect URI `http://localhost:4173/login/oauth2/code/keycloak`
 
@@ -723,6 +726,7 @@ These credentials are local-only and must not be reused outside local test envir
 - login redirect works
 - callback completes on `/login/oauth2/code/keycloak`
 - browser API requests do not include an `Authorization` header in Docker BFF mode
+- `/api/v1/session` exposes identity, authorities, `sessionStatus`, and CSRF metadata only; it does not expose access, refresh, or ID tokens
 - `readonly` receives `403` on write actions
 - logout works
 - expired session shows the correct UI state
@@ -736,6 +740,7 @@ These credentials are local-only and must not be reused outside local test envir
 - service-to-service auth uses the internal service-auth foundation for configured ML/governance calls; local Docker may use explicit `DISABLED_LOCAL_ONLY`, the token-validator Docker override exercises compatibility `TOKEN_VALIDATOR`, `deployment/docker-compose.service-identity-rs256.yml` exercises production-target `JWT_SERVICE_IDENTITY`, and `deployment/docker-compose.service-identity-mtls.yml` exercises FDP-18 internal mTLS service identity; this is not enterprise IAM or automated certificate lifecycle management
 - no production IdP config
 - direct SPA OIDC mode still exists for development, but Docker OIDC mode uses the BFF session path to avoid browser-side bearer API calls
+- browser DevTools can still show bearer headers in direct SPA OIDC mode; the Docker BFF mode avoids browser-side bearer API requests instead of trying to hide them
 
 Keycloak is available at:
 
