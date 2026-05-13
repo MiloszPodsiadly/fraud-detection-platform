@@ -113,6 +113,7 @@ class BffSessionSecurityIntegrationTest {
                 .andExpect(header().string("Cache-Control", containsString("no-store")))
                 .andExpect(header().string("Pragma", "no-cache"))
                 .andExpect(jsonPath("$.authenticated").value(false))
+                .andExpect(jsonPath("$.sessionStatus").value("ANONYMOUS"))
                 .andExpect(jsonPath("$.userId").value(""))
                 .andExpect(jsonPath("$.roles").isEmpty())
                 .andExpect(jsonPath("$.authorities").isEmpty())
@@ -134,6 +135,7 @@ class BffSessionSecurityIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(header().string("Cache-Control", containsString("no-store")))
                 .andExpect(jsonPath("$.authenticated").value(true))
+                .andExpect(jsonPath("$.sessionStatus").value("AUTHENTICATED"))
                 .andExpect(jsonPath("$.userId").value("oidc-user-1"))
                 .andExpect(jsonPath("$.roles[0]").value("FRAUD_OPS_ADMIN"))
                 .andExpect(jsonPath("$.authorities[0]").value(AnalystAuthority.FRAUD_CASE_READ))
@@ -235,6 +237,45 @@ class BffSessionSecurityIntegrationTest {
     void unknownApiRouteRemainsDenied() throws Exception {
         mockMvc.perform(get("/api/v1/not-a-real-endpoint")
                         .with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void publicSpaStaticAndSessionRoutesAreAllowedBySecurity() throws Exception {
+        mockMvc.perform(get("/"))
+                .andExpect(status().isInternalServerError());
+
+        mockMvc.perform(get("/analyst-console"))
+                .andExpect(status().isInternalServerError());
+
+        mockMvc.perform(get("/api/v1/session"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void spaFallbackDoesNotAllowUnsafeMethodsOrUnknownBackendRoutes() throws Exception {
+        mockMvc.perform(post("/analyst-console").with(userWith(AnalystAuthority.FRAUD_CASE_READ)).with(csrf()))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/not-a-real-endpoint").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/governance/not-a-real-endpoint").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/system/not-a-real-endpoint").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/bff/not-a-real-endpoint").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void protectedGovernanceAndSystemRoutesRemainAuthorityGated() throws Exception {
+        mockMvc.perform(get("/system/trust-level").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/governance/advisories").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
                 .andExpect(status().isForbidden());
     }
 

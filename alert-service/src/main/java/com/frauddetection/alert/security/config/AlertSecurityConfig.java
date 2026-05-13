@@ -31,6 +31,8 @@ import org.springframework.util.StringUtils;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 
+import java.util.Set;
+
 @Configuration
 @EnableWebSecurity
 @EnableConfigurationProperties(BffSecurityProperties.class)
@@ -47,8 +49,8 @@ public class AlertSecurityConfig {
      * - governance advisory audit endpoints, which record authenticated operator review only
      *
      * Fallback:
-     * - unknown /api/v1/** routes are denied explicitly
-     * - non-API routes remain permitted for local UI/static usage
+     * - unknown backend-looking routes are denied explicitly
+     * - only allowlisted SPA/static/OAuth routes remain public
      */
 
     @Bean
@@ -93,6 +95,16 @@ public class AlertSecurityConfig {
                         // Public technical endpoints for local orchestration and health checks.
                         .requestMatchers("/actuator/health/**", "/actuator/info").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/session").permitAll()
+                        .requestMatchers("/oauth2/**", "/login/oauth2/**", "/error").permitAll()
+                        .requestMatchers(HttpMethod.GET,
+                                "/",
+                                "/index.html",
+                                "/favicon.ico",
+                                "/manifest.webmanifest",
+                                "/robots.txt",
+                                "/assets/**",
+                                "/static/**"
+                        ).permitAll()
 
                         // Protected analyst business endpoints.
                         .requestMatchers(HttpMethod.GET, "/api/v1/alerts").hasAuthority(AnalystAuthority.ALERT_READ)
@@ -158,9 +170,15 @@ public class AlertSecurityConfig {
 
                         // Guardrail for future analyst endpoints added under /api/v1/** without explicit rules.
                         .requestMatchers("/api/v1/**").denyAll()
+                        .requestMatchers("/api/**").denyAll()
+                        .requestMatchers("/governance/**").denyAll()
+                        .requestMatchers("/system/**").denyAll()
+                        .requestMatchers("/bff/**").denyAll()
+                        .requestMatchers("/actuator/**").denyAll()
 
-                        // Keep non-business routes open for local UI/static delivery.
-                        .anyRequest().permitAll()
+                        // SPA fallback is intentionally narrow; backend-looking routes stay fail-closed.
+                        .requestMatchers(this::isSpaFallbackRoute).permitAll()
+                        .anyRequest().denyAll()
                 );
 
         configureBffSessionMode(http, bffEnabled, oidcAnalystAuthoritiesMapper, bffLogoutSuccessHandler);
@@ -224,6 +242,22 @@ public class AlertSecurityConfig {
         return StringUtils.hasText(authorization)
                 && authorization.regionMatches(true, 0, "Bearer ", 0, 7)
                 && !hasCookie(request, "JSESSIONID");
+    }
+
+    private boolean isSpaFallbackRoute(HttpServletRequest request) {
+        if (!HttpMethod.GET.matches(request.getMethod())) {
+            return false;
+        }
+        String path = request.getRequestURI();
+        return Set.of(
+                "/analyst-console",
+                "/fraud-case",
+                "/fraud-transaction",
+                "/transaction-scoring",
+                "/compliance",
+                "/reports",
+                "/auth/callback"
+        ).contains(path);
     }
 
     private boolean hasCookie(HttpServletRequest request, String cookieName) {

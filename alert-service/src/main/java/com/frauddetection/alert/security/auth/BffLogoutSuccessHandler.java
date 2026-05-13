@@ -42,7 +42,7 @@ public class BffLogoutSuccessHandler implements LogoutSuccessHandler {
             return "/";
         }
         return UriComponentsBuilder.fromUriString(properties.providerLogoutUri())
-                .queryParam("client_id", properties.clientId())
+                .queryParam("client_id", properties.effectiveClientId())
                 .queryParam("post_logout_redirect_uri", properties.postLogoutRedirectUri())
                 .build()
                 .toUriString();

@@ -29,12 +29,13 @@ public class AnalystSessionController {
         AnalystSessionResponse response = currentAnalystUser.get()
                 .map(principal -> new AnalystSessionResponse(
                         true,
+                        "AUTHENTICATED",
                         requireUserId(principal.userId()),
                         principal.roles().stream().map(AnalystRole::name).sorted().toList(),
                         principal.authorities().stream().sorted().toList(),
                         csrf(csrfToken)
                 ))
-                .orElseGet(() -> new AnalystSessionResponse(false, "", List.of(), List.of(), csrf(csrfToken)));
+                .orElseGet(() -> new AnalystSessionResponse(false, "ANONYMOUS", "", List.of(), List.of(), csrf(csrfToken)));
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
                 .header(HttpHeaders.PRAGMA, "no-cache")
@@ -57,6 +58,7 @@ public class AnalystSessionController {
 
     public record AnalystSessionResponse(
             boolean authenticated,
+            String sessionStatus,
             String userId,
             List<String> roles,
             List<String> authorities,
