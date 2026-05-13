@@ -2,6 +2,7 @@ package com.frauddetection.alert.security.auth;
 
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.security.authorization.AnalystRole;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.authority.mapping.GrantedAuthoritiesMapper;
@@ -24,6 +25,7 @@ public class OidcAnalystAuthoritiesMapper implements GrantedAuthoritiesMapper {
     private final JwtSecurityProperties properties;
     private final AlertServiceMetrics metrics;
 
+    @Autowired
     public OidcAnalystAuthoritiesMapper(JwtSecurityProperties properties, AlertServiceMetrics metrics) {
         this.properties = properties;
         this.metrics = metrics;
