@@ -66,6 +66,10 @@ export default function App() {
     riskLevel: "ALL",
     status: "ALL"
   });
+  const [workspaceCounters, setWorkspaceCounters] = useState({
+    alerts: 0,
+    transactions: 0
+  });
   const [advisoryQueue, setAdvisoryQueue] = useState({
     status: "UNAVAILABLE",
     count: 0,
@@ -110,10 +114,11 @@ export default function App() {
   const skipNextOidcBootstrapRef = useRef(false);
   const alertRequestSeqRef = useRef(0);
   const transactionRequestSeqRef = useRef(0);
-  const workQueueEnabled = workspacePage === "analyst"
-    && !handlingOidcCallback
+  const workspaceCounterRequestSeqRef = useRef(0);
+  const workspaceNavigationEnabled = !handlingOidcCallback
     && !sessionBootstrapPending
     && !shouldBlockDashboardFetch(sessionState);
+  const workQueueEnabled = workspacePage === "analyst" && workspaceNavigationEnabled;
   const handleWorkQueueSessionError = useCallback((apiError) => {
     setSessionState(getSessionStateForApiError(session, apiError) || getSessionStateForProvider(session, authProvider));
   }, [authProvider, session]);
@@ -124,7 +129,7 @@ export default function App() {
     onSessionError: handleWorkQueueSessionError
   });
   const fraudCaseWorkQueueSummaryState = useFraudCaseWorkQueueSummary({
-    enabled: workQueueEnabled,
+    enabled: workspaceNavigationEnabled,
     session,
     authProvider
   });
@@ -207,6 +212,17 @@ export default function App() {
     setApiSession(session, authProvider);
     loadAlertQueue(alertPageRequest);
   }, [authProvider, alertPageRequest, handlingOidcCallback, session, sessionBootstrapPending, sessionState?.status, workspacePage]);
+
+  useEffect(() => {
+    if (!workspaceNavigationEnabled) {
+      return;
+    }
+    setApiSession(session, authProvider);
+    loadWorkspaceCounters({
+      includeAlerts: workspacePage !== "fraudTransaction",
+      includeTransactions: workspacePage !== "transactionScoring"
+    });
+  }, [authProvider, session, workspaceNavigationEnabled, workspacePage]);
 
   useEffect(() => {
     if (handlingOidcCallback || sessionBootstrapPending) {
@@ -322,6 +338,10 @@ export default function App() {
         return;
       }
       setAlertPage(nextAlerts);
+      setWorkspaceCounters((current) => ({
+        ...current,
+        alerts: nextAlerts.totalElements ?? current.alerts
+      }));
     } catch (apiError) {
       if (alertRequestSeqRef.current !== requestSeq) {
         return;
@@ -346,6 +366,10 @@ export default function App() {
         return;
       }
       setTransactionPage(nextTransactionPage);
+      setWorkspaceCounters((current) => ({
+        ...current,
+        transactions: nextTransactionPage.totalElements ?? current.transactions
+      }));
     } catch (apiError) {
       if (transactionRequestSeqRef.current !== requestSeq) {
         return;
@@ -404,6 +428,46 @@ export default function App() {
     setGovernanceAuditHistories(histories);
   }
 
+  async function loadWorkspaceCounters({ includeAlerts = true, includeTransactions = true } = {}) {
+    const requests = [];
+    if (includeAlerts) {
+      requests.push(["alerts", listAlerts({ page: 0, size: 1 })]);
+    }
+    if (includeTransactions) {
+      requests.push([
+        "transactions",
+        listScoredTransactions({
+          page: 0,
+          size: 1,
+          query: "",
+          riskLevel: "ALL",
+          status: "ALL"
+        })
+      ]);
+    }
+    if (requests.length === 0) {
+      return;
+    }
+
+    const requestSeq = workspaceCounterRequestSeqRef.current + 1;
+    workspaceCounterRequestSeqRef.current = requestSeq;
+    const results = await Promise.allSettled(requests.map(([, request]) => request));
+    if (workspaceCounterRequestSeqRef.current !== requestSeq) {
+      return;
+    }
+
+    setWorkspaceCounters((current) => requests.reduce((next, [counterName], index) => {
+      const result = results[index];
+      if (result.status !== "fulfilled") {
+        return next;
+      }
+      return {
+        ...next,
+        [counterName]: result.value.totalElements ?? next[counterName]
+      };
+    }, { ...current }));
+  }
+
   async function recordGovernanceAudit(eventId, audit) {
     await recordGovernanceAdvisoryAudit(eventId, audit);
     const nextHistory = await getGovernanceAdvisoryAudit(eventId);
@@ -437,8 +501,14 @@ export default function App() {
     if (workspacePage === "transactionScoring") {
       loadTransactionStream(transactionPageRequest);
     }
-    if (workspacePage === "analyst") {
+    if (workspaceNavigationEnabled) {
       fraudCaseWorkQueueSummaryState.retry();
+      loadWorkspaceCounters({
+        includeAlerts: workspacePage !== "fraudTransaction",
+        includeTransactions: workspacePage !== "transactionScoring"
+      });
+    }
+    if (workspacePage === "analyst") {
       fraudCaseWorkQueueState.refreshFirstSlice();
     }
     if (workspacePage === "compliance") {
@@ -622,6 +692,7 @@ export default function App() {
         ) : (
           <AlertsListPage
             workspacePage={workspacePage}
+            workspaceCounters={workspaceCounters}
             alertPage={alertPage}
             fraudCaseSummary={fraudCaseWorkQueueSummaryState.summary}
             fraudCaseWorkQueue={fraudCaseWorkQueueState.queue}

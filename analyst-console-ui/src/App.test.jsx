@@ -111,7 +111,7 @@ describe("App", () => {
     };
   });
 
-  it("handles the dedicated OIDC callback path before loading active workspace data", async () => {
+  it("handles the dedicated OIDC callback path before loading active workspace and navigation counters", async () => {
     completeLoginCallback.mockImplementation(async () => {
       callbackPath.value = false;
       return {
@@ -128,9 +128,15 @@ describe("App", () => {
 
     await waitFor(() => expect(completeLoginCallback).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
-    expect(listAlerts).not.toHaveBeenCalled();
+    expect(listAlerts).toHaveBeenCalledWith({ page: 0, size: 1 });
     expect(listFraudCaseWorkQueue).toHaveBeenCalledTimes(1);
-    expect(listScoredTransactions).not.toHaveBeenCalled();
+    expect(listScoredTransactions).toHaveBeenCalledWith({
+      page: 0,
+      size: 1,
+      query: "",
+      riskLevel: "ALL",
+      status: "ALL"
+    });
     expect(setApiSession).toHaveBeenCalled();
   });
 
@@ -177,9 +183,15 @@ describe("App", () => {
 
     await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
-    expect(listAlerts).not.toHaveBeenCalled();
+    expect(listAlerts).toHaveBeenCalledWith({ page: 0, size: 1 });
     expect(listFraudCaseWorkQueue).toHaveBeenCalledTimes(1);
-    expect(listScoredTransactions).not.toHaveBeenCalled();
+    expect(listScoredTransactions).toHaveBeenCalledWith({
+      page: 0,
+      size: 1,
+      query: "",
+      riskLevel: "ALL",
+      status: "ALL"
+    });
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
     expect(screen.queryByText("Loading session state...")).not.toBeInTheDocument();
   });
@@ -204,7 +216,7 @@ describe("App", () => {
     expect(screen.queryByRole("heading", { name: "Session required" })).not.toBeInTheDocument();
   });
 
-  it("does not fetch the fraud case summary when transaction scoring is the initial workspace", async () => {
+  it("fetches the visible global fraud case summary when transaction scoring is the initial workspace", async () => {
     callbackPath.value = false;
     window.history.replaceState({}, "", "/?workspace=transaction-scoring");
     refreshSession.mockResolvedValue(authenticatedSession());
@@ -218,11 +230,11 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByText("txn-visible")).toBeInTheDocument();
-    expect(getFraudCaseWorkQueueSummary).not.toHaveBeenCalled();
+    expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1);
     expect(listFraudCaseWorkQueue).not.toHaveBeenCalled();
   });
 
-  it("loads the fraud case summary when navigating into the fraud case workspace", async () => {
+  it("keeps the visible fraud case summary when navigating into the fraud case workspace", async () => {
     callbackPath.value = false;
     window.history.replaceState({}, "", "/?workspace=transaction-scoring");
     refreshSession.mockResolvedValue(authenticatedSession());
@@ -237,7 +249,8 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByText("txn-visible")).toBeInTheDocument();
-    expect(getFraudCaseWorkQueueSummary).not.toHaveBeenCalled();
+    await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole("link", { name: /Global fraud cases\s*47/ })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("link", { name: "Fraud Case" }));
 
@@ -245,7 +258,7 @@ describe("App", () => {
     expect(await screen.findByRole("link", { name: /Global fraud cases\s*47/ })).toBeInTheDocument();
   });
 
-  it("does not retry fraud case summary after switching away from the fraud case workspace", async () => {
+  it("refreshes visible navigation counters after switching away from the fraud case workspace", async () => {
     callbackPath.value = false;
     refreshSession.mockResolvedValue(authenticatedSession());
     providerState.value = {
@@ -263,8 +276,9 @@ describe("App", () => {
     expect(await screen.findByText("txn-visible")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
 
-    await waitFor(() => expect(listScoredTransactions).toHaveBeenCalledTimes(2));
-    expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(listScoredTransactions).toHaveBeenCalledTimes(3));
+    expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(2);
+    expect(listFraudCaseWorkQueue).toHaveBeenCalledTimes(1);
   });
 
   it("keeps workspace state synchronized with browser back and forward navigation", async () => {

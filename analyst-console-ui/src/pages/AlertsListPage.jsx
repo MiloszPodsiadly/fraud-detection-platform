@@ -14,6 +14,7 @@ import { SESSION_STATES } from "../auth/sessionState.js";
 
 export function AlertsListPage({
   workspacePage = "analyst",
+  workspaceCounters = { alerts: 0, transactions: 0 },
   alertPage,
   fraudCaseSummary = { totalFraudCases: 0 },
   fraudCaseTotalElements,
@@ -91,6 +92,8 @@ export function AlertsListPage({
   const sessionBlocksDashboard = shouldBlockDashboard(sessionState, error);
   const workQueueError = sessionBlocksDashboard ? workQueueErrorForSession(sessionState) : fraudCaseWorkQueueError;
   const showAnalyst = workspacePage === "analyst";
+  const transactionGlobalCount = workspaceCounters.transactions ?? transactionPage.totalElements ?? 0;
+  const alertGlobalCount = workspaceCounters.alerts ?? alertPage.totalElements ?? 0;
   const fraudCaseGlobalCount = fraudCaseSummary?.totalFraudCases ?? fraudCaseTotalElements ?? 0;
   const fraudCaseSummaryLabel = fraudCaseSummaryError
     ? "Unavailable"
@@ -116,20 +119,20 @@ export function AlertsListPage({
       <nav className="workspaceTabs" aria-label="Analyst workspace sections">
         <a href="?workspace=transaction-scoring" onClick={(event) => openWorkspace(event, onWorkspaceChange, "transactionScoring")}>
           <span>Transactions</span>
-          <strong>{transactionPage.totalElements}</strong>
+          <strong>{transactionGlobalCount}</strong>
         </a>
         <a href="?workspace=fraud-transaction" onClick={(event) => openWorkspace(event, onWorkspaceChange, "fraudTransaction")}>
           <span>Alerts</span>
-          <strong>{alertPage.totalElements}</strong>
+          <strong>{alertGlobalCount}</strong>
         </a>
         <a
           href="/"
-          title={showAnalyst ? fraudCaseSummaryHint : "Open the fraud case workspace."}
-          aria-label={showAnalyst ? `Global fraud cases ${fraudCaseSummaryLabel}` : "Open fraud case workspace"}
+          title={fraudCaseSummaryHint}
+          aria-label={`Global fraud cases ${isFraudCaseSummaryLoading ? "Loading" : fraudCaseSummaryLabel}`}
           onClick={(event) => openWorkspace(event, onWorkspaceChange, "analyst")}
         >
           <span>Global fraud cases</span>
-          <strong>{showAnalyst ? (isFraudCaseSummaryLoading ? "..." : fraudCaseSummaryLabel) : "Open"}</strong>
+          <strong>{isFraudCaseSummaryLoading ? "..." : fraudCaseSummaryLabel}</strong>
         </a>
         <a href="?workspace=reports" onClick={(event) => openWorkspace(event, onWorkspaceChange, "reports")}>
           <span>Audit analytics</span>

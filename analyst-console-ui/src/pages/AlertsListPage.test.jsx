@@ -340,7 +340,7 @@ describe("AlertsListPage session lifecycle", () => {
     expect(screen.getAllByText("CASE-1").length).toBeGreaterThan(0);
   });
 
-  it("does not display a stale global fraud case count outside the fraud case workspace", () => {
+  it("displays the visible global fraud case count outside the fraud case workspace", () => {
     render(
       <AlertsListPage
         workspacePage="transactionScoring"
@@ -383,8 +383,9 @@ describe("AlertsListPage session lifecycle", () => {
       />
     );
 
-    expect(screen.getByRole("link", { name: "Open fraud case workspace" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /Global fraud cases\s*46/ })).not.toBeInTheDocument();
+    const globalCountLink = screen.getByRole("link", { name: /Global fraud cases\s*46/ });
+    expect(globalCountLink).toBeInTheDocument();
+    expect(globalCountLink).toHaveAttribute("title", expect.stringContaining("Global point-in-time fraud case count."));
   });
 
   it("sends transaction monitor filters to request state instead of filtering only the current page", () => {
