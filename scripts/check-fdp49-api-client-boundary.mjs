@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const root = process.env.FDP49_API_BOUNDARY_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), "..");
 const failureMessage = "Auth-sensitive UI code must use createAlertsApiClient({ session, authProvider }); raw fetch is only allowed in API/auth bootstrap layers.";
 const disallowed = new Set([
   "listAlerts",
@@ -51,6 +51,14 @@ for (const file of files) {
       console.error(`${file} re-exports default alertsApi wrappers: ${blocked.join(", ")}`);
     }
   }
+  if (/export\s+\*\s+from\s*["'][^"']*\/api\/alertsApi\.js["'];?/.test(source)) {
+    failed = true;
+    console.error(`${file} re-exports alertsApi.js from an auth-sensitive barrel`);
+  }
+  if (/export\s+\{\s*default(?:\s+as\s+[A-Za-z_$][\w$]*)?\s*\}\s*from\s*["'][^"']*\/api\/alertsApi\.js["'];?/.test(source)) {
+    failed = true;
+    console.error(`${file} re-exports the default alertsApi client from an auth-sensitive barrel`);
+  }
 
   for (const match of source.matchAll(/import\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s*["']([^"']*\/api\/alertsApi\.js)["'];?/g)) {
     namespaceImports.add(match[1]);
@@ -68,7 +76,15 @@ for (const file of files) {
     console.error(`${file} dynamically imports alertsApi.js outside the API layer`);
   }
 
-  if (/\b(?:fetch|window\.fetch|globalThis\.fetch)\s*\(/.test(source)) {
+  for (const match of source.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*fetch\s*;?/g)) {
+    const alias = match[1];
+    if (new RegExp(`\\b${alias}\\s*\\(`).test(source.slice(match.index + match[0].length))) {
+      failed = true;
+      console.error(`${file} aliases raw fetch as ${alias} outside the API/auth bootstrap layer`);
+    }
+  }
+
+  if (/\b(?:fetch|window\.fetch|globalThis\.fetch|window\[\s*["']fetch["']\s*\]|globalThis\[\s*["']fetch["']\s*\])\s*\(/.test(source)) {
     failed = true;
     console.error(`${file} uses raw fetch outside the API/auth bootstrap layer`);
   }
