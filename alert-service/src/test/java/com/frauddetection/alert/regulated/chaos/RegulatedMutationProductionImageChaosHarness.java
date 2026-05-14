@@ -547,7 +547,7 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
                 + fields.getOrDefault("success_audit", "recorded") + " |\n";
     }
 
-    private Map<String, String> parseEvidenceLine(String line) {
+    private static Map<String, String> parseEvidenceLine(String line) {
         Map<String, String> fields = new HashMap<>();
         String normalized = line.startsWith("- ") ? line.substring(2) : line;
         for (String segment : normalized.split(";")) {
@@ -755,7 +755,21 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
     }
 
     private boolean hasRequiredTransactionScenario() {
+        Path evidence = logDirectory.resolve("evidence-summary.md");
+        if (Files.exists(evidence)) {
+            return evidenceContainsRequiredTransactionScenario(evidence);
+        }
         return scenarioTransactionModes.values().stream().anyMatch("REQUIRED"::equals);
+    }
+
+    static boolean evidenceContainsRequiredTransactionScenario(Path evidence) {
+        try (var lines = Files.lines(evidence)) {
+            return lines.filter(line -> line.startsWith("- scenario="))
+                    .map(RegulatedMutationProductionImageChaosHarness::parseEvidenceLine)
+                    .anyMatch(fields -> "REQUIRED".equals(fields.get("transaction_mode")));
+        } catch (IOException exception) {
+            throw new UncheckedIOException("Unable to inspect FDP-37 evidence transaction modes", exception);
+        }
     }
 
     private String requiredWorkflowStatus(String envName) {
