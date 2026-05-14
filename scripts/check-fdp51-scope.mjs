@@ -19,6 +19,28 @@ const backendProductionPrefixes = [
 const allowedEndpointFiles = new Set([
   "analyst-console-ui/src/api/alertsApi.js"
 ]);
+const authSensitiveFrontendPrefixes = [
+  "analyst-console-ui/src/workspace/",
+  "analyst-console-ui/src/components/",
+  "analyst-console-ui/src/pages/",
+  "analyst-console-ui/src/fraudCases/"
+];
+const blockedDefaultApiWrappers = [
+  "listAlerts",
+  "listFraudCaseWorkQueue",
+  "getFraudCaseWorkQueueSummary",
+  "listScoredTransactions",
+  "listGovernanceAdvisories",
+  "getGovernanceAdvisoryAnalytics",
+  "getGovernanceAdvisoryAudit",
+  "recordGovernanceAdvisoryAudit",
+  "getAlert",
+  "getAssistantSummary",
+  "getFraudCase",
+  "updateFraudCase",
+  "submitAnalystDecision"
+];
+const blockedWrapperPattern = new RegExp(`\\b(${blockedDefaultApiWrappers.join("|")})\\b`);
 
 for (const file of changedFiles) {
   const normalized = file.replaceAll("\\", "/");
@@ -35,6 +57,9 @@ for (const file of changedFiles) {
     }
     if (introducesForbiddenWorkflow(line)) {
       violations.push(`${normalized}: FDP-51 must not introduce export, bulk, assignment, or mass-action workflows.`);
+    }
+    if (isAuthSensitiveFrontendFile(normalized) && introducesDirectDefaultApiWrapperUsage(line)) {
+      violations.push(`${normalized}: FDP-51 workspace code must use runtime-provided API clients, not default API wrapper calls.`);
     }
   }
 }
@@ -95,4 +120,17 @@ function introducesForbiddenWorkflow(diffLine) {
     || /\bexport\s+(workflow|button|action|csv|download|file|report|data|results)\b/i.test(sourceLine)
     || /\b(export|download)\s+(csv|file|report|data|results)\b/i.test(sourceLine)
     || /\b(onExport|handleExport|export[A-Z][A-Za-z]*)\b/.test(sourceLine);
+}
+
+function isAuthSensitiveFrontendFile(file) {
+  return authSensitiveFrontendPrefixes.some((prefix) => file.startsWith(prefix));
+}
+
+function introducesDirectDefaultApiWrapperUsage(diffLine) {
+  const sourceLine = diffLine.replace(/^\+\s*/, "");
+  return (
+    /from\s+["'][^"']*\/api\/alertsApi\.js["']/.test(sourceLine)
+    || /from\s+["'][^"']*api\/alertsApi\.js["']/.test(sourceLine)
+    || /\balertsApi\./.test(sourceLine)
+  ) && blockedWrapperPattern.test(sourceLine);
 }

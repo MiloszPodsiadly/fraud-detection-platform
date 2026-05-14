@@ -14,7 +14,8 @@ Workspace data loading, counters, authority-derived workspace capability flags, 
 - Explicit hook client props are for tests, stories, and standalone hook verification only; production composition goes through `WorkspaceRuntimeProvider`.
 - Workspace counters move to `useWorkspaceCounters` with abort, request sequencing, partial failure reporting, stale retained values, and session-boundary clearing.
 - Counter UI visibly reports degraded and stale states without converting missing authority or failed counters to zero.
-- `WorkspaceDashboardShell` owns workspace hook orchestration, refresh behavior, details-page runtime wiring, and governance audit refresh behavior.
+- `WorkspaceDashboardShell` is a composition shell for workspace hook orchestration, detail-page runtime wiring, and panel fan-out. It is not the final full decomposition.
+- Refresh routing is isolated in `useWorkspaceRefreshController`; governance audit writes are isolated in `useGovernanceAuditWorkflow`.
 - FDP-49/FDP-50 API client and raw-fetch guardrails remain mandatory.
 
 ## Non-Goals
@@ -40,6 +41,7 @@ Workspace data loading, counters, authority-derived workspace capability flags, 
 - Workspace counters clear on logout and session boundary reset.
 - Partial counter failures set `degraded`; retained previous values are marked `stale` and shown as last-known values.
 - Missing authority makes a counter unavailable, not zero.
+- Governance audit workflow returns controlled `{ ok: false, reason, message }` results for expected local guard or API failures so the UI can show bounded errors without unhandled promise rejections.
 
 ## SOLID / ACID Alignment
 
@@ -58,3 +60,9 @@ Workspace data loading, counters, authority-derived workspace capability flags, 
 - CI job: `FDP-51 Analyst Console Workspace Runtime`
 - CI must reject `.skip` and `.only` in FDP-51 runtime, counter, workspace, app, and API boundary tests.
 - `documents/` remains uncommitted.
+
+## Remaining Debt
+
+- `WorkspaceDashboardShell` should be decomposed further if additional workspace panels are added.
+- Governance audit workflow may move into a dedicated container if its UI state grows beyond controlled form errors.
+- Counter stale state may become per-counter if the workspace adds more counters.

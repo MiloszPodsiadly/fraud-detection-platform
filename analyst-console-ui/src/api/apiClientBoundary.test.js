@@ -164,6 +164,9 @@ describe("api client boundary", () => {
 
     expect(script).toContain("introducesForbiddenWorkflow");
     expect(script).toContain("^export\\s+(async\\s+)?(function|const|let|var|class)\\b");
+    expect(script).toContain("endpoint URL strings must stay inside the API client boundary.");
+    expect(script).toContain("blockedDefaultApiWrappers");
+    expect(script).toContain("runtime-provided API clients");
     expect(() => runScopeGuard({
       FDP51_SCOPE_BASE: "refs/heads/does-not-exist-fdp51",
       FDP51_SCOPE_CHANGED_FILES: "analyst-console-ui/src/workspace/useRuntime.js"
