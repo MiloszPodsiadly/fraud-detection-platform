@@ -1967,7 +1967,19 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Validate compose file
-        run: docker compose -f deployment/docker-compose.yml config --quiet
+        run: |
+          docker compose \
+            -f deployment/docker-compose.yml \
+            -f deployment/docker-compose.oidc.yml \
+            -f deployment/docker-compose.service-identity-mtls.yml \
+            -f deployment/docker-compose.trust-authority-jwt.yml \
+            config --quiet
 
       - name: Build compose images
-        run: docker compose -f deployment/docker-compose.yml build
+        run: |
+          docker compose \
+            -f deployment/docker-compose.yml \
+            -f deployment/docker-compose.oidc.yml \
+            -f deployment/docker-compose.service-identity-mtls.yml \
+            -f deployment/docker-compose.trust-authority-jwt.yml \
+            build
