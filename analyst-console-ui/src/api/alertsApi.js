@@ -107,8 +107,7 @@ export function isAbortError(error) {
   return error?.name === "AbortError";
 }
 
-// Default client is compatibility-only; auth-sensitive workspace code must use
-// createAlertsApiClient({ session, authProvider }).
+// Compatibility-only default client. Auth-sensitive workspace code must use createAlertsApiClient({ session, authProvider }).
 const defaultApiClient = createAlertsApiClient();
 
 export function listAlerts(requestParams, requestOptions) {

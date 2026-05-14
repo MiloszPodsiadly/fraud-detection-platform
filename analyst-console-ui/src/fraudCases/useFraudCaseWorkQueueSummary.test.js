@@ -1,12 +1,8 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getFraudCaseWorkQueueSummary } from "../api/alertsApi.js";
 import { useFraudCaseWorkQueueSummary } from "./useFraudCaseWorkQueueSummary.js";
 
-vi.mock("../api/alertsApi.js", () => ({
-  getFraudCaseWorkQueueSummary: vi.fn(),
-  isAbortError: (error) => error?.name === "AbortError"
-}));
+const getFraudCaseWorkQueueSummary = vi.fn();
 
 describe("useFraudCaseWorkQueueSummary", () => {
   beforeEach(() => {
