@@ -23,13 +23,14 @@ export function createAlertsApiClient({
     listGovernanceAdvisories: (requestParams, requestOptions) => listGovernanceAdvisoriesWithRequest(request, requestParams, requestOptions),
     getGovernanceAdvisoryAnalytics: (requestParams, requestOptions) => getGovernanceAdvisoryAnalyticsWithRequest(request, requestParams, requestOptions),
     getGovernanceAdvisoryAudit: (eventId, requestOptions) => request(`/governance/advisories/${encodeURIComponent(eventId)}/audit`, requestOptions),
-    recordGovernanceAdvisoryAudit: (eventId, audit) => request(`/governance/advisories/${encodeURIComponent(eventId)}/audit`, {
+    recordGovernanceAdvisoryAudit: (eventId, audit, requestOptions = {}) => request(`/governance/advisories/${encodeURIComponent(eventId)}/audit`, {
+      ...requestOptions,
       method: "POST",
       body: JSON.stringify(audit)
     }),
-    getAlert: (alertId) => request(`/api/v1/alerts/${encodeURIComponent(alertId)}`),
-    getAssistantSummary: (alertId) => request(`/api/v1/alerts/${encodeURIComponent(alertId)}/assistant-summary`),
-    getFraudCase: (caseId) => request(`/api/v1/fraud-cases/${encodeURIComponent(caseId)}`),
+    getAlert: (alertId, requestOptions) => request(`/api/v1/alerts/${encodeURIComponent(alertId)}`, requestOptions),
+    getAssistantSummary: (alertId, requestOptions) => request(`/api/v1/alerts/${encodeURIComponent(alertId)}/assistant-summary`, requestOptions),
+    getFraudCase: (caseId, requestOptions) => request(`/api/v1/fraud-cases/${encodeURIComponent(caseId)}`, requestOptions),
     updateFraudCase: (caseId, decision, { idempotencyKey } = {}) => request(`/api/v1/fraud-cases/${encodeURIComponent(caseId)}`, {
       method: "PATCH",
       headers: idempotencyKey ? { "X-Idempotency-Key": idempotencyKey } : {},

@@ -35,7 +35,8 @@ export default function App() {
   });
   const [session, setSession] = useState(() => authProvider.getInitialSession());
   const [sessionState, setSessionState] = useState(() => getSessionStateForProvider(authProvider.getInitialSession(), authProvider));
-  const apiClient = useMemo(() => createAlertsApiClient({ session, authProvider }), [authProvider, session]);
+  const apiClientBoundaryKey = useMemo(() => sessionBoundaryKey(session, authProvider), [authProvider, session]);
+  const apiClient = useMemo(() => createAlertsApiClient({ session, authProvider }), [apiClientBoundaryKey, authProvider]);
   const [callbackError, setCallbackError] = useState(null);
   const handlingOidcCallback = authProvider.kind === "oidc" && isOidcCallbackPath();
   const [sessionBootstrapPending, setSessionBootstrapPending] = useState(Boolean(authProvider.requiresSessionBootstrap) || authProvider.kind === "oidc");
@@ -78,10 +79,14 @@ export default function App() {
   });
   const governanceQueueState = useGovernanceQueue({
     enabled: workspacePage === "compliance" && workspaceNavigationEnabled,
+    session,
+    authProvider,
     apiClient
   });
   const governanceAnalyticsState = useGovernanceAnalytics({
     enabled: workspacePage === "reports" && workspaceNavigationEnabled,
+    session,
+    authProvider,
     apiClient
   });
 
@@ -89,6 +94,13 @@ export default function App() {
     authProvider.persistSession(session);
     setSessionState(getSessionStateForProvider(session, authProvider));
   }, [authProvider, session]);
+
+  useEffect(() => {
+    workspaceCounterRequestSeqRef.current += 1;
+    if (!workspaceNavigationEnabled) {
+      setWorkspaceCounters({ alerts: 0, transactions: 0 });
+    }
+  }, [apiClientBoundaryKey, workspaceNavigationEnabled]);
 
   useEffect(() => {
     if (!selectedAlertId && !selectedFraudCaseId) {
@@ -487,4 +499,15 @@ function shouldBlockDashboardFetch(sessionState) {
     SESSION_STATES.ACCESS_DENIED,
     SESSION_STATES.AUTH_ERROR
   ].includes(sessionState?.status);
+}
+
+function sessionBoundaryKey(session, authProvider) {
+  const roles = Array.isArray(session?.roles) ? session.roles.join(",") : "";
+  const authorities = Array.isArray(session?.authorities) ? session.authorities.join(",") : "";
+  return [
+    authProvider?.kind || "none",
+    session?.userId || "",
+    roles,
+    authorities
+  ].join(":");
 }

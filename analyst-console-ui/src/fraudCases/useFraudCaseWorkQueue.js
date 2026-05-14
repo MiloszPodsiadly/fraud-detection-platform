@@ -80,7 +80,7 @@ export function useFraudCaseWorkQueue({
   }, [apiClient, onSessionError]);
 
   useEffect(() => {
-    if (!enabled) {
+    if (!enabled || !apiClient) {
       abortControllerRef.current?.abort();
       abortControllerRef.current = null;
       requestSeqRef.current += 1;

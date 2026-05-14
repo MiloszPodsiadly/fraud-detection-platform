@@ -392,6 +392,67 @@ describe("alertsApi auth headers", () => {
     expect(fetchMock.mock.calls[1][1]).not.toHaveProperty("credentials");
   });
 
+  it("keeps explicit clients isolated from later provider and session switches", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => Promise.resolve(jsonResponse({ content: [] })));
+    const bffClient = createAlertsApiClient({
+      session: normalizeSession({ userId: "server-user-1", roles: ["FRAUD_OPS_ADMIN"] }),
+      authProvider: await refreshedBffProvider("X-CSRF-TOKEN", "csrf-original")
+    });
+    const oidcClient = createAlertsApiClient({
+      session: normalizeSession({ userId: "oidc-analyst", roles: ["ANALYST"] }),
+      authProvider: createOidcAuthProvider(createInMemoryOidcSessionSource({
+        accessToken: "oidc-token-current",
+        session: { userId: "oidc-analyst", roles: ["ANALYST"] }
+      }))
+    });
+
+    await bffClient.listAlerts();
+    await oidcClient.listAlerts();
+    await bffClient.listAlerts();
+
+    expect(fetchMock.mock.calls[0][1].headers["X-CSRF-TOKEN"]).toBe("csrf-original");
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined();
+    expect(fetchMock.mock.calls[1][1].headers.Authorization).toBe("Bearer oidc-token-current");
+    expect(fetchMock.mock.calls[1][1].headers).not.toHaveProperty("X-CSRF-TOKEN");
+    expect(fetchMock.mock.calls[2][1].headers["X-CSRF-TOKEN"]).toBe("csrf-original");
+    expect(fetchMock.mock.calls[2][1].headers.Authorization).toBeUndefined();
+  });
+
+  it("does not persist BFF csrf headers to browser storage", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      operation_status: "COMMITTED"
+    }));
+    const authProvider = await refreshedBffProvider("X-CSRF-TOKEN", "csrf-storage-check");
+    resetApiClient(normalizeSession({ userId: "server-user-1", roles: ["FRAUD_OPS_ADMIN"] }), authProvider);
+
+    await submitAnalystDecision("alert-1", { decision: "MARKED_LEGITIMATE" }, { idempotencyKey: "alert-decision-alert-1-key" });
+
+    expect(fetchMock.mock.calls[0][1].headers["X-CSRF-TOKEN"]).toBe("csrf-storage-check");
+    expect(storageContains(window.localStorage, "csrf-storage-check")).toBe(false);
+    expect(storageContains(window.sessionStorage, "csrf-storage-check")).toBe(false);
+  });
+
+  it("creates a logged-out client without stale Authorization or CSRF headers", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => Promise.resolve(jsonResponse({ content: [] })));
+    const oidcProvider = createOidcAuthProvider(createInMemoryOidcSessionSource({
+      accessToken: "stale-token",
+      session: { userId: "oidc-analyst", roles: ["ANALYST"] }
+    }));
+    const loggedOutClient = createAlertsApiClient({
+      session: normalizeSession({}),
+      authProvider: createDemoAuthProvider()
+    });
+
+    await createAlertsApiClient({
+      session: normalizeSession({ userId: "oidc-analyst", roles: ["ANALYST"] }),
+      authProvider: oidcProvider
+    }).listAlerts();
+    await loggedOutClient.listAlerts();
+
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer stale-token");
+    expect(fetchMock.mock.calls[1][1].headers).toEqual({ "Content-Type": "application/json" });
+  });
+
   it("passes AbortSignal to list endpoints", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ content: [] }));
     const abortController = new AbortController();
@@ -575,4 +636,14 @@ function jsonResponse(body, status = 200) {
     status,
     headers: { "Content-Type": "application/json" }
   });
+}
+
+function storageContains(storage, needle) {
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (key?.includes(needle) || storage.getItem(key)?.includes(needle)) {
+      return true;
+    }
+  }
+  return false;
 }

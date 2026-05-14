@@ -14,13 +14,14 @@ const INITIAL_ANALYTICS = {
   }
 };
 
-export function useGovernanceAnalytics({ enabled = true, apiClient } = {}) {
+export function useGovernanceAnalytics({ enabled = true, apiClient, session, authProvider } = {}) {
   const [analytics, setAnalytics] = useState(INITIAL_ANALYTICS);
   const [windowDays, setWindowDays] = useState(7);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const requestSeqRef = useRef(0);
   const abortControllerRef = useRef(null);
+  const sessionIdentity = `${authProvider?.kind || "none"}:${session?.userId || ""}`;
 
   const load = useCallback(async (days = windowDays) => {
     abortControllerRef.current?.abort();
@@ -55,7 +56,7 @@ export function useGovernanceAnalytics({ enabled = true, apiClient } = {}) {
   }, [apiClient, windowDays]);
 
   useEffect(() => {
-    if (!enabled) {
+    if (!enabled || !apiClient) {
       abortControllerRef.current?.abort();
       abortControllerRef.current = null;
       requestSeqRef.current += 1;
@@ -65,7 +66,7 @@ export function useGovernanceAnalytics({ enabled = true, apiClient } = {}) {
       return;
     }
     load(windowDays);
-  }, [enabled, load, windowDays]);
+  }, [enabled, load, sessionIdentity, windowDays]);
 
   useEffect(() => () => {
     abortControllerRef.current?.abort();

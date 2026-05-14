@@ -23,6 +23,12 @@ describe("useFraudCaseWorkQueue", () => {
     expect(result.current.lastRefreshedAt).toBeTruthy();
   });
 
+  it("does not fetch without an explicit apiClient", () => {
+    renderHook(() => useFraudCaseWorkQueue({ enabled: true, apiClient: null }));
+
+    expect(listFraudCaseWorkQueue).not.toHaveBeenCalled();
+  });
+
   it("load more appends the next slice", async () => {
     listFraudCaseWorkQueue
       .mockResolvedValueOnce(slice([{ caseId: "case-1" }], { nextCursor: "cursor-2", hasNext: true }))
@@ -145,6 +151,32 @@ describe("useFraudCaseWorkQueue", () => {
     expect(result.current.error).toBeNull();
     expect(result.current.warning).toBeNull();
     expect(result.current.lastRefreshedAt).toBeNull();
+  });
+
+  it("does not allow an old apiClient response to overwrite a switched session", async () => {
+    const first = deferred();
+    const second = deferred();
+    const apiClientA = { listFraudCaseWorkQueue: vi.fn().mockReturnValue(first.promise) };
+    const apiClientB = { listFraudCaseWorkQueue: vi.fn().mockReturnValue(second.promise) };
+    const { result, rerender } = renderHook(
+      ({ session, apiClient }) => useFraudCaseWorkQueue({ enabled: true, session, authProvider: { kind: "demo" }, apiClient }),
+      { initialProps: { session: { userId: "user-a" }, apiClient: apiClientA } }
+    );
+    await waitFor(() => expect(apiClientA.listFraudCaseWorkQueue).toHaveBeenCalledTimes(1));
+
+    rerender({ session: { userId: "user-b" }, apiClient: apiClientB });
+    await waitFor(() => expect(apiClientB.listFraudCaseWorkQueue).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      second.resolve(slice([{ caseId: "case-b" }]));
+    });
+    await waitFor(() => expect(result.current.queue.content).toEqual([{ caseId: "case-b" }]));
+
+    await act(async () => {
+      first.resolve(slice([{ caseId: "case-a" }]));
+    });
+
+    expect(result.current.queue.content).toEqual([{ caseId: "case-b" }]);
   });
 });
 
