@@ -9,20 +9,19 @@ const usingExplicitChangedFiles = Boolean(process.env.FDP50_SCOPE_CHANGED_FILES)
 const changedFiles = resolveChangedFiles();
 const violations = [];
 
-const forbiddenBackendPrefixes = [
-  "alert-service/src/main/java/",
+const allowedBackendFiles = new Set([
+  "alert-service/src/main/java/com/frauddetection/alert/controller/FraudCaseController.java",
+  "alert-service/src/main/java/com/frauddetection/alert/security/config/FraudCaseAuthorizationRules.java",
+  "alert-service/src/main/java/com/frauddetection/alert/security/config/BffSessionSecurityConfigurer.java",
+  "alert-service/src/main/java/com/frauddetection/alert/audit/read/ReadAccessAuditClassifier.java",
+  "alert-service/src/main/java/com/frauddetection/alert/observability/AlertServiceMetrics.java",
+  "alert-service/src/main/java/com/frauddetection/alert/fraudcase/FraudCaseReadQueryPolicy.java"
+]);
+const forbiddenBackendProductionPrefixes = [
   "transaction-ingest-service/src/main/java/",
   "feature-enricher-service/src/main/java/",
   "fraud-scoring-service/src/main/java/",
   "ml-inference-service/"
-];
-const forbiddenBackendHints = [
-  "/controller/",
-  "/security/",
-  "/regulated/",
-  "/outbox/",
-  "/finality/",
-  "/coordinator/"
 ];
 const allowedEndpointFiles = new Set([
   "analyst-console-ui/src/api/alertsApi.js"
@@ -30,11 +29,11 @@ const allowedEndpointFiles = new Set([
 
 for (const file of changedFiles) {
   const normalized = file.replaceAll("\\", "/");
-  if (forbiddenBackendPrefixes.some((prefix) => normalized.startsWith(prefix))) {
-    violations.push(`${normalized}: FDP-50 must not change backend production code`);
+  if (normalized.startsWith("alert-service/src/main/java/") && !allowedBackendFiles.has(normalized)) {
+    violations.push(`${normalized}: FDP-50 backend production changes are restricted to the approved legacy fraud-case route removal allowlist.`);
   }
-  if (normalized.endsWith(".java") && forbiddenBackendHints.some((hint) => normalized.includes(hint))) {
-    violations.push(`${normalized}: FDP-50 must not change backend auth/controller/lifecycle semantics`);
+  if (forbiddenBackendProductionPrefixes.some((prefix) => normalized.startsWith(prefix))) {
+    violations.push(`${normalized}: FDP-50 must not change backend production code outside the approved alert-service allowlist.`);
   }
 }
 

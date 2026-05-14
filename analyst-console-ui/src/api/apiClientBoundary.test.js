@@ -159,6 +159,29 @@ describe("api client boundary", () => {
     })).not.toThrow();
   });
 
+  it("allows only approved backend production files in the FDP-50 scope guard", () => {
+    expect(() => runScopeGuard({
+      FDP50_SCOPE_BASE: "refs/heads/does-not-exist-fdp50",
+      FDP50_SCOPE_CHANGED_FILES: [
+        "alert-service/src/main/java/com/frauddetection/alert/controller/FraudCaseController.java",
+        "alert-service/src/main/java/com/frauddetection/alert/security/config/FraudCaseAuthorizationRules.java",
+        "alert-service/src/main/java/com/frauddetection/alert/security/config/BffSessionSecurityConfigurer.java",
+        "alert-service/src/test/java/com/frauddetection/alert/controller/Fdp50RetiredRouteTest.java",
+        "docs/fdp-50-legacy-api-removal.md",
+        "scripts/check-fdp50-scope.mjs"
+      ].join(",")
+    })).not.toThrow();
+  });
+
+  it("rejects unapproved backend production files in the FDP-50 scope guard", () => {
+    const failure = captureScopeFailure({
+      FDP50_SCOPE_BASE: "refs/heads/does-not-exist-fdp50",
+      FDP50_SCOPE_CHANGED_FILES: "alert-service/src/main/java/com/frauddetection/alert/service/FraudCaseManagementService.java"
+    });
+
+    expect(failure).toContain("FDP-50 backend production changes are restricted to the approved legacy fraud-case route removal allowlist.");
+  });
+
   it("documents the FDP-50 frontend API client boundary", () => {
     const fdp50 = readFileSync(join(process.cwd(), "../docs/fdp-50-frontend-api-client-boundary.md"), "utf8");
     const howTo = readFileSync(join(process.cwd(), "../docs/frontend/api-client-boundary.md"), "utf8");

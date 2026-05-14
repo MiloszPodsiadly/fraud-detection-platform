@@ -35,7 +35,9 @@ export default function App() {
   });
   const [session, setSession] = useState(() => authProvider.getInitialSession());
   const [sessionState, setSessionState] = useState(() => getSessionStateForProvider(authProvider.getInitialSession(), authProvider));
-  const apiClientBoundaryKey = useMemo(() => sessionBoundaryKey(session, authProvider), [authProvider, session]);
+  // This key is for workspace UI reset behavior only.
+  // API client freshness depends on the actual session/authProvider objects.
+  const workspaceSessionResetKey = useMemo(() => workspaceSessionResetKeyFor(session, authProvider), [authProvider, session]);
   const apiClient = useMemo(() => createAlertsApiClient({ session, authProvider }), [session, authProvider]);
   const [workspaceCountersStatus, setWorkspaceCountersStatus] = useState({ degraded: false, failedCounters: [] });
   const [callbackError, setCallbackError] = useState(null);
@@ -102,7 +104,7 @@ export default function App() {
       setWorkspaceCounters({ alerts: 0, transactions: 0 });
       setWorkspaceCountersStatus({ degraded: false, failedCounters: [] });
     }
-  }, [apiClientBoundaryKey, workspaceNavigationEnabled]);
+  }, [workspaceSessionResetKey, workspaceNavigationEnabled]);
 
   useEffect(() => {
     if (!selectedAlertId && !selectedFraudCaseId) {
@@ -511,7 +513,7 @@ function shouldBlockDashboardFetch(sessionState) {
   ].includes(sessionState?.status);
 }
 
-function sessionBoundaryKey(session, authProvider) {
+function workspaceSessionResetKeyFor(session, authProvider) {
   const roles = Array.isArray(session?.roles) ? session.roles.join(",") : "";
   const authorities = Array.isArray(session?.authorities) ? session.authorities.join(",") : "";
   return [
