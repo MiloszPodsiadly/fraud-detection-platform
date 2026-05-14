@@ -5,10 +5,11 @@ import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("api client boundary", () => {
-  it("keeps default wrappers compatibility-only", () => {
+  it("does not export legacy default wrappers from alertsApi", () => {
     const source = readFileSync(join(process.cwd(), "src/api/alertsApi.js"), "utf8");
 
-    expect(source).toContain("Compatibility-only default client. Auth-sensitive workspace code must use createAlertsApiClient({ session, authProvider }).");
+    expect(source).not.toContain("defaultApiClient");
+    expect(source).not.toMatch(/^export function (listAlerts|listFraudCaseWorkQueue|getFraudCaseWorkQueueSummary|listScoredTransactions|listGovernanceAdvisories|getGovernanceAdvisoryAnalytics|getGovernanceAdvisoryAudit|recordGovernanceAdvisoryAudit|getAlert|getAssistantSummary|getFraudCase|updateFraudCase|submitAnalystDecision)\(/m);
   });
 
   it("runs the FDP-49 boundary script that blocks wrappers, re-exports, dynamic imports and raw fetch", () => {
@@ -85,6 +86,79 @@ describe("api client boundary", () => {
     }
   });
 
+  it("rejects future auth-sensitive folders through the FDP-50 AST guard", () => {
+    const fixture = createBoundaryFixture({
+      "analyst-console-ui/src/hooks/useCases.js": "import { listAlerts } from '../api/alertsApi.js'; export const load = () => listAlerts();",
+      "analyst-console-ui/src/features/rawFetch.js": "export const load = () => fetch('/api/v1/alerts');"
+    });
+
+    try {
+      const failure = captureBoundaryFailure(fixture, "fdp50");
+      expect(failure).toContain("src/hooks/useCases.js");
+      expect(failure).toContain("src/features/rawFetch.js");
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
+  it("allows raw fetch only inside API and auth bootstrap folders for the FDP-50 AST guard", () => {
+    const fixture = createBoundaryFixture({
+      "analyst-console-ui/src/api/bootstrap.js": "export const api = () => fetch('/api/v1/session');",
+      "analyst-console-ui/src/auth/authProvider.js": "export const auth = () => window.fetch('/api/v1/session');",
+      "analyst-console-ui/src/hooks/useClient.js": "import { createAlertsApiClient } from '../api/alertsApi.js'; export const client = createAlertsApiClient({});"
+    });
+
+    try {
+      expect(() => runBoundaryScript(fixture, "fdp50")).not.toThrow();
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps removed wrapper names blocked by the FDP-50 guard", () => {
+    const script = readFileSync(join(process.cwd(), "../scripts/check-fdp50-api-client-boundary.mjs"), "utf8");
+    const removedWrappers = [
+      "listAlerts",
+      "listFraudCaseWorkQueue",
+      "getFraudCaseWorkQueueSummary",
+      "listScoredTransactions",
+      "listGovernanceAdvisories",
+      "getGovernanceAdvisoryAnalytics",
+      "getGovernanceAdvisoryAudit",
+      "recordGovernanceAdvisoryAudit",
+      "getAlert",
+      "getAssistantSummary",
+      "getFraudCase",
+      "updateFraudCase",
+      "submitAnalystDecision"
+    ];
+
+    for (const wrapperName of removedWrappers) {
+      expect(script).toContain(`"${wrapperName}"`);
+    }
+  });
+
+  it("fails closed when the FDP-50 scope base ref is missing", () => {
+    const failure = captureScopeFailure({
+      FDP50_SCOPE_BASE: "refs/heads/does-not-exist-fdp50"
+    });
+
+    expect(failure).toContain("Cannot resolve FDP-50 scope base ref refs/heads/does-not-exist-fdp50");
+  });
+
+  it("honors an explicit FDP-50 scope base ref", () => {
+    expect(() => runScopeGuard({
+      FDP50_SCOPE_BASE: "HEAD"
+    })).not.toThrow();
+  });
+
+  it("lets explicit changed files bypass git base resolution for FDP-50 scope fixtures", () => {
+    expect(() => runScopeGuard({
+      FDP50_SCOPE_BASE: "refs/heads/does-not-exist-fdp50",
+      FDP50_SCOPE_CHANGED_FILES: "docs/fdp-50-frontend-api-client-boundary.md"
+    })).not.toThrow();
+  });
+
   it("documents the FDP-50 frontend API client boundary", () => {
     const fdp50 = readFileSync(join(process.cwd(), "../docs/fdp-50-frontend-api-client-boundary.md"), "utf8");
     const howTo = readFileSync(join(process.cwd(), "../docs/frontend/api-client-boundary.md"), "utf8");
@@ -126,6 +200,24 @@ function captureBoundaryFailure(root, version = "fdp49") {
   try {
     runBoundaryScript(root, version);
     throw new Error("Expected FDP-49 API boundary fixture to fail");
+  } catch (error) {
+    return String(error.stderr ?? error.message);
+  }
+}
+
+function runScopeGuard(env = {}) {
+  execFileSync("node", ["../scripts/check-fdp50-scope.mjs"], {
+    cwd: process.cwd(),
+    env: { ...process.env, ...env },
+    encoding: "utf8",
+    stdio: "pipe"
+  });
+}
+
+function captureScopeFailure(env = {}) {
+  try {
+    runScopeGuard(env);
+    throw new Error("Expected FDP-50 scope guard fixture to fail");
   } catch (error) {
     return String(error.stderr ?? error.message);
   }

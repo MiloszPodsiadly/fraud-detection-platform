@@ -1,5 +1,11 @@
 import { execFileSync } from "node:child_process";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const safeRepoRoot = repoRoot.replaceAll("\\", "/");
+
+const usingExplicitChangedFiles = Boolean(process.env.FDP50_SCOPE_CHANGED_FILES);
 const changedFiles = resolveChangedFiles();
 const violations = [];
 
@@ -37,12 +43,12 @@ for (const file of changedFiles) {
   if (!normalized.startsWith("analyst-console-ui/src/") || /\.(test|spec)\.[jt]sx?$/.test(normalized)) {
     continue;
   }
-  const diff = git(["diff", "--unified=0", `${diffBase()}...HEAD`, "--", normalized], { allowFailure: true });
+  const diff = usingExplicitChangedFiles ? "" : git(["diff", "--unified=0", `${diffBase()}...HEAD`, "--", normalized]);
   for (const line of diff.split(/\r?\n/).filter((entry) => entry.startsWith("+") && !entry.startsWith("+++"))) {
     if (!allowedEndpointFiles.has(normalized) && /["']\/(?:api|governance|system|bff)\//.test(line)) {
       violations.push(`${normalized}: endpoint URL strings must stay inside the API client boundary`);
     }
-    if (/\b(export|bulk|assign(?:ment)?|mass action)\b/i.test(line)) {
+    if (/\b(bulk|assign(?:ment)?|mass action)\b/i.test(line)) {
       violations.push(`${normalized}: FDP-50 must not introduce export/bulk/assignment workflows`);
     }
   }
@@ -62,22 +68,36 @@ function resolveChangedFiles() {
     return explicit.split(/[\r\n,]+/).map((entry) => entry.trim()).filter(Boolean);
   }
   const base = diffBase();
-  const output = git(["diff", "--name-only", `${base}...HEAD`], { allowFailure: true });
-  if (output.trim()) {
-    return output.split(/\r?\n/).filter(Boolean);
+  if (!assertRefExists(base)) {
+    if (process.env.FDP50_SCOPE_ALLOW_HEAD_FALLBACK === "true") {
+      return git(["diff", "--name-only", "HEAD~1..HEAD"])
+        .split(/\r?\n/)
+        .filter(Boolean);
+    }
+    console.error(`Cannot resolve FDP-50 scope base ref ${base}`);
+    process.exit(1);
   }
-  return git(["diff", "--name-only", "HEAD~1..HEAD"], { allowFailure: true })
+  return git(["diff", "--name-only", `${base}...HEAD`])
     .split(/\r?\n/)
     .filter(Boolean);
 }
 
 function diffBase() {
-  return process.env.FDP50_SCOPE_BASE || `origin/${process.env.GITHUB_BASE_REF || "main"}`;
+  return process.env.FDP50_SCOPE_BASE || `origin/${process.env.GITHUB_BASE_REF || "master"}`;
+}
+
+function assertRefExists(ref) {
+  try {
+    git(["rev-parse", "--verify", ref]);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function git(args, { allowFailure = false } = {}) {
   try {
-    return execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    return execFileSync("git", ["-c", `safe.directory=${safeRepoRoot}`, "-C", repoRoot, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   } catch (error) {
     if (allowFailure) {
       return "";

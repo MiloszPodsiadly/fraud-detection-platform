@@ -17,6 +17,8 @@ Forbidden patterns:
 - Storing CSRF tokens, opaque cursors, bearer tokens, or session tokens in `localStorage` or `sessionStorage`.
 - Mixing BFF, JWT/OIDC, or demo client state across one client instance.
 
+FDP-50 removes unused legacy wrappers and keeps guard coverage so they are not reintroduced.
+
 Auth mode notes:
 
 - BFF: cookies plus CSRF, same-origin credentials, no `Authorization`.

@@ -8,13 +8,6 @@ const root = process.env.FDP50_API_BOUNDARY_ROOT ?? repoRoot;
 const requireFromFrontend = createRequire(join(repoRoot, "analyst-console-ui/package.json"));
 const { parse } = requireFromFrontend("@babel/parser");
 const failureMessage = "FDP-50 requires auth-sensitive UI code to use explicit workspace-scoped apiClient instances.";
-const scannedRoots = [
-  "analyst-console-ui/src/workspace",
-  "analyst-console-ui/src/fraudCases",
-  "analyst-console-ui/src/components",
-  "analyst-console-ui/src/pages"
-];
-const scannedFiles = ["analyst-console-ui/src/App.jsx"];
 const allowedAlertsApiImports = new Set([
   "createAlertsApiClient",
   "isAbortError",
@@ -36,10 +29,7 @@ const defaultWrapperExports = new Set([
   "submitAnalystDecision"
 ]);
 
-const files = [
-  ...scannedRoots.flatMap((directory) => walk(directory)),
-  ...scannedFiles.filter((file) => existsSync(join(root, file)))
-]
+const files = walk("analyst-console-ui/src")
   .filter((file) => /\.(js|jsx|ts|tsx)$/.test(file))
   .filter((file) => !isExcluded(file));
 
@@ -198,7 +188,13 @@ function walk(relativeDirectory) {
 
 function isExcluded(file) {
   const normalized = file.replaceAll("\\", "/");
-  return /(\.test\.[jt]sx?|__mocks__|\/mocks\/|generated)/.test(normalized);
+  if (normalized.startsWith("analyst-console-ui/src/api/")) {
+    return true;
+  }
+  if (normalized.startsWith("analyst-console-ui/src/auth/")) {
+    return true;
+  }
+  return /(\.test\.[jt]sx?|\/test\/|__mocks__|\/mocks\/|generated)/.test(normalized);
 }
 
 function fail(file, node, message) {
