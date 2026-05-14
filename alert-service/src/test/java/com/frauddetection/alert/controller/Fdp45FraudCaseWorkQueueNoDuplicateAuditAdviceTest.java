@@ -39,6 +39,7 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.Pageable;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.time.Instant;
 import java.util.List;
@@ -47,6 +48,7 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -129,7 +131,13 @@ class Fdp45FraudCaseWorkQueueNoDuplicateAuditAdviceTest {
         mockMvc.perform(get("/api/fraud-cases/work-queue")
                         .queryParam("page", "0")
                         .queryParam("size", "20"))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isInternalServerError())
+                .andExpect(result -> assertThat(result.getResolvedException())
+                        .isInstanceOf(NoResourceFoundException.class));
+
+        verify(fraudCaseManagementService, never())
+                .workQueue(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(Pageable.class));
+        verify(repository, never()).save(any());
     }
 
     private ReadAccessAuditEventDocument onlyAuditDocument() {
