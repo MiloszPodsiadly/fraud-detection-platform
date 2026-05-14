@@ -19,11 +19,9 @@ import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.List;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -89,9 +87,9 @@ class Fdp45FraudCaseLegacyDeepPaginationValidationTest {
         mockMvc.perform(get("/api/fraud-cases")
                         .param("page", String.valueOf(FraudCaseReadQueryPolicy.MAX_PAGE_NUMBER))
                         .param("size", "100"))
-                .andExpect(status().isInternalServerError())
-                .andExpect(result -> assertThat(result.getResolvedException())
-                        .isInstanceOf(NoResourceFoundException.class));
+                .andExpect(status().isGone())
+                .andExpect(jsonPath("$.message").value("Legacy fraud-case API route is removed. Use /api/v1/fraud-cases."))
+                .andExpect(jsonPath("$.details[0]").value("code:LEGACY_FRAUD_CASE_ROUTE_REMOVED"));
 
         verify(service, never()).listCases(any(Pageable.class));
         verify(service, never()).searchCases(any(), any(), any(), any(), any(), any(), any(), any(Pageable.class));

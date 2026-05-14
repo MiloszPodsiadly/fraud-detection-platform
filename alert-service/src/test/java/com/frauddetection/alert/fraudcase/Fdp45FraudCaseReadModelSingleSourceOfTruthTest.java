@@ -19,7 +19,7 @@ class Fdp45FraudCaseReadModelSingleSourceOfTruthTest {
         String queryPolicy = read("fraudcase/FraudCaseReadQueryPolicy.java");
 
         assertThat(controller)
-                .contains("@GetMapping(\"/work-queue\")")
+                .contains("@GetMapping(VERSIONED_BASE_PATH + \"/work-queue\")")
                 .contains("fraudCaseManagementService.workQueue(")
                 .contains("FraudCaseReadQueryPolicy")
                 .doesNotContain("MongoTemplate")

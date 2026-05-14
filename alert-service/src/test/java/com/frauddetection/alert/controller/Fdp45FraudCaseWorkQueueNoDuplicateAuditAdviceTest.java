@@ -39,7 +39,6 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.Pageable;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.time.Instant;
 import java.util.List;
@@ -53,6 +52,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(
@@ -131,9 +131,9 @@ class Fdp45FraudCaseWorkQueueNoDuplicateAuditAdviceTest {
         mockMvc.perform(get("/api/fraud-cases/work-queue")
                         .queryParam("page", "0")
                         .queryParam("size", "20"))
-                .andExpect(status().isInternalServerError())
-                .andExpect(result -> assertThat(result.getResolvedException())
-                        .isInstanceOf(NoResourceFoundException.class));
+                .andExpect(status().isGone())
+                .andExpect(jsonPath("$.message").value("Legacy fraud-case API route is removed. Use /api/v1/fraud-cases."))
+                .andExpect(jsonPath("$.details[0]").value("code:LEGACY_FRAUD_CASE_ROUTE_REMOVED"));
 
         verify(fraudCaseManagementService, never())
                 .workQueue(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(Pageable.class));

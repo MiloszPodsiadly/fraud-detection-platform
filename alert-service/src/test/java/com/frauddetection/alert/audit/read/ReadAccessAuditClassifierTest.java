@@ -59,6 +59,14 @@ class ReadAccessAuditClassifierTest {
     }
 
     @Test
+    void shouldNotClassifyRetiredLegacyFraudCaseRouteAsSuccessfulSensitiveRead() {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/fraud-cases/work-queue");
+        request.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/api/fraud-cases/**");
+
+        assertThat(classifier.classify(request)).isEmpty();
+    }
+
+    @Test
     void shouldClassifyGovernanceAdvisoryListReadWithoutRawFilters() {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/governance/advisories");
         request.setQueryString("severity=HIGH&model_version=2026-04-21.trained.v1&limit=25");

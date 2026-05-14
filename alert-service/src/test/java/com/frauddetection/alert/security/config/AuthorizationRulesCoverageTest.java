@@ -20,6 +20,8 @@ class AuthorizationRulesCoverageTest extends AbstractSecurityRouteBoundaryWebMvc
             "Static SPA asset subtree is public read-only content.",
             "PublicTechnicalAuthorizationRules:\"/static/**\"",
             "Static SPA fallback asset subtree is public read-only content.",
+            "FraudCaseAuthorizationRules:\"/api/fraud-cases/**\"",
+            "Retired unversioned fraud-case routes require authentication and return 410 only; no business API is exposed.",
             "SessionAuthorizationRules:\"/oauth2/**\"",
             "OAuth framework bootstrap routes are public GET-only and not business APIs.",
             "SessionAuthorizationRules:\"/login/oauth2/**\"",

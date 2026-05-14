@@ -25,7 +25,7 @@ class BffSessionSecurityConfigurer {
         http
                 .csrf(csrf -> csrf
                         .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
-                        .ignoringRequestMatchers(this::isStatelessBearerRequest)
+                        .ignoringRequestMatchers(this::isCsrfIgnoredRequest)
                 )
                 .oauth2Login(oauth2 -> oauth2
                         .userInfoEndpoint(userInfo -> userInfo
@@ -45,6 +45,15 @@ class BffSessionSecurityConfigurer {
         return StringUtils.hasText(authorization)
                 && authorization.regionMatches(true, 0, "Bearer ", 0, 7)
                 && !hasSessionSignal(request);
+    }
+
+    private boolean isCsrfIgnoredRequest(HttpServletRequest request) {
+        return isStatelessBearerRequest(request) || isRetiredLegacyFraudCaseRoute(request);
+    }
+
+    private boolean isRetiredLegacyFraudCaseRoute(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        return "/api/fraud-cases".equals(path) || (path != null && path.startsWith("/api/fraud-cases/"));
     }
 
     private boolean hasSessionSignal(HttpServletRequest request) {

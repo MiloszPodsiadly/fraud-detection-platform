@@ -9,6 +9,7 @@ class FraudCaseAuthorizationRules implements EndpointAuthorizationRuleGroup {
 
     public void configure(AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry authorize) {
         authorize
+                .requestMatchers("/api/fraud-cases", "/api/fraud-cases/**").authenticated()
                 .requestMatchers(HttpMethod.GET, "/api/v1/fraud-cases").hasAuthority(AnalystAuthority.FRAUD_CASE_READ)
                 .requestMatchers(HttpMethod.GET, "/api/v1/fraud-cases/work-queue").hasAuthority(AnalystAuthority.FRAUD_CASE_READ)
                 .requestMatchers(HttpMethod.GET, "/api/v1/fraud-cases/work-queue/summary").hasAuthority(AnalystAuthority.FRAUD_CASE_READ)
