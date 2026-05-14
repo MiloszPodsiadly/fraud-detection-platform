@@ -18,6 +18,13 @@ describe("api client boundary", () => {
     })).not.toThrow();
   });
 
+  it("runs the FDP-50 AST boundary script for workspace-scoped API clients", () => {
+    expect(() => execFileSync("node", ["../scripts/check-fdp50-api-client-boundary.mjs"], {
+      cwd: process.cwd(),
+      stdio: "pipe"
+    })).not.toThrow();
+  });
+
   it("allows raw fetch only in API and auth bootstrap fixtures", () => {
     const fixture = createBoundaryFixture({
       "analyst-console-ui/src/api/bootstrap.js": "export const api = () => fetch('/api/v1/session');",
@@ -26,7 +33,8 @@ describe("api client boundary", () => {
     });
 
     try {
-      expect(() => runBoundaryScript(fixture)).not.toThrow();
+      expect(() => runBoundaryScript(fixture, "fdp49")).not.toThrow();
+      expect(() => runBoundaryScript(fixture, "fdp50")).not.toThrow();
     } finally {
       rmSync(fixture, { recursive: true, force: true });
     }
@@ -45,10 +53,49 @@ describe("api client boundary", () => {
     const fixture = createBoundaryFixture({ [path]: source });
 
     try {
-      expect(captureBoundaryFailure(fixture)).toContain("Auth-sensitive UI code must use createAlertsApiClient");
+      expect(captureBoundaryFailure(fixture, "fdp49")).toContain("Auth-sensitive UI code must use createAlertsApiClient");
+      expect(captureBoundaryFailure(fixture, "fdp50")).toContain("FDP-50 requires auth-sensitive UI code");
     } finally {
       rmSync(fixture, { recursive: true, force: true });
     }
+  });
+
+  it("allows only explicit createAlertsApiClient and safe helpers from alertsApi in auth-sensitive code", () => {
+    const fixture = createBoundaryFixture({
+      "analyst-console-ui/src/App.jsx": "import { createAlertsApiClient } from './api/alertsApi.js'; export const client = createAlertsApiClient({});",
+      "analyst-console-ui/src/workspace/hook.js": "import { isAbortError } from '../api/alertsApi.js'; export const ok = isAbortError;"
+    });
+
+    try {
+      expect(() => runBoundaryScript(fixture, "fdp50")).not.toThrow();
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects default wrapper named imports through the FDP-50 AST guard", () => {
+    const fixture = createBoundaryFixture({
+      "analyst-console-ui/src/workspace/hook.js": "import { listAlerts } from '../api/alertsApi.js'; export const load = () => listAlerts();"
+    });
+
+    try {
+      expect(captureBoundaryFailure(fixture, "fdp50")).toContain("imports compatibility wrapper listAlerts");
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
+  it("documents the FDP-50 frontend API client boundary", () => {
+    const fdp50 = readFileSync(join(process.cwd(), "../docs/fdp-50-frontend-api-client-boundary.md"), "utf8");
+    const howTo = readFileSync(join(process.cwd(), "../docs/frontend/api-client-boundary.md"), "utf8");
+    const combined = `${fdp50}\n${howTo}`;
+
+    expect(combined).toContain("createAlertsApiClient");
+    expect(combined).toContain("BFF");
+    expect(combined).toContain("JWT");
+    expect(combined).toContain("demo");
+    expect(combined).toContain("raw fetch");
+    expect(combined).toContain("default wrappers");
   });
 });
 
@@ -62,18 +109,22 @@ function createBoundaryFixture(files) {
   return root;
 }
 
-function runBoundaryScript(root) {
-  execFileSync("node", ["../scripts/check-fdp49-api-client-boundary.mjs"], {
+function runBoundaryScript(root, version = "fdp49") {
+  const script = version === "fdp50"
+    ? "../scripts/check-fdp50-api-client-boundary.mjs"
+    : "../scripts/check-fdp49-api-client-boundary.mjs";
+  const rootEnv = version === "fdp50" ? "FDP50_API_BOUNDARY_ROOT" : "FDP49_API_BOUNDARY_ROOT";
+  execFileSync("node", [script], {
     cwd: process.cwd(),
-    env: { ...process.env, FDP49_API_BOUNDARY_ROOT: root },
+    env: { ...process.env, [rootEnv]: root },
     encoding: "utf8",
     stdio: "pipe"
   });
 }
 
-function captureBoundaryFailure(root) {
+function captureBoundaryFailure(root, version = "fdp49") {
   try {
-    runBoundaryScript(root);
+    runBoundaryScript(root, version);
     throw new Error("Expected FDP-49 API boundary fixture to fail");
   } catch (error) {
     return String(error.stderr ?? error.message);
