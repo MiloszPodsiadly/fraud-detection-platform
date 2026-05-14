@@ -838,6 +838,7 @@ jobs:
             alert-service/src/test/java/com/frauddetection/alert/security/config/BearerVsSessionCsrfRegressionTest.java \
             alert-service/src/test/java/com/frauddetection/alert/security/config/BffSessionSecurityIntegrationTest.java \
             alert-service/src/test/java/com/frauddetection/alert/security/config/SecurityRouteRegistryDocumentationTest.java \
+            alert-service/src/test/java/com/frauddetection/alert/security/config/SecurityRouteOwnershipRegistryTest.java \
             alert-service/src/test/java/com/frauddetection/alert/security/config/SingleSecurityFilterChainGuardTest.java \
             alert-service/src/test/java/com/frauddetection/alert/security/config/Fdp49NoNewBusinessSemanticsTest.java; then
             echo "FDP-49 backend tests must not be disabled" >&2
@@ -855,7 +856,7 @@ jobs:
           fi
 
       - name: Run FDP-49 backend security route tests
-        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=AuthorizationRulesCoverageTest,AuthorizationRuleGroupRegistrationTest,RouteCoverageAgainstMvcMappingsTest,SecurityMatcherOrderRegressionTest,DenyByDefaultSecurityTest,SpaFallbackSecurityTest,BffCsrfBoundaryRegressionTest,BearerVsSessionCsrfRegressionTest,BffSessionSecurityIntegrationTest,SecurityRouteRegistryDocumentationTest,SingleSecurityFilterChainGuardTest,Fdp49NoNewBusinessSemanticsTest,AlertServiceMetricsTest" test
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=AuthorizationRulesCoverageTest,AuthorizationRuleGroupRegistrationTest,RouteCoverageAgainstMvcMappingsTest,SecurityMatcherOrderRegressionTest,DenyByDefaultSecurityTest,SpaFallbackSecurityTest,BffCsrfBoundaryRegressionTest,BearerVsSessionCsrfRegressionTest,BffSessionSecurityIntegrationTest,SecurityRouteRegistryDocumentationTest,SecurityRouteOwnershipRegistryTest,SingleSecurityFilterChainGuardTest,Fdp49NoNewBusinessSemanticsTest,AlertServiceMetricsTest" test
 
       - name: Verify FDP-49 backend reports
         run: |
@@ -875,6 +876,7 @@ jobs:
               "com.frauddetection.alert.security.config.BearerVsSessionCsrfRegressionTest",
               "com.frauddetection.alert.security.config.BffSessionSecurityIntegrationTest",
               "com.frauddetection.alert.security.config.SecurityRouteRegistryDocumentationTest",
+              "com.frauddetection.alert.security.config.SecurityRouteOwnershipRegistryTest",
               "com.frauddetection.alert.security.config.SingleSecurityFilterChainGuardTest",
               "com.frauddetection.alert.security.config.Fdp49NoNewBusinessSemanticsTest",
               "com.frauddetection.alert.observability.AlertServiceMetricsTest",
@@ -945,6 +947,17 @@ jobs:
       - name: Build FDP-49 UI
         working-directory: analyst-console-ui
         run: npm run build
+
+      - name: Upload FDP-49 route boundary reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fdp49-route-boundary-reports
+          if-no-files-found: ignore
+          path: |
+            alert-service/target/surefire-reports/
+            analyst-console-ui/test-results/fdp49-vitest.xml
+            analyst-console-ui/test-results/fdp49-api-client-boundary-guard.txt
 
   fdp36-real-chaos:
     name: FDP-36 Real Alert-Service Kill Proof
