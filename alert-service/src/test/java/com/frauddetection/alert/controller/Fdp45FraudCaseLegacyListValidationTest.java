@@ -54,7 +54,7 @@ class Fdp45FraudCaseLegacyListValidationTest {
     private SensitiveReadAuditService sensitiveReadAuditService;
 
     @Test
-    void shouldRejectInvalidCurrentAndLegacyListPaginationBeforeServiceCall() throws Exception {
+    void shouldRejectInvalidCurrentListPaginationBeforeServiceCall() throws Exception {
         mockMvc.perform(get("/api/v1/fraud-cases").param("page", "-1"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.details[0]").value("code:INVALID_PAGE_REQUEST"));
@@ -64,23 +64,26 @@ class Fdp45FraudCaseLegacyListValidationTest {
         mockMvc.perform(get("/api/v1/fraud-cases").param("size", "101"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.details[0]").value("code:INVALID_PAGE_REQUEST"));
-        mockMvc.perform(get("/api/fraud-cases").param("size", "101"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.details[0]").value("code:INVALID_PAGE_REQUEST"));
 
         verify(service, never()).listCases(any(Pageable.class));
         verify(service, never()).searchCases(any(), any(), any(), any(), any(), any(), any(), any(Pageable.class));
     }
 
     @Test
-    void shouldAcceptValidCurrentAndLegacyListPagination() throws Exception {
+    void shouldAcceptValidCurrentListPagination() throws Exception {
         when(service.listCases(any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
 
         mockMvc.perform(get("/api/v1/fraud-cases").param("page", "0").param("size", "20"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isArray());
+    }
+
+    @Test
+    void shouldNotMapRemovedLegacyListRoute() throws Exception {
         mockMvc.perform(get("/api/fraud-cases").param("page", "0").param("size", "20"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content").isArray());
+                .andExpect(status().isNotFound());
+
+        verify(service, never()).listCases(any(Pageable.class));
+        verify(service, never()).searchCases(any(), any(), any(), any(), any(), any(), any(), any(Pageable.class));
     }
 }

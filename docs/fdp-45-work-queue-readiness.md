@@ -4,12 +4,12 @@ FDP-45 hardens the fraud-case investigator work queue as a bounded read model on
 
 ## Public list contract compatibility
 
-`GET /api/v1/fraud-cases` and legacy `GET /api/fraud-cases` keep returning `PagedResponse<FraudCaseSummaryResponse>`.
+`GET /api/v1/fraud-cases` keeps returning `PagedResponse<FraudCaseSummaryResponse>`.
 FDP-45 does not change that existing public list/search contract.
 
 ## Dedicated work queue contract
 
-`GET /api/v1/fraud-cases/work-queue` and legacy `GET /api/fraud-cases/work-queue` return
+`GET /api/v1/fraud-cases/work-queue` returns
 `FraudCaseWorkQueueSliceResponse`, a bounded slice without exact `totalElements` or `totalPages`. The slice contains
 `FraudCaseWorkQueueItemResponse`, a minimal read model for queue scanning:
 
@@ -67,25 +67,25 @@ Page mode remains as bounded offset compatibility mode for exploratory use. Repe
 Low-cardinality alerting can watch for high-page work queue usage by endpoint family and outcome, but must not label by
 case id, assignee, linked alert id, raw query string, request hash, or cursor value.
 
-The legacy list endpoints keep their `PagedResponse<FraudCaseSummaryResponse>` compatibility contract and therefore
-still perform exact count pagination. FDP-45 aligns their API boundary with the same `0..1000` and `1..100` bounds, but
-the legacy exact count remains compatibility debt. High-volume investigator queues should use the dedicated work queue
-slice endpoint with cursor traversal. A future hardening item may move the legacy list contract to cursor/keyset
-pagination or a capped count after a versioned public API decision.
+The versioned list endpoint keeps its `PagedResponse<FraudCaseSummaryResponse>` compatibility contract and therefore
+still performs exact count pagination. FDP-45 aligns its API boundary with the same `0..1000` and `1..100` bounds, but
+the list exact count remains compatibility debt. High-volume investigator queues should use the dedicated work queue
+slice endpoint with cursor traversal. A future hardening item may move the list contract to cursor/keyset pagination or
+a capped count after a versioned public API decision.
 
 ## Release Notes
 
-### Legacy list pagination bound
+### List pagination bound
 
-`GET /api/v1/fraud-cases` and legacy `GET /api/fraud-cases` now reject `page > 1000`. This is an intentional abuse
+`GET /api/v1/fraud-cases` rejects `page > 1000`. This is an intentional abuse
 prevention safety boundary for the existing `PagedResponse` compatibility path. Deep operational browsing should use
-`/api/v1/fraud-cases/work-queue` or legacy `/api/fraud-cases/work-queue` with filters and cursor pagination.
+`/api/v1/fraud-cases/work-queue` with filters and cursor pagination.
 
 ### Cursor traversal limits
 
 Work queue cursor mode is the preferred high-volume traversal path. The cursor is opaque, signed, not encrypted, bound
 to filters and sort, and not snapshot isolation. Offset page mode remains a bounded compatibility path for exploratory
-use only. Legacy exact count remains compatibility behavior, not the recommended high-volume path.
+use only. Exact count list pagination remains compatibility behavior, not the recommended high-volume path.
 
 ## SLA Fields
 
@@ -138,7 +138,7 @@ ranges, overlong filters, or deep page requests are audited as `REJECTED`. Unexp
 audited as `FAILED`. These audit attempts use endpoint/resource metadata and result count only; raw filters and user
 supplied values are not stored.
 
-For `/api/v1/fraud-cases/work-queue` and legacy `/api/fraud-cases/work-queue`, the controller owns the sensitive-read
+For `/api/v1/fraud-cases/work-queue`, the controller owns the sensitive-read
 audit for `SUCCESS`, `REJECTED`, and `FAILED` outcomes because FDP-45 needs explicit outcome classification. The generic
 response advice remains the owner for other sensitive reads when no manual audit has happened. `AUDITED_ATTRIBUTE`
 prevents response-advice duplicate writes after a manual work queue audit. Manual work queue audit preserves bounded
@@ -187,6 +187,6 @@ success/rejected/failed outcomes, no duplicate work queue success audit, respons
 audit precedence, OpenAPI truth, and no-overclaim docs proof.
 
 FDP-45 is NO-GO while any required job is pending, in progress, skipped, missing, cancelled, timed out, or failed. It is
-also NO-GO if the old `GET /api/v1/fraud-cases` contract drifts, the work queue performs unbounded list/export/exact
+also NO-GO if the `GET /api/v1/fraud-cases` contract drifts, the work queue performs unbounded list/export/exact
 count behavior, unsupported filters silently fall back, failed sensitive-read attempts are not audited, successful work
 queue reads are audited twice, or docs claim mutation/idempotency/finality guarantees outside FDP-45 scope.

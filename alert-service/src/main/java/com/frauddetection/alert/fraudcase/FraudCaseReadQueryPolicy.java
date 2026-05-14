@@ -77,7 +77,7 @@ public final class FraudCaseReadQueryPolicy {
         }
     }
 
-    public static void validateLegacyListPagination(int page, int size) {
+    public static void validateListPagination(int page, int size) {
         if (page < 0 || page > MAX_PAGE_NUMBER || size < 1 || size > MAX_PAGE_SIZE) {
             throw new FraudCaseWorkQueueQueryException("INVALID_PAGE_REQUEST", "Invalid fraud case list page request.");
         }

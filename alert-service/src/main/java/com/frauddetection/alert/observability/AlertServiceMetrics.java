@@ -950,7 +950,7 @@ public class AlertServiceMetrics {
         if (path == null) {
             return "other";
         }
-        if (path.startsWith("/api/v1/fraud-cases") || path.startsWith("/api/fraud-cases")) {
+        if (path.startsWith("/api/v1/fraud-cases")) {
             return "fraud_case";
         }
         if (path.startsWith("/api/v1/alerts")) {

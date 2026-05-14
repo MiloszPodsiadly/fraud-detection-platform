@@ -52,7 +52,7 @@ import java.util.List;
 
 @RestController
 @Validated
-@RequestMapping({"/api/v1/fraud-cases", "/api/fraud-cases"})
+@RequestMapping("/api/v1/fraud-cases")
 public class FraudCaseController {
 
     private final FraudCaseManagementService fraudCaseManagementService;
@@ -84,7 +84,7 @@ public class FraudCaseController {
             @RequestParam(required = false) Instant createdTo,
             @RequestParam(required = false) String linkedAlertId
     ) {
-        FraudCaseReadQueryPolicy.validateLegacyListPagination(page, size);
+        FraudCaseReadQueryPolicy.validateListPagination(page, size);
         var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         var result = hasSearchFilters(status, assignee, priority, riskLevel, createdFrom, createdTo, linkedAlertId)
                 ? fraudCaseManagementService.searchCases(status, assignee, priority, riskLevel, createdFrom, createdTo, linkedAlertId, pageable)

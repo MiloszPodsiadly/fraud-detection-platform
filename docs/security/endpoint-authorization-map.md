@@ -96,7 +96,7 @@ Production BFF hardening remains deployment responsibility unless configured in 
 | `GET /api/v1/session` | `SessionAuthorizationRules` | Public bootstrap | Public, no-store, token-free | Safe method only | `BffSessionSecurityIntegrationTest` |
 | `GET /oauth2/**`, `GET /login/oauth2/**`, `GET /error` | `SessionAuthorizationRules` | OAuth/session bootstrap | Public auth lifecycle | Framework controlled safe method only | `SecurityMatcherOrderRegressionTest` |
 | `/api/v1/alerts/**` | `AlertAuthorizationRules` | `ALERT_READ`, `ASSISTANT_SUMMARY_READ`, `ALERT_DECISION_SUBMIT` | Protected | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |
-| `/api/v1/fraud-cases/**`, `/api/fraud-cases/**` | `FraudCaseAuthorizationRules` | `FRAUD_CASE_READ`, `FRAUD_CASE_AUDIT_READ`, `FRAUD_CASE_UPDATE` | Protected | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |
+| `/api/v1/fraud-cases/**` | `FraudCaseAuthorizationRules` | `FRAUD_CASE_READ`, `FRAUD_CASE_AUDIT_READ`, `FRAUD_CASE_UPDATE` | Protected | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |
 | `GET /api/v1/transactions/scored` | `TransactionAuthorizationRules` | `TRANSACTION_MONITOR_READ` | Protected | Safe method only | `AuthorizationRulesCoverageTest` |
 | `/governance/advisories/**` | `GovernanceAuthorizationRules` | `TRANSACTION_MONITOR_READ`, `GOVERNANCE_ADVISORY_AUDIT_WRITE` | Protected or denied | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |
 | `/api/v1/audit/**` | `AuditAuthorizationRules` | `AUDIT_READ`, `AUDIT_VERIFY`, `AUDIT_EXPORT`, `AUDIT_DEGRADATION_RESOLVE` | Protected | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |

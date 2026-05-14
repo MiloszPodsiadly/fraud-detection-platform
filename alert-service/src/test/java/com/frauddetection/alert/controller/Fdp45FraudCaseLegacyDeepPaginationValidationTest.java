@@ -55,7 +55,7 @@ class Fdp45FraudCaseLegacyDeepPaginationValidationTest {
     private SensitiveReadAuditService sensitiveReadAuditService;
 
     @Test
-    void shouldAcceptLegacyListAtMaxPageForCurrentAndLegacyRoutes() throws Exception {
+    void shouldAcceptListAtMaxPageForCurrentRoute() throws Exception {
         when(service.listCases(any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
 
         mockMvc.perform(get("/api/v1/fraud-cases")
@@ -63,15 +63,10 @@ class Fdp45FraudCaseLegacyDeepPaginationValidationTest {
                         .param("size", "100"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isArray());
-        mockMvc.perform(get("/api/fraud-cases")
-                        .param("page", String.valueOf(FraudCaseReadQueryPolicy.MAX_PAGE_NUMBER))
-                        .param("size", "100"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content").isArray());
     }
 
     @Test
-    void shouldRejectLegacyListBeyondMaxPageBeforeServiceCall() throws Exception {
+    void shouldRejectListBeyondMaxPageBeforeServiceCall() throws Exception {
         mockMvc.perform(get("/api/v1/fraud-cases")
                         .param("page", String.valueOf(FraudCaseReadQueryPolicy.MAX_PAGE_NUMBER + 1))
                         .param("size", "100"))
@@ -82,11 +77,17 @@ class Fdp45FraudCaseLegacyDeepPaginationValidationTest {
                         .param("size", "100"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.details[0]").value("code:INVALID_PAGE_REQUEST"));
+
+        verify(service, never()).listCases(any(Pageable.class));
+        verify(service, never()).searchCases(any(), any(), any(), any(), any(), any(), any(), any(Pageable.class));
+    }
+
+    @Test
+    void shouldNotMapRemovedLegacyListRoute() throws Exception {
         mockMvc.perform(get("/api/fraud-cases")
-                        .param("page", String.valueOf(FraudCaseReadQueryPolicy.MAX_PAGE_NUMBER + 1))
+                        .param("page", String.valueOf(FraudCaseReadQueryPolicy.MAX_PAGE_NUMBER))
                         .param("size", "100"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.details[0]").value("code:INVALID_PAGE_REQUEST"));
+                .andExpect(status().isNotFound());
 
         verify(service, never()).listCases(any(Pageable.class));
         verify(service, never()).searchCases(any(), any(), any(), any(), any(), any(), any(), any(Pageable.class));

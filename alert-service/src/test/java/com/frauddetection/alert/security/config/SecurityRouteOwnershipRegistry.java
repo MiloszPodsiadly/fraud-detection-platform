@@ -35,7 +35,6 @@ final class SecurityRouteOwnershipRegistry {
         route(routes, "GET", "/api/v1/alerts/{alertId}/assistant-summary", "AlertAuthorizationRules");
         route(routes, "POST", "/api/v1/alerts/{alertId}/decision", "AlertAuthorizationRules");
         fraudCaseRoutes(routes, "/api/v1/fraud-cases");
-        fraudCaseRoutes(routes, "/api/fraud-cases");
         route(routes, "GET", "/api/v1/fraud-cases/work-queue/summary", "FraudCaseAuthorizationRules");
         route(routes, "GET", "/api/v1/transactions/scored", "TransactionAuthorizationRules");
         route(routes, "GET", "/governance/advisories/analytics", "GovernanceAuthorizationRules");

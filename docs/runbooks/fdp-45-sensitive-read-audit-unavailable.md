@@ -7,7 +7,7 @@ read-access audit write is unavailable. Do not disable audit to restore reads.
 
 ## Symptoms
 
-- `GET /api/v1/fraud-cases/work-queue` or `GET /api/fraud-cases/work-queue` returns `503`.
+- `GET /api/v1/fraud-cases/work-queue` returns `503`.
 - Work queue failure metrics increase with endpoint-family and outcome labels only.
 - Application logs mention read-access audit persistence failure without raw identifiers.
 

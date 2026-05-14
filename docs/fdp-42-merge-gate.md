@@ -7,7 +7,7 @@ Status: branch merge gate.
 - Fraud case lifecycle policy tests pass.
 - Fraud case service tests pass for create, assignment, note conflict, and audit append behavior.
 - Fraud case controller tests pass for create, search, validation, and conflict responses.
-- Fraud case security tests pass with filters enabled for `/api/v1/fraud-cases/**` and `/api/fraud-cases/**`.
+- Fraud case security tests pass with filters enabled for `/api/v1/fraud-cases/**`.
 - Fraud case Mongo transaction integration tests prove case state and audit append commit or roll back together with
   `MongoTransactionManager` and `app.regulated-mutations.transaction-mode=REQUIRED`.
 - Fraud case documentation no-overclaim tests pass for local lifecycle scope.

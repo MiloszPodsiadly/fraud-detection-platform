@@ -21,18 +21,6 @@ class FraudCaseAuthorizationRules implements EndpointAuthorizationRuleGroup {
                 .requestMatchers(HttpMethod.POST, "/api/v1/fraud-cases/{caseId}/transition").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
                 .requestMatchers(HttpMethod.POST, "/api/v1/fraud-cases/{caseId}/close").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
                 .requestMatchers(HttpMethod.POST, "/api/v1/fraud-cases/{caseId}/reopen").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
-                .requestMatchers(HttpMethod.PATCH, "/api/v1/fraud-cases/{caseId}").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
-                .requestMatchers(HttpMethod.GET, "/api/fraud-cases").hasAuthority(AnalystAuthority.FRAUD_CASE_READ)
-                .requestMatchers(HttpMethod.GET, "/api/fraud-cases/work-queue").hasAuthority(AnalystAuthority.FRAUD_CASE_READ)
-                .requestMatchers(HttpMethod.GET, "/api/fraud-cases/{caseId}").hasAuthority(AnalystAuthority.FRAUD_CASE_READ)
-                .requestMatchers(HttpMethod.GET, "/api/fraud-cases/{caseId}/audit").hasAuthority(AnalystAuthority.FRAUD_CASE_AUDIT_READ)
-                .requestMatchers(HttpMethod.POST, "/api/fraud-cases").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
-                .requestMatchers(HttpMethod.POST, "/api/fraud-cases/{caseId}/assign").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
-                .requestMatchers(HttpMethod.POST, "/api/fraud-cases/{caseId}/notes").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
-                .requestMatchers(HttpMethod.POST, "/api/fraud-cases/{caseId}/decisions").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
-                .requestMatchers(HttpMethod.POST, "/api/fraud-cases/{caseId}/transition").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
-                .requestMatchers(HttpMethod.POST, "/api/fraud-cases/{caseId}/close").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
-                .requestMatchers(HttpMethod.POST, "/api/fraud-cases/{caseId}/reopen").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
-                .requestMatchers(HttpMethod.PATCH, "/api/fraud-cases/{caseId}").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE);
+                .requestMatchers(HttpMethod.PATCH, "/api/v1/fraud-cases/{caseId}").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE);
     }
 }

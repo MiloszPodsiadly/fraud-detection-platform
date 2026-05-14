@@ -125,16 +125,11 @@ class Fdp45FraudCaseWorkQueueNoDuplicateAuditAdviceTest {
     }
 
     @Test
-    void shouldAuditLegacyWorkQueueSuccessExactlyOnce() throws Exception {
+    void shouldNotAuditRemovedLegacyWorkQueueRoute() throws Exception {
         mockMvc.perform(get("/api/fraud-cases/work-queue")
                         .queryParam("page", "0")
                         .queryParam("size", "20"))
-                .andExpect(status().isOk());
-
-        ReadAccessAuditEventDocument document = onlyAuditDocument();
-        assertThat(document.outcome()).isEqualTo(ReadAccessAuditOutcome.SUCCESS);
-        assertThat(document.endpointCategory()).isEqualTo(ReadAccessEndpointCategory.FRAUD_CASE_WORK_QUEUE);
-        assertThat(document.resultCount()).isEqualTo(1);
+                .andExpect(status().isNotFound());
     }
 
     private ReadAccessAuditEventDocument onlyAuditDocument() {

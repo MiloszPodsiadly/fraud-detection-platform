@@ -10,13 +10,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class Fdp45FraudCaseReadQueryPolicyContractTest {
 
     @Test
-    void shouldPreserveLegacyListBoundsWithoutWorkQueueSpecificParams() {
-        assertInvalidPage(() -> FraudCaseReadQueryPolicy.validateLegacyListPagination(-1, 20));
-        assertInvalidPage(() -> FraudCaseReadQueryPolicy.validateLegacyListPagination(FraudCaseReadQueryPolicy.MAX_PAGE_NUMBER + 1, 20));
-        assertInvalidPage(() -> FraudCaseReadQueryPolicy.validateLegacyListPagination(0, 0));
-        assertInvalidPage(() -> FraudCaseReadQueryPolicy.validateLegacyListPagination(0, FraudCaseReadQueryPolicy.MAX_PAGE_SIZE + 1));
+    void shouldPreserveListBoundsWithoutWorkQueueSpecificParams() {
+        assertInvalidPage(() -> FraudCaseReadQueryPolicy.validateListPagination(-1, 20));
+        assertInvalidPage(() -> FraudCaseReadQueryPolicy.validateListPagination(FraudCaseReadQueryPolicy.MAX_PAGE_NUMBER + 1, 20));
+        assertInvalidPage(() -> FraudCaseReadQueryPolicy.validateListPagination(0, 0));
+        assertInvalidPage(() -> FraudCaseReadQueryPolicy.validateListPagination(0, FraudCaseReadQueryPolicy.MAX_PAGE_SIZE + 1));
 
-        assertThatCode(() -> FraudCaseReadQueryPolicy.validateLegacyListPagination(FraudCaseReadQueryPolicy.MAX_PAGE_NUMBER, FraudCaseReadQueryPolicy.MAX_PAGE_SIZE))
+        assertThatCode(() -> FraudCaseReadQueryPolicy.validateListPagination(FraudCaseReadQueryPolicy.MAX_PAGE_NUMBER, FraudCaseReadQueryPolicy.MAX_PAGE_SIZE))
                 .doesNotThrowAnyException();
     }
 
