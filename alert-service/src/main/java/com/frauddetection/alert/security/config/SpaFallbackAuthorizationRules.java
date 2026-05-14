@@ -7,7 +7,7 @@ import org.springframework.security.config.annotation.web.configurers.AuthorizeH
 
 import java.util.Set;
 
-class SpaFallbackAuthorizationRules {
+class SpaFallbackAuthorizationRules implements EndpointAuthorizationRuleGroup {
 
     private static final Set<String> SPA_ROUTES = Set.of(
             "/analyst-console",
@@ -19,7 +19,7 @@ class SpaFallbackAuthorizationRules {
             "/auth/callback"
     );
 
-    void configure(AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry authorize) {
+    public void configure(AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry authorize) {
         // SPA fallback is intentionally narrow; backend-looking routes stay fail-closed.
         authorize
                 .requestMatchers(this::isSpaFallbackRoute).permitAll();

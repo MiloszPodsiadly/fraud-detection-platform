@@ -5,9 +5,9 @@ import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AuthorizeHttpRequestsConfigurer;
 
-class TrustAuthorizationRules {
+class TrustAuthorizationRules implements EndpointAuthorizationRuleGroup {
 
-    void configure(AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry authorize) {
+    public void configure(AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry authorize) {
         authorize
                 .requestMatchers(HttpMethod.GET, "/api/v1/trust/incidents").hasAuthority(AnalystAuthority.TRUST_INCIDENT_READ)
                 .requestMatchers(HttpMethod.GET, "/api/v1/trust/incidents/signals/preview").hasAuthority(AnalystAuthority.TRUST_INCIDENT_READ)
