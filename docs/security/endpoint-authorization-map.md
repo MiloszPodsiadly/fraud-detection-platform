@@ -4,6 +4,20 @@ FDP-49 is security architecture hardening only. It decomposes authorization rule
 
 No new business endpoints, fraud-case lifecycle changes, idempotency changes, `RegulatedMutationCoordinator` changes, Kafka/outbox/finality changes, export workflow, bulk action workflow, assignment workflow, or UI feature work are part of FDP-49.
 
+## Non-Goals
+
+FDP-49 does not add business endpoints, change fraud-case lifecycle semantics, change idempotency behavior, change `RegulatedMutationCoordinator`, change Kafka/outbox/finality behavior, change export workflows, change bulk action workflows, change assignment workflows, or add UI product features.
+
+FDP-49 does not certify enterprise IAM readiness. Production IAM governance, provider configuration, secret rotation, and deployment hardening remain deployment responsibilities unless configured in this repo.
+
+## /api/v1/session and CSRF metadata
+
+`GET /api/v1/session` is a public BFF bootstrap endpoint owned by `SessionAuthorizationRules`. It returns no-store session state and CSRF metadata only. The CSRF token is not authentication material, is not a secret against XSS, and must not be treated as a bearer credential.
+
+The session response must not expose an access token, refresh token, ID token, JWT, raw claims, provider groups, profile data, email address, or session ID. Frontend roles/authorities are display/capability hints only; backend Spring Security remains the enforcement source.
+
+Unsafe cookie-backed routes require CSRF. Stateless bearer APIs may bypass CSRF only when no `JSESSIONID` is present, and they still require valid JWT authentication and RBAC authorization.
+
 ## Adding a new backend endpoint safely
 
 Every backend endpoint must be explicitly owned by a route group. New endpoints under `/api/**`, `/api/v1/**`, `/governance/**`, `/system/**`, `/bff/**`, and `/actuator/**` are denied by default until a route group allowlists them. This is the FDP-49 deny by default rule.
@@ -14,11 +28,28 @@ The SPA fallback must remain GET-only and must not catch backend-looking paths. 
 
 Every endpoint addition must include a correct-authority test, wrong-authority test, anonymous test, unknown sibling route test, and unsafe method/CSRF test when applicable.
 
+## Maintainer checklist for new endpoints
+
+- Add or update the owning `*AuthorizationRules` class.
+- Register the route group in `AlertEndpointAuthorizationRules` before deny-by-default and before the SPA fallback only when the route is intentionally reachable.
+- Add the route owner to `SecurityRouteOwnershipRegistry`.
+- Update this route ownership map with the route family, owner, authority, classification, CSRF behavior, and expected test.
+- Add controller mapping coverage through `RouteCoverageAgainstMvcMappingsTest`.
+- Add route group coverage through `AuthorizationRulesCoverageTest`.
+- Add wrong-authority, anonymous, unknown sibling, and unsafe-method/CSRF tests.
+- Keep the SPA fallback GET-only and out of backend-looking route families.
+- Do not add broad `permitAll` matchers for `/api/**`, `/api/v1/**`, `/governance/**`, `/system/**`, `/bff/**`, or `/actuator/**`.
+- Keep frontend auth-sensitive calls behind `createAlertsApiClient({ session, authProvider })`; raw fetch belongs only in API/auth bootstrap layers.
+
 ## Auth observability boundaries
 
 Auth/session/security metrics are operational signals, not audit evidence. They must not place raw tokens, session IDs, user IDs, authorities, role values, provider groups, raw OIDC claim values, provider logout URLs, or query strings in metric labels.
 
 BFF session, logout, CSRF, and OIDC mapping events use low-cardinality outcome labels. Sensitive read audit remains separate from operational metrics.
+
+## Metrics ownership follow-up
+
+Future security/auth metrics should be owned by `AuthSecurityMetrics`. Fraud-case metrics should remain under `FraudCaseMetrics`, and transaction-scoring metrics should remain under `TransactionMetrics`. New metrics must avoid high-cardinality labels such as user IDs, session IDs, tokens, authorities, raw claims, provider groups, provider logout URLs, or query strings.
 
 ## Production BFF Deployment Checklist
 
@@ -39,7 +70,7 @@ Production BFF deployment requires:
 - demo auth disabled.
 - Local, dev, and test profile escape hatches disabled.
 
-FDP-49 does not certify enterprise IAM readiness. BFF mode is a safer browser auth foundation, not a replacement for production IAM governance. The CSRF token is not authentication material. Backend Spring Security remains the enforcement source.
+Production BFF hardening remains deployment responsibility unless configured in this repo. BFF mode is a safer browser auth foundation, not a replacement for production IAM governance. Backend Spring Security remains the enforcement source.
 
 ## Route Ownership
 
@@ -48,7 +79,7 @@ FDP-49 does not certify enterprise IAM readiness. BFF mode is a safer browser au
 | `/actuator/health/**`, `/actuator/info` | `PublicTechnicalAuthorizationRules` | Public technical endpoint | Public | Safe methods only | `SecurityMatcherOrderRegressionTest` |
 | Static frontend assets and root document | `PublicTechnicalAuthorizationRules` | Public static content | Public | Safe methods only | `SecurityMatcherOrderRegressionTest` |
 | `GET /api/v1/session` | `SessionAuthorizationRules` | Public bootstrap | Public, no-store, token-free | Safe method only | `BffSessionSecurityIntegrationTest` |
-| `/oauth2/**`, `/login/oauth2/**`, `/error` | `SessionAuthorizationRules` | OAuth/session bootstrap | Public auth lifecycle | Framework controlled | `SecurityMatcherOrderRegressionTest` |
+| `GET /oauth2/**`, `GET /login/oauth2/**`, `GET /error` | `SessionAuthorizationRules` | OAuth/session bootstrap | Public auth lifecycle | Framework controlled safe method only | `SecurityMatcherOrderRegressionTest` |
 | `/api/v1/alerts/**` | `AlertAuthorizationRules` | `ALERT_READ`, `ASSISTANT_SUMMARY_READ`, `ALERT_DECISION_SUBMIT` | Protected | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |
 | `/api/v1/fraud-cases/**`, `/api/fraud-cases/**` | `FraudCaseAuthorizationRules` | `FRAUD_CASE_READ`, `FRAUD_CASE_AUDIT_READ`, `FRAUD_CASE_UPDATE` | Protected | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |
 | `GET /api/v1/transactions/scored` | `TransactionAuthorizationRules` | `TRANSACTION_MONITOR_READ` | Protected | Safe method only | `AuthorizationRulesCoverageTest` |
