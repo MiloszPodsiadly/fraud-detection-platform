@@ -797,6 +797,143 @@ jobs:
         working-directory: analyst-console-ui
         run: npm run build
 
+  fdp49-security-route-boundary-hardening:
+    name: FDP-49 Security Route Boundary Hardening
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs:
+      - backend
+      - fdp48-bff-session-request-lifecycle
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: analyst-console-ui/package-lock.json
+
+      - name: Ensure FDP-49 tests are not skipped
+        run: |
+          if grep -R "@Disabled" \
+            alert-service/src/test/java/com/frauddetection/alert/security/config/AuthorizationRulesCoverageTest.java \
+            alert-service/src/test/java/com/frauddetection/alert/security/config/SecurityMatcherOrderRegressionTest.java \
+            alert-service/src/test/java/com/frauddetection/alert/security/config/DenyByDefaultSecurityTest.java \
+            alert-service/src/test/java/com/frauddetection/alert/security/config/SpaFallbackSecurityTest.java \
+            alert-service/src/test/java/com/frauddetection/alert/security/config/BffCsrfBoundaryRegressionTest.java \
+            alert-service/src/test/java/com/frauddetection/alert/security/config/BearerVsSessionCsrfRegressionTest.java \
+            alert-service/src/test/java/com/frauddetection/alert/security/config/SecurityRouteRegistryDocumentationTest.java \
+            alert-service/src/test/java/com/frauddetection/alert/security/config/SingleSecurityFilterChainGuardTest.java \
+            alert-service/src/test/java/com/frauddetection/alert/security/config/Fdp49NoNewBusinessSemanticsTest.java; then
+            echo "FDP-49 backend tests must not be disabled" >&2
+            exit 1
+          fi
+          if grep -R "it\.skip\|describe\.skip\|test\.skip\|it\.only\|describe\.only\|test\.only" \
+            analyst-console-ui/src/api/apiClientBoundary.test.js \
+            analyst-console-ui/src/auth/authProvider.test.js \
+            analyst-console-ui/src/api/alertsApi.test.js \
+            analyst-console-ui/src/workspace/workspaceDataHooks.test.js \
+            analyst-console-ui/src/fraudCases/useFraudCaseWorkQueue.test.js \
+            analyst-console-ui/src/fraudCases/useFraudCaseWorkQueueSummary.test.js; then
+            echo "FDP-49 frontend tests must not be skipped or focused" >&2
+            exit 1
+          fi
+
+      - name: Run FDP-49 backend security route tests
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=AuthorizationRulesCoverageTest,SecurityMatcherOrderRegressionTest,DenyByDefaultSecurityTest,SpaFallbackSecurityTest,BffCsrfBoundaryRegressionTest,BearerVsSessionCsrfRegressionTest,SecurityRouteRegistryDocumentationTest,SingleSecurityFilterChainGuardTest,Fdp49NoNewBusinessSemanticsTest,AlertServiceMetricsTest" test
+
+      - name: Verify FDP-49 backend reports
+        run: |
+          python - <<'PY'
+          import pathlib
+          import sys
+          import xml.etree.ElementTree as ET
+
+          required = {
+              "com.frauddetection.alert.security.config.AuthorizationRulesCoverageTest",
+              "com.frauddetection.alert.security.config.SecurityMatcherOrderRegressionTest",
+              "com.frauddetection.alert.security.config.DenyByDefaultSecurityTest",
+              "com.frauddetection.alert.security.config.SpaFallbackSecurityTest",
+              "com.frauddetection.alert.security.config.BffCsrfBoundaryRegressionTest",
+              "com.frauddetection.alert.security.config.BearerVsSessionCsrfRegressionTest",
+              "com.frauddetection.alert.security.config.SecurityRouteRegistryDocumentationTest",
+              "com.frauddetection.alert.security.config.SingleSecurityFilterChainGuardTest",
+              "com.frauddetection.alert.security.config.Fdp49NoNewBusinessSemanticsTest",
+              "com.frauddetection.alert.observability.AlertServiceMetricsTest",
+          }
+          reports = pathlib.Path("alert-service/target/surefire-reports")
+          for class_name in sorted(required):
+              report = reports / f"TEST-{class_name}.xml"
+              if not report.exists():
+                  print(f"Missing FDP-49 Surefire XML: {report}", file=sys.stderr)
+                  sys.exit(1)
+              root = ET.parse(report).getroot()
+              tests = int(root.attrib.get("tests", "0"))
+              skipped = int(root.attrib.get("skipped", "0"))
+              failures = int(root.attrib.get("failures", "0"))
+              errors = int(root.attrib.get("errors", "0"))
+              if tests <= 0 or skipped > 0 or failures > 0 or errors > 0:
+                  print(f"FDP-49 test class did not fully execute: {class_name} tests={tests} skipped={skipped} failures={failures} errors={errors}", file=sys.stderr)
+                  sys.exit(1)
+          PY
+
+      - name: Run FDP-49 security grep guardrails
+        run: |
+          if grep -R "anyRequest()\.permitAll()" alert-service/src/main/java/com/frauddetection/alert/security/config; then
+            echo "FDP-49 forbids anyRequest().permitAll() in alert-service security config" >&2
+            exit 1
+          fi
+          if grep -R 'requestMatchers("/api/\*\*")\.permitAll()' alert-service/src/main/java/com/frauddetection/alert/security/config; then exit 1; fi
+          if grep -R 'requestMatchers("/api/v1/\*\*")\.permitAll()' alert-service/src/main/java/com/frauddetection/alert/security/config; then exit 1; fi
+          if grep -R 'requestMatchers("/governance/\*\*")\.permitAll()' alert-service/src/main/java/com/frauddetection/alert/security/config; then exit 1; fi
+          if grep -R 'requestMatchers("/system/\*\*")\.permitAll()' alert-service/src/main/java/com/frauddetection/alert/security/config; then exit 1; fi
+          if grep -R 'requestMatchers("/bff/\*\*")\.permitAll()' alert-service/src/main/java/com/frauddetection/alert/security/config; then exit 1; fi
+          if grep -R "HttpMethod\.POST\|HttpMethod\.PUT\|HttpMethod\.PATCH\|HttpMethod\.DELETE" alert-service/src/main/java/com/frauddetection/alert/security/config/SpaFallbackAuthorizationRules.java; then
+            echo "FDP-49 SPA fallback must remain GET-only" >&2
+            exit 1
+          fi
+
+      - name: Install frontend dependencies
+        working-directory: analyst-console-ui
+        run: npm ci
+
+      - name: Run FDP-49 frontend API client boundary tests
+        working-directory: analyst-console-ui
+        run: npm test -- --run src/api/apiClientBoundary.test.js src/auth/authProvider.test.js src/api/alertsApi.test.js src/workspace/workspaceDataHooks.test.js src/fraudCases/useFraudCaseWorkQueue.test.js src/fraudCases/useFraudCaseWorkQueueSummary.test.js --reporter=default --reporter=junit --outputFile=./test-results/fdp49-vitest.xml
+
+      - name: Guard FDP-49 API client boundary
+        working-directory: analyst-console-ui
+        run: npm run check:api-client-boundary:fdp49
+
+      - name: Verify FDP-49 frontend report
+        working-directory: analyst-console-ui
+        run: |
+          test -f test-results/fdp49-vitest.xml
+          grep -q "apiClientBoundary.test.js" test-results/fdp49-vitest.xml
+          grep -q "authProvider.test.js" test-results/fdp49-vitest.xml
+          grep -q "alertsApi.test.js" test-results/fdp49-vitest.xml
+          grep -q "workspaceDataHooks.test.js" test-results/fdp49-vitest.xml
+          grep -q "useFraudCaseWorkQueue.test.js" test-results/fdp49-vitest.xml
+          grep -q "useFraudCaseWorkQueueSummary.test.js" test-results/fdp49-vitest.xml
+          if grep -q 'skipped="[1-9]' test-results/fdp49-vitest.xml; then
+            echo "FDP-49 frontend tests must not be skipped" >&2
+            exit 1
+          fi
+
+      - name: Build FDP-49 UI
+        working-directory: analyst-console-ui
+        run: npm run build
+
   fdp36-real-chaos:
     name: FDP-36 Real Alert-Service Kill Proof
     runs-on: ubuntu-latest
