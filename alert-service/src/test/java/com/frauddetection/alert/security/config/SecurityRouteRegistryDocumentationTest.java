@@ -24,6 +24,7 @@ class SecurityRouteRegistryDocumentationTest {
                 .contains("Every public endpoint must explain why it is public")
                 .contains("## Maintainer checklist for new endpoints")
                 .contains("Add the route owner to `SecurityRouteOwnershipRegistry`")
+                .contains("SecurityRouteOwnershipRegistry is a CI guardrail that mirrors expected MVC ownership")
                 .contains("Keep frontend auth-sensitive calls behind `createAlertsApiClient({ session, authProvider })`");
     }
 
@@ -76,6 +77,38 @@ class SecurityRouteRegistryDocumentationTest {
                 .contains("FraudCaseMetrics")
                 .contains("TransactionMetrics")
                 .contains("avoid high-cardinality labels");
+    }
+
+    @Test
+    void docsExplainCrossDomainOwnershipGuidance() throws IOException {
+        String doc = readEndpointAuthorizationMap();
+
+        assertThat(doc)
+                .contains("## Choosing the route owner for cross-domain endpoints")
+                .contains("Do not choose an owner based on URL prefix alone")
+                .contains("Choose owner by resource semantics and required authority")
+                .contains("FraudCaseAuthorizationRules` owns fraud-case lifecycle")
+                .contains("AuditAuthorizationRules` owns audit evidence")
+                .contains("GovernanceAuthorizationRules` owns governance advisory")
+                .contains("RecoveryAuthorizationRules` owns operational recovery routes")
+                .contains("TrustAuthorizationRules` owns trust incident and system trust-level")
+                .contains("BffAuthorizationRules` owns BFF lifecycle routes only")
+                .contains("SessionAuthorizationRules` owns session/bootstrap/OAuth routes only")
+                .contains("prefer the most restrictive operational owner");
+    }
+
+    @Test
+    void everyApplicationControllerIsRepresentedInEndpointAuthorizationDocs() throws IOException {
+        String doc = readEndpointAuthorizationMap();
+
+        assertThat(SecurityRuleSource.discoveredApplicationControllerClasses())
+                .allSatisfy(controller -> {
+                    String simpleName = controller.substring(controller.lastIndexOf('.') + 1);
+                    assertThat(doc)
+                            .as("Controller %s is not represented in FDP-49 endpoint authorization documentation.",
+                                    simpleName)
+                            .contains(simpleName);
+                });
     }
 
     private String readEndpointAuthorizationMap() throws IOException {

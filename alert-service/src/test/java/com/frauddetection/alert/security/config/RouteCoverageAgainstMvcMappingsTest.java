@@ -64,6 +64,9 @@ import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.mvc.method.RequestMappingInfo;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 
+import java.io.IOException;
+import java.lang.reflect.Method;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -195,8 +198,11 @@ class RouteCoverageAgainstMvcMappingsTest {
 
     @Test
     void everyApplicationControllerMappingHasExplicitFdp49SecurityOwnership() {
-        List<String> unmappedRoutes = handlerMapping.getHandlerMethods().entrySet().stream()
+        var applicationMappings = handlerMapping.getHandlerMethods().entrySet().stream()
                 .filter(entry -> entry.getValue().getBeanType().getName().startsWith("com.frauddetection.alert"))
+                .toList();
+        List<String> methodlessMappings = methodlessMappingViolations(applicationMappings);
+        List<String> unmappedRoutes = applicationMappings.stream()
                 .flatMap(this::routeDescriptors)
                 .filter(route -> !SecurityRouteOwnershipRegistry.hasMvcOwnership(route.method(), route.pattern()))
                 .map(route -> "Controller mapping " + route.method() + " " + route.pattern()
@@ -204,7 +210,37 @@ class RouteCoverageAgainstMvcMappingsTest {
                 .sorted()
                 .toList();
 
+        assertThat(methodlessMappings).as(String.join(System.lineSeparator(), methodlessMappings)).isEmpty();
         assertThat(unmappedRoutes).as(String.join(System.lineSeparator(), unmappedRoutes)).isEmpty();
+    }
+
+    @Test
+    void everyApplicationControllerIsIncludedInFdp49MvcCoverage() throws IOException {
+        Set<String> coveredControllers = Arrays.stream(RouteCoverageAgainstMvcMappingsTest.class
+                        .getAnnotation(WebMvcTest.class)
+                        .value())
+                .map(Class::getName)
+                .collect(java.util.stream.Collectors.toSet());
+
+        List<String> missingControllers = discoverApplicationControllers().stream()
+                .filter(controller -> !coveredControllers.contains(controller))
+                .map(controller -> "Controller " + controller
+                        + " is not included in FDP-49 MVC route ownership coverage.")
+                .sorted()
+                .toList();
+
+        assertThat(missingControllers).as(String.join(System.lineSeparator(), missingControllers)).isEmpty();
+    }
+
+    @Test
+    void methodlessMappingsAreRejectedByFdp49Guard() throws NoSuchMethodException {
+        Method method = MethodlessController.class.getDeclaredMethod("methodless");
+        RequestMappingInfo mapping = RequestMappingInfo.paths("/methodless").build();
+        HandlerMethod handlerMethod = new HandlerMethod(new MethodlessController(), method);
+
+        assertThat(methodlessMappingViolations(List.of(Map.entry(mapping, handlerMethod))))
+                .containsExactly("FDP-49 requires explicit HTTP methods for security-owned controller mapping: "
+                        + "/methodless handled by MethodlessController#methodless.");
     }
 
     private Stream<RouteDescriptor> routeDescriptors(Map.Entry<RequestMappingInfo, HandlerMethod> entry) {
@@ -219,6 +255,35 @@ class RouteCoverageAgainstMvcMappingsTest {
                         .map(method -> new RouteDescriptor(method.name(), pattern)));
     }
 
+    private List<String> methodlessMappingViolations(List<Map.Entry<RequestMappingInfo, HandlerMethod>> mappings) {
+        return mappings.stream()
+                .filter(entry -> entry.getKey().getMethodsCondition().getMethods().isEmpty())
+                .flatMap(entry -> patterns(entry.getKey())
+                        .map(pattern -> "FDP-49 requires explicit HTTP methods for security-owned controller mapping: "
+                                + pattern + " handled by " + entry.getValue().getBeanType().getSimpleName()
+                                + "#" + entry.getValue().getMethod().getName() + "."))
+                .sorted()
+                .toList();
+    }
+
+    private Stream<String> patterns(RequestMappingInfo info) {
+        Set<String> patterns = info.getPathPatternsCondition() == null
+                ? info.getPatternsCondition().getPatterns()
+                : info.getPathPatternsCondition().getPatternValues();
+        return patterns.stream().sorted(Comparator.naturalOrder());
+    }
+
+    private List<String> discoverApplicationControllers() throws IOException {
+        return SecurityRuleSource.discoveredApplicationControllerClasses().stream().toList();
+    }
+
     private record RouteDescriptor(String method, String pattern) {
+    }
+
+    private static final class MethodlessController {
+
+        @SuppressWarnings("unused")
+        void methodless() {
+        }
     }
 }

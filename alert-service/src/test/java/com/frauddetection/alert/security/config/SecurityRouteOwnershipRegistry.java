@@ -3,6 +3,10 @@ package com.frauddetection.alert.security.config;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * FDP-49 test contract only. Runtime security source of truth remains the *AuthorizationRules classes composed by
+ * AlertEndpointAuthorizationRules.
+ */
 final class SecurityRouteOwnershipRegistry {
 
     static final List<RouteOwnership> MVC_ROUTES = mvcRoutes();

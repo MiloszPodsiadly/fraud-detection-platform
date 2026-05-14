@@ -55,6 +55,19 @@ final class SecurityRuleSource {
         }
     }
 
+    static Set<String> discoveredApplicationControllerClasses() {
+        Path root = repositoryFile("alert-service/src/main/java/com/frauddetection/alert");
+        try (Stream<Path> files = Files.walk(root)) {
+            return files
+                    .filter(path -> path.toString().endsWith(".java"))
+                    .filter(SecurityRuleSource::isApplicationControllerSource)
+                    .map(SecurityRuleSource::fullyQualifiedClassName)
+                    .collect(Collectors.toCollection(TreeSet::new));
+        } catch (IOException exception) {
+            throw new IllegalStateException("Unable to scan application controllers under " + root, exception);
+        }
+    }
+
     static String source(String relativePath) {
         Path base = Path.of("").toAbsolutePath();
         Path candidate = base.resolve(relativePath);
@@ -91,5 +104,29 @@ final class SecurityRuleSource {
 
     private static Path securityConfigSourceRoot() {
         return repositoryFile("alert-service/src/main/java/com/frauddetection/alert/security/config");
+    }
+
+    private static boolean isApplicationControllerSource(Path path) {
+        String source = sourceFromPath(path);
+        String fileName = path.getFileName().toString();
+        return !fileName.endsWith("Test.java")
+                && !source.contains("@ControllerAdvice")
+                && !source.contains("@RestControllerAdvice")
+                && java.util.regex.Pattern.compile("@(RestController|Controller)(\\s|\\(|$)")
+                        .matcher(source)
+                        .find();
+    }
+
+    private static String fullyQualifiedClassName(Path path) {
+        String source = sourceFromPath(path);
+        String packageName = source.lines()
+                .filter(line -> line.startsWith("package "))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("Missing package in " + path))
+                .replace("package ", "")
+                .replace(";", "")
+                .trim();
+        String simpleName = path.getFileName().toString().replace(".java", "");
+        return packageName + "." + simpleName;
     }
 }

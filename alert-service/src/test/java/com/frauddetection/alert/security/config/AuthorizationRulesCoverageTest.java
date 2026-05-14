@@ -3,12 +3,28 @@ package com.frauddetection.alert.security.config;
 import com.frauddetection.alert.security.authorization.AnalystAuthority;
 import org.junit.jupiter.api.Test;
 
+import java.util.Map;
+import java.util.regex.Pattern;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 class AuthorizationRulesCoverageTest extends AbstractSecurityRouteBoundaryWebMvcTest {
+
+    private static final Map<String, String> BROAD_ROUTE_MATCHER_ALLOWLIST = Map.of(
+            "PublicTechnicalAuthorizationRules:\"/actuator/health/**\"",
+            "Health subpaths are public for platform health probes only.",
+            "PublicTechnicalAuthorizationRules:\"/assets/**\"",
+            "Static SPA asset subtree is public read-only content.",
+            "PublicTechnicalAuthorizationRules:\"/static/**\"",
+            "Static SPA fallback asset subtree is public read-only content.",
+            "SessionAuthorizationRules:\"/oauth2/**\"",
+            "OAuth framework bootstrap routes are public GET-only and not business APIs.",
+            "SessionAuthorizationRules:\"/login/oauth2/**\"",
+            "OAuth framework callback routes are public GET-only and not business APIs."
+    );
 
     @Test
     void fraudCaseRoutesRequireExplicitFraudCaseAuthority() throws Exception {
@@ -107,5 +123,34 @@ class AuthorizationRulesCoverageTest extends AbstractSecurityRouteBoundaryWebMvc
                     assertThat(source).doesNotContain("\"/system/**\").permitAll()");
                     assertThat(source).doesNotContain("\"/bff/**\").permitAll()");
                 });
+    }
+
+    @Test
+    void broadRouteMatchersRequireExplicitFdp49ReviewAllowlist() {
+        assertThat(SecurityRuleSource.discoveredAuthorizationRuleGroups()
+                .stream()
+                .filter(group -> !"DenyByDefaultAuthorizationRules".equals(group))
+                .filter(group -> !"SpaFallbackAuthorizationRules".equals(group))
+                .flatMap(group -> broadRouteMatchers(group).stream()
+                        .map(matcher -> new BroadRouteMatcher(group, matcher)))
+                .filter(matcher -> !BROAD_ROUTE_MATCHER_ALLOWLIST.containsKey(matcher.group() + ":" + matcher.matcher()))
+                .map(matcher -> "Broad route matcher " + matcher.matcher() + " in " + matcher.group()
+                        + " requires explicit FDP-49 review and allowlist justification.")
+                .toList())
+                .isEmpty();
+    }
+
+    private java.util.List<String> broadRouteMatchers(String group) {
+        String source = SecurityRuleSource.source(
+                "src/main/java/com/frauddetection/alert/security/config/" + group + ".java");
+        var matchers = new java.util.ArrayList<String>();
+        var matcher = Pattern.compile("\"[^\"]+/\\*\\*\"").matcher(source);
+        while (matcher.find()) {
+            matchers.add(matcher.group());
+        }
+        return matchers;
+    }
+
+    private record BroadRouteMatcher(String group, String matcher) {
     }
 }

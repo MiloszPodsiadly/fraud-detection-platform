@@ -28,6 +28,8 @@ The SPA fallback must remain GET-only and must not catch backend-looking paths. 
 
 Every endpoint addition must include a correct-authority test, wrong-authority test, anonymous test, unknown sibling route test, and unsafe method/CSRF test when applicable.
 
+SecurityRouteOwnershipRegistry is a CI guardrail that mirrors expected MVC ownership. It does not configure Spring Security.
+
 ## Maintainer checklist for new endpoints
 
 - Add or update the owning `*AuthorizationRules` class.
@@ -40,6 +42,19 @@ Every endpoint addition must include a correct-authority test, wrong-authority t
 - Keep the SPA fallback GET-only and out of backend-looking route families.
 - Do not add broad `permitAll` matchers for `/api/**`, `/api/v1/**`, `/governance/**`, `/system/**`, `/bff/**`, or `/actuator/**`.
 - Keep frontend auth-sensitive calls behind `createAlertsApiClient({ session, authProvider })`; raw fetch belongs only in API/auth bootstrap layers.
+
+## Choosing the route owner for cross-domain endpoints
+
+Do not choose an owner based on URL prefix alone. Choose owner by resource semantics and required authority. Every ambiguous endpoint must include a one-line ownership rationale in this document.
+
+- `FraudCaseAuthorizationRules` owns fraud-case lifecycle, read, and audit routes only when the primary resource is a fraud case.
+- `AuditAuthorizationRules` owns audit evidence, audit integrity, audit export, audit degradations, and trust-attestation evidence routes.
+- `GovernanceAuthorizationRules` owns governance advisory projection, analytics, and advisory audit routes.
+- `RecoveryAuthorizationRules` owns operational recovery routes: outbox recovery, regulated mutation recovery, and unknown confirmations.
+- `TrustAuthorizationRules` owns trust incident and system trust-level operational views.
+- `BffAuthorizationRules` owns BFF lifecycle routes only, not business API routes.
+- `SessionAuthorizationRules` owns session/bootstrap/OAuth routes only.
+- If ownership is ambiguous, prefer the most restrictive operational owner and add tests for wrong-authority rejection.
 
 ## Auth observability boundaries
 
@@ -91,6 +106,30 @@ Production BFF hardening remains deployment responsibility unless configured in 
 | Unknown `/api/**`, `/api/v1/**`, `/governance/**`, `/system/**`, `/bff/**`, `/actuator/**` | `DenyByDefaultAuthorizationRules` | None | Deny by default | Denied before SPA fallback | `DenyByDefaultSecurityTest` |
 | Known frontend routes such as `GET /analyst-console` | `SpaFallbackAuthorizationRules` | Public SPA fallback | GET-only fallback | Unsafe methods denied | `SpaFallbackSecurityTest` |
 | Any other route | `DenyByDefaultAuthorizationRules` | None | Final deny | Denied | `SecurityMatcherOrderRegressionTest` |
+
+## FDP-49 MVC Controller Coverage
+
+The FDP-49 route ownership docs represent these Spring MVC controllers:
+
+- `AlertController`
+- `AnalystSessionController`
+- `AuditDegradationController`
+- `AuditEventController`
+- `AuditEvidenceExportController`
+- `AuditIntegrityController`
+- `AuditTrustAttestationController`
+- `AuditTrustKeysController`
+- `DecisionOutboxReconciliationController`
+- `ExternalAuditIntegrityController`
+- `FraudCaseController`
+- `FraudCaseWorkQueueSummaryController`
+- `GovernanceAdvisoryController`
+- `GovernanceAuditController`
+- `OutboxRecoveryController`
+- `RegulatedMutationRecoveryController`
+- `ScoredTransactionController`
+- `SystemTrustLevelController`
+- `TrustIncidentController`
 
 ## PR Metadata
 
