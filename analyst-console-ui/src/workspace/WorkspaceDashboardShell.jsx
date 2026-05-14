@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo } from "react";
-import { SESSION_STATES, getSessionStateForApiError, getSessionStateForProvider } from "../auth/sessionState.js";
+import { getSessionStateForApiError, getSessionStateForProvider } from "../auth/sessionState.js";
 import { useFraudCaseWorkQueue } from "../fraudCases/useFraudCaseWorkQueue.js";
 import { useFraudCaseWorkQueueSummary } from "../fraudCases/useFraudCaseWorkQueueSummary.js";
 import { AlertDetailsPage } from "../pages/AlertDetailsPage.jsx";
@@ -11,6 +11,7 @@ import { useGovernanceAuditWorkflow } from "./useGovernanceAuditWorkflow.js";
 import { useGovernanceQueue } from "./useGovernanceQueue.js";
 import { useScoredTransactionStream } from "./useScoredTransactionStream.js";
 import { useWorkspaceCounters } from "./useWorkspaceCounters.js";
+import { shouldBlockDashboardFetch, useWorkspaceRefreshController } from "./useWorkspaceRefreshController.js";
 import { useWorkspaceRuntime } from "./useWorkspaceRuntime.js";
 
 export function WorkspaceDashboardShell({
@@ -97,30 +98,18 @@ export function WorkspaceDashboardShell({
     }
   }, [canReadTransactions, setCounterValue, transactionStreamState.page.totalElements]);
 
-  function refreshDashboard() {
-    if (shouldBlockDashboardFetch(sessionState)) {
-      return;
-    }
-    if (workspacePage === "fraudTransaction") {
-      alertQueueState.refresh();
-    }
-    if (workspacePage === "transactionScoring") {
-      transactionStreamState.refresh();
-    }
-    if (workspaceNavigationEnabled) {
-      fraudCaseWorkQueueSummaryState.retry();
-      refreshWorkspaceCounters();
-    }
-    if (workspacePage === "analyst") {
-      fraudCaseWorkQueueState.refreshFirstSlice();
-    }
-    if (workspacePage === "compliance") {
-      governanceQueueState.refresh();
-    }
-    if (workspacePage === "reports") {
-      governanceAnalyticsState.refresh();
-    }
-  }
+  const refreshDashboard = useWorkspaceRefreshController({
+    sessionState,
+    workspacePage,
+    workspaceNavigationEnabled,
+    alertQueueState,
+    transactionStreamState,
+    fraudCaseWorkQueueSummaryState,
+    refreshWorkspaceCounters,
+    fraudCaseWorkQueueState,
+    governanceQueueState,
+    governanceAnalyticsState
+  });
 
   function changeTransactionPage(page) {
     transactionStreamState.setRequest((current) => ({ ...current, page: Math.min(Math.max(Number(page) || 0, 0), 1000) }));
@@ -235,13 +224,4 @@ export function WorkspaceDashboardShell({
       onOpenFraudCase={openFraudCase}
     />
   );
-}
-
-function shouldBlockDashboardFetch(sessionState) {
-  return [
-    SESSION_STATES.UNAUTHENTICATED,
-    SESSION_STATES.EXPIRED,
-    SESSION_STATES.ACCESS_DENIED,
-    SESSION_STATES.AUTH_ERROR
-  ].includes(sessionState?.status);
 }
