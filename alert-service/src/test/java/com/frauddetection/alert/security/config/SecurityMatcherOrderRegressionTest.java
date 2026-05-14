@@ -15,10 +15,18 @@ class SecurityMatcherOrderRegressionTest extends AbstractSecurityRouteBoundaryWe
 
     @Test
     void publicRoutesRemainPublic() throws Exception {
-        expectSecurityAllowsThrough(get("/api/v1/session"));
-        expectSecurityAllowsThrough(get("/oauth2/authorization/oidc"));
-        expectSecurityAllowsThrough(get("/login/oauth2/code/oidc"));
-        expectSecurityAllowsThrough(get("/actuator/health"));
+        expectSecurityLayerDoesNotReject(get("/api/v1/session"));
+        expectSecurityLayerDoesNotReject(get("/oauth2/authorization/oidc"));
+        expectSecurityLayerDoesNotReject(get("/login/oauth2/code/oidc"));
+        expectSecurityLayerDoesNotReject(get("/actuator/health"));
+    }
+
+    @Test
+    void oauthAndSessionBootstrapRoutesAreGetOnlyAtTheSecurityBoundary() throws Exception {
+        expectSecurityLayerDoesNotReject(get("/oauth2/authorization/oidc"));
+        expectSecurityLayerDoesNotReject(get("/login/oauth2/code/oidc"));
+        expectDenied(post("/oauth2/authorization/oidc").with(reader()));
+        expectDenied(post("/login/oauth2/code/oidc").with(reader()));
     }
 
     @Test
@@ -37,7 +45,9 @@ class SecurityMatcherOrderRegressionTest extends AbstractSecurityRouteBoundaryWe
                 "/governance/anything",
                 "/system/anything",
                 "/bff/anything",
-                "/actuator/anything-unknown"
+                "/actuator/anything-unknown",
+                "/internal/api/anything",
+                "/backend/anything"
         }) {
             mockMvc.perform(get(path).with(reader()))
                     .andExpect(result -> assertThat(result.getResponse().getStatus())
@@ -51,7 +61,7 @@ class SecurityMatcherOrderRegressionTest extends AbstractSecurityRouteBoundaryWe
 
     @Test
     void spaFallbackIsGetOnly() throws Exception {
-        expectSecurityAllowsThrough(get("/analyst-console"));
+        expectSecurityLayerDoesNotReject(get("/analyst-console"));
         expectDenied(post("/analyst-console").with(reader()).with(csrf()));
         expectDenied(put("/analyst-console").with(reader()).with(csrf()));
         expectDenied(delete("/analyst-console").with(reader()).with(csrf()));

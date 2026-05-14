@@ -9,6 +9,6 @@ class SessionAuthorizationRules {
     void configure(AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry authorize) {
         authorize
                 .requestMatchers(HttpMethod.GET, "/api/v1/session").permitAll()
-                .requestMatchers("/oauth2/**", "/login/oauth2/**", "/error").permitAll();
+                .requestMatchers(HttpMethod.GET, "/oauth2/**", "/login/oauth2/**", "/error").permitAll();
     }
 }

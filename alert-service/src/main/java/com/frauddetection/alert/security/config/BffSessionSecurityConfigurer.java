@@ -44,7 +44,13 @@ class BffSessionSecurityConfigurer {
         String authorization = request.getHeader("Authorization");
         return StringUtils.hasText(authorization)
                 && authorization.regionMatches(true, 0, "Bearer ", 0, 7)
-                && !hasCookie(request, "JSESSIONID");
+                && !hasSessionSignal(request);
+    }
+
+    private boolean hasSessionSignal(HttpServletRequest request) {
+        return hasCookie(request, "JSESSIONID")
+                || StringUtils.hasText(request.getRequestedSessionId())
+                || hasCookieHeader(request, "JSESSIONID");
     }
 
     private boolean hasCookie(HttpServletRequest request, String cookieName) {
@@ -58,5 +64,11 @@ class BffSessionSecurityConfigurer {
             }
         }
         return false;
+    }
+
+    private boolean hasCookieHeader(HttpServletRequest request, String cookieName) {
+        String cookieHeader = request.getHeader("Cookie");
+        return StringUtils.hasText(cookieHeader)
+                && cookieHeader.contains(cookieName + "=");
     }
 }

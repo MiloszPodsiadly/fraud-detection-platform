@@ -12,7 +12,7 @@ class AuthorizationRulesCoverageTest extends AbstractSecurityRouteBoundaryWebMvc
 
     @Test
     void fraudCaseRoutesRequireExplicitFraudCaseAuthority() throws Exception {
-        expectSecurityAllowsThrough(get("/api/v1/fraud-cases/work-queue")
+        expectSecurityLayerDoesNotReject(get("/api/v1/fraud-cases/work-queue")
                 .with(userWith(AnalystAuthority.FRAUD_CASE_READ)));
         expectDenied(get("/api/v1/fraud-cases/work-queue")
                 .with(userWith(AnalystAuthority.ALERT_READ)));
@@ -25,7 +25,7 @@ class AuthorizationRulesCoverageTest extends AbstractSecurityRouteBoundaryWebMvc
 
     @Test
     void alertRoutesRequireExplicitAlertAuthority() throws Exception {
-        expectSecurityAllowsThrough(get("/api/v1/alerts").with(userWith(AnalystAuthority.ALERT_READ)));
+        expectSecurityLayerDoesNotReject(get("/api/v1/alerts").with(userWith(AnalystAuthority.ALERT_READ)));
         expectDenied(get("/api/v1/alerts").with(userWith(AnalystAuthority.FRAUD_CASE_READ)));
         expectDenied(get("/api/v1/alerts"));
         expectDenied(get("/api/v1/alerts/not-real/sibling").with(userWith(AnalystAuthority.ALERT_READ)));
@@ -34,7 +34,7 @@ class AuthorizationRulesCoverageTest extends AbstractSecurityRouteBoundaryWebMvc
 
     @Test
     void transactionRoutesRequireExplicitTransactionAuthority() throws Exception {
-        expectSecurityAllowsThrough(get("/api/v1/transactions/scored")
+        expectSecurityLayerDoesNotReject(get("/api/v1/transactions/scored")
                 .with(userWith(AnalystAuthority.TRANSACTION_MONITOR_READ)));
         expectDenied(get("/api/v1/transactions/scored").with(userWith(AnalystAuthority.FRAUD_CASE_READ)));
         expectDenied(get("/api/v1/transactions/scored"));
@@ -46,7 +46,7 @@ class AuthorizationRulesCoverageTest extends AbstractSecurityRouteBoundaryWebMvc
 
     @Test
     void governanceRoutesRequireExplicitGovernanceAuthorities() throws Exception {
-        expectSecurityAllowsThrough(get("/governance/advisories")
+        expectSecurityLayerDoesNotReject(get("/governance/advisories")
                 .with(userWith(AnalystAuthority.TRANSACTION_MONITOR_READ)));
         expectDenied(get("/governance/advisories").with(userWith(AnalystAuthority.FRAUD_CASE_READ)));
         expectDenied(get("/governance/advisories"));
@@ -58,7 +58,7 @@ class AuthorizationRulesCoverageTest extends AbstractSecurityRouteBoundaryWebMvc
 
     @Test
     void auditRoutesRequireExplicitAuditAuthorities() throws Exception {
-        expectSecurityAllowsThrough(get("/api/v1/audit/integrity/external")
+        expectSecurityLayerDoesNotReject(get("/api/v1/audit/integrity/external")
                 .with(userWith(AnalystAuthority.AUDIT_VERIFY)));
         expectDenied(get("/api/v1/audit/integrity/external").with(userWith(AnalystAuthority.AUDIT_READ)));
         expectDenied(get("/api/v1/audit/integrity/external"));
@@ -69,7 +69,7 @@ class AuthorizationRulesCoverageTest extends AbstractSecurityRouteBoundaryWebMvc
 
     @Test
     void trustRoutesRequireExplicitTrustAuthorities() throws Exception {
-        expectSecurityAllowsThrough(get("/system/trust-level")
+        expectSecurityLayerDoesNotReject(get("/system/trust-level")
                 .with(userWith(AnalystAuthority.AUDIT_VERIFY)));
         expectDenied(get("/system/trust-level").with(userWith(AnalystAuthority.FRAUD_CASE_READ)));
         expectDenied(get("/system/trust-level"));
@@ -79,7 +79,7 @@ class AuthorizationRulesCoverageTest extends AbstractSecurityRouteBoundaryWebMvc
 
     @Test
     void bffRoutesKeepLogoutExplicitAndDenyUnknownSiblings() throws Exception {
-        expectSecurityAllowsThrough(post("/bff/logout").with(reader()).with(csrf()));
+        expectSecurityLayerDoesNotReject(post("/bff/logout").with(reader()).with(csrf()));
         expectDenied(post("/bff/logout"));
         expectDenied(get("/bff/not-real").with(reader()));
         expectDenied(post("/bff/not-real").with(reader()).with(csrf()));
@@ -87,7 +87,7 @@ class AuthorizationRulesCoverageTest extends AbstractSecurityRouteBoundaryWebMvc
 
     @Test
     void spaFallbackIsGetOnlyAndDoesNotCatchBackendLookingRoutes() throws Exception {
-        expectSecurityAllowsThrough(get("/analyst-console"));
+        expectSecurityLayerDoesNotReject(get("/analyst-console"));
         expectDenied(post("/analyst-console").with(reader()).with(csrf()));
         expectDenied(get("/api/anything").with(reader()));
         expectDenied(get("/api/v1/anything").with(reader()));

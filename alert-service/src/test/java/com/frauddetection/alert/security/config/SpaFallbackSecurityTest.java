@@ -12,9 +12,9 @@ class SpaFallbackSecurityTest extends AbstractSecurityRouteBoundaryWebMvcTest {
 
     @Test
     void frontendFallbackAllowsOnlyKnownGetRoutes() throws Exception {
-        expectSecurityAllowsThrough(get("/analyst-console"));
-        expectSecurityAllowsThrough(get("/fraud-case"));
-        expectSecurityAllowsThrough(get("/reports"));
+        expectSecurityLayerDoesNotReject(get("/analyst-console"));
+        expectSecurityLayerDoesNotReject(get("/fraud-case"));
+        expectSecurityLayerDoesNotReject(get("/reports"));
 
         expectDenied(post("/analyst-console").with(reader()).with(csrf()));
         expectDenied(patch("/analyst-console").with(reader()).with(csrf()));

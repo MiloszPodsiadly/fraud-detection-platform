@@ -70,7 +70,8 @@ abstract class AbstractSecurityRouteBoundaryWebMvcTest {
         return userWith(AnalystAuthority.FRAUD_CASE_READ);
     }
 
-    void expectSecurityAllowsThrough(MockHttpServletRequestBuilder request) throws Exception {
+    void expectSecurityLayerDoesNotReject(MockHttpServletRequestBuilder request) throws Exception {
+        // This only proves Spring Security did not return 401/403; MVC handler success is tested separately.
         ResultActions result = mockMvc.perform(request);
         result.andExpect(response -> assertThat(response.getResponse().getStatus())
                 .isNotIn(401, 403));
