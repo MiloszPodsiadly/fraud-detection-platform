@@ -161,10 +161,14 @@ function GovernanceEventRows({ event, auditHistory, canRecordAudit, session, onR
     setError("");
     setResult("");
     try {
-      await onRecordAudit(event.event_id, {
+      const auditResult = await onRecordAudit(event.event_id, {
         decision,
         note: note.trim() || undefined
       });
+      if (auditResult?.ok === false) {
+        setError(auditResult.message || "Unable to record review.");
+        return;
+      }
       setNote("");
       setResult("Human review recorded.");
     } catch (apiError) {
