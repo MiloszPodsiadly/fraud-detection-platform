@@ -51,7 +51,7 @@ export function useAlertQueue({ enabled = true, session, authProvider, apiClient
   }, [apiClient, request]);
 
   useEffect(() => {
-    if (!enabled) {
+    if (!enabled || !apiClient) {
       abortControllerRef.current?.abort();
       abortControllerRef.current = null;
       requestSeqRef.current += 1;

@@ -40,8 +40,8 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 
-import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
@@ -113,7 +113,7 @@ class FraudCaseSecurityIntegrationTest {
     }
 
     @Test
-    void shouldAllowReadAuthorityForCurrentAndLegacyReadPaths() throws Exception {
+    void shouldAllowReadAuthorityForCurrentReadPaths() throws Exception {
         when(fraudCaseManagementService.listCases(any(Pageable.class))).thenReturn(new PageImpl<>(List.of(caseDocument())));
         when(fraudCaseManagementService.workQueue(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(Pageable.class)))
                 .thenReturn(new com.frauddetection.alert.api.FraudCaseWorkQueueSliceResponse(List.of(workQueueItem()), 0, 20, false, null));
@@ -132,13 +132,13 @@ class FraudCaseSecurityIntegrationTest {
                 .andExpect(jsonPath("$.totalFraudCases").value(42))
                 .andExpect(jsonPath("$.scope").value("GLOBAL_FRAUD_CASES"))
                 .andExpect(jsonPath("$.snapshotConsistentWithWorkQueue").value(false));
-        mockMvc.perform(get("/api/fraud-cases/case-1").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
+        mockMvc.perform(get("/api/v1/fraud-cases/case-1").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.caseId").value("case-1"));
     }
 
     @Test
-    void shouldDenyMutationsForReadOnlyAuthorityAndAllowUpdateAuthorityOnBothPaths() throws Exception {
+    void shouldDenyMutationsForReadOnlyAuthorityAndAllowUpdateAuthorityOnCurrentPath() throws Exception {
         when(fraudCaseManagementService.createCase(any(), any())).thenReturn(responseMapper.toResponse(caseDocument()));
         when(fraudCaseManagementService.assignCase(any(), any(), any())).thenReturn(responseMapper.toResponse(caseDocument()));
 
@@ -157,13 +157,39 @@ class FraudCaseSecurityIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.caseId").value("case-1"));
 
-        mockMvc.perform(post("/api/fraud-cases/case-1/assign")
+        mockMvc.perform(post("/api/v1/fraud-cases/case-1/assign")
                         .with(userWith(AnalystAuthority.FRAUD_CASE_UPDATE))
                         .header("X-Idempotency-Key", "case-assign-update")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"assignedInvestigatorId\":\"investigator-1\",\"actorId\":\"lead-1\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.caseId").value("case-1"));
+    }
+
+    @Test
+    void shouldReturnGoneForRemovedLegacyFraudCaseRoutes() throws Exception {
+        mockMvc.perform(get("/api/fraud-cases/case-1")
+                        .with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
+                .andExpect(status().isGone())
+                .andExpect(jsonPath("$.message").value("Legacy fraud-case API route is removed. Use /api/v1/fraud-cases."))
+                .andExpect(jsonPath("$.details[0]").value("code:LEGACY_FRAUD_CASE_ROUTE_REMOVED"))
+                .andExpect(content().string(not(containsString("insufficient_authority"))));
+
+        mockMvc.perform(post("/api/fraud-cases/case-1/assign")
+                        .with(userWith(AnalystAuthority.FRAUD_CASE_UPDATE))
+                        .header("X-Idempotency-Key", "case-assign-update")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assignedInvestigatorId\":\"investigator-1\",\"actorId\":\"lead-1\"}"))
+                .andExpect(status().isGone())
+                .andExpect(jsonPath("$.details[0]").value("code:LEGACY_FRAUD_CASE_ROUTE_REMOVED"))
+                .andExpect(content().string(not(containsString("insufficient_authority"))));
+    }
+
+    @Test
+    void shouldRequireAuthenticationForRemovedLegacyFraudCaseRoutes() throws Exception {
+        mockMvc.perform(get("/api/fraud-cases/case-1"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().string(not(containsString("LEGACY_FRAUD_CASE_ROUTE_REMOVED"))));
     }
 
     @Test
@@ -206,9 +232,10 @@ class FraudCaseSecurityIntegrationTest {
                 .andExpect(jsonPath("$[0].actorId").value("analyst-1"));
 
         mockMvc.perform(get("/api/fraud-cases/case-1/audit")
-                        .with(userWith(AnalystAuthority.FRAUD_CASE_AUDIT_READ)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].action").value("CASE_CREATED"));
+                .with(userWith(AnalystAuthority.FRAUD_CASE_AUDIT_READ)))
+                .andExpect(status().isGone())
+                .andExpect(jsonPath("$.details[0]").value("code:LEGACY_FRAUD_CASE_ROUTE_REMOVED"))
+                .andExpect(content().string(not(containsString("insufficient_authority"))));
     }
 
     @Test

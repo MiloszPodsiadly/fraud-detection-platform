@@ -4,10 +4,9 @@ Status: current API summary.
 
 Base paths:
 
-- `/api/fraud-cases`
 - `/api/v1/fraud-cases`
 
-Both paths are protected by the same `alert-service` RBAC rules.
+Only the versioned `/api/v1/fraud-cases` route family is supported. The old unversioned fraud-case alias is removed and is denied by default.
 
 FDP-43 lifecycle endpoints are local audited lifecycle endpoints with local idempotency. They reuse shared
 idempotency primitives from the existing regulated mutation model, but they are not routed through
@@ -18,16 +17,16 @@ exactly-once execution, and not external finality.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `POST` | `/api/fraud-cases` | Create a fraud case from alert ids. |
-| `GET` | `/api/fraud-cases/{caseId}` | Read case details. |
-| `GET` | `/api/fraud-cases` | Search cases. |
-| `POST` | `/api/fraud-cases/{caseId}/assign` | Assign or reassign investigator. |
-| `POST` | `/api/fraud-cases/{caseId}/notes` | Append investigator note. |
-| `POST` | `/api/fraud-cases/{caseId}/decisions` | Append investigator decision. |
-| `POST` | `/api/fraud-cases/{caseId}/transition` | Change status through lifecycle policy. |
-| `POST` | `/api/fraud-cases/{caseId}/close` | Close a resolved case. |
-| `POST` | `/api/fraud-cases/{caseId}/reopen` | Reopen a closed case. |
-| `GET` | `/api/fraud-cases/{caseId}/audit` | Read audit history. |
+| `POST` | `/api/v1/fraud-cases` | Create a fraud case from alert ids. |
+| `GET` | `/api/v1/fraud-cases/{caseId}` | Read case details. |
+| `GET` | `/api/v1/fraud-cases` | Search cases. |
+| `POST` | `/api/v1/fraud-cases/{caseId}/assign` | Assign or reassign investigator. |
+| `POST` | `/api/v1/fraud-cases/{caseId}/notes` | Append investigator note. |
+| `POST` | `/api/v1/fraud-cases/{caseId}/decisions` | Append investigator decision. |
+| `POST` | `/api/v1/fraud-cases/{caseId}/transition` | Change status through lifecycle policy. |
+| `POST` | `/api/v1/fraud-cases/{caseId}/close` | Close a resolved case. |
+| `POST` | `/api/v1/fraud-cases/{caseId}/reopen` | Reopen a closed case. |
+| `GET` | `/api/v1/fraud-cases/{caseId}/audit` | Read audit history. |
 
 Authorities:
 

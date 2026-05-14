@@ -90,7 +90,7 @@ class FraudCaseControllerTest {
                 "analyst-1"
         );
 
-        mockMvc.perform(post("/api/fraud-cases")
+        mockMvc.perform(post("/api/v1/fraud-cases")
                         .header("X-Idempotency-Key", "create-key-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -114,7 +114,7 @@ class FraudCaseControllerTest {
                 any(Pageable.class)
         )).thenReturn(new PageImpl<>(List.of(summary)));
 
-        mockMvc.perform(get("/api/fraud-cases").param("status", "OPEN"))
+        mockMvc.perform(get("/api/v1/fraud-cases").param("status", "OPEN"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].caseId").value("case-1"))
                 .andExpect(jsonPath("$.content[0].linkedAlertIds[0]").value("alert-1"))
@@ -136,7 +136,7 @@ class FraudCaseControllerTest {
                 any(Pageable.class)
         )).thenReturn(workQueueSlice());
 
-        mockMvc.perform(get("/api/fraud-cases/work-queue").param("status", "OPEN"))
+        mockMvc.perform(get("/api/v1/fraud-cases/work-queue").param("status", "OPEN"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].caseId").value("case-1"))
                 .andExpect(jsonPath("$.content[0].linkedAlertCount").value(1))
@@ -145,15 +145,15 @@ class FraudCaseControllerTest {
 
     @Test
     void shouldRejectUnsupportedWorkQueueSortAndUnknownFilters() throws Exception {
-        mockMvc.perform(get("/api/fraud-cases/work-queue").param("sort", "customerId,desc"))
+        mockMvc.perform(get("/api/v1/fraud-cases/work-queue").param("sort", "customerId,desc"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.details[0]").value("code:UNSUPPORTED_SORT_FIELD"));
 
-        mockMvc.perform(get("/api/fraud-cases/work-queue").param("customerId", "customer-1"))
+        mockMvc.perform(get("/api/v1/fraud-cases/work-queue").param("customerId", "customer-1"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.details[0]").value("code:UNSUPPORTED_FILTER"));
 
-        mockMvc.perform(get("/api/fraud-cases/work-queue").param("size", "101"))
+        mockMvc.perform(get("/api/v1/fraud-cases/work-queue").param("size", "101"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.details[0]").value("code:INVALID_PAGE_REQUEST"));
     }
@@ -163,7 +163,7 @@ class FraudCaseControllerTest {
         when(fraudCaseManagementService.assignCase(eq("case-1"), any(), eq("assign-key-1")))
                 .thenThrow(new FraudCaseConflictException("Closed case cannot be assigned."));
 
-        mockMvc.perform(post("/api/fraud-cases/case-1/assign")
+        mockMvc.perform(post("/api/v1/fraud-cases/case-1/assign")
                         .header("X-Idempotency-Key", "assign-key-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"assignedInvestigatorId\":\"investigator-1\",\"actorId\":\"lead-1\"}"))
@@ -178,14 +178,14 @@ class FraudCaseControllerTest {
         when(fraudCaseManagementService.reopenCase(eq("case-1"), any(), eq("reopen-key-1")))
                 .thenThrow(new FraudCaseConflictException("Forbidden fraud case status transition: REOPENED -> REOPENED"));
 
-        mockMvc.perform(post("/api/fraud-cases/case-1/close")
+        mockMvc.perform(post("/api/v1/fraud-cases/case-1/close")
                         .header("X-Idempotency-Key", "close-key-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"closureReason\":\"Done\",\"actorId\":\"lead-1\"}"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.details[0]").value("reason:FRAUD_CASE_LIFECYCLE_CONFLICT"));
 
-        mockMvc.perform(post("/api/fraud-cases/case-1/reopen")
+        mockMvc.perform(post("/api/v1/fraud-cases/case-1/reopen")
                         .header("X-Idempotency-Key", "reopen-key-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"reason\":\"New evidence\",\"actorId\":\"lead-1\"}"))
@@ -195,7 +195,7 @@ class FraudCaseControllerTest {
 
     @Test
     void shouldRejectInvalidCreateRequest() throws Exception {
-        mockMvc.perform(post("/api/fraud-cases")
+        mockMvc.perform(post("/api/v1/fraud-cases")
                         .header("X-Idempotency-Key", "create-key-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"alertIds\":[],\"priority\":\"HIGH\",\"actorId\":\"analyst-1\"}"))
@@ -204,7 +204,7 @@ class FraudCaseControllerTest {
 
     @Test
     void shouldReturnLocalMissingIdempotencyErrorForLifecyclePost() throws Exception {
-        mockMvc.perform(post("/api/fraud-cases")
+        mockMvc.perform(post("/api/v1/fraud-cases")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"alertIds":["alert-1"],"priority":"HIGH","riskLevel":"CRITICAL","actorId":"analyst-1"}
@@ -217,7 +217,7 @@ class FraudCaseControllerTest {
 
     @Test
     void shouldReturnMissingIdempotencyForNotesWithoutCallingService() throws Exception {
-        mockMvc.perform(post("/api/fraud-cases/case-1/notes")
+        mockMvc.perform(post("/api/v1/fraud-cases/case-1/notes")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"body\":\"note\",\"actorId\":\"analyst-1\"}"))
                 .andExpect(status().isBadRequest())
@@ -235,7 +235,7 @@ class FraudCaseControllerTest {
         when(fraudCaseManagementService.addNote(eq("case-1"), any(), eq("progress-key")))
                 .thenThrow(new FraudCaseIdempotencyInProgressException());
 
-        String invalid = mockMvc.perform(post("/api/fraud-cases")
+        String invalid = mockMvc.perform(post("/api/v1/fraud-cases")
                         .header("X-Idempotency-Key", "invalid key")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -252,7 +252,7 @@ class FraudCaseControllerTest {
                 .doesNotContain("FraudCaseInvalidIdempotencyKeyException")
                 .doesNotContain("java.lang");
 
-        String conflict = mockMvc.perform(post("/api/fraud-cases")
+        String conflict = mockMvc.perform(post("/api/v1/fraud-cases")
                         .header("X-Idempotency-Key", "conflict-key")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -269,7 +269,7 @@ class FraudCaseControllerTest {
                 .doesNotContain("FraudCaseIdempotencyConflictException")
                 .doesNotContain("java.lang");
 
-        String inProgress = mockMvc.perform(post("/api/fraud-cases/case-1/notes")
+        String inProgress = mockMvc.perform(post("/api/v1/fraud-cases/case-1/notes")
                         .header("X-Idempotency-Key", "progress-key")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"body\":\"note\",\"actorId\":\"analyst-1\"}"))

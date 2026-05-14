@@ -43,6 +43,18 @@ describe("workspace data hooks", () => {
     expect(result.current.page.totalElements).toBe(1);
   });
 
+  it("does not fetch workspace data without an explicit apiClient", async () => {
+    renderHook(() => useAlertQueue({ enabled: true, apiClient: null }));
+    renderHook(() => useScoredTransactionStream({ enabled: true, apiClient: null }));
+    renderHook(() => useGovernanceQueue({ enabled: true, apiClient: null }));
+    renderHook(() => useGovernanceAnalytics({ enabled: true, apiClient: null }));
+
+    expect(listAlerts).not.toHaveBeenCalled();
+    expect(listScoredTransactions).not.toHaveBeenCalled();
+    expect(listGovernanceAdvisories).not.toHaveBeenCalled();
+    expect(getGovernanceAdvisoryAnalytics).not.toHaveBeenCalled();
+  });
+
   it("aborts scored transaction request on unmount", async () => {
     listScoredTransactions.mockReturnValue(new Promise(() => {}));
     const { unmount } = renderHook(() => useScoredTransactionStream({ enabled: true, apiClient: workspaceApiClient }));
@@ -90,6 +102,32 @@ describe("workspace data hooks", () => {
     expect(result.current.error).toBeNull();
   });
 
+  it("keeps scored transaction data isolated across apiClient session switch", async () => {
+    const first = deferred();
+    const second = deferred();
+    const apiClientA = { ...workspaceApiClient, listScoredTransactions: vi.fn().mockReturnValue(first.promise) };
+    const apiClientB = { ...workspaceApiClient, listScoredTransactions: vi.fn().mockReturnValue(second.promise) };
+    const { result, rerender } = renderHook(
+      ({ session, apiClient }) => useScoredTransactionStream({ enabled: true, session, authProvider: { kind: "demo" }, apiClient }),
+      { initialProps: { session: { userId: "user-a" }, apiClient: apiClientA } }
+    );
+    await waitFor(() => expect(apiClientA.listScoredTransactions).toHaveBeenCalledTimes(1));
+
+    rerender({ session: { userId: "user-b" }, apiClient: apiClientB });
+    await waitFor(() => expect(apiClientB.listScoredTransactions).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      second.resolve(page([{ transactionId: "txn-b" }]));
+    });
+    await waitFor(() => expect(result.current.page.content).toEqual([{ transactionId: "txn-b" }]));
+
+    await act(async () => {
+      first.resolve(page([{ transactionId: "txn-a" }]));
+    });
+
+    expect(result.current.page.content).toEqual([{ transactionId: "txn-b" }]);
+  });
+
   it("clears governance queue state when disabled after data was loaded", async () => {
     listGovernanceAdvisories.mockResolvedValue({
       status: "AVAILABLE",
@@ -107,6 +145,23 @@ describe("workspace data hooks", () => {
     await waitFor(() => expect(result.current.queue.count).toBe(0));
     expect(result.current.auditHistories).toEqual({});
     expect(result.current.error).toBeNull();
+  });
+
+  it("clears governance queue state when apiClient is removed", async () => {
+    listGovernanceAdvisories.mockResolvedValue({
+      status: "AVAILABLE",
+      count: 1,
+      advisory_events: [{ event_id: "event-1" }]
+    });
+    const { result, rerender } = renderHook(({ apiClient }) => useGovernanceQueue({ enabled: true, apiClient }), {
+      initialProps: { apiClient: workspaceApiClient }
+    });
+    await waitFor(() => expect(result.current.queue.count).toBe(1));
+
+    rerender({ apiClient: null });
+
+    await waitFor(() => expect(result.current.queue.count).toBe(0));
+    expect(result.current.auditHistories).toEqual({});
   });
 
   it("clears governance analytics state when disabled after data was loaded", async () => {

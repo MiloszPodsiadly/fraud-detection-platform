@@ -30,6 +30,12 @@ describe("useFraudCaseWorkQueueSummary", () => {
     expect(getFraudCaseWorkQueueSummary).not.toHaveBeenCalled();
   });
 
+  it("does not call the summary endpoint without an explicit apiClient", () => {
+    renderHook(() => useFraudCaseWorkQueueSummary({ enabled: true, apiClient: null }));
+
+    expect(getFraudCaseWorkQueueSummary).not.toHaveBeenCalled();
+  });
+
   it("isolates failures in local hook state", async () => {
     const apiError = { status: 403, message: "forbidden" };
     getFraudCaseWorkQueueSummary.mockRejectedValue(apiError);
@@ -104,6 +110,32 @@ describe("useFraudCaseWorkQueueSummary", () => {
 
     await waitFor(() => expect(result.current.summary.totalFraudCases).toBe(0));
     expect(result.current.error).toBeNull();
+  });
+
+  it("does not allow an old apiClient response to restore a switched summary", async () => {
+    const first = deferred();
+    const second = deferred();
+    const apiClientA = { getFraudCaseWorkQueueSummary: vi.fn().mockReturnValue(first.promise) };
+    const apiClientB = { getFraudCaseWorkQueueSummary: vi.fn().mockReturnValue(second.promise) };
+    const { result, rerender } = renderHook(
+      ({ session, apiClient }) => useFraudCaseWorkQueueSummary({ enabled: true, session, authProvider: { kind: "demo" }, apiClient }),
+      { initialProps: { session: { userId: "user-a" }, apiClient: apiClientA } }
+    );
+    await waitFor(() => expect(apiClientA.getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
+
+    rerender({ session: { userId: "user-b" }, apiClient: apiClientB });
+    await waitFor(() => expect(apiClientB.getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      second.resolve(summary(22));
+    });
+    await waitFor(() => expect(result.current.summary.totalFraudCases).toBe(22));
+
+    await act(async () => {
+      first.resolve(summary(11));
+    });
+
+    expect(result.current.summary.totalFraudCases).toBe(22);
   });
 });
 

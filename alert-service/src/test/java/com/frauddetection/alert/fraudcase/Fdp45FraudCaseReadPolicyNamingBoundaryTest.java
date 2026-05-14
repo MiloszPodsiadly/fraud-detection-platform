@@ -11,7 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class Fdp45FraudCaseReadPolicyNamingBoundaryTest {
 
     @Test
-    void readPolicyNameCoversLegacyWorkQueueAndRepositoryBounds() throws IOException {
+    void readPolicyNameCoversListWorkQueueAndRepositoryBounds() throws IOException {
         Path mainRoot = sourceRoot();
         Path readPolicy = mainRoot.resolve("fraudcase/FraudCaseReadQueryPolicy.java");
 
@@ -24,7 +24,8 @@ class Fdp45FraudCaseReadPolicyNamingBoundaryTest {
 
         assertThat(policy)
                 .contains("validateWorkQueuePagination")
-                .contains("validateLegacyListPagination")
+                .contains("validateListPagination")
+                .doesNotContain("validateLegacyListPagination")
                 .contains("validateRepositoryPageBounds")
                 .contains("stableReadSort");
         assertThat(controller)

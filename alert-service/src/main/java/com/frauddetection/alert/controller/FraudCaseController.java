@@ -24,6 +24,7 @@ import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.domain.FraudCaseStatus;
+import com.frauddetection.alert.exception.ApiErrorResponse;
 import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueQueryException;
 import com.frauddetection.alert.fraudcase.FraudCaseReadQueryPolicy;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
@@ -34,6 +35,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.util.MultiValueMap;
 import org.springframework.util.StringUtils;
 import org.springframework.validation.annotation.Validated;
@@ -44,6 +47,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -52,8 +56,12 @@ import java.util.List;
 
 @RestController
 @Validated
-@RequestMapping({"/api/v1/fraud-cases", "/api/fraud-cases"})
 public class FraudCaseController {
+
+    private static final String VERSIONED_BASE_PATH = "/api/v1/fraud-cases";
+    private static final String LEGACY_ROUTE_REMOVED_CODE = "code:LEGACY_FRAUD_CASE_ROUTE_REMOVED";
+    private static final String LEGACY_ROUTE_REMOVED_MESSAGE =
+            "Legacy fraud-case API route is removed. Use /api/v1/fraud-cases.";
 
     private final FraudCaseManagementService fraudCaseManagementService;
     private final FraudCaseResponseMapper responseMapper;
@@ -72,7 +80,30 @@ public class FraudCaseController {
         this.sensitiveReadAuditService = sensitiveReadAuditService;
     }
 
-    @GetMapping
+    @RequestMapping(
+            value = {"/api/fraud-cases", "/api/fraud-cases/**"},
+            method = {
+                    RequestMethod.GET,
+                    RequestMethod.POST,
+                    RequestMethod.PUT,
+                    RequestMethod.PATCH,
+                    RequestMethod.DELETE,
+                    RequestMethod.HEAD,
+                    RequestMethod.OPTIONS
+            }
+    )
+    public ResponseEntity<ApiErrorResponse> legacyFraudCaseRouteRemoved() {
+        return ResponseEntity.status(HttpStatus.GONE)
+                .body(new ApiErrorResponse(
+                        Instant.now(),
+                        HttpStatus.GONE.value(),
+                        HttpStatus.GONE.getReasonPhrase(),
+                        LEGACY_ROUTE_REMOVED_MESSAGE,
+                        List.of(LEGACY_ROUTE_REMOVED_CODE)
+                ));
+    }
+
+    @GetMapping(VERSIONED_BASE_PATH)
     public PagedResponse<FraudCaseSummaryResponse> listCases(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
@@ -84,7 +115,7 @@ public class FraudCaseController {
             @RequestParam(required = false) Instant createdTo,
             @RequestParam(required = false) String linkedAlertId
     ) {
-        FraudCaseReadQueryPolicy.validateLegacyListPagination(page, size);
+        FraudCaseReadQueryPolicy.validateListPagination(page, size);
         var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         var result = hasSearchFilters(status, assignee, priority, riskLevel, createdFrom, createdTo, linkedAlertId)
                 ? fraudCaseManagementService.searchCases(status, assignee, priority, riskLevel, createdFrom, createdTo, linkedAlertId, pageable)
@@ -99,7 +130,7 @@ public class FraudCaseController {
     }
 
     @AuditedSensitiveRead
-    @GetMapping("/work-queue")
+    @GetMapping(VERSIONED_BASE_PATH + "/work-queue")
     public FraudCaseWorkQueueSliceResponse workQueue(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
@@ -179,7 +210,7 @@ public class FraudCaseController {
         }
     }
 
-    @PostMapping
+    @PostMapping(VERSIONED_BASE_PATH)
     public FraudCaseResponse createCase(
             @RequestHeader(name = "X-Idempotency-Key", required = true) String idempotencyKey,
             @Valid @RequestBody CreateFraudCaseRequest request
@@ -187,12 +218,12 @@ public class FraudCaseController {
         return fraudCaseManagementService.createCase(request, idempotencyKey);
     }
 
-    @GetMapping("/{caseId}")
+    @GetMapping(VERSIONED_BASE_PATH + "/{caseId}")
     public FraudCaseResponse getCase(@PathVariable String caseId) {
         return responseMapper.toResponse(fraudCaseManagementService.getCase(caseId));
     }
 
-    @PostMapping("/{caseId}/assign")
+    @PostMapping(VERSIONED_BASE_PATH + "/{caseId}/assign")
     public FraudCaseResponse assign(
             @PathVariable String caseId,
             @RequestHeader(name = "X-Idempotency-Key", required = true) String idempotencyKey,
@@ -201,7 +232,7 @@ public class FraudCaseController {
         return fraudCaseManagementService.assignCase(caseId, request, idempotencyKey);
     }
 
-    @PostMapping("/{caseId}/notes")
+    @PostMapping(VERSIONED_BASE_PATH + "/{caseId}/notes")
     public FraudCaseNoteResponse addNote(
             @PathVariable String caseId,
             @RequestHeader(name = "X-Idempotency-Key", required = true) String idempotencyKey,
@@ -210,7 +241,7 @@ public class FraudCaseController {
         return fraudCaseManagementService.addNote(caseId, request, idempotencyKey);
     }
 
-    @PostMapping("/{caseId}/decisions")
+    @PostMapping(VERSIONED_BASE_PATH + "/{caseId}/decisions")
     public FraudCaseDecisionResponse addDecision(
             @PathVariable String caseId,
             @RequestHeader(name = "X-Idempotency-Key", required = true) String idempotencyKey,
@@ -219,7 +250,7 @@ public class FraudCaseController {
         return fraudCaseManagementService.addDecision(caseId, request, idempotencyKey);
     }
 
-    @PostMapping("/{caseId}/transition")
+    @PostMapping(VERSIONED_BASE_PATH + "/{caseId}/transition")
     public FraudCaseResponse transition(
             @PathVariable String caseId,
             @RequestHeader(name = "X-Idempotency-Key", required = true) String idempotencyKey,
@@ -228,7 +259,7 @@ public class FraudCaseController {
         return fraudCaseManagementService.transitionCase(caseId, request, idempotencyKey);
     }
 
-    @PostMapping("/{caseId}/close")
+    @PostMapping(VERSIONED_BASE_PATH + "/{caseId}/close")
     public FraudCaseResponse close(
             @PathVariable String caseId,
             @RequestHeader(name = "X-Idempotency-Key", required = true) String idempotencyKey,
@@ -237,7 +268,7 @@ public class FraudCaseController {
         return fraudCaseManagementService.closeCase(caseId, request, idempotencyKey);
     }
 
-    @PostMapping("/{caseId}/reopen")
+    @PostMapping(VERSIONED_BASE_PATH + "/{caseId}/reopen")
     public FraudCaseResponse reopen(
             @PathVariable String caseId,
             @RequestHeader(name = "X-Idempotency-Key", required = true) String idempotencyKey,
@@ -246,12 +277,12 @@ public class FraudCaseController {
         return fraudCaseManagementService.reopenCase(caseId, request, idempotencyKey);
     }
 
-    @GetMapping("/{caseId}/audit")
+    @GetMapping(VERSIONED_BASE_PATH + "/{caseId}/audit")
     public List<FraudCaseAuditResponse> audit(@PathVariable String caseId) {
         return fraudCaseManagementService.auditTrail(caseId);
     }
 
-    @PatchMapping("/{caseId}")
+    @PatchMapping(VERSIONED_BASE_PATH + "/{caseId}")
     public UpdateFraudCaseResponse updateCase(
             @PathVariable String caseId,
             @RequestHeader(name = "X-Idempotency-Key", required = true) String idempotencyKey,

@@ -23,13 +23,14 @@ export function createAlertsApiClient({
     listGovernanceAdvisories: (requestParams, requestOptions) => listGovernanceAdvisoriesWithRequest(request, requestParams, requestOptions),
     getGovernanceAdvisoryAnalytics: (requestParams, requestOptions) => getGovernanceAdvisoryAnalyticsWithRequest(request, requestParams, requestOptions),
     getGovernanceAdvisoryAudit: (eventId, requestOptions) => request(`/governance/advisories/${encodeURIComponent(eventId)}/audit`, requestOptions),
-    recordGovernanceAdvisoryAudit: (eventId, audit) => request(`/governance/advisories/${encodeURIComponent(eventId)}/audit`, {
+    recordGovernanceAdvisoryAudit: (eventId, audit, requestOptions = {}) => request(`/governance/advisories/${encodeURIComponent(eventId)}/audit`, {
+      ...requestOptions,
       method: "POST",
       body: JSON.stringify(audit)
     }),
-    getAlert: (alertId) => request(`/api/v1/alerts/${encodeURIComponent(alertId)}`),
-    getAssistantSummary: (alertId) => request(`/api/v1/alerts/${encodeURIComponent(alertId)}/assistant-summary`),
-    getFraudCase: (caseId) => request(`/api/v1/fraud-cases/${encodeURIComponent(caseId)}`),
+    getAlert: (alertId, requestOptions) => request(`/api/v1/alerts/${encodeURIComponent(alertId)}`, requestOptions),
+    getAssistantSummary: (alertId, requestOptions) => request(`/api/v1/alerts/${encodeURIComponent(alertId)}/assistant-summary`, requestOptions),
+    getFraudCase: (caseId, requestOptions) => request(`/api/v1/fraud-cases/${encodeURIComponent(caseId)}`, requestOptions),
     updateFraudCase: (caseId, decision, { idempotencyKey } = {}) => request(`/api/v1/fraud-cases/${encodeURIComponent(caseId)}`, {
       method: "PATCH",
       headers: idempotencyKey ? { "X-Idempotency-Key": idempotencyKey } : {},
@@ -55,26 +56,20 @@ async function requestWithContext(path, options = {}, context = {}) {
     authProvider = getConfiguredAuthProvider()
   } = context;
   const authHeaders = includeAuth ? authHeadersForSession(authProvider, session) : {};
-  const credentialOptions = authProvider?.kind === "bff"
-    ? { credentials: fetchOptions.credentials || "same-origin" }
-    : {};
-  let response;
-  try {
-    response = await fetch(`${baseUrl}${path}`, {
-      ...credentialOptions,
-      ...fetchOptions,
-      headers: {
-        "Content-Type": "application/json",
-        ...authHeaders,
-        ...headers
-      }
-    });
-  } catch (error) {
-    if (isAbortError(error)) {
-      throw error;
-    }
-    throw error;
+  const mergedHeaders = {
+    "Content-Type": "application/json",
+    ...authHeaders,
+    ...headers
+  };
+  if (authProvider?.kind === "bff") {
+    delete mergedHeaders.Authorization;
+    delete mergedHeaders.authorization;
   }
+  const response = await fetch(`${baseUrl}${path}`, {
+    ...fetchOptions,
+    ...(authProvider?.kind === "bff" ? { credentials: "same-origin" } : {}),
+    headers: mergedHeaders
+  });
 
   if (!response.ok) {
     const fallback = `Request failed with status ${response.status}`;
@@ -105,61 +100,6 @@ async function requestWithContext(path, options = {}, context = {}) {
 
 export function isAbortError(error) {
   return error?.name === "AbortError";
-}
-
-// Compatibility-only default client. Auth-sensitive workspace code must use createAlertsApiClient({ session, authProvider }).
-const defaultApiClient = createAlertsApiClient();
-
-export function listAlerts(requestParams, requestOptions) {
-  return defaultApiClient.listAlerts(requestParams, requestOptions);
-}
-
-export function listFraudCaseWorkQueue(requestParams, requestOptions) {
-  return defaultApiClient.listFraudCaseWorkQueue(requestParams, requestOptions);
-}
-
-export function getFraudCaseWorkQueueSummary(requestOptions) {
-  return defaultApiClient.getFraudCaseWorkQueueSummary(requestOptions);
-}
-
-export function listScoredTransactions(requestParams, requestOptions) {
-  return defaultApiClient.listScoredTransactions(requestParams, requestOptions);
-}
-
-export function listGovernanceAdvisories(requestParams, requestOptions) {
-  return defaultApiClient.listGovernanceAdvisories(requestParams, requestOptions);
-}
-
-export function getGovernanceAdvisoryAnalytics(requestParams, requestOptions) {
-  return defaultApiClient.getGovernanceAdvisoryAnalytics(requestParams, requestOptions);
-}
-
-export function getGovernanceAdvisoryAudit(eventId, requestOptions) {
-  return defaultApiClient.getGovernanceAdvisoryAudit(eventId, requestOptions);
-}
-
-export function recordGovernanceAdvisoryAudit(eventId, audit) {
-  return defaultApiClient.recordGovernanceAdvisoryAudit(eventId, audit);
-}
-
-export function getAlert(alertId) {
-  return defaultApiClient.getAlert(alertId);
-}
-
-export function getAssistantSummary(alertId) {
-  return defaultApiClient.getAssistantSummary(alertId);
-}
-
-export function getFraudCase(caseId) {
-  return defaultApiClient.getFraudCase(caseId);
-}
-
-export function updateFraudCase(caseId, decision, options) {
-  return defaultApiClient.updateFraudCase(caseId, decision, options);
-}
-
-export function submitAnalystDecision(alertId, decision, options) {
-  return defaultApiClient.submitAnalystDecision(alertId, decision, options);
 }
 
 function listAlertsWithRequest(request, { page = 0, size = 10 } = {}, { signal } = {}) {

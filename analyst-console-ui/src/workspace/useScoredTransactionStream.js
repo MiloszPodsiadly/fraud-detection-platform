@@ -59,7 +59,7 @@ export function useScoredTransactionStream({ enabled = true, session, authProvid
   }, [apiClient, request]);
 
   useEffect(() => {
-    if (!enabled) {
+    if (!enabled || !apiClient) {
       abortControllerRef.current?.abort();
       abortControllerRef.current = null;
       requestSeqRef.current += 1;

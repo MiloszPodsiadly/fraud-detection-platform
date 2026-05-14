@@ -21,7 +21,7 @@ replay-safe, not external finality, and not WORM storage, legal notarization, or
 ## Safety Proof
 
 - Mongo transaction integration tests cover case+audit commit and rollback with transaction-mode `REQUIRED`.
-- Security tests run with filters enabled for both `/api/v1/fraud-cases/**` and `/api/fraud-cases/**`.
+- Security tests run with filters enabled for `/api/v1/fraud-cases/**`.
 - Audit append-only architecture tests block direct audit mutation paths outside `FraudCaseAuditService.append`.
 - Documentation no-overclaim tests block replay, finality, WORM, and unconditional rollback claims.
 - CI job: `fdp42-fraud-case-management`.

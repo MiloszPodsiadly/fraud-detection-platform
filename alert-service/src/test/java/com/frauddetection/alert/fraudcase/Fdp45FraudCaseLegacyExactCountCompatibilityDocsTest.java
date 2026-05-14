@@ -11,7 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class Fdp45FraudCaseLegacyExactCountCompatibilityDocsTest {
 
     @Test
-    void docsAndSourceSeparateWorkQueueSliceFromLegacyExactCountDebt() throws IOException {
+    void docsAndSourceSeparateWorkQueueSliceFromListExactCountDebt() throws IOException {
         String docs = Files.readString(projectRoot().resolve("docs/fdp-45-work-queue-readiness.md"))
                 .toLowerCase()
                 .replaceAll("\\s+", " ");
@@ -21,12 +21,12 @@ class Fdp45FraudCaseLegacyExactCountCompatibilityDocsTest {
         assertThat(docs)
                 .contains("bounded slice")
                 .contains("does not perform an exact mongo count")
-                .contains("legacy exact count remains compatibility debt")
+                .contains("list exact count remains compatibility debt")
                 .contains("high-volume investigator queues should use the dedicated work queue slice endpoint")
                 .contains("future hardening item");
         assertThat(docs)
                 .doesNotContain("all fraud-case read endpoints avoid exact count")
-                .doesNotContain("legacy list avoids exact count");
+                .doesNotContain("list avoids exact count");
 
         assertThat(queryService)
                 .contains("searchRepository.searchSlice(")

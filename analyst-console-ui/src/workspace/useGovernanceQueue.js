@@ -15,7 +15,7 @@ const INITIAL_REQUEST = {
   limit: 25
 };
 
-export function useGovernanceQueue({ enabled = true, apiClient } = {}) {
+export function useGovernanceQueue({ enabled = true, apiClient, session, authProvider } = {}) {
   const [queue, setQueue] = useState(INITIAL_QUEUE);
   const [request, setRequest] = useState(INITIAL_REQUEST);
   const [auditHistories, setAuditHistories] = useState({});
@@ -23,6 +23,7 @@ export function useGovernanceQueue({ enabled = true, apiClient } = {}) {
   const [error, setError] = useState(null);
   const requestSeqRef = useRef(0);
   const abortControllerRef = useRef(null);
+  const sessionIdentity = `${authProvider?.kind || "none"}:${session?.userId || ""}`;
 
   const load = useCallback(async (nextRequest = request) => {
     abortControllerRef.current?.abort();
@@ -60,7 +61,7 @@ export function useGovernanceQueue({ enabled = true, apiClient } = {}) {
   }, [apiClient, request]);
 
   useEffect(() => {
-    if (!enabled) {
+    if (!enabled || !apiClient) {
       abortControllerRef.current?.abort();
       abortControllerRef.current = null;
       requestSeqRef.current += 1;
@@ -71,7 +72,7 @@ export function useGovernanceQueue({ enabled = true, apiClient } = {}) {
       return;
     }
     load(request);
-  }, [enabled, load, request]);
+  }, [enabled, load, request, sessionIdentity]);
 
   useEffect(() => () => {
     abortControllerRef.current?.abort();

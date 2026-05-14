@@ -55,6 +55,8 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.oidcLogin;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -262,6 +264,45 @@ class BffSessionSecurityIntegrationTest {
                 .andExpect(status().isUnauthorized());
 
         verify(fraudCaseManagementService, never()).updateCase(any(), any(), any());
+    }
+
+    @Test
+    void retiredLegacyFraudCaseMutationReturnsGoneBeforeBffCsrfRejection() throws Exception {
+        mockMvc.perform(post("/api/fraud-cases/case-1/assign")
+                        .with(userWith(AnalystAuthority.FRAUD_CASE_UPDATE))
+                        .header("X-Idempotency-Key", "case-assign-update")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assignedInvestigatorId\":\"investigator-1\",\"actorId\":\"lead-1\"}"))
+                .andExpect(status().isGone())
+                .andExpect(jsonPath("$.details[0]").value("code:LEGACY_FRAUD_CASE_ROUTE_REMOVED"))
+                .andExpect(content().string(not(containsString("csrf"))))
+                .andExpect(content().string(not(containsString("insufficient_authority"))));
+
+        verify(fraudCaseManagementService, never()).assignCase(any(), any(), any());
+        verify(alertServiceMetrics, never()).recordBffCsrfRejection(any());
+    }
+
+    @Test
+    void retiredLegacyFraudCaseRouteStillRequiresAuthentication() throws Exception {
+        mockMvc.perform(get("/api/fraud-cases/case-1"))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(post("/api/fraud-cases/case-1/assign")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assignedInvestigatorId\":\"investigator-1\",\"actorId\":\"lead-1\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void retiredLegacyFraudCaseHeadAndOptionsUseGoneContract() throws Exception {
+        mockMvc.perform(head("/api/fraud-cases/case-1")
+                        .with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
+                .andExpect(status().isGone());
+
+        mockMvc.perform(options("/api/fraud-cases/case-1")
+                        .with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
+                .andExpect(status().isGone())
+                .andExpect(jsonPath("$.details[0]").value("code:LEGACY_FRAUD_CASE_ROUTE_REMOVED"));
     }
 
     @Test

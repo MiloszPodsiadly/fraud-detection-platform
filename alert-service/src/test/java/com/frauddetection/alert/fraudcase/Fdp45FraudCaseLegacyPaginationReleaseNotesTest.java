@@ -11,20 +11,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 class Fdp45FraudCaseLegacyPaginationReleaseNotesTest {
 
     @Test
-    void docsShouldMakeLegacyMaxPageSafetyBoundaryExplicit() throws IOException {
+    void docsShouldMakeListMaxPageSafetyBoundaryExplicit() throws IOException {
         String docs = Files.readString(projectRoot().resolve("docs/fdp-45-work-queue-readiness.md"))
                 .toLowerCase()
                 .replaceAll("\\s+", " ");
 
         assertThat(docs)
-                .contains("legacy list pagination bound")
+                .contains("list pagination bound")
                 .contains("get /api/v1/fraud-cases")
-                .contains("get /api/fraud-cases")
                 .contains("page > 1000")
                 .contains("abuse prevention safety boundary")
                 .contains("pagedresponse")
                 .contains("compatibility path")
                 .contains("cursor pagination");
+        assertThat(docs).doesNotContain("get /api/fraud-cases");
     }
 
     private Path projectRoot() {

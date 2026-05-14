@@ -35,7 +35,11 @@ export default function App() {
   });
   const [session, setSession] = useState(() => authProvider.getInitialSession());
   const [sessionState, setSessionState] = useState(() => getSessionStateForProvider(authProvider.getInitialSession(), authProvider));
-  const apiClient = useMemo(() => createAlertsApiClient({ session, authProvider }), [authProvider, session]);
+  // This key is for workspace UI reset behavior only.
+  // API client freshness depends on the actual session/authProvider objects.
+  const workspaceSessionResetKey = useMemo(() => workspaceSessionResetKeyFor(session, authProvider), [authProvider, session]);
+  const apiClient = useMemo(() => createAlertsApiClient({ session, authProvider }), [session, authProvider]);
+  const [workspaceCountersStatus, setWorkspaceCountersStatus] = useState({ degraded: false, failedCounters: [] });
   const [callbackError, setCallbackError] = useState(null);
   const handlingOidcCallback = authProvider.kind === "oidc" && isOidcCallbackPath();
   const [sessionBootstrapPending, setSessionBootstrapPending] = useState(Boolean(authProvider.requiresSessionBootstrap) || authProvider.kind === "oidc");
@@ -78,10 +82,14 @@ export default function App() {
   });
   const governanceQueueState = useGovernanceQueue({
     enabled: workspacePage === "compliance" && workspaceNavigationEnabled,
+    session,
+    authProvider,
     apiClient
   });
   const governanceAnalyticsState = useGovernanceAnalytics({
     enabled: workspacePage === "reports" && workspaceNavigationEnabled,
+    session,
+    authProvider,
     apiClient
   });
 
@@ -89,6 +97,14 @@ export default function App() {
     authProvider.persistSession(session);
     setSessionState(getSessionStateForProvider(session, authProvider));
   }, [authProvider, session]);
+
+  useEffect(() => {
+    workspaceCounterRequestSeqRef.current += 1;
+    if (!workspaceNavigationEnabled) {
+      setWorkspaceCounters({ alerts: 0, transactions: 0 });
+      setWorkspaceCountersStatus({ degraded: false, failedCounters: [] });
+    }
+  }, [workspaceSessionResetKey, workspaceNavigationEnabled]);
 
   useEffect(() => {
     if (!selectedAlertId && !selectedFraudCaseId) {
@@ -228,6 +244,13 @@ export default function App() {
       return;
     }
 
+    const failedCounters = requests
+      .filter((_, index) => results[index].status !== "fulfilled")
+      .map(([counterName]) => counterName);
+    setWorkspaceCountersStatus({
+      degraded: failedCounters.length > 0,
+      failedCounters
+    });
     setWorkspaceCounters((current) => requests.reduce((next, [counterName], index) => {
       const result = results[index];
       if (result.status !== "fulfilled") {
@@ -424,6 +447,7 @@ export default function App() {
           <AlertsListPage
             workspacePage={workspacePage}
             workspaceCounters={workspaceCounters}
+            workspaceCountersStatus={workspaceCountersStatus}
             canReadFraudCases={canReadFraudCases}
             alertPage={alertQueueState.page}
             fraudCaseSummary={fraudCaseWorkQueueSummaryState.summary}
@@ -487,4 +511,15 @@ function shouldBlockDashboardFetch(sessionState) {
     SESSION_STATES.ACCESS_DENIED,
     SESSION_STATES.AUTH_ERROR
   ].includes(sessionState?.status);
+}
+
+function workspaceSessionResetKeyFor(session, authProvider) {
+  const roles = Array.isArray(session?.roles) ? session.roles.join(",") : "";
+  const authorities = Array.isArray(session?.authorities) ? session.authorities.join(",") : "";
+  return [
+    authProvider?.kind || "none",
+    session?.userId || "",
+    roles,
+    authorities
+  ].join(":");
 }
