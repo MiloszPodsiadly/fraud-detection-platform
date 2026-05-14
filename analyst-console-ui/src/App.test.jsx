@@ -143,12 +143,18 @@ describe("App", () => {
     });
     listAlerts.mockResolvedValue({ content: [], totalElements: 1, totalPages: 1, page: 0, size: 10 });
     listScoredTransactions.mockResolvedValue({ content: [], totalElements: 3, totalPages: 1, page: 0, size: 25 });
+    refreshSession.mockResolvedValue(authenticatedSession());
+    providerState.value = {
+      ...providerState.value,
+      getSessionState: (session) => ({ status: session?.userId ? "authenticated" : "unauthenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer callback-token" })
+    };
 
     render(<App />);
 
     await waitFor(() => expect(completeLoginCallback).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
-    expect(listAlerts).toHaveBeenCalledWith({ page: 0, size: 1 });
+    expect(listAlerts).toHaveBeenCalledWith({ page: 0, size: 1 }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(listFraudCaseWorkQueue).toHaveBeenCalledTimes(1);
     expect(listScoredTransactions).toHaveBeenCalledWith({
       page: 0,
@@ -156,7 +162,7 @@ describe("App", () => {
       query: "",
       riskLevel: "ALL",
       status: "ALL"
-    });
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
   it("does not load dashboard data when oidc bootstrap reports an expired session", async () => {
@@ -202,7 +208,7 @@ describe("App", () => {
 
     await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
-    expect(listAlerts).toHaveBeenCalledWith({ page: 0, size: 1 });
+    expect(listAlerts).toHaveBeenCalledWith({ page: 0, size: 1 }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(listFraudCaseWorkQueue).toHaveBeenCalledTimes(1);
     expect(listScoredTransactions).toHaveBeenCalledWith({
       page: 0,
@@ -210,7 +216,7 @@ describe("App", () => {
       query: "",
       riskLevel: "ALL",
       status: "ALL"
-    });
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
     expect(screen.queryByText("Loading session state...")).not.toBeInTheDocument();
   });
@@ -256,7 +262,7 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Counters partially unavailable.")).toBeInTheDocument();
+    expect(await screen.findByText("Some workspace counters are temporarily unavailable.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Transactions\s*9/ })).toBeInTheDocument();
   });
 
@@ -274,10 +280,10 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Counters partially unavailable.")).toBeInTheDocument();
+    expect(await screen.findByText("Some workspace counters are temporarily unavailable.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
 
-    await waitFor(() => expect(screen.queryByText("Counters partially unavailable.")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText("Some workspace counters are temporarily unavailable.")).not.toBeInTheDocument());
   });
 
   it("keeps transaction scoring usable when the fraud case global summary fails", async () => {

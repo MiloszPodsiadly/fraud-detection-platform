@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isAbortError } from "../api/alertsApi.js";
+import { useOptionalWorkspaceRuntime } from "./useWorkspaceRuntime.js";
 
 const INITIAL_ALERT_PAGE = {
   content: [],
@@ -10,13 +11,17 @@ const INITIAL_ALERT_PAGE = {
 };
 
 export function useAlertQueue({ enabled = true, session, authProvider, apiClient } = {}) {
+  const runtime = useOptionalWorkspaceRuntime();
+  const effectiveApiClient = apiClient !== undefined ? apiClient : runtime?.apiClient;
+  const effectiveSession = session !== undefined ? session : runtime?.session;
+  const effectiveAuthProvider = authProvider !== undefined ? authProvider : runtime?.authProvider;
   const [page, setPage] = useState(INITIAL_ALERT_PAGE);
   const [request, setRequest] = useState({ page: 0, size: 10 });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const requestSeqRef = useRef(0);
   const abortControllerRef = useRef(null);
-  const sessionIdentity = `${authProvider?.kind || "none"}:${session?.userId || ""}`;
+  const sessionIdentity = `${effectiveAuthProvider?.kind || "none"}:${effectiveSession?.userId || ""}`;
 
   const load = useCallback(async (nextRequest = request) => {
     abortControllerRef.current?.abort();
@@ -27,7 +32,7 @@ export function useAlertQueue({ enabled = true, session, authProvider, apiClient
     setIsLoading(true);
     setError(null);
     try {
-      const nextPage = await apiClient.listAlerts(nextRequest, { signal: abortController.signal });
+      const nextPage = await effectiveApiClient.listAlerts(nextRequest, { signal: abortController.signal });
       if (requestSeqRef.current !== requestSeq) {
         return null;
       }
@@ -48,10 +53,10 @@ export function useAlertQueue({ enabled = true, session, authProvider, apiClient
       }
     }
     return null;
-  }, [apiClient, request]);
+  }, [effectiveApiClient, request]);
 
   useEffect(() => {
-    if (!enabled || !apiClient) {
+    if (!enabled || !effectiveApiClient) {
       abortControllerRef.current?.abort();
       abortControllerRef.current = null;
       requestSeqRef.current += 1;
@@ -61,7 +66,7 @@ export function useAlertQueue({ enabled = true, session, authProvider, apiClient
       return;
     }
     load(request);
-  }, [enabled, load, request, sessionIdentity]);
+  }, [enabled, effectiveApiClient, load, request, sessionIdentity]);
 
   useEffect(() => () => {
     abortControllerRef.current?.abort();

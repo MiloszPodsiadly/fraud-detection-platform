@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isAbortError } from "../api/alertsApi.js";
+import { useOptionalWorkspaceRuntime } from "../workspace/useWorkspaceRuntime.js";
 
 const INITIAL_SUMMARY = {
   totalFraudCases: 0,
@@ -9,15 +10,20 @@ const INITIAL_SUMMARY = {
 };
 
 export function useFraudCaseWorkQueueSummary({ enabled, canReadFraudCases, session, authProvider, apiClient } = {}) {
+  const runtime = useOptionalWorkspaceRuntime();
+  const effectiveApiClient = apiClient !== undefined ? apiClient : runtime?.apiClient;
+  const effectiveSession = session !== undefined ? session : runtime?.session;
+  const effectiveAuthProvider = authProvider !== undefined ? authProvider : runtime?.authProvider;
+  const effectiveCanReadFraudCases = canReadFraudCases !== undefined ? canReadFraudCases : runtime?.canReadFraudCases;
   const [summary, setSummary] = useState(INITIAL_SUMMARY);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const requestSeqRef = useRef(0);
   const abortControllerRef = useRef(null);
-  const sessionIdentity = `${authProvider?.kind || "none"}:${session?.userId || ""}`;
+  const sessionIdentity = `${effectiveAuthProvider?.kind || "none"}:${effectiveSession?.userId || ""}`;
 
   const loadSummary = useCallback(async () => {
-    if (!enabled || canReadFraudCases === false || !apiClient) {
+    if (!enabled || effectiveCanReadFraudCases === false || !effectiveApiClient) {
       setIsLoading(false);
       return;
     }
@@ -31,7 +37,7 @@ export function useFraudCaseWorkQueueSummary({ enabled, canReadFraudCases, sessi
     setError(null);
 
     try {
-      const nextSummary = await apiClient.getFraudCaseWorkQueueSummary({ signal: abortController.signal });
+      const nextSummary = await effectiveApiClient.getFraudCaseWorkQueueSummary({ signal: abortController.signal });
       if (requestSeqRef.current !== requestSeq) {
         return;
       }
@@ -52,10 +58,10 @@ export function useFraudCaseWorkQueueSummary({ enabled, canReadFraudCases, sessi
         }
       }
     }
-  }, [apiClient, canReadFraudCases, enabled]);
+  }, [effectiveApiClient, effectiveCanReadFraudCases, enabled]);
 
   useEffect(() => {
-    if (!enabled || canReadFraudCases === false || !apiClient) {
+    if (!enabled || effectiveCanReadFraudCases === false || !effectiveApiClient) {
       abortControllerRef.current?.abort();
       abortControllerRef.current = null;
       requestSeqRef.current += 1;
@@ -65,7 +71,7 @@ export function useFraudCaseWorkQueueSummary({ enabled, canReadFraudCases, sessi
       return;
     }
     loadSummary();
-  }, [canReadFraudCases, enabled, loadSummary, sessionIdentity]);
+  }, [effectiveApiClient, effectiveCanReadFraudCases, enabled, loadSummary, sessionIdentity]);
 
   useEffect(() => () => {
     abortControllerRef.current?.abort();
