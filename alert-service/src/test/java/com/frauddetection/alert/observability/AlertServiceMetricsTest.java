@@ -176,6 +176,7 @@ class AlertServiceMetricsTest {
     @Test
     void shouldUseLowCardinalityBffSessionSecurityMetricLabels() {
         MockHttpServletRequest fraudCaseRequest = new MockHttpServletRequest("PATCH", "/api/v1/fraud-cases/case-1");
+        fraudCaseRequest.setQueryString("userId=analyst-1&token=secret");
         metrics.recordAnalystSessionRequest("authenticated", true);
         metrics.recordAnalystSessionRequest("anonymous", false);
         metrics.recordAnalystSessionInvalidPrincipal("oidc");
@@ -183,6 +184,7 @@ class AlertServiceMetricsTest {
         metrics.recordBffLogoutRequest("rejected", "https://issuer.bank.example/logout?client_id=x");
         metrics.recordBffCsrfRejection(fraudCaseRequest);
         metrics.recordOidcAuthorityMappingMiss("groups");
+        metrics.recordOidcAuthorityMappingMiss("ROLE_FRAUD_OPS_ADMIN");
 
         assertThat(meterRegistry.get("analyst_session_requests_total")
                 .tag("outcome", "authenticated")
@@ -217,6 +219,11 @@ class AlertServiceMetricsTest {
                 .tag("outcome", "ignored")
                 .counter()
                 .count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.get("oidc_authority_mapping_misses_total")
+                .tag("claim", "other")
+                .tag("outcome", "ignored")
+                .counter()
+                .count()).isEqualTo(1.0d);
         assertThat(meterRegistry.getMeters())
                 .filteredOn(meter -> Set.of(
                         "analyst_session_requests_total",
@@ -229,10 +236,16 @@ class AlertServiceMetricsTest {
                         .doesNotContain("case-1")
                         .doesNotContain("issuer.bank.example")
                         .doesNotContain("client_id")
+                        .doesNotContain("analyst-1")
+                        .doesNotContain("ROLE_FRAUD_OPS_ADMIN")
+                        .doesNotContain("FRAUD_CASE_READ")
+                        .doesNotContain("secret")
                         .doesNotContain("userId")
                         .doesNotContain("authorities")
+                        .doesNotContain("role")
                         .doesNotContain("token")
-                        .doesNotContain("sessionId"));
+                        .doesNotContain("sessionId")
+                        .doesNotContain("/api/v1/fraud-cases/case-1"));
     }
 
     @Test

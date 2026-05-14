@@ -84,28 +84,28 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class BffSessionSecurityIntegrationTest {
 
     @Autowired
-    private MockMvc mockMvc;
+    protected MockMvc mockMvc;
 
     @Autowired
-    private ObjectMapper objectMapper;
+    protected ObjectMapper objectMapper;
 
     @MockBean
-    private FraudCaseManagementService fraudCaseManagementService;
+    protected FraudCaseManagementService fraudCaseManagementService;
 
     @MockBean
-    private FraudCaseQueryService fraudCaseQueryService;
+    protected FraudCaseQueryService fraudCaseQueryService;
 
     @MockBean
-    private AlertServiceMetrics alertServiceMetrics;
+    protected AlertServiceMetrics alertServiceMetrics;
 
     @MockBean
-    private SensitiveReadAuditService sensitiveReadAuditService;
+    protected SensitiveReadAuditService sensitiveReadAuditService;
 
     @MockBean
-    private OidcAnalystAuthoritiesMapper oidcAnalystAuthoritiesMapper;
+    protected OidcAnalystAuthoritiesMapper oidcAnalystAuthoritiesMapper;
 
     @MockBean
-    private ClientRegistrationRepository clientRegistrationRepository;
+    protected ClientRegistrationRepository clientRegistrationRepository;
 
     @Test
     void sessionEndpointReturnsAnonymousNoStoreResponseWithoutTokenFields() throws Exception {
@@ -365,7 +365,7 @@ class BffSessionSecurityIntegrationTest {
                 .andExpect(status().isForbidden());
     }
 
-    private RequestPostProcessor userWith(String... authorities) {
+    protected RequestPostProcessor userWith(String... authorities) {
         return authentication(new UsernamePasswordAuthenticationToken(
                 "analyst-1",
                 null,
@@ -373,7 +373,7 @@ class BffSessionSecurityIntegrationTest {
         ));
     }
 
-    private UpdateFraudCaseRequest updateFraudCaseRequest() {
+    protected UpdateFraudCaseRequest updateFraudCaseRequest() {
         return new UpdateFraudCaseRequest(
                 FraudCaseStatus.CONFIRMED_FRAUD,
                 "analyst-1",
@@ -382,7 +382,7 @@ class BffSessionSecurityIntegrationTest {
         );
     }
 
-    private UpdateFraudCaseResponse updateFraudCaseResponse() {
+    protected UpdateFraudCaseResponse updateFraudCaseResponse() {
         FraudCaseDocument document = new FraudCaseDocument();
         document.setCaseId("case-1");
         document.setStatus(FraudCaseStatus.CONFIRMED_FRAUD);

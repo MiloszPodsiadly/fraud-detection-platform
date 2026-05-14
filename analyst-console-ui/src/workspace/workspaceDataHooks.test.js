@@ -1,25 +1,15 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  getGovernanceAdvisoryAnalytics,
-  getGovernanceAdvisoryAudit,
-  listAlerts,
-  listGovernanceAdvisories,
-  listScoredTransactions
-} from "../api/alertsApi.js";
 import { useAlertQueue } from "./useAlertQueue.js";
 import { useGovernanceAnalytics } from "./useGovernanceAnalytics.js";
 import { useGovernanceQueue } from "./useGovernanceQueue.js";
 import { useScoredTransactionStream } from "./useScoredTransactionStream.js";
 
-vi.mock("../api/alertsApi.js", () => ({
-  getGovernanceAdvisoryAnalytics: vi.fn(),
-  getGovernanceAdvisoryAudit: vi.fn(),
-  isAbortError: (error) => error?.name === "AbortError",
-  listAlerts: vi.fn(),
-  listGovernanceAdvisories: vi.fn(),
-  listScoredTransactions: vi.fn()
-}));
+const getGovernanceAdvisoryAnalytics = vi.fn();
+const getGovernanceAdvisoryAudit = vi.fn();
+const listAlerts = vi.fn();
+const listGovernanceAdvisories = vi.fn();
+const listScoredTransactions = vi.fn();
 
 describe("workspace data hooks", () => {
   beforeEach(() => {
