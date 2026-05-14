@@ -257,6 +257,28 @@ describe("alertsApi auth headers", () => {
     expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty("X-Demo-User-Id");
   });
 
+  it("prevents BFF callers from injecting Authorization headers or weakening credentials", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ content: [] }));
+    const authProvider = await refreshedBffProvider("X-CSRF-TOKEN", "csrf-1");
+    resetApiClient(normalizeSession({ userId: "server-user-1", roles: ["FRAUD_OPS_ADMIN"] }), authProvider);
+
+    await apiClient.getAlert("alert-1", {
+      credentials: "omit",
+      headers: {
+        Authorization: "Bearer injected",
+        authorization: "Bearer injected-lower",
+        "X-Trace-Id": "trace-1"
+      }
+    });
+
+    const options = fetchMock.mock.calls[0][1];
+    expect(options.credentials).toBe("same-origin");
+    expect(options.headers.Authorization).toBeUndefined();
+    expect(options.headers.authorization).toBeUndefined();
+    expect(options.headers["X-CSRF-TOKEN"]).toBe("csrf-1");
+    expect(options.headers["X-Trace-Id"]).toBe("trace-1");
+  });
+
   it("uses bff credentials without authorization for all FDP-48 read paths", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => Promise.resolve(jsonResponse({ content: [] })));
     const authProvider = await refreshedBffProvider("X-CSRF-TOKEN", "csrf-read");
@@ -416,6 +438,66 @@ describe("alertsApi auth headers", () => {
     expect(fetchMock.mock.calls[1][1].headers).not.toHaveProperty("X-CSRF-TOKEN");
     expect(fetchMock.mock.calls[2][1].headers["X-CSRF-TOKEN"]).toBe("csrf-original");
     expect(fetchMock.mock.calls[2][1].headers.Authorization).toBeUndefined();
+  });
+
+  it("uses refreshed OIDC bearer token for the same user and authorities", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => Promise.resolve(jsonResponse({ content: [] })));
+    const sessionSource = createInMemoryOidcSessionSource({
+      accessToken: "token-old",
+      session: { userId: "analyst-1", roles: ["ANALYST"] }
+    });
+    const authProvider = createOidcAuthProvider(sessionSource);
+
+    await createAlertsApiClient({
+      session: normalizeSession({ userId: "analyst-1", roles: ["ANALYST"] }),
+      authProvider
+    }).listAlerts();
+    sessionSource.replace({
+      accessToken: "token-new",
+      session: { userId: "analyst-1", roles: ["ANALYST"] },
+      state: { status: "authenticated" }
+    });
+    await createAlertsApiClient({
+      session: normalizeSession({ userId: "analyst-1", roles: ["ANALYST"] }),
+      authProvider
+    }).listAlerts();
+
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer token-old");
+    expect(fetchMock.mock.calls[1][1].headers.Authorization).toBe("Bearer token-new");
+  });
+
+  it("uses refreshed BFF CSRF for the same user and authorities without Authorization", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => Promise.resolve(jsonResponse({ content: [] })));
+    const snapshots = [
+      {
+        authenticated: true,
+        sessionStatus: "AUTHENTICATED",
+        userId: "server-user-1",
+        roles: ["FRAUD_OPS_ADMIN"],
+        authorities: ["alert:read"],
+        csrf: { headerName: "X-CSRF-TOKEN", token: "csrf-old" }
+      },
+      {
+        authenticated: true,
+        sessionStatus: "AUTHENTICATED",
+        userId: "server-user-1",
+        roles: ["FRAUD_OPS_ADMIN"],
+        authorities: ["alert:read"],
+        csrf: { headerName: "X-CSRF-TOKEN", token: "csrf-new" }
+      }
+    ];
+    const authProvider = createBffAuthProvider(vi.fn()
+      .mockResolvedValueOnce(snapshots[0])
+      .mockResolvedValueOnce(snapshots[1]));
+
+    const session = normalizeSession(await authProvider.refreshSession());
+    await createAlertsApiClient({ session, authProvider }).listAlerts();
+    const refreshedSession = normalizeSession(await authProvider.refreshSession());
+    await createAlertsApiClient({ session: refreshedSession, authProvider }).listAlerts();
+
+    expect(fetchMock.mock.calls[0][1].headers["X-CSRF-TOKEN"]).toBe("csrf-old");
+    expect(fetchMock.mock.calls[1][1].headers["X-CSRF-TOKEN"]).toBe("csrf-new");
+    expect(fetchMock.mock.calls[1][1].headers.Authorization).toBeUndefined();
   });
 
   it("does not persist BFF csrf headers to browser storage", async () => {

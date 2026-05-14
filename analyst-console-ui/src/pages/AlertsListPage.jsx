@@ -15,6 +15,7 @@ import { SESSION_STATES } from "../auth/sessionState.js";
 export function AlertsListPage({
   workspacePage = "analyst",
   workspaceCounters = { alerts: 0, transactions: 0 },
+  workspaceCountersStatus = { degraded: false, failedCounters: [] },
   canReadFraudCases,
   alertPage,
   fraudCaseSummary = { totalFraudCases: 0 },
@@ -145,6 +146,13 @@ export function AlertsListPage({
           <strong>{advisoryQueue.count || 0}</strong>
         </a>
       </nav>
+
+      {workspaceCountersStatus.degraded && (
+        <div className="statePanel warningPanel" role="status">
+          <h3>Counters partially unavailable.</h3>
+          <p>Some global counters could not refresh; visible values may be stale.</p>
+        </div>
+      )}
 
       {sessionBlocksDashboard && <SessionStatePanel sessionState={sessionState} onRetry={onRetry} />}
 

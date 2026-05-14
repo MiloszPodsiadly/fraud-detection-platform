@@ -36,7 +36,8 @@ export default function App() {
   const [session, setSession] = useState(() => authProvider.getInitialSession());
   const [sessionState, setSessionState] = useState(() => getSessionStateForProvider(authProvider.getInitialSession(), authProvider));
   const apiClientBoundaryKey = useMemo(() => sessionBoundaryKey(session, authProvider), [authProvider, session]);
-  const apiClient = useMemo(() => createAlertsApiClient({ session, authProvider }), [apiClientBoundaryKey, authProvider]);
+  const apiClient = useMemo(() => createAlertsApiClient({ session, authProvider }), [session, authProvider]);
+  const [workspaceCountersStatus, setWorkspaceCountersStatus] = useState({ degraded: false, failedCounters: [] });
   const [callbackError, setCallbackError] = useState(null);
   const handlingOidcCallback = authProvider.kind === "oidc" && isOidcCallbackPath();
   const [sessionBootstrapPending, setSessionBootstrapPending] = useState(Boolean(authProvider.requiresSessionBootstrap) || authProvider.kind === "oidc");
@@ -99,6 +100,7 @@ export default function App() {
     workspaceCounterRequestSeqRef.current += 1;
     if (!workspaceNavigationEnabled) {
       setWorkspaceCounters({ alerts: 0, transactions: 0 });
+      setWorkspaceCountersStatus({ degraded: false, failedCounters: [] });
     }
   }, [apiClientBoundaryKey, workspaceNavigationEnabled]);
 
@@ -240,6 +242,13 @@ export default function App() {
       return;
     }
 
+    const failedCounters = requests
+      .filter((_, index) => results[index].status !== "fulfilled")
+      .map(([counterName]) => counterName);
+    setWorkspaceCountersStatus({
+      degraded: failedCounters.length > 0,
+      failedCounters
+    });
     setWorkspaceCounters((current) => requests.reduce((next, [counterName], index) => {
       const result = results[index];
       if (result.status !== "fulfilled") {
@@ -436,6 +445,7 @@ export default function App() {
           <AlertsListPage
             workspacePage={workspacePage}
             workspaceCounters={workspaceCounters}
+            workspaceCountersStatus={workspaceCountersStatus}
             canReadFraudCases={canReadFraudCases}
             alertPage={alertQueueState.page}
             fraudCaseSummary={fraudCaseWorkQueueSummaryState.summary}

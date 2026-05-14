@@ -12,50 +12,60 @@ const {
   getGovernanceAdvisoryAnalytics,
   getFraudCaseWorkQueueSummary,
   isAbortError,
-  listScoredTransactions
-} = vi.hoisted(() => ({
-  callbackPath: { value: true },
-  completeLoginCallback: vi.fn(),
-  providerState: {
-    value: {
-      kind: "oidc",
-      label: "OIDC session",
-      supportsSessionEditing: false,
-      authenticatedModeLabel: "oidc",
-      unauthenticatedModeLabel: "waiting for oidc",
-      unauthenticatedDescription: "Use the configured OIDC sign-in flow to start a real provider session.",
-      getInitialSession: () => ({ userId: "", roles: [], extraAuthorities: [], authorities: [] }),
-      getSessionState: () => ({ status: "unauthenticated" }),
-      persistSession: vi.fn(),
-      refreshSession: vi.fn(),
-      completeLoginCallback: vi.fn(),
-      beginLogin: vi.fn(),
-      beginLogout: vi.fn(),
-      hasLoginConfiguration: () => true,
-      getRequestHeaders: () => ({})
-    }
-  },
-  refreshSession: vi.fn(),
-  listAlerts: vi.fn(),
-  listFraudCaseWorkQueue: vi.fn(),
-  listGovernanceAdvisories: vi.fn(),
-  getGovernanceAdvisoryAnalytics: vi.fn(),
-  getFraudCaseWorkQueueSummary: vi.fn(),
-  isAbortError: (error) => error?.name === "AbortError",
-  listScoredTransactions: vi.fn()
-}));
-
-vi.mock("./api/alertsApi.js", () => ({
-  createAlertsApiClient: () => ({
+  listScoredTransactions,
+  createAlertsApiClient
+} = vi.hoisted(() => {
+  const listAlerts = vi.fn();
+  const listFraudCaseWorkQueue = vi.fn();
+  const listGovernanceAdvisories = vi.fn();
+  const getGovernanceAdvisoryAnalytics = vi.fn();
+  const getFraudCaseWorkQueueSummary = vi.fn();
+  const listScoredTransactions = vi.fn();
+  return {
+    callbackPath: { value: true },
+    completeLoginCallback: vi.fn(),
+    providerState: {
+      value: {
+        kind: "oidc",
+        label: "OIDC session",
+        supportsSessionEditing: false,
+        authenticatedModeLabel: "oidc",
+        unauthenticatedModeLabel: "waiting for oidc",
+        unauthenticatedDescription: "Use the configured OIDC sign-in flow to start a real provider session.",
+        getInitialSession: () => ({ userId: "", roles: [], extraAuthorities: [], authorities: [] }),
+        getSessionState: () => ({ status: "unauthenticated" }),
+        persistSession: vi.fn(),
+        refreshSession: vi.fn(),
+        completeLoginCallback: vi.fn(),
+        beginLogin: vi.fn(),
+        beginLogout: vi.fn(),
+        hasLoginConfiguration: () => true,
+        getRequestHeaders: () => ({})
+      }
+    },
+    refreshSession: vi.fn(),
     listAlerts,
     listFraudCaseWorkQueue,
     listGovernanceAdvisories,
     getGovernanceAdvisoryAnalytics,
     getFraudCaseWorkQueueSummary,
+    isAbortError: (error) => error?.name === "AbortError",
     listScoredTransactions,
-    getGovernanceAdvisoryAudit: vi.fn(),
-    recordGovernanceAdvisoryAudit: vi.fn()
-  }),
+    createAlertsApiClient: vi.fn(() => ({
+      listAlerts,
+      listFraudCaseWorkQueue,
+      listGovernanceAdvisories,
+      getGovernanceAdvisoryAnalytics,
+      getFraudCaseWorkQueueSummary,
+      listScoredTransactions,
+      getGovernanceAdvisoryAudit: vi.fn(),
+      recordGovernanceAdvisoryAudit: vi.fn()
+    }))
+  };
+});
+
+vi.mock("./api/alertsApi.js", () => ({
+  createAlertsApiClient,
   listAlerts,
   listFraudCaseWorkQueue,
   listGovernanceAdvisories,
@@ -203,6 +213,71 @@ describe("App", () => {
     });
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
     expect(screen.queryByText("Loading session state...")).not.toBeInTheDocument();
+  });
+
+  it("recreates the api client when auth material refreshes for the same session identity", async () => {
+    callbackPath.value = false;
+    const initialSession = authenticatedSession();
+    const refreshedSession = authenticatedSession();
+    refreshSession.mockResolvedValue(refreshedSession);
+    providerState.value = {
+      ...providerState.value,
+      getInitialSession: () => initialSession,
+      getSessionState: () => ({ status: "authenticated" }),
+      getRequestHeaders: vi.fn()
+        .mockReturnValueOnce({ Authorization: "Bearer token-old" })
+        .mockReturnValue({ Authorization: "Bearer token-new" })
+    };
+    listAlerts.mockResolvedValue({ content: [], totalElements: 1, totalPages: 1, page: 0, size: 10 });
+    listScoredTransactions.mockResolvedValue({ content: [], totalElements: 3, totalPages: 1, page: 0, size: 25 });
+
+    render(<App />);
+
+    await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
+    const authenticatedClientCreations = createAlertsApiClient.mock.calls
+      .filter(([options]) => options.session?.userId === "subject-1");
+    expect(authenticatedClientCreations.length).toBeGreaterThanOrEqual(2);
+    expect(authenticatedClientCreations.at(-1)[0].session.userId).toBe(refreshedSession.userId);
+    expect(authenticatedClientCreations.at(-1)[0].session.roles).toEqual(refreshedSession.roles);
+    expect(new Set(authenticatedClientCreations.at(-1)[0].session.authorities)).toEqual(new Set(refreshedSession.authorities));
+  });
+
+  it("marks workspace counters degraded when one counter fails without hiding successful counters", async () => {
+    callbackPath.value = false;
+    refreshSession.mockResolvedValue(authenticatedSession());
+    providerState.value = {
+      ...providerState.value,
+      getSessionState: () => ({ status: "authenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
+    };
+    listAlerts.mockRejectedValue(new Error("alerts counter unavailable"));
+    listScoredTransactions.mockResolvedValue({ content: [], totalElements: 9, totalPages: 1, page: 0, size: 25 });
+
+    render(<App />);
+
+    expect(await screen.findByText("Counters partially unavailable.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Transactions\s*9/ })).toBeInTheDocument();
+  });
+
+  it("clears degraded counter state on session boundary reset", async () => {
+    callbackPath.value = false;
+    refreshSession.mockResolvedValue(authenticatedSession());
+    providerState.value = {
+      ...providerState.value,
+      getSessionState: (session) => ({ status: session?.userId ? "authenticated" : "unauthenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer token-1" }),
+      beginLogout: vi.fn().mockResolvedValue(undefined)
+    };
+    listAlerts.mockRejectedValue(new Error("alerts counter unavailable"));
+    listScoredTransactions.mockResolvedValue({ content: [], totalElements: 9, totalPages: 1, page: 0, size: 25 });
+
+    render(<App />);
+
+    expect(await screen.findByText("Counters partially unavailable.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+
+    await waitFor(() => expect(screen.queryByText("Counters partially unavailable.")).not.toBeInTheDocument());
   });
 
   it("keeps transaction scoring usable when the fraud case global summary fails", async () => {
