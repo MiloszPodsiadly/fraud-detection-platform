@@ -9,6 +9,9 @@ Workspace data loading, counters, authority-derived workspace capability flags, 
 - `WorkspaceRuntimeProvider` owns `createAlertsApiClient({ session, authProvider })`.
 - `useWorkspaceRuntime` exposes `session`, `authProvider`, `apiClient`, `workspaceSessionResetKey`, read capability flags, and `runtimeStatus`.
 - Workspace hooks keep accepting explicit test clients while defaulting to runtime context in application composition.
+- Auth-sensitive workspace hooks may receive an explicit test client or consume the `WorkspaceRuntimeProvider` client.
+  They must not import default API wrappers, raw fetch backend URLs, or module-global session state.
+- Explicit hook client props are for tests, stories, and standalone hook verification only; production composition goes through `WorkspaceRuntimeProvider`.
 - Workspace counters move to `useWorkspaceCounters` with abort, request sequencing, partial failure reporting, stale retained values, and session-boundary clearing.
 - Counter UI visibly reports degraded and stale states without converting missing authority or failed counters to zero.
 - `WorkspaceDashboardShell` owns workspace hook orchestration, refresh behavior, details-page runtime wiring, and governance audit refresh behavior.
@@ -28,6 +31,11 @@ Workspace data loading, counters, authority-derived workspace capability flags, 
 - Authenticated workspace runtime creates one explicit API client for the current session/auth provider object.
 - A changed session object, including the same user with changed auth material or authorities, recreates the client and changes the reset key.
 - Unauthenticated or disabled runtime exposes `apiClient: null` and `runtimeStatus: "disabled"`.
+- Capability state is tri-state: `true` means allowed, `false` means denied, and `undefined` means unknown/not ready.
+- Unknown capabilities must not start auth-sensitive workspace reads.
+- Governance advisory read views are currently backed by `transaction-monitor:read`.
+- Governance audit writes are separate and require `governance-advisory:audit:write`.
+- Frontend capabilities are UI/request gating only; backend authorization remains the source of truth.
 - Workspace hooks abort in-flight requests and ignore stale responses on session/client/workspace switches.
 - Workspace counters clear on logout and session boundary reset.
 - Partial counter failures set `degraded`; retained previous values are marked `stale` and shown as last-known values.

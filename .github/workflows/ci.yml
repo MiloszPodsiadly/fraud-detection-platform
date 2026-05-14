@@ -1083,6 +1083,7 @@ jobs:
           if grep -R "it\.skip\|describe\.skip\|test\.skip\|it\.only\|describe\.only\|test\.only" \
             analyst-console-ui/src/workspace/WorkspaceRuntimeProvider.test.jsx \
             analyst-console-ui/src/workspace/useWorkspaceCounters.test.js \
+            analyst-console-ui/src/workspace/useGovernanceAuditWorkflow.test.js \
             analyst-console-ui/src/workspace/workspaceDataHooks.test.js \
             analyst-console-ui/src/pages/AlertsListPage.test.jsx \
             analyst-console-ui/src/App.test.jsx \
@@ -1093,7 +1094,7 @@ jobs:
 
       - name: Run FDP-51 workspace runtime tests
         working-directory: analyst-console-ui
-        run: npm test -- --run src/workspace/WorkspaceRuntimeProvider.test.jsx src/workspace/useWorkspaceCounters.test.js src/workspace/workspaceDataHooks.test.js src/pages/AlertsListPage.test.jsx src/App.test.jsx src/api/apiClientBoundary.test.js --reporter=default --reporter=junit --outputFile=./test-results/fdp51-vitest.xml
+        run: npm test -- --run src/workspace/WorkspaceRuntimeProvider.test.jsx src/workspace/useWorkspaceCounters.test.js src/workspace/useGovernanceAuditWorkflow.test.js src/workspace/workspaceDataHooks.test.js src/pages/AlertsListPage.test.jsx src/App.test.jsx src/api/apiClientBoundary.test.js --reporter=default --reporter=junit --outputFile=./test-results/fdp51-vitest.xml
 
       - name: Build FDP-51 UI
         working-directory: analyst-console-ui
@@ -1119,6 +1120,7 @@ jobs:
           test -f test-results/fdp51-vitest.xml
           grep -q "WorkspaceRuntimeProvider.test.jsx" test-results/fdp51-vitest.xml
           grep -q "useWorkspaceCounters.test.js" test-results/fdp51-vitest.xml
+          grep -q "useGovernanceAuditWorkflow.test.js" test-results/fdp51-vitest.xml
           grep -q "workspaceDataHooks.test.js" test-results/fdp51-vitest.xml
           grep -q "AlertsListPage.test.jsx" test-results/fdp51-vitest.xml
           grep -q "App.test.jsx" test-results/fdp51-vitest.xml

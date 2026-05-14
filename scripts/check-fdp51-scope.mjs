@@ -33,7 +33,7 @@ for (const file of changedFiles) {
     if (!allowedEndpointFiles.has(normalized) && /["']\/(?:api|governance|system|bff)\//.test(line)) {
       violations.push(`${normalized}: endpoint URL strings must stay inside the API client boundary.`);
     }
-    if (/\b(bulk|assign(?:ment)?|mass action|export)\b/i.test(line)) {
+    if (introducesForbiddenWorkflow(line)) {
       violations.push(`${normalized}: FDP-51 must not introduce export, bulk, assignment, or mass-action workflows.`);
     }
   }
@@ -81,4 +81,18 @@ function git(args) {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"]
   });
+}
+
+function introducesForbiddenWorkflow(diffLine) {
+  const sourceLine = diffLine.replace(/^\+\s*/, "");
+  if (/^export\s+(async\s+)?(function|const|let|var|class)\b/.test(sourceLine)) {
+    return false;
+  }
+  if (/^export\s+(default|\{|\*)\b/.test(sourceLine)) {
+    return false;
+  }
+  return /\b(bulk|assign(?:ment)?|mass action)\b/i.test(sourceLine)
+    || /\bexport\s+(workflow|button|action|csv|download|file|report|data|results)\b/i.test(sourceLine)
+    || /\b(export|download)\s+(csv|file|report|data|results)\b/i.test(sourceLine)
+    || /\b(onExport|handleExport|export[A-Z][A-Za-z]*)\b/.test(sourceLine);
 }

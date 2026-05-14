@@ -159,6 +159,17 @@ describe("api client boundary", () => {
     })).not.toThrow();
   });
 
+  it("allows ES module exports while blocking product export workflows in the FDP-51 scope guard", () => {
+    const script = readFileSync(join(process.cwd(), "../scripts/check-fdp51-scope.mjs"), "utf8");
+
+    expect(script).toContain("introducesForbiddenWorkflow");
+    expect(script).toContain("^export\\s+(async\\s+)?(function|const|let|var|class)\\b");
+    expect(() => runScopeGuard({
+      FDP51_SCOPE_BASE: "refs/heads/does-not-exist-fdp51",
+      FDP51_SCOPE_CHANGED_FILES: "analyst-console-ui/src/workspace/useRuntime.js"
+    }, "fdp51")).not.toThrow();
+  });
+
   it("allows only approved backend production files in the FDP-50 scope guard", () => {
     expect(() => runScopeGuard({
       FDP50_SCOPE_BASE: "refs/heads/does-not-exist-fdp50",
@@ -228,8 +239,9 @@ function captureBoundaryFailure(root, version = "fdp49") {
   }
 }
 
-function runScopeGuard(env = {}) {
-  execFileSync("node", ["../scripts/check-fdp50-scope.mjs"], {
+function runScopeGuard(env = {}, version = "fdp50") {
+  const script = version === "fdp51" ? "../scripts/check-fdp51-scope.mjs" : "../scripts/check-fdp50-scope.mjs";
+  execFileSync("node", [script], {
     cwd: process.cwd(),
     env: { ...process.env, ...env },
     encoding: "utf8",
@@ -237,9 +249,9 @@ function runScopeGuard(env = {}) {
   });
 }
 
-function captureScopeFailure(env = {}) {
+function captureScopeFailure(env = {}, version = "fdp50") {
   try {
-    runScopeGuard(env);
+    runScopeGuard(env, version);
     throw new Error("Expected FDP-50 scope guard fixture to fail");
   } catch (error) {
     return String(error.stderr ?? error.message);
