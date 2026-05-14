@@ -19,7 +19,8 @@ export function AlertsListPage({
   canReadFraudCases,
   canReadAlerts,
   canReadTransactions,
-  canReadGovernance,
+  canReadGovernanceAdvisories,
+  canWriteGovernanceAudit,
   alertPage,
   fraudCaseSummary = { totalFraudCases: 0 },
   fraudCaseTotalElements,
@@ -170,7 +171,7 @@ export function AlertsListPage({
         >
           <span>Audit analytics</span>
           <strong>{governanceAnalytics?.totals?.advisories ?? 0}</strong>
-          <CounterMeta authority={canReadGovernance} label="Partial analytics" />
+          <CounterMeta authority={canReadGovernanceAdvisories} label="Partial analytics" />
         </a>
         <a
           href="?workspace=compliance"
@@ -180,7 +181,7 @@ export function AlertsListPage({
         >
           <span>Governance</span>
           <strong>{advisoryQueue.count || 0}</strong>
-          <CounterMeta authority={canReadGovernance} label="Review queue" />
+          <CounterMeta authority={canReadGovernanceAdvisories} label={canWriteGovernanceAudit === true ? "Review queue" : "Read-only queue"} />
         </a>
       </nav>
 
@@ -193,7 +194,7 @@ export function AlertsListPage({
               : "Unavailable counters are not shown as zero."}
           </p>
           {workspaceCountersStatus.lastRefreshedAt && (
-            <p>Last refreshed {new Date(workspaceCountersStatus.lastRefreshedAt).toLocaleString()}.</p>
+            <p>Last successful counter refresh {new Date(workspaceCountersStatus.lastRefreshedAt).toLocaleString()}.</p>
           )}
           {typeof workspaceCountersStatus.refresh === "function" && (
             <button className="secondaryButton" type="button" onClick={workspaceCountersStatus.refresh}>
@@ -339,6 +340,7 @@ export function AlertsListPage({
           error={governanceError}
           auditHistories={governanceAuditHistories}
           session={session}
+          canRecordAudit={canWriteGovernanceAudit === true}
           onFiltersChange={onAdvisoryQueueRequestChange}
           onRetry={onGovernanceRetry}
           onRecordAudit={onRecordGovernanceAudit}

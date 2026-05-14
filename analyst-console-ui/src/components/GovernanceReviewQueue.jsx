@@ -20,6 +20,7 @@ export function GovernanceReviewQueue({
   error,
   auditHistories = {},
   session,
+  canRecordAudit: canRecordAuditProp,
   onFiltersChange,
   onRetry,
   onRecordAudit
@@ -28,7 +29,7 @@ export function GovernanceReviewQueue({
   const events = status === "UNAVAILABLE" ? [] : advisoryQueue?.advisory_events || [];
   const isUnavailable = status === "UNAVAILABLE";
   const isPartial = status === "PARTIAL";
-  const canRecordAudit = hasAuthority(session, AUTHORITIES.GOVERNANCE_ADVISORY_AUDIT_WRITE);
+  const canRecordAudit = canRecordAuditProp ?? hasAuthority(session, AUTHORITIES.GOVERNANCE_ADVISORY_AUDIT_WRITE);
 
   function updateFilter(field, value) {
     onFiltersChange({ ...filters, [field]: value });

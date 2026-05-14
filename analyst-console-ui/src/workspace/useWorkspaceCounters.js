@@ -37,6 +37,7 @@ export function useWorkspaceCounters({
   const [state, setState] = useState(INITIAL_STATE);
   const requestSeqRef = useRef(0);
   const abortControllerRef = useRef(null);
+  const resetKeyRef = useRef(effectiveResetKey);
   const clearState = useCallback(() => {
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
@@ -114,6 +115,10 @@ export function useWorkspaceCounters({
       clearState();
       return;
     }
+    if (resetKeyRef.current !== effectiveResetKey) {
+      resetKeyRef.current = effectiveResetKey;
+      clearState();
+    }
     refresh();
     return () => {
       abortControllerRef.current?.abort();
@@ -151,13 +156,13 @@ function buildCounterRequests({
   canReadTransactions
 }) {
   const requests = [];
-  if (includeAlerts && canReadAlerts !== false) {
+  if (includeAlerts && canReadAlerts === true) {
     requests.push({
       name: "alerts",
       promise: apiClient.listAlerts({ page: 0, size: 1 }, { signal })
     });
   }
-  if (includeTransactions && canReadTransactions !== false) {
+  if (includeTransactions && canReadTransactions === true) {
     requests.push({
       name: "transactions",
       promise: apiClient.listScoredTransactions({
@@ -177,6 +182,7 @@ function reduceCounterResults(current, requests, results, authorityState) {
   const errorByCounter = {};
   let hasSuccessfulRefresh = false;
   let retainedStaleValue = false;
+  let hasNonAbortFailure = false;
 
   requests.forEach((request, index) => {
     const result = results[index];
@@ -188,12 +194,21 @@ function reduceCounterResults(current, requests, results, authorityState) {
     if (isAbortError(result.reason)) {
       return;
     }
+    hasNonAbortFailure = true;
     errorByCounter[request.name] = result.reason?.message || "Counter unavailable";
     if (current.counters[request.name] !== null && current.counters[request.name] !== undefined) {
       retainedStaleValue = true;
       counters[request.name] = current.counters[request.name];
     }
   });
+
+  if (!hasSuccessfulRefresh && !hasNonAbortFailure) {
+    return {
+      ...current,
+      counters,
+      isLoading: false
+    };
+  }
 
   const degraded = Object.keys(errorByCounter).length > 0;
   return {
@@ -213,8 +228,8 @@ function clearUnavailableCounters(counters, {
   canReadTransactions
 }) {
   return {
-    alerts: includeAlerts && canReadAlerts === false ? null : counters.alerts,
-    transactions: includeTransactions && canReadTransactions === false ? null : counters.transactions
+    alerts: includeAlerts && canReadAlerts !== true ? null : counters.alerts,
+    transactions: includeTransactions && canReadTransactions !== true ? null : counters.transactions
   };
 }
 

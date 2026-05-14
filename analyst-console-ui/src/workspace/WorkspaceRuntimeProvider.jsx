@@ -21,7 +21,10 @@ export function WorkspaceRuntimeProvider({ session, authProvider, enabled = true
     canReadAlerts: authorityState(session, AUTHORITIES.ALERT_READ),
     canReadFraudCases: authorityState(session, AUTHORITIES.FRAUD_CASE_READ),
     canReadTransactions: authorityState(session, AUTHORITIES.TRANSACTION_MONITOR_READ),
-    canReadGovernance: authorityState(session, AUTHORITIES.TRANSACTION_MONITOR_READ),
+    // Governance advisory read views are backed by TRANSACTION_MONITOR_READ in the current backend authorization model.
+    // Governance audit writes require GOVERNANCE_ADVISORY_AUDIT_WRITE.
+    canReadGovernanceAdvisories: authorityState(session, AUTHORITIES.TRANSACTION_MONITOR_READ),
+    canWriteGovernanceAudit: authorityState(session, AUTHORITIES.GOVERNANCE_ADVISORY_AUDIT_WRITE),
     runtimeStatus: enabled && authenticated ? "ready" : "disabled"
   }), [apiClient, authProvider, enabled, authenticated, session, workspaceSessionResetKey]);
 

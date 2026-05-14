@@ -7,6 +7,7 @@ import { AlertsListPage } from "../pages/AlertsListPage.jsx";
 import { FraudCaseDetailsPage } from "../pages/FraudCaseDetailsPage.jsx";
 import { useAlertQueue } from "./useAlertQueue.js";
 import { useGovernanceAnalytics } from "./useGovernanceAnalytics.js";
+import { useGovernanceAuditWorkflow } from "./useGovernanceAuditWorkflow.js";
 import { useGovernanceQueue } from "./useGovernanceQueue.js";
 import { useScoredTransactionStream } from "./useScoredTransactionStream.js";
 import { useWorkspaceCounters } from "./useWorkspaceCounters.js";
@@ -30,12 +31,13 @@ export function WorkspaceDashboardShell({
     canReadFraudCases,
     canReadAlerts,
     canReadTransactions,
-    canReadGovernance,
+    canReadGovernanceAdvisories,
+    canWriteGovernanceAudit,
     runtimeStatus
   } = useWorkspaceRuntime();
   const workspaceNavigationEnabled = runtimeStatus === "ready" && !shouldBlockDashboardFetch(sessionState);
-  const workQueueEnabled = workspacePage === "analyst" && workspaceNavigationEnabled && canReadFraudCases !== false;
-  const summaryEnabled = workspacePage === "analyst" && workspaceNavigationEnabled && canReadFraudCases !== false;
+  const workQueueEnabled = workspacePage === "analyst" && workspaceNavigationEnabled && canReadFraudCases === true;
+  const summaryEnabled = workspacePage === "analyst" && workspaceNavigationEnabled && canReadFraudCases === true;
   const handleWorkQueueSessionError = useCallback((apiError) => {
     setSessionState(getSessionStateForApiError(session, apiError) || getSessionStateForProvider(session, authProvider));
   }, [authProvider, session, setSessionState]);
@@ -47,16 +49,16 @@ export function WorkspaceDashboardShell({
     enabled: summaryEnabled
   });
   const alertQueueState = useAlertQueue({
-    enabled: workspacePage === "fraudTransaction" && workspaceNavigationEnabled && canReadAlerts !== false
+    enabled: workspacePage === "fraudTransaction" && workspaceNavigationEnabled && canReadAlerts === true
   });
   const transactionStreamState = useScoredTransactionStream({
-    enabled: workspacePage === "transactionScoring" && workspaceNavigationEnabled && canReadTransactions !== false
+    enabled: workspacePage === "transactionScoring" && workspaceNavigationEnabled && canReadTransactions === true
   });
   const governanceQueueState = useGovernanceQueue({
-    enabled: workspacePage === "compliance" && workspaceNavigationEnabled && canReadGovernance !== false
+    enabled: workspacePage === "compliance" && workspaceNavigationEnabled && canReadGovernanceAdvisories === true
   });
   const governanceAnalyticsState = useGovernanceAnalytics({
-    enabled: workspacePage === "reports" && workspaceNavigationEnabled && canReadGovernance !== false
+    enabled: workspacePage === "reports" && workspaceNavigationEnabled && canReadGovernanceAdvisories === true
   });
   const workspaceCounterState = useWorkspaceCounters({
     enabled: workspaceNavigationEnabled,
@@ -64,6 +66,12 @@ export function WorkspaceDashboardShell({
     includeTransactions: workspacePage !== "transactionScoring"
   });
   const { refresh: refreshWorkspaceCounters, setCounterValue } = workspaceCounterState;
+  const recordGovernanceAudit = useGovernanceAuditWorkflow({
+    apiClient,
+    canWriteGovernanceAudit,
+    governanceQueueState,
+    governanceAnalyticsState
+  });
 
   const selectedAlertSummary = useMemo(
     () => alertQueueState.page.content.find((alert) => alert.alertId === selectedAlertId),
@@ -78,29 +86,16 @@ export function WorkspaceDashboardShell({
   }, [selectedAlertId, selectedFraudCaseId]);
 
   useEffect(() => {
-    setCounterValue("alerts", alertQueueState.page.totalElements);
-  }, [alertQueueState.page.totalElements, setCounterValue]);
+    if (canReadAlerts === true) {
+      setCounterValue("alerts", alertQueueState.page.totalElements);
+    }
+  }, [alertQueueState.page.totalElements, canReadAlerts, setCounterValue]);
 
   useEffect(() => {
-    setCounterValue("transactions", transactionStreamState.page.totalElements);
-  }, [setCounterValue, transactionStreamState.page.totalElements]);
-
-  async function recordGovernanceAudit(eventId, audit) {
-    await apiClient.recordGovernanceAdvisoryAudit(eventId, audit);
-    const nextHistory = await apiClient.getGovernanceAdvisoryAudit(eventId);
-    governanceQueueState.setAuditHistories((current) => ({
-      ...current,
-      [eventId]: nextHistory
-    }));
-    const latestDecision = nextHistory.audit_events?.[0]?.decision || "OPEN";
-    governanceQueueState.setQueue((current) => ({
-      ...current,
-      advisory_events: current.advisory_events
-        .map((event) => (event.event_id === eventId ? { ...event, lifecycle_status: latestDecision } : event))
-        .filter((event) => governanceQueueState.request.lifecycleStatus === "ALL" || event.lifecycle_status === governanceQueueState.request.lifecycleStatus)
-    }));
-    governanceAnalyticsState.refresh();
-  }
+    if (canReadTransactions === true) {
+      setCounterValue("transactions", transactionStreamState.page.totalElements);
+    }
+  }, [canReadTransactions, setCounterValue, transactionStreamState.page.totalElements]);
 
   function refreshDashboard() {
     if (shouldBlockDashboardFetch(sessionState)) {
@@ -155,7 +150,7 @@ export function WorkspaceDashboardShell({
     clearSelection();
   }
 
-  if (selectedAlertId) {
+  if (selectedAlertId && apiClient) {
     return (
       <AlertDetailsPage
         alertId={selectedAlertId}
@@ -168,7 +163,7 @@ export function WorkspaceDashboardShell({
     );
   }
 
-  if (selectedFraudCaseId) {
+  if (selectedFraudCaseId && apiClient) {
     return (
       <FraudCaseDetailsPage
         caseId={selectedFraudCaseId}
@@ -188,7 +183,8 @@ export function WorkspaceDashboardShell({
       canReadFraudCases={canReadFraudCases}
       canReadAlerts={canReadAlerts}
       canReadTransactions={canReadTransactions}
-      canReadGovernance={canReadGovernance}
+      canReadGovernanceAdvisories={canReadGovernanceAdvisories}
+      canWriteGovernanceAudit={canWriteGovernanceAudit}
       alertPage={alertQueueState.page}
       fraudCaseSummary={fraudCaseWorkQueueSummaryState.summary}
       fraudCaseWorkQueue={fraudCaseWorkQueueState.queue}

@@ -26,14 +26,28 @@ export default function App() {
   const handlingOidcCallback = authProvider.kind === "oidc" && isOidcCallbackPath();
   const [sessionBootstrapPending, setSessionBootstrapPending] = useState(Boolean(authProvider.requiresSessionBootstrap) || authProvider.kind === "oidc");
   const skipNextOidcBootstrapRef = useRef(false);
+  const sessionBoundaryKey = useMemo(() => sessionBoundaryKeyFor(session, authProvider), [authProvider, session]);
+  const previousSessionBoundaryKeyRef = useRef(sessionBoundaryKey);
   const workspaceNavigationEnabled = !handlingOidcCallback
     && !sessionBootstrapPending
     && !shouldBlockDashboardFetch(sessionState);
+  const detailSelectionPendingBoundaryReset = Boolean(selectedAlertId || selectedFraudCaseId)
+    && previousSessionBoundaryKeyRef.current !== sessionBoundaryKey;
 
   useEffect(() => {
     authProvider.persistSession(session);
     setSessionState(getSessionStateForProvider(session, authProvider));
   }, [authProvider, session]);
+
+  useEffect(() => {
+    if (previousSessionBoundaryKeyRef.current === sessionBoundaryKey) {
+      return;
+    }
+    previousSessionBoundaryKeyRef.current = sessionBoundaryKey;
+    if (selectedAlertId || selectedFraudCaseId) {
+      clearSelection();
+    }
+  }, [clearSelection, selectedAlertId, selectedFraudCaseId, sessionBoundaryKey]);
 
   useEffect(() => {
     if ((!authProvider.requiresSessionBootstrap && authProvider.kind !== "oidc") || handlingOidcCallback || typeof authProvider.refreshSession !== "function") {
@@ -113,7 +127,9 @@ export default function App() {
     setSession(normalizeSession(nextSession));
   }
 
-  const detailMode = Boolean(selectedAlertId || selectedFraudCaseId);
+  const detailMode = Boolean(selectedAlertId || selectedFraudCaseId) && !detailSelectionPendingBoundaryReset;
+  const runtimeSelectedAlertId = detailSelectionPendingBoundaryReset ? null : selectedAlertId;
+  const runtimeSelectedFraudCaseId = detailSelectionPendingBoundaryReset ? null : selectedFraudCaseId;
   const workspaceTitle = WORKSPACE_PAGES[workspacePage]?.label || WORKSPACE_PAGES.analyst.label;
 
   if (handlingOidcCallback) {
@@ -198,8 +214,8 @@ export default function App() {
         <WorkspaceRuntimeProvider session={session} authProvider={authProvider} enabled={Boolean(session?.userId)}>
           <WorkspaceDashboardShell
             workspacePage={workspacePage}
-            selectedAlertId={selectedAlertId}
-            selectedFraudCaseId={selectedFraudCaseId}
+            selectedAlertId={runtimeSelectedAlertId}
+            selectedFraudCaseId={runtimeSelectedFraudCaseId}
             clearSelection={clearSelection}
             navigateWorkspace={navigateWorkspace}
             openAlert={openAlert}
@@ -220,4 +236,15 @@ function shouldBlockDashboardFetch(sessionState) {
     SESSION_STATES.ACCESS_DENIED,
     SESSION_STATES.AUTH_ERROR
   ].includes(sessionState?.status);
+}
+
+function sessionBoundaryKeyFor(session, authProvider) {
+  const roles = Array.isArray(session?.roles) ? session.roles.join(",") : "";
+  const authorities = Array.isArray(session?.authorities) ? session.authorities.join(",") : "";
+  return [
+    authProvider?.kind || "none",
+    session?.userId || "",
+    roles,
+    authorities
+  ].join(":");
 }
