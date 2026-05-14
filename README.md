@@ -1367,6 +1367,8 @@ Security and architecture:
 - [Alert Service SLOs](docs/observability/alert-service-slo.md): FDP-27 low-cardinality operational thresholds.
 - [Alert Service Config Matrix](docs/deployment/alert-service-config-matrix.md): local/test/docker/staging/prod/bank configuration semantics.
 - [FDP-27 Merge Gate](docs/fdp-27-merge-gate.md): pre-merge invariant checklist and explicit non-goals.
+- [FDP-50 Frontend API Client Boundary](docs/fdp-50-frontend-api-client-boundary.md): branch scope for explicit workspace-scoped Analyst Console API clients.
+- [Frontend API Client Boundary](docs/frontend/api-client-boundary.md): approved frontend API call pattern, auth mode notes, and hook testing checklist.
 - [ML Governance And Drift v1](docs/ml/ml-governance-drift-v1.md): bounded runtime governance layer for active model metadata, aggregate profiles, drift status, privacy rules, and incident playbook.
 
 Documentation guidance: future data-generation or deployment docs should stay consolidated by feature area instead
