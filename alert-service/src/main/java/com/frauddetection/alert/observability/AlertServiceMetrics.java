@@ -969,7 +969,10 @@ public class AlertServiceMetrics {
         if (!StringUtils.hasText(claimName)) {
             return "unknown";
         }
-        return claimName.trim().replaceAll("[^A-Za-z0-9._:-]+", "_");
+        return switch (claimName.trim()) {
+            case "groups", "roles", "authorities", "realm_access.roles", "resource_access" -> claimName.trim();
+            default -> "other";
+        };
     }
 
     private String normalize(Enum<?> value) {
