@@ -164,9 +164,13 @@ describe("useWorkspaceCounters", () => {
       canReadTransactions: true
     }), { initialProps: { client: firstClient, resetKey: "session-a" } });
     await waitFor(() => expect(firstClient.listAlerts).toHaveBeenCalledTimes(1));
+    const firstAlertSignal = firstClient.listAlerts.mock.calls[0][1].signal;
+    const firstTransactionSignal = firstClient.listScoredTransactions.mock.calls[0][1].signal;
 
     rerender({ client: secondClient, resetKey: "session-b" });
     await waitFor(() => expect(secondClient.listAlerts).toHaveBeenCalledTimes(1));
+    expect(firstAlertSignal.aborted).toBe(true);
+    expect(firstTransactionSignal.aborted).toBe(true);
     await act(async () => {
       secondAlerts.resolve(page(10));
       secondTransactions.resolve(page(20));

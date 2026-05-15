@@ -682,20 +682,22 @@ describe("alertsApi auth headers", () => {
     expect(fetchMock.mock.calls[0][0]).toContain("/api/v1/fraud-cases/work-queue?");
   });
 
-  it("sends fraud case update with required idempotency header", async () => {
+  it("sends fraud case update with required idempotency header and signal", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
       operation_status: "COMMITTED",
       updated_case: { caseId: "case-1", status: "CLOSED" }
     }));
+    const signal = new AbortController().signal;
     await updateFraudCase("case-1", {
       status: "CLOSED",
       analystId: "analyst-1",
       decisionReason: "Reviewed",
       tags: ["reviewed"]
-    }, { idempotencyKey: "fraud-case-update-case-1-key" });
+    }, { idempotencyKey: "fraud-case-update-case-1-key", signal });
 
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/fraud-cases/case-1", expect.objectContaining({
       method: "PATCH",
+      signal,
       headers: expect.objectContaining({
         "Content-Type": "application/json",
         "X-Idempotency-Key": "fraud-case-update-case-1-key"
@@ -703,19 +705,21 @@ describe("alertsApi auth headers", () => {
     }));
   });
 
-  it("sends analyst decision with idempotency header", async () => {
+  it("sends analyst decision with idempotency header and signal", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
       resultingStatus: "RESOLVED"
     }));
+    const signal = new AbortController().signal;
     await submitAnalystDecision("alert-1", {
       analystId: "analyst-1",
       decision: "MARKED_LEGITIMATE",
       decisionReason: "Reviewed",
       tags: ["manual-review"]
-    }, { idempotencyKey: "alert-decision-alert-1-key" });
+    }, { idempotencyKey: "alert-decision-alert-1-key", signal });
 
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/alerts/alert-1/decision", expect.objectContaining({
       method: "POST",
+      signal,
       headers: expect.objectContaining({
         "Content-Type": "application/json",
         "X-Idempotency-Key": "alert-decision-alert-1-key"

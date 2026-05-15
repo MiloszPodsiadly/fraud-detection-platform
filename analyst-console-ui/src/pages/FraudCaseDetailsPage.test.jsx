@@ -79,6 +79,24 @@ describe("FraudCaseDetailsPage", () => {
     await waitFor(() => expect(onCaseUpdated).not.toHaveBeenCalled());
   });
 
+  it("aborts in-flight fraud case update on unmount", async () => {
+    const update = deferred();
+    const apiClient = {
+      getFraudCase: vi.fn().mockResolvedValue(fraudCase("case-1", "Open case")),
+      updateFraudCase: vi.fn().mockReturnValue(update.promise)
+    };
+    const { unmount } = render(page({ caseId: "case-1", apiClient }));
+    await screen.findByText("Open case");
+
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Reviewed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save case decision" }));
+    await waitFor(() => expect(apiClient.updateFraudCase).toHaveBeenCalledTimes(1));
+    const signal = apiClient.updateFraudCase.mock.calls[0][2].signal;
+    unmount();
+
+    expect(signal.aborted).toBe(true);
+  });
+
   it("does not let old submit response overwrite state after caseId changes", async () => {
     const update = deferred();
     const apiClient = {
@@ -93,12 +111,60 @@ describe("FraudCaseDetailsPage", () => {
     fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Reviewed" } });
     fireEvent.click(screen.getByRole("button", { name: "Save case decision" }));
     await waitFor(() => expect(apiClient.updateFraudCase).toHaveBeenCalledTimes(1));
+    const signal = apiClient.updateFraudCase.mock.calls[0][2].signal;
     rerender(page({ caseId: "case-new", apiClient }));
+    expect(signal.aborted).toBe(true);
     await screen.findByText("New case");
     update.resolve({ ...fraudCase("case-old", "Updated old case"), status: "CLOSED", decisionReason: "Reviewed" });
 
     await waitFor(() => expect(screen.queryByText("Updated old case")).not.toBeInTheDocument());
     expect(screen.getByText("New case")).toBeInTheDocument();
+  });
+
+  it("aborts in-flight submit when apiClient changes", async () => {
+    const update = deferred();
+    const apiClientA = {
+      getFraudCase: vi.fn().mockResolvedValue(fraudCase("case-1", "Client A case")),
+      updateFraudCase: vi.fn().mockReturnValue(update.promise)
+    };
+    const apiClientB = {
+      getFraudCase: vi.fn().mockResolvedValue(fraudCase("case-1", "Client B case")),
+      updateFraudCase: vi.fn()
+    };
+    const { rerender } = render(page({ caseId: "case-1", apiClient: apiClientA }));
+    await screen.findByText("Client A case");
+
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Reviewed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save case decision" }));
+    await waitFor(() => expect(apiClientA.updateFraudCase).toHaveBeenCalledTimes(1));
+    const signal = apiClientA.updateFraudCase.mock.calls[0][2].signal;
+    rerender(page({ caseId: "case-1", apiClient: apiClientB }));
+
+    expect(signal.aborted).toBe(true);
+    expect(await screen.findByText("Client B case")).toBeInTheDocument();
+  });
+
+  it("passes submit signal with the idempotency key and ignores AbortError", async () => {
+    const apiClient = {
+      getFraudCase: vi.fn().mockResolvedValue(fraudCase("case-1", "Open case")),
+      updateFraudCase: vi.fn().mockRejectedValue(new DOMException("aborted", "AbortError"))
+    };
+    render(page({ caseId: "case-1", apiClient }));
+    await screen.findByText("Open case");
+
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Reviewed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save case decision" }));
+
+    await waitFor(() => expect(apiClient.updateFraudCase).toHaveBeenCalledWith(
+      "case-1",
+      expect.objectContaining({ decisionReason: "Reviewed" }),
+      expect.objectContaining({
+        idempotencyKey: expect.stringMatching(/^fraud-case-update-case-1-/),
+        signal: expect.any(AbortSignal)
+      })
+    ));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save case decision" })).toBeEnabled());
+    expect(screen.queryByText("aborted")).not.toBeInTheDocument();
   });
 
   it("shows controlled mutation error when current submit fails", async () => {
