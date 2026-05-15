@@ -1,4 +1,9 @@
 import { AlertsListPage } from "../pages/AlertsListPage.jsx";
+import { AnalystWorkspaceContainer } from "./AnalystWorkspaceContainer.jsx";
+import { FraudTransactionWorkspaceContainer } from "./FraudTransactionWorkspaceContainer.jsx";
+import { GovernanceWorkspaceContainer } from "./GovernanceWorkspaceContainer.jsx";
+import { ReportsWorkspaceContainer } from "./ReportsWorkspaceContainer.jsx";
+import { TransactionScoringWorkspaceContainer } from "./TransactionScoringWorkspaceContainer.jsx";
 import { WorkspaceDetailRouter } from "./WorkspaceDetailRouter.jsx";
 import { useAnalystWorkspaceRuntime } from "./useAnalystWorkspaceRuntime.js";
 import { useGovernanceWorkspaceRuntime } from "./useGovernanceWorkspaceRuntime.js";
@@ -101,6 +106,9 @@ export function WorkspaceDashboardShell({
         alertQueueState={alertQueueState}
         session={session}
         apiClient={apiClient}
+        canReadAlerts={canReadAlerts}
+        canReadFraudCases={canReadFraudCases}
+        workspacePage={workspacePage}
         onCloseSelection={closeSelection}
         onRefreshDashboard={refreshDashboard}
       />
@@ -119,52 +127,85 @@ export function WorkspaceDashboardShell({
       canWriteGovernanceAudit={canWriteGovernanceAudit}
       alertPage={alertQueueState.page}
       fraudCaseSummary={fraudCaseWorkQueueSummaryState.summary}
-      fraudCaseWorkQueue={fraudCaseWorkQueueState.queue}
       fraudCaseSummaryError={fraudCaseWorkQueueSummaryState.error}
       isFraudCaseSummaryLoading={fraudCaseWorkQueueSummaryState.isLoading}
-      fraudCaseWorkQueueRequest={fraudCaseWorkQueueState.committedFilters}
-      fraudCaseWorkQueueDraftFilters={fraudCaseWorkQueueState.draftFilters}
-      fraudCaseWorkQueueWarning={fraudCaseWorkQueueState.warning}
-      fraudCaseWorkQueueFilterError={fraudCaseWorkQueueState.filterError}
-      fraudCaseWorkQueueLastRefreshedAt={fraudCaseWorkQueueState.lastRefreshedAt}
       onWorkspaceChange={navigateWorkspace}
       transactionPage={transactionStreamState.page}
-      transactionPageRequest={transactionStreamState.request}
       advisoryQueue={governanceQueueState.queue}
-      advisoryQueueRequest={governanceQueueState.request}
       governanceAnalytics={governanceAnalyticsState.analytics}
-      analyticsWindowDays={governanceAnalyticsState.windowDays}
-      isLoading={workspacePage === "transactionScoring" ? transactionStreamState.isLoading : alertQueueState.isLoading}
-      isFraudCaseWorkQueueLoading={fraudCaseWorkQueueState.isLoading}
-      isGovernanceLoading={governanceQueueState.isLoading}
-      isAnalyticsLoading={governanceAnalyticsState.isLoading}
-      error={workspacePage === "transactionScoring" ? transactionStreamState.error : alertQueueState.error}
-      fraudCaseWorkQueueError={fraudCaseWorkQueueState.error}
-      governanceError={governanceQueueState.error}
-      analyticsError={governanceAnalyticsState.error}
-      governanceAuditHistories={governanceQueueState.auditHistories}
-      session={session}
       sessionState={sessionState}
+      error={workspacePage === "transactionScoring" ? transactionStreamState.error : alertQueueState.error}
       onRetry={refreshDashboard}
-      onFraudCaseSummaryRetry={fraudCaseWorkQueueSummaryState.retry}
-      onGovernanceRetry={governanceQueueState.refresh}
-      onAnalyticsRetry={governanceAnalyticsState.refresh}
-      onAdvisoryQueueRequestChange={governanceQueueState.setRequest}
-      onFraudCaseWorkQueueDraftChange={fraudCaseWorkQueueState.updateDraftFilter}
-      onFraudCaseWorkQueueApplyFilters={fraudCaseWorkQueueState.applyFilters}
-      onFraudCaseWorkQueueResetFilters={fraudCaseWorkQueueState.resetFilters}
-      onFraudCaseWorkQueueRetry={fraudCaseWorkQueueState.refreshFirstSlice}
-      onFraudCaseWorkQueueRefreshFirstSlice={fraudCaseWorkQueueState.refreshFirstSlice}
-      onFraudCaseWorkQueueLoadMore={fraudCaseWorkQueueState.loadMore}
-      onAnalyticsWindowDaysChange={governanceAnalyticsState.setWindowDays}
-      onRecordGovernanceAudit={recordGovernanceAudit}
-      onTransactionFiltersChange={changeTransactionFilters}
-      onTransactionPageChange={changeTransactionPage}
-      onTransactionPageSizeChange={changeTransactionPageSize}
-      onAlertPageChange={changeAlertPage}
-      onAlertPageSizeChange={changeAlertPageSize}
-      onOpenAlert={openAlert}
-      onOpenFraudCase={openFraudCase}
-    />
+    >
+      {workspacePage === "analyst" && (
+        <AnalystWorkspaceContainer
+          canReadFraudCases={canReadFraudCases}
+          fraudCaseSummaryError={fraudCaseWorkQueueSummaryState.error}
+          fraudCaseWorkQueue={fraudCaseWorkQueueState.queue}
+          fraudCaseWorkQueueRequest={fraudCaseWorkQueueState.committedFilters}
+          fraudCaseWorkQueueDraftFilters={fraudCaseWorkQueueState.draftFilters}
+          fraudCaseWorkQueueWarning={fraudCaseWorkQueueState.warning}
+          fraudCaseWorkQueueFilterError={fraudCaseWorkQueueState.filterError}
+          fraudCaseWorkQueueLastRefreshedAt={fraudCaseWorkQueueState.lastRefreshedAt}
+          isFraudCaseWorkQueueLoading={fraudCaseWorkQueueState.isLoading}
+          fraudCaseWorkQueueError={fraudCaseWorkQueueState.error}
+          onFraudCaseSummaryRetry={fraudCaseWorkQueueSummaryState.retry}
+          onFraudCaseWorkQueueDraftChange={fraudCaseWorkQueueState.updateDraftFilter}
+          onFraudCaseWorkQueueApplyFilters={fraudCaseWorkQueueState.applyFilters}
+          onFraudCaseWorkQueueResetFilters={fraudCaseWorkQueueState.resetFilters}
+          onFraudCaseWorkQueueRetry={fraudCaseWorkQueueState.refreshFirstSlice}
+          onFraudCaseWorkQueueRefreshFirstSlice={fraudCaseWorkQueueState.refreshFirstSlice}
+          onFraudCaseWorkQueueLoadMore={fraudCaseWorkQueueState.loadMore}
+          onOpenFraudCase={openFraudCase}
+        />
+      )}
+      {workspacePage === "fraudTransaction" && (
+        <FraudTransactionWorkspaceContainer
+          alertPage={alertQueueState.page}
+          isLoading={alertQueueState.isLoading}
+          error={alertQueueState.error}
+          onRetry={refreshDashboard}
+          onAlertPageChange={changeAlertPage}
+          onAlertPageSizeChange={changeAlertPageSize}
+          onOpenAlert={openAlert}
+        />
+      )}
+      {workspacePage === "transactionScoring" && (
+        <TransactionScoringWorkspaceContainer
+          transactionPage={transactionStreamState.page}
+          transactionPageRequest={transactionStreamState.request}
+          isLoading={transactionStreamState.isLoading}
+          error={transactionStreamState.error}
+          onRetry={refreshDashboard}
+          onTransactionFiltersChange={changeTransactionFilters}
+          onTransactionPageChange={changeTransactionPage}
+          onTransactionPageSizeChange={changeTransactionPageSize}
+        />
+      )}
+      {workspacePage === "reports" && (
+        <ReportsWorkspaceContainer
+          governanceAnalytics={governanceAnalyticsState.analytics}
+          analyticsWindowDays={governanceAnalyticsState.windowDays}
+          isAnalyticsLoading={governanceAnalyticsState.isLoading}
+          analyticsError={governanceAnalyticsState.error}
+          onAnalyticsWindowDaysChange={governanceAnalyticsState.setWindowDays}
+          onAnalyticsRetry={governanceAnalyticsState.refresh}
+        />
+      )}
+      {workspacePage === "compliance" && (
+        <GovernanceWorkspaceContainer
+          advisoryQueue={governanceQueueState.queue}
+          advisoryQueueRequest={governanceQueueState.request}
+          isGovernanceLoading={governanceQueueState.isLoading}
+          governanceError={governanceQueueState.error}
+          governanceAuditHistories={governanceQueueState.auditHistories}
+          session={session}
+          canWriteGovernanceAudit={canWriteGovernanceAudit}
+          onAdvisoryQueueRequestChange={governanceQueueState.setRequest}
+          onGovernanceRetry={governanceQueueState.refresh}
+          onRecordGovernanceAudit={recordGovernanceAudit}
+        />
+      )}
+    </AlertsListPage>
   );
 }
