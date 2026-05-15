@@ -139,7 +139,7 @@ export function AlertsListPage({
         >
           <span>Transactions</span>
           <strong>{transactionGlobalCount}</strong>
-          <CounterMeta authority={canReadTransactions} stale={isCounterStale("transactions", failedCounterNames, workspaceCountersStatus)} label="Read-only stream" />
+          <CounterMeta authority={canReadTransactions} stale={isCounterStale("transactions", failedCounterNames, workspaceCountersStatus)} />
         </a>
         <a
           href="?workspace=fraud-transaction"
@@ -149,7 +149,7 @@ export function AlertsListPage({
         >
           <span>Alerts</span>
           <strong>{alertGlobalCount}</strong>
-          <CounterMeta authority={canReadAlerts} stale={isCounterStale("alerts", failedCounterNames, workspaceCountersStatus)} label="Read-only queue" />
+          <CounterMeta authority={canReadAlerts} stale={isCounterStale("alerts", failedCounterNames, workspaceCountersStatus)} />
         </a>
         <a
           href="/"
@@ -161,7 +161,7 @@ export function AlertsListPage({
         >
           <span>Global fraud cases</span>
           <strong>{isFraudCaseSummaryLoading ? "..." : fraudCaseSummaryLabel}</strong>
-          <CounterMeta authority={canReadFraudCases} stale={Boolean(fraudCaseSummaryError)} label="Read-only summary" />
+          <CounterMeta authority={canReadFraudCases} stale={Boolean(fraudCaseSummaryError)} />
         </a>
         <a
           href="?workspace=reports"
@@ -171,7 +171,7 @@ export function AlertsListPage({
         >
           <span>Audit analytics</span>
           <strong>{governanceAnalytics?.totals?.advisories ?? 0}</strong>
-          <CounterMeta authority={canReadGovernanceAdvisories} label="Partial analytics" />
+          <CounterMeta authority={canReadGovernanceAdvisories} />
         </a>
         <a
           href="?workspace=compliance"
@@ -181,7 +181,7 @@ export function AlertsListPage({
         >
           <span>Governance</span>
           <strong>{advisoryQueue.count || 0}</strong>
-          <CounterMeta authority={canReadGovernanceAdvisories} label={canWriteGovernanceAudit === true ? "Review queue" : "Read-only queue"} />
+          <CounterMeta authority={canReadGovernanceAdvisories} />
         </a>
       </nav>
 
@@ -358,14 +358,14 @@ function openWorkspace(event, onWorkspaceChange, page) {
   onWorkspaceChange(page);
 }
 
-function CounterMeta({ authority, stale = false, label }) {
+function CounterMeta({ authority, stale = false }) {
   if (authority === false) {
     return <small className="counterMeta">Unavailable</small>;
   }
   if (stale) {
     return <small className="counterMeta">Last known</small>;
   }
-  return <small className="counterMeta">{label}</small>;
+  return null;
 }
 
 function isCounterStale(counterName, failedCounterNames, workspaceCountersStatus) {
