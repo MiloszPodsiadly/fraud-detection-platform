@@ -29,7 +29,12 @@ export function AlertTable({ alerts, onOpenAlert }) {
               <td>{formatDateTime(alert.alertTimestamp)}</td>
               <td className="numericCell">{formatScore(alert.fraudScore)}</td>
               <td>
-                <button className="rowButton" type="button" onClick={() => onOpenAlert(alert.alertId)}>
+                <button
+                  className="rowButton"
+                  type="button"
+                  data-detail-origin={`alert-${alert.alertId}`}
+                  onClick={() => onOpenAlert(alert.alertId)}
+                >
                   Review
                 </button>
               </td>
