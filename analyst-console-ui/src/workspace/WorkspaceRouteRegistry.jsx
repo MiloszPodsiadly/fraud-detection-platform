@@ -62,7 +62,19 @@ export const WORKSPACE_ROUTE_REGISTRY = Object.freeze({
 export const WORKSPACE_ROUTE_ENTRIES = Object.freeze(Object.values(WORKSPACE_ROUTE_REGISTRY));
 
 export function resolveWorkspaceRoute(workspaceKey) {
-  return WORKSPACE_ROUTE_REGISTRY[workspaceKey] || WORKSPACE_ROUTE_REGISTRY[DEFAULT_WORKSPACE_KEY];
+  return resolveWorkspaceRouteResult(workspaceKey).route;
+}
+
+export function resolveWorkspaceRouteResult(workspaceKey) {
+  const route = WORKSPACE_ROUTE_REGISTRY[workspaceKey];
+  if (route) {
+    return { route, wasInvalid: false, requestedKey: workspaceKey || null };
+  }
+  return {
+    route: WORKSPACE_ROUTE_REGISTRY[DEFAULT_WORKSPACE_KEY],
+    wasInvalid: Boolean(workspaceKey),
+    requestedKey: workspaceKey || null
+  };
 }
 
 export function getWorkspaceRoute(workspaceKey) {

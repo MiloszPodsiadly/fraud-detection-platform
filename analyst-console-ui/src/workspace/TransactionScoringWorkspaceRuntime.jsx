@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { TransactionScoringWorkspaceContainer } from "./TransactionScoringWorkspaceContainer.jsx";
 import { useScoredTransactionStream } from "./useScoredTransactionStream.js";
 import { useWorkspaceRuntime } from "./useWorkspaceRuntime.js";
+import { createWorkspaceRuntimeResult } from "./workspaceRuntimeResult.js";
 
 export function TransactionScoringWorkspaceRuntime({
   route,
@@ -40,7 +41,7 @@ export function TransactionScoringWorkspaceRuntime({
     transactionStreamState.refresh();
   }
 
-  return children({
+  return children(createWorkspaceRuntimeResult({
     workspaceContent: (
       <TransactionScoringWorkspaceContainer
         headingLabel={route.heading.label}
@@ -56,5 +57,5 @@ export function TransactionScoringWorkspaceRuntime({
     },
     error: transactionStreamState.error,
     refreshWorkspace
-  });
+  }));
 }

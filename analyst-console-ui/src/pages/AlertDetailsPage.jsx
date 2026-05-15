@@ -16,6 +16,7 @@ import { formatDateTime, formatScore } from "../utils/format.js";
 export function AlertDetailsPage({
   alertId,
   alertSummary,
+  alertSummaryRuntimeState = "available",
   session,
   apiClient,
   canReadAlert = true,
@@ -230,6 +231,12 @@ export function AlertDetailsPage({
               Created {formatDateTime(alert.createdAt)} with correlation ID{" "}
               <code>{alert.correlationId}</code>
             </p>
+            {alertSummaryRuntimeState !== "available" && !alertSummary && (
+              <DetailStateBanner
+                state="runtime-not-ready"
+                message="Alert queue summary is not mounted for this workspace; detail data is loaded directly from the alert service."
+              />
+            )}
 
             <div className="metricGrid">
               <Metric label="Fraud score" value={formatScore(alert.fraudScore)} />

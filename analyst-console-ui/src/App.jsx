@@ -18,7 +18,8 @@ export default function App() {
     openAlert,
     openFraudCase,
     clearSelection,
-    workspaceHref
+    workspaceHref,
+    invalidWorkspaceRoute
   } = useWorkspaceRoute();
   const [session, setSession] = useState(() => authProvider.getInitialSession());
   const [sessionState, setSessionState] = useState(() => getSessionStateForProvider(authProvider.getInitialSession(), authProvider));
@@ -217,6 +218,7 @@ export default function App() {
             navigateWorkspace={navigateWorkspace}
             openAlert={openAlert}
             openFraudCase={openFraudCase}
+            invalidWorkspaceRoute={invalidWorkspaceRoute}
             sessionState={sessionState}
             setSessionState={setSessionState}
           />

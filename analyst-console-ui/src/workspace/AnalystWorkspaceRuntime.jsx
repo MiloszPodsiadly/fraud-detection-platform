@@ -1,6 +1,7 @@
 import { AnalystWorkspaceContainer } from "./AnalystWorkspaceContainer.jsx";
 import { useAnalystWorkspaceRuntime } from "./useAnalystWorkspaceRuntime.js";
 import { useWorkspaceRuntime } from "./useWorkspaceRuntime.js";
+import { createWorkspaceRuntimeResult } from "./workspaceRuntimeResult.js";
 
 export function AnalystWorkspaceRuntime({
   route,
@@ -28,7 +29,7 @@ export function AnalystWorkspaceRuntime({
     workQueueState.refreshFirstSlice();
   }
 
-  return children({
+  return children(createWorkspaceRuntimeResult({
     workspaceContent: (
       <AnalystWorkspaceContainer
         canReadFraudCases={canReadFraudCases}
@@ -45,5 +46,5 @@ export function AnalystWorkspaceRuntime({
     },
     error: workQueueState.error,
     refreshWorkspace
-  });
+  }));
 }

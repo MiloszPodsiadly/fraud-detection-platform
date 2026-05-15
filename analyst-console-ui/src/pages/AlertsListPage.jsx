@@ -5,15 +5,16 @@ import { WorkspaceNavigation } from "../workspace/WorkspaceNavigation.jsx";
 export function AlertsListPage({
   workspacePage = "analyst",
   workspaceRoutes,
+  routeFallbackNotice,
   workspaceCounters = { alerts: null, transactions: null },
   workspaceCountersStatus = { degraded: false, failedCounters: [], errorByCounter: {}, stale: false, lastRefreshedAt: null },
   canReadFraudCases,
   canReadAlerts,
   canReadTransactions,
   canReadGovernanceAdvisories,
-  alertPage = emptyPage(),
-  transactionPage = emptyPage(),
-  advisoryQueue = { count: 0 },
+  alertPage,
+  transactionPage,
+  advisoryQueue,
   governanceAnalytics,
   fraudCaseSummary = { totalFraudCases: 0 },
   fraudCaseTotalElements,
@@ -49,6 +50,13 @@ export function AlertsListPage({
         onWorkspaceChange={onWorkspaceChange}
       />
 
+      {routeFallbackNotice && (
+        <div className="statePanel warningPanel" role="status" aria-live="polite">
+          <h3>Workspace route normalized.</h3>
+          <p>{routeFallbackNotice}</p>
+        </div>
+      )}
+
       {workspaceCountersStatus.degraded && (
         <div className="statePanel warningPanel" role="status" aria-live="polite">
           <h3>Some workspace counters are temporarily unavailable.</h3>
@@ -82,14 +90,4 @@ function shouldBlockDashboard(sessionState, error) {
   ];
 
   return blockedSessionStates.includes(sessionState?.status) || [401, 403].includes(error?.status);
-}
-
-function emptyPage() {
-  return {
-    content: [],
-    totalElements: 0,
-    totalPages: 0,
-    page: 0,
-    size: 0
-  };
 }

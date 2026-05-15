@@ -2,7 +2,10 @@ import { GovernanceWorkspaceContainer } from "./GovernanceWorkspaceContainer.jsx
 import { useGovernanceAuditWorkflow } from "./useGovernanceAuditWorkflow.js";
 import { useGovernanceQueue } from "./useGovernanceQueue.js";
 import { useWorkspaceRuntime } from "./useWorkspaceRuntime.js";
+import { createWorkspaceRuntimeResult } from "./workspaceRuntimeResult.js";
 
+// Compliance runtime owns advisory queue freshness. Reports analytics is owned by
+// ReportsWorkspaceRuntime and refreshes when Reports is active or explicitly retried.
 const NO_ANALYTICS_REFRESH = {
   refresh: async () => {}
 };
@@ -32,7 +35,7 @@ export function GovernanceWorkspaceRuntime({
     queueState.refresh();
   }
 
-  return children({
+  return children(createWorkspaceRuntimeResult({
     workspaceContent: (
       <GovernanceWorkspaceContainer
         headingLabel={route.heading.label}
@@ -47,5 +50,5 @@ export function GovernanceWorkspaceRuntime({
     },
     error: queueState.error,
     refreshWorkspace
-  });
+  }));
 }

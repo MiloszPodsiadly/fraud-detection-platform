@@ -1,26 +1,9 @@
 import { AlertsListPage } from "../pages/AlertsListPage.jsx";
 import { WorkspaceDetailRouter } from "./WorkspaceDetailRouter.jsx";
-import { WORKSPACE_ROUTE_ENTRIES, resolveWorkspaceRoute } from "./WorkspaceRouteRegistry.jsx";
+import { WORKSPACE_ROUTE_ENTRIES, resolveWorkspaceRouteResult } from "./WorkspaceRouteRegistry.jsx";
 import { useWorkspaceCounters } from "./useWorkspaceCounters.js";
-import { shouldBlockDashboardFetch } from "./useWorkspaceRefreshController.js";
 import { useWorkspaceRuntime } from "./useWorkspaceRuntime.js";
-
-const EMPTY_PAGE = Object.freeze({
-  content: Object.freeze([]),
-  totalElements: 0,
-  totalPages: 0,
-  page: 0,
-  size: 0
-});
-
-const EMPTY_ALERT_QUEUE_STATE = Object.freeze({
-  page: EMPTY_PAGE
-});
-
-const EMPTY_ADVISORY_QUEUE = Object.freeze({
-  count: 0,
-  advisory_events: Object.freeze([])
-});
+import { createWorkspaceRefreshHandler, shouldBlockDashboardFetch } from "./workspaceRefreshContract.js";
 
 export function WorkspaceDashboardShell({
   workspacePage,
@@ -30,6 +13,7 @@ export function WorkspaceDashboardShell({
   navigateWorkspace,
   openAlert,
   openFraudCase,
+  invalidWorkspaceRoute,
   sessionState,
   setSessionState
 }) {
@@ -43,7 +27,8 @@ export function WorkspaceDashboardShell({
     canWriteGovernanceAudit,
     runtimeStatus
   } = useWorkspaceRuntime();
-  const activeRoute = resolveWorkspaceRoute(workspacePage);
+  const resolvedRoute = resolveWorkspaceRouteResult(workspacePage);
+  const activeRoute = resolvedRoute.route;
   const ActiveWorkspaceRuntime = activeRoute.Runtime;
   const sharedWorkspaceReadsEnabled = runtimeStatus === "ready" && !shouldBlockDashboardFetch(sessionState);
   const workspaceCounterState = useWorkspaceCounters({
@@ -73,22 +58,24 @@ export function WorkspaceDashboardShell({
         error,
         refreshWorkspace
       }) => {
-        function refreshDashboard() {
-          if (shouldBlockDashboardFetch(sessionState)) {
-            return;
-          }
-          refreshWorkspace?.();
-          if (sharedWorkspaceReadsEnabled) {
-            refreshWorkspaceCounters();
-          }
-        }
+        const refreshDashboard = createWorkspaceRefreshHandler({
+          sessionState,
+          sharedWorkspaceReadsEnabled,
+          refreshWorkspace,
+          refreshWorkspaceCounters
+        });
+        const routeFallbackNotice = fallbackNoticeFor({
+          invalidWorkspaceRoute,
+          resolvedRoute
+        });
 
         if ((selectedAlertId || selectedFraudCaseId) && apiClient) {
           return (
             <WorkspaceDetailRouter
               selectedAlertId={selectedAlertId}
               selectedFraudCaseId={selectedFraudCaseId}
-              alertQueueState={detailRouterState.alertQueueState || EMPTY_ALERT_QUEUE_STATE}
+              alertQueueState={detailRouterState.alertQueueState}
+              alertSummaryRuntimeState={detailRouterState.alertQueueState ? "available" : "not-mounted"}
               session={session}
               apiClient={apiClient}
               canReadAlerts={canReadAlerts}
@@ -104,6 +91,7 @@ export function WorkspaceDashboardShell({
         return (
           <AlertsListPage
             workspacePage={activeRoute.key}
+            routeFallbackNotice={routeFallbackNotice}
             workspaceRoutes={WORKSPACE_ROUTE_ENTRIES}
             workspaceCounters={workspaceCounterState.counters}
             workspaceCountersStatus={workspaceCounterState}
@@ -112,13 +100,13 @@ export function WorkspaceDashboardShell({
             canReadTransactions={canReadTransactions}
             canReadGovernanceAdvisories={canReadGovernanceAdvisories}
             canWriteGovernanceAudit={canWriteGovernanceAudit}
-            alertPage={navigationState.alertPage || EMPTY_PAGE}
+            alertPage={navigationState.alertPage}
             fraudCaseSummary={navigationState.fraudCaseSummary}
             fraudCaseSummaryError={navigationState.fraudCaseSummaryError}
             isFraudCaseSummaryLoading={navigationState.isFraudCaseSummaryLoading}
             onWorkspaceChange={navigateWorkspace}
-            transactionPage={navigationState.transactionPage || EMPTY_PAGE}
-            advisoryQueue={navigationState.advisoryQueue || EMPTY_ADVISORY_QUEUE}
+            transactionPage={navigationState.transactionPage}
+            advisoryQueue={navigationState.advisoryQueue}
             governanceAnalytics={navigationState.governanceAnalytics}
             sessionState={sessionState}
             error={error}
@@ -130,4 +118,12 @@ export function WorkspaceDashboardShell({
       }}
     </ActiveWorkspaceRuntime>
   );
+}
+
+function fallbackNoticeFor({ invalidWorkspaceRoute, resolvedRoute }) {
+  const requestedKey = invalidWorkspaceRoute || (resolvedRoute.wasInvalid ? resolvedRoute.requestedKey : null);
+  if (!requestedKey) {
+    return null;
+  }
+  return `Unknown workspace route "${requestedKey}"; showing ${resolvedRoute.route.label} workspace.`;
 }

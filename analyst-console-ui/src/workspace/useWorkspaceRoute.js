@@ -65,9 +65,11 @@ export function useWorkspaceRoute() {
 export function readWorkspaceRoute() {
   const params = new URLSearchParams(window.location.search);
   const workspace = params.get("workspace");
+  const matchedWorkspace = Object.entries(WORKSPACE_PAGES)
+    .find(([, page]) => page.path === workspace)?.[0] || null;
   return {
-    workspacePage: Object.entries(WORKSPACE_PAGES)
-      .find(([, page]) => page.path === workspace)?.[0] || "analyst",
+    workspacePage: matchedWorkspace || "analyst",
+    invalidWorkspaceRoute: workspace && !matchedWorkspace ? workspace : null,
     selectedAlertId: params.get("alertId"),
     selectedFraudCaseId: params.get("fraudCaseId")
   };

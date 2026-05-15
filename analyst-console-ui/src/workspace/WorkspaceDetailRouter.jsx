@@ -6,6 +6,7 @@ export function WorkspaceDetailRouter({
   selectedAlertId,
   selectedFraudCaseId,
   alertQueueState,
+  alertSummaryRuntimeState = "available",
   session,
   apiClient,
   canReadAlerts,
@@ -16,8 +17,8 @@ export function WorkspaceDetailRouter({
   onRefreshDashboard
 }) {
   const selectedAlertSummary = useMemo(
-    () => alertQueueState.page.content.find((alert) => alert.alertId === selectedAlertId),
-    [alertQueueState.page.content, selectedAlertId]
+    () => alertQueueState?.page?.content?.find((alert) => alert.alertId === selectedAlertId),
+    [alertQueueState?.page?.content, selectedAlertId]
   );
 
   useEffect(() => {
@@ -46,6 +47,7 @@ export function WorkspaceDetailRouter({
       <AlertDetailsPage
         alertId={selectedAlertId}
         alertSummary={selectedAlertSummary}
+        alertSummaryRuntimeState={alertSummaryRuntimeState}
         session={session}
         apiClient={apiClient}
         canReadAlert={canReadAlerts}

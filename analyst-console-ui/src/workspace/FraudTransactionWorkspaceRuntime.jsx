@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { FraudTransactionWorkspaceContainer } from "./FraudTransactionWorkspaceContainer.jsx";
 import { useAlertQueue } from "./useAlertQueue.js";
 import { useWorkspaceRuntime } from "./useWorkspaceRuntime.js";
+import { createWorkspaceRuntimeResult } from "./workspaceRuntimeResult.js";
 
 export function FraudTransactionWorkspaceRuntime({
   route,
@@ -33,7 +34,7 @@ export function FraudTransactionWorkspaceRuntime({
     alertQueueState.refresh();
   }
 
-  return children({
+  return children(createWorkspaceRuntimeResult({
     workspaceContent: (
       <FraudTransactionWorkspaceContainer
         headingLabel={route.heading.label}
@@ -52,5 +53,5 @@ export function FraudTransactionWorkspaceRuntime({
     },
     error: alertQueueState.error,
     refreshWorkspace
-  });
+  }));
 }

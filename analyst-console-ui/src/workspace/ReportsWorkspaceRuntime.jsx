@@ -1,6 +1,7 @@
 import { ReportsWorkspaceContainer } from "./ReportsWorkspaceContainer.jsx";
 import { useGovernanceAnalytics } from "./useGovernanceAnalytics.js";
 import { useWorkspaceRuntime } from "./useWorkspaceRuntime.js";
+import { createWorkspaceRuntimeResult } from "./workspaceRuntimeResult.js";
 
 export function ReportsWorkspaceRuntime({
   route,
@@ -16,7 +17,7 @@ export function ReportsWorkspaceRuntime({
     analyticsState.refresh();
   }
 
-  return children({
+  return children(createWorkspaceRuntimeResult({
     workspaceContent: (
       <ReportsWorkspaceContainer
         headingLabel={route.heading.label}
@@ -28,5 +29,5 @@ export function ReportsWorkspaceRuntime({
     },
     error: analyticsState.error,
     refreshWorkspace
-  });
+  }));
 }

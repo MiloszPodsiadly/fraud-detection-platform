@@ -24,14 +24,14 @@ export function WorkspaceNavigation({
     : Object.keys(workspaceCountersStatus.errorByCounter || {});
   const transactionGlobalCount = canReadTransactions === false
     ? "Unavailable"
-    : workspaceCounters.transactions ?? transactionPage.totalElements ?? 0;
+    : workspaceCounters.transactions ?? transactionPage?.totalElements ?? "Unavailable";
   const alertGlobalCount = canReadAlerts === false
     ? "Unavailable"
-    : workspaceCounters.alerts ?? alertPage.totalElements ?? 0;
-  const fraudCaseGlobalCount = fraudCaseSummary?.totalFraudCases ?? fraudCaseTotalElements ?? 0;
+    : workspaceCounters.alerts ?? alertPage?.totalElements ?? "Unavailable";
+  const fraudCaseGlobalCount = fraudCaseSummary?.totalFraudCases ?? fraudCaseTotalElements;
   const fraudCaseSummaryLabel = fraudCaseSummaryError
     ? "Unavailable"
-    : String(fraudCaseGlobalCount);
+    : fraudCaseGlobalCount === undefined ? "Unavailable" : String(fraudCaseGlobalCount);
   const fraudCaseSummaryGeneratedAt = fraudCaseSummary?.generatedAt
     ? new Date(fraudCaseSummary.generatedAt).toLocaleString()
     : null;
@@ -63,11 +63,15 @@ export function WorkspaceNavigation({
       ariaLabel: `Global fraud cases ${isFraudCaseSummaryLoading ? "Loading" : fraudCaseSummaryLabel}`
     },
     reports: {
-      value: governanceAnalytics?.totals?.advisories ?? 0,
+      value: canReadGovernanceAdvisories === false
+        ? "Unavailable"
+        : governanceAnalytics?.totals?.advisories ?? "Unavailable",
       authority: canReadGovernanceAdvisories
     },
     compliance: {
-      value: advisoryQueue.count || 0,
+      value: canReadGovernanceAdvisories === false
+        ? "Unavailable"
+        : advisoryQueue?.count ?? "Unavailable",
       authority: canReadGovernanceAdvisories
     }
   };
