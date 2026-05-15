@@ -15,6 +15,8 @@ Workspace data loading, counters, authority-derived workspace capability flags, 
 - Workspace counters move to `useWorkspaceCounters` with abort, request sequencing, partial failure reporting, stale retained values, and session-boundary clearing.
 - Counter UI visibly reports degraded and stale states without converting missing authority or failed counters to zero.
 - `WorkspaceDashboardShell` is a composition shell for wiring workspace-specific runtime hooks into the page component.
+- `WorkspaceDashboardShell` remains a transitional composition layer; keep new business workflows out of this shell.
+- `AlertsListPage` remains a broad workspace presentation sink during FDP-51; do not grow its prop surface for new workflows.
 - Analyst workspace reads live in `useAnalystWorkspaceRuntime`.
 - Alert and transaction workspace reads live in `useTransactionWorkspaceRuntime`.
 - Governance advisory, analytics, and audit workflow wiring live in `useGovernanceWorkspaceRuntime`.
@@ -69,6 +71,19 @@ Workspace data loading, counters, authority-derived workspace capability flags, 
 
 Governance advisory read intentionally follows the current backend authorization model. Do not introduce a frontend-only governance-read concept without a backend contract change.
 
+## Governance Capability Mapping
+
+- `canReadGovernanceAdvisories` is currently backed by `transaction-monitor:read`.
+- `canWriteGovernanceAudit` is backed by `governance-advisory:audit:write`.
+- Backend authorization remains authoritative.
+- Future domain cleanup may introduce a dedicated `governance-advisory:read` authority.
+- Do not use `canReadGovernanceAdvisories` for write affordances.
+
+## Transitional Composition
+
+FDP-51 creates a workspace runtime layer, but `WorkspaceDashboardShell` and `AlertsListPage` are still transitional composition surfaces.
+Future UI decomposition should split presentation into `AnalystWorkspacePage`, `TransactionWorkspacePage`, `FraudTransactionWorkspacePage`, `GovernanceWorkspacePage`, `ReportsWorkspacePage`, and `WorkspaceTabs`.
+
 ## UI Session Boundary
 
 `workspaceSessionResetKey` and the `App.jsx` detail-selection reset key are UI consistency boundaries. They clear counters and stale details across user, role, authority, or provider-kind changes.
@@ -79,7 +94,7 @@ They are not API credential freshness keys. API client freshness comes from recr
 - Counters are workspace UX metadata, not globally consistent truth.
 - `null` means unavailable, not authorized, or not loaded; it does not mean zero.
 - `stale` means a previous value is retained after a failed refresh.
-- `lastRefreshedAt` means last successful counter refresh, not current global freshness.
+- `lastRefreshedAt` is displayed as the last successful refresh, not current global freshness.
 
 ## Scope Guard
 

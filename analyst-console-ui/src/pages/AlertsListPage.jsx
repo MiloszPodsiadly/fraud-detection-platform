@@ -194,7 +194,7 @@ export function AlertsListPage({
               : "Unavailable counters are not shown as zero."}
           </p>
           {workspaceCountersStatus.lastRefreshedAt && (
-            <p>Last successful counter refresh {new Date(workspaceCountersStatus.lastRefreshedAt).toLocaleString()}.</p>
+            <p>Last successful refresh {new Date(workspaceCountersStatus.lastRefreshedAt).toLocaleString()}.</p>
           )}
           {typeof workspaceCountersStatus.refresh === "function" && (
             <button className="secondaryButton" type="button" onClick={workspaceCountersStatus.refresh}>

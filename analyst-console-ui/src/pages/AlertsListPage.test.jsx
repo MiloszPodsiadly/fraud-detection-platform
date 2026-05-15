@@ -200,7 +200,7 @@ describe("AlertsListPage session lifecycle", () => {
     );
 
     expect(screen.getByText("Some workspace counters are temporarily unavailable.")).toBeInTheDocument();
-    expect(screen.getByText(/Last successful counter refresh/)).toBeInTheDocument();
+    expect(screen.getByText(/Last successful refresh/)).toBeInTheDocument();
     expect(screen.queryByText(/Last refreshed/)).not.toBeInTheDocument();
   });
 
