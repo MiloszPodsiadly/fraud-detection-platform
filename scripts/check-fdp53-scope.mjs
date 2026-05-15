@@ -109,10 +109,14 @@ function isCheckedTextFile(file) {
 }
 
 function isAllowedNarrativeFile(file) {
-  return file === scriptPath
+  return isScopeGuardScript(file)
     || file.startsWith("docs/")
     || file.startsWith(".github/workflows/")
     || /\.(test|spec)\.[jt]sx?$/.test(file);
+}
+
+function isScopeGuardScript(file) {
+  return /^scripts\/check-fdp\d+-scope\.mjs$/.test(file);
 }
 
 function isWorkspaceRuntimeFile(file) {

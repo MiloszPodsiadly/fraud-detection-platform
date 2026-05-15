@@ -32,7 +32,7 @@ for (const file of changedFiles) {
     if (!allowedEndpointFiles.has(normalized) && /["']\/(?:api|governance|system|bff)\//.test(sourceLine)) {
       violations.push(`${normalized}: new endpoint strings must stay behind the API client boundary.`);
     }
-    if (normalized !== "scripts/check-fdp52-scope.mjs" && !normalized.startsWith("docs/") && introducesForbiddenScope(sourceLine)) {
+    if (!isScopeGuardScript(normalized) && !normalized.startsWith("docs/") && introducesForbiddenScope(sourceLine)) {
       violations.push(`${normalized}: FDP-52 must not introduce assignment, claim, export, bulk, optimistic, Kafka/outbox/finality, or idempotency semantics.`);
     }
   }
@@ -57,6 +57,10 @@ function introducesForbiddenScope(sourceLine) {
     || exportWorkflowPattern.test(sourceLine)
     || /\b(export|download)\s+(csv|file|report|data|results)\b/i.test(sourceLine)
     || /\b(onExport|handleExport|export[A-Z][A-Za-z]*)\b/.test(sourceLine);
+}
+
+function isScopeGuardScript(file) {
+  return /^scripts\/check-fdp\d+-scope\.mjs$/.test(file);
 }
 
 function isCheckedTextFile(file) {
