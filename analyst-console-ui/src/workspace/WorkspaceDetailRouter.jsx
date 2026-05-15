@@ -1,12 +1,13 @@
 import { useEffect, useMemo } from "react";
 import { AlertDetailsPage } from "../pages/AlertDetailsPage.jsx";
 import { FraudCaseDetailsPage } from "../pages/FraudCaseDetailsPage.jsx";
+import { WORKSPACE_DETAIL_RUNTIME_STATE } from "./workspaceRuntimeStates.js";
 
 export function WorkspaceDetailRouter({
   selectedAlertId,
   selectedFraudCaseId,
   alertQueueState,
-  alertSummaryRuntimeState = "available",
+  alertSummaryRuntimeState,
   session,
   apiClient,
   canReadAlerts,
@@ -43,11 +44,13 @@ export function WorkspaceDetailRouter({
   }
 
   if (selectedAlertId && apiClient) {
+    const effectiveAlertSummaryRuntimeState = alertSummaryRuntimeState
+      || (alertQueueState ? WORKSPACE_DETAIL_RUNTIME_STATE.AVAILABLE : WORKSPACE_DETAIL_RUNTIME_STATE.NOT_MOUNTED);
     return (
       <AlertDetailsPage
         alertId={selectedAlertId}
         alertSummary={selectedAlertSummary}
-        alertSummaryRuntimeState={alertSummaryRuntimeState}
+        alertSummaryRuntimeState={effectiveAlertSummaryRuntimeState}
         session={session}
         apiClient={apiClient}
         canReadAlert={canReadAlerts}

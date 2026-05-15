@@ -2,8 +2,10 @@ import { AlertsListPage } from "../pages/AlertsListPage.jsx";
 import { WorkspaceDetailRouter } from "./WorkspaceDetailRouter.jsx";
 import { WORKSPACE_ROUTE_ENTRIES, resolveWorkspaceRouteResult } from "./WorkspaceRouteRegistry.jsx";
 import { useWorkspaceCounters } from "./useWorkspaceCounters.js";
+import { useWorkspaceRefreshNotice } from "./useWorkspaceRefreshNotice.js";
 import { useWorkspaceRuntime } from "./useWorkspaceRuntime.js";
 import { createWorkspaceRefreshHandler, shouldBlockDashboardFetch } from "./workspaceRefreshContract.js";
+import { WORKSPACE_DETAIL_RUNTIME_STATE } from "./workspaceRuntimeStates.js";
 
 export function WorkspaceDashboardShell({
   workspacePage,
@@ -30,6 +32,7 @@ export function WorkspaceDashboardShell({
   const resolvedRoute = resolveWorkspaceRouteResult(workspacePage);
   const activeRoute = resolvedRoute.route;
   const ActiveWorkspaceRuntime = activeRoute.Runtime;
+  const { refreshNotice, consumeRefreshResult } = useWorkspaceRefreshNotice(activeRoute.key);
   const sharedWorkspaceReadsEnabled = runtimeStatus === "ready" && !shouldBlockDashboardFetch(sessionState);
   const workspaceCounterState = useWorkspaceCounters({
     enabled: sharedWorkspaceReadsEnabled,
@@ -64,6 +67,9 @@ export function WorkspaceDashboardShell({
           refreshWorkspace,
           refreshWorkspaceCounters
         });
+        const refreshDashboardWithNotice = () => {
+          return consumeRefreshResult(refreshDashboard());
+        };
         const routeFallbackNotice = fallbackNoticeFor({
           invalidWorkspaceRoute,
           resolvedRoute
@@ -75,7 +81,9 @@ export function WorkspaceDashboardShell({
               selectedAlertId={selectedAlertId}
               selectedFraudCaseId={selectedFraudCaseId}
               alertQueueState={detailRouterState.alertQueueState}
-              alertSummaryRuntimeState={detailRouterState.alertQueueState ? "available" : "not-mounted"}
+              alertSummaryRuntimeState={detailRouterState.alertQueueState
+                ? WORKSPACE_DETAIL_RUNTIME_STATE.AVAILABLE
+                : WORKSPACE_DETAIL_RUNTIME_STATE.NOT_MOUNTED}
               session={session}
               apiClient={apiClient}
               canReadAlerts={canReadAlerts}
@@ -83,7 +91,7 @@ export function WorkspaceDashboardShell({
               workspacePage={activeRoute.key}
               workspaceLabel={activeRoute.label}
               onCloseSelection={closeSelection}
-              onRefreshDashboard={refreshDashboard}
+              onRefreshDashboard={refreshDashboardWithNotice}
             />
           );
         }
@@ -92,6 +100,7 @@ export function WorkspaceDashboardShell({
           <AlertsListPage
             workspacePage={activeRoute.key}
             routeFallbackNotice={routeFallbackNotice}
+            refreshNotice={refreshNotice}
             workspaceRoutes={WORKSPACE_ROUTE_ENTRIES}
             workspaceCounters={workspaceCounterState.counters}
             workspaceCountersStatus={workspaceCounterState}
@@ -110,7 +119,7 @@ export function WorkspaceDashboardShell({
             governanceAnalytics={navigationState.governanceAnalytics}
             sessionState={sessionState}
             error={error}
-            onRetry={refreshDashboard}
+            onRetry={refreshDashboardWithNotice}
           >
             {workspaceContent}
           </AlertsListPage>

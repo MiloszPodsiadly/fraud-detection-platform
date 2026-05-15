@@ -59,7 +59,17 @@ export const WORKSPACE_ROUTE_REGISTRY = Object.freeze({
   })
 });
 
-export const WORKSPACE_ROUTE_ENTRIES = Object.freeze(Object.values(WORKSPACE_ROUTE_REGISTRY));
+export const WORKSPACE_ROUTE_ORDER = Object.freeze([
+  "transactionScoring",
+  "fraudTransaction",
+  "analyst",
+  "reports",
+  "compliance"
+]);
+
+export const WORKSPACE_ROUTE_ENTRIES = Object.freeze(
+  WORKSPACE_ROUTE_ORDER.map((key) => WORKSPACE_ROUTE_REGISTRY[key])
+);
 
 export function resolveWorkspaceRoute(workspaceKey) {
   return resolveWorkspaceRouteResult(workspaceKey).route;

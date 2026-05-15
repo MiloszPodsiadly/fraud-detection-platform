@@ -12,11 +12,12 @@ import { LoadingPanel } from "../components/LoadingPanel.jsx";
 import { PermissionNotice } from "../components/SecurityStatePanels.jsx";
 import { TransactionSummary } from "../components/TransactionSummary.jsx";
 import { formatDateTime, formatScore } from "../utils/format.js";
+import { isWorkspaceDetailRuntimeAvailable, normalizeWorkspaceDetailRuntimeState } from "../workspace/workspaceRuntimeStates.js";
 
 export function AlertDetailsPage({
   alertId,
   alertSummary,
-  alertSummaryRuntimeState = "available",
+  alertSummaryRuntimeState,
   session,
   apiClient,
   canReadAlert = true,
@@ -41,6 +42,7 @@ export function AlertDetailsPage({
   const headingRef = useRef(null);
   const canSubmitDecision = hasAuthority(session, AUTHORITIES.ALERT_DECISION_SUBMIT);
   const detailHeadingId = `detail-heading-alert-${safeDomId(alertId)}`;
+  const normalizedAlertSummaryRuntimeState = normalizeWorkspaceDetailRuntimeState(alertSummaryRuntimeState);
 
   useEffect(() => {
     currentContextRef.current = { alertId, apiClient };
@@ -231,7 +233,7 @@ export function AlertDetailsPage({
               Created {formatDateTime(alert.createdAt)} with correlation ID{" "}
               <code>{alert.correlationId}</code>
             </p>
-            {alertSummaryRuntimeState !== "available" && !alertSummary && (
+            {!isWorkspaceDetailRuntimeAvailable(normalizedAlertSummaryRuntimeState) && !alertSummary && (
               <DetailStateBanner
                 state="runtime-not-ready"
                 message="Alert queue summary is not mounted for this workspace; detail data is loaded directly from the alert service."

@@ -10,11 +10,20 @@ export function createWorkspaceRefreshHandler({
     if (shouldBlockDashboardFetch(sessionState)) {
       return { refreshed: false, reason: "blocked-session" };
     }
-    refreshWorkspace();
-    if (sharedWorkspaceReadsEnabled) {
-      refreshWorkspaceCounters();
+    try {
+      refreshWorkspace();
+    } catch {
+      return { refreshed: false, reason: "refresh-failed", failedStep: "workspace" };
     }
-    return { refreshed: true };
+    if (sharedWorkspaceReadsEnabled) {
+      try {
+        refreshWorkspaceCounters();
+      } catch {
+        return { refreshed: false, reason: "refresh-failed", failedStep: "counters" };
+      }
+      return { refreshed: true, workspaceRefresh: "started", countersRefresh: "started" };
+    }
+    return { refreshed: true, workspaceRefresh: "started", countersRefresh: "skipped" };
   };
 }
 

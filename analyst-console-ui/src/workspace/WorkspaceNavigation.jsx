@@ -23,10 +23,10 @@ export function WorkspaceNavigation({
     ? workspaceCountersStatus.failedCounters
     : Object.keys(workspaceCountersStatus.errorByCounter || {});
   const transactionGlobalCount = canReadTransactions === false
-    ? "Unavailable"
+    ? "No access"
     : workspaceCounters.transactions ?? transactionPage?.totalElements ?? "Unavailable";
   const alertGlobalCount = canReadAlerts === false
-    ? "Unavailable"
+    ? "No access"
     : workspaceCounters.alerts ?? alertPage?.totalElements ?? "Unavailable";
   const fraudCaseGlobalCount = fraudCaseSummary?.totalFraudCases ?? fraudCaseTotalElements;
   const fraudCaseSummaryLabel = fraudCaseSummaryError
@@ -64,13 +64,13 @@ export function WorkspaceNavigation({
     },
     reports: {
       value: canReadGovernanceAdvisories === false
-        ? "Unavailable"
+        ? "No access"
         : governanceAnalytics?.totals?.advisories ?? "Unavailable",
       authority: canReadGovernanceAdvisories
     },
     compliance: {
       value: canReadGovernanceAdvisories === false
-        ? "Unavailable"
+        ? "No access"
         : advisoryQueue?.count ?? "Unavailable",
       authority: canReadGovernanceAdvisories
     }
@@ -124,7 +124,7 @@ function openWorkspace(event, onWorkspaceChange, page) {
 
 function CounterMeta({ authority, stale = false }) {
   if (authority === false) {
-    return <small className="counterMeta">Unavailable</small>;
+    return <small className="counterMeta">Access unavailable</small>;
   }
   if (stale) {
     return <small className="counterMeta">Last known</small>;

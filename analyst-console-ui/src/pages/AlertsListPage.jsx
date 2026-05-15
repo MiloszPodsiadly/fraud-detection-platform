@@ -6,6 +6,7 @@ export function AlertsListPage({
   workspacePage = "analyst",
   workspaceRoutes,
   routeFallbackNotice,
+  refreshNotice,
   workspaceCounters = { alerts: null, transactions: null },
   workspaceCountersStatus = { degraded: false, failedCounters: [], errorByCounter: {}, stale: false, lastRefreshedAt: null },
   canReadFraudCases,
@@ -54,6 +55,13 @@ export function AlertsListPage({
         <div className="statePanel warningPanel" role="status" aria-live="polite">
           <h3>Workspace route normalized.</h3>
           <p>{routeFallbackNotice}</p>
+        </div>
+      )}
+
+      {refreshNotice && (
+        <div className="statePanel warningPanel" role="status" aria-live="polite">
+          <h3>{refreshNotice.title}</h3>
+          <p>{refreshNotice.message}</p>
         </div>
       )}
 

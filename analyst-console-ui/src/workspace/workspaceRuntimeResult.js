@@ -1,10 +1,21 @@
-export function createWorkspaceRuntimeResult({
+const RESULT_KEYS = Object.freeze([
+  "workspaceContent",
+  "navigationState",
+  "detailRouterState",
+  "error",
+  "refreshWorkspace"
+]);
+
+// Keep this object narrow so WorkspaceDashboardShell does not grow a meta-prop contract.
+export function createWorkspaceRuntimeResult(input) {
+  rejectUnknownKeys(input);
+  const {
   workspaceContent,
   navigationState = {},
   detailRouterState = {},
   error = null,
   refreshWorkspace
-}) {
+  } = input;
   if (!workspaceContent) {
     throw new Error("Workspace runtime result requires workspaceContent.");
   }
@@ -25,6 +36,13 @@ export function createWorkspaceRuntimeResult({
     error,
     refreshWorkspace
   };
+}
+
+function rejectUnknownKeys(input) {
+  const extraKeys = Object.keys(input || {}).filter((key) => !RESULT_KEYS.includes(key));
+  if (extraKeys.length > 0) {
+    throw new Error(`Workspace runtime result contains unsupported keys: ${extraKeys.join(", ")}`);
+  }
 }
 
 function isPlainObject(value) {
