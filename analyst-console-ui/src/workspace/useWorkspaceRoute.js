@@ -32,14 +32,16 @@ export function useWorkspaceRoute() {
   }, []);
 
   const openAlert = useCallback((alertId) => {
-    const params = new URLSearchParams();
+    const params = new URLSearchParams(window.location.search);
+    params.delete("fraudCaseId");
     params.set("alertId", alertId);
     pushRoute(params);
     setRoute(readWorkspaceRoute());
   }, []);
 
   const openFraudCase = useCallback((caseId) => {
-    const params = new URLSearchParams();
+    const params = new URLSearchParams(window.location.search);
+    params.delete("alertId");
     params.set("fraudCaseId", caseId);
     pushRoute(params);
     setRoute(readWorkspaceRoute());

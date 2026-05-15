@@ -1,18 +1,32 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { isAbortError } from "../api/alertsApi.js";
 import { AUTHORITIES, hasAuthority } from "../auth/session.js";
+import { DetailHeader } from "../components/DetailHeader.jsx";
+import { DetailStateBanner } from "../components/DetailStateBanner.jsx";
 import { ErrorState } from "../components/ErrorState.jsx";
 import { LoadingPanel } from "../components/LoadingPanel.jsx";
 import { RiskBadge } from "../components/RiskBadge.jsx";
 import { PermissionNotice } from "../components/SecurityStatePanels.jsx";
 import { formatAmount, formatDateTime, formatScore } from "../utils/format.js";
+import { createIdempotencyKey } from "../utils/idempotencyKey.js";
 
 const CASE_STATUSES = ["IN_REVIEW", "CONFIRMED_FRAUD", "FALSE_POSITIVE", "CLOSED"];
+const SECURE_REQUEST_ID_ERROR = "Secure request identifier could not be generated. Reload the page and try again.";
 
-export function FraudCaseDetailsPage({ caseId, session, apiClient, onBack, onCaseUpdated }) {
+export function FraudCaseDetailsPage({
+  caseId,
+  session,
+  apiClient,
+  canReadFraudCase = true,
+  workspaceLabel = "Fraud Case",
+  onBack,
+  onCaseUpdated
+}) {
   const [fraudCase, setFraudCase] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [detailState, setDetailState] = useState("loading");
+  const [lastSuccessfulLoadAt, setLastSuccessfulLoadAt] = useState(null);
   const [expandedTransactionId, setExpandedTransactionId] = useState(null);
   const [form, setForm] = useState({
     status: "IN_REVIEW",
@@ -21,13 +35,16 @@ export function FraudCaseDetailsPage({ caseId, session, apiClient, onBack, onCas
     tags: "rapid-transfer, grouped-low-risk"
   });
   const [decisionIdempotencyKey, setDecisionIdempotencyKey] = useState("");
-  const [submitState, setSubmitState] = useState({ isSubmitting: false, error: "", success: "" });
+  const [submitState, setSubmitState] = useState({ isSubmitting: false, error: "", success: "", warning: "" });
   const loadRequestSeqRef = useRef(0);
   const mutationSeqRef = useRef(0);
   const loadAbortRef = useRef(null);
   const mutationAbortRef = useRef(null);
   const mountedRef = useRef(false);
   const currentContextRef = useRef({ caseId, apiClient });
+  const currentCaseRef = useRef(null);
+  const headingRef = useRef(null);
+  const detailHeadingId = `detail-heading-fraud-case-${safeDomId(caseId)}`;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -45,10 +62,27 @@ export function FraudCaseDetailsPage({ caseId, session, apiClient, onBack, onCas
     mutationAbortRef.current?.abort();
     mutationAbortRef.current = null;
     mutationSeqRef.current += 1;
-    setSubmitState({ isSubmitting: false, error: "", success: "" });
+    setSubmitState({ isSubmitting: false, error: "", success: "", warning: "" });
   }, [apiClient, caseId]);
 
+  useEffect(() => {
+    currentCaseRef.current = fraudCase;
+  }, [fraudCase]);
+
+  useEffect(() => {
+    if (!isLoading) {
+      headingRef.current?.focus();
+    }
+  }, [caseId, isLoading]);
+
   const loadCase = useCallback(async () => {
+    if (canReadFraudCase !== true) {
+      loadAbortRef.current?.abort();
+      setIsLoading(false);
+      setError("");
+      setDetailState(canReadFraudCase === false ? "access-denied" : "runtime-not-ready");
+      return { status: canReadFraudCase === false ? "access-denied" : "runtime-not-ready" };
+    }
     loadAbortRef.current?.abort();
     const abortController = new AbortController();
     loadAbortRef.current = abortController;
@@ -58,12 +92,15 @@ export function FraudCaseDetailsPage({ caseId, session, apiClient, onBack, onCas
     const currentApiClient = apiClient;
     setIsLoading(true);
     setError("");
+    setDetailState("loading");
     try {
       const nextCase = await currentApiClient.getFraudCase(currentCaseId, { signal: abortController.signal });
       if (!isCurrentLoad(requestSeq, abortController.signal, loadRequestSeqRef, mountedRef)) {
         return;
       }
       setFraudCase(nextCase);
+      setLastSuccessfulLoadAt(new Date().toISOString());
+      setDetailState("loaded");
       setForm({
         status: nextCase.status === "OPEN" ? "IN_REVIEW" : nextCase.status,
         analystId: session.userId || nextCase.analystId || nextCase.assignedInvestigatorId || "",
@@ -76,6 +113,7 @@ export function FraudCaseDetailsPage({ caseId, session, apiClient, onBack, onCas
         return;
       }
       setError(apiError.message);
+      setDetailState(currentCaseRef.current ? "stale" : "unavailable");
     } finally {
       if (loadRequestSeqRef.current === requestSeq) {
         setIsLoading(false);
@@ -84,7 +122,7 @@ export function FraudCaseDetailsPage({ caseId, session, apiClient, onBack, onCas
         }
       }
     }
-  }, [apiClient, caseId, session.userId]);
+  }, [apiClient, canReadFraudCase, caseId, session.userId]);
 
   useEffect(() => {
     loadCase();
@@ -98,25 +136,48 @@ export function FraudCaseDetailsPage({ caseId, session, apiClient, onBack, onCas
     return <LoadingPanel label="Loading fraud case..." />;
   }
 
-  if (error) {
+  if (canReadFraudCase !== true) {
+    return (
+      <div className="pageEnter">
+        <section className="panel detailsMain">
+          <DetailHeader
+            title="Fraud case detail"
+            entityType="Fraud case"
+            entityId={caseId}
+            workspaceLabel={workspaceLabel}
+            actionState={canReadFraudCase === false ? "Case update unavailable: missing authority" : "Case update unavailable: runtime not ready"}
+            onBack={onBack}
+            headingRef={headingRef}
+            headingId={detailHeadingId}
+          />
+          <DetailStateBanner
+            state={canReadFraudCase === false ? "access-denied" : "runtime-not-ready"}
+            message={canReadFraudCase === false ? "This session does not include fraud case read authority." : "Fraud case detail cannot load until runtime capabilities are ready."}
+          />
+        </section>
+      </div>
+    );
+  }
+
+  if (error && !fraudCase) {
     return <ErrorState message={error} onRetry={loadCase} />;
   }
 
   const canUpdateCase = hasAuthority(session, AUTHORITIES.FRAUD_CASE_UPDATE);
-  const actionDisabled = submitState.isSubmitting || !canUpdateCase;
+  const actionDisabled = submitState.isSubmitting || !canUpdateCase || detailState === "stale";
+  const actionState = fraudCaseActionState({ canUpdateCase, detailState });
 
   function changeForm(patch) {
     setForm((current) => ({ ...current, ...patch }));
     setDecisionIdempotencyKey("");
-    setSubmitState((current) => ({ ...current, error: "", success: "" }));
+    setSubmitState((current) => ({ ...current, error: "", success: "", warning: "" }));
   }
 
   async function submitDecision(event) {
     event.preventDefault();
-    if (!canUpdateCase) {
+    if (!canUpdateCase || detailState === "stale") {
       return;
     }
-    const idempotencyKey = decisionIdempotencyKey || createDecisionIdempotencyKey(caseId);
     mutationAbortRef.current?.abort();
     const abortController = new AbortController();
     mutationAbortRef.current = abortController;
@@ -124,9 +185,17 @@ export function FraudCaseDetailsPage({ caseId, session, apiClient, onBack, onCas
     mutationSeqRef.current = mutationSeq;
     const currentCaseId = caseId;
     const currentApiClient = apiClient;
-    setDecisionIdempotencyKey(idempotencyKey);
-    setSubmitState({ isSubmitting: true, error: "", success: "" });
+    setSubmitState({ isSubmitting: true, error: "", success: "", warning: "" });
     try {
+      let idempotencyKey;
+      try {
+        idempotencyKey = decisionIdempotencyKey || createIdempotencyKey("fraud-case-update");
+      } catch {
+        setSubmitState({ isSubmitting: false, error: SECURE_REQUEST_ID_ERROR, success: "", warning: "" });
+        return;
+      }
+      setDecisionIdempotencyKey(idempotencyKey);
+      // Abort only protects the frontend request lifecycle; an unsafe request that reached the server may still complete.
       const response = await currentApiClient.updateFraudCase(currentCaseId, {
         status: form.status,
         analystId: session.userId || form.analystId,
@@ -145,17 +214,28 @@ export function FraudCaseDetailsPage({ caseId, session, apiClient, onBack, onCas
         tags: (updatedCase.decisionTags || []).join(", ")
       });
       setDecisionIdempotencyKey("");
-      setSubmitState({ isSubmitting: false, error: "", success: "Case decision saved." });
-      onCaseUpdated?.();
+      setSubmitState({ isSubmitting: false, error: "", success: "Case decision saved.", warning: "" });
+      let refreshWarning = "";
+      try {
+        await onCaseUpdated?.();
+      } catch {
+        refreshWarning = "Case decision saved. Latest dashboard state could not be refreshed.";
+      }
+      if (!isCurrentMutation(mutationSeq, currentCaseId, currentApiClient, abortController.signal, mutationSeqRef, mountedRef, currentContextRef)) {
+        return;
+      }
+      if (refreshWarning) {
+        setSubmitState({ isSubmitting: false, error: "", success: "Case decision saved.", warning: refreshWarning });
+      }
     } catch (apiError) {
       if (!isCurrentMutation(mutationSeq, currentCaseId, currentApiClient, abortController.signal, mutationSeqRef, mountedRef, currentContextRef)) {
         return;
       }
       if (isAbortError(apiError)) {
-        setSubmitState({ isSubmitting: false, error: "", success: "" });
+        setSubmitState({ isSubmitting: false, error: "", success: "", warning: "" });
         return;
       }
-      setSubmitState({ isSubmitting: false, error: apiError.message, success: "" });
+      setSubmitState({ isSubmitting: false, error: apiError.message, success: "", warning: "" });
     } finally {
       if (mutationSeqRef.current === mutationSeq && mutationAbortRef.current === abortController) {
         mutationAbortRef.current = null;
@@ -165,17 +245,28 @@ export function FraudCaseDetailsPage({ caseId, session, apiClient, onBack, onCas
 
   return (
     <div className="pageEnter">
-      <button className="backButton" type="button" onClick={onBack}>Back to dashboard</button>
       <div className="detailsLayout">
         <section className="panel detailsMain">
-          <div className="detailsHeader">
-            <div>
-              <p className="eyebrow">Fraud case</p>
-              <h2>{fraudCase.suspicionType}</h2>
-              <p className="sectionCopy">{fraudCase.reason}</p>
-            </div>
-            <span className="statusPill">{fraudCase.status}</span>
-          </div>
+          <DetailHeader
+            title={fraudCase.suspicionType}
+            entityType="Fraud case"
+            entityId={fraudCase.caseNumber || fraudCase.caseId}
+            workspaceLabel={workspaceLabel}
+            status={fraudCase.status}
+            riskLevel={fraudCase.riskLevel}
+            actionState={actionState}
+            lastLoadedAt={lastSuccessfulLoadAt}
+            onBack={onBack}
+            headingRef={headingRef}
+            headingId={detailHeadingId}
+          />
+          <DetailStateBanner
+            state={detailState === "stale" ? "stale" : null}
+            message={detailState === "stale" ? staleFraudCaseMessage(error) : error}
+            onRetry={loadCase}
+            retryLabel={`Retry fraud case ${fraudCase.caseNumber || fraudCase.caseId} detail`}
+          />
+          <p className="sectionCopy">{fraudCase.reason}</p>
 
           <div className="metricGrid">
             <div className="metricCard">
@@ -297,7 +388,7 @@ export function FraudCaseDetailsPage({ caseId, session, apiClient, onBack, onCas
               action="updating a fraud case"
             />
           )}
-          <form className="decisionForm" onSubmit={submitDecision}>
+          {canUpdateCase && <form className="decisionForm" onSubmit={submitDecision}>
             <label>
               Status
               <select value={form.status} onChange={(event) => changeForm({ status: event.target.value })} disabled={actionDisabled}>
@@ -318,10 +409,12 @@ export function FraudCaseDetailsPage({ caseId, session, apiClient, onBack, onCas
             </label>
             {submitState.error && <p className="formError">{submitState.error}</p>}
             {submitState.success && <p className="formSuccess">{submitState.success}</p>}
+            {submitState.warning && <p className="formWarning">{submitState.warning}</p>}
+            {detailState === "stale" && <p className="formWarning">Refresh fraud case detail successfully before saving a case decision.</p>}
             <button className="primaryButton" type="submit" disabled={actionDisabled}>
               {submitState.isSubmitting ? "Saving..." : "Save case decision"}
             </button>
-          </form>
+          </form>}
 
           <div className="caseStatePanel">
             <h3>Current decision</h3>
@@ -350,9 +443,28 @@ export function FraudCaseDetailsPage({ caseId, session, apiClient, onBack, onCas
   );
 }
 
-function createDecisionIdempotencyKey(caseId) {
-  const random = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  return `fraud-case-update-${caseId}-${random}`;
+function fraudCaseActionState({ canUpdateCase, detailState }) {
+  if (!canUpdateCase) {
+    return "Case update unavailable: missing authority";
+  }
+  if (detailState === "runtime-not-ready") {
+    return "Case update unavailable: runtime not ready";
+  }
+  if (detailState === "stale") {
+    return "Case update unavailable: refresh required";
+  }
+  return "Case update available";
+}
+
+function safeDomId(value) {
+  const safe = String(value || "unknown").replace(/[^A-Za-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
+  return safe || "unknown";
+}
+
+function staleFraudCaseMessage(error) {
+  return error
+    ? `Refresh fraud case detail successfully before updating the case decision. Last refresh error: ${error}`
+    : "Refresh fraud case detail successfully before updating the case decision.";
 }
 
 function isCurrentLoad(requestSeq, signal, requestSeqRef, mountedRef) {

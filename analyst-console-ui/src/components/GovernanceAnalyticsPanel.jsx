@@ -20,7 +20,8 @@ export function GovernanceAnalyticsPanel({
   isLoading,
   error,
   onWindowDaysChange,
-  onRetry
+  onRetry,
+  headingProps = {}
 }) {
   const totals = analytics?.totals || { advisories: 0, reviewed: 0, open: 0 };
   const decisionDistribution = analytics?.decision_distribution || {};
@@ -36,7 +37,7 @@ export function GovernanceAnalyticsPanel({
       <div className="panelHeader">
         <div>
           <p className="eyebrow">Audit analytics</p>
-          <h2>Review visibility</h2>
+          <h2 {...headingProps}>Review visibility</h2>
           <p className="sectionCopy">
             Derived read-only view of recent advisory handling. Analytics do not define SLAs, trigger actions, or change scoring.
           </p>

@@ -62,7 +62,13 @@ function WorkQueueRow({ item, onOpenCase }) {
       </td>
       <td className="numericCell">{item.linkedAlertCount ?? 0}</td>
       <td>
-        <button className="rowButton" type="button" onClick={() => onOpenCase(item.caseId)} aria-label={`Open fraud case ${caseLabel}`}>
+        <button
+          className="rowButton"
+          type="button"
+          data-detail-origin={`fraud-case-${item.caseId}`}
+          onClick={() => onOpenCase(item.caseId)}
+          aria-label={`Open fraud case ${caseLabel}`}
+        >
           Open case
         </button>
       </td>

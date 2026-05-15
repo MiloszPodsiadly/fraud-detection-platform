@@ -23,7 +23,8 @@ export function GovernanceReviewQueue({
   canRecordAudit: canRecordAuditProp,
   onFiltersChange,
   onRetry,
-  onRecordAudit
+  onRecordAudit,
+  headingProps = {}
 }) {
   const status = advisoryQueue?.status || "UNAVAILABLE";
   const events = status === "UNAVAILABLE" ? [] : advisoryQueue?.advisory_events || [];
@@ -40,7 +41,7 @@ export function GovernanceReviewQueue({
       <div className="panelHeader">
         <div>
           <p className="eyebrow">Governance</p>
-          <h2>Operator review queue</h2>
+          <h2 {...headingProps}>Operator review queue</h2>
           <p className="sectionCopy">
             Advisory context is read-only. Recording review writes audit history only.
             Audit entries do not trigger system actions. Advisory signals do not affect scoring, model behavior, or system decisions.

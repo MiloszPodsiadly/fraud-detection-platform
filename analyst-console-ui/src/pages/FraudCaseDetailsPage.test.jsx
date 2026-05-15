@@ -1,8 +1,12 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { FraudCaseDetailsPage } from "./FraudCaseDetailsPage.jsx";
 
 describe("FraudCaseDetailsPage", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("ignores stale fraud case response after caseId changes", async () => {
     const firstCase = deferred();
     const secondCase = deferred();
@@ -159,10 +163,11 @@ describe("FraudCaseDetailsPage", () => {
       "case-1",
       expect.objectContaining({ decisionReason: "Reviewed" }),
       expect.objectContaining({
-        idempotencyKey: expect.stringMatching(/^fraud-case-update-case-1-/),
+        idempotencyKey: expect.stringMatching(/^fraud-case-update-/),
         signal: expect.any(AbortSignal)
       })
     ));
+    expect(apiClient.updateFraudCase.mock.calls[0][2].idempotencyKey).not.toContain("case-1");
     await waitFor(() => expect(screen.getByRole("button", { name: "Save case decision" })).toBeEnabled());
     expect(screen.queryByText("aborted")).not.toBeInTheDocument();
   });
@@ -179,6 +184,64 @@ describe("FraudCaseDetailsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save case decision" }));
 
     expect(await screen.findByText("write failed")).toBeInTheDocument();
+  });
+
+  it("keeps stale fraud case detail visible but disables case update", async () => {
+    const apiClientA = {
+      getFraudCase: vi.fn().mockResolvedValue(fraudCase("case-1", "Open case")),
+      updateFraudCase: vi.fn()
+    };
+    const apiClientB = {
+      getFraudCase: vi.fn().mockRejectedValue(new Error("refresh failed")),
+      updateFraudCase: vi.fn()
+    };
+    const { rerender } = render(page({ caseId: "case-1", apiClient: apiClientA }));
+    await screen.findByText("Open case");
+
+    rerender(page({ caseId: "case-1", apiClient: apiClientB }));
+
+    expect(await screen.findByText(/Refresh fraud case detail successfully before updating the case decision/)).toBeInTheDocument();
+    expect(screen.getByText("Case update unavailable: refresh required")).toBeInTheDocument();
+    expect(screen.getByText("Open case")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save case decision" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Save case decision" }));
+    expect(apiClientB.updateFraudCase).not.toHaveBeenCalled();
+  });
+
+  it("keeps mutation success separate from dashboard refresh failure", async () => {
+    const onCaseUpdated = vi.fn().mockRejectedValue(new Error("dashboard refresh failed"));
+    const apiClient = {
+      getFraudCase: vi.fn().mockResolvedValue(fraudCase("case-1", "Open case")),
+      updateFraudCase: vi.fn().mockResolvedValue({ ...fraudCase("case-1", "Updated case"), status: "CLOSED", decisionReason: "Reviewed" })
+    };
+    render(page({ caseId: "case-1", apiClient, onCaseUpdated }));
+    await screen.findByText("Open case");
+
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Reviewed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save case decision" }));
+
+    expect(await screen.findByText("Case decision saved.")).toBeInTheDocument();
+    expect(screen.getByText("Case decision saved. Latest dashboard state could not be refreshed.")).toBeInTheDocument();
+    expect(screen.queryByText("dashboard refresh failed")).not.toBeInTheDocument();
+    expect(apiClient.updateFraudCase).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a controlled error and does not update when secure request ID generation fails", async () => {
+    vi.stubGlobal("crypto", undefined);
+    const apiClient = {
+      getFraudCase: vi.fn().mockResolvedValue(fraudCase("case-1", "Open case")),
+      updateFraudCase: vi.fn()
+    };
+    render(page({ caseId: "case-1", apiClient }));
+    await screen.findByText("Open case");
+
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Reviewed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save case decision" }));
+
+    expect(await screen.findByText("Secure request identifier could not be generated. Reload the page and try again.")).toBeInTheDocument();
+    expect(apiClient.updateFraudCase).not.toHaveBeenCalled();
+    expect(screen.queryByText("Case decision saved.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save case decision" })).toBeEnabled();
   });
 });
 

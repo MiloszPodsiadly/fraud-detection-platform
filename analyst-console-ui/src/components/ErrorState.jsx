@@ -22,7 +22,7 @@ export function ErrorState({ error, message, onRetry }) {
   }
 
   return (
-    <div className="statePanel errorPanel">
+    <div className="statePanel errorPanel" role="alert">
       <h3>Unable to load data</h3>
       <p>{displayMessage}</p>
       <button className="secondaryButton" type="button" onClick={onRetry}>Try again</button>

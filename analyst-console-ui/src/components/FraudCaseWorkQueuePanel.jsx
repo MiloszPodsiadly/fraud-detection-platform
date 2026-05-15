@@ -28,7 +28,8 @@ export function FraudCaseWorkQueuePanel({
   onLoadMore,
   onRetry,
   onRefreshFirstSlice,
-  onOpenCase
+  onOpenCase,
+  headingProps = {}
 }) {
   const items = dedupeByCaseId(queue.content || []);
   const [filtersExpanded, setFiltersExpanded] = useState(true);
@@ -56,7 +57,7 @@ export function FraudCaseWorkQueuePanel({
       <div className="panelHeader workQueuePanelHeader">
         <div>
           <p className="eyebrow">Fraud cases</p>
-          <h2 id="fraud-case-work-queue-title">Fraud Case Work Queue</h2>
+          <h2 id="fraud-case-work-queue-title" {...headingProps}>Fraud Case Work Queue</h2>
           <p className="sectionCopy">Read-only investigator queue. Counts reflect loaded cases only.</p>
         </div>
         <div className="workQueueHeaderActions">

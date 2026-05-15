@@ -130,8 +130,55 @@ describe("AlertDetailsPage", () => {
     fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Reviewed manually" } });
     fireEvent.click(screen.getByRole("button", { name: "Submit decision" }));
 
-    expect(await screen.findByText("refresh failed")).toBeInTheDocument();
+    expect(await screen.findByText(/Refresh alert detail successfully before submitting a decision/)).toBeInTheDocument();
+    expect(screen.getByText("Decision saved. Dashboard refresh failed; retry refresh.")).toBeInTheDocument();
     expect(onDecisionSubmitted).not.toHaveBeenCalled();
+  });
+
+  it("locks decision submission while showing stale alert detail and re-enables after retry", async () => {
+    const apiClient = {
+      getAlert: vi.fn()
+        .mockResolvedValueOnce(alertDetails("alert-1", "Open alert"))
+        .mockRejectedValueOnce(new Error("refresh failed"))
+        .mockResolvedValueOnce(alertDetails("alert-1", "Recovered alert")),
+      getAssistantSummary: vi.fn().mockResolvedValue(summary("summary-current")),
+      submitAnalystDecision: vi.fn().mockResolvedValue({ resultingStatus: "RESOLVED" })
+    };
+    render(page({ alertId: "alert-1", apiClient }));
+    await screen.findByText("Open alert");
+
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Reviewed manually" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit decision" }));
+
+    expect(await screen.findByText(/Refresh alert detail successfully before submitting a decision/)).toBeInTheDocument();
+    expect(screen.getByText("Decision action unavailable: refresh required")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Submit decision" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Submit decision" }));
+    expect(apiClient.submitAnalystDecision).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /Retry alert alert-1 detail/ }));
+    expect(await screen.findByText("Recovered alert")).toBeInTheDocument();
+    expect(screen.getByText("Decision action available")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Submit decision" })).toBeEnabled();
+  });
+
+  it("shows permission notice instead of stale decision controls when submit authority is missing", async () => {
+    const apiClientA = {
+      getAlert: vi.fn().mockResolvedValue(alertDetails("alert-1", "Open alert")),
+      getAssistantSummary: vi.fn().mockResolvedValue(summary("summary-current"))
+    };
+    const apiClientB = {
+      getAlert: vi.fn().mockRejectedValue(new Error("refresh failed")),
+      getAssistantSummary: vi.fn().mockResolvedValue(summary("summary-current"))
+    };
+    const { rerender } = render(page({ alertId: "alert-1", apiClient: apiClientA, sessionValue: readOnlySession() }));
+    await screen.findByText("Open alert");
+
+    rerender(page({ alertId: "alert-1", apiClient: apiClientB, sessionValue: readOnlySession() }));
+
+    expect(await screen.findByText(/Refresh alert detail successfully before submitting a decision/)).toBeInTheDocument();
+    expect(screen.getByText("Insufficient permission")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Submit decision" })).not.toBeInTheDocument();
   });
 
   it("does not call the dashboard callback when a post-decision refresh becomes stale", async () => {
@@ -210,12 +257,12 @@ describe("AlertDetailsPage", () => {
   });
 });
 
-function page({ alertId, apiClient, onDecisionSubmitted = vi.fn() }) {
+function page({ alertId, apiClient, onDecisionSubmitted = vi.fn(), sessionValue = session() }) {
   return (
     <AlertDetailsPage
       alertId={alertId}
       alertSummary={null}
-      session={session()}
+      session={sessionValue}
       apiClient={apiClient}
       onBack={vi.fn()}
       onDecisionSubmitted={onDecisionSubmitted}
@@ -228,6 +275,14 @@ function session() {
     userId: "analyst-1",
     roles: ["ANALYST"],
     authorities: ["alert:read", "assistant-summary:read", "alert:decision:submit"]
+  };
+}
+
+function readOnlySession() {
+  return {
+    userId: "readonly-1",
+    roles: ["READ_ONLY_ANALYST"],
+    authorities: ["alert:read", "assistant-summary:read"]
   };
 }
 

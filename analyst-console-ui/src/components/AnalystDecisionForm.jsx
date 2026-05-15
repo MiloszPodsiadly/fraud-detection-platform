@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { isAbortError } from "../api/alertsApi.js";
 import { AUTHORITIES } from "../auth/session.js";
+import { createIdempotencyKey } from "../utils/idempotencyKey.js";
 import { formatScore } from "../utils/format.js";
 import { PermissionNotice } from "./SecurityStatePanels.jsx";
 import { RiskBadge } from "./RiskBadge.jsx";
@@ -11,6 +12,7 @@ const DECISIONS = [
   "REQUIRE_MORE_EVIDENCE",
   "ESCALATED"
 ];
+const SECURE_REQUEST_ID_ERROR = "Secure request identifier could not be generated. Reload the page and try again.";
 
 export function AnalystDecisionForm({ alertId, summary, session, apiClient, canSubmit, disabled, onSubmitted }) {
   const [decision, setDecision] = useState("REQUIRE_MORE_EVIDENCE");
@@ -19,6 +21,7 @@ export function AnalystDecisionForm({ alertId, summary, session, apiClient, canS
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
+  const [postSubmitWarning, setPostSubmitWarning] = useState("");
   const mountedRef = useRef(false);
   const submitSeqRef = useRef(0);
   const submitAbortRef = useRef(null);
@@ -43,6 +46,7 @@ export function AnalystDecisionForm({ alertId, summary, session, apiClient, canS
     setIsSubmitting(false);
     setError("");
     setResult(null);
+    setPostSubmitWarning("");
   }, [alertId, apiClient]);
 
   async function handleSubmit(event) {
@@ -60,9 +64,17 @@ export function AnalystDecisionForm({ alertId, summary, session, apiClient, canS
     setIsSubmitting(true);
     setError("");
     setResult(null);
+    setPostSubmitWarning("");
 
     try {
-      const idempotencyKey = createDecisionIdempotencyKey(alertId);
+      let idempotencyKey;
+      try {
+        idempotencyKey = createIdempotencyKey("alert-decision");
+      } catch {
+        setError(SECURE_REQUEST_ID_ERROR);
+        return;
+      }
+      // Abort only protects the frontend request lifecycle; an unsafe request that reached the server may still complete.
       const response = await currentApiClient.submitAnalystDecision(currentAlertId, {
         analystId,
         decision,
@@ -79,7 +91,16 @@ export function AnalystDecisionForm({ alertId, summary, session, apiClient, canS
         return;
       }
       setResult(response);
-      await onSubmitted();
+      let refreshFailed = false;
+      try {
+        const postSubmitResult = await onSubmitted?.();
+        refreshFailed = Boolean(postSubmitResult?.status && postSubmitResult.status !== "loaded");
+      } catch {
+        refreshFailed = true;
+      }
+      if (isCurrentSubmit(submitSeq, currentAlertId, currentApiClient, abortController.signal, submitSeqRef, mountedRef, currentContextRef) && refreshFailed) {
+        setPostSubmitWarning("Decision saved. Dashboard refresh failed; retry refresh.");
+      }
     } catch (apiError) {
       if (!isCurrentSubmit(submitSeq, currentAlertId, currentApiClient, abortController.signal, submitSeqRef, mountedRef, currentContextRef)) {
         return;
@@ -161,6 +182,7 @@ export function AnalystDecisionForm({ alertId, summary, session, apiClient, canS
 
       {error && <p className="formError">{error}</p>}
       {result && <p className="formSuccess">Decision saved. Status: {result.resultingStatus}</p>}
+      {postSubmitWarning && <p className="formWarning">{postSubmitWarning}</p>}
 
       <button className="primaryButton" type="submit" disabled={actionDisabled}>
         {isSubmitting ? "Submitting..." : "Submit decision"}
@@ -175,11 +197,4 @@ function isCurrentSubmit(submitSeq, alertId, apiClient, signal, submitSeqRef, mo
     && currentContextRef.current.alertId === alertId
     && currentContextRef.current.apiClient === apiClient
     && !signal.aborted;
-}
-
-function createDecisionIdempotencyKey(alertId) {
-  if (globalThis.crypto?.randomUUID) {
-    return `alert-decision-${alertId}-${globalThis.crypto.randomUUID()}`;
-  }
-  return `alert-decision-${alertId}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
