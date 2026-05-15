@@ -1408,16 +1408,35 @@ jobs:
           echo
           cat "$SUMMARY_MD"
 
+      - name: Package FDP-37 production image chaos artifacts
+        if: always()
+        run: |
+          ARCHIVE=alert-service/target/fdp37-production-image-chaos-reports.tar.gz
+          paths=()
+          for path in \
+            alert-service/target/surefire-reports \
+            alert-service/target/failsafe-reports \
+            alert-service/target/fdp37-chaos
+          do
+            if [ -e "$path" ]; then
+              paths+=("$path")
+            fi
+          done
+          if [ "${#paths[@]}" -eq 0 ]; then
+            echo "No FDP-37 artifact paths found to package" >&2
+            exit 1
+          fi
+          tar -czf "$ARCHIVE" "${paths[@]}"
+          test -s "$ARCHIVE"
+          echo "Packaged FDP-37 artifacts into $ARCHIVE"
+
       - name: Upload FDP-37 production image chaos artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: fdp37-production-image-chaos-reports
           if-no-files-found: error
-          path: |
-            alert-service/target/surefire-reports/
-            alert-service/target/failsafe-reports/
-            alert-service/target/fdp37-chaos/
+          path: alert-service/target/fdp37-production-image-chaos-reports.tar.gz
 
   regulated-mutation-regression:
     name: Regulated Mutation Regression Gate
