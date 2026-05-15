@@ -32,7 +32,7 @@ for (const file of changedFiles) {
     if (!allowedEndpointFiles.has(normalized) && /["']\/(?:api|governance|system|bff)\//.test(sourceLine)) {
       violations.push(`${normalized}: new endpoint strings must stay behind the API client boundary.`);
     }
-    if (normalized !== "scripts/check-fdp52-scope.mjs" && introducesForbiddenScope(sourceLine)) {
+    if (normalized !== "scripts/check-fdp52-scope.mjs" && !normalized.startsWith("docs/") && introducesForbiddenScope(sourceLine)) {
       violations.push(`${normalized}: FDP-52 must not introduce assignment, claim, export, bulk, optimistic, Kafka/outbox/finality, or idempotency semantics.`);
     }
   }

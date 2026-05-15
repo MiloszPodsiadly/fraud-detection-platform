@@ -1191,6 +1191,7 @@ jobs:
             analyst-console-ui/src/workspace/TransactionScoringWorkspaceContainer.test.jsx \
             analyst-console-ui/src/workspace/GovernanceWorkspaceContainer.test.jsx \
             analyst-console-ui/src/workspace/ReportsWorkspaceContainer.test.jsx \
+            analyst-console-ui/src/workspace/WorkspaceContainerBoundary.test.jsx \
             analyst-console-ui/src/components/DetailHeader.test.jsx \
             analyst-console-ui/src/components/DetailStateBanner.test.jsx \
             analyst-console-ui/src/utils/idempotencyKey.test.js \
@@ -1203,7 +1204,7 @@ jobs:
 
       - name: Run FDP-52 workspace split and detail UX tests
         working-directory: analyst-console-ui
-        run: npm test -- --run src/workspace/WorkspaceDashboardShell.test.jsx src/workspace/WorkspaceDetailRouter.test.jsx src/workspace/AnalystWorkspaceContainer.test.jsx src/workspace/FraudTransactionWorkspaceContainer.test.jsx src/workspace/TransactionScoringWorkspaceContainer.test.jsx src/workspace/GovernanceWorkspaceContainer.test.jsx src/workspace/ReportsWorkspaceContainer.test.jsx src/components/DetailHeader.test.jsx src/components/DetailStateBanner.test.jsx src/utils/idempotencyKey.test.js src/pages/AlertDetailsPage.test.jsx src/pages/FraudCaseDetailsPage.test.jsx src/App.test.jsx --reporter=default --reporter=junit --outputFile=./test-results/fdp52-vitest.xml
+        run: npm test -- --run src/workspace/WorkspaceDashboardShell.test.jsx src/workspace/WorkspaceDetailRouter.test.jsx src/workspace/AnalystWorkspaceContainer.test.jsx src/workspace/FraudTransactionWorkspaceContainer.test.jsx src/workspace/TransactionScoringWorkspaceContainer.test.jsx src/workspace/GovernanceWorkspaceContainer.test.jsx src/workspace/ReportsWorkspaceContainer.test.jsx src/workspace/WorkspaceContainerBoundary.test.jsx src/components/DetailHeader.test.jsx src/components/DetailStateBanner.test.jsx src/utils/idempotencyKey.test.js src/pages/AlertDetailsPage.test.jsx src/pages/FraudCaseDetailsPage.test.jsx src/App.test.jsx --reporter=default --reporter=junit --outputFile=./test-results/fdp52-vitest.xml
 
       - name: Build FDP-52 UI
         working-directory: analyst-console-ui
@@ -1237,6 +1238,7 @@ jobs:
           grep -q "TransactionScoringWorkspaceContainer.test.jsx" test-results/fdp52-vitest.xml
           grep -q "GovernanceWorkspaceContainer.test.jsx" test-results/fdp52-vitest.xml
           grep -q "ReportsWorkspaceContainer.test.jsx" test-results/fdp52-vitest.xml
+          grep -q "WorkspaceContainerBoundary.test.jsx" test-results/fdp52-vitest.xml
           grep -q "DetailHeader.test.jsx" test-results/fdp52-vitest.xml
           grep -q "DetailStateBanner.test.jsx" test-results/fdp52-vitest.xml
           grep -q "idempotencyKey.test.js" test-results/fdp52-vitest.xml

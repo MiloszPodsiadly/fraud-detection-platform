@@ -2,7 +2,9 @@
 
 FDP-52 detail and mutation components are frontend runtime consumers only. Backend authorization remains authoritative, and UI capability checks are presentation guards.
 
-FDP-52 introduces workspace-specific presentation boundaries and focus anchors. `WorkspaceDashboardShell` remains the composition hub for runtime hooks. Containers are not a new security or runtime boundary; future work may move hook ownership into workspace-specific runtime containers. FDP-52 moves rendering boundaries out of `AlertsListPage` and improves detail UX readiness.
+FDP-52 introduces workspace-specific presentation boundaries. It moves rendering boundaries out of `AlertsListPage` and improves detail UX readiness. `WorkspaceDashboardShell` remains the runtime composition hub. Workspace containers are not security boundaries, and backend authorization remains authoritative. Frontend capability checks are UX/runtime gating only.
+
+FDP-52 does not add backend endpoints, new mutation workflows, assignment, claim, export, bulk actions, idempotency semantics, Kafka/outbox/finality, or new auth modes. Future work may move hook ownership into workspace-specific runtime containers after lifecycle and duplicate-fetch risks are covered by tests.
 
 ## Detail Reads
 
@@ -21,8 +23,11 @@ Every new mutation UI must use:
 
 - The explicit runtime-provided `apiClient`.
 - An idempotency key when the backend endpoint requires one.
+- Web Crypto only for idempotency key generation.
 - A context guard before `setState` and before `onUpdated` callbacks.
 - Clear separation between mutation success and a later dashboard/detail refresh failure.
+
+`Math.random` fallback is intentionally forbidden. If secure randomness is unavailable, mutation UI must fail closed before sending the request. This protects request identity quality but does not make mutation abort a backend rollback.
 
 Mutation abort is a frontend request lifecycle guard, not a backend rollback guarantee. If an unsafe request reached the backend, it may complete; UI must rely on idempotency keys, the server response, and post-save refresh.
 
