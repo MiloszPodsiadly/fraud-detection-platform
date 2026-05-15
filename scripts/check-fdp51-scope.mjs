@@ -45,7 +45,7 @@ const blockedWrapperPattern = new RegExp(`\\b(${blockedDefaultApiWrappers.join("
 for (const file of changedFiles) {
   const normalized = file.replaceAll("\\", "/");
   if (backendProductionPrefixes.some((prefix) => normalized.startsWith(prefix))) {
-    violations.push(`${normalized}: FDP-51 must not change backend production code.`);
+    violations.push(`${normalized}: FDP-51 is frontend runtime only; backend production code must not change.`);
   }
   if (!normalized.startsWith("analyst-console-ui/src/") || /\.(test|spec)\.[jt]sx?$/.test(normalized)) {
     continue;
@@ -53,10 +53,10 @@ for (const file of changedFiles) {
   const diff = usingExplicitChangedFiles ? "" : git(["diff", "--unified=0", `${diffBase()}...HEAD`, "--", normalized]);
   for (const line of diff.split(/\r?\n/).filter((entry) => entry.startsWith("+") && !entry.startsWith("+++"))) {
     if (!allowedEndpointFiles.has(normalized) && /["']\/(?:api|governance|system|bff)\//.test(line)) {
-      violations.push(`${normalized}: endpoint URL strings must stay inside the API client boundary.`);
+      violations.push(`${normalized}: route calls must go through API client boundary.`);
     }
     if (introducesForbiddenWorkflow(line)) {
-      violations.push(`${normalized}: FDP-51 must not introduce export, bulk, assignment, or mass-action workflows.`);
+      violations.push(`${normalized}: export, bulk, assignment, or mass-action workflows are out of scope for FDP-51.`);
     }
     if (isAuthSensitiveFrontendFile(normalized) && introducesDirectDefaultApiWrapperUsage(line)) {
       violations.push(`${normalized}: FDP-51 workspace code must use runtime-provided API clients, not default API wrapper calls.`);

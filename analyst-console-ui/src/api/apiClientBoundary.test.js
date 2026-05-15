@@ -164,7 +164,9 @@ describe("api client boundary", () => {
 
     expect(script).toContain("introducesForbiddenWorkflow");
     expect(script).toContain("^export\\s+(async\\s+)?(function|const|let|var|class)\\b");
-    expect(script).toContain("endpoint URL strings must stay inside the API client boundary.");
+    expect(script).toContain("route calls must go through API client boundary.");
+    expect(script).toContain("FDP-51 is frontend runtime only; backend production code must not change.");
+    expect(script).toContain("out of scope for FDP-51");
     expect(script).toContain("blockedDefaultApiWrappers");
     expect(script).toContain("runtime-provided API clients");
     expect(() => runScopeGuard({
