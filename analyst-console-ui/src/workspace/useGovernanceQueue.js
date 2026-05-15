@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isAbortError } from "../api/alertsApi.js";
+import { useOptionalWorkspaceRuntime } from "./useWorkspaceRuntime.js";
 
 const INITIAL_QUEUE = {
   status: "UNAVAILABLE",
@@ -16,6 +17,10 @@ const INITIAL_REQUEST = {
 };
 
 export function useGovernanceQueue({ enabled = true, apiClient, session, authProvider } = {}) {
+  const runtime = useOptionalWorkspaceRuntime();
+  const effectiveApiClient = apiClient !== undefined ? apiClient : runtime?.apiClient;
+  const effectiveSession = session !== undefined ? session : runtime?.session;
+  const effectiveAuthProvider = authProvider !== undefined ? authProvider : runtime?.authProvider;
   const [queue, setQueue] = useState(INITIAL_QUEUE);
   const [request, setRequest] = useState(INITIAL_REQUEST);
   const [auditHistories, setAuditHistories] = useState({});
@@ -23,7 +28,7 @@ export function useGovernanceQueue({ enabled = true, apiClient, session, authPro
   const [error, setError] = useState(null);
   const requestSeqRef = useRef(0);
   const abortControllerRef = useRef(null);
-  const sessionIdentity = `${authProvider?.kind || "none"}:${session?.userId || ""}`;
+  const sessionIdentity = `${effectiveAuthProvider?.kind || "none"}:${effectiveSession?.userId || ""}`;
 
   const load = useCallback(async (nextRequest = request) => {
     abortControllerRef.current?.abort();
@@ -34,8 +39,8 @@ export function useGovernanceQueue({ enabled = true, apiClient, session, authPro
     setIsLoading(true);
     setError(null);
     try {
-      const nextQueue = await apiClient.listGovernanceAdvisories(nextRequest, { signal: abortController.signal });
-      const histories = await loadAuditHistories(apiClient, nextQueue.advisory_events || [], abortController.signal);
+      const nextQueue = await effectiveApiClient.listGovernanceAdvisories(nextRequest, { signal: abortController.signal });
+      const histories = await loadAuditHistories(effectiveApiClient, nextQueue.advisory_events || [], abortController.signal);
       if (requestSeqRef.current !== requestSeq) {
         return null;
       }
@@ -58,10 +63,10 @@ export function useGovernanceQueue({ enabled = true, apiClient, session, authPro
       }
     }
     return null;
-  }, [apiClient, request]);
+  }, [effectiveApiClient, request]);
 
   useEffect(() => {
-    if (!enabled || !apiClient) {
+    if (!enabled || !effectiveApiClient) {
       abortControllerRef.current?.abort();
       abortControllerRef.current = null;
       requestSeqRef.current += 1;
@@ -72,7 +77,7 @@ export function useGovernanceQueue({ enabled = true, apiClient, session, authPro
       return;
     }
     load(request);
-  }, [enabled, load, request, sessionIdentity]);
+  }, [enabled, effectiveApiClient, load, request, sessionIdentity]);
 
   useEffect(() => () => {
     abortControllerRef.current?.abort();

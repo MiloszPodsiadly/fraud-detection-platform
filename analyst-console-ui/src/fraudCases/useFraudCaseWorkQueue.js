@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isAbortError } from "../api/alertsApi.js";
+import { useOptionalWorkspaceRuntime } from "../workspace/useWorkspaceRuntime.js";
 import {
   initialFraudCaseWorkQueue,
   initialFraudCaseWorkQueueRequest,
@@ -17,6 +18,10 @@ export function useFraudCaseWorkQueue({
   apiClient,
   onSessionError = noop
 } = {}) {
+  const runtime = useOptionalWorkspaceRuntime();
+  const effectiveApiClient = apiClient !== undefined ? apiClient : runtime?.apiClient;
+  const effectiveSession = session !== undefined ? session : runtime?.session;
+  const effectiveAuthProvider = authProvider !== undefined ? authProvider : runtime?.authProvider;
   const [queue, setQueue] = useState(initialFraudCaseWorkQueue);
   const [draftFilters, setDraftFilters] = useState(initialFraudCaseWorkQueueRequest);
   const [committedFilters, setCommittedFilters] = useState(initialFraudCaseWorkQueueRequest);
@@ -28,7 +33,7 @@ export function useFraudCaseWorkQueue({
   const requestSeqRef = useRef(0);
   const abortControllerRef = useRef(null);
   const skipNextReloadRef = useRef(false);
-  const sessionIdentity = `${authProvider?.kind || "none"}:${session?.userId || ""}`;
+  const sessionIdentity = `${effectiveAuthProvider?.kind || "none"}:${effectiveSession?.userId || ""}`;
 
   const loadQueue = useCallback(async (request, { append = false } = {}) => {
     abortControllerRef.current?.abort();
@@ -39,7 +44,7 @@ export function useFraudCaseWorkQueue({
     setIsLoading(true);
     setError(null);
     try {
-      const nextQueue = await apiClient.listFraudCaseWorkQueue(request, { signal: abortController.signal });
+      const nextQueue = await effectiveApiClient.listFraudCaseWorkQueue(request, { signal: abortController.signal });
       if (requestSeqRef.current !== requestSeq) {
         return;
       }
@@ -77,10 +82,10 @@ export function useFraudCaseWorkQueue({
         }
       }
     }
-  }, [apiClient, onSessionError]);
+  }, [effectiveApiClient, onSessionError]);
 
   useEffect(() => {
-    if (!enabled || !apiClient) {
+    if (!enabled || !effectiveApiClient) {
       abortControllerRef.current?.abort();
       abortControllerRef.current = null;
       requestSeqRef.current += 1;
@@ -97,7 +102,7 @@ export function useFraudCaseWorkQueue({
       return;
     }
     loadQueue(committedFilters, { append: Boolean(committedFilters.cursor) });
-  }, [enabled, committedFilters, loadQueue, sessionIdentity]);
+  }, [enabled, committedFilters, effectiveApiClient, loadQueue, sessionIdentity]);
 
   useEffect(() => () => {
     abortControllerRef.current?.abort();

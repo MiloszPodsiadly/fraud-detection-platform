@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { isAbortError } from "../api/alertsApi.js";
 import { AUTHORITIES } from "../auth/session.js";
 import { formatScore } from "../utils/format.js";
 import { PermissionNotice } from "./SecurityStatePanels.jsx";
@@ -18,21 +19,51 @@ export function AnalystDecisionForm({ alertId, summary, session, apiClient, canS
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
+  const mountedRef = useRef(false);
+  const submitSeqRef = useRef(0);
+  const submitAbortRef = useRef(null);
+  const currentContextRef = useRef({ alertId, apiClient });
   const actionDisabled = disabled || isSubmitting || !canSubmit;
   const analystId = session?.userId || "";
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      submitAbortRef.current?.abort();
+      submitSeqRef.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
+    currentContextRef.current = { alertId, apiClient };
+    submitAbortRef.current?.abort();
+    submitAbortRef.current = null;
+    submitSeqRef.current += 1;
+    setIsSubmitting(false);
+    setError("");
+    setResult(null);
+  }, [alertId, apiClient]);
 
   async function handleSubmit(event) {
     event.preventDefault();
     if (actionDisabled) {
       return;
     }
+    submitAbortRef.current?.abort();
+    const abortController = new AbortController();
+    submitAbortRef.current = abortController;
+    const submitSeq = submitSeqRef.current + 1;
+    submitSeqRef.current = submitSeq;
+    const currentAlertId = alertId;
+    const currentApiClient = apiClient;
     setIsSubmitting(true);
     setError("");
     setResult(null);
 
     try {
       const idempotencyKey = createDecisionIdempotencyKey(alertId);
-      const response = await apiClient.submitAnalystDecision(alertId, {
+      const response = await currentApiClient.submitAnalystDecision(currentAlertId, {
         analystId,
         decision,
         decisionReason: decisionReason.trim(),
@@ -41,14 +72,30 @@ export function AnalystDecisionForm({ alertId, summary, session, apiClient, canS
           source: "analyst-console-ui"
         }
       }, {
-        idempotencyKey
+        idempotencyKey,
+        signal: abortController.signal
       });
+      if (!isCurrentSubmit(submitSeq, currentAlertId, currentApiClient, abortController.signal, submitSeqRef, mountedRef, currentContextRef)) {
+        return;
+      }
       setResult(response);
       await onSubmitted();
     } catch (apiError) {
+      if (!isCurrentSubmit(submitSeq, currentAlertId, currentApiClient, abortController.signal, submitSeqRef, mountedRef, currentContextRef)) {
+        return;
+      }
+      if (isAbortError(apiError)) {
+        setIsSubmitting(false);
+        return;
+      }
       setError(apiError.message);
     } finally {
-      setIsSubmitting(false);
+      if (submitSeqRef.current === submitSeq) {
+        setIsSubmitting(false);
+        if (submitAbortRef.current === abortController) {
+          submitAbortRef.current = null;
+        }
+      }
     }
   }
 
@@ -120,6 +167,14 @@ export function AnalystDecisionForm({ alertId, summary, session, apiClient, canS
       </button>
     </form>
   );
+}
+
+function isCurrentSubmit(submitSeq, alertId, apiClient, signal, submitSeqRef, mountedRef, currentContextRef) {
+  return mountedRef.current
+    && submitSeqRef.current === submitSeq
+    && currentContextRef.current.alertId === alertId
+    && currentContextRef.current.apiClient === apiClient
+    && !signal.aborted;
 }
 
 function createDecisionIdempotencyKey(alertId) {

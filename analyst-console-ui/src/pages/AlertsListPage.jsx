@@ -14,9 +14,13 @@ import { SESSION_STATES } from "../auth/sessionState.js";
 
 export function AlertsListPage({
   workspacePage = "analyst",
-  workspaceCounters = { alerts: 0, transactions: 0 },
-  workspaceCountersStatus = { degraded: false, failedCounters: [] },
+  workspaceCounters = { alerts: null, transactions: null },
+  workspaceCountersStatus = { degraded: false, failedCounters: [], errorByCounter: {}, stale: false, lastRefreshedAt: null },
   canReadFraudCases,
+  canReadAlerts,
+  canReadTransactions,
+  canReadGovernanceAdvisories,
+  canWriteGovernanceAudit,
   alertPage,
   fraudCaseSummary = { totalFraudCases: 0 },
   fraudCaseTotalElements,
@@ -94,8 +98,15 @@ export function AlertsListPage({
   const sessionBlocksDashboard = shouldBlockDashboard(sessionState, error);
   const workQueueError = sessionBlocksDashboard ? workQueueErrorForSession(sessionState) : fraudCaseWorkQueueError;
   const showAnalyst = workspacePage === "analyst";
-  const transactionGlobalCount = workspaceCounters.transactions ?? transactionPage.totalElements ?? 0;
-  const alertGlobalCount = workspaceCounters.alerts ?? alertPage.totalElements ?? 0;
+  const failedCounterNames = workspaceCountersStatus.failedCounters?.length
+    ? workspaceCountersStatus.failedCounters
+    : Object.keys(workspaceCountersStatus.errorByCounter || {});
+  const transactionGlobalCount = canReadTransactions === false
+    ? "Unavailable"
+    : workspaceCounters.transactions ?? transactionPage.totalElements ?? 0;
+  const alertGlobalCount = canReadAlerts === false
+    ? "Unavailable"
+    : workspaceCounters.alerts ?? alertPage.totalElements ?? 0;
   const fraudCaseGlobalCount = fraudCaseSummary?.totalFraudCases ?? fraudCaseTotalElements ?? 0;
   const fraudCaseSummaryLabel = fraudCaseSummaryError
     ? "Unavailable"
@@ -120,37 +131,76 @@ export function AlertsListPage({
   return (
     <div className="dashboardGrid pageEnter">
       <nav className="workspaceTabs" aria-label="Analyst workspace sections">
-        <a href="?workspace=transaction-scoring" onClick={(event) => openWorkspace(event, onWorkspaceChange, "transactionScoring")}>
+        <a
+          href="?workspace=transaction-scoring"
+          className={workspacePage === "transactionScoring" ? "workspaceTabActive" : undefined}
+          aria-current={workspacePage === "transactionScoring" ? "page" : undefined}
+          onClick={(event) => openWorkspace(event, onWorkspaceChange, "transactionScoring")}
+        >
           <span>Transactions</span>
           <strong>{transactionGlobalCount}</strong>
+          <CounterMeta authority={canReadTransactions} stale={isCounterStale("transactions", failedCounterNames, workspaceCountersStatus)} />
         </a>
-        <a href="?workspace=fraud-transaction" onClick={(event) => openWorkspace(event, onWorkspaceChange, "fraudTransaction")}>
+        <a
+          href="?workspace=fraud-transaction"
+          className={workspacePage === "fraudTransaction" ? "workspaceTabActive" : undefined}
+          aria-current={workspacePage === "fraudTransaction" ? "page" : undefined}
+          onClick={(event) => openWorkspace(event, onWorkspaceChange, "fraudTransaction")}
+        >
           <span>Alerts</span>
           <strong>{alertGlobalCount}</strong>
+          <CounterMeta authority={canReadAlerts} stale={isCounterStale("alerts", failedCounterNames, workspaceCountersStatus)} />
         </a>
         <a
           href="/"
+          className={workspacePage === "analyst" ? "workspaceTabActive" : undefined}
+          aria-current={workspacePage === "analyst" ? "page" : undefined}
           title={fraudCaseSummaryHint}
           aria-label={`Global fraud cases ${isFraudCaseSummaryLoading ? "Loading" : fraudCaseSummaryLabel}`}
           onClick={(event) => openWorkspace(event, onWorkspaceChange, "analyst")}
         >
           <span>Global fraud cases</span>
           <strong>{isFraudCaseSummaryLoading ? "..." : fraudCaseSummaryLabel}</strong>
+          <CounterMeta authority={canReadFraudCases} stale={Boolean(fraudCaseSummaryError)} />
         </a>
-        <a href="?workspace=reports" onClick={(event) => openWorkspace(event, onWorkspaceChange, "reports")}>
+        <a
+          href="?workspace=reports"
+          className={workspacePage === "reports" ? "workspaceTabActive" : undefined}
+          aria-current={workspacePage === "reports" ? "page" : undefined}
+          onClick={(event) => openWorkspace(event, onWorkspaceChange, "reports")}
+        >
           <span>Audit analytics</span>
           <strong>{governanceAnalytics?.totals?.advisories ?? 0}</strong>
+          <CounterMeta authority={canReadGovernanceAdvisories} />
         </a>
-        <a href="?workspace=compliance" onClick={(event) => openWorkspace(event, onWorkspaceChange, "compliance")}>
+        <a
+          href="?workspace=compliance"
+          className={workspacePage === "compliance" ? "workspaceTabActive" : undefined}
+          aria-current={workspacePage === "compliance" ? "page" : undefined}
+          onClick={(event) => openWorkspace(event, onWorkspaceChange, "compliance")}
+        >
           <span>Governance</span>
           <strong>{advisoryQueue.count || 0}</strong>
+          <CounterMeta authority={canReadGovernanceAdvisories} />
         </a>
       </nav>
 
       {workspaceCountersStatus.degraded && (
-        <div className="statePanel warningPanel" role="status">
-          <h3>Counters partially unavailable.</h3>
-          <p>Some global counters could not refresh; visible values may be stale.</p>
+        <div className="statePanel warningPanel" role="status" aria-live="polite">
+          <h3>Some workspace counters are temporarily unavailable.</h3>
+          <p>
+            {workspaceCountersStatus.stale
+              ? "Last known counter values are marked as stale."
+              : "Unavailable counters are not shown as zero."}
+          </p>
+          {workspaceCountersStatus.lastRefreshedAt && (
+            <p>Last successful refresh {new Date(workspaceCountersStatus.lastRefreshedAt).toLocaleString()}.</p>
+          )}
+          {typeof workspaceCountersStatus.refresh === "function" && (
+            <button className="secondaryButton" type="button" onClick={workspaceCountersStatus.refresh}>
+              Retry counters
+            </button>
+          )}
         </div>
       )}
 
@@ -290,6 +340,7 @@ export function AlertsListPage({
           error={governanceError}
           auditHistories={governanceAuditHistories}
           session={session}
+          canRecordAudit={canWriteGovernanceAudit === true}
           onFiltersChange={onAdvisoryQueueRequestChange}
           onRetry={onGovernanceRetry}
           onRecordAudit={onRecordGovernanceAudit}
@@ -305,6 +356,20 @@ function openWorkspace(event, onWorkspaceChange, page) {
   }
   event.preventDefault();
   onWorkspaceChange(page);
+}
+
+function CounterMeta({ authority, stale = false }) {
+  if (authority === false) {
+    return <small className="counterMeta">Unavailable</small>;
+  }
+  if (stale) {
+    return <small className="counterMeta">Last known</small>;
+  }
+  return null;
+}
+
+function isCounterStale(counterName, failedCounterNames, workspaceCountersStatus) {
+  return Boolean(workspaceCountersStatus.stale && failedCounterNames.includes(counterName));
 }
 
 function TransactionMonitorFilters({ request, onApply }) {

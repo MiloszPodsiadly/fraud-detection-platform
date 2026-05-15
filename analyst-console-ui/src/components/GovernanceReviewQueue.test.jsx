@@ -63,6 +63,43 @@ describe("GovernanceReviewQueue", () => {
     expect(JSON.stringify(onRecordAudit.mock.calls[0][1])).not.toContain("actor");
   });
 
+  it("shows controlled audit error when workflow returns an expected failure", async () => {
+    const onRecordAudit = vi.fn().mockResolvedValue({
+      ok: false,
+      reason: "runtime-not-ready",
+      message: "Workspace runtime is not ready."
+    });
+    renderQueue({
+      onRecordAudit,
+      advisoryQueue: {
+        status: "AVAILABLE",
+        count: 1,
+        retention_limit: 200,
+        advisory_events: [advisoryEvent()]
+      }
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark reviewed" }));
+
+    await screen.findByText("Workspace runtime is not ready.");
+    expect(screen.queryByText("Human review recorded.")).not.toBeInTheDocument();
+  });
+
+  it("keeps governance audit writes disabled without explicit write capability", () => {
+    renderQueue({
+      canRecordAudit: false,
+      advisoryQueue: {
+        status: "AVAILABLE",
+        count: 1,
+        retention_limit: 200,
+        advisory_events: [advisoryEvent()]
+      }
+    });
+
+    expect(screen.getByRole("button", { name: "Mark reviewed" })).toBeDisabled();
+    expect(screen.getByText(/record governance advisory review/i)).toBeInTheDocument();
+  });
+
   it("shows audit history per advisory event", () => {
     renderQueue({
       advisoryQueue: {

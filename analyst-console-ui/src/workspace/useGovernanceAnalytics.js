@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isAbortError } from "../api/alertsApi.js";
+import { useOptionalWorkspaceRuntime } from "./useWorkspaceRuntime.js";
 
 const INITIAL_ANALYTICS = {
   status: "UNAVAILABLE",
@@ -15,13 +16,17 @@ const INITIAL_ANALYTICS = {
 };
 
 export function useGovernanceAnalytics({ enabled = true, apiClient, session, authProvider } = {}) {
+  const runtime = useOptionalWorkspaceRuntime();
+  const effectiveApiClient = apiClient !== undefined ? apiClient : runtime?.apiClient;
+  const effectiveSession = session !== undefined ? session : runtime?.session;
+  const effectiveAuthProvider = authProvider !== undefined ? authProvider : runtime?.authProvider;
   const [analytics, setAnalytics] = useState(INITIAL_ANALYTICS);
   const [windowDays, setWindowDays] = useState(7);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const requestSeqRef = useRef(0);
   const abortControllerRef = useRef(null);
-  const sessionIdentity = `${authProvider?.kind || "none"}:${session?.userId || ""}`;
+  const sessionIdentity = `${effectiveAuthProvider?.kind || "none"}:${effectiveSession?.userId || ""}`;
 
   const load = useCallback(async (days = windowDays) => {
     abortControllerRef.current?.abort();
@@ -32,7 +37,7 @@ export function useGovernanceAnalytics({ enabled = true, apiClient, session, aut
     setIsLoading(true);
     setError(null);
     try {
-      const nextAnalytics = await apiClient.getGovernanceAdvisoryAnalytics({ windowDays: days }, { signal: abortController.signal });
+      const nextAnalytics = await effectiveApiClient.getGovernanceAdvisoryAnalytics({ windowDays: days }, { signal: abortController.signal });
       if (requestSeqRef.current !== requestSeq) {
         return null;
       }
@@ -53,10 +58,10 @@ export function useGovernanceAnalytics({ enabled = true, apiClient, session, aut
       }
     }
     return null;
-  }, [apiClient, windowDays]);
+  }, [effectiveApiClient, windowDays]);
 
   useEffect(() => {
-    if (!enabled || !apiClient) {
+    if (!enabled || !effectiveApiClient) {
       abortControllerRef.current?.abort();
       abortControllerRef.current = null;
       requestSeqRef.current += 1;
@@ -66,7 +71,7 @@ export function useGovernanceAnalytics({ enabled = true, apiClient, session, aut
       return;
     }
     load(windowDays);
-  }, [enabled, load, sessionIdentity, windowDays]);
+  }, [enabled, effectiveApiClient, load, sessionIdentity, windowDays]);
 
   useEffect(() => () => {
     abortControllerRef.current?.abort();

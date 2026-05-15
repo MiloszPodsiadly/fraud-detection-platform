@@ -31,13 +31,15 @@ export function createAlertsApiClient({
     getAlert: (alertId, requestOptions) => request(`/api/v1/alerts/${encodeURIComponent(alertId)}`, requestOptions),
     getAssistantSummary: (alertId, requestOptions) => request(`/api/v1/alerts/${encodeURIComponent(alertId)}/assistant-summary`, requestOptions),
     getFraudCase: (caseId, requestOptions) => request(`/api/v1/fraud-cases/${encodeURIComponent(caseId)}`, requestOptions),
-    updateFraudCase: (caseId, decision, { idempotencyKey } = {}) => request(`/api/v1/fraud-cases/${encodeURIComponent(caseId)}`, {
+    updateFraudCase: (caseId, decision, { idempotencyKey, signal } = {}) => request(`/api/v1/fraud-cases/${encodeURIComponent(caseId)}`, {
       method: "PATCH",
+      signal,
       headers: idempotencyKey ? { "X-Idempotency-Key": idempotencyKey } : {},
       body: JSON.stringify(decision)
     }),
-    submitAnalystDecision: (alertId, decision, { idempotencyKey } = {}) => request(`/api/v1/alerts/${encodeURIComponent(alertId)}/decision`, {
+    submitAnalystDecision: (alertId, decision, { idempotencyKey, signal } = {}) => request(`/api/v1/alerts/${encodeURIComponent(alertId)}/decision`, {
       method: "POST",
+      signal,
       headers: idempotencyKey ? { "X-Idempotency-Key": idempotencyKey } : {},
       body: JSON.stringify(decision)
     })

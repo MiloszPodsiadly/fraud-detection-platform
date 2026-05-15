@@ -149,6 +149,61 @@ describe("AlertsListPage session lifecycle", () => {
     expect(screen.queryByRole("heading", { name: "Fraud Case Work Queue" })).not.toBeInTheDocument();
   });
 
+  it("labels degraded counter timestamp as last successful refresh", () => {
+    render(
+      <AlertsListPage
+        workspacePage="analyst"
+        workspaceCounters={{ alerts: 7, transactions: null }}
+        workspaceCountersStatus={{
+          degraded: true,
+          stale: true,
+          errorByCounter: { transactions: "transactions unavailable" },
+          lastRefreshedAt: "2026-05-14T10:00:00Z",
+          refresh: vi.fn()
+        }}
+        alertPage={emptyPage(10)}
+        fraudCaseWorkQueue={emptyWorkQueue()}
+        fraudCaseWorkQueueRequest={emptyWorkQueueRequest()}
+        transactionPage={emptyPage(25)}
+        advisoryQueue={emptyAdvisoryQueue()}
+        advisoryQueueRequest={{ severity: "ALL", modelVersion: "", lifecycleStatus: "ALL", limit: 25 }}
+        governanceAnalytics={emptyAnalytics()}
+        analyticsWindowDays={7}
+        isLoading={false}
+        isFraudCaseWorkQueueLoading={false}
+        isGovernanceLoading={false}
+        isAnalyticsLoading={false}
+        error={null}
+        fraudCaseWorkQueueError={null}
+        governanceError={null}
+        analyticsError={null}
+        sessionState={{ status: SESSION_STATES.AUTHENTICATED }}
+        onRetry={vi.fn()}
+        onGovernanceRetry={vi.fn()}
+        onAnalyticsRetry={vi.fn()}
+        onFraudCaseWorkQueueDraftChange={vi.fn()}
+        onFraudCaseWorkQueueApplyFilters={vi.fn()}
+        onFraudCaseWorkQueueResetFilters={vi.fn()}
+        onFraudCaseWorkQueueRetry={vi.fn()}
+        onFraudCaseWorkQueueRefreshFirstSlice={vi.fn()}
+        onFraudCaseWorkQueueLoadMore={vi.fn()}
+        onAdvisoryQueueRequestChange={vi.fn()}
+        onAnalyticsWindowDaysChange={vi.fn()}
+        onRecordGovernanceAudit={vi.fn()}
+        onTransactionPageChange={vi.fn()}
+        onTransactionPageSizeChange={vi.fn()}
+        onAlertPageChange={vi.fn()}
+        onAlertPageSizeChange={vi.fn()}
+        onOpenAlert={vi.fn()}
+        onOpenFraudCase={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Some workspace counters are temporarily unavailable.")).toBeInTheDocument();
+    expect(screen.getByText(/Last successful refresh/)).toBeInTheDocument();
+    expect(screen.queryByText(/Last refreshed/)).not.toBeInTheDocument();
+  });
+
   it("keeps fraud detection focused on alert review and moves transactions to a dedicated workspace", () => {
     const { rerender } = render(
       <AlertsListPage

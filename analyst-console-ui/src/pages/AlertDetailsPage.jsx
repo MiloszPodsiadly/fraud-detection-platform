@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { isAbortError } from "../api/alertsApi.js";
 import { AUTHORITIES, hasAuthority } from "../auth/session.js";
 import { AnalystDecisionForm } from "../components/AnalystDecisionForm.jsx";
 import { AssistantSummaryPanel } from "../components/AssistantSummaryPanel.jsx";
@@ -17,42 +18,116 @@ export function AlertDetailsPage({ alertId, alertSummary, session, apiClient, on
   const [assistantError, setAssistantError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const alertRequestSeqRef = useRef(0);
+  const assistantRequestSeqRef = useRef(0);
+  const alertAbortRef = useRef(null);
+  const assistantAbortRef = useRef(null);
+  const currentContextRef = useRef({ alertId, apiClient });
 
   useEffect(() => {
-    loadAlert();
-  }, [alertId]);
+    currentContextRef.current = { alertId, apiClient };
+  }, [alertId, apiClient]);
 
-  async function loadAlert() {
+  const loadAssistantSummary = useCallback(async (context = {
+    alertId,
+    apiClient,
+    alertRequestSeq: alertRequestSeqRef.current
+  }) => {
+    assistantAbortRef.current?.abort();
+    const abortController = new AbortController();
+    assistantAbortRef.current = abortController;
+    const requestSeq = assistantRequestSeqRef.current + 1;
+    assistantRequestSeqRef.current = requestSeq;
+    const currentAlertId = context.alertId;
+    const currentApiClient = context.apiClient;
+    setIsAssistantLoading(true);
+    setAssistantError("");
+    try {
+      const nextSummary = await currentApiClient.getAssistantSummary(currentAlertId, { signal: abortController.signal });
+      if (!isCurrentAssistantRequest(requestSeq, context, abortController.signal, assistantRequestSeqRef, alertRequestSeqRef, currentContextRef)) {
+        return { status: "stale" };
+      }
+      setAssistantSummary(nextSummary);
+      return { status: "loaded" };
+    } catch (apiError) {
+      if (!isCurrentAssistantRequest(requestSeq, context, abortController.signal, assistantRequestSeqRef, alertRequestSeqRef, currentContextRef)) {
+        return { status: "stale" };
+      }
+      if (isAbortError(apiError)) {
+        return { status: "aborted" };
+      }
+      setAssistantError(apiError.message);
+      return { status: "failed" };
+    } finally {
+      if (assistantRequestSeqRef.current === requestSeq) {
+        setIsAssistantLoading(false);
+        if (assistantAbortRef.current === abortController) {
+          assistantAbortRef.current = null;
+        }
+      }
+    }
+  }, [alertId, apiClient]);
+
+  const loadAlert = useCallback(async () => {
+    alertAbortRef.current?.abort();
+    assistantAbortRef.current?.abort();
+    const abortController = new AbortController();
+    alertAbortRef.current = abortController;
+    const requestSeq = alertRequestSeqRef.current + 1;
+    alertRequestSeqRef.current = requestSeq;
+    assistantRequestSeqRef.current += 1;
+    const currentAlertId = alertId;
+    const currentApiClient = apiClient;
     setIsLoading(true);
     setError("");
     setAssistantSummary(null);
     setAssistantError("");
     try {
-      const nextAlert = await apiClient.getAlert(alertId);
+      const nextAlert = await currentApiClient.getAlert(currentAlertId, { signal: abortController.signal });
+      if (alertRequestSeqRef.current !== requestSeq || abortController.signal.aborted) {
+        return { status: abortController.signal.aborted ? "aborted" : "stale" };
+      }
       setAlert(nextAlert);
-      loadAssistantSummary();
+      loadAssistantSummary({
+        alertId: currentAlertId,
+        apiClient: currentApiClient,
+        alertRequestSeq: requestSeq
+      });
+      return { status: "loaded" };
     } catch (apiError) {
+      if (alertRequestSeqRef.current !== requestSeq) {
+        return { status: "stale" };
+      }
+      if (isAbortError(apiError)) {
+        return { status: "aborted" };
+      }
       setError(apiError.message);
+      return { status: "failed" };
     } finally {
-      setIsLoading(false);
+      if (alertRequestSeqRef.current === requestSeq) {
+        setIsLoading(false);
+        if (alertAbortRef.current === abortController) {
+          alertAbortRef.current = null;
+        }
+      }
     }
-  }
+  }, [alertId, apiClient, loadAssistantSummary]);
 
-  async function loadAssistantSummary() {
-    setIsAssistantLoading(true);
-    setAssistantError("");
-    try {
-      setAssistantSummary(await apiClient.getAssistantSummary(alertId));
-    } catch (apiError) {
-      setAssistantError(apiError.message);
-    } finally {
-      setIsAssistantLoading(false);
-    }
-  }
+  useEffect(() => {
+    loadAlert();
+    return () => {
+      alertAbortRef.current?.abort();
+      assistantAbortRef.current?.abort();
+      alertRequestSeqRef.current += 1;
+      assistantRequestSeqRef.current += 1;
+    };
+  }, [loadAlert]);
 
   async function handleDecisionSubmitted() {
-    await loadAlert();
-    await onDecisionSubmitted();
+    const refreshResult = await loadAlert();
+    if (refreshResult?.status === "loaded") {
+      await onDecisionSubmitted();
+    }
   }
 
   return (
@@ -148,4 +223,12 @@ function Metric({ label, value }) {
       <strong>{value || "Unknown"}</strong>
     </div>
   );
+}
+
+function isCurrentAssistantRequest(requestSeq, context, signal, assistantRequestSeqRef, alertRequestSeqRef, currentContextRef) {
+  return assistantRequestSeqRef.current === requestSeq
+    && alertRequestSeqRef.current === context.alertRequestSeq
+    && currentContextRef.current.alertId === context.alertId
+    && currentContextRef.current.apiClient === context.apiClient
+    && !signal.aborted;
 }

@@ -25,6 +25,9 @@ describe("alertsApi auth headers", () => {
   const getGovernanceAdvisoryAnalytics = (...args) => apiClient.getGovernanceAdvisoryAnalytics(...args);
   const getGovernanceAdvisoryAudit = (...args) => apiClient.getGovernanceAdvisoryAudit(...args);
   const recordGovernanceAdvisoryAudit = (...args) => apiClient.recordGovernanceAdvisoryAudit(...args);
+  const getAlert = (...args) => apiClient.getAlert(...args);
+  const getAssistantSummary = (...args) => apiClient.getAssistantSummary(...args);
+  const getFraudCase = (...args) => apiClient.getFraudCase(...args);
   const updateFraudCase = (...args) => apiClient.updateFraudCase(...args);
   const submitAnalystDecision = (...args) => apiClient.submitAnalystDecision(...args);
 
@@ -277,6 +280,30 @@ describe("alertsApi auth headers", () => {
     expect(options.headers.authorization).toBeUndefined();
     expect(options.headers["X-CSRF-TOKEN"]).toBe("csrf-1");
     expect(options.headers["X-Trace-Id"]).toBe("trace-1");
+  });
+
+  it("passes AbortSignal through detail read methods", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => Promise.resolve(jsonResponse({})));
+    const alertSignal = new AbortController().signal;
+    const summarySignal = new AbortController().signal;
+    const caseSignal = new AbortController().signal;
+    resetApiClient(normalizeSession({ userId: "analyst-1", roles: ["ANALYST"] }));
+
+    await getAlert("alert-1", { signal: alertSignal });
+    await getAssistantSummary("alert-1", { signal: summarySignal });
+    await getFraudCase("case-1", { signal: caseSignal });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/v1/alerts/alert-1", expect.objectContaining({ signal: alertSignal }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/v1/alerts/alert-1/assistant-summary", expect.objectContaining({ signal: summarySignal }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/v1/fraud-cases/case-1", expect.objectContaining({ signal: caseSignal }));
+  });
+
+  it("preserves AbortError from fetch", async () => {
+    const abortError = new DOMException("aborted", "AbortError");
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(abortError);
+    resetApiClient(normalizeSession({ userId: "analyst-1", roles: ["ANALYST"] }));
+
+    await expect(getAlert("alert-1")).rejects.toBe(abortError);
   });
 
   it("uses bff credentials without authorization for all FDP-48 read paths", async () => {
@@ -655,20 +682,22 @@ describe("alertsApi auth headers", () => {
     expect(fetchMock.mock.calls[0][0]).toContain("/api/v1/fraud-cases/work-queue?");
   });
 
-  it("sends fraud case update with required idempotency header", async () => {
+  it("sends fraud case update with required idempotency header and signal", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
       operation_status: "COMMITTED",
       updated_case: { caseId: "case-1", status: "CLOSED" }
     }));
+    const signal = new AbortController().signal;
     await updateFraudCase("case-1", {
       status: "CLOSED",
       analystId: "analyst-1",
       decisionReason: "Reviewed",
       tags: ["reviewed"]
-    }, { idempotencyKey: "fraud-case-update-case-1-key" });
+    }, { idempotencyKey: "fraud-case-update-case-1-key", signal });
 
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/fraud-cases/case-1", expect.objectContaining({
       method: "PATCH",
+      signal,
       headers: expect.objectContaining({
         "Content-Type": "application/json",
         "X-Idempotency-Key": "fraud-case-update-case-1-key"
@@ -676,19 +705,21 @@ describe("alertsApi auth headers", () => {
     }));
   });
 
-  it("sends analyst decision with idempotency header", async () => {
+  it("sends analyst decision with idempotency header and signal", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
       resultingStatus: "RESOLVED"
     }));
+    const signal = new AbortController().signal;
     await submitAnalystDecision("alert-1", {
       analystId: "analyst-1",
       decision: "MARKED_LEGITIMATE",
       decisionReason: "Reviewed",
       tags: ["manual-review"]
-    }, { idempotencyKey: "alert-decision-alert-1-key" });
+    }, { idempotencyKey: "alert-decision-alert-1-key", signal });
 
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/alerts/alert-1/decision", expect.objectContaining({
       method: "POST",
+      signal,
       headers: expect.objectContaining({
         "Content-Type": "application/json",
         "X-Idempotency-Key": "alert-decision-alert-1-key"

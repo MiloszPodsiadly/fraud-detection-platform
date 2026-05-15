@@ -11,6 +11,9 @@ const {
   listGovernanceAdvisories,
   getGovernanceAdvisoryAnalytics,
   getFraudCaseWorkQueueSummary,
+  getAlert,
+  getAssistantSummary,
+  getFraudCase,
   isAbortError,
   listScoredTransactions,
   createAlertsApiClient
@@ -20,6 +23,9 @@ const {
   const listGovernanceAdvisories = vi.fn();
   const getGovernanceAdvisoryAnalytics = vi.fn();
   const getFraudCaseWorkQueueSummary = vi.fn();
+  const getAlert = vi.fn();
+  const getAssistantSummary = vi.fn();
+  const getFraudCase = vi.fn();
   const listScoredTransactions = vi.fn();
   return {
     callbackPath: { value: true },
@@ -49,6 +55,9 @@ const {
     listGovernanceAdvisories,
     getGovernanceAdvisoryAnalytics,
     getFraudCaseWorkQueueSummary,
+    getAlert,
+    getAssistantSummary,
+    getFraudCase,
     isAbortError: (error) => error?.name === "AbortError",
     listScoredTransactions,
     createAlertsApiClient: vi.fn(() => ({
@@ -59,6 +68,10 @@ const {
       getFraudCaseWorkQueueSummary,
       listScoredTransactions,
       getGovernanceAdvisoryAudit: vi.fn(),
+      getAlert,
+      getAssistantSummary,
+      getFraudCase,
+      updateFraudCase: vi.fn(),
       recordGovernanceAdvisoryAudit: vi.fn()
     }))
   };
@@ -71,9 +84,14 @@ vi.mock("./api/alertsApi.js", () => ({
   listGovernanceAdvisories,
   getGovernanceAdvisoryAnalytics,
   getFraudCaseWorkQueueSummary,
+  getAlert,
+  getAssistantSummary,
+  getFraudCase,
   isAbortError,
   listScoredTransactions,
   getGovernanceAdvisoryAudit: vi.fn(),
+  getAssistantSummary,
+  getFraudCase,
   recordGovernanceAdvisoryAudit: vi.fn()
 }));
 
@@ -103,6 +121,9 @@ describe("App", () => {
     refreshSession.mockResolvedValue({ userId: "", roles: [], extraAuthorities: [], authorities: [] });
     listFraudCaseWorkQueue.mockResolvedValue({ content: [], size: 20, hasNext: false, nextCursor: null, sort: "createdAt,desc" });
     getFraudCaseWorkQueueSummary.mockResolvedValue(summary(0));
+    getAlert.mockResolvedValue(alertDetails("alert-stable"));
+    getAssistantSummary.mockResolvedValue({ summary: "Assistant summary" });
+    getFraudCase.mockResolvedValue(fraudCaseDetails("case-stable"));
     listGovernanceAdvisories.mockResolvedValue({ status: "AVAILABLE", count: 0, retention_limit: 200, advisory_events: [] });
     getGovernanceAdvisoryAnalytics.mockResolvedValue({
       status: "AVAILABLE",
@@ -143,12 +164,18 @@ describe("App", () => {
     });
     listAlerts.mockResolvedValue({ content: [], totalElements: 1, totalPages: 1, page: 0, size: 10 });
     listScoredTransactions.mockResolvedValue({ content: [], totalElements: 3, totalPages: 1, page: 0, size: 25 });
+    refreshSession.mockResolvedValue(authenticatedSession());
+    providerState.value = {
+      ...providerState.value,
+      getSessionState: (session) => ({ status: session?.userId ? "authenticated" : "unauthenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer callback-token" })
+    };
 
     render(<App />);
 
     await waitFor(() => expect(completeLoginCallback).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
-    expect(listAlerts).toHaveBeenCalledWith({ page: 0, size: 1 });
+    expect(listAlerts).toHaveBeenCalledWith({ page: 0, size: 1 }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(listFraudCaseWorkQueue).toHaveBeenCalledTimes(1);
     expect(listScoredTransactions).toHaveBeenCalledWith({
       page: 0,
@@ -156,7 +183,7 @@ describe("App", () => {
       query: "",
       riskLevel: "ALL",
       status: "ALL"
-    });
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
   it("does not load dashboard data when oidc bootstrap reports an expired session", async () => {
@@ -202,7 +229,7 @@ describe("App", () => {
 
     await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
-    expect(listAlerts).toHaveBeenCalledWith({ page: 0, size: 1 });
+    expect(listAlerts).toHaveBeenCalledWith({ page: 0, size: 1 }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(listFraudCaseWorkQueue).toHaveBeenCalledTimes(1);
     expect(listScoredTransactions).toHaveBeenCalledWith({
       page: 0,
@@ -210,7 +237,7 @@ describe("App", () => {
       query: "",
       riskLevel: "ALL",
       status: "ALL"
-    });
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
     expect(screen.queryByText("Loading session state...")).not.toBeInTheDocument();
   });
@@ -256,7 +283,7 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Counters partially unavailable.")).toBeInTheDocument();
+    expect(await screen.findByText("Some workspace counters are temporarily unavailable.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Transactions\s*9/ })).toBeInTheDocument();
   });
 
@@ -274,10 +301,128 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Counters partially unavailable.")).toBeInTheDocument();
+    expect(await screen.findByText("Some workspace counters are temporarily unavailable.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
 
-    await waitFor(() => expect(screen.queryByText("Counters partially unavailable.")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText("Some workspace counters are temporarily unavailable.")).not.toBeInTheDocument());
+  });
+
+  it("clears stale detail selection across session boundary before loading detail data", async () => {
+    callbackPath.value = false;
+    window.history.replaceState({}, "", "/?alertId=alert-stale");
+    refreshSession.mockResolvedValue(authenticatedSession());
+    providerState.value = {
+      ...providerState.value,
+      getSessionState: (session) => ({ status: session?.userId ? "authenticated" : "unauthenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
+    };
+    listAlerts.mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, page: 0, size: 10 });
+    listScoredTransactions.mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, page: 0, size: 25 });
+
+    render(<App />);
+
+    await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(window.location.search).not.toContain("alertId"));
+    expect(getAlert).not.toHaveBeenCalled();
+  });
+
+  it("clears stale fraud case detail selection across session boundary before loading detail data", async () => {
+    callbackPath.value = false;
+    window.history.replaceState({}, "", "/?fraudCaseId=case-stale");
+    refreshSession.mockResolvedValue(authenticatedSession());
+    providerState.value = {
+      ...providerState.value,
+      getSessionState: (session) => ({ status: session?.userId ? "authenticated" : "unauthenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
+    };
+    listAlerts.mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, page: 0, size: 10 });
+    listScoredTransactions.mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, page: 0, size: 25 });
+
+    render(<App />);
+
+    await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(window.location.search).not.toContain("fraudCaseId"));
+    expect(getFraudCase).not.toHaveBeenCalled();
+  });
+
+  it("clears selected detail when editable session authorities change", async () => {
+    callbackPath.value = false;
+    window.history.replaceState({}, "", "/?alertId=alert-stable");
+    providerState.value = {
+      kind: "demo",
+      label: "Local demo session",
+      supportsSessionEditing: true,
+      authenticatedModeLabel: "local/dev only",
+      unauthenticatedModeLabel: "headers off",
+      unauthenticatedDescription: "Demo auth headers are disabled",
+      getInitialSession: authenticatedSession,
+      getSessionState: (session) => ({ status: session?.userId ? "authenticated" : "unauthenticated" }),
+      persistSession: vi.fn(),
+      beginLogin: vi.fn(),
+      beginLogout: vi.fn(),
+      hasLoginConfiguration: () => false,
+      getRequestHeaders: () => ({ Authorization: "Bearer demo-token" })
+    };
+
+    render(<App />);
+
+    await waitFor(() => expect(getAlert).toHaveBeenCalledWith("alert-stable", expect.objectContaining({ signal: expect.any(AbortSignal) })));
+    fireEvent.change(screen.getByLabelText("Role"), { target: { value: "ANALYST" } });
+
+    await waitFor(() => expect(window.location.search).not.toContain("alertId"));
+  });
+
+  it("keeps selected detail when session metadata changes without user role or authority boundary change", async () => {
+    callbackPath.value = false;
+    window.history.replaceState({}, "", "/?alertId=alert-stable");
+    const normalizedReadOnlyAuthorities = ["alert:read", "assistant-summary:read", "fraud-case:read", "transaction-monitor:read"];
+    const initialSession = {
+      ...authenticatedSession(),
+      authorities: normalizedReadOnlyAuthorities,
+      displayName: "Analyst One"
+    };
+    refreshSession.mockResolvedValue({
+      ...authenticatedSession(),
+      authorities: normalizedReadOnlyAuthorities,
+      displayName: "Analyst One Refreshed"
+    });
+    providerState.value = {
+      ...providerState.value,
+      getInitialSession: () => initialSession,
+      getSessionState: (session) => ({ status: session?.userId ? "authenticated" : "unauthenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
+    };
+
+    render(<App />);
+
+    await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(getAlert).toHaveBeenCalledWith("alert-stable", expect.objectContaining({ signal: expect.any(AbortSignal) })));
+    expect(window.location.search).toContain("alertId=alert-stable");
+  });
+
+  it("does not fetch auth-sensitive workspace reads while authorities are unknown", async () => {
+    callbackPath.value = false;
+    refreshSession.mockResolvedValue({
+      userId: "subject-unknown",
+      roles: [],
+      extraAuthorities: [],
+      authorities: []
+    });
+    providerState.value = {
+      ...providerState.value,
+      getSessionState: () => ({ status: "authenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
+    };
+
+    render(<App />);
+
+    await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
+    expect(listAlerts).not.toHaveBeenCalled();
+    expect(listFraudCaseWorkQueue).not.toHaveBeenCalled();
+    expect(getFraudCaseWorkQueueSummary).not.toHaveBeenCalled();
+    expect(listScoredTransactions).not.toHaveBeenCalled();
+    expect(listGovernanceAdvisories).not.toHaveBeenCalled();
+    expect(getGovernanceAdvisoryAnalytics).not.toHaveBeenCalled();
   });
 
   it("keeps transaction scoring usable when the fraud case global summary fails", async () => {
@@ -455,6 +600,35 @@ function authenticatedSession() {
     roles: ["READ_ONLY_ANALYST"],
     extraAuthorities: [],
     authorities: ["alert:read", "fraud-case:read", "transaction-monitor:read", "assistant-summary:read"]
+  };
+}
+
+function alertDetails(alertId) {
+  return {
+    alertId,
+    alertReason: "High risk transfer",
+    createdAt: "2026-05-10T10:00:00Z",
+    correlationId: "corr-1",
+    riskLevel: "HIGH",
+    fraudScore: 0.91,
+    alertStatus: "OPEN",
+    customerId: "customer-1",
+    transactionId: "txn-1",
+    reasonCodes: ["RISK_SCORE"],
+    featureSnapshot: {},
+    scoreDetails: {}
+  };
+}
+
+function fraudCaseDetails(caseId) {
+  return {
+    caseId,
+    suspicionType: "Grouped transfers",
+    reason: "Multiple suspicious transfers",
+    status: "OPEN",
+    totalAmountPln: 1200,
+    transactions: [],
+    decisionTags: []
   };
 }
 
