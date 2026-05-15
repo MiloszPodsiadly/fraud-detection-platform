@@ -8,7 +8,7 @@ FDP-53 moves workspace-specific runtime ownership out of `WorkspaceDashboardShel
 
 `WorkspaceDashboardShell` owns only the runtime provider boundary usage, active workspace selection, `WorkspaceRouteRegistry` lookup, shared header/counters, `WorkspaceDetailRouter`, the active workspace outlet, and top-level session blocking state.
 
-`WorkspaceRouteRegistry` is declarative metadata: workspace key, labels, route value, heading label, capability key reference, and Runtime component. `capabilityKey` is display/runtime metadata resolved by `WorkspaceRuntimeProvider`; it is not policy. The registry does not compute authorities, create API clients, call APIs, or encode business workflow rules.
+`WorkspaceRouteRegistry` is declarative metadata: workspace key, labels, route value, heading label, capability key reference, and Runtime component. `WORKSPACE_ROUTE_ORDER` is the explicit UX order for navigation. `capabilityKey` is display/runtime metadata resolved by `WorkspaceRuntimeProvider`; it is not policy. The registry does not compute authorities, create API clients, call APIs, or encode business workflow rules.
 
 `WorkspaceRuntimeProvider` remains the source of normalized frontend runtime context. It exposes the current session, auth provider, API client, capability booleans, and runtime status to mounted workspace runtime layers. It is not a security boundary; backend authorization remains authoritative.
 
@@ -22,7 +22,9 @@ Workspace-specific runtime layers own their workspace reads and local callbacks:
 
 Only the active workspace runtime is mounted. Hidden workspace runtimes do not fetch domain data. Shared counters remain shell-owned global dashboard signals and may fetch minimal count reads when `sharedWorkspaceReadsEnabled`.
 
-Workspace refresh has one contract: the shell calls the active runtime `refreshWorkspace()` and then refreshes shared counters when shared reads are enabled. Compliance audit refreshes the compliance advisory queue only; Reports analytics is owned by `ReportsWorkspaceRuntime` and refreshes when Reports is active or explicitly retried.
+Workspace refresh has one contract: `createWorkspaceRefreshHandler` calls the active runtime `refreshWorkspace()` and then refreshes shared counters when shared reads are enabled. The contract returns low-cardinality results for blocked sessions, successful dispatch, and synchronous refresh-start failures. `WorkspaceDashboardShell` consumes those results through a small refresh-notice hook so skipped or failed refresh attempts are visible without logging entity identifiers.
+
+Compliance audit refreshes the compliance advisory queue only. Reports analytics is owned by `ReportsWorkspaceRuntime`, shows the last loaded analytics snapshot, and refreshes when Reports is active or explicitly retried.
 
 ## Adding A Workspace
 
