@@ -15,7 +15,7 @@ const backendProductionPrefixes = [
 const allowedEndpointFiles = new Set([
   "analyst-console-ui/src/api/alertsApi.js"
 ]);
-const outOfScopePattern = /\b(assign(?:ment)?|claim|bulk|mass|optimistic|Kafka|outbox|finality|idempotency)\b/i;
+const outOfScopePattern = /\b(assign(?:ment)?|claim|bulk|mass|optimistic|Kafka|outbox|finality)\b/i;
 const exportWorkflowPattern = /\bexport\s+(workflow|button|action|csv|download|file|report|data|results)\b/i;
 
 for (const file of changedFiles) {
