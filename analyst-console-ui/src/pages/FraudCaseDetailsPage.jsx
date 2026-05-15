@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { isAbortError } from "../api/alertsApi.js";
 import { AUTHORITIES, hasAuthority } from "../auth/session.js";
 import { ErrorState } from "../components/ErrorState.jsx";
 import { LoadingPanel } from "../components/LoadingPanel.jsx";
@@ -21,16 +22,42 @@ export function FraudCaseDetailsPage({ caseId, session, apiClient, onBack, onCas
   });
   const [decisionIdempotencyKey, setDecisionIdempotencyKey] = useState("");
   const [submitState, setSubmitState] = useState({ isSubmitting: false, error: "", success: "" });
+  const loadRequestSeqRef = useRef(0);
+  const mutationSeqRef = useRef(0);
+  const loadAbortRef = useRef(null);
+  const mountedRef = useRef(false);
+  const currentContextRef = useRef({ caseId, apiClient });
 
   useEffect(() => {
-    loadCase();
-  }, [caseId]);
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      loadAbortRef.current?.abort();
+      loadRequestSeqRef.current += 1;
+      mutationSeqRef.current += 1;
+    };
+  }, []);
 
-  async function loadCase() {
+  useEffect(() => {
+    currentContextRef.current = { caseId, apiClient };
+    mutationSeqRef.current += 1;
+  }, [apiClient, caseId]);
+
+  const loadCase = useCallback(async () => {
+    loadAbortRef.current?.abort();
+    const abortController = new AbortController();
+    loadAbortRef.current = abortController;
+    const requestSeq = loadRequestSeqRef.current + 1;
+    loadRequestSeqRef.current = requestSeq;
+    const currentCaseId = caseId;
+    const currentApiClient = apiClient;
     setIsLoading(true);
     setError("");
     try {
-      const nextCase = await apiClient.getFraudCase(caseId);
+      const nextCase = await currentApiClient.getFraudCase(currentCaseId, { signal: abortController.signal });
+      if (!isCurrentLoad(requestSeq, abortController.signal, loadRequestSeqRef, mountedRef)) {
+        return;
+      }
       setFraudCase(nextCase);
       setForm({
         status: nextCase.status === "OPEN" ? "IN_REVIEW" : nextCase.status,
@@ -40,11 +67,27 @@ export function FraudCaseDetailsPage({ caseId, session, apiClient, onBack, onCas
       });
       setDecisionIdempotencyKey("");
     } catch (apiError) {
+      if (loadRequestSeqRef.current !== requestSeq || isAbortError(apiError)) {
+        return;
+      }
       setError(apiError.message);
     } finally {
-      setIsLoading(false);
+      if (loadRequestSeqRef.current === requestSeq) {
+        setIsLoading(false);
+        if (loadAbortRef.current === abortController) {
+          loadAbortRef.current = null;
+        }
+      }
     }
-  }
+  }, [apiClient, caseId, session.userId]);
+
+  useEffect(() => {
+    loadCase();
+    return () => {
+      loadAbortRef.current?.abort();
+      loadRequestSeqRef.current += 1;
+    };
+  }, [loadCase]);
 
   if (isLoading) {
     return <LoadingPanel label="Loading fraud case..." />;
@@ -69,15 +112,22 @@ export function FraudCaseDetailsPage({ caseId, session, apiClient, onBack, onCas
       return;
     }
     const idempotencyKey = decisionIdempotencyKey || createDecisionIdempotencyKey(caseId);
+    const mutationSeq = mutationSeqRef.current + 1;
+    mutationSeqRef.current = mutationSeq;
+    const currentCaseId = caseId;
+    const currentApiClient = apiClient;
     setDecisionIdempotencyKey(idempotencyKey);
     setSubmitState({ isSubmitting: true, error: "", success: "" });
     try {
-      const response = await apiClient.updateFraudCase(caseId, {
+      const response = await currentApiClient.updateFraudCase(currentCaseId, {
         status: form.status,
         analystId: session.userId || form.analystId,
         decisionReason: form.decisionReason,
         tags: form.tags.split(",").map((tag) => tag.trim()).filter(Boolean)
       }, { idempotencyKey });
+      if (!isCurrentMutation(mutationSeq, currentCaseId, currentApiClient, mutationSeqRef, mountedRef, currentContextRef)) {
+        return;
+      }
       const updatedCase = response?.updated_case || response?.updatedCase || response?.current_case_snapshot || response?.currentCaseSnapshot || response;
       setFraudCase(updatedCase);
       setForm({
@@ -90,6 +140,9 @@ export function FraudCaseDetailsPage({ caseId, session, apiClient, onBack, onCas
       setSubmitState({ isSubmitting: false, error: "", success: "Case decision saved." });
       onCaseUpdated?.();
     } catch (apiError) {
+      if (!isCurrentMutation(mutationSeq, currentCaseId, currentApiClient, mutationSeqRef, mountedRef, currentContextRef) || isAbortError(apiError)) {
+        return;
+      }
       setSubmitState({ isSubmitting: false, error: apiError.message, success: "" });
     }
   }
@@ -284,6 +337,17 @@ export function FraudCaseDetailsPage({ caseId, session, apiClient, onBack, onCas
 function createDecisionIdempotencyKey(caseId) {
   const random = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   return `fraud-case-update-${caseId}-${random}`;
+}
+
+function isCurrentLoad(requestSeq, signal, requestSeqRef, mountedRef) {
+  return mountedRef.current && requestSeqRef.current === requestSeq && !signal.aborted;
+}
+
+function isCurrentMutation(mutationSeq, caseId, apiClient, mutationSeqRef, mountedRef, currentContextRef) {
+  return mountedRef.current
+    && mutationSeqRef.current === mutationSeq
+    && currentContextRef.current.caseId === caseId
+    && currentContextRef.current.apiClient === apiClient;
 }
 
 function formatPln(value) {

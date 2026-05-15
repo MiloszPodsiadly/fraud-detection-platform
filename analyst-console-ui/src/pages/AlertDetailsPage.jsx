@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { isAbortError } from "../api/alertsApi.js";
 import { AUTHORITIES, hasAuthority } from "../auth/session.js";
 import { AnalystDecisionForm } from "../components/AnalystDecisionForm.jsx";
 import { AssistantSummaryPanel } from "../components/AssistantSummaryPanel.jsx";
@@ -17,38 +18,87 @@ export function AlertDetailsPage({ alertId, alertSummary, session, apiClient, on
   const [assistantError, setAssistantError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const alertRequestSeqRef = useRef(0);
+  const assistantRequestSeqRef = useRef(0);
+  const alertAbortRef = useRef(null);
+  const assistantAbortRef = useRef(null);
 
-  useEffect(() => {
-    loadAlert();
-  }, [alertId]);
+  const loadAssistantSummary = useCallback(async () => {
+    assistantAbortRef.current?.abort();
+    const abortController = new AbortController();
+    assistantAbortRef.current = abortController;
+    const requestSeq = assistantRequestSeqRef.current + 1;
+    assistantRequestSeqRef.current = requestSeq;
+    const currentAlertId = alertId;
+    const currentApiClient = apiClient;
+    setIsAssistantLoading(true);
+    setAssistantError("");
+    try {
+      const nextSummary = await currentApiClient.getAssistantSummary(currentAlertId, { signal: abortController.signal });
+      if (assistantRequestSeqRef.current !== requestSeq || abortController.signal.aborted) {
+        return;
+      }
+      setAssistantSummary(nextSummary);
+    } catch (apiError) {
+      if (assistantRequestSeqRef.current !== requestSeq || isAbortError(apiError)) {
+        return;
+      }
+      setAssistantError(apiError.message);
+    } finally {
+      if (assistantRequestSeqRef.current === requestSeq) {
+        setIsAssistantLoading(false);
+        if (assistantAbortRef.current === abortController) {
+          assistantAbortRef.current = null;
+        }
+      }
+    }
+  }, [alertId, apiClient]);
 
-  async function loadAlert() {
+  const loadAlert = useCallback(async () => {
+    alertAbortRef.current?.abort();
+    assistantAbortRef.current?.abort();
+    const abortController = new AbortController();
+    alertAbortRef.current = abortController;
+    const requestSeq = alertRequestSeqRef.current + 1;
+    alertRequestSeqRef.current = requestSeq;
+    assistantRequestSeqRef.current += 1;
+    const currentAlertId = alertId;
+    const currentApiClient = apiClient;
     setIsLoading(true);
     setError("");
     setAssistantSummary(null);
     setAssistantError("");
     try {
-      const nextAlert = await apiClient.getAlert(alertId);
+      const nextAlert = await currentApiClient.getAlert(currentAlertId, { signal: abortController.signal });
+      if (alertRequestSeqRef.current !== requestSeq || abortController.signal.aborted) {
+        return;
+      }
       setAlert(nextAlert);
       loadAssistantSummary();
     } catch (apiError) {
+      if (alertRequestSeqRef.current !== requestSeq || isAbortError(apiError)) {
+        return;
+      }
       setError(apiError.message);
     } finally {
-      setIsLoading(false);
+      if (alertRequestSeqRef.current === requestSeq) {
+        setIsLoading(false);
+        if (alertAbortRef.current === abortController) {
+          alertAbortRef.current = null;
+        }
+      }
     }
-  }
+  }, [alertId, apiClient, loadAssistantSummary]);
 
-  async function loadAssistantSummary() {
-    setIsAssistantLoading(true);
-    setAssistantError("");
-    try {
-      setAssistantSummary(await apiClient.getAssistantSummary(alertId));
-    } catch (apiError) {
-      setAssistantError(apiError.message);
-    } finally {
-      setIsAssistantLoading(false);
-    }
-  }
+  useEffect(() => {
+    loadAlert();
+    return () => {
+      alertAbortRef.current?.abort();
+      assistantAbortRef.current?.abort();
+      alertRequestSeqRef.current += 1;
+      assistantRequestSeqRef.current += 1;
+    };
+  }, [loadAlert]);
 
   async function handleDecisionSubmitted() {
     await loadAlert();
