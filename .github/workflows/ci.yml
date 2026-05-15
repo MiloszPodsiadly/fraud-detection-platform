@@ -1155,6 +1155,107 @@ jobs:
             analyst-console-ui/test-results/fdp51-api-client-boundary-guard.txt
             analyst-console-ui/test-results/fdp51-scope-guard.txt
 
+  fdp52-workspace-split-detail-ux:
+    name: FDP-52 Workspace Split Detail UX
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs:
+      - frontend
+      - fdp50-frontend-api-client-runtime-boundary
+      - fdp51-analyst-console-workspace-runtime
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: analyst-console-ui/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: analyst-console-ui
+        run: npm ci
+
+      - name: Ensure FDP-52 tests are not skipped or focused
+        run: |
+          if grep -R "it\.skip\|describe\.skip\|test\.skip\|it\.only\|describe\.only\|test\.only" \
+            analyst-console-ui/src/workspace/WorkspaceDashboardShell.test.jsx \
+            analyst-console-ui/src/workspace/WorkspaceDetailRouter.test.jsx \
+            analyst-console-ui/src/workspace/AnalystWorkspaceContainer.test.jsx \
+            analyst-console-ui/src/workspace/FraudTransactionWorkspaceContainer.test.jsx \
+            analyst-console-ui/src/workspace/TransactionScoringWorkspaceContainer.test.jsx \
+            analyst-console-ui/src/workspace/GovernanceWorkspaceContainer.test.jsx \
+            analyst-console-ui/src/workspace/ReportsWorkspaceContainer.test.jsx \
+            analyst-console-ui/src/pages/AlertDetailsPage.test.jsx \
+            analyst-console-ui/src/pages/FraudCaseDetailsPage.test.jsx \
+            analyst-console-ui/src/App.test.jsx; then
+            echo "FDP-52 frontend tests must not be skipped or focused" >&2
+            exit 1
+          fi
+
+      - name: Run FDP-52 workspace split and detail UX tests
+        working-directory: analyst-console-ui
+        run: npm test -- --run src/workspace/WorkspaceDashboardShell.test.jsx src/workspace/WorkspaceDetailRouter.test.jsx src/workspace/AnalystWorkspaceContainer.test.jsx src/workspace/FraudTransactionWorkspaceContainer.test.jsx src/workspace/TransactionScoringWorkspaceContainer.test.jsx src/workspace/GovernanceWorkspaceContainer.test.jsx src/workspace/ReportsWorkspaceContainer.test.jsx src/pages/AlertDetailsPage.test.jsx src/pages/FraudCaseDetailsPage.test.jsx src/App.test.jsx --reporter=default --reporter=junit --outputFile=./test-results/fdp52-vitest.xml
+
+      - name: Build FDP-52 UI
+        working-directory: analyst-console-ui
+        run: npm run build
+
+      - name: Guard FDP-50 and FDP-51 boundaries
+        working-directory: analyst-console-ui
+        env:
+          FDP51_SCOPE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
+        run: |
+          npm run check:api-client-boundary:fdp50
+          npm run check:scope:fdp51
+          echo "fdp52_prior_boundary_guards_ran=true" > test-results/fdp52-prior-boundary-guards.txt
+
+      - name: Guard FDP-52 scope
+        working-directory: analyst-console-ui
+        env:
+          FDP52_SCOPE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
+        run: |
+          npm run check:scope:fdp52
+          echo "fdp52_scope_guard_ran=true" > test-results/fdp52-scope-guard.txt
+
+      - name: Verify FDP-52 report
+        working-directory: analyst-console-ui
+        run: |
+          test -f test-results/fdp52-vitest.xml
+          grep -q "WorkspaceDashboardShell.test.jsx" test-results/fdp52-vitest.xml
+          grep -q "WorkspaceDetailRouter.test.jsx" test-results/fdp52-vitest.xml
+          grep -q "AnalystWorkspaceContainer.test.jsx" test-results/fdp52-vitest.xml
+          grep -q "FraudTransactionWorkspaceContainer.test.jsx" test-results/fdp52-vitest.xml
+          grep -q "TransactionScoringWorkspaceContainer.test.jsx" test-results/fdp52-vitest.xml
+          grep -q "GovernanceWorkspaceContainer.test.jsx" test-results/fdp52-vitest.xml
+          grep -q "ReportsWorkspaceContainer.test.jsx" test-results/fdp52-vitest.xml
+          grep -q "AlertDetailsPage.test.jsx" test-results/fdp52-vitest.xml
+          grep -q "FraudCaseDetailsPage.test.jsx" test-results/fdp52-vitest.xml
+          test -f test-results/fdp52-prior-boundary-guards.txt
+          test -f test-results/fdp52-scope-guard.txt
+          grep -q "fdp52_prior_boundary_guards_ran=true" test-results/fdp52-prior-boundary-guards.txt
+          grep -q "fdp52_scope_guard_ran=true" test-results/fdp52-scope-guard.txt
+          if grep -q 'skipped="[1-9]' test-results/fdp52-vitest.xml; then
+            echo "FDP-52 frontend tests must not be skipped" >&2
+            exit 1
+          fi
+
+      - name: Upload FDP-52 workspace split detail UX reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fdp52-workspace-split-detail-ux-reports
+          if-no-files-found: ignore
+          path: |
+            analyst-console-ui/test-results/fdp52-vitest.xml
+            analyst-console-ui/test-results/fdp52-prior-boundary-guards.txt
+            analyst-console-ui/test-results/fdp52-scope-guard.txt
+
   fdp36-real-chaos:
     name: FDP-36 Real Alert-Service Kill Proof
     runs-on: ubuntu-latest
@@ -2177,6 +2278,7 @@ jobs:
       - fdp39-release-governance
       - fdp50-frontend-api-client-runtime-boundary
       - fdp51-analyst-console-workspace-runtime
+      - fdp52-workspace-split-detail-ux
       - regulated-mutation-regression
 
     steps:
