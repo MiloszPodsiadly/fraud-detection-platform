@@ -240,6 +240,7 @@ describe("FraudCaseDetailsPage", () => {
 
     expect(await screen.findByText("Secure request identifier could not be generated. Reload the page and try again.")).toBeInTheDocument();
     expect(apiClient.updateFraudCase).not.toHaveBeenCalled();
+    expect(screen.queryByText("Case decision saved.")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save case decision" })).toBeEnabled();
   });
 });

@@ -189,7 +189,7 @@ export function FraudCaseDetailsPage({
     try {
       let idempotencyKey;
       try {
-        idempotencyKey = decisionIdempotencyKey || createIdempotencyKey("fraud-case-update", caseId);
+        idempotencyKey = decisionIdempotencyKey || createIdempotencyKey("fraud-case-update");
       } catch {
         setSubmitState({ isSubmitting: false, error: SECURE_REQUEST_ID_ERROR, success: "", warning: "" });
         return;

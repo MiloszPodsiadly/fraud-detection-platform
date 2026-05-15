@@ -7,14 +7,16 @@ describe("TransactionScoringWorkspaceContainer", () => {
     const onTransactionFiltersChange = vi.fn();
     const { container } = render(
       <TransactionScoringWorkspaceContainer
-        transactionPage={{ content: [transaction("txn-1")], totalElements: 73, totalPages: 8, page: 0, size: 10 }}
-        transactionPageRequest={{ page: 0, size: 10, query: "", riskLevel: "ALL", status: "ALL" }}
-        isLoading={false}
-        error={null}
-        onRetry={vi.fn()}
-        onTransactionFiltersChange={onTransactionFiltersChange}
-        onTransactionPageChange={vi.fn()}
-        onTransactionPageSizeChange={vi.fn()}
+        transactionStreamState={{
+          page: { content: [transaction("txn-1")], totalElements: 73, totalPages: 8, page: 0, size: 10 },
+          request: { page: 0, size: 10, query: "", riskLevel: "ALL", status: "ALL" },
+          isLoading: false,
+          error: null
+        }}
+        onRetryWorkspace={vi.fn()}
+        onFiltersChange={onTransactionFiltersChange}
+        onPageChange={vi.fn()}
+        onPageSizeChange={vi.fn()}
       />
     );
 

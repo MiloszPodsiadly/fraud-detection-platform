@@ -6,12 +6,10 @@ describe("FraudTransactionWorkspaceContainer", () => {
   it("renders only the alert review workspace", () => {
     const { container } = render(
       <FraudTransactionWorkspaceContainer
-        alertPage={page()}
-        isLoading={false}
-        error={null}
-        onRetry={vi.fn()}
-        onAlertPageChange={vi.fn()}
-        onAlertPageSizeChange={vi.fn()}
+        alertQueueState={queueState(page())}
+        onRetryWorkspace={vi.fn()}
+        onPageChange={vi.fn()}
+        onPageSizeChange={vi.fn()}
         onOpenAlert={vi.fn()}
       />
     );
@@ -25,12 +23,10 @@ describe("FraudTransactionWorkspaceContainer", () => {
   it("uses loaded-page wording when local filters hide alerts", () => {
     render(
       <FraudTransactionWorkspaceContainer
-        alertPage={{ content: [alert("alert-1")], totalElements: 20, totalPages: 2, page: 0, size: 10 }}
-        isLoading={false}
-        error={null}
-        onRetry={vi.fn()}
-        onAlertPageChange={vi.fn()}
-        onAlertPageSizeChange={vi.fn()}
+        alertQueueState={queueState({ content: [alert("alert-1")], totalElements: 20, totalPages: 2, page: 0, size: 10 })}
+        onRetryWorkspace={vi.fn()}
+        onPageChange={vi.fn()}
+        onPageSizeChange={vi.fn()}
         onOpenAlert={vi.fn()}
       />
     );
@@ -45,6 +41,10 @@ describe("FraudTransactionWorkspaceContainer", () => {
 
 function page() {
   return { content: [], totalElements: 0, totalPages: 0, page: 0, size: 10 };
+}
+
+function queueState(pageValue) {
+  return { page: pageValue, isLoading: false, error: null };
 }
 
 function alert(alertId) {

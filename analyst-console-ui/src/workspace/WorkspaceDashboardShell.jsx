@@ -141,69 +141,39 @@ export function WorkspaceDashboardShell({
       {workspacePage === "analyst" && (
         <AnalystWorkspaceContainer
           canReadFraudCases={canReadFraudCases}
-          fraudCaseSummaryError={fraudCaseWorkQueueSummaryState.error}
-          fraudCaseWorkQueue={fraudCaseWorkQueueState.queue}
-          fraudCaseWorkQueueRequest={fraudCaseWorkQueueState.committedFilters}
-          fraudCaseWorkQueueDraftFilters={fraudCaseWorkQueueState.draftFilters}
-          fraudCaseWorkQueueWarning={fraudCaseWorkQueueState.warning}
-          fraudCaseWorkQueueFilterError={fraudCaseWorkQueueState.filterError}
-          fraudCaseWorkQueueLastRefreshedAt={fraudCaseWorkQueueState.lastRefreshedAt}
-          isFraudCaseWorkQueueLoading={fraudCaseWorkQueueState.isLoading}
-          fraudCaseWorkQueueError={fraudCaseWorkQueueState.error}
-          onFraudCaseSummaryRetry={fraudCaseWorkQueueSummaryState.retry}
-          onFraudCaseWorkQueueDraftChange={fraudCaseWorkQueueState.updateDraftFilter}
-          onFraudCaseWorkQueueApplyFilters={fraudCaseWorkQueueState.applyFilters}
-          onFraudCaseWorkQueueResetFilters={fraudCaseWorkQueueState.resetFilters}
-          onFraudCaseWorkQueueRetry={fraudCaseWorkQueueState.refreshFirstSlice}
-          onFraudCaseWorkQueueRefreshFirstSlice={fraudCaseWorkQueueState.refreshFirstSlice}
-          onFraudCaseWorkQueueLoadMore={fraudCaseWorkQueueState.loadMore}
+          workQueueState={fraudCaseWorkQueueState}
+          summaryState={fraudCaseWorkQueueSummaryState}
           onOpenFraudCase={openFraudCase}
         />
       )}
       {workspacePage === "fraudTransaction" && (
         <FraudTransactionWorkspaceContainer
-          alertPage={alertQueueState.page}
-          isLoading={alertQueueState.isLoading}
-          error={alertQueueState.error}
-          onRetry={refreshDashboard}
-          onAlertPageChange={changeAlertPage}
-          onAlertPageSizeChange={changeAlertPageSize}
+          alertQueueState={alertQueueState}
+          onRetryWorkspace={refreshDashboard}
+          onPageChange={changeAlertPage}
+          onPageSizeChange={changeAlertPageSize}
           onOpenAlert={openAlert}
         />
       )}
       {workspacePage === "transactionScoring" && (
         <TransactionScoringWorkspaceContainer
-          transactionPage={transactionStreamState.page}
-          transactionPageRequest={transactionStreamState.request}
-          isLoading={transactionStreamState.isLoading}
-          error={transactionStreamState.error}
-          onRetry={refreshDashboard}
-          onTransactionFiltersChange={changeTransactionFilters}
-          onTransactionPageChange={changeTransactionPage}
-          onTransactionPageSizeChange={changeTransactionPageSize}
+          transactionStreamState={transactionStreamState}
+          onRetryWorkspace={refreshDashboard}
+          onFiltersChange={changeTransactionFilters}
+          onPageChange={changeTransactionPage}
+          onPageSizeChange={changeTransactionPageSize}
         />
       )}
       {workspacePage === "reports" && (
         <ReportsWorkspaceContainer
-          governanceAnalytics={governanceAnalyticsState.analytics}
-          analyticsWindowDays={governanceAnalyticsState.windowDays}
-          isAnalyticsLoading={governanceAnalyticsState.isLoading}
-          analyticsError={governanceAnalyticsState.error}
-          onAnalyticsWindowDaysChange={governanceAnalyticsState.setWindowDays}
-          onAnalyticsRetry={governanceAnalyticsState.refresh}
+          analyticsState={governanceAnalyticsState}
         />
       )}
       {workspacePage === "compliance" && (
         <GovernanceWorkspaceContainer
-          advisoryQueue={governanceQueueState.queue}
-          advisoryQueueRequest={governanceQueueState.request}
-          isGovernanceLoading={governanceQueueState.isLoading}
-          governanceError={governanceQueueState.error}
-          governanceAuditHistories={governanceQueueState.auditHistories}
+          queueState={governanceQueueState}
           session={session}
           canWriteGovernanceAudit={canWriteGovernanceAudit}
-          onAdvisoryQueueRequestChange={governanceQueueState.setRequest}
-          onGovernanceRetry={governanceQueueState.refresh}
           onRecordGovernanceAudit={recordGovernanceAudit}
         />
       )}

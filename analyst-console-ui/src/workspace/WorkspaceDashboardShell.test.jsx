@@ -19,4 +19,16 @@ describe("WorkspaceDashboardShell FDP-52 composition", () => {
     expect(frameCall).not.toContain("governanceAuditHistories=");
     expect(frameCall).not.toContain("onRecordGovernanceAudit=");
   });
+
+  it("passes grouped runtime state into workspace containers", () => {
+    expect(shellSource).toContain("workQueueState={fraudCaseWorkQueueState}");
+    expect(shellSource).toContain("summaryState={fraudCaseWorkQueueSummaryState}");
+    expect(shellSource).toContain("alertQueueState={alertQueueState}");
+    expect(shellSource).toContain("transactionStreamState={transactionStreamState}");
+    expect(shellSource).toContain("analyticsState={governanceAnalyticsState}");
+    expect(shellSource).toContain("queueState={governanceQueueState}");
+    expect(shellSource).not.toContain("fraudCaseWorkQueueDraftFilters=");
+    expect(shellSource).not.toContain("transactionPageRequest=");
+    expect(shellSource).not.toContain("governanceAuditHistories=");
+  });
 });

@@ -1,9 +1,22 @@
 import { TransactionScoringWorkspacePage } from "../pages/TransactionScoringWorkspacePage.jsx";
 
-export function TransactionScoringWorkspaceContainer(props) {
+export function TransactionScoringWorkspaceContainer({
+  transactionStreamState,
+  onRetryWorkspace,
+  onFiltersChange,
+  onPageChange,
+  onPageSizeChange
+}) {
   return (
     <TransactionScoringWorkspacePage
-      {...props}
+      transactionPage={transactionStreamState.page}
+      transactionPageRequest={transactionStreamState.request}
+      isLoading={transactionStreamState.isLoading}
+      error={transactionStreamState.error}
+      onRetry={onRetryWorkspace}
+      onTransactionFiltersChange={onFiltersChange}
+      onTransactionPageChange={onPageChange}
+      onTransactionPageSizeChange={onPageSizeChange}
       workspaceHeadingProps={workspaceHeadingProps("Transaction scoring stream")}
     />
   );

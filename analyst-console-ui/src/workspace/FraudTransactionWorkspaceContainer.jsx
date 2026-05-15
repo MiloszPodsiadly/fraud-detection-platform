@@ -1,9 +1,21 @@
 import { FraudTransactionWorkspacePage } from "../pages/FraudTransactionWorkspacePage.jsx";
 
-export function FraudTransactionWorkspaceContainer(props) {
+export function FraudTransactionWorkspaceContainer({
+  alertQueueState,
+  onRetryWorkspace,
+  onPageChange,
+  onPageSizeChange,
+  onOpenAlert
+}) {
   return (
     <FraudTransactionWorkspacePage
-      {...props}
+      alertPage={alertQueueState.page}
+      isLoading={alertQueueState.isLoading}
+      error={alertQueueState.error}
+      onRetry={onRetryWorkspace}
+      onAlertPageChange={onPageChange}
+      onAlertPageSizeChange={onPageSizeChange}
+      onOpenAlert={onOpenAlert}
       workspaceHeadingProps={workspaceHeadingProps("Alert review queue")}
     />
   );

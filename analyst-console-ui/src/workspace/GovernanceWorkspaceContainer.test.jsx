@@ -6,15 +6,17 @@ describe("GovernanceWorkspaceContainer", () => {
   it("renders only governance review queue wiring", () => {
     const { container } = render(
       <GovernanceWorkspaceContainer
-        advisoryQueue={{ status: "AVAILABLE", count: 0, retention_limit: 200, advisory_events: [] }}
-        advisoryQueueRequest={{ severity: "ALL", modelVersion: "", lifecycleStatus: "ALL", limit: 25 }}
-        isGovernanceLoading={false}
-        governanceError={null}
-        governanceAuditHistories={{}}
+        queueState={{
+          queue: { status: "AVAILABLE", count: 0, retention_limit: 200, advisory_events: [] },
+          request: { severity: "ALL", modelVersion: "", lifecycleStatus: "ALL", limit: 25 },
+          isLoading: false,
+          error: null,
+          auditHistories: {},
+          setRequest: vi.fn(),
+          refresh: vi.fn()
+        }}
         session={{ userId: "analyst-1", roles: ["ANALYST"], authorities: [] }}
         canWriteGovernanceAudit={false}
-        onAdvisoryQueueRequestChange={vi.fn()}
-        onGovernanceRetry={vi.fn()}
         onRecordGovernanceAudit={vi.fn()}
       />
     );

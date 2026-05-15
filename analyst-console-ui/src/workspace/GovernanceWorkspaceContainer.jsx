@@ -1,9 +1,23 @@
 import { GovernanceWorkspacePage } from "../pages/GovernanceWorkspacePage.jsx";
 
-export function GovernanceWorkspaceContainer(props) {
+export function GovernanceWorkspaceContainer({
+  queueState,
+  session,
+  canWriteGovernanceAudit,
+  onRecordGovernanceAudit
+}) {
   return (
     <GovernanceWorkspacePage
-      {...props}
+      advisoryQueue={queueState.queue}
+      advisoryQueueRequest={queueState.request}
+      isGovernanceLoading={queueState.isLoading}
+      governanceError={queueState.error}
+      governanceAuditHistories={queueState.auditHistories}
+      session={session}
+      canWriteGovernanceAudit={canWriteGovernanceAudit}
+      onAdvisoryQueueRequestChange={queueState.setRequest}
+      onGovernanceRetry={queueState.refresh}
+      onRecordGovernanceAudit={onRecordGovernanceAudit}
       workspaceHeadingProps={workspaceHeadingProps("Operator review queue")}
     />
   );

@@ -115,7 +115,7 @@ describe("AnalystDecisionForm", () => {
   it("shows a controlled error and does not submit when secure request ID generation fails", async () => {
     vi.stubGlobal("crypto", undefined);
     const apiClient = {
-      submitAnalystDecision: vi.fn()
+      submitAnalystDecision: vi.fn().mockResolvedValue({ resultingStatus: "RESOLVED" })
     };
     render(form({ apiClient }));
 
@@ -124,7 +124,14 @@ describe("AnalystDecisionForm", () => {
 
     expect(await screen.findByText("Secure request identifier could not be generated. Reload the page and try again.")).toBeInTheDocument();
     expect(apiClient.submitAnalystDecision).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Decision saved/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Submit decision" })).toBeEnabled();
+
+    vi.stubGlobal("crypto", { randomUUID: vi.fn(() => "uuid-after-restore") });
+    fireEvent.click(screen.getByRole("button", { name: "Submit decision" }));
+
+    await waitFor(() => expect(apiClient.submitAnalystDecision).toHaveBeenCalledTimes(1));
+    expect(screen.getByText("Decision saved. Status: RESOLVED")).toBeInTheDocument();
   });
 });
 

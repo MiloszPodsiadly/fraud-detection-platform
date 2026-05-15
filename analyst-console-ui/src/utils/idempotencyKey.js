@@ -1,5 +1,5 @@
-export function createIdempotencyKey(operationPrefix, entityId) {
-  void entityId;
+// Domain identifiers must not be embedded because request IDs can appear in logs, traces, or retry records.
+export function createIdempotencyKey(operationPrefix) {
   return `${operationPrefix}-${secureRandomId()}`;
 }
 

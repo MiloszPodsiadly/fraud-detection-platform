@@ -69,7 +69,7 @@ export function AnalystDecisionForm({ alertId, summary, session, apiClient, canS
     try {
       let idempotencyKey;
       try {
-        idempotencyKey = createIdempotencyKey("alert-decision", alertId);
+        idempotencyKey = createIdempotencyKey("alert-decision");
       } catch {
         setError(SECURE_REQUEST_ID_ERROR);
         return;

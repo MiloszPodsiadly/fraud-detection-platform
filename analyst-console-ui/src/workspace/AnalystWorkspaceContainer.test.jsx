@@ -7,17 +7,8 @@ describe("AnalystWorkspaceContainer", () => {
     const { container } = render(
       <AnalystWorkspaceContainer
         canReadFraudCases
-        fraudCaseWorkQueue={emptyWorkQueue()}
-        fraudCaseWorkQueueRequest={emptyWorkQueueRequest()}
-        fraudCaseWorkQueueDraftFilters={emptyWorkQueueRequest()}
-        isFraudCaseWorkQueueLoading={false}
-        onFraudCaseSummaryRetry={vi.fn()}
-        onFraudCaseWorkQueueDraftChange={vi.fn()}
-        onFraudCaseWorkQueueApplyFilters={vi.fn()}
-        onFraudCaseWorkQueueResetFilters={vi.fn()}
-        onFraudCaseWorkQueueRetry={vi.fn()}
-        onFraudCaseWorkQueueRefreshFirstSlice={vi.fn()}
-        onFraudCaseWorkQueueLoadMore={vi.fn()}
+        workQueueState={workQueueState()}
+        summaryState={{ error: null, retry: vi.fn() }}
         onOpenFraudCase={vi.fn()}
       />
     );
@@ -26,6 +17,22 @@ describe("AnalystWorkspaceContainer", () => {
     expect(container.querySelector("[data-workspace-heading]")).toHaveTextContent("Fraud Case Work Queue");
     expect(screen.queryByRole("heading", { name: "Transaction scoring stream" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Alert review queue" })).not.toBeInTheDocument();
+  });
+
+  it("keeps workspace-specific callback ownership in the container", () => {
+    const retry = vi.fn();
+    render(
+      <AnalystWorkspaceContainer
+        canReadFraudCases
+        workQueueState={workQueueState()}
+        summaryState={{ error: "summary unavailable", retry }}
+        onOpenFraudCase={vi.fn()}
+      />
+    );
+
+    screen.getByRole("button", { name: "Retry summary" }).click();
+
+    expect(retry).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -46,5 +53,23 @@ function emptyWorkQueueRequest() {
     updatedTo: "",
     linkedAlertId: "",
     sort: "createdAt,desc"
+  };
+}
+
+function workQueueState() {
+  return {
+    queue: emptyWorkQueue(),
+    committedFilters: emptyWorkQueueRequest(),
+    draftFilters: emptyWorkQueueRequest(),
+    warning: null,
+    filterError: null,
+    lastRefreshedAt: null,
+    isLoading: false,
+    error: null,
+    updateDraftFilter: vi.fn(),
+    applyFilters: vi.fn(),
+    resetFilters: vi.fn(),
+    refreshFirstSlice: vi.fn(),
+    loadMore: vi.fn()
   };
 }

@@ -6,19 +6,21 @@ describe("ReportsWorkspaceContainer", () => {
   it("renders only reports analytics presentation", () => {
     const { container } = render(
       <ReportsWorkspaceContainer
-        governanceAnalytics={{
-          status: "AVAILABLE",
-          window: { days: 7 },
-          totals: { advisories: 0, reviewed: 0, open: 0 },
-          decision_distribution: {},
-          lifecycle_distribution: {},
-          review_timeliness: { status: "LOW_CONFIDENCE" }
+        analyticsState={{
+          analytics: {
+            status: "AVAILABLE",
+            window: { days: 7 },
+            totals: { advisories: 0, reviewed: 0, open: 0 },
+            decision_distribution: {},
+            lifecycle_distribution: {},
+            review_timeliness: { status: "LOW_CONFIDENCE" }
+          },
+          windowDays: 7,
+          isLoading: false,
+          error: null,
+          setWindowDays: vi.fn(),
+          refresh: vi.fn()
         }}
-        analyticsWindowDays={7}
-        isAnalyticsLoading={false}
-        analyticsError={null}
-        onAnalyticsWindowDaysChange={vi.fn()}
-        onAnalyticsRetry={vi.fn()}
       />
     );
 
