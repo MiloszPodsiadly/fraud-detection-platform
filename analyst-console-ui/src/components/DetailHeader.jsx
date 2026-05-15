@@ -11,12 +11,13 @@ export function DetailHeader({
   actionState,
   lastLoadedAt,
   onBack,
-  headingRef
+  headingRef,
+  headingId = "detail-heading"
 }) {
-  const breadcrumb = [workspaceLabel, entityType, entityId].filter(Boolean).join(" > ");
+  const breadcrumbItems = [workspaceLabel, entityType, entityId].filter(Boolean);
 
   return (
-    <header className="detailsHeader detailHeader" aria-labelledby="detail-heading">
+    <header className="detailsHeader detailHeader" aria-labelledby={headingId}>
       <div>
         <button
           className="backButton"
@@ -26,8 +27,17 @@ export function DetailHeader({
         >
           Back to {workspaceLabel || "workspace"}
         </button>
-        <p className="eyebrow" aria-label="Breadcrumb">{breadcrumb}</p>
-        <h2 id="detail-heading" ref={headingRef} tabIndex="-1">{title}</h2>
+        <nav className="eyebrow" aria-label="Breadcrumb">
+          <ol className="breadcrumbList">
+            {breadcrumbItems.map((item, index) => (
+              <li key={`${item}-${index}`}>
+                {index > 0 && <span aria-hidden="true"> &gt; </span>}
+                <span>{item}</span>
+              </li>
+            ))}
+          </ol>
+        </nav>
+        <h2 id={headingId} ref={headingRef} tabIndex="-1">{title}</h2>
         <dl className="detailHeaderMeta">
           <div><dt>Entity ID</dt><dd><code>{entityId || "Unknown"}</code></dd></div>
           {status && <div><dt>Status</dt><dd><span className="statusPill">{status}</span></dd></div>}

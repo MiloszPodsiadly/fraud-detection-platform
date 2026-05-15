@@ -2073,8 +2073,18 @@ button:focus-visible,
   padding: 1rem;
 }
 
+.breadcrumbList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
 .formError,
 .formSuccess,
+.formWarning,
 .permissionNotice {
   border-radius: 0.9rem;
   padding: 0.75rem;
@@ -2089,6 +2099,11 @@ button:focus-visible,
 .formSuccess {
   background: rgba(63, 123, 85, 0.12);
   color: var(--green);
+}
+
+.formWarning {
+  background: rgba(217, 119, 6, 0.12);
+  color: #92400e;
 }
 
 .permissionNotice {

@@ -39,6 +39,7 @@ export function AlertDetailsPage({
   const currentAlertRef = useRef(null);
   const headingRef = useRef(null);
   const canSubmitDecision = hasAuthority(session, AUTHORITIES.ALERT_DECISION_SUBMIT);
+  const detailHeadingId = `detail-heading-alert-${safeDomId(alertId)}`;
 
   useEffect(() => {
     currentContextRef.current = { alertId, apiClient };
@@ -167,7 +168,16 @@ export function AlertDetailsPage({
     if (refreshResult?.status === "loaded") {
       await onDecisionSubmitted();
     }
+    return refreshResult;
   }
+
+  const actionState = alertActionState({
+    canSubmitDecision,
+    detailState,
+    canReadAlert,
+    hasAlert: Boolean(alert)
+  });
+  const decisionDisabled = isLoading || detailState === "stale" || Boolean(error && !alert);
 
   return (
     <section className="detailsLayout pageEnter">
@@ -180,9 +190,10 @@ export function AlertDetailsPage({
               entityType="Alert"
               entityId={alertId}
               workspaceLabel={workspaceLabel}
-              actionState={canReadAlert === false ? "Action unavailable: missing authority" : "Action unavailable: runtime not ready"}
+              actionState={actionState}
               onBack={onBack}
               headingRef={headingRef}
+              headingId={detailHeadingId}
             />
             <DetailStateBanner
               state={canReadAlert === false ? "access-denied" : "runtime-not-ready"}
@@ -203,14 +214,15 @@ export function AlertDetailsPage({
               workspaceLabel={workspaceLabel}
               status={alert.alertStatus}
               riskLevel={alert.riskLevel}
-              actionState={canSubmitDecision ? "Action available" : "Action unavailable: missing authority"}
+              actionState={actionState}
               lastLoadedAt={lastSuccessfulLoadAt}
               onBack={onBack}
               headingRef={headingRef}
+              headingId={detailHeadingId}
             />
             <DetailStateBanner
               state={detailState === "stale" ? "stale" : null}
-              message={error}
+              message={detailState === "stale" ? staleAlertMessage(error) : error}
               onRetry={loadAlert}
               retryLabel={`Retry alert ${alert.alertId} detail`}
             />
@@ -271,7 +283,7 @@ export function AlertDetailsPage({
             session={session}
             apiClient={apiClient}
             canSubmit
-            disabled={isLoading || Boolean(error && !alert)}
+            disabled={decisionDisabled}
             summary={alert || alertSummary}
             onSubmitted={handleDecisionSubmitted}
           />
@@ -285,6 +297,30 @@ export function AlertDetailsPage({
       </aside>
     </section>
   );
+}
+
+function alertActionState({ canSubmitDecision, detailState, canReadAlert, hasAlert }) {
+  if (canReadAlert === false || !canSubmitDecision) {
+    return "Decision action unavailable: missing authority";
+  }
+  if (canReadAlert !== true || (!hasAlert && detailState === "runtime-not-ready")) {
+    return "Decision action unavailable: runtime not ready";
+  }
+  if (detailState === "stale") {
+    return "Decision action unavailable: refresh required";
+  }
+  return "Decision action available";
+}
+
+function safeDomId(value) {
+  const safe = String(value || "unknown").replace(/[^A-Za-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
+  return safe || "unknown";
+}
+
+function staleAlertMessage(error) {
+  return error
+    ? `Refresh alert detail successfully before submitting a decision. Last refresh error: ${error}`
+    : "Refresh alert detail successfully before submitting a decision.";
 }
 
 function Metric({ label, value }) {

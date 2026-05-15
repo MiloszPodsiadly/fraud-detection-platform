@@ -180,6 +180,46 @@ describe("FraudCaseDetailsPage", () => {
 
     expect(await screen.findByText("write failed")).toBeInTheDocument();
   });
+
+  it("keeps stale fraud case detail visible but disables case update", async () => {
+    const apiClientA = {
+      getFraudCase: vi.fn().mockResolvedValue(fraudCase("case-1", "Open case")),
+      updateFraudCase: vi.fn()
+    };
+    const apiClientB = {
+      getFraudCase: vi.fn().mockRejectedValue(new Error("refresh failed")),
+      updateFraudCase: vi.fn()
+    };
+    const { rerender } = render(page({ caseId: "case-1", apiClient: apiClientA }));
+    await screen.findByText("Open case");
+
+    rerender(page({ caseId: "case-1", apiClient: apiClientB }));
+
+    expect(await screen.findByText(/Refresh fraud case detail successfully before updating the case decision/)).toBeInTheDocument();
+    expect(screen.getByText("Case update unavailable: refresh required")).toBeInTheDocument();
+    expect(screen.getByText("Open case")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save case decision" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Save case decision" }));
+    expect(apiClientB.updateFraudCase).not.toHaveBeenCalled();
+  });
+
+  it("keeps mutation success separate from dashboard refresh failure", async () => {
+    const onCaseUpdated = vi.fn().mockRejectedValue(new Error("dashboard refresh failed"));
+    const apiClient = {
+      getFraudCase: vi.fn().mockResolvedValue(fraudCase("case-1", "Open case")),
+      updateFraudCase: vi.fn().mockResolvedValue({ ...fraudCase("case-1", "Updated case"), status: "CLOSED", decisionReason: "Reviewed" })
+    };
+    render(page({ caseId: "case-1", apiClient, onCaseUpdated }));
+    await screen.findByText("Open case");
+
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Reviewed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save case decision" }));
+
+    expect(await screen.findByText("Case decision saved.")).toBeInTheDocument();
+    expect(screen.getByText("Case decision saved. Latest dashboard state could not be refreshed.")).toBeInTheDocument();
+    expect(screen.queryByText("dashboard refresh failed")).not.toBeInTheDocument();
+    expect(apiClient.updateFraudCase).toHaveBeenCalledTimes(1);
+  });
 });
 
 function page({ caseId, apiClient, onCaseUpdated = vi.fn() }) {

@@ -76,4 +76,31 @@ describe("WorkspaceDetailRouter", () => {
     expect(onCloseSelection).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.getByRole("heading", { name: "Fraud Case Work Queue" })).toHaveFocus());
   });
+
+  it("restores focus for selector-sensitive alert IDs without throwing", async () => {
+    const weirdAlertId = 'alert ] " \\ with spaces:1';
+    const onCloseSelection = vi.fn();
+    render(
+      <>
+        <button type="button" data-detail-origin={`alert-${weirdAlertId}`}>Origin weird alert</button>
+        <WorkspaceDetailRouter
+          selectedAlertId={weirdAlertId}
+          selectedFraudCaseId={null}
+          alertQueueState={{ page: { content: [{ alertId: weirdAlertId }] } }}
+          session={{ userId: "analyst-1", authorities: [] }}
+          apiClient={{}}
+          canReadAlerts
+          canReadFraudCases={false}
+          workspacePage="fraudTransaction"
+          onCloseSelection={onCloseSelection}
+          onRefreshDashboard={vi.fn()}
+        />
+      </>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to list" }));
+
+    expect(onCloseSelection).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Origin weird alert" })).toHaveFocus());
+  });
 });

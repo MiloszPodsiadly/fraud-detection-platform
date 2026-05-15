@@ -27,14 +27,14 @@ export function WorkspaceDetailRouter({
   }, [selectedAlertId, selectedFraudCaseId]);
 
   function closeAndRestoreFocus() {
-    const originSelector = selectedAlertId
-      ? `[data-detail-origin="alert-${cssEscape(selectedAlertId)}"]`
+    const originKey = selectedAlertId
+      ? `alert-${selectedAlertId}`
       : selectedFraudCaseId
-        ? `[data-detail-origin="fraud-case-${cssEscape(selectedFraudCaseId)}"]`
+        ? `fraud-case-${selectedFraudCaseId}`
         : null;
     onCloseSelection();
     window.setTimeout(() => {
-      const origin = originSelector ? document.querySelector(originSelector) : null;
+      const origin = findDetailOrigin(originKey);
       const fallback = document.querySelector("[data-workspace-heading]");
       (origin || fallback)?.focus?.();
     }, 0);
@@ -82,6 +82,10 @@ function workspaceLabelFor(workspacePage) {
   }[workspacePage] || "Workspace";
 }
 
-function cssEscape(value) {
-  return String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+function findDetailOrigin(originKey) {
+  if (!originKey) {
+    return null;
+  }
+  return [...document.querySelectorAll("[data-detail-origin]")]
+    .find((element) => element.getAttribute("data-detail-origin") === originKey) || null;
 }

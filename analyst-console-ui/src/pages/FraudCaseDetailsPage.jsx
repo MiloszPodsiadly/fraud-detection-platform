@@ -8,6 +8,7 @@ import { LoadingPanel } from "../components/LoadingPanel.jsx";
 import { RiskBadge } from "../components/RiskBadge.jsx";
 import { PermissionNotice } from "../components/SecurityStatePanels.jsx";
 import { formatAmount, formatDateTime, formatScore } from "../utils/format.js";
+import { createIdempotencyKey } from "../utils/idempotencyKey.js";
 
 const CASE_STATUSES = ["IN_REVIEW", "CONFIRMED_FRAUD", "FALSE_POSITIVE", "CLOSED"];
 
@@ -33,7 +34,7 @@ export function FraudCaseDetailsPage({
     tags: "rapid-transfer, grouped-low-risk"
   });
   const [decisionIdempotencyKey, setDecisionIdempotencyKey] = useState("");
-  const [submitState, setSubmitState] = useState({ isSubmitting: false, error: "", success: "" });
+  const [submitState, setSubmitState] = useState({ isSubmitting: false, error: "", success: "", warning: "" });
   const loadRequestSeqRef = useRef(0);
   const mutationSeqRef = useRef(0);
   const loadAbortRef = useRef(null);
@@ -42,6 +43,7 @@ export function FraudCaseDetailsPage({
   const currentContextRef = useRef({ caseId, apiClient });
   const currentCaseRef = useRef(null);
   const headingRef = useRef(null);
+  const detailHeadingId = `detail-heading-fraud-case-${safeDomId(caseId)}`;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -59,7 +61,7 @@ export function FraudCaseDetailsPage({
     mutationAbortRef.current?.abort();
     mutationAbortRef.current = null;
     mutationSeqRef.current += 1;
-    setSubmitState({ isSubmitting: false, error: "", success: "" });
+    setSubmitState({ isSubmitting: false, error: "", success: "", warning: "" });
   }, [apiClient, caseId]);
 
   useEffect(() => {
@@ -142,9 +144,10 @@ export function FraudCaseDetailsPage({
             entityType="Fraud case"
             entityId={caseId}
             workspaceLabel={workspaceLabel}
-            actionState={canReadFraudCase === false ? "Action unavailable: missing authority" : "Action unavailable: runtime not ready"}
+            actionState={canReadFraudCase === false ? "Case update unavailable: missing authority" : "Case update unavailable: runtime not ready"}
             onBack={onBack}
             headingRef={headingRef}
+            headingId={detailHeadingId}
           />
           <DetailStateBanner
             state={canReadFraudCase === false ? "access-denied" : "runtime-not-ready"}
@@ -160,20 +163,21 @@ export function FraudCaseDetailsPage({
   }
 
   const canUpdateCase = hasAuthority(session, AUTHORITIES.FRAUD_CASE_UPDATE);
-  const actionDisabled = submitState.isSubmitting || !canUpdateCase;
+  const actionDisabled = submitState.isSubmitting || !canUpdateCase || detailState === "stale";
+  const actionState = fraudCaseActionState({ canUpdateCase, detailState });
 
   function changeForm(patch) {
     setForm((current) => ({ ...current, ...patch }));
     setDecisionIdempotencyKey("");
-    setSubmitState((current) => ({ ...current, error: "", success: "" }));
+    setSubmitState((current) => ({ ...current, error: "", success: "", warning: "" }));
   }
 
   async function submitDecision(event) {
     event.preventDefault();
-    if (!canUpdateCase) {
+    if (!canUpdateCase || detailState === "stale") {
       return;
     }
-    const idempotencyKey = decisionIdempotencyKey || createDecisionIdempotencyKey(caseId);
+    const idempotencyKey = decisionIdempotencyKey || createIdempotencyKey("fraud-case-update", caseId);
     mutationAbortRef.current?.abort();
     const abortController = new AbortController();
     mutationAbortRef.current = abortController;
@@ -182,7 +186,7 @@ export function FraudCaseDetailsPage({
     const currentCaseId = caseId;
     const currentApiClient = apiClient;
     setDecisionIdempotencyKey(idempotencyKey);
-    setSubmitState({ isSubmitting: true, error: "", success: "" });
+    setSubmitState({ isSubmitting: true, error: "", success: "", warning: "" });
     try {
       const response = await currentApiClient.updateFraudCase(currentCaseId, {
         status: form.status,
@@ -202,17 +206,28 @@ export function FraudCaseDetailsPage({
         tags: (updatedCase.decisionTags || []).join(", ")
       });
       setDecisionIdempotencyKey("");
-      setSubmitState({ isSubmitting: false, error: "", success: "Case decision saved." });
-      onCaseUpdated?.();
+      setSubmitState({ isSubmitting: false, error: "", success: "Case decision saved.", warning: "" });
+      let refreshWarning = "";
+      try {
+        await onCaseUpdated?.();
+      } catch {
+        refreshWarning = "Case decision saved. Latest dashboard state could not be refreshed.";
+      }
+      if (!isCurrentMutation(mutationSeq, currentCaseId, currentApiClient, abortController.signal, mutationSeqRef, mountedRef, currentContextRef)) {
+        return;
+      }
+      if (refreshWarning) {
+        setSubmitState({ isSubmitting: false, error: "", success: "Case decision saved.", warning: refreshWarning });
+      }
     } catch (apiError) {
       if (!isCurrentMutation(mutationSeq, currentCaseId, currentApiClient, abortController.signal, mutationSeqRef, mountedRef, currentContextRef)) {
         return;
       }
       if (isAbortError(apiError)) {
-        setSubmitState({ isSubmitting: false, error: "", success: "" });
+        setSubmitState({ isSubmitting: false, error: "", success: "", warning: "" });
         return;
       }
-      setSubmitState({ isSubmitting: false, error: apiError.message, success: "" });
+      setSubmitState({ isSubmitting: false, error: apiError.message, success: "", warning: "" });
     } finally {
       if (mutationSeqRef.current === mutationSeq && mutationAbortRef.current === abortController) {
         mutationAbortRef.current = null;
@@ -231,14 +246,15 @@ export function FraudCaseDetailsPage({
             workspaceLabel={workspaceLabel}
             status={fraudCase.status}
             riskLevel={fraudCase.riskLevel}
-            actionState={canUpdateCase ? "Action available" : "Action unavailable: missing authority"}
+            actionState={actionState}
             lastLoadedAt={lastSuccessfulLoadAt}
             onBack={onBack}
             headingRef={headingRef}
+            headingId={detailHeadingId}
           />
           <DetailStateBanner
             state={detailState === "stale" ? "stale" : null}
-            message={error}
+            message={detailState === "stale" ? staleFraudCaseMessage(error) : error}
             onRetry={loadCase}
             retryLabel={`Retry fraud case ${fraudCase.caseNumber || fraudCase.caseId} detail`}
           />
@@ -385,6 +401,8 @@ export function FraudCaseDetailsPage({
             </label>
             {submitState.error && <p className="formError">{submitState.error}</p>}
             {submitState.success && <p className="formSuccess">{submitState.success}</p>}
+            {submitState.warning && <p className="formWarning">{submitState.warning}</p>}
+            {detailState === "stale" && <p className="formWarning">Refresh fraud case detail successfully before saving a case decision.</p>}
             <button className="primaryButton" type="submit" disabled={actionDisabled}>
               {submitState.isSubmitting ? "Saving..." : "Save case decision"}
             </button>
@@ -417,9 +435,28 @@ export function FraudCaseDetailsPage({
   );
 }
 
-function createDecisionIdempotencyKey(caseId) {
-  const random = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  return `fraud-case-update-${caseId}-${random}`;
+function fraudCaseActionState({ canUpdateCase, detailState }) {
+  if (!canUpdateCase) {
+    return "Case update unavailable: missing authority";
+  }
+  if (detailState === "runtime-not-ready") {
+    return "Case update unavailable: runtime not ready";
+  }
+  if (detailState === "stale") {
+    return "Case update unavailable: refresh required";
+  }
+  return "Case update available";
+}
+
+function safeDomId(value) {
+  const safe = String(value || "unknown").replace(/[^A-Za-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
+  return safe || "unknown";
+}
+
+function staleFraudCaseMessage(error) {
+  return error
+    ? `Refresh fraud case detail successfully before updating the case decision. Last refresh error: ${error}`
+    : "Refresh fraud case detail successfully before updating the case decision.";
 }
 
 function isCurrentLoad(requestSeq, signal, requestSeqRef, mountedRef) {

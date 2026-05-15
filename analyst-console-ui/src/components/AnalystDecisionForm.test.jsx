@@ -92,6 +92,20 @@ describe("AnalystDecisionForm", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Submit decision" })).toBeEnabled());
     expect(screen.queryByText("aborted")).not.toBeInTheDocument();
   });
+
+  it("keeps decision success separate from post-save refresh failure", async () => {
+    const apiClient = {
+      submitAnalystDecision: vi.fn().mockResolvedValue({ resultingStatus: "RESOLVED" })
+    };
+    render(form({ apiClient, onSubmitted: vi.fn().mockResolvedValue({ status: "failed" }) }));
+
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Reviewed manually" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit decision" }));
+
+    expect(await screen.findByText("Decision saved. Status: RESOLVED")).toBeInTheDocument();
+    expect(screen.getByText("Decision saved. Dashboard refresh failed; retry refresh.")).toBeInTheDocument();
+    expect(screen.queryByText("failed")).not.toBeInTheDocument();
+  });
 });
 
 function form({ alertId = "alert-1", apiClient = { submitAnalystDecision: vi.fn() }, onSubmitted = vi.fn() } = {}) {
