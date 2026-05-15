@@ -22,28 +22,42 @@ export function AlertDetailsPage({ alertId, alertSummary, session, apiClient, on
   const assistantRequestSeqRef = useRef(0);
   const alertAbortRef = useRef(null);
   const assistantAbortRef = useRef(null);
+  const currentContextRef = useRef({ alertId, apiClient });
 
-  const loadAssistantSummary = useCallback(async () => {
+  useEffect(() => {
+    currentContextRef.current = { alertId, apiClient };
+  }, [alertId, apiClient]);
+
+  const loadAssistantSummary = useCallback(async (context = {
+    alertId,
+    apiClient,
+    alertRequestSeq: alertRequestSeqRef.current
+  }) => {
     assistantAbortRef.current?.abort();
     const abortController = new AbortController();
     assistantAbortRef.current = abortController;
     const requestSeq = assistantRequestSeqRef.current + 1;
     assistantRequestSeqRef.current = requestSeq;
-    const currentAlertId = alertId;
-    const currentApiClient = apiClient;
+    const currentAlertId = context.alertId;
+    const currentApiClient = context.apiClient;
     setIsAssistantLoading(true);
     setAssistantError("");
     try {
       const nextSummary = await currentApiClient.getAssistantSummary(currentAlertId, { signal: abortController.signal });
-      if (assistantRequestSeqRef.current !== requestSeq || abortController.signal.aborted) {
-        return;
+      if (!isCurrentAssistantRequest(requestSeq, context, abortController.signal, assistantRequestSeqRef, alertRequestSeqRef, currentContextRef)) {
+        return { status: "stale" };
       }
       setAssistantSummary(nextSummary);
+      return { status: "loaded" };
     } catch (apiError) {
-      if (assistantRequestSeqRef.current !== requestSeq || isAbortError(apiError)) {
-        return;
+      if (!isCurrentAssistantRequest(requestSeq, context, abortController.signal, assistantRequestSeqRef, alertRequestSeqRef, currentContextRef)) {
+        return { status: "stale" };
+      }
+      if (isAbortError(apiError)) {
+        return { status: "aborted" };
       }
       setAssistantError(apiError.message);
+      return { status: "failed" };
     } finally {
       if (assistantRequestSeqRef.current === requestSeq) {
         setIsAssistantLoading(false);
@@ -71,15 +85,24 @@ export function AlertDetailsPage({ alertId, alertSummary, session, apiClient, on
     try {
       const nextAlert = await currentApiClient.getAlert(currentAlertId, { signal: abortController.signal });
       if (alertRequestSeqRef.current !== requestSeq || abortController.signal.aborted) {
-        return;
+        return { status: abortController.signal.aborted ? "aborted" : "stale" };
       }
       setAlert(nextAlert);
-      loadAssistantSummary();
+      loadAssistantSummary({
+        alertId: currentAlertId,
+        apiClient: currentApiClient,
+        alertRequestSeq: requestSeq
+      });
+      return { status: "loaded" };
     } catch (apiError) {
-      if (alertRequestSeqRef.current !== requestSeq || isAbortError(apiError)) {
-        return;
+      if (alertRequestSeqRef.current !== requestSeq) {
+        return { status: "stale" };
+      }
+      if (isAbortError(apiError)) {
+        return { status: "aborted" };
       }
       setError(apiError.message);
+      return { status: "failed" };
     } finally {
       if (alertRequestSeqRef.current === requestSeq) {
         setIsLoading(false);
@@ -101,8 +124,10 @@ export function AlertDetailsPage({ alertId, alertSummary, session, apiClient, on
   }, [loadAlert]);
 
   async function handleDecisionSubmitted() {
-    await loadAlert();
-    await onDecisionSubmitted();
+    const refreshResult = await loadAlert();
+    if (refreshResult?.status === "loaded") {
+      await onDecisionSubmitted();
+    }
   }
 
   return (
@@ -198,4 +223,12 @@ function Metric({ label, value }) {
       <strong>{value || "Unknown"}</strong>
     </div>
   );
+}
+
+function isCurrentAssistantRequest(requestSeq, context, signal, assistantRequestSeqRef, alertRequestSeqRef, currentContextRef) {
+  return assistantRequestSeqRef.current === requestSeq
+    && alertRequestSeqRef.current === context.alertRequestSeq
+    && currentContextRef.current.alertId === context.alertId
+    && currentContextRef.current.apiClient === context.apiClient
+    && !signal.aborted;
 }

@@ -25,6 +25,7 @@ export function FraudCaseDetailsPage({ caseId, session, apiClient, onBack, onCas
   const loadRequestSeqRef = useRef(0);
   const mutationSeqRef = useRef(0);
   const loadAbortRef = useRef(null);
+  const mutationAbortRef = useRef(null);
   const mountedRef = useRef(false);
   const currentContextRef = useRef({ caseId, apiClient });
 
@@ -33,6 +34,7 @@ export function FraudCaseDetailsPage({ caseId, session, apiClient, onBack, onCas
     return () => {
       mountedRef.current = false;
       loadAbortRef.current?.abort();
+      mutationAbortRef.current?.abort();
       loadRequestSeqRef.current += 1;
       mutationSeqRef.current += 1;
     };
@@ -40,7 +42,10 @@ export function FraudCaseDetailsPage({ caseId, session, apiClient, onBack, onCas
 
   useEffect(() => {
     currentContextRef.current = { caseId, apiClient };
+    mutationAbortRef.current?.abort();
+    mutationAbortRef.current = null;
     mutationSeqRef.current += 1;
+    setSubmitState({ isSubmitting: false, error: "", success: "" });
   }, [apiClient, caseId]);
 
   const loadCase = useCallback(async () => {
@@ -112,6 +117,9 @@ export function FraudCaseDetailsPage({ caseId, session, apiClient, onBack, onCas
       return;
     }
     const idempotencyKey = decisionIdempotencyKey || createDecisionIdempotencyKey(caseId);
+    mutationAbortRef.current?.abort();
+    const abortController = new AbortController();
+    mutationAbortRef.current = abortController;
     const mutationSeq = mutationSeqRef.current + 1;
     mutationSeqRef.current = mutationSeq;
     const currentCaseId = caseId;
@@ -124,8 +132,8 @@ export function FraudCaseDetailsPage({ caseId, session, apiClient, onBack, onCas
         analystId: session.userId || form.analystId,
         decisionReason: form.decisionReason,
         tags: form.tags.split(",").map((tag) => tag.trim()).filter(Boolean)
-      }, { idempotencyKey });
-      if (!isCurrentMutation(mutationSeq, currentCaseId, currentApiClient, mutationSeqRef, mountedRef, currentContextRef)) {
+      }, { idempotencyKey, signal: abortController.signal });
+      if (!isCurrentMutation(mutationSeq, currentCaseId, currentApiClient, abortController.signal, mutationSeqRef, mountedRef, currentContextRef)) {
         return;
       }
       const updatedCase = response?.updated_case || response?.updatedCase || response?.current_case_snapshot || response?.currentCaseSnapshot || response;
@@ -140,10 +148,18 @@ export function FraudCaseDetailsPage({ caseId, session, apiClient, onBack, onCas
       setSubmitState({ isSubmitting: false, error: "", success: "Case decision saved." });
       onCaseUpdated?.();
     } catch (apiError) {
-      if (!isCurrentMutation(mutationSeq, currentCaseId, currentApiClient, mutationSeqRef, mountedRef, currentContextRef) || isAbortError(apiError)) {
+      if (!isCurrentMutation(mutationSeq, currentCaseId, currentApiClient, abortController.signal, mutationSeqRef, mountedRef, currentContextRef)) {
+        return;
+      }
+      if (isAbortError(apiError)) {
+        setSubmitState({ isSubmitting: false, error: "", success: "" });
         return;
       }
       setSubmitState({ isSubmitting: false, error: apiError.message, success: "" });
+    } finally {
+      if (mutationSeqRef.current === mutationSeq && mutationAbortRef.current === abortController) {
+        mutationAbortRef.current = null;
+      }
     }
   }
 
@@ -343,11 +359,12 @@ function isCurrentLoad(requestSeq, signal, requestSeqRef, mountedRef) {
   return mountedRef.current && requestSeqRef.current === requestSeq && !signal.aborted;
 }
 
-function isCurrentMutation(mutationSeq, caseId, apiClient, mutationSeqRef, mountedRef, currentContextRef) {
+function isCurrentMutation(mutationSeq, caseId, apiClient, signal, mutationSeqRef, mountedRef, currentContextRef) {
   return mountedRef.current
     && mutationSeqRef.current === mutationSeq
     && currentContextRef.current.caseId === caseId
-    && currentContextRef.current.apiClient === apiClient;
+    && currentContextRef.current.apiClient === apiClient
+    && !signal.aborted;
 }
 
 function formatPln(value) {
