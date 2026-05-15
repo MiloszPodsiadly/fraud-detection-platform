@@ -70,6 +70,39 @@ describe("AlertsListPage frame", () => {
     expect(screen.getByText(/Last successful refresh/)).toBeInTheDocument();
     expect(screen.queryByText(/Last refreshed/)).not.toBeInTheDocument();
   });
+
+  it("does not render not-mounted reports or compliance data as business zero", () => {
+    render(
+      <AlertsListPage
+        workspacePage="analyst"
+        workspaceCounters={{ alerts: null, transactions: null }}
+        workspaceCountersStatus={{ failedCounters: [], errorByCounter: {}, stale: false }}
+        fraudCaseSummary={{ totalFraudCases: 4 }}
+        sessionState={{ status: SESSION_STATES.AUTHENTICATED }}
+      >
+        <section><h2>Fraud Case Work Queue</h2></section>
+      </AlertsListPage>
+    );
+
+    expect(screen.getByRole("link", { name: /Audit analytics\s*Unavailable/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Governance\s*Unavailable/ })).toBeInTheDocument();
+  });
+
+  it("surfaces invalid workspace route normalization", () => {
+    render(
+      <AlertsListPage
+        workspacePage="analyst"
+        routeFallbackNotice={'Unknown workspace route "bad"; showing Fraud Case workspace.'}
+        fraudCaseSummary={{ totalFraudCases: 4 }}
+        sessionState={{ status: SESSION_STATES.AUTHENTICATED }}
+      >
+        <section><h2>Fraud Case Work Queue</h2></section>
+      </AlertsListPage>
+    );
+
+    expect(screen.getByText("Workspace route normalized.")).toBeInTheDocument();
+    expect(screen.getByText('Unknown workspace route "bad"; showing Fraud Case workspace.')).toBeInTheDocument();
+  });
 });
 
 function page(totalElements) {

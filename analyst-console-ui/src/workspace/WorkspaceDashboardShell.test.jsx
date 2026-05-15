@@ -7,10 +7,16 @@ const shellSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url))
 
 describe("WorkspaceDashboardShell FDP-53 composition", () => {
   it("renders the active workspace through WorkspaceRouteRegistry", () => {
-    expect(shellSource).toContain("resolveWorkspaceRoute(workspacePage)");
+    expect(shellSource).toContain("resolveWorkspaceRouteResult(workspacePage)");
     expect(shellSource).toContain("const ActiveWorkspaceRuntime = activeRoute.Runtime");
     expect(shellSource).toContain("<ActiveWorkspaceRuntime");
     expect(shellSource).toContain("workspaceRoutes={WORKSPACE_ROUTE_ENTRIES}");
+  });
+
+  it("delegates refresh behavior to the single refresh contract", () => {
+    expect(shellSource).toContain("createWorkspaceRefreshHandler");
+    expect(shellSource).not.toContain("function refreshDashboard");
+    expect(shellSource).not.toContain("refreshWorkspaceDashboard");
   });
 
   it("keeps workspace-specific runtime hooks out of the shell", () => {

@@ -255,13 +255,32 @@ describe("AlertDetailsPage", () => {
     await waitFor(() => expect(screen.queryByText("AbortError")).not.toBeInTheDocument());
     expect(screen.queryByText("aborted")).not.toBeInTheDocument();
   });
+
+  it("marks missing alert queue owner as runtime-not-ready instead of fake empty summary", async () => {
+    const apiClient = {
+      getAlert: vi.fn().mockResolvedValue(alertDetails("alert-1", "Open alert")),
+      getAssistantSummary: vi.fn().mockResolvedValue(summary("summary-current"))
+    };
+
+    render(page({ alertId: "alert-1", apiClient, alertSummaryRuntimeState: "not-mounted" }));
+
+    await screen.findByText("Open alert");
+    expect(screen.getByText(/Alert queue summary is not mounted/)).toBeInTheDocument();
+  });
 });
 
-function page({ alertId, apiClient, onDecisionSubmitted = vi.fn(), sessionValue = session() }) {
+function page({
+  alertId,
+  apiClient,
+  onDecisionSubmitted = vi.fn(),
+  sessionValue = session(),
+  alertSummaryRuntimeState = "available"
+}) {
   return (
     <AlertDetailsPage
       alertId={alertId}
       alertSummary={null}
+      alertSummaryRuntimeState={alertSummaryRuntimeState}
       session={sessionValue}
       apiClient={apiClient}
       onBack={vi.fn()}

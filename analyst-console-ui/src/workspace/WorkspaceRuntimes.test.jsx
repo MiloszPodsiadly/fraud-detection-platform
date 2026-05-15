@@ -73,6 +73,28 @@ describe("workspace runtime ownership", () => {
     await waitFor(() => expect(apiClient.listFraudCaseWorkQueue).not.toHaveBeenCalled());
     expect(apiClient.getFraudCaseWorkQueueSummary).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["analyst", "listFraudCaseWorkQueue"],
+    ["fraudTransaction", "listAlerts"],
+    ["transactionScoring", "listScoredTransactions"],
+    ["compliance", "listGovernanceAdvisories"],
+    ["reports", "getGovernanceAdvisoryAnalytics"]
+  ])("surfaces %s runtime API failures without replacing them with fake empty state", async (routeKey, methodName) => {
+    apiClient[methodName].mockRejectedValueOnce(new Error(`${routeKey} unavailable`));
+    const onResult = vi.fn();
+
+    renderRuntime(routeKey, {}, runtimeValue(), { ...runtimeProps(), onResult });
+
+    await waitFor(() => expect(lastRuntimeResult(onResult)?.error?.message).toBe(`${routeKey} unavailable`));
+  });
+
+  it("does not hidden-fetch reports analytics from compliance runtime", async () => {
+    renderRuntime("compliance");
+
+    await waitFor(() => expect(apiClient.listGovernanceAdvisories).toHaveBeenCalledTimes(1));
+    expect(apiClient.getGovernanceAdvisoryAnalytics).not.toHaveBeenCalled();
+  });
 });
 
 function renderRuntime(routeKey, runtimeOverrides = {}, runtimeContext = runtimeValue(runtimeOverrides), props = runtimeProps()) {
@@ -92,7 +114,10 @@ function runtimeElement(routeKey, runtimeOverrides = {}, runtimeContext = runtim
         onOpenAlert={props.onOpenAlert}
         onOpenFraudCase={props.onOpenFraudCase}
       >
-        {({ workspaceContent }) => <div>{workspaceContent}</div>}
+        {(result) => {
+          props.onResult?.(result);
+          return <div>{result.workspaceContent}</div>;
+        }}
       </Runtime>
     </WorkspaceRuntimeContext.Provider>
   );
@@ -103,8 +128,13 @@ function runtimeProps() {
     setCounterValue: vi.fn(),
     setSessionState: vi.fn(),
     onOpenAlert: vi.fn(),
-    onOpenFraudCase: vi.fn()
+    onOpenFraudCase: vi.fn(),
+    onResult: null
   };
+}
+
+function lastRuntimeResult(onResult) {
+  return onResult.mock.calls.at(-1)?.[0];
 }
 
 function runtimeValue(overrides = {}) {
