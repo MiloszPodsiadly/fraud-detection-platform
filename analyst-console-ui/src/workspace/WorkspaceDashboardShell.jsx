@@ -12,7 +12,8 @@ import { useWorkspaceCounters } from "./useWorkspaceCounters.js";
 import { shouldBlockDashboardFetch, useWorkspaceRefreshController } from "./useWorkspaceRefreshController.js";
 import { useWorkspaceRuntime } from "./useWorkspaceRuntime.js";
 
-// Composition layer: keep new business workflows in workspace-specific hooks/containers.
+// Composition hub: wires runtime hooks, counters, and workspace containers.
+// New business workflows belong in workspace-specific hooks/containers; do not add mutation workflows here.
 export function WorkspaceDashboardShell({
   workspacePage,
   selectedAlertId,
