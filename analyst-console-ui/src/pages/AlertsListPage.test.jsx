@@ -88,6 +88,25 @@ describe("AlertsListPage frame", () => {
     expect(screen.getByRole("link", { name: /Governance\s*Unavailable/ })).toBeInTheDocument();
   });
 
+  it("distinguishes missing authority from stale or unavailable counters", () => {
+    render(
+      <AlertsListPage
+        workspacePage="fraudTransaction"
+        workspaceCounters={{ alerts: 7, transactions: null }}
+        workspaceCountersStatus={{ failedCounters: [], errorByCounter: {}, stale: false }}
+        canReadAlerts={false}
+        canReadTransactions
+        fraudCaseSummary={{ totalFraudCases: 4 }}
+        sessionState={{ status: SESSION_STATES.AUTHENTICATED }}
+      >
+        <section><h2>Alert review queue</h2></section>
+      </AlertsListPage>
+    );
+
+    expect(screen.getByRole("link", { name: /Alerts\s*No access\s*Access unavailable/ })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Alerts\s*7/ })).not.toBeInTheDocument();
+  });
+
   it("surfaces invalid workspace route normalization", () => {
     render(
       <AlertsListPage
@@ -102,6 +121,26 @@ describe("AlertsListPage frame", () => {
 
     expect(screen.getByText("Workspace route normalized.")).toBeInTheDocument();
     expect(screen.getByText('Unknown workspace route "bad"; showing Fraud Case workspace.')).toBeInTheDocument();
+  });
+
+  it("renders controlled refresh notices without entity identifiers", () => {
+    render(
+      <AlertsListPage
+        workspacePage="analyst"
+        refreshNotice={{
+          title: "Refresh could not start.",
+          message: "Refresh could not be started. Try again."
+        }}
+        fraudCaseSummary={{ totalFraudCases: 4 }}
+        sessionState={{ status: SESSION_STATES.AUTHENTICATED }}
+      >
+        <section><h2>Fraud Case Work Queue</h2></section>
+      </AlertsListPage>
+    );
+
+    expect(screen.getByText("Refresh could not start.")).toBeInTheDocument();
+    expect(screen.getByText("Refresh could not be started. Try again.")).toBeInTheDocument();
+    expect(screen.queryByText(/alert-/)).not.toBeInTheDocument();
   });
 });
 

@@ -16,6 +16,13 @@ describe("createWorkspaceRuntimeResult", () => {
       error: null,
       refreshWorkspace
     });
+    expect(Object.keys(result)).toEqual([
+      "workspaceContent",
+      "navigationState",
+      "detailRouterState",
+      "error",
+      "refreshWorkspace"
+    ]);
   });
 
   it("fails fast when required runtime contract fields are missing", () => {
@@ -28,5 +35,10 @@ describe("createWorkspaceRuntimeResult", () => {
       refreshWorkspace: vi.fn(),
       navigationState: null
     })).toThrow("navigationState");
+    expect(() => createWorkspaceRuntimeResult({
+      workspaceContent: "content",
+      refreshWorkspace: vi.fn(),
+      extra: "field"
+    })).toThrow("unsupported keys");
   });
 });

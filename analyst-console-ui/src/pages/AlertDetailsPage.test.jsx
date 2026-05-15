@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { WORKSPACE_DETAIL_RUNTIME_STATE } from "../workspace/workspaceRuntimeStates.js";
 import { AlertDetailsPage } from "./AlertDetailsPage.jsx";
 
 describe("AlertDetailsPage", () => {
@@ -262,7 +263,23 @@ describe("AlertDetailsPage", () => {
       getAssistantSummary: vi.fn().mockResolvedValue(summary("summary-current"))
     };
 
-    render(page({ alertId: "alert-1", apiClient, alertSummaryRuntimeState: "not-mounted" }));
+    render(page({
+      alertId: "alert-1",
+      apiClient,
+      alertSummaryRuntimeState: WORKSPACE_DETAIL_RUNTIME_STATE.NOT_MOUNTED
+    }));
+
+    await screen.findByText("Open alert");
+    expect(screen.getByText(/Alert queue summary is not mounted/)).toBeInTheDocument();
+  });
+
+  it("treats unknown alert queue runtime state as not mounted", async () => {
+    const apiClient = {
+      getAlert: vi.fn().mockResolvedValue(alertDetails("alert-1", "Open alert")),
+      getAssistantSummary: vi.fn().mockResolvedValue(summary("summary-current"))
+    };
+
+    render(page({ alertId: "alert-1", apiClient, alertSummaryRuntimeState: "notMounted" }));
 
     await screen.findByText("Open alert");
     expect(screen.getByText(/Alert queue summary is not mounted/)).toBeInTheDocument();
@@ -274,7 +291,7 @@ function page({
   apiClient,
   onDecisionSubmitted = vi.fn(),
   sessionValue = session(),
-  alertSummaryRuntimeState = "available"
+  alertSummaryRuntimeState = WORKSPACE_DETAIL_RUNTIME_STATE.AVAILABLE
 }) {
   return (
     <AlertDetailsPage

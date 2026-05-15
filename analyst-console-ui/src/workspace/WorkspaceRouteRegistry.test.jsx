@@ -2,19 +2,30 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { WORKSPACE_ROUTE_ENTRIES, WORKSPACE_ROUTE_REGISTRY, resolveWorkspaceRoute, resolveWorkspaceRouteResult } from "./WorkspaceRouteRegistry.jsx";
+import {
+  WORKSPACE_ROUTE_ENTRIES,
+  WORKSPACE_ROUTE_ORDER,
+  WORKSPACE_ROUTE_REGISTRY,
+  resolveWorkspaceRoute,
+  resolveWorkspaceRouteResult
+} from "./WorkspaceRouteRegistry.jsx";
 
 const registrySource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "WorkspaceRouteRegistry.jsx"), "utf8");
 
 describe("WorkspaceRouteRegistry", () => {
   it("contains every workspace route with declarative metadata", () => {
-    expect(WORKSPACE_ROUTE_ENTRIES.map((route) => route.key)).toEqual([
+    const expectedOrder = [
       "transactionScoring",
       "fraudTransaction",
       "analyst",
       "reports",
       "compliance"
-    ]);
+    ];
+
+    expect(WORKSPACE_ROUTE_ORDER).toEqual(expectedOrder);
+    expect(new Set(WORKSPACE_ROUTE_ORDER).size).toBe(WORKSPACE_ROUTE_ORDER.length);
+    expect(WORKSPACE_ROUTE_ORDER.toSorted()).toEqual(Object.keys(WORKSPACE_ROUTE_REGISTRY).toSorted());
+    expect(WORKSPACE_ROUTE_ENTRIES.map((route) => route.key)).toEqual(expectedOrder);
 
     for (const route of WORKSPACE_ROUTE_ENTRIES) {
       expect(route).toEqual(expect.objectContaining({

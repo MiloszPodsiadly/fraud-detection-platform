@@ -28,7 +28,11 @@ describe("workspaceRefreshContract", () => {
       refreshWorkspaceCounters
     });
 
-    expect(refresh()).toEqual({ refreshed: true });
+    expect(refresh()).toEqual({
+      refreshed: true,
+      workspaceRefresh: "started",
+      countersRefresh: "started"
+    });
     expect(refreshWorkspace).toHaveBeenCalledTimes(1);
     expect(refreshWorkspaceCounters).toHaveBeenCalledTimes(1);
   });
@@ -43,10 +47,54 @@ describe("workspaceRefreshContract", () => {
       refreshWorkspaceCounters
     });
 
-    refresh();
+    expect(refresh()).toEqual({
+      refreshed: true,
+      workspaceRefresh: "started",
+      countersRefresh: "skipped"
+    });
 
     expect(refreshWorkspace).toHaveBeenCalledTimes(1);
     expect(refreshWorkspaceCounters).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when workspace refresh throws synchronously", () => {
+    const refreshWorkspace = vi.fn(() => {
+      throw new Error("workspace failed");
+    });
+    const refreshWorkspaceCounters = vi.fn();
+    const refresh = createWorkspaceRefreshHandler({
+      sessionState: { status: SESSION_STATES.AUTHENTICATED },
+      sharedWorkspaceReadsEnabled: true,
+      refreshWorkspace,
+      refreshWorkspaceCounters
+    });
+
+    expect(refresh()).toEqual({
+      refreshed: false,
+      reason: "refresh-failed",
+      failedStep: "workspace"
+    });
+    expect(refreshWorkspaceCounters).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when counters refresh throws synchronously", () => {
+    const refreshWorkspace = vi.fn();
+    const refreshWorkspaceCounters = vi.fn(() => {
+      throw new Error("counters failed");
+    });
+    const refresh = createWorkspaceRefreshHandler({
+      sessionState: { status: SESSION_STATES.AUTHENTICATED },
+      sharedWorkspaceReadsEnabled: true,
+      refreshWorkspace,
+      refreshWorkspaceCounters
+    });
+
+    expect(refresh()).toEqual({
+      refreshed: false,
+      reason: "refresh-failed",
+      failedStep: "counters"
+    });
+    expect(refreshWorkspace).toHaveBeenCalledTimes(1);
   });
 });
 

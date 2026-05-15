@@ -2,10 +2,11 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../pages/AlertDetailsPage.jsx", () => ({
-  AlertDetailsPage: ({ canReadAlert, workspaceLabel, onBack }) => (
+  AlertDetailsPage: ({ canReadAlert, workspaceLabel, alertSummaryRuntimeState, onBack }) => (
     <section>
       <h2>Alert detail {String(canReadAlert)}</h2>
       <span>{workspaceLabel}</span>
+      <span>{alertSummaryRuntimeState}</span>
       <button type="button" onClick={onBack}>Back to list</button>
     </section>
   )
@@ -22,6 +23,7 @@ vi.mock("../pages/FraudCaseDetailsPage.jsx", () => ({
 }));
 
 import { WorkspaceDetailRouter } from "./WorkspaceDetailRouter.jsx";
+import { WORKSPACE_DETAIL_RUNTIME_STATE } from "./workspaceRuntimeStates.js";
 
 describe("WorkspaceDetailRouter", () => {
   it("passes alert read capability and restores focus to the originating alert control", async () => {
@@ -46,9 +48,29 @@ describe("WorkspaceDetailRouter", () => {
 
     expect(screen.getByRole("heading", { name: "Alert detail true" })).toBeInTheDocument();
     expect(screen.getByText("Fraud Transaction")).toBeInTheDocument();
+    expect(screen.getByText(WORKSPACE_DETAIL_RUNTIME_STATE.AVAILABLE)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Back to list" }));
     expect(onCloseSelection).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.getByRole("button", { name: "Origin alert" })).toHaveFocus());
+  });
+
+  it("passes not-mounted detail runtime state when alert queue owner is absent", () => {
+    render(
+      <WorkspaceDetailRouter
+        selectedAlertId="alert-1"
+        selectedFraudCaseId={null}
+        alertQueueState={undefined}
+        session={{ userId: "analyst-1", authorities: [] }}
+        apiClient={{}}
+        canReadAlerts
+        canReadFraudCases={false}
+        workspacePage="analyst"
+        onCloseSelection={vi.fn()}
+        onRefreshDashboard={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText(WORKSPACE_DETAIL_RUNTIME_STATE.NOT_MOUNTED)).toBeInTheDocument();
   });
 
   it("passes fraud-case read capability and falls back to workspace heading focus", async () => {
