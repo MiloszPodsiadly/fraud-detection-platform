@@ -1,0 +1,60 @@
+# FDP-53 Workspace Runtime Ownership
+
+## Goal
+
+FDP-53 moves workspace-specific runtime ownership out of `WorkspaceDashboardShell` so the shell remains a composition layer instead of becoming the next central application component.
+
+## Architecture
+
+`WorkspaceDashboardShell` owns only the runtime provider boundary usage, active workspace selection, `WorkspaceRouteRegistry` lookup, shared header/counters, `WorkspaceDetailRouter`, the active workspace outlet, and top-level session blocking state.
+
+`WorkspaceRouteRegistry` is declarative metadata: workspace key, labels, route value, heading label, capability key reference, and Runtime component. It does not compute authorities, create API clients, call APIs, or encode business workflow rules.
+
+`WorkspaceRuntimeProvider` remains the source of normalized frontend runtime context. It exposes the current session, auth provider, API client, capability booleans, and runtime status to mounted workspace runtime layers. It is not a security boundary; backend authorization remains authoritative.
+
+Workspace-specific runtime layers own their workspace reads and local callbacks:
+
+- `AnalystWorkspaceRuntime`: fraud-case work queue and global fraud-case summary.
+- `FraudTransactionWorkspaceRuntime`: alert queue and alert pagination.
+- `TransactionScoringWorkspaceRuntime`: scored transaction filters and pagination.
+- `GovernanceWorkspaceRuntime`: governance advisory queue and guarded audit workflow.
+- `ReportsWorkspaceRuntime`: governance analytics read model.
+
+Only the active workspace runtime is mounted. Hidden workspaces do not run sensitive reads or speculative prefetches.
+
+## Adding A Workspace
+
+Add a `WorkspaceRouteRegistry` entry with key, labels, route value, heading, capability key reference, and Runtime component.
+
+Add a workspace runtime layer that consumes `WorkspaceRuntimeProvider` context and owns only that workspace's read hooks and local callbacks.
+
+Add a container/page pair for presentation. Containers remain presentation boundaries and must not import API clients or call raw `fetch`.
+
+Add no-duplicate-fetch tests proving only the active runtime fetches. Add session switch and authority-loss tests proving old data clears or cannot be committed. Add focus/detail tests when the workspace has a detail route.
+
+## Hard Rules
+
+- No raw `fetch` outside API/auth layers.
+- No default API wrapper imports in workspace runtime/container code.
+- No API client creation inside workspace runtime.
+- No speculative prefetching.
+- No hidden workspace sensitive reads.
+- No backend production changes in FDP-53.
+
+## Auth Model
+
+The registry may reference capability keys such as `canReadFraudCases`; it must not calculate roles, authorities, or token state. Frontend capability flags only shape UI availability. Backend authorization remains the source of truth for every protected read and mutation.
+
+## Non-Goals
+
+FDP-53 does not add assignment, claim, export, bulk, or mass-action workflows. It does not add new mutations, idempotency semantics, Kafka/outbox/finality behavior, backend endpoints, or auth modes.
+
+## Failure Modes
+
+Duplicate fetches can occur if a workspace hook remains in the shell or if multiple runtimes are mounted at once.
+
+Stale state can appear if session or authority switches do not clear old runtime data.
+
+The registry becomes dangerous if it starts computing authorization instead of referencing capability keys.
+
+The shell becomes hard to reason about if workspace-specific hooks, filters, pagination, or retry behavior move back into it.
