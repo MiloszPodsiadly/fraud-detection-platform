@@ -1,5 +1,8 @@
+import { WORKSPACE_ROUTE_ENTRIES } from "./WorkspaceRouteRegistry.jsx";
+
 export function WorkspaceNavigation({
   workspacePage,
+  workspaceRoutes = WORKSPACE_ROUTE_ENTRIES,
   workspaceCounters = { alerts: null, transactions: null },
   workspaceCountersStatus = { failedCounters: [], errorByCounter: {}, stale: false },
   canReadFraudCases,
@@ -41,58 +44,51 @@ export function WorkspaceNavigation({
     fraudCaseSummaryGeneratedAt ? `Generated at ${fraudCaseSummaryGeneratedAt}.` : null
   ].filter(Boolean).join(" ");
 
+  const navigationState = {
+    transactionScoring: {
+      value: transactionGlobalCount,
+      authority: canReadTransactions,
+      stale: isCounterStale("transactions", failedCounterNames, workspaceCountersStatus)
+    },
+    fraudTransaction: {
+      value: alertGlobalCount,
+      authority: canReadAlerts,
+      stale: isCounterStale("alerts", failedCounterNames, workspaceCountersStatus)
+    },
+    analyst: {
+      value: isFraudCaseSummaryLoading ? "..." : fraudCaseSummaryLabel,
+      authority: canReadFraudCases,
+      stale: Boolean(fraudCaseSummaryError),
+      title: fraudCaseSummaryHint,
+      ariaLabel: `Global fraud cases ${isFraudCaseSummaryLoading ? "Loading" : fraudCaseSummaryLabel}`
+    },
+    reports: {
+      value: governanceAnalytics?.totals?.advisories ?? 0,
+      authority: canReadGovernanceAdvisories
+    },
+    compliance: {
+      value: advisoryQueue.count || 0,
+      authority: canReadGovernanceAdvisories
+    }
+  };
+
   return (
     <nav className="workspaceTabs" aria-label="Analyst workspace sections">
-      <WorkspaceTab
-        page="transactionScoring"
-        href="?workspace=transaction-scoring"
-        activePage={workspacePage}
-        label="Transactions"
-        value={transactionGlobalCount}
-        authority={canReadTransactions}
-        stale={isCounterStale("transactions", failedCounterNames, workspaceCountersStatus)}
-        onWorkspaceChange={onWorkspaceChange}
-      />
-      <WorkspaceTab
-        page="fraudTransaction"
-        href="?workspace=fraud-transaction"
-        activePage={workspacePage}
-        label="Alerts"
-        value={alertGlobalCount}
-        authority={canReadAlerts}
-        stale={isCounterStale("alerts", failedCounterNames, workspaceCountersStatus)}
-        onWorkspaceChange={onWorkspaceChange}
-      />
-      <WorkspaceTab
-        page="analyst"
-        href="/"
-        activePage={workspacePage}
-        label="Global fraud cases"
-        value={isFraudCaseSummaryLoading ? "..." : fraudCaseSummaryLabel}
-        authority={canReadFraudCases}
-        stale={Boolean(fraudCaseSummaryError)}
-        title={fraudCaseSummaryHint}
-        ariaLabel={`Global fraud cases ${isFraudCaseSummaryLoading ? "Loading" : fraudCaseSummaryLabel}`}
-        onWorkspaceChange={onWorkspaceChange}
-      />
-      <WorkspaceTab
-        page="reports"
-        href="?workspace=reports"
-        activePage={workspacePage}
-        label="Audit analytics"
-        value={governanceAnalytics?.totals?.advisories ?? 0}
-        authority={canReadGovernanceAdvisories}
-        onWorkspaceChange={onWorkspaceChange}
-      />
-      <WorkspaceTab
-        page="compliance"
-        href="?workspace=compliance"
-        activePage={workspacePage}
-        label="Governance"
-        value={advisoryQueue.count || 0}
-        authority={canReadGovernanceAdvisories}
-        onWorkspaceChange={onWorkspaceChange}
-      />
+      {workspaceRoutes.map((route) => (
+        <WorkspaceTab
+          key={route.key}
+          page={route.key}
+          href={route.href}
+          activePage={workspacePage}
+          label={route.navigationLabel}
+          value={navigationState[route.key]?.value ?? 0}
+          authority={navigationState[route.key]?.authority}
+          stale={navigationState[route.key]?.stale}
+          title={navigationState[route.key]?.title}
+          ariaLabel={navigationState[route.key]?.ariaLabel}
+          onWorkspaceChange={onWorkspaceChange}
+        />
+      ))}
     </nav>
   );
 }

@@ -2,6 +2,7 @@ import { AnalystWorkspacePage } from "../pages/AnalystWorkspacePage.jsx";
 
 export function AnalystWorkspaceContainer({
   canReadFraudCases,
+  headingLabel = "Fraud Case Work Queue",
   workQueueState,
   summaryState,
   onOpenFraudCase
@@ -26,7 +27,7 @@ export function AnalystWorkspaceContainer({
       onFraudCaseWorkQueueRefreshFirstSlice={workQueueState.refreshFirstSlice}
       onFraudCaseWorkQueueLoadMore={workQueueState.loadMore}
       onOpenFraudCase={onOpenFraudCase}
-      workspaceHeadingProps={workspaceHeadingProps("Fraud Case Work Queue")}
+      workspaceHeadingProps={workspaceHeadingProps(headingLabel)}
     />
   );
 }

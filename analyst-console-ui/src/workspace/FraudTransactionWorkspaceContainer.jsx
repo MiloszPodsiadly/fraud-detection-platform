@@ -1,6 +1,7 @@
 import { FraudTransactionWorkspacePage } from "../pages/FraudTransactionWorkspacePage.jsx";
 
 export function FraudTransactionWorkspaceContainer({
+  headingLabel = "Alert review queue",
   alertQueueState,
   onRetryWorkspace,
   onPageChange,
@@ -16,7 +17,7 @@ export function FraudTransactionWorkspaceContainer({
       onAlertPageChange={onPageChange}
       onAlertPageSizeChange={onPageSizeChange}
       onOpenAlert={onOpenAlert}
-      workspaceHeadingProps={workspaceHeadingProps("Alert review queue")}
+      workspaceHeadingProps={workspaceHeadingProps(headingLabel)}
     />
   );
 }

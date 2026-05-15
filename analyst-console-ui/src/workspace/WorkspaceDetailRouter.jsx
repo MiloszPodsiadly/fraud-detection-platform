@@ -11,6 +11,7 @@ export function WorkspaceDetailRouter({
   canReadAlerts,
   canReadFraudCases,
   workspacePage,
+  workspaceLabel,
   onCloseSelection,
   onRefreshDashboard
 }) {
@@ -48,7 +49,7 @@ export function WorkspaceDetailRouter({
         session={session}
         apiClient={apiClient}
         canReadAlert={canReadAlerts}
-        workspaceLabel={workspaceLabelFor(workspacePage)}
+        workspaceLabel={workspaceLabel || workspaceLabelFor(workspacePage)}
         onBack={closeAndRestoreFocus}
         onDecisionSubmitted={onRefreshDashboard}
       />
@@ -62,7 +63,7 @@ export function WorkspaceDetailRouter({
         session={session}
         apiClient={apiClient}
         canReadFraudCase={canReadFraudCases}
-        workspaceLabel={workspaceLabelFor(workspacePage)}
+        workspaceLabel={workspaceLabel || workspaceLabelFor(workspacePage)}
         onBack={closeAndRestoreFocus}
         onCaseUpdated={onRefreshDashboard}
       />

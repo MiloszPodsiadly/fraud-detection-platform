@@ -1,6 +1,7 @@
 import { GovernanceWorkspacePage } from "../pages/GovernanceWorkspacePage.jsx";
 
 export function GovernanceWorkspaceContainer({
+  headingLabel = "Operator review queue",
   queueState,
   session,
   canWriteGovernanceAudit,
@@ -18,7 +19,7 @@ export function GovernanceWorkspaceContainer({
       onAdvisoryQueueRequestChange={queueState.setRequest}
       onGovernanceRetry={queueState.refresh}
       onRecordGovernanceAudit={onRecordGovernanceAudit}
-      workspaceHeadingProps={workspaceHeadingProps("Operator review queue")}
+      workspaceHeadingProps={workspaceHeadingProps(headingLabel)}
     />
   );
 }

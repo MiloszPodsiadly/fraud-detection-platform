@@ -4,6 +4,7 @@ import { WorkspaceNavigation } from "../workspace/WorkspaceNavigation.jsx";
 
 export function AlertsListPage({
   workspacePage = "analyst",
+  workspaceRoutes,
   workspaceCounters = { alerts: null, transactions: null },
   workspaceCountersStatus = { degraded: false, failedCounters: [], errorByCounter: {}, stale: false, lastRefreshedAt: null },
   canReadFraudCases,
@@ -30,6 +31,7 @@ export function AlertsListPage({
     <div className="dashboardGrid pageEnter">
       <WorkspaceNavigation
         workspacePage={workspacePage}
+        workspaceRoutes={workspaceRoutes}
         workspaceCounters={workspaceCounters}
         workspaceCountersStatus={workspaceCountersStatus}
         canReadFraudCases={canReadFraudCases}

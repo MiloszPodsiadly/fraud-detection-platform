@@ -1,19 +1,27 @@
 import { AlertsListPage } from "../pages/AlertsListPage.jsx";
-import { AnalystWorkspaceContainer } from "./AnalystWorkspaceContainer.jsx";
-import { FraudTransactionWorkspaceContainer } from "./FraudTransactionWorkspaceContainer.jsx";
-import { GovernanceWorkspaceContainer } from "./GovernanceWorkspaceContainer.jsx";
-import { ReportsWorkspaceContainer } from "./ReportsWorkspaceContainer.jsx";
-import { TransactionScoringWorkspaceContainer } from "./TransactionScoringWorkspaceContainer.jsx";
 import { WorkspaceDetailRouter } from "./WorkspaceDetailRouter.jsx";
-import { useAnalystWorkspaceRuntime } from "./useAnalystWorkspaceRuntime.js";
-import { useGovernanceWorkspaceRuntime } from "./useGovernanceWorkspaceRuntime.js";
-import { useTransactionWorkspaceRuntime } from "./useTransactionWorkspaceRuntime.js";
+import { WORKSPACE_ROUTE_ENTRIES, resolveWorkspaceRoute } from "./WorkspaceRouteRegistry.jsx";
 import { useWorkspaceCounters } from "./useWorkspaceCounters.js";
-import { shouldBlockDashboardFetch, useWorkspaceRefreshController } from "./useWorkspaceRefreshController.js";
+import { shouldBlockDashboardFetch } from "./useWorkspaceRefreshController.js";
 import { useWorkspaceRuntime } from "./useWorkspaceRuntime.js";
 
-// Composition hub: wires runtime hooks, counters, and workspace containers.
-// New business workflows belong in workspace-specific hooks/containers; do not add mutation workflows here.
+const EMPTY_PAGE = Object.freeze({
+  content: Object.freeze([]),
+  totalElements: 0,
+  totalPages: 0,
+  page: 0,
+  size: 0
+});
+
+const EMPTY_ALERT_QUEUE_STATE = Object.freeze({
+  page: EMPTY_PAGE
+});
+
+const EMPTY_ADVISORY_QUEUE = Object.freeze({
+  count: 0,
+  advisory_events: Object.freeze([])
+});
+
 export function WorkspaceDashboardShell({
   workspacePage,
   selectedAlertId,
@@ -27,7 +35,6 @@ export function WorkspaceDashboardShell({
 }) {
   const {
     session,
-    authProvider,
     apiClient,
     canReadFraudCases,
     canReadAlerts,
@@ -36,147 +43,91 @@ export function WorkspaceDashboardShell({
     canWriteGovernanceAudit,
     runtimeStatus
   } = useWorkspaceRuntime();
-  // Gates shared workspace reads/counters; active tab refresh behavior is still owned by each workspace hook/controller.
+  const activeRoute = resolveWorkspaceRoute(workspacePage);
+  const ActiveWorkspaceRuntime = activeRoute.Runtime;
   const sharedWorkspaceReadsEnabled = runtimeStatus === "ready" && !shouldBlockDashboardFetch(sessionState);
   const workspaceCounterState = useWorkspaceCounters({
     enabled: sharedWorkspaceReadsEnabled,
-    includeAlerts: workspacePage !== "fraudTransaction",
-    includeTransactions: workspacePage !== "transactionScoring"
+    includeAlerts: activeRoute.key !== "fraudTransaction",
+    includeTransactions: activeRoute.key !== "transactionScoring"
   });
   const { refresh: refreshWorkspaceCounters, setCounterValue } = workspaceCounterState;
-  const {
-    workQueueState: fraudCaseWorkQueueState,
-    summaryState: fraudCaseWorkQueueSummaryState
-  } = useAnalystWorkspaceRuntime({
-    workspacePage,
-    sharedWorkspaceReadsEnabled,
-    canReadFraudCases,
-    session,
-    authProvider,
-    setSessionState
-  });
-  const {
-    alertQueueState,
-    transactionStreamState,
-    changeTransactionFilters,
-    changeTransactionPage,
-    changeTransactionPageSize,
-    changeAlertPage,
-    changeAlertPageSize
-  } = useTransactionWorkspaceRuntime({
-    workspacePage,
-    sharedWorkspaceReadsEnabled,
-    canReadAlerts,
-    canReadTransactions,
-    setCounterValue
-  });
-  const {
-    queueState: governanceQueueState,
-    analyticsState: governanceAnalyticsState,
-    recordGovernanceAudit
-  } = useGovernanceWorkspaceRuntime({
-    workspacePage,
-    sharedWorkspaceReadsEnabled,
-    canReadGovernanceAdvisories,
-    canWriteGovernanceAudit,
-    apiClient
-  });
-
-  const refreshDashboard = useWorkspaceRefreshController({
-    sessionState,
-    workspacePage,
-    sharedWorkspaceReadsEnabled,
-    alertQueueState,
-    transactionStreamState,
-    fraudCaseWorkQueueSummaryState,
-    refreshWorkspaceCounters,
-    fraudCaseWorkQueueState,
-    governanceQueueState,
-    governanceAnalyticsState
-  });
 
   function closeSelection() {
     clearSelection();
   }
 
-  if ((selectedAlertId || selectedFraudCaseId) && apiClient) {
-    return (
-      <WorkspaceDetailRouter
-        selectedAlertId={selectedAlertId}
-        selectedFraudCaseId={selectedFraudCaseId}
-        alertQueueState={alertQueueState}
-        session={session}
-        apiClient={apiClient}
-        canReadAlerts={canReadAlerts}
-        canReadFraudCases={canReadFraudCases}
-        workspacePage={workspacePage}
-        onCloseSelection={closeSelection}
-        onRefreshDashboard={refreshDashboard}
-      />
-    );
-  }
-
   return (
-    <AlertsListPage
-      workspacePage={workspacePage}
-      workspaceCounters={workspaceCounterState.counters}
-      workspaceCountersStatus={workspaceCounterState}
-      canReadFraudCases={canReadFraudCases}
-      canReadAlerts={canReadAlerts}
-      canReadTransactions={canReadTransactions}
-      canReadGovernanceAdvisories={canReadGovernanceAdvisories}
-      canWriteGovernanceAudit={canWriteGovernanceAudit}
-      alertPage={alertQueueState.page}
-      fraudCaseSummary={fraudCaseWorkQueueSummaryState.summary}
-      fraudCaseSummaryError={fraudCaseWorkQueueSummaryState.error}
-      isFraudCaseSummaryLoading={fraudCaseWorkQueueSummaryState.isLoading}
-      onWorkspaceChange={navigateWorkspace}
-      transactionPage={transactionStreamState.page}
-      advisoryQueue={governanceQueueState.queue}
-      governanceAnalytics={governanceAnalyticsState.analytics}
-      sessionState={sessionState}
-      error={workspacePage === "transactionScoring" ? transactionStreamState.error : alertQueueState.error}
-      onRetry={refreshDashboard}
+    <ActiveWorkspaceRuntime
+      route={activeRoute}
+      sharedWorkspaceReadsEnabled={sharedWorkspaceReadsEnabled}
+      setCounterValue={setCounterValue}
+      setSessionState={setSessionState}
+      onOpenAlert={openAlert}
+      onOpenFraudCase={openFraudCase}
     >
-      {workspacePage === "analyst" && (
-        <AnalystWorkspaceContainer
-          canReadFraudCases={canReadFraudCases}
-          workQueueState={fraudCaseWorkQueueState}
-          summaryState={fraudCaseWorkQueueSummaryState}
-          onOpenFraudCase={openFraudCase}
-        />
-      )}
-      {workspacePage === "fraudTransaction" && (
-        <FraudTransactionWorkspaceContainer
-          alertQueueState={alertQueueState}
-          onRetryWorkspace={refreshDashboard}
-          onPageChange={changeAlertPage}
-          onPageSizeChange={changeAlertPageSize}
-          onOpenAlert={openAlert}
-        />
-      )}
-      {workspacePage === "transactionScoring" && (
-        <TransactionScoringWorkspaceContainer
-          transactionStreamState={transactionStreamState}
-          onRetryWorkspace={refreshDashboard}
-          onFiltersChange={changeTransactionFilters}
-          onPageChange={changeTransactionPage}
-          onPageSizeChange={changeTransactionPageSize}
-        />
-      )}
-      {workspacePage === "reports" && (
-        <ReportsWorkspaceContainer
-          analyticsState={governanceAnalyticsState}
-        />
-      )}
-      {workspacePage === "compliance" && (
-        <GovernanceWorkspaceContainer
-          queueState={governanceQueueState}
-          session={session}
-          canWriteGovernanceAudit={canWriteGovernanceAudit}
-          onRecordGovernanceAudit={recordGovernanceAudit}
-        />
-      )}
-    </AlertsListPage>
+      {({
+        workspaceContent,
+        navigationState = {},
+        detailRouterState = {},
+        error,
+        refreshWorkspace
+      }) => {
+        function refreshDashboard() {
+          if (shouldBlockDashboardFetch(sessionState)) {
+            return;
+          }
+          refreshWorkspace?.();
+          if (sharedWorkspaceReadsEnabled) {
+            refreshWorkspaceCounters();
+          }
+        }
+
+        if ((selectedAlertId || selectedFraudCaseId) && apiClient) {
+          return (
+            <WorkspaceDetailRouter
+              selectedAlertId={selectedAlertId}
+              selectedFraudCaseId={selectedFraudCaseId}
+              alertQueueState={detailRouterState.alertQueueState || EMPTY_ALERT_QUEUE_STATE}
+              session={session}
+              apiClient={apiClient}
+              canReadAlerts={canReadAlerts}
+              canReadFraudCases={canReadFraudCases}
+              workspacePage={activeRoute.key}
+              workspaceLabel={activeRoute.label}
+              onCloseSelection={closeSelection}
+              onRefreshDashboard={refreshDashboard}
+            />
+          );
+        }
+
+        return (
+          <AlertsListPage
+            workspacePage={activeRoute.key}
+            workspaceRoutes={WORKSPACE_ROUTE_ENTRIES}
+            workspaceCounters={workspaceCounterState.counters}
+            workspaceCountersStatus={workspaceCounterState}
+            canReadFraudCases={canReadFraudCases}
+            canReadAlerts={canReadAlerts}
+            canReadTransactions={canReadTransactions}
+            canReadGovernanceAdvisories={canReadGovernanceAdvisories}
+            canWriteGovernanceAudit={canWriteGovernanceAudit}
+            alertPage={navigationState.alertPage || EMPTY_PAGE}
+            fraudCaseSummary={navigationState.fraudCaseSummary}
+            fraudCaseSummaryError={navigationState.fraudCaseSummaryError}
+            isFraudCaseSummaryLoading={navigationState.isFraudCaseSummaryLoading}
+            onWorkspaceChange={navigateWorkspace}
+            transactionPage={navigationState.transactionPage || EMPTY_PAGE}
+            advisoryQueue={navigationState.advisoryQueue || EMPTY_ADVISORY_QUEUE}
+            governanceAnalytics={navigationState.governanceAnalytics}
+            sessionState={sessionState}
+            error={error}
+            onRetry={refreshDashboard}
+          >
+            {workspaceContent}
+          </AlertsListPage>
+        );
+      }}
+    </ActiveWorkspaceRuntime>
   );
 }
