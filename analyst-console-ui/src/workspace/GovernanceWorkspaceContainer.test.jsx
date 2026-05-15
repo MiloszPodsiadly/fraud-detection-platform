@@ -4,7 +4,7 @@ import { GovernanceWorkspaceContainer } from "./GovernanceWorkspaceContainer.jsx
 
 describe("GovernanceWorkspaceContainer", () => {
   it("renders only governance review queue wiring", () => {
-    render(
+    const { container } = render(
       <GovernanceWorkspaceContainer
         advisoryQueue={{ status: "AVAILABLE", count: 0, retention_limit: 200, advisory_events: [] }}
         advisoryQueueRequest={{ severity: "ALL", modelVersion: "", lifecycleStatus: "ALL", limit: 25 }}
@@ -20,6 +20,7 @@ describe("GovernanceWorkspaceContainer", () => {
     );
 
     expect(screen.getByRole("heading", { name: "Operator review queue" })).toBeInTheDocument();
+    expect(container.querySelector("[data-workspace-heading]")).toHaveTextContent("Operator review queue");
     expect(screen.queryByRole("heading", { name: "Alert review queue" })).not.toBeInTheDocument();
   });
 });

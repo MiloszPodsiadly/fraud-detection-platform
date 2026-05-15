@@ -18,7 +18,8 @@ export function AnalystWorkspacePage({
   onFraudCaseWorkQueueRetry,
   onFraudCaseWorkQueueRefreshFirstSlice,
   onFraudCaseWorkQueueLoadMore,
-  onOpenFraudCase
+  onOpenFraudCase,
+  workspaceHeadingProps = {}
 }) {
   if (canReadFraudCases === false) {
     return (
@@ -47,6 +48,7 @@ export function AnalystWorkspacePage({
         onRetry={onFraudCaseWorkQueueRetry}
         onRefreshFirstSlice={onFraudCaseWorkQueueRefreshFirstSlice}
         onOpenCase={onOpenFraudCase}
+        headingProps={workspaceHeadingProps}
       />
 
       {fraudCaseSummaryError && (

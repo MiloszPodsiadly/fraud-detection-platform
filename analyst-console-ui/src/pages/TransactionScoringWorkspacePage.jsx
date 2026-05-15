@@ -13,7 +13,8 @@ export function TransactionScoringWorkspacePage({
   onRetry,
   onTransactionFiltersChange = () => {},
   onTransactionPageChange,
-  onTransactionPageSizeChange
+  onTransactionPageSizeChange,
+  workspaceHeadingProps = {}
 }) {
   const transactions = transactionPage.content || [];
 
@@ -22,7 +23,7 @@ export function TransactionScoringWorkspacePage({
       <div className="panelHeader">
         <div>
           <p className="eyebrow">Monitor</p>
-          <h2 id="transaction-stream-title" tabIndex="-1">Transaction scoring stream</h2>
+          <h2 id="transaction-stream-title" tabIndex="-1" {...workspaceHeadingProps}>Transaction scoring stream</h2>
           <p className="sectionCopy">
             Recent scored transactions include both legitimate traffic and suspicious cases.
           </p>

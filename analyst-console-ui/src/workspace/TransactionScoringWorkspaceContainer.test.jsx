@@ -5,7 +5,7 @@ import { TransactionScoringWorkspaceContainer } from "./TransactionScoringWorksp
 describe("TransactionScoringWorkspaceContainer", () => {
   it("renders only scored transactions and sends filters to request state", () => {
     const onTransactionFiltersChange = vi.fn();
-    render(
+    const { container } = render(
       <TransactionScoringWorkspaceContainer
         transactionPage={{ content: [transaction("txn-1")], totalElements: 73, totalPages: 8, page: 0, size: 10 }}
         transactionPageRequest={{ page: 0, size: 10, query: "", riskLevel: "ALL", status: "ALL" }}
@@ -19,6 +19,7 @@ describe("TransactionScoringWorkspaceContainer", () => {
     );
 
     expect(screen.getByRole("heading", { name: "Transaction scoring stream" })).toBeInTheDocument();
+    expect(container.querySelector("[data-workspace-heading]")).toHaveTextContent("Transaction scoring stream");
     expect(screen.queryByRole("heading", { name: "Alert review queue" })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Risk", { selector: "select" }), { target: { value: "CRITICAL" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));

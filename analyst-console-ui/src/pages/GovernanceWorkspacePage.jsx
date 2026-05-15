@@ -10,7 +10,8 @@ export function GovernanceWorkspacePage({
   canWriteGovernanceAudit,
   onAdvisoryQueueRequestChange,
   onGovernanceRetry,
-  onRecordGovernanceAudit
+  onRecordGovernanceAudit,
+  workspaceHeadingProps = {}
 }) {
   return (
     <GovernanceReviewQueue
@@ -24,6 +25,7 @@ export function GovernanceWorkspacePage({
       onFiltersChange={onAdvisoryQueueRequestChange}
       onRetry={onGovernanceRetry}
       onRecordAudit={onRecordGovernanceAudit}
+      headingProps={workspaceHeadingProps}
     />
   );
 }

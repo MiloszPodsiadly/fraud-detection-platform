@@ -4,7 +4,7 @@ import { ReportsWorkspaceContainer } from "./ReportsWorkspaceContainer.jsx";
 
 describe("ReportsWorkspaceContainer", () => {
   it("renders only reports analytics presentation", () => {
-    render(
+    const { container } = render(
       <ReportsWorkspaceContainer
         governanceAnalytics={{
           status: "AVAILABLE",
@@ -23,6 +23,7 @@ describe("ReportsWorkspaceContainer", () => {
     );
 
     expect(screen.getByRole("heading", { name: "Review visibility" })).toBeInTheDocument();
+    expect(container.querySelector("[data-workspace-heading]")).toHaveTextContent("Review visibility");
     expect(screen.queryByRole("heading", { name: "Governance review queue" })).not.toBeInTheDocument();
   });
 });

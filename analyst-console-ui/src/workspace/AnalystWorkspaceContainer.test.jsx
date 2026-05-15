@@ -4,7 +4,7 @@ import { AnalystWorkspaceContainer } from "./AnalystWorkspaceContainer.jsx";
 
 describe("AnalystWorkspaceContainer", () => {
   it("renders only the analyst fraud-case workspace", () => {
-    render(
+    const { container } = render(
       <AnalystWorkspaceContainer
         canReadFraudCases
         fraudCaseWorkQueue={emptyWorkQueue()}
@@ -23,6 +23,7 @@ describe("AnalystWorkspaceContainer", () => {
     );
 
     expect(screen.getByRole("heading", { name: "Fraud Case Work Queue" })).toBeInTheDocument();
+    expect(container.querySelector("[data-workspace-heading]")).toHaveTextContent("Fraud Case Work Queue");
     expect(screen.queryByRole("heading", { name: "Transaction scoring stream" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Alert review queue" })).not.toBeInTheDocument();
   });

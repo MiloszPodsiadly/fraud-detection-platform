@@ -6,7 +6,8 @@ export function ReportsWorkspacePage({
   isAnalyticsLoading,
   analyticsError,
   onAnalyticsWindowDaysChange,
-  onAnalyticsRetry
+  onAnalyticsRetry,
+  workspaceHeadingProps = {}
 }) {
   return (
     <GovernanceAnalyticsPanel
@@ -16,6 +17,7 @@ export function ReportsWorkspacePage({
       error={analyticsError}
       onWindowDaysChange={onAnalyticsWindowDaysChange}
       onRetry={onAnalyticsRetry}
+      headingProps={workspaceHeadingProps}
     />
   );
 }

@@ -13,7 +13,8 @@ export function FraudTransactionWorkspacePage({
   onRetry,
   onAlertPageChange,
   onAlertPageSizeChange,
-  onOpenAlert
+  onOpenAlert,
+  workspaceHeadingProps = {}
 }) {
   const [filters, setFilters] = useState({
     query: "",
@@ -41,7 +42,7 @@ export function FraudTransactionWorkspacePage({
       <div className="panelHeader">
         <div>
           <p className="eyebrow">Queue</p>
-          <h2 id="alert-review-queue-title" tabIndex="-1">Alert review queue</h2>
+          <h2 id="alert-review-queue-title" tabIndex="-1" {...workspaceHeadingProps}>Alert review queue</h2>
         </div>
       </div>
 
@@ -51,8 +52,8 @@ export function FraudTransactionWorkspacePage({
       {!isLoading && error && <ErrorState error={error} onRetry={onRetry} />}
       {!isLoading && !error && filteredAlerts.length === 0 && (
         <EmptyState
-          title="No alerts match this view"
-          message="Adjust filters or generate synthetic high-risk traffic to populate the queue."
+          title="No alerts on this loaded page match the local filters."
+          message={alertPage.totalPages > 1 ? "Change filters or load another page to continue reviewing." : "Change filters to continue reviewing the loaded page."}
         />
       )}
       {!isLoading && !error && filteredAlerts.length > 0 && (
