@@ -7,7 +7,7 @@ import { useWorkspaceCounters } from "./useWorkspaceCounters.js";
 import { shouldBlockDashboardFetch, useWorkspaceRefreshController } from "./useWorkspaceRefreshController.js";
 import { useWorkspaceRuntime } from "./useWorkspaceRuntime.js";
 
-// Transitional composition layer: keep new business workflows in workspace-specific hooks/containers.
+// Composition layer: keep new business workflows in workspace-specific hooks/containers.
 export function WorkspaceDashboardShell({
   workspacePage,
   selectedAlertId,

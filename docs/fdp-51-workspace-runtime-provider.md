@@ -14,9 +14,9 @@ Workspace data loading, counters, authority-derived workspace capability flags, 
 - Explicit hook client props are for tests, stories, and standalone hook verification only; production composition goes through `WorkspaceRuntimeProvider`.
 - Workspace counters move to `useWorkspaceCounters` with abort, request sequencing, partial failure reporting, stale retained values, and session-boundary clearing.
 - Counter UI visibly reports degraded and stale states without converting missing authority or failed counters to zero.
-- `WorkspaceDashboardShell` is a composition shell for wiring workspace-specific runtime hooks into the page component.
-- `WorkspaceDashboardShell` remains a transitional composition layer; keep new business workflows out of this shell.
-- `AlertsListPage` remains a broad workspace presentation sink during FDP-51; do not grow its prop surface for new workflows.
+- `WorkspaceDashboardShell` wires workspace-specific runtime hooks into the page component.
+- New business workflow logic belongs in workspace-specific containers or hooks, not in the shell.
+- `AlertsListPage` renders the current workspace presentation surfaces and should not receive new workflow responsibilities.
 - Analyst workspace reads live in `useAnalystWorkspaceRuntime`.
 - Alert and transaction workspace reads live in `useTransactionWorkspaceRuntime`.
 - Governance advisory, analytics, and audit workflow wiring live in `useGovernanceWorkspaceRuntime`.
@@ -54,6 +54,11 @@ Workspace data loading, counters, authority-derived workspace capability flags, 
 - Governance audit writes are separate and require `governance-advisory:audit:write`.
 - Frontend capabilities are UI/request gating only; backend authorization remains the source of truth.
 - Workspace hooks abort in-flight requests and ignore stale responses on session/client/workspace switches.
+- Alert and fraud-case detail reads abort in-flight requests and ignore stale responses on `alertId`/`caseId` or API-client switches.
+- Alert assistant summaries are bound to the loaded alert request context; stale summaries from an older alert or API client are discarded.
+- Alert decision submits and fraud-case updates pass `AbortSignal` through the API client while preserving idempotency keys.
+- Alert decision refresh callbacks run only after the current alert detail refresh completes with a loaded result.
+- Fraud-case update submit state is cleared on `caseId` or API-client switches so old mutation state does not bleed into the active detail view.
 - Workspace counters clear on logout and session boundary reset.
 - Partial counter failures set `degraded`; retained previous values are marked `stale` and shown as last-known values.
 - Missing authority makes a counter unavailable, not zero.
@@ -76,13 +81,12 @@ Governance advisory read intentionally follows the current backend authorization
 - `canReadGovernanceAdvisories` is currently backed by `transaction-monitor:read`.
 - `canWriteGovernanceAudit` is backed by `governance-advisory:audit:write`.
 - Backend authorization remains authoritative.
-- Future domain cleanup may introduce a dedicated `governance-advisory:read` authority.
 - Do not use `canReadGovernanceAdvisories` for write affordances.
 
-## Transitional Composition
+## Workspace Composition
 
-FDP-51 creates a workspace runtime layer, but `WorkspaceDashboardShell` and `AlertsListPage` are still transitional composition surfaces.
-Future UI decomposition should split presentation into `AnalystWorkspacePage`, `TransactionWorkspacePage`, `FraudTransactionWorkspacePage`, `GovernanceWorkspacePage`, `ReportsWorkspacePage`, and `WorkspaceTabs`.
+FDP-51 creates a workspace runtime layer. `WorkspaceDashboardShell` composes the runtime hooks, `WorkspaceDetailRouter` owns detail-page routing, and `AlertsListPage` renders the current workspace surfaces.
+Additional workflow logic must stay in workspace-specific hooks or containers instead of accumulating in the shell.
 
 ## UI Session Boundary
 
