@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -74,6 +74,24 @@ if (changedFiles.map((file) => file.replaceAll("\\", "/")).includes(registryPath
   const registrySource = readFile(registryPath);
   if (/apiClient|authProvider|authorit/i.test(registrySource) || /\bfetch\s*\(/.test(registrySource)) {
     violations.push(`${registryPath}: WorkspaceRouteRegistry must stay declarative and must not compute auth or call APIs.`);
+  }
+}
+
+for (const staleRefreshFile of [
+  "analyst-console-ui/src/workspace/useWorkspaceRefreshController.js",
+  "analyst-console-ui/src/workspace/useWorkspaceRefreshController.test.js"
+]) {
+  if (existsSync(join(repoRoot, staleRefreshFile))) {
+    violations.push(`${staleRefreshFile}: FDP-53 refresh semantics must use workspaceRefreshContract, not the stale refresh controller.`);
+  }
+}
+
+for (const file of changedFiles.map((entry) => entry.replaceAll("\\", "/"))) {
+  if (/analyst-console-ui\/src\/workspace\/[A-Za-z]+WorkspaceRuntime\.jsx$/.test(file)) {
+    const source = readFile(file);
+    if (/useWorkspaceCounters/.test(source)) {
+      violations.push(`${file}: shared counters must remain shell-owned; workspace runtimes must not call useWorkspaceCounters.`);
+    }
   }
 }
 

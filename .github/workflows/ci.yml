@@ -1084,7 +1084,7 @@ jobs:
             analyst-console-ui/src/workspace/WorkspaceRuntimeProvider.test.jsx \
             analyst-console-ui/src/workspace/useWorkspaceCounters.test.js \
             analyst-console-ui/src/workspace/useGovernanceAuditWorkflow.test.js \
-            analyst-console-ui/src/workspace/useWorkspaceRefreshController.test.js \
+            analyst-console-ui/src/workspace/workspaceRefreshContract.test.js \
             analyst-console-ui/src/workspace/workspaceDataHooks.test.js \
             analyst-console-ui/src/components/GovernanceReviewQueue.test.jsx \
             analyst-console-ui/src/pages/AlertDetailsPage.test.jsx \
@@ -1099,7 +1099,7 @@ jobs:
 
       - name: Run FDP-51 workspace runtime tests
         working-directory: analyst-console-ui
-        run: npm test -- --run src/workspace/WorkspaceRuntimeProvider.test.jsx src/workspace/useWorkspaceCounters.test.js src/workspace/useGovernanceAuditWorkflow.test.js src/workspace/useWorkspaceRefreshController.test.js src/workspace/workspaceDataHooks.test.js src/components/GovernanceReviewQueue.test.jsx src/pages/AlertDetailsPage.test.jsx src/pages/FraudCaseDetailsPage.test.jsx src/pages/AlertsListPage.test.jsx src/App.test.jsx src/api/alertsApi.test.js src/api/apiClientBoundary.test.js --reporter=default --reporter=junit --outputFile=./test-results/fdp51-vitest.xml
+        run: npm test -- --run src/workspace/WorkspaceRuntimeProvider.test.jsx src/workspace/useWorkspaceCounters.test.js src/workspace/useGovernanceAuditWorkflow.test.js src/workspace/workspaceRefreshContract.test.js src/workspace/workspaceDataHooks.test.js src/components/GovernanceReviewQueue.test.jsx src/pages/AlertDetailsPage.test.jsx src/pages/FraudCaseDetailsPage.test.jsx src/pages/AlertsListPage.test.jsx src/App.test.jsx src/api/alertsApi.test.js src/api/apiClientBoundary.test.js --reporter=default --reporter=junit --outputFile=./test-results/fdp51-vitest.xml
 
       - name: Build FDP-51 UI
         working-directory: analyst-console-ui
@@ -1126,7 +1126,7 @@ jobs:
           grep -q "WorkspaceRuntimeProvider.test.jsx" test-results/fdp51-vitest.xml
           grep -q "useWorkspaceCounters.test.js" test-results/fdp51-vitest.xml
           grep -q "useGovernanceAuditWorkflow.test.js" test-results/fdp51-vitest.xml
-          grep -q "useWorkspaceRefreshController.test.js" test-results/fdp51-vitest.xml
+          grep -q "workspaceRefreshContract.test.js" test-results/fdp51-vitest.xml
           grep -q "workspaceDataHooks.test.js" test-results/fdp51-vitest.xml
           grep -q "GovernanceReviewQueue.test.jsx" test-results/fdp51-vitest.xml
           grep -q "AlertDetailsPage.test.jsx" test-results/fdp51-vitest.xml
@@ -1297,6 +1297,10 @@ jobs:
             analyst-console-ui/src/workspace/WorkspaceDashboardShell.test.jsx \
             analyst-console-ui/src/workspace/WorkspaceRouteRegistry.test.jsx \
             analyst-console-ui/src/workspace/WorkspaceRuntimes.test.jsx \
+            analyst-console-ui/src/workspace/workspaceRefreshContract.test.js \
+            analyst-console-ui/src/workspace/workspaceRuntimeResult.test.js \
+            analyst-console-ui/src/workspace/useWorkspaceRoute.test.js \
+            analyst-console-ui/src/pages/AlertsListPage.test.jsx \
             analyst-console-ui/src/workspace/WorkspaceDetailRouter.test.jsx \
             analyst-console-ui/src/workspace/WorkspaceContainerBoundary.test.jsx \
             analyst-console-ui/src/pages/AlertDetailsPage.test.jsx \
@@ -1308,7 +1312,7 @@ jobs:
 
       - name: Run FDP-53 workspace runtime ownership tests
         working-directory: analyst-console-ui
-        run: npm test -- --run src/workspace/WorkspaceDashboardShell.test.jsx src/workspace/WorkspaceRouteRegistry.test.jsx src/workspace/WorkspaceRuntimes.test.jsx src/workspace/WorkspaceDetailRouter.test.jsx src/workspace/WorkspaceContainerBoundary.test.jsx src/pages/AlertDetailsPage.test.jsx src/pages/FraudCaseDetailsPage.test.jsx src/App.test.jsx --reporter=default --reporter=junit --outputFile=./test-results/fdp53-vitest.xml
+        run: npm test -- --run src/workspace/WorkspaceDashboardShell.test.jsx src/workspace/WorkspaceRouteRegistry.test.jsx src/workspace/WorkspaceRuntimes.test.jsx src/workspace/workspaceRefreshContract.test.js src/workspace/workspaceRuntimeResult.test.js src/workspace/useWorkspaceRoute.test.js src/pages/AlertsListPage.test.jsx src/workspace/WorkspaceDetailRouter.test.jsx src/workspace/WorkspaceContainerBoundary.test.jsx src/pages/AlertDetailsPage.test.jsx src/pages/FraudCaseDetailsPage.test.jsx src/App.test.jsx --reporter=default --reporter=junit --outputFile=./test-results/fdp53-vitest.xml
 
       - name: Build FDP-53 UI
         working-directory: analyst-console-ui
@@ -1340,6 +1344,10 @@ jobs:
           grep -q "WorkspaceDashboardShell.test.jsx" test-results/fdp53-vitest.xml
           grep -q "WorkspaceRouteRegistry.test.jsx" test-results/fdp53-vitest.xml
           grep -q "WorkspaceRuntimes.test.jsx" test-results/fdp53-vitest.xml
+          grep -q "workspaceRefreshContract.test.js" test-results/fdp53-vitest.xml
+          grep -q "workspaceRuntimeResult.test.js" test-results/fdp53-vitest.xml
+          grep -q "useWorkspaceRoute.test.js" test-results/fdp53-vitest.xml
+          grep -q "AlertsListPage.test.jsx" test-results/fdp53-vitest.xml
           grep -q "WorkspaceDetailRouter.test.jsx" test-results/fdp53-vitest.xml
           grep -q "WorkspaceContainerBoundary.test.jsx" test-results/fdp53-vitest.xml
           grep -q "AlertDetailsPage.test.jsx" test-results/fdp53-vitest.xml

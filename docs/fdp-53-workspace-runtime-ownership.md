@@ -8,7 +8,7 @@ FDP-53 moves workspace-specific runtime ownership out of `WorkspaceDashboardShel
 
 `WorkspaceDashboardShell` owns only the runtime provider boundary usage, active workspace selection, `WorkspaceRouteRegistry` lookup, shared header/counters, `WorkspaceDetailRouter`, the active workspace outlet, and top-level session blocking state.
 
-`WorkspaceRouteRegistry` is declarative metadata: workspace key, labels, route value, heading label, capability key reference, and Runtime component. It does not compute authorities, create API clients, call APIs, or encode business workflow rules.
+`WorkspaceRouteRegistry` is declarative metadata: workspace key, labels, route value, heading label, capability key reference, and Runtime component. `capabilityKey` is display/runtime metadata resolved by `WorkspaceRuntimeProvider`; it is not policy. The registry does not compute authorities, create API clients, call APIs, or encode business workflow rules.
 
 `WorkspaceRuntimeProvider` remains the source of normalized frontend runtime context. It exposes the current session, auth provider, API client, capability booleans, and runtime status to mounted workspace runtime layers. It is not a security boundary; backend authorization remains authoritative.
 
@@ -20,7 +20,9 @@ Workspace-specific runtime layers own their workspace reads and local callbacks:
 - `GovernanceWorkspaceRuntime`: governance advisory queue and guarded audit workflow.
 - `ReportsWorkspaceRuntime`: governance analytics read model.
 
-Only the active workspace runtime is mounted. Hidden workspaces do not run sensitive reads or speculative prefetches.
+Only the active workspace runtime is mounted. Hidden workspace runtimes do not fetch domain data. Shared counters remain shell-owned global dashboard signals and may fetch minimal count reads when `sharedWorkspaceReadsEnabled`.
+
+Workspace refresh has one contract: the shell calls the active runtime `refreshWorkspace()` and then refreshes shared counters when shared reads are enabled. Compliance audit refreshes the compliance advisory queue only; Reports analytics is owned by `ReportsWorkspaceRuntime` and refreshes when Reports is active or explicitly retried.
 
 ## Adding A Workspace
 
@@ -40,6 +42,7 @@ Add no-duplicate-fetch tests proving only the active runtime fetches. Add sessio
 - No speculative prefetching.
 - No hidden workspace sensitive reads.
 - No backend production changes in FDP-53.
+- No fake empty fallback states for not-mounted, unavailable, unauthorized, loading, or failed runtime data.
 
 ## Auth Model
 
@@ -58,3 +61,5 @@ Stale state can appear if session or authority switches do not clear old runtime
 The registry becomes dangerous if it starts computing authorization instead of referencing capability keys.
 
 The shell becomes hard to reason about if workspace-specific hooks, filters, pagination, or retry behavior move back into it.
+
+Invalid workspace route inputs are normalized to the Fraud Case workspace through an explicit fallback notice. That fallback is UX routing behavior only and does not grant authority or bypass backend authorization.
