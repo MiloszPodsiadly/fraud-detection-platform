@@ -1,5 +1,6 @@
 export function createIdempotencyKey(operationPrefix, entityId) {
-  return `${operationPrefix}-${entityId}-${secureRandomId()}`;
+  void entityId;
+  return `${operationPrefix}-${secureRandomId()}`;
 }
 
 export function secureRandomId() {

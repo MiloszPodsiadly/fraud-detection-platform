@@ -45,7 +45,7 @@ export function DetailHeader({
           {lastLoadedAt && <div><dt>Last successful load</dt><dd>{formatDateTime(lastLoadedAt)}</dd></div>}
         </dl>
       </div>
-      {riskLevel ? <RiskBadge riskLevel={riskLevel} /> : status ? <span className="statusPill">{status}</span> : null}
+      {riskLevel ? <RiskBadge riskLevel={riskLevel} /> : null}
     </header>
   );
 }

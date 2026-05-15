@@ -11,6 +11,7 @@ import { formatAmount, formatDateTime, formatScore } from "../utils/format.js";
 import { createIdempotencyKey } from "../utils/idempotencyKey.js";
 
 const CASE_STATUSES = ["IN_REVIEW", "CONFIRMED_FRAUD", "FALSE_POSITIVE", "CLOSED"];
+const SECURE_REQUEST_ID_ERROR = "Secure request identifier could not be generated. Reload the page and try again.";
 
 export function FraudCaseDetailsPage({
   caseId,
@@ -177,7 +178,6 @@ export function FraudCaseDetailsPage({
     if (!canUpdateCase || detailState === "stale") {
       return;
     }
-    const idempotencyKey = decisionIdempotencyKey || createIdempotencyKey("fraud-case-update", caseId);
     mutationAbortRef.current?.abort();
     const abortController = new AbortController();
     mutationAbortRef.current = abortController;
@@ -185,9 +185,17 @@ export function FraudCaseDetailsPage({
     mutationSeqRef.current = mutationSeq;
     const currentCaseId = caseId;
     const currentApiClient = apiClient;
-    setDecisionIdempotencyKey(idempotencyKey);
     setSubmitState({ isSubmitting: true, error: "", success: "", warning: "" });
     try {
+      let idempotencyKey;
+      try {
+        idempotencyKey = decisionIdempotencyKey || createIdempotencyKey("fraud-case-update", caseId);
+      } catch {
+        setSubmitState({ isSubmitting: false, error: SECURE_REQUEST_ID_ERROR, success: "", warning: "" });
+        return;
+      }
+      setDecisionIdempotencyKey(idempotencyKey);
+      // Abort only protects the frontend request lifecycle; an unsafe request that reached the server may still complete.
       const response = await currentApiClient.updateFraudCase(currentCaseId, {
         status: form.status,
         analystId: session.userId || form.analystId,

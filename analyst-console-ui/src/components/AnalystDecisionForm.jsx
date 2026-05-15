@@ -12,6 +12,7 @@ const DECISIONS = [
   "REQUIRE_MORE_EVIDENCE",
   "ESCALATED"
 ];
+const SECURE_REQUEST_ID_ERROR = "Secure request identifier could not be generated. Reload the page and try again.";
 
 export function AnalystDecisionForm({ alertId, summary, session, apiClient, canSubmit, disabled, onSubmitted }) {
   const [decision, setDecision] = useState("REQUIRE_MORE_EVIDENCE");
@@ -66,7 +67,14 @@ export function AnalystDecisionForm({ alertId, summary, session, apiClient, canS
     setPostSubmitWarning("");
 
     try {
-      const idempotencyKey = createIdempotencyKey("alert-decision", alertId);
+      let idempotencyKey;
+      try {
+        idempotencyKey = createIdempotencyKey("alert-decision", alertId);
+      } catch {
+        setError(SECURE_REQUEST_ID_ERROR);
+        return;
+      }
+      // Abort only protects the frontend request lifecycle; an unsafe request that reached the server may still complete.
       const response = await currentApiClient.submitAnalystDecision(currentAlertId, {
         analystId,
         decision,

@@ -1,8 +1,12 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { FraudCaseDetailsPage } from "./FraudCaseDetailsPage.jsx";
 
 describe("FraudCaseDetailsPage", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("ignores stale fraud case response after caseId changes", async () => {
     const firstCase = deferred();
     const secondCase = deferred();
@@ -159,10 +163,11 @@ describe("FraudCaseDetailsPage", () => {
       "case-1",
       expect.objectContaining({ decisionReason: "Reviewed" }),
       expect.objectContaining({
-        idempotencyKey: expect.stringMatching(/^fraud-case-update-case-1-/),
+        idempotencyKey: expect.stringMatching(/^fraud-case-update-/),
         signal: expect.any(AbortSignal)
       })
     ));
+    expect(apiClient.updateFraudCase.mock.calls[0][2].idempotencyKey).not.toContain("case-1");
     await waitFor(() => expect(screen.getByRole("button", { name: "Save case decision" })).toBeEnabled());
     expect(screen.queryByText("aborted")).not.toBeInTheDocument();
   });
@@ -219,6 +224,23 @@ describe("FraudCaseDetailsPage", () => {
     expect(screen.getByText("Case decision saved. Latest dashboard state could not be refreshed.")).toBeInTheDocument();
     expect(screen.queryByText("dashboard refresh failed")).not.toBeInTheDocument();
     expect(apiClient.updateFraudCase).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a controlled error and does not update when secure request ID generation fails", async () => {
+    vi.stubGlobal("crypto", undefined);
+    const apiClient = {
+      getFraudCase: vi.fn().mockResolvedValue(fraudCase("case-1", "Open case")),
+      updateFraudCase: vi.fn()
+    };
+    render(page({ caseId: "case-1", apiClient }));
+    await screen.findByText("Open case");
+
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Reviewed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save case decision" }));
+
+    expect(await screen.findByText("Secure request identifier could not be generated. Reload the page and try again.")).toBeInTheDocument();
+    expect(apiClient.updateFraudCase).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Save case decision" })).toBeEnabled();
   });
 });
 

@@ -1,9 +1,13 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { normalizeSession } from "../auth/session.js";
 import { AnalystDecisionForm } from "./AnalystDecisionForm.jsx";
 
 describe("AnalystDecisionForm", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("blocks submission controls when the session lacks decision authority", () => {
     render(
       <AnalystDecisionForm
@@ -52,10 +56,11 @@ describe("AnalystDecisionForm", () => {
       "alert-1",
       expect.objectContaining({ decisionReason: "Reviewed manually" }),
       expect.objectContaining({
-        idempotencyKey: expect.stringMatching(/^alert-decision-alert-1-/),
+        idempotencyKey: expect.stringMatching(/^alert-decision-/),
         signal: expect.any(AbortSignal)
       })
     ));
+    expect(apiClient.submitAnalystDecision.mock.calls[0][2].idempotencyKey).not.toContain("alert-1");
     expect(onSubmitted).toHaveBeenCalledTimes(1);
   });
 
@@ -105,6 +110,21 @@ describe("AnalystDecisionForm", () => {
     expect(await screen.findByText("Decision saved. Status: RESOLVED")).toBeInTheDocument();
     expect(screen.getByText("Decision saved. Dashboard refresh failed; retry refresh.")).toBeInTheDocument();
     expect(screen.queryByText("failed")).not.toBeInTheDocument();
+  });
+
+  it("shows a controlled error and does not submit when secure request ID generation fails", async () => {
+    vi.stubGlobal("crypto", undefined);
+    const apiClient = {
+      submitAnalystDecision: vi.fn()
+    };
+    render(form({ apiClient }));
+
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Reviewed manually" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit decision" }));
+
+    expect(await screen.findByText("Secure request identifier could not be generated. Reload the page and try again.")).toBeInTheDocument();
+    expect(apiClient.submitAnalystDecision).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Submit decision" })).toBeEnabled();
   });
 });
 

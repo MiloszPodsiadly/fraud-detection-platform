@@ -31,4 +31,36 @@ describe("DetailHeader", () => {
     expect(document.querySelectorAll("#detail-heading-alert-alert-1")).toHaveLength(1);
     expect(document.querySelectorAll("#detail-heading-fraud-case-case-1")).toHaveLength(1);
   });
+
+  it("renders status metadata once when risk level is absent", () => {
+    render(
+      <DetailHeader
+        title="Fraud case detail"
+        entityType="Fraud case"
+        entityId="case-1"
+        status="OPEN"
+        headingId="detail-heading-fraud-case-case-1"
+      />
+    );
+
+    expect(screen.getByText("Status")).toBeInTheDocument();
+    expect(document.querySelectorAll(".statusPill")).toHaveLength(1);
+  });
+
+  it("renders risk badge alongside status metadata when risk level exists", () => {
+    render(
+      <DetailHeader
+        title="Alert detail"
+        entityType="Alert"
+        entityId="alert-1"
+        status="OPEN"
+        riskLevel="HIGH"
+        headingId="detail-heading-alert-alert-1"
+      />
+    );
+
+    expect(screen.getByText("Status")).toBeInTheDocument();
+    expect(screen.getByText("HIGH")).toBeInTheDocument();
+    expect(document.querySelectorAll(".statusPill")).toHaveLength(1);
+  });
 });
