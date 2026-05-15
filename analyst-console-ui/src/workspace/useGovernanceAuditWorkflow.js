@@ -27,6 +27,7 @@ export function useGovernanceAuditWorkflow({
       return auditFailure("history-refresh-failed", messageFor(apiError, "Review was recorded, but audit history could not be refreshed."), apiError);
     }
 
+    // Local queue state is updated only after audit history refresh; backend remains authoritative if lifecycle semantics grow.
     governanceQueueState.setAuditHistories((current) => ({
       ...current,
       [eventId]: nextHistory

@@ -13,6 +13,7 @@ export function WorkspaceRuntimeProvider({ session, authProvider, enabled = true
     () => workspaceSessionResetKeyFor(session, authProvider),
     [authProvider, session]
   );
+  // Capability flags are frontend UX/request gates only. Backend authorization still enforces every protected API call.
   const value = useMemo(() => ({
     session,
     authProvider,
@@ -22,7 +23,7 @@ export function WorkspaceRuntimeProvider({ session, authProvider, enabled = true
     canReadFraudCases: authorityState(session, AUTHORITIES.FRAUD_CASE_READ),
     canReadTransactions: authorityState(session, AUTHORITIES.TRANSACTION_MONITOR_READ),
     // Governance advisory read views are backed by TRANSACTION_MONITOR_READ in the current backend authorization model.
-    // Governance audit writes require GOVERNANCE_ADVISORY_AUDIT_WRITE.
+    // Governance audit writes require GOVERNANCE_ADVISORY_AUDIT_WRITE; do not reuse read capability for write affordances.
     canReadGovernanceAdvisories: authorityState(session, AUTHORITIES.TRANSACTION_MONITOR_READ),
     canWriteGovernanceAudit: authorityState(session, AUTHORITIES.GOVERNANCE_ADVISORY_AUDIT_WRITE),
     runtimeStatus: enabled && authenticated ? "ready" : "disabled"

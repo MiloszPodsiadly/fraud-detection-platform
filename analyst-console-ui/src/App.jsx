@@ -26,13 +26,10 @@ export default function App() {
   const handlingOidcCallback = authProvider.kind === "oidc" && isOidcCallbackPath();
   const [sessionBootstrapPending, setSessionBootstrapPending] = useState(Boolean(authProvider.requiresSessionBootstrap) || authProvider.kind === "oidc");
   const skipNextOidcBootstrapRef = useRef(false);
-  const sessionBoundaryKey = useMemo(() => sessionBoundaryKeyFor(session, authProvider), [authProvider, session]);
-  const previousSessionBoundaryKeyRef = useRef(sessionBoundaryKey);
-  const workspaceNavigationEnabled = !handlingOidcCallback
-    && !sessionBootstrapPending
-    && !shouldBlockDashboardFetch(sessionState);
+  const uiSessionBoundaryKey = useMemo(() => sessionBoundaryKeyFor(session, authProvider), [authProvider, session]);
+  const previousSessionBoundaryKeyRef = useRef(uiSessionBoundaryKey);
   const detailSelectionPendingBoundaryReset = Boolean(selectedAlertId || selectedFraudCaseId)
-    && previousSessionBoundaryKeyRef.current !== sessionBoundaryKey;
+    && previousSessionBoundaryKeyRef.current !== uiSessionBoundaryKey;
 
   useEffect(() => {
     authProvider.persistSession(session);
@@ -40,14 +37,14 @@ export default function App() {
   }, [authProvider, session]);
 
   useEffect(() => {
-    if (previousSessionBoundaryKeyRef.current === sessionBoundaryKey) {
+    if (previousSessionBoundaryKeyRef.current === uiSessionBoundaryKey) {
       return;
     }
-    previousSessionBoundaryKeyRef.current = sessionBoundaryKey;
+    previousSessionBoundaryKeyRef.current = uiSessionBoundaryKey;
     if (selectedAlertId || selectedFraudCaseId) {
       clearSelection();
     }
-  }, [clearSelection, selectedAlertId, selectedFraudCaseId, sessionBoundaryKey]);
+  }, [clearSelection, selectedAlertId, selectedFraudCaseId, uiSessionBoundaryKey]);
 
   useEffect(() => {
     if ((!authProvider.requiresSessionBootstrap && authProvider.kind !== "oidc") || handlingOidcCallback || typeof authProvider.refreshSession !== "function") {
@@ -229,16 +226,9 @@ export default function App() {
   );
 }
 
-function shouldBlockDashboardFetch(sessionState) {
-  return [
-    SESSION_STATES.UNAUTHENTICATED,
-    SESSION_STATES.EXPIRED,
-    SESSION_STATES.ACCESS_DENIED,
-    SESSION_STATES.AUTH_ERROR
-  ].includes(sessionState?.status);
-}
-
 function sessionBoundaryKeyFor(session, authProvider) {
+  // UI reset key only: clears stale detail selections across user/role/authority boundary changes.
+  // API client freshness is handled by WorkspaceRuntimeProvider from the full session/authProvider objects.
   const roles = Array.isArray(session?.roles) ? session.roles.join(",") : "";
   const authorities = Array.isArray(session?.authorities) ? session.authorities.join(",") : "";
   return [
