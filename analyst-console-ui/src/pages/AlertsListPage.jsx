@@ -4,15 +4,18 @@ import { WorkspaceNavigation } from "../workspace/WorkspaceNavigation.jsx";
 
 export function AlertsListPage({
   workspacePage = "analyst",
+  workspaceRoutes,
+  routeFallbackNotice,
+  refreshNotice,
   workspaceCounters = { alerts: null, transactions: null },
   workspaceCountersStatus = { degraded: false, failedCounters: [], errorByCounter: {}, stale: false, lastRefreshedAt: null },
   canReadFraudCases,
   canReadAlerts,
   canReadTransactions,
   canReadGovernanceAdvisories,
-  alertPage = emptyPage(),
-  transactionPage = emptyPage(),
-  advisoryQueue = { count: 0 },
+  alertPage,
+  transactionPage,
+  advisoryQueue,
   governanceAnalytics,
   fraudCaseSummary = { totalFraudCases: 0 },
   fraudCaseTotalElements,
@@ -30,6 +33,7 @@ export function AlertsListPage({
     <div className="dashboardGrid pageEnter">
       <WorkspaceNavigation
         workspacePage={workspacePage}
+        workspaceRoutes={workspaceRoutes}
         workspaceCounters={workspaceCounters}
         workspaceCountersStatus={workspaceCountersStatus}
         canReadFraudCases={canReadFraudCases}
@@ -46,6 +50,20 @@ export function AlertsListPage({
         isFraudCaseSummaryLoading={isFraudCaseSummaryLoading}
         onWorkspaceChange={onWorkspaceChange}
       />
+
+      {routeFallbackNotice && (
+        <div className="statePanel warningPanel" role="status" aria-live="polite">
+          <h3>Workspace route normalized.</h3>
+          <p>{routeFallbackNotice}</p>
+        </div>
+      )}
+
+      {refreshNotice && (
+        <div className="statePanel warningPanel" role="status" aria-live="polite">
+          <h3>{refreshNotice.title}</h3>
+          <p>{refreshNotice.message}</p>
+        </div>
+      )}
 
       {workspaceCountersStatus.degraded && (
         <div className="statePanel warningPanel" role="status" aria-live="polite">
@@ -80,14 +98,4 @@ function shouldBlockDashboard(sessionState, error) {
   ];
 
   return blockedSessionStates.includes(sessionState?.status) || [401, 403].includes(error?.status);
-}
-
-function emptyPage() {
-  return {
-    content: [],
-    totalElements: 0,
-    totalPages: 0,
-    page: 0,
-    size: 0
-  };
 }

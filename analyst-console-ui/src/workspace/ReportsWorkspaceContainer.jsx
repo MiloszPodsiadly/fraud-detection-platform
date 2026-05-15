@@ -1,6 +1,6 @@
 import { ReportsWorkspacePage } from "../pages/ReportsWorkspacePage.jsx";
 
-export function ReportsWorkspaceContainer({ analyticsState }) {
+export function ReportsWorkspaceContainer({ headingLabel = "Review visibility", analyticsState }) {
   return (
     <ReportsWorkspacePage
       governanceAnalytics={analyticsState.analytics}
@@ -9,7 +9,7 @@ export function ReportsWorkspaceContainer({ analyticsState }) {
       analyticsError={analyticsState.error}
       onAnalyticsWindowDaysChange={analyticsState.setWindowDays}
       onAnalyticsRetry={analyticsState.refresh}
-      workspaceHeadingProps={workspaceHeadingProps("Review visibility")}
+      workspaceHeadingProps={workspaceHeadingProps(headingLabel)}
     />
   );
 }

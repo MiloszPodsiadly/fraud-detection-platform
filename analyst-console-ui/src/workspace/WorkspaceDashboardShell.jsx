@@ -1,19 +1,12 @@
 import { AlertsListPage } from "../pages/AlertsListPage.jsx";
-import { AnalystWorkspaceContainer } from "./AnalystWorkspaceContainer.jsx";
-import { FraudTransactionWorkspaceContainer } from "./FraudTransactionWorkspaceContainer.jsx";
-import { GovernanceWorkspaceContainer } from "./GovernanceWorkspaceContainer.jsx";
-import { ReportsWorkspaceContainer } from "./ReportsWorkspaceContainer.jsx";
-import { TransactionScoringWorkspaceContainer } from "./TransactionScoringWorkspaceContainer.jsx";
 import { WorkspaceDetailRouter } from "./WorkspaceDetailRouter.jsx";
-import { useAnalystWorkspaceRuntime } from "./useAnalystWorkspaceRuntime.js";
-import { useGovernanceWorkspaceRuntime } from "./useGovernanceWorkspaceRuntime.js";
-import { useTransactionWorkspaceRuntime } from "./useTransactionWorkspaceRuntime.js";
+import { WORKSPACE_ROUTE_ENTRIES, resolveWorkspaceRouteResult } from "./WorkspaceRouteRegistry.jsx";
 import { useWorkspaceCounters } from "./useWorkspaceCounters.js";
-import { shouldBlockDashboardFetch, useWorkspaceRefreshController } from "./useWorkspaceRefreshController.js";
+import { useWorkspaceRefreshNotice } from "./useWorkspaceRefreshNotice.js";
 import { useWorkspaceRuntime } from "./useWorkspaceRuntime.js";
+import { createWorkspaceRefreshHandler, shouldBlockDashboardFetch } from "./workspaceRefreshContract.js";
+import { WORKSPACE_DETAIL_RUNTIME_STATE } from "./workspaceRuntimeStates.js";
 
-// Composition hub: wires runtime hooks, counters, and workspace containers.
-// New business workflows belong in workspace-specific hooks/containers; do not add mutation workflows here.
 export function WorkspaceDashboardShell({
   workspacePage,
   selectedAlertId,
@@ -22,12 +15,12 @@ export function WorkspaceDashboardShell({
   navigateWorkspace,
   openAlert,
   openFraudCase,
+  invalidWorkspaceRoute,
   sessionState,
   setSessionState
 }) {
   const {
     session,
-    authProvider,
     apiClient,
     canReadFraudCases,
     canReadAlerts,
@@ -36,147 +29,110 @@ export function WorkspaceDashboardShell({
     canWriteGovernanceAudit,
     runtimeStatus
   } = useWorkspaceRuntime();
-  // Gates shared workspace reads/counters; active tab refresh behavior is still owned by each workspace hook/controller.
+  const resolvedRoute = resolveWorkspaceRouteResult(workspacePage);
+  const activeRoute = resolvedRoute.route;
+  const ActiveWorkspaceRuntime = activeRoute.Runtime;
+  const { refreshNotice, consumeRefreshResult } = useWorkspaceRefreshNotice(activeRoute.key);
   const sharedWorkspaceReadsEnabled = runtimeStatus === "ready" && !shouldBlockDashboardFetch(sessionState);
   const workspaceCounterState = useWorkspaceCounters({
     enabled: sharedWorkspaceReadsEnabled,
-    includeAlerts: workspacePage !== "fraudTransaction",
-    includeTransactions: workspacePage !== "transactionScoring"
+    includeAlerts: activeRoute.key !== "fraudTransaction",
+    includeTransactions: activeRoute.key !== "transactionScoring"
   });
   const { refresh: refreshWorkspaceCounters, setCounterValue } = workspaceCounterState;
-  const {
-    workQueueState: fraudCaseWorkQueueState,
-    summaryState: fraudCaseWorkQueueSummaryState
-  } = useAnalystWorkspaceRuntime({
-    workspacePage,
-    sharedWorkspaceReadsEnabled,
-    canReadFraudCases,
-    session,
-    authProvider,
-    setSessionState
-  });
-  const {
-    alertQueueState,
-    transactionStreamState,
-    changeTransactionFilters,
-    changeTransactionPage,
-    changeTransactionPageSize,
-    changeAlertPage,
-    changeAlertPageSize
-  } = useTransactionWorkspaceRuntime({
-    workspacePage,
-    sharedWorkspaceReadsEnabled,
-    canReadAlerts,
-    canReadTransactions,
-    setCounterValue
-  });
-  const {
-    queueState: governanceQueueState,
-    analyticsState: governanceAnalyticsState,
-    recordGovernanceAudit
-  } = useGovernanceWorkspaceRuntime({
-    workspacePage,
-    sharedWorkspaceReadsEnabled,
-    canReadGovernanceAdvisories,
-    canWriteGovernanceAudit,
-    apiClient
-  });
-
-  const refreshDashboard = useWorkspaceRefreshController({
-    sessionState,
-    workspacePage,
-    sharedWorkspaceReadsEnabled,
-    alertQueueState,
-    transactionStreamState,
-    fraudCaseWorkQueueSummaryState,
-    refreshWorkspaceCounters,
-    fraudCaseWorkQueueState,
-    governanceQueueState,
-    governanceAnalyticsState
-  });
 
   function closeSelection() {
     clearSelection();
   }
 
-  if ((selectedAlertId || selectedFraudCaseId) && apiClient) {
-    return (
-      <WorkspaceDetailRouter
-        selectedAlertId={selectedAlertId}
-        selectedFraudCaseId={selectedFraudCaseId}
-        alertQueueState={alertQueueState}
-        session={session}
-        apiClient={apiClient}
-        canReadAlerts={canReadAlerts}
-        canReadFraudCases={canReadFraudCases}
-        workspacePage={workspacePage}
-        onCloseSelection={closeSelection}
-        onRefreshDashboard={refreshDashboard}
-      />
-    );
-  }
-
   return (
-    <AlertsListPage
-      workspacePage={workspacePage}
-      workspaceCounters={workspaceCounterState.counters}
-      workspaceCountersStatus={workspaceCounterState}
-      canReadFraudCases={canReadFraudCases}
-      canReadAlerts={canReadAlerts}
-      canReadTransactions={canReadTransactions}
-      canReadGovernanceAdvisories={canReadGovernanceAdvisories}
-      canWriteGovernanceAudit={canWriteGovernanceAudit}
-      alertPage={alertQueueState.page}
-      fraudCaseSummary={fraudCaseWorkQueueSummaryState.summary}
-      fraudCaseSummaryError={fraudCaseWorkQueueSummaryState.error}
-      isFraudCaseSummaryLoading={fraudCaseWorkQueueSummaryState.isLoading}
-      onWorkspaceChange={navigateWorkspace}
-      transactionPage={transactionStreamState.page}
-      advisoryQueue={governanceQueueState.queue}
-      governanceAnalytics={governanceAnalyticsState.analytics}
-      sessionState={sessionState}
-      error={workspacePage === "transactionScoring" ? transactionStreamState.error : alertQueueState.error}
-      onRetry={refreshDashboard}
+    <ActiveWorkspaceRuntime
+      route={activeRoute}
+      sharedWorkspaceReadsEnabled={sharedWorkspaceReadsEnabled}
+      setCounterValue={setCounterValue}
+      setSessionState={setSessionState}
+      onOpenAlert={openAlert}
+      onOpenFraudCase={openFraudCase}
     >
-      {workspacePage === "analyst" && (
-        <AnalystWorkspaceContainer
-          canReadFraudCases={canReadFraudCases}
-          workQueueState={fraudCaseWorkQueueState}
-          summaryState={fraudCaseWorkQueueSummaryState}
-          onOpenFraudCase={openFraudCase}
-        />
-      )}
-      {workspacePage === "fraudTransaction" && (
-        <FraudTransactionWorkspaceContainer
-          alertQueueState={alertQueueState}
-          onRetryWorkspace={refreshDashboard}
-          onPageChange={changeAlertPage}
-          onPageSizeChange={changeAlertPageSize}
-          onOpenAlert={openAlert}
-        />
-      )}
-      {workspacePage === "transactionScoring" && (
-        <TransactionScoringWorkspaceContainer
-          transactionStreamState={transactionStreamState}
-          onRetryWorkspace={refreshDashboard}
-          onFiltersChange={changeTransactionFilters}
-          onPageChange={changeTransactionPage}
-          onPageSizeChange={changeTransactionPageSize}
-        />
-      )}
-      {workspacePage === "reports" && (
-        <ReportsWorkspaceContainer
-          analyticsState={governanceAnalyticsState}
-        />
-      )}
-      {workspacePage === "compliance" && (
-        <GovernanceWorkspaceContainer
-          queueState={governanceQueueState}
-          session={session}
-          canWriteGovernanceAudit={canWriteGovernanceAudit}
-          onRecordGovernanceAudit={recordGovernanceAudit}
-        />
-      )}
-    </AlertsListPage>
+      {({
+        workspaceContent,
+        navigationState = {},
+        detailRouterState = {},
+        error,
+        refreshWorkspace
+      }) => {
+        const refreshDashboard = createWorkspaceRefreshHandler({
+          sessionState,
+          sharedWorkspaceReadsEnabled,
+          refreshWorkspace,
+          refreshWorkspaceCounters
+        });
+        const refreshDashboardWithNotice = () => {
+          return consumeRefreshResult(refreshDashboard());
+        };
+        const routeFallbackNotice = fallbackNoticeFor({
+          invalidWorkspaceRoute,
+          resolvedRoute
+        });
+
+        if ((selectedAlertId || selectedFraudCaseId) && apiClient) {
+          return (
+            <WorkspaceDetailRouter
+              selectedAlertId={selectedAlertId}
+              selectedFraudCaseId={selectedFraudCaseId}
+              alertQueueState={detailRouterState.alertQueueState}
+              alertSummaryRuntimeState={detailRouterState.alertQueueState
+                ? WORKSPACE_DETAIL_RUNTIME_STATE.AVAILABLE
+                : WORKSPACE_DETAIL_RUNTIME_STATE.NOT_MOUNTED}
+              session={session}
+              apiClient={apiClient}
+              canReadAlerts={canReadAlerts}
+              canReadFraudCases={canReadFraudCases}
+              workspacePage={activeRoute.key}
+              workspaceLabel={activeRoute.label}
+              onCloseSelection={closeSelection}
+              onRefreshDashboard={refreshDashboardWithNotice}
+            />
+          );
+        }
+
+        return (
+          <AlertsListPage
+            workspacePage={activeRoute.key}
+            routeFallbackNotice={routeFallbackNotice}
+            refreshNotice={refreshNotice}
+            workspaceRoutes={WORKSPACE_ROUTE_ENTRIES}
+            workspaceCounters={workspaceCounterState.counters}
+            workspaceCountersStatus={workspaceCounterState}
+            canReadFraudCases={canReadFraudCases}
+            canReadAlerts={canReadAlerts}
+            canReadTransactions={canReadTransactions}
+            canReadGovernanceAdvisories={canReadGovernanceAdvisories}
+            canWriteGovernanceAudit={canWriteGovernanceAudit}
+            alertPage={navigationState.alertPage}
+            fraudCaseSummary={navigationState.fraudCaseSummary}
+            fraudCaseSummaryError={navigationState.fraudCaseSummaryError}
+            isFraudCaseSummaryLoading={navigationState.isFraudCaseSummaryLoading}
+            onWorkspaceChange={navigateWorkspace}
+            transactionPage={navigationState.transactionPage}
+            advisoryQueue={navigationState.advisoryQueue}
+            governanceAnalytics={navigationState.governanceAnalytics}
+            sessionState={sessionState}
+            error={error}
+            onRetry={refreshDashboardWithNotice}
+          >
+            {workspaceContent}
+          </AlertsListPage>
+        );
+      }}
+    </ActiveWorkspaceRuntime>
   );
+}
+
+function fallbackNoticeFor({ invalidWorkspaceRoute, resolvedRoute }) {
+  const requestedKey = invalidWorkspaceRoute || (resolvedRoute.wasInvalid ? resolvedRoute.requestedKey : null);
+  if (!requestedKey) {
+    return null;
+  }
+  return `Unknown workspace route "${requestedKey}"; showing ${resolvedRoute.route.label} workspace.`;
 }

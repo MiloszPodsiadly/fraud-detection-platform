@@ -1,12 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
+import { WORKSPACE_ROUTE_REGISTRY, getWorkspaceRoute } from "./WorkspaceRouteRegistry.jsx";
 
-export const WORKSPACE_PAGES = {
-  analyst: { label: "Fraud Case", path: "analyst" },
-  fraudTransaction: { label: "Fraud Transaction", path: "fraud-transaction" },
-  transactionScoring: { label: "Transaction Scoring", path: "transaction-scoring" },
-  compliance: { label: "Compliance", path: "compliance" },
-  reports: { label: "Reports", path: "reports" }
-};
+export const WORKSPACE_PAGES = Object.fromEntries(
+  Object.entries(WORKSPACE_ROUTE_REGISTRY).map(([key, route]) => [key, { label: route.label, path: route.routeValue }])
+);
 
 export function useWorkspaceRoute() {
   const [route, setRoute] = useState(readWorkspaceRoute);
@@ -18,14 +15,14 @@ export function useWorkspaceRoute() {
   }, []);
 
   const navigateWorkspace = useCallback((page) => {
-    const nextPage = WORKSPACE_PAGES[page] ? page : "analyst";
+    const nextPage = getWorkspaceRoute(page)?.key || "analyst";
     const params = new URLSearchParams(window.location.search);
     params.delete("alertId");
     params.delete("fraudCaseId");
     if (nextPage === "analyst") {
       params.delete("workspace");
     } else {
-      params.set("workspace", WORKSPACE_PAGES[nextPage].path);
+      params.set("workspace", getWorkspaceRoute(nextPage).routeValue);
     }
     pushRoute(params);
     setRoute(readWorkspaceRoute());
@@ -68,16 +65,19 @@ export function useWorkspaceRoute() {
 export function readWorkspaceRoute() {
   const params = new URLSearchParams(window.location.search);
   const workspace = params.get("workspace");
+  const matchedWorkspace = Object.entries(WORKSPACE_PAGES)
+    .find(([, page]) => page.path === workspace)?.[0] || null;
   return {
-    workspacePage: Object.entries(WORKSPACE_PAGES)
-      .find(([, page]) => page.path === workspace)?.[0] || "analyst",
+    workspacePage: matchedWorkspace || "analyst",
+    invalidWorkspaceRoute: workspace && !matchedWorkspace ? workspace : null,
     selectedAlertId: params.get("alertId"),
     selectedFraudCaseId: params.get("fraudCaseId")
   };
 }
 
 export function workspaceHref(page) {
-  return page === "analyst" ? "/" : `/?workspace=${WORKSPACE_PAGES[page]?.path || WORKSPACE_PAGES.analyst.path}`;
+  const route = getWorkspaceRoute(page) || getWorkspaceRoute("analyst");
+  return route.key === "analyst" ? "/" : `/?workspace=${route.routeValue}`;
 }
 
 function pushRoute(params) {

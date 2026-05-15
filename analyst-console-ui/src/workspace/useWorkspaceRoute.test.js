@@ -8,6 +8,7 @@ describe("useWorkspaceRoute", () => {
 
     expect(readWorkspaceRoute()).toEqual({
       workspacePage: "transactionScoring",
+      invalidWorkspaceRoute: null,
       selectedAlertId: "alert-1",
       selectedFraudCaseId: null
     });
@@ -17,6 +18,7 @@ describe("useWorkspaceRoute", () => {
     window.history.replaceState({}, "", "/?workspace=unknown");
 
     expect(readWorkspaceRoute().workspacePage).toBe("analyst");
+    expect(readWorkspaceRoute().invalidWorkspaceRoute).toBe("unknown");
   });
 
   it("navigates workspaces and clears stale detail selections", () => {
@@ -26,6 +28,7 @@ describe("useWorkspaceRoute", () => {
     act(() => result.current.navigateWorkspace("transactionScoring"));
 
     expect(result.current.workspacePage).toBe("transactionScoring");
+    expect(result.current.invalidWorkspaceRoute).toBeNull();
     expect(result.current.selectedAlertId).toBeNull();
     expect(window.location.search).toBe("?workspace=transaction-scoring");
   });

@@ -12,6 +12,8 @@
     "check:scope:fdp50": "node ../scripts/check-fdp50-scope.mjs",
     "check:scope:fdp51": "node ../scripts/check-fdp51-scope.mjs",
     "check:scope:fdp52": "node ../scripts/check-fdp52-scope.mjs",
+    "check:scope:fdp53": "node ../scripts/check-fdp53-scope.mjs",
+    "check:fdp53-scope": "node ../scripts/check-fdp53-scope.mjs",
     "dev": "npm run generate:authorities && vite --host 127.0.0.1",
     "build": "npm run generate:authorities && vite build",
     "preview": "vite preview --host 127.0.0.1",

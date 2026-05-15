@@ -41,6 +41,9 @@ export function GovernanceAnalyticsPanel({
           <p className="sectionCopy">
             Derived read-only view of recent advisory handling. Analytics do not define SLAs, trigger actions, or change scoring.
           </p>
+          <p className="sectionCopy">
+            Reports show the last loaded analytics snapshot and refresh when this workspace is opened or retried.
+          </p>
           <div className="analyticsMeta" aria-label="Analytics status context">
             <span title={STATUS_TOOLTIPS[analyticsStatus] || STATUS_TOOLTIPS.UNAVAILABLE}>Status {analyticsStatus}</span>
             {timelinessStatus && (

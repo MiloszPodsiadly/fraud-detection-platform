@@ -1,6 +1,7 @@
 import { TransactionScoringWorkspacePage } from "../pages/TransactionScoringWorkspacePage.jsx";
 
 export function TransactionScoringWorkspaceContainer({
+  headingLabel = "Transaction scoring stream",
   transactionStreamState,
   onRetryWorkspace,
   onFiltersChange,
@@ -17,7 +18,7 @@ export function TransactionScoringWorkspaceContainer({
       onTransactionFiltersChange={onFiltersChange}
       onTransactionPageChange={onPageChange}
       onTransactionPageSizeChange={onPageSizeChange}
-      workspaceHeadingProps={workspaceHeadingProps("Transaction scoring stream")}
+      workspaceHeadingProps={workspaceHeadingProps(headingLabel)}
     />
   );
 }

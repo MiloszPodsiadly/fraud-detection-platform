@@ -1,22 +1,25 @@
 import { useEffect, useMemo } from "react";
 import { AlertDetailsPage } from "../pages/AlertDetailsPage.jsx";
 import { FraudCaseDetailsPage } from "../pages/FraudCaseDetailsPage.jsx";
+import { WORKSPACE_DETAIL_RUNTIME_STATE } from "./workspaceRuntimeStates.js";
 
 export function WorkspaceDetailRouter({
   selectedAlertId,
   selectedFraudCaseId,
   alertQueueState,
+  alertSummaryRuntimeState,
   session,
   apiClient,
   canReadAlerts,
   canReadFraudCases,
   workspacePage,
+  workspaceLabel,
   onCloseSelection,
   onRefreshDashboard
 }) {
   const selectedAlertSummary = useMemo(
-    () => alertQueueState.page.content.find((alert) => alert.alertId === selectedAlertId),
-    [alertQueueState.page.content, selectedAlertId]
+    () => alertQueueState?.page?.content?.find((alert) => alert.alertId === selectedAlertId),
+    [alertQueueState?.page?.content, selectedAlertId]
   );
 
   useEffect(() => {
@@ -41,14 +44,17 @@ export function WorkspaceDetailRouter({
   }
 
   if (selectedAlertId && apiClient) {
+    const effectiveAlertSummaryRuntimeState = alertSummaryRuntimeState
+      || (alertQueueState ? WORKSPACE_DETAIL_RUNTIME_STATE.AVAILABLE : WORKSPACE_DETAIL_RUNTIME_STATE.NOT_MOUNTED);
     return (
       <AlertDetailsPage
         alertId={selectedAlertId}
         alertSummary={selectedAlertSummary}
+        alertSummaryRuntimeState={effectiveAlertSummaryRuntimeState}
         session={session}
         apiClient={apiClient}
         canReadAlert={canReadAlerts}
-        workspaceLabel={workspaceLabelFor(workspacePage)}
+        workspaceLabel={workspaceLabel || workspaceLabelFor(workspacePage)}
         onBack={closeAndRestoreFocus}
         onDecisionSubmitted={onRefreshDashboard}
       />
@@ -62,7 +68,7 @@ export function WorkspaceDetailRouter({
         session={session}
         apiClient={apiClient}
         canReadFraudCase={canReadFraudCases}
-        workspaceLabel={workspaceLabelFor(workspacePage)}
+        workspaceLabel={workspaceLabel || workspaceLabelFor(workspacePage)}
         onBack={closeAndRestoreFocus}
         onCaseUpdated={onRefreshDashboard}
       />
