@@ -25,6 +25,9 @@ describe("alertsApi auth headers", () => {
   const getGovernanceAdvisoryAnalytics = (...args) => apiClient.getGovernanceAdvisoryAnalytics(...args);
   const getGovernanceAdvisoryAudit = (...args) => apiClient.getGovernanceAdvisoryAudit(...args);
   const recordGovernanceAdvisoryAudit = (...args) => apiClient.recordGovernanceAdvisoryAudit(...args);
+  const getAlert = (...args) => apiClient.getAlert(...args);
+  const getAssistantSummary = (...args) => apiClient.getAssistantSummary(...args);
+  const getFraudCase = (...args) => apiClient.getFraudCase(...args);
   const updateFraudCase = (...args) => apiClient.updateFraudCase(...args);
   const submitAnalystDecision = (...args) => apiClient.submitAnalystDecision(...args);
 
@@ -277,6 +280,30 @@ describe("alertsApi auth headers", () => {
     expect(options.headers.authorization).toBeUndefined();
     expect(options.headers["X-CSRF-TOKEN"]).toBe("csrf-1");
     expect(options.headers["X-Trace-Id"]).toBe("trace-1");
+  });
+
+  it("passes AbortSignal through detail read methods", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => Promise.resolve(jsonResponse({})));
+    const alertSignal = new AbortController().signal;
+    const summarySignal = new AbortController().signal;
+    const caseSignal = new AbortController().signal;
+    resetApiClient(normalizeSession({ userId: "analyst-1", roles: ["ANALYST"] }));
+
+    await getAlert("alert-1", { signal: alertSignal });
+    await getAssistantSummary("alert-1", { signal: summarySignal });
+    await getFraudCase("case-1", { signal: caseSignal });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/v1/alerts/alert-1", expect.objectContaining({ signal: alertSignal }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/v1/alerts/alert-1/assistant-summary", expect.objectContaining({ signal: summarySignal }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/v1/fraud-cases/case-1", expect.objectContaining({ signal: caseSignal }));
+  });
+
+  it("preserves AbortError from fetch", async () => {
+    const abortError = new DOMException("aborted", "AbortError");
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(abortError);
+    resetApiClient(normalizeSession({ userId: "analyst-1", roles: ["ANALYST"] }));
+
+    await expect(getAlert("alert-1")).rejects.toBe(abortError);
   });
 
   it("uses bff credentials without authorization for all FDP-48 read paths", async () => {

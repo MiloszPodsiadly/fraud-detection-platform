@@ -366,10 +366,38 @@ describe("App", () => {
 
     render(<App />);
 
-    await waitFor(() => expect(getAlert).toHaveBeenCalledWith("alert-stable"));
+    await waitFor(() => expect(getAlert).toHaveBeenCalledWith("alert-stable", expect.objectContaining({ signal: expect.any(AbortSignal) })));
     fireEvent.change(screen.getByLabelText("Role"), { target: { value: "ANALYST" } });
 
     await waitFor(() => expect(window.location.search).not.toContain("alertId"));
+  });
+
+  it("keeps selected detail when session metadata changes without user role or authority boundary change", async () => {
+    callbackPath.value = false;
+    window.history.replaceState({}, "", "/?alertId=alert-stable");
+    const normalizedReadOnlyAuthorities = ["alert:read", "assistant-summary:read", "fraud-case:read", "transaction-monitor:read"];
+    const initialSession = {
+      ...authenticatedSession(),
+      authorities: normalizedReadOnlyAuthorities,
+      displayName: "Analyst One"
+    };
+    refreshSession.mockResolvedValue({
+      ...authenticatedSession(),
+      authorities: normalizedReadOnlyAuthorities,
+      displayName: "Analyst One Refreshed"
+    });
+    providerState.value = {
+      ...providerState.value,
+      getInitialSession: () => initialSession,
+      getSessionState: (session) => ({ status: session?.userId ? "authenticated" : "unauthenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
+    };
+
+    render(<App />);
+
+    await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(getAlert).toHaveBeenCalledWith("alert-stable", expect.objectContaining({ signal: expect.any(AbortSignal) })));
+    expect(window.location.search).toContain("alertId=alert-stable");
   });
 
   it("does not fetch auth-sensitive workspace reads while authorities are unknown", async () => {

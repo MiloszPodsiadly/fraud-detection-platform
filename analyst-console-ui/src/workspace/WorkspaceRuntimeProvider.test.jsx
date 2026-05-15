@@ -83,7 +83,7 @@ describe("WorkspaceRuntimeProvider", () => {
     expect(result.current.canReadAlerts).toBe(false);
   });
 
-  it("does not let governance advisory read imply audit write", () => {
+  it("maps governance advisory read capability to transaction monitor read authority by current backend contract", () => {
     const session = authenticatedSession({
       authorities: ["transaction-monitor:read"]
     });
