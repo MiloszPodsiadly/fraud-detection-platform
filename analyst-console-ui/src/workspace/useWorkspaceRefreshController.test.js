@@ -10,7 +10,7 @@ describe("refreshWorkspaceDashboard", () => {
       ...states,
       sessionState: { status: SESSION_STATES.ACCESS_DENIED },
       workspacePage: "analyst",
-      workspaceNavigationEnabled: true
+      sharedWorkspaceReadsEnabled: true
     });
 
     expect(states.alertQueueState.refresh).not.toHaveBeenCalled();
@@ -29,7 +29,7 @@ describe("refreshWorkspaceDashboard", () => {
       ...states,
       sessionState: { status: SESSION_STATES.AUTHENTICATED },
       workspacePage: "analyst",
-      workspaceNavigationEnabled: true
+      sharedWorkspaceReadsEnabled: true
     });
 
     expect(states.fraudCaseWorkQueueState.refreshFirstSlice).toHaveBeenCalledTimes(1);
@@ -45,7 +45,7 @@ describe("refreshWorkspaceDashboard", () => {
       ...fraudTransaction,
       sessionState: { status: SESSION_STATES.AUTHENTICATED },
       workspacePage: "fraudTransaction",
-      workspaceNavigationEnabled: true
+      sharedWorkspaceReadsEnabled: true
     });
     expect(fraudTransaction.alertQueueState.refresh).toHaveBeenCalledTimes(1);
     expect(fraudTransaction.fraudCaseWorkQueueSummaryState.retry).toHaveBeenCalledTimes(1);
@@ -56,7 +56,7 @@ describe("refreshWorkspaceDashboard", () => {
       ...transactionScoring,
       sessionState: { status: SESSION_STATES.AUTHENTICATED },
       workspacePage: "transactionScoring",
-      workspaceNavigationEnabled: true
+      sharedWorkspaceReadsEnabled: true
     });
     expect(transactionScoring.transactionStreamState.refresh).toHaveBeenCalledTimes(1);
     expect(transactionScoring.fraudCaseWorkQueueSummaryState.retry).toHaveBeenCalledTimes(1);
@@ -67,7 +67,7 @@ describe("refreshWorkspaceDashboard", () => {
       ...compliance,
       sessionState: { status: SESSION_STATES.AUTHENTICATED },
       workspacePage: "compliance",
-      workspaceNavigationEnabled: true
+      sharedWorkspaceReadsEnabled: true
     });
     expect(compliance.governanceQueueState.refresh).toHaveBeenCalledTimes(1);
     expect(compliance.fraudCaseWorkQueueSummaryState.retry).toHaveBeenCalledTimes(1);
@@ -78,21 +78,21 @@ describe("refreshWorkspaceDashboard", () => {
       ...reports,
       sessionState: { status: SESSION_STATES.AUTHENTICATED },
       workspacePage: "reports",
-      workspaceNavigationEnabled: true
+      sharedWorkspaceReadsEnabled: true
     });
     expect(reports.governanceAnalyticsState.refresh).toHaveBeenCalledTimes(1);
     expect(reports.fraudCaseWorkQueueSummaryState.retry).toHaveBeenCalledTimes(1);
     expect(reports.refreshWorkspaceCounters).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps shared summary and counters behind the workspace navigation gate", () => {
+  it("keeps shared summary and counters behind the shared read gate while active tab refresh can still run", () => {
     const states = workspaceStates();
 
     refreshWorkspaceDashboard({
       ...states,
       sessionState: { status: SESSION_STATES.AUTHENTICATED },
       workspacePage: "fraudTransaction",
-      workspaceNavigationEnabled: false
+      sharedWorkspaceReadsEnabled: false
     });
 
     expect(states.alertQueueState.refresh).toHaveBeenCalledTimes(1);

@@ -1,15 +1,8 @@
-import { useCallback, useEffect, useMemo } from "react";
-import { getSessionStateForApiError, getSessionStateForProvider } from "../auth/sessionState.js";
-import { useFraudCaseWorkQueue } from "../fraudCases/useFraudCaseWorkQueue.js";
-import { useFraudCaseWorkQueueSummary } from "../fraudCases/useFraudCaseWorkQueueSummary.js";
-import { AlertDetailsPage } from "../pages/AlertDetailsPage.jsx";
 import { AlertsListPage } from "../pages/AlertsListPage.jsx";
-import { FraudCaseDetailsPage } from "../pages/FraudCaseDetailsPage.jsx";
-import { useAlertQueue } from "./useAlertQueue.js";
-import { useGovernanceAnalytics } from "./useGovernanceAnalytics.js";
-import { useGovernanceAuditWorkflow } from "./useGovernanceAuditWorkflow.js";
-import { useGovernanceQueue } from "./useGovernanceQueue.js";
-import { useScoredTransactionStream } from "./useScoredTransactionStream.js";
+import { WorkspaceDetailRouter } from "./WorkspaceDetailRouter.jsx";
+import { useAnalystWorkspaceRuntime } from "./useAnalystWorkspaceRuntime.js";
+import { useGovernanceWorkspaceRuntime } from "./useGovernanceWorkspaceRuntime.js";
+import { useTransactionWorkspaceRuntime } from "./useTransactionWorkspaceRuntime.js";
 import { useWorkspaceCounters } from "./useWorkspaceCounters.js";
 import { shouldBlockDashboardFetch, useWorkspaceRefreshController } from "./useWorkspaceRefreshController.js";
 import { useWorkspaceRuntime } from "./useWorkspaceRuntime.js";
@@ -36,72 +29,56 @@ export function WorkspaceDashboardShell({
     canWriteGovernanceAudit,
     runtimeStatus
   } = useWorkspaceRuntime();
-  const workspaceNavigationEnabled = runtimeStatus === "ready" && !shouldBlockDashboardFetch(sessionState);
-  const workQueueEnabled = workspacePage === "analyst" && workspaceNavigationEnabled && canReadFraudCases === true;
-  const summaryEnabled = workspacePage === "analyst" && workspaceNavigationEnabled && canReadFraudCases === true;
-  const handleWorkQueueSessionError = useCallback((apiError) => {
-    setSessionState(getSessionStateForApiError(session, apiError) || getSessionStateForProvider(session, authProvider));
-  }, [authProvider, session, setSessionState]);
-  const fraudCaseWorkQueueState = useFraudCaseWorkQueue({
-    enabled: workQueueEnabled,
-    onSessionError: handleWorkQueueSessionError
-  });
-  const fraudCaseWorkQueueSummaryState = useFraudCaseWorkQueueSummary({
-    enabled: summaryEnabled
-  });
-  const alertQueueState = useAlertQueue({
-    enabled: workspacePage === "fraudTransaction" && workspaceNavigationEnabled && canReadAlerts === true
-  });
-  const transactionStreamState = useScoredTransactionStream({
-    enabled: workspacePage === "transactionScoring" && workspaceNavigationEnabled && canReadTransactions === true
-  });
-  const governanceQueueState = useGovernanceQueue({
-    enabled: workspacePage === "compliance" && workspaceNavigationEnabled && canReadGovernanceAdvisories === true
-  });
-  const governanceAnalyticsState = useGovernanceAnalytics({
-    enabled: workspacePage === "reports" && workspaceNavigationEnabled && canReadGovernanceAdvisories === true
-  });
+  // Gates shared workspace reads/counters; active tab refresh behavior is still owned by each workspace hook/controller.
+  const sharedWorkspaceReadsEnabled = runtimeStatus === "ready" && !shouldBlockDashboardFetch(sessionState);
   const workspaceCounterState = useWorkspaceCounters({
-    enabled: workspaceNavigationEnabled,
+    enabled: sharedWorkspaceReadsEnabled,
     includeAlerts: workspacePage !== "fraudTransaction",
     includeTransactions: workspacePage !== "transactionScoring"
   });
   const { refresh: refreshWorkspaceCounters, setCounterValue } = workspaceCounterState;
-  const recordGovernanceAudit = useGovernanceAuditWorkflow({
-    apiClient,
-    canWriteGovernanceAudit,
-    governanceQueueState,
-    governanceAnalyticsState
+  const {
+    workQueueState: fraudCaseWorkQueueState,
+    summaryState: fraudCaseWorkQueueSummaryState
+  } = useAnalystWorkspaceRuntime({
+    workspacePage,
+    sharedWorkspaceReadsEnabled,
+    canReadFraudCases,
+    session,
+    authProvider,
+    setSessionState
   });
-
-  const selectedAlertSummary = useMemo(
-    () => alertQueueState.page.content.find((alert) => alert.alertId === selectedAlertId),
-    [alertQueueState.page.content, selectedAlertId]
-  );
-
-  useEffect(() => {
-    if (!selectedAlertId && !selectedFraudCaseId) {
-      return;
-    }
-    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
-  }, [selectedAlertId, selectedFraudCaseId]);
-
-  useEffect(() => {
-    if (canReadAlerts === true) {
-      setCounterValue("alerts", alertQueueState.page.totalElements);
-    }
-  }, [alertQueueState.page.totalElements, canReadAlerts, setCounterValue]);
-
-  useEffect(() => {
-    if (canReadTransactions === true) {
-      setCounterValue("transactions", transactionStreamState.page.totalElements);
-    }
-  }, [canReadTransactions, setCounterValue, transactionStreamState.page.totalElements]);
+  const {
+    alertQueueState,
+    transactionStreamState,
+    changeTransactionFilters,
+    changeTransactionPage,
+    changeTransactionPageSize,
+    changeAlertPage,
+    changeAlertPageSize
+  } = useTransactionWorkspaceRuntime({
+    workspacePage,
+    sharedWorkspaceReadsEnabled,
+    canReadAlerts,
+    canReadTransactions,
+    setCounterValue
+  });
+  const {
+    queueState: governanceQueueState,
+    analyticsState: governanceAnalyticsState,
+    recordGovernanceAudit
+  } = useGovernanceWorkspaceRuntime({
+    workspacePage,
+    sharedWorkspaceReadsEnabled,
+    canReadGovernanceAdvisories,
+    canWriteGovernanceAudit,
+    apiClient
+  });
 
   const refreshDashboard = useWorkspaceRefreshController({
     sessionState,
     workspacePage,
-    workspaceNavigationEnabled,
+    sharedWorkspaceReadsEnabled,
     alertQueueState,
     transactionStreamState,
     fraudCaseWorkQueueSummaryState,
@@ -111,55 +88,20 @@ export function WorkspaceDashboardShell({
     governanceAnalyticsState
   });
 
-  function changeTransactionPage(page) {
-    transactionStreamState.setRequest((current) => ({ ...current, page: Math.min(Math.max(Number(page) || 0, 0), 1000) }));
-  }
-
-  function changeTransactionPageSize(size) {
-    transactionStreamState.setRequest((current) => ({ ...current, page: 0, size: Math.min(Math.max(Number(size) || 25, 1), 100) }));
-  }
-
-  function changeTransactionFilters(filters) {
-    transactionStreamState.setRequest((current) => ({
-      ...current,
-      ...filters,
-      page: 0
-    }));
-  }
-
-  function changeAlertPage(page) {
-    alertQueueState.setRequest((current) => ({ ...current, page }));
-  }
-
-  function changeAlertPageSize(size) {
-    alertQueueState.setRequest({ page: 0, size });
-  }
-
   function closeSelection() {
     clearSelection();
   }
 
-  if (selectedAlertId && apiClient) {
+  if ((selectedAlertId || selectedFraudCaseId) && apiClient) {
     return (
-      <AlertDetailsPage
-        alertId={selectedAlertId}
-        alertSummary={selectedAlertSummary}
+      <WorkspaceDetailRouter
+        selectedAlertId={selectedAlertId}
+        selectedFraudCaseId={selectedFraudCaseId}
+        alertQueueState={alertQueueState}
         session={session}
         apiClient={apiClient}
-        onBack={closeSelection}
-        onDecisionSubmitted={refreshDashboard}
-      />
-    );
-  }
-
-  if (selectedFraudCaseId && apiClient) {
-    return (
-      <FraudCaseDetailsPage
-        caseId={selectedFraudCaseId}
-        session={session}
-        apiClient={apiClient}
-        onBack={closeSelection}
-        onCaseUpdated={refreshDashboard}
+        onCloseSelection={closeSelection}
+        onRefreshDashboard={refreshDashboard}
       />
     );
   }

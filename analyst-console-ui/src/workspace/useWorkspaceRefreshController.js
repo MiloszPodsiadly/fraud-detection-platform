@@ -4,7 +4,7 @@ import { SESSION_STATES } from "../auth/sessionState.js";
 export function useWorkspaceRefreshController({
   sessionState,
   workspacePage,
-  workspaceNavigationEnabled,
+  sharedWorkspaceReadsEnabled,
   alertQueueState,
   transactionStreamState,
   fraudCaseWorkQueueSummaryState,
@@ -17,7 +17,7 @@ export function useWorkspaceRefreshController({
     refreshWorkspaceDashboard({
       sessionState,
       workspacePage,
-      workspaceNavigationEnabled,
+      sharedWorkspaceReadsEnabled,
       alertQueueState,
       transactionStreamState,
       fraudCaseWorkQueueSummaryState,
@@ -35,7 +35,7 @@ export function useWorkspaceRefreshController({
     refreshWorkspaceCounters,
     sessionState,
     transactionStreamState,
-    workspaceNavigationEnabled,
+    sharedWorkspaceReadsEnabled,
     workspacePage
   ]);
 }
@@ -43,7 +43,7 @@ export function useWorkspaceRefreshController({
 export function refreshWorkspaceDashboard({
   sessionState,
   workspacePage,
-  workspaceNavigationEnabled,
+  sharedWorkspaceReadsEnabled,
   alertQueueState,
   transactionStreamState,
   fraudCaseWorkQueueSummaryState,
@@ -61,7 +61,7 @@ export function refreshWorkspaceDashboard({
   if (workspacePage === "transactionScoring") {
     transactionStreamState.refresh();
   }
-  if (workspaceNavigationEnabled) {
+  if (sharedWorkspaceReadsEnabled) {
     fraudCaseWorkQueueSummaryState.retry();
     refreshWorkspaceCounters();
   }
