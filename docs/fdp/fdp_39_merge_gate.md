@@ -34,6 +34,7 @@ FDP-39 is mergeable only as release artifact separation and enablement governanc
 - Release image has immutable image id or digest evidence.
 - Release image filesystem is exported in CI and scanned with `release_image_scan_performed=true`, `scanned_file_count>0`, `forbidden_token_count=0`, and `release_image_safe=true`.
 - Fixture Dockerfile usage is enforced by `docs/release/fdp_39_fixture_dockerfile_allowlist.json`.
+- Enablement evidence may reach `READY_FOR_ENABLEMENT_REVIEW`; it is not `PRODUCTION_ENABLED`.
 - Enablement governance says `production_enabled=false` and `bank_enabled=false`.
 - Dual control, rollback owner, operator drill, security review, and audit record are required.
 - Ops recovery/inspection endpoints are admin-only or equivalent authority, masked, audited, rate-limit verified, and audit-failure policy verified.
