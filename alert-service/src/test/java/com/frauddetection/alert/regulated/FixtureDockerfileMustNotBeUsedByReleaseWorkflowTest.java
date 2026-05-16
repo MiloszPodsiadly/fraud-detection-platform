@@ -26,7 +26,10 @@ class FixtureDockerfileMustNotBeUsedByReleaseWorkflowTest {
         assertFilesDoNotContain(Path.of("../deployment"), List.of(
                 "Dockerfile.alert-service-fdp38-fixture"
         ));
-        assertFilesDoNotContain(Path.of("../scripts"), List.of("fdp39-generate-governance-artifacts.sh"));
+        assertFilesDoNotContain(Path.of("../scripts"), List.of(
+                "fdp39-generate-governance-artifacts.sh",
+                "verify-fdp38-artifacts.mjs"
+        ));
         assertThat(Files.readString(Path.of("../README.md"))).doesNotContain(FIXTURE_DOCKERFILE);
 
         String ci = Files.readString(Path.of("../.github/workflows/ci.yml"));
@@ -103,6 +106,7 @@ class FixtureDockerfileMustNotBeUsedByReleaseWorkflowTest {
                     || jobName.equals("fdp39-release-governance");
         }
         return path.equals("scripts/fdp39-generate-governance-artifacts.sh")
+                || path.equals("scripts/ci/verify-fdp38-artifacts.mjs")
                 || path.equals("deployment/Dockerfile.alert-service-fdp38-fixture")
                 || path.matches("docs/fdp/fdp_38_.*\\.md")
                 || path.matches("docs/adr/fdp_39_.*\\.md")

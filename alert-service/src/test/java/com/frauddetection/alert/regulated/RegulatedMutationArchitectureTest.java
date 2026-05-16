@@ -1826,6 +1826,7 @@ class RegulatedMutationArchitectureTest {
     @Test
     void fdp36CiMustContainRequiredRealChaosJobAndArtifacts() throws Exception {
         String ci = Files.readString(Path.of("../.github/workflows/ci.yml"));
+        String verifier = Files.readString(Path.of("../scripts/ci/verify-fdp36-artifacts.mjs"));
 
         assertThat(ci).contains("fdp36-real-chaos:");
         assertThat(ci).contains("Run FDP-36 real alert-service kill suite");
@@ -1833,11 +1834,12 @@ class RegulatedMutationArchitectureTest {
         assertThat(ci).contains("-Dgroups=real-chaos,docker-chaos,service-chaos,integration");
         assertThat(ci).contains("-Dtest=RegulatedMutationRealAlertServiceChaosIT,RegulatedMutationRealAlertServiceEvidenceIntegrityIT");
         assertThat(ci).contains("RegulatedMutationLiveInFlightKillIT");
-        assertThat(ci).contains("killed target: actual alert-service JVM/process");
-        assertThat(ci).contains("Docker/Testcontainers are infrastructure dependencies, not the killed alert-service image.");
-        assertThat(ci).contains("FDP-36 real chaos is not sufficient without regulated-mutation-regression.");
-        assertThat(ci).contains("fdp36-proof-summary.md");
-        assertThat(ci).contains("REAL_ALERT_SERVICE_KILL, REAL_ALERT_SERVICE_RESTART_API_PROOF, LIVE_IN_FLIGHT_REQUEST_KILL");
+        assertThat(ci).contains("node scripts/ci/verify-fdp36-artifacts.mjs");
+        assertThat(verifier).contains("killed target: actual alert-service JVM/process");
+        assertThat(verifier).contains("Docker/Testcontainers are infrastructure dependencies, not the killed alert-service image.");
+        assertThat(verifier).contains("FDP-36 real chaos is not sufficient without regulated-mutation-regression.");
+        assertThat(verifier).contains("fdp36-proof-summary.md");
+        assertThat(verifier).contains("REAL_ALERT_SERVICE_KILL, REAL_ALERT_SERVICE_RESTART_API_PROOF, LIVE_IN_FLIGHT_REQUEST_KILL");
         assertThat(ci).contains("alert-service/target/fdp36-chaos/");
         assertThat(ci).contains("fdp36-real-chaos-test-reports");
         assertThat(ci).contains("if-no-files-found: ignore");
@@ -2067,6 +2069,9 @@ class RegulatedMutationArchitectureTest {
     @Test
     void fdp38CiMustRequireLiveCheckpointFixtureProof() throws Exception {
         String ci = Files.readString(Path.of("../.github/workflows/ci.yml"));
+        String verifier = Files.readString(Path.of("../scripts/ci/verify-fdp38-artifacts.mjs"));
+        String verifierHelpers = Files.readString(Path.of("../scripts/ci/artifact-verification-helpers.mjs"));
+        String verifierSurface = verifier + "\n" + verifierHelpers;
 
         assertThat(ci).contains("fdp38-live-runtime-checkpoint-chaos:");
         assertThat(ci).contains("fdp38-alert-service-test-fixture:${GITHUB_SHA}");
@@ -2077,22 +2082,23 @@ class RegulatedMutationArchitectureTest {
         assertThat(ci).contains("RegulatedMutationLiveCheckpointAfterAttemptedAuditIT");
         assertThat(ci).contains("RegulatedMutationLiveCheckpointBeforeFdp29FinalizeIT");
         assertThat(ci).contains("RegulatedMutationLiveCheckpointBeforeSuccessAuditRetryIT");
-        assertThat(ci).contains("skipped > 0");
-        assertThat(ci).contains("LIVE_IN_FLIGHT_REQUEST_KILL");
-        assertThat(ci).contains("RUNTIME_REACHED_TEST_FIXTURE");
-        assertThat(ci).contains("checkpoint_reached=true");
-        assertThat(ci).contains("no_false_success=true");
-        assertThat(ci).contains("release_image=false");
-        assertThat(ci).contains("contains_test_classes");
-        assertThat(ci).contains("contains_test_profiles");
-        assertThat(ci).contains("release_candidate_allowed");
-        assertThat(ci).contains("production_deployable");
-        assertThat(ci).contains("false_success_evaluation");
-        assertThat(ci).contains("failed_false_success_reasons");
-        assertThat(ci).contains("precondition_setup");
-        assertThat(ci).contains("fdp38-proof-summary-${checkpoint}.md");
-        assertThat(ci).contains("fdp38-proof-summary-${checkpoint}.json");
-        assertThat(ci).contains("fdp38-fixture-image-provenance.json");
+        assertThat(ci).contains("node scripts/ci/verify-fdp38-artifacts.mjs");
+        assertThat(verifierSurface).contains("skipped > 0");
+        assertThat(verifier).contains("LIVE_IN_FLIGHT_REQUEST_KILL");
+        assertThat(verifier).contains("RUNTIME_REACHED_TEST_FIXTURE");
+        assertThat(verifier).contains("checkpoint_reached=true");
+        assertThat(verifier).contains("no_false_success=true");
+        assertThat(verifier).contains("release_image=false");
+        assertThat(verifier).contains("contains_test_classes");
+        assertThat(verifier).contains("contains_test_profiles");
+        assertThat(verifier).contains("release_candidate_allowed");
+        assertThat(verifier).contains("production_deployable");
+        assertThat(verifier).contains("false_success_evaluation");
+        assertThat(verifier).contains("failed_false_success_reasons");
+        assertThat(verifier).contains("precondition_setup");
+        assertThat(verifier).contains("fdp38-proof-summary-${checkpoint}.md");
+        assertThat(verifier).contains("fdp38-proof-summary-${checkpoint}.json");
+        assertThat(verifier).contains("fdp38-fixture-image-provenance.json");
         assertThat(ci).contains("fdp38-live-runtime-checkpoint-chaos-reports");
     }
 
@@ -2100,6 +2106,7 @@ class RegulatedMutationArchitectureTest {
     void fdp38CheckpointRegistrationMustBeExplicitInDocsTestsAndCi() throws Exception {
         String matrix = Files.readString(Path.of("../docs/testing/fdp_38_live_runtime_checkpoint_proof.md"));
         String ci = Files.readString(Path.of("../.github/workflows/ci.yml"));
+        String verifier = Files.readString(Path.of("../scripts/ci/verify-fdp38-artifacts.mjs"));
         String harness = Files.readString(Path.of(
                 "src/test/java/com/frauddetection/alert/regulated/chaos/RegulatedMutationFdp38LiveCheckpointChaosHarness.java"
         ));
@@ -2127,6 +2134,9 @@ class RegulatedMutationArchitectureTest {
                     .contains(checkpoint.name());
             assertThat(ci)
                     .as("FDP-38 CI must validate checkpoint " + checkpoint)
+                    .contains("node scripts/ci/verify-fdp38-artifacts.mjs");
+            assertThat(verifier)
+                    .as("FDP-38 artifact verifier must validate checkpoint " + checkpoint)
                     .contains(checkpoint.name())
                     .contains(checkpoint.preconditionSetup().name());
             assertThat(harness)
@@ -2142,13 +2152,18 @@ class RegulatedMutationArchitectureTest {
         String compose = Files.readString(Path.of("../deployment/docker-compose.yml"));
         String fdp38Job = ci.substring(
                 ci.indexOf("fdp38-live-runtime-checkpoint-chaos:"),
-                ci.indexOf("\n  docker:", ci.indexOf("fdp38-live-runtime-checkpoint-chaos:"))
+                ci.indexOf("\n  fdp39-release-governance:", ci.indexOf("fdp38-live-runtime-checkpoint-chaos:"))
         );
-        String ciOutsideFdp38 = ci.replace(fdp38Job, "");
+        String fdp39Job = ci.substring(
+                ci.indexOf("fdp39-release-governance:"),
+                ci.indexOf("\n  fdp40-release-controls:", ci.indexOf("fdp39-release-governance:"))
+        );
+        String ciOutsideFdp38AndFdp39 = ci.replace(fdp38Job, "").replace(fdp39Job, "");
 
         assertThat(compose).doesNotContain("Dockerfile.alert-service-fdp38-fixture");
-        assertThat(ciOutsideFdp38).doesNotContain("Dockerfile.alert-service-fdp38-fixture");
+        assertThat(ciOutsideFdp38AndFdp39).doesNotContain("Dockerfile.alert-service-fdp38-fixture");
         assertThat(fdp38Job).contains("Dockerfile.alert-service-fdp38-fixture");
+        assertThat(fdp39Job).contains("Dockerfile.alert-service-fdp38-fixture");
         assertThat(ci).contains(
                 "docker build -f deployment/Dockerfile.backend --build-arg MODULE_NAME=alert-service -t fdp37-alert-service"
         );
@@ -2220,6 +2235,9 @@ class RegulatedMutationArchitectureTest {
     @Test
     void fdp37CiMustContainRequiredProductionImageChaosJobAndArtifacts() throws Exception {
         String ci = Files.readString(Path.of("../.github/workflows/ci.yml"));
+        String verifier = Files.readString(Path.of("../scripts/ci/verify-fdp37-artifacts.mjs"));
+        String verifierHelpers = Files.readString(Path.of("../scripts/ci/artifact-verification-helpers.mjs"));
+        String verifierSurface = verifier + "\n" + verifierHelpers;
 
         assertThat(ci).contains("fdp37-production-image-chaos:");
         assertThat(ci).contains("Build alert-service production-like image");
@@ -2235,21 +2253,22 @@ class RegulatedMutationArchitectureTest {
         assertThat(ci).contains("RegulatedMutationProductionImageConfigParityIT");
         assertThat(ci).contains("RegulatedMutationProductionImageRollbackIT");
         assertThat(ci).contains("RegulatedMutationProductionImageRequiredTransactionChaosIT");
-        assertThat(ci).contains("FDP-37 required test class did not fully execute");
-        assertThat(ci).contains("fdp37-proof-summary.md");
-        assertThat(ci).contains("fdp37-proof-summary.json");
-        assertThat(ci).contains("fdp37-enablement-review-pack.md");
-        assertThat(ci).contains("fdp37-enablement-review-pack.json");
-        assertThat(ci).contains("fdp37-rollback-validation.md");
-        assertThat(ci).contains("PRODUCTION_IMAGE_CONTAINER_KILL");
-        assertThat(ci).contains("PRODUCTION_IMAGE_RESTART_API_PROOF");
-        assertThat(ci).contains("transaction_mode=REQUIRED");
-        assertThat(ci).contains("network_mode=testcontainers-shared-network");
-        assertThat(ci).contains("host_networking_used=false");
-        assertThat(ci).contains("FDP-37 proof artifacts must not use host networking");
-        assertThat(ci).contains("FDP-37 enablement review pack failed checks");
-        assertThat(ci).contains("\"scenario_count\": int(summary.get(\"scenario_count\", 0)) >= 5");
-        assertThat(ci).contains("live_in_flight_proof_executed: `false`");
+        assertThat(ci).contains("node scripts/ci/verify-fdp37-artifacts.mjs");
+        assertThat(verifierSurface).contains("test class did not fully execute");
+        assertThat(verifier).contains("fdp37-proof-summary.md");
+        assertThat(verifier).contains("fdp37-proof-summary.json");
+        assertThat(verifier).contains("fdp37-enablement-review-pack.md");
+        assertThat(verifier).contains("fdp37-enablement-review-pack.json");
+        assertThat(verifier).contains("fdp37-rollback-validation.md");
+        assertThat(verifier).contains("PRODUCTION_IMAGE_CONTAINER_KILL");
+        assertThat(verifier).contains("PRODUCTION_IMAGE_RESTART_API_PROOF");
+        assertThat(verifier).contains("transaction_mode=REQUIRED");
+        assertThat(verifier).contains("network_mode=testcontainers-shared-network");
+        assertThat(verifier).contains("host_networking_used=false");
+        assertThat(verifier).contains("FDP-37 proof artifacts must not use host networking");
+        assertThat(verifier).contains("FDP-37 enablement review pack");
+        assertThat(verifier).contains("scenario_count");
+        assertThat(verifier).contains("live_in_flight_proof_executed: `false`");
         assertThat(ci).contains("if-no-files-found: error");
         assertThat(ci).contains("fdp37-production-image-chaos-reports");
         assertThat(ci).contains("regulated-mutation-regression");
