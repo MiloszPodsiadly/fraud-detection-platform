@@ -135,6 +135,7 @@ function isCheckedTextFile(file) {
 function isAllowedNarrativeFile(file) {
   return isScopeGuardScript(file)
     || fdp54GovernanceFiles.has(file)
+    || file.startsWith("scripts/ci/")
     || file.startsWith("docs/")
     || file.startsWith(".github/workflows/")
     || /\.(test|spec)\.[jt]sx?$/.test(file);

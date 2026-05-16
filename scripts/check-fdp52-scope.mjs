@@ -67,7 +67,9 @@ function isScopeGuardScript(file) {
 }
 
 function isFdp54GovernanceFile(file) {
-  return file.startsWith(".github/workflows/") || fdp54GovernanceFiles.has(file);
+  return file.startsWith(".github/workflows/")
+    || file.startsWith("scripts/ci/")
+    || fdp54GovernanceFiles.has(file);
 }
 
 function isCheckedTextFile(file) {
