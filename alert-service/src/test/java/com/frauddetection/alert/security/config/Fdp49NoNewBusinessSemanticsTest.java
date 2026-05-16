@@ -13,7 +13,7 @@ class Fdp49NoNewBusinessSemanticsTest {
 
     @Test
     void docsLockFdp49ToSecurityArchitectureHardeningOnly() throws IOException {
-        String doc = Files.readString(SecurityRuleSource.repositoryFile("docs/security/endpoint-authorization-map.md"));
+        String doc = Files.readString(SecurityRuleSource.repositoryFile("docs/security/endpoint_authorization_map.md"));
 
         assertThat(doc)
                 .contains("No new business endpoints")
@@ -64,7 +64,7 @@ class Fdp49NoNewBusinessSemanticsTest {
 
     @Test
     void endpointAuthorizationDocsKeepBusinessSemanticNonGoalsExplicit() throws IOException {
-        String doc = Files.readString(SecurityRuleSource.repositoryFile("docs/security/endpoint-authorization-map.md"));
+        String doc = Files.readString(SecurityRuleSource.repositoryFile("docs/security/endpoint_authorization_map.md"));
 
         assertThat(doc)
                 .contains("does not add business endpoints")

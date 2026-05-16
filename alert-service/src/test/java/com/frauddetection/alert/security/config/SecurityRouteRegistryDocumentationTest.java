@@ -112,7 +112,7 @@ class SecurityRouteRegistryDocumentationTest {
     }
 
     private String readEndpointAuthorizationMap() throws IOException {
-        Path doc = SecurityRuleSource.repositoryFile("docs/security/endpoint-authorization-map.md");
+        Path doc = SecurityRuleSource.repositoryFile("docs/security/endpoint_authorization_map.md");
         assertThat(doc).exists();
         return Files.readString(doc);
     }

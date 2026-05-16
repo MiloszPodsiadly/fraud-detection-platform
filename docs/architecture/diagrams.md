@@ -7,86 +7,44 @@ Status: current portfolio diagrams.
 These diagrams are simplified reviewer aids. They summarize implemented service boundaries and known regulated
 mutation concepts, but they are not a complete architecture proof and do not replace code-level contracts.
 
-## High-Level Module Flow
+## System Architecture
 
-```mermaid
-flowchart LR
-  Ingest[transaction-ingest-service] --> Raw[transactions.raw]
-  Simulator[transaction-simulator-service] --> Raw
-  Raw --> Enricher[feature-enricher-service]
-  Enricher --> Enriched[transactions.enriched]
-  Enriched --> Scoring[fraud-scoring-service]
-  Scoring --> ML[ml-inference-service]
-  Scoring --> Scored[transactions.scored]
-  Scored --> Alert[alert-service]
-  Alert --> UI[analyst-console-ui]
-  Alert --> Trust[audit-trust-authority]
-```
+![Fraud Detection Platform architecture](../assets/readme_architecture.svg)
 
-The flow is event-driven through Kafka topics, with REST APIs at service boundaries.
+The platform is event-driven through Kafka topics, with REST APIs at service boundaries. Alert service owns regulated
+mutation state, local evidence, response snapshots, and analyst-facing alert workflows.
+
+## Runtime Flow
+
+![Fraud detection runtime flow](../assets/readme_runtime_flow.svg)
+
+The runtime path keeps each service responsible for one bounded transition: ingestion, enrichment, scoring, alert
+projection, analyst review, and audit-backed state changes.
 
 ## Regulated Mutation Lifecycle
 
-```mermaid
-stateDiagram-v2
-  [*] --> REQUESTED
-  REQUESTED --> AUDIT_ATTEMPTED
-  AUDIT_ATTEMPTED --> BUSINESS_COMMITTING
-  BUSINESS_COMMITTING --> COMMITTED_EVIDENCE_PENDING
-  BUSINESS_COMMITTING --> COMMITTED_EVIDENCE_INCOMPLETE
-  COMMITTED_EVIDENCE_PENDING --> COMMITTED_EVIDENCE_CONFIRMED
-  REQUESTED --> RECOVERY_REQUIRED
-  AUDIT_ATTEMPTED --> RECOVERY_REQUIRED
-  BUSINESS_COMMITTING --> COMMIT_UNKNOWN
-```
+![Regulated mutation lifecycle](../assets/architecture_regulated_mutation_lifecycle.svg)
 
-The diagram is simplified. It does not claim external finality or distributed ACID.
+The lifecycle separates command intake, local audit evidence, business mutation, outbox publication, replay snapshots,
+and recovery. It does not claim external finality, distributed ACID, or exactly-once Kafka delivery.
 
 ## Claim, Replay, Fencing, Renewal, And Checkpoint
 
-```mermaid
-sequenceDiagram
-  participant Client
-  participant API as alert-service API
-  participant Coord as regulated coordinator
-  participant Mongo
-  participant Worker
-  Client->>API: request + X-Idempotency-Key
-  API->>Coord: canonical intent
-  Coord->>Mongo: create or replay command
-  Worker->>Mongo: claim lease
-  Worker->>Mongo: fenced transition
-  Worker->>Mongo: checkpoint/renew lease when allowed
-  Client->>API: replay same key
-  API->>Mongo: return stored safe status/snapshot
-```
+![Claim replay fencing renewal and checkpoint flow](../assets/architecture_claim_replay_checkpoint.svg)
 
-Replay is idempotent for the same canonical intent. It is not distributed exactly-once processing.
+Replay is idempotent for the same canonical intent. Lease fencing and checkpoint renewal preserve bounded ownership;
+they are not progress signals and they do not allow a worker to continue after a rejected renewal.
 
 ## Release Governance Flow
 
-```mermaid
-flowchart TD
-  Commit[Git commit] --> CI[Required CI checks]
-  CI --> Digest[Image digest evidence]
-  Digest --> Manifest[Release manifest]
-  Manifest --> Owner[Single release owner review]
-  Owner --> Env[External platform controls]
-  Env --> Decision{Enablement decision}
-  Decision -->|Approved separately| ConfigPR[Separate config PR]
-  Decision -->|Not approved| NoGo[NO-GO]
-```
+![Release governance flow](../assets/architecture_release_governance.svg)
 
-FDP-40 and later release-control docs are readiness evidence. They are not production approval by themselves.
+Release-control documents are readiness evidence. They do not approve production enablement by themselves; enablement
+requires separate owner review, environment controls, and configuration change approval.
 
 ## Alert To Case Roadmap
 
-```mermaid
-flowchart LR
-  Alert[High-risk alert] --> Decision[Analyst decision]
-  Decision --> Case[Fraud case]
-  Case --> Review[Reviewer workflow]
-  Review --> Roadmap[Future case-management hardening]
-```
+![Alert to fraud case roadmap](../assets/architecture_alert_case_roadmap.svg)
 
-Case-management hardening beyond the current implementation must be treated as roadmap until implemented.
+Current alert decisions and fraud-case workflows are implemented locally. Future case-management hardening remains
+roadmap until code and tests establish the behavior.

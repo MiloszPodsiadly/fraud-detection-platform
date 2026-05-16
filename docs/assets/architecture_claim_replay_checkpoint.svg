@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="title desc">
+  <title id="title">Claim replay fencing renewal and checkpoint flow</title>
+  <desc id="desc">Sequence showing client idempotency, command persistence, lease claim, fenced transition, checkpoint renewal, and replay snapshot response.</desc>
+  <defs>
+    <marker id="arrow-cr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font: 700 26px Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 14px Arial, sans-serif; fill: #475569; }
+      .actor { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.4; rx: 14; }
+      .api { fill: #eff6ff; stroke: #3b82f6; }
+      .coord { fill: #f5f3ff; stroke: #8b5cf6; }
+      .store { fill: #ecfdf5; stroke: #22c55e; }
+      .worker { fill: #fff7ed; stroke: #f97316; }
+      .risk { fill: #fef2f2; stroke: #ef4444; }
+      .label { font: 700 13px Arial, sans-serif; fill: #111827; }
+      .small { font: 400 11px Arial, sans-serif; fill: #475569; }
+      .line { stroke: #94a3b8; stroke-width: 1.3; stroke-dasharray: 5 5; }
+      .arrow { stroke: #334155; stroke-width: 2.1; fill: none; marker-end: url(#arrow-cr); }
+      .deny { stroke: #ef4444; stroke-width: 2; fill: none; marker-end: url(#arrow-cr); stroke-dasharray: 7 5; }
+      .note { fill: #f1f5f9; stroke: #cbd5e1; stroke-width: 1.2; rx: 12; }
+    </style>
+  </defs>
+  <rect class="bg" width="1200" height="620"/>
+  <text class="title" x="48" y="52">Claim, Replay, Fencing, Renewal, And Checkpoint</text>
+  <text class="subtitle" x="48" y="78">Idempotency and ownership checks keep retries safe without claiming distributed exactly-once processing.</text>
+
+  <rect class="actor api" x="70" y="115" width="145" height="60"/>
+  <text class="label" x="103" y="143">Client</text>
+  <text class="small" x="93" y="160">same key replay</text>
+  <rect class="actor api" x="285" y="115" width="150" height="60"/>
+  <text class="label" x="324" y="143">API</text>
+  <text class="small" x="307" y="160">canonical intent</text>
+  <rect class="actor coord" x="505" y="115" width="165" height="60"/>
+  <text class="label" x="538" y="143">Coordinator</text>
+  <text class="small" x="532" y="160">state machine</text>
+  <rect class="actor store" x="740" y="115" width="165" height="60"/>
+  <text class="label" x="779" y="143">Mongo</text>
+  <text class="small" x="765" y="160">command store</text>
+  <rect class="actor worker" x="975" y="115" width="150" height="60"/>
+  <text class="label" x="1017" y="143">Worker</text>
+  <text class="small" x="999" y="160">owned execution</text>
+
+  <line class="line" x1="142" y1="175" x2="142" y2="545"/>
+  <line class="line" x1="360" y1="175" x2="360" y2="545"/>
+  <line class="line" x1="588" y1="175" x2="588" y2="545"/>
+  <line class="line" x1="823" y1="175" x2="823" y2="545"/>
+  <line class="line" x1="1050" y1="175" x2="1050" y2="545"/>
+
+  <path class="arrow" d="M 142 215 L 360 215"/>
+  <text class="small" x="180" y="205">request + X-Idempotency-Key</text>
+  <path class="arrow" d="M 360 260 L 588 260"/>
+  <text class="small" x="406" y="250">canonical actor/resource/action</text>
+  <path class="arrow" d="M 588 305 L 823 305"/>
+  <text class="small" x="632" y="295">create or replay command</text>
+  <path class="arrow" d="M 1050 350 L 823 350"/>
+  <text class="small" x="875" y="340">claim lease with owner token</text>
+  <path class="arrow" d="M 1050 395 L 823 395"/>
+  <text class="small" x="870" y="385">fenced transition</text>
+  <path class="arrow" d="M 1050 440 L 823 440"/>
+  <text class="small" x="838" y="430">allowed checkpoint renewal</text>
+  <path class="deny" d="M 823 485 L 1050 485"/>
+  <text class="small" x="860" y="475">reject stale/expired/budget exceeded</text>
+
+  <rect class="note" x="260" y="510" width="320" height="58"/>
+  <text class="label" x="285" y="535">Replay rule</text>
+  <text class="small" x="285" y="553">same key + same intent returns stored status or snapshot</text>
+  <path class="arrow" d="M 142 520 L 260 520"/>
+  <path class="arrow" d="M 580 540 C 675 540 720 535 823 520"/>
+
+  <rect class="actor risk" x="735" y="532" width="390" height="42"/>
+  <text class="label" x="758" y="557">Rejected renewal means stop execution, not retry business work.</text>
+</svg>

@@ -71,9 +71,9 @@ class Fdp43FraudCaseLifecyclePublicPathIdempotencyArchitectureTest {
 
     @Test
     void docsMustStatePublicLifecyclePostsRequireIdempotency() {
-        String docs = compact(read(repoRoot().resolve(Path.of("docs", "api", "fraud-case-api.md")))
+        String docs = compact(read(repoRoot().resolve(Path.of("docs", "api", "fraud_case_api.md")))
                 + "\n"
-                + read(repoRoot().resolve(Path.of("docs", "fdp-43-merge-gate.md"))));
+                + read(repoRoot().resolve(Path.of("docs", "fdp", "fdp_43_merge_gate.md"))));
 
         assertThat(docs)
                 .contains("every local lifecycle `post` requires `x-idempotency-key`")

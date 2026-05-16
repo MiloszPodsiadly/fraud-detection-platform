@@ -14,8 +14,8 @@ class Fdp40BranchProtectionReadinessTest {
 
     @Test
     void branchProtectionIsRequiredButNotVerifiedByFdp40() throws Exception {
-        String docs = Files.readString(Path.of("../docs/release/fdp-40-branch-protection-readiness.md"));
-        Map<String, Object> readiness = readJson(Path.of("../docs/release/fdp-40-branch-protection-readiness.json"));
+        String docs = Files.readString(Path.of("../docs/release/fdp_40_branch_protection_readiness.md"));
+        Map<String, Object> readiness = readJson(Path.of("../docs/release/fdp_40_branch_protection_readiness.json"));
 
         assertThat(docs)
                 .contains("does not verify GitHub branch protection through GitHub APIs")
@@ -27,6 +27,6 @@ class Fdp40BranchProtectionReadinessTest {
         assertThat(bool(readiness, "require_code_owner_reviews")).isTrue();
         assertThat(bool(readiness, "require_status_checks_before_merge")).isTrue();
         assertThat(bool(readiness, "admin_bypass_allowed")).isFalse();
-        assertThat(readiness.get("required_checks_matrix_ref")).isEqualTo("docs/release/fdp-40-required-checks-matrix.json");
+        assertThat(readiness.get("required_checks_matrix_ref")).isEqualTo("docs/release/fdp_40_required_checks_matrix.json");
     }
 }

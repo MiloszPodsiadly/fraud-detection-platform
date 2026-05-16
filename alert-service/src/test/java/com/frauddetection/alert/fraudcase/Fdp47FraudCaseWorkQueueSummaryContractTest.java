@@ -11,8 +11,8 @@ class Fdp47FraudCaseWorkQueueSummaryContractTest {
 
     @Test
     void docsAndOpenApiMustDescribeSummaryAsGlobalAndNotSnapshotConsistent() throws Exception {
-        String docs = Files.readString(projectRoot().resolve("docs/fdp-47-analyst-console-ux-and-summary.md"));
-        String openApi = Files.readString(projectRoot().resolve("docs/openapi/alert-service.openapi.yaml"));
+        String docs = Files.readString(projectRoot().resolve("docs/fdp/fdp_47_analyst_console_ux_and_summary.md"));
+        String openApi = Files.readString(projectRoot().resolve("docs/openapi/alert_service.openapi.yaml"));
         String combined = docs + "\n" + openApi;
 
         assertThat(combined)
@@ -37,7 +37,7 @@ class Fdp47FraudCaseWorkQueueSummaryContractTest {
 
     @Test
     void openApiMustExposeOnlyCurrentV1SummaryEndpoint() throws Exception {
-        String openApi = Files.readString(projectRoot().resolve("docs/openapi/alert-service.openapi.yaml"));
+        String openApi = Files.readString(projectRoot().resolve("docs/openapi/alert_service.openapi.yaml"));
         String summaryEndpoint = section(openApi, "  /api/v1/fraud-cases/work-queue/summary:", "  /api/v1/fraud-cases/{caseId}:");
 
         assertThat(summaryEndpoint)

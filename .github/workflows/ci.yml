@@ -50,6 +50,11 @@ jobs:
           java-version: "21"
           cache: maven
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Verify Docker is available for Testcontainers
         run: docker version
 
@@ -57,58 +62,7 @@ jobs:
         run: mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=FraudCaseTransitionPolicyTest,Fdp42FraudCaseManagementServiceTest,FraudCaseControllerTest,FraudCaseManagementServiceTest,FraudCaseMutationInvariantTest,FraudCaseAuditServiceTest,Fdp42FraudCaseAuditAppendOnlyArchitectureTest,Fdp42FraudCaseDocumentationNoOverclaimTest,FraudCaseSecurityIntegrationTest,FraudCaseTransactionIntegrationTest,AlertSecurityConfigTest,AlertSecurityConfigJwtEnabledTest,DemoAuthSecurityConfigTest,AnalystRoleTest" test
 
       - name: Verify FDP-42 proof suite reports
-        run: |
-          python - <<'PY'
-          import pathlib
-          import sys
-          import xml.etree.ElementTree as ET
-
-          reports = pathlib.Path("alert-service/target/surefire-reports")
-          required = [
-              "FraudCaseTransitionPolicyTest",
-              "Fdp42FraudCaseManagementServiceTest",
-              "FraudCaseControllerTest",
-              "FraudCaseManagementServiceTest",
-              "FraudCaseMutationInvariantTest",
-              "FraudCaseAuditServiceTest",
-              "Fdp42FraudCaseAuditAppendOnlyArchitectureTest",
-              "Fdp42FraudCaseDocumentationNoOverclaimTest",
-              "FraudCaseSecurityIntegrationTest",
-              "FraudCaseTransactionIntegrationTest",
-              "AlertSecurityConfigTest",
-              "AlertSecurityConfigJwtEnabledTest",
-              "DemoAuthSecurityConfigTest",
-              "AnalystRoleTest",
-          ]
-
-          xml_by_class = {}
-          for report in reports.glob("TEST-*.xml"):
-              root = ET.parse(report).getroot()
-              class_name = root.attrib.get("name", report.stem.removeprefix("TEST-")).split(".")[-1]
-              xml_by_class[class_name] = (report, root)
-
-          failed = []
-          for class_name in required:
-              if class_name not in xml_by_class:
-                  failed.append(f"missing XML report for {class_name}")
-                  continue
-              report, root = xml_by_class[class_name]
-              tests = int(root.attrib.get("tests", "0"))
-              skipped = int(root.attrib.get("skipped", "0"))
-              failures = int(root.attrib.get("failures", "0"))
-              errors = int(root.attrib.get("errors", "0"))
-              if tests <= 0 or skipped != 0 or failures != 0 or errors != 0:
-                  failed.append(
-                      f"{class_name} did not fully execute: report={report} "
-                      f"tests={tests} skipped={skipped} failures={failures} errors={errors}"
-                  )
-
-          if failed:
-              print("FDP-42 proof suite verification failed:", file=sys.stderr)
-              for failure in failed:
-                  print(f"- {failure}", file=sys.stderr)
-              sys.exit(1)
-          PY
+        run: node scripts/ci/verify-junit-reports.mjs --suite fdp42
 
       - name: Upload FDP-42 test reports
         if: always()
@@ -140,6 +94,11 @@ jobs:
           java-version: "21"
           cache: maven
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Verify Docker is available for Testcontainers
         run: docker version
 
@@ -147,57 +106,7 @@ jobs:
         run: mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=IdempotencyCanonicalHasherTest,SharedIdempotencyKeyPolicyTest,FraudCaseLifecycleIdempotencyConflictPolicyTest,Fdp43FraudCaseLifecycleIdempotencyArchitectureTest,Fdp43FraudCaseLifecyclePublicPathIdempotencyArchitectureTest,FraudCaseControllerTest,FraudCaseSecurityIntegrationTest,FraudCaseTransactionIntegrationTest,FraudCaseLifecycleIdempotencyGlobalKeyRegressionIntegrationTest,FraudCaseLifecycleIdempotencyConcurrencyIntegrationTest,FraudCaseLifecycleIdempotencyFailureIntegrationTest,FraudCaseLifecycleIdempotencyServiceRaceTest,RegulatedMutationIdempotencyPrimitiveCompatibilityTest" test
 
       - name: Verify FDP-43 proof suite reports
-        run: |
-          python - <<'PY'
-          import pathlib
-          import sys
-          import xml.etree.ElementTree as ET
-
-          reports = pathlib.Path("alert-service/target/surefire-reports")
-          required = [
-              "IdempotencyCanonicalHasherTest",
-              "SharedIdempotencyKeyPolicyTest",
-              "FraudCaseLifecycleIdempotencyConflictPolicyTest",
-              "Fdp43FraudCaseLifecycleIdempotencyArchitectureTest",
-              "Fdp43FraudCaseLifecyclePublicPathIdempotencyArchitectureTest",
-              "FraudCaseControllerTest",
-              "FraudCaseSecurityIntegrationTest",
-              "FraudCaseTransactionIntegrationTest",
-              "FraudCaseLifecycleIdempotencyGlobalKeyRegressionIntegrationTest",
-              "FraudCaseLifecycleIdempotencyConcurrencyIntegrationTest",
-              "FraudCaseLifecycleIdempotencyFailureIntegrationTest",
-              "FraudCaseLifecycleIdempotencyServiceRaceTest",
-              "RegulatedMutationIdempotencyPrimitiveCompatibilityTest",
-          ]
-
-          xml_by_class = {}
-          for report in reports.glob("TEST-*.xml"):
-              root = ET.parse(report).getroot()
-              class_name = root.attrib.get("name", report.stem.removeprefix("TEST-")).split(".")[-1]
-              xml_by_class[class_name] = (report, root)
-
-          failed = []
-          for class_name in required:
-              if class_name not in xml_by_class:
-                  failed.append(f"missing XML report for {class_name}")
-                  continue
-              report, root = xml_by_class[class_name]
-              tests = int(root.attrib.get("tests", "0"))
-              skipped = int(root.attrib.get("skipped", "0"))
-              failures = int(root.attrib.get("failures", "0"))
-              errors = int(root.attrib.get("errors", "0"))
-              if tests <= 0 or skipped != 0 or failures != 0 or errors != 0:
-                  failed.append(
-                      f"{class_name} did not fully execute: report={report} "
-                      f"tests={tests} skipped={skipped} failures={failures} errors={errors}"
-                  )
-
-          if failed:
-              print("FDP-43 proof suite verification failed:", file=sys.stderr)
-              for failure in failed:
-                  print(f"- {failure}", file=sys.stderr)
-              sys.exit(1)
-          PY
+        run: node scripts/ci/verify-junit-reports.mjs --suite fdp43
 
       - name: Upload FDP-43 test reports
         if: always()
@@ -230,6 +139,11 @@ jobs:
           java-version: "21"
           cache: maven
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Verify Docker is available for Testcontainers
         run: docker version
 
@@ -237,57 +151,7 @@ jobs:
         run: mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=Fdp44FraudCaseLifecycleApiSurfaceStructuralTest,Fdp44FraudCaseLifecycleReplaySnapshotTest,Fdp44FraudCaseLifecycleReplaySnapshotFailClosedTest,Fdp44FraudCaseLifecycleReplaySnapshotCoverageTest,Fdp44FraudCaseLifecycleReplaySnapshotMapperStructuralTest,Fdp44FraudCaseLifecycleReplayEquivalenceIntegrationTest,Fdp44FraudCaseIdempotencyRetentionOperationalTest,Fdp44FraudCaseIdempotencyOperationalDocsNoOverclaimTest,FraudCaseLifecycleIdempotencyServiceRaceTest,FraudCaseLifecycleIdempotencyGlobalKeyRegressionIntegrationTest,FraudCaseLifecycleIdempotencyConcurrencyIntegrationTest,FraudCaseLifecycleIdempotencyFailureIntegrationTest,AlertServiceMetricsTest" test
 
       - name: Verify FDP-44 proof suite reports
-        run: |
-          python - <<'PY'
-          import pathlib
-          import sys
-          import xml.etree.ElementTree as ET
-
-          reports = pathlib.Path("alert-service/target/surefire-reports")
-          required = [
-              "Fdp44FraudCaseLifecycleApiSurfaceStructuralTest",
-              "Fdp44FraudCaseLifecycleReplaySnapshotTest",
-              "Fdp44FraudCaseLifecycleReplaySnapshotFailClosedTest",
-              "Fdp44FraudCaseLifecycleReplaySnapshotCoverageTest",
-              "Fdp44FraudCaseLifecycleReplaySnapshotMapperStructuralTest",
-              "Fdp44FraudCaseLifecycleReplayEquivalenceIntegrationTest",
-              "Fdp44FraudCaseIdempotencyRetentionOperationalTest",
-              "Fdp44FraudCaseIdempotencyOperationalDocsNoOverclaimTest",
-              "FraudCaseLifecycleIdempotencyServiceRaceTest",
-              "FraudCaseLifecycleIdempotencyGlobalKeyRegressionIntegrationTest",
-              "FraudCaseLifecycleIdempotencyConcurrencyIntegrationTest",
-              "FraudCaseLifecycleIdempotencyFailureIntegrationTest",
-              "AlertServiceMetricsTest",
-          ]
-
-          xml_by_class = {}
-          for report in reports.glob("TEST-*.xml"):
-              root = ET.parse(report).getroot()
-              class_name = root.attrib.get("name", report.stem.removeprefix("TEST-")).split(".")[-1]
-              xml_by_class[class_name] = (report, root)
-
-          failed = []
-          for class_name in required:
-              if class_name not in xml_by_class:
-                  failed.append(f"missing XML report for {class_name}")
-                  continue
-              report, root = xml_by_class[class_name]
-              tests = int(root.attrib.get("tests", "0"))
-              skipped = int(root.attrib.get("skipped", "0"))
-              failures = int(root.attrib.get("failures", "0"))
-              errors = int(root.attrib.get("errors", "0"))
-              if tests <= 0 or skipped != 0 or failures != 0 or errors != 0:
-                  failed.append(
-                      f"{class_name} did not fully execute: report={report} "
-                      f"tests={tests} skipped={skipped} failures={failures} errors={errors}"
-                  )
-
-          if failed:
-              print("FDP-44 proof suite verification failed:", file=sys.stderr)
-              for failure in failed:
-                  print(f"- {failure}", file=sys.stderr)
-              sys.exit(1)
-          PY
+        run: node scripts/ci/verify-junit-reports.mjs --suite fdp44
 
       - name: Upload FDP-44 test reports
         if: always()
@@ -321,6 +185,11 @@ jobs:
           java-version: "21"
           cache: maven
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Verify Docker is available for Testcontainers
         run: docker version
 
@@ -331,88 +200,7 @@ jobs:
           test
 
       - name: Verify FDP-45 proof suite reports
-        run: |
-          python - <<'PY'
-          import pathlib
-          import sys
-          import xml.etree.ElementTree as ET
-
-          reports = pathlib.Path("alert-service/target/surefire-reports")
-          required = [
-              "Fdp45FraudCaseReadModelSingleSourceOfTruthTest",
-              "Fdp45FraudCaseWorkQueuePaginationTest",
-              "Fdp45FraudCaseWorkQueueSortingTest",
-              "Fdp45FraudCaseWorkQueueFilterTest",
-              "Fdp45FraudCaseWorkQueueDuplicateParamTest",
-              "Fdp45FraudCaseWorkQueueSlaConfigTest",
-              "Fdp45FraudCaseProdSlaConfigTest",
-              "Fdp45FraudCaseWorkQueueSlaAgeTest",
-              "Fdp45FraudCaseWorkQueueReadOnlySafetyTest",
-              "Fdp45FraudCaseWorkQueueSecurityTest",
-              "Fdp45FraudCaseWorkQueueObservabilityTest",
-              "Fdp45FraudCaseWorkQueueFailureMetricsTest",
-              "Fdp45FraudCaseWorkQueueReadAccessAuditTest",
-              "Fdp45FraudCaseWorkQueueMongoIntegrationTest",
-              "Fdp45FraudCaseWorkQueueContractCompatibilityTest",
-              "Fdp45FraudCaseWorkQueueDocsNoOverclaimTest",
-              "Fdp45FraudCaseLegacyListValidationTest",
-              "Fdp45FraudCaseLegacyDeepPaginationValidationTest",
-              "Fdp45FraudCaseWorkQueueDeepPaginationTest",
-              "Fdp45FraudCaseWorkQueueIndexReadinessTest",
-              "Fdp45FraudCaseCompoundIndexReadinessDocsTest",
-              "Fdp45FraudCaseWorkQueueOpenApiContractTest",
-              "Fdp45FraudCaseWorkQueueFailedReadAuditTest",
-              "Fdp45FraudCaseWorkQueueFilterLengthTest",
-              "Fdp45FraudCaseWorkQueueNoDuplicateAuditAdviceTest",
-              "Fdp45ReadAccessAuditResponseAdviceMarkerTest",
-              "Fdp45FraudCaseWorkQueueAuditPrecedenceTest",
-              "Fdp45SensitiveReadAuditUnavailableRunbookTest",
-              "Fdp45FraudCaseReadPolicyNamingBoundaryTest",
-              "Fdp45FraudCaseLegacyExactCountCompatibilityDocsTest",
-              "Fdp45FraudCaseLegacyPaginationReleaseNotesTest",
-              "Fdp45FraudCaseReadQueryPolicyContractTest",
-              "Fdp45FraudCaseWorkQueueCursorArchitectureTest",
-              "Fdp45FraudCaseWorkQueueCursorCodecTest",
-              "Fdp45FraudCaseWorkQueueCursorPaginationTest",
-              "Fdp45FraudCaseWorkQueueCursorQueryFingerprintTest",
-              "Fdp45FraudCaseWorkQueueCursorFilterBindingTest",
-              "Fdp45FraudCaseWorkQueueCursorPageCombinationTest",
-              "Fdp45FraudCaseWorkQueueCursorSecretProfileTest",
-              "Fdp45FraudCaseWorkQueueCursorObservabilityTest",
-              "Fdp45FraudCaseWorkQueueCursorDocsContractTest",
-              "Fdp45FraudCaseWorkQueueSortFieldCoverageTest",
-              "Fdp45FraudCaseWorkQueueCursorSizeChangeTest",
-              "SensitiveReadAuditServiceTest",
-          ]
-
-          xml_by_class = {}
-          for report in reports.glob("TEST-*.xml"):
-              root = ET.parse(report).getroot()
-              class_name = root.attrib.get("name", report.stem.removeprefix("TEST-")).split(".")[-1]
-              xml_by_class[class_name] = (report, root)
-
-          failed = []
-          for class_name in required:
-              if class_name not in xml_by_class:
-                  failed.append(f"missing XML report for {class_name}")
-                  continue
-              report, root = xml_by_class[class_name]
-              tests = int(root.attrib.get("tests", "0"))
-              skipped = int(root.attrib.get("skipped", "0"))
-              failures = int(root.attrib.get("failures", "0"))
-              errors = int(root.attrib.get("errors", "0"))
-              if tests <= 0 or skipped != 0 or failures != 0 or errors != 0:
-                  failed.append(
-                      f"{class_name} did not fully execute: report={report} "
-                      f"tests={tests} skipped={skipped} failures={failures} errors={errors}"
-                  )
-
-          if failed:
-              print("FDP-45 proof suite verification failed:", file=sys.stderr)
-              for failure in failed:
-                  print(f"- {failure}", file=sys.stderr)
-              sys.exit(1)
-          PY
+        run: node scripts/ci/verify-junit-reports.mjs --suite fdp45
 
       - name: Upload FDP-45 test reports
         if: always()
@@ -483,111 +271,6 @@ jobs:
       - name: Build UI
         run: npm run build
 
-  fdp46-fraud-case-work-queue-ui:
-    name: FDP-46 Fraud Case Work Queue UI
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs:
-      - frontend
-      - fdp45-fraud-case-work-queue-read-model
-
-    defaults:
-      run:
-        working-directory: analyst-console-ui
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: analyst-console-ui/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Ensure FDP-46 tests are not skipped
-        run: |
-          if grep -R "it\.skip\|describe\.skip\|test\.skip" src/components/FraudCaseWorkQueuePanel.test.jsx src/fraudCases/workQueueState.test.js src/api/alertsApi.test.js src/pages/AlertsListPage.test.jsx src/App.test.jsx; then
-            echo "FDP-46 mandatory tests must not be skipped" >&2
-            exit 1
-          fi
-
-      - name: Run FDP-46 frontend tests
-        run: npm test -- --run
-
-      - name: Build FDP-46 UI
-        run: npm run build
-
-  fdp46-scored-transaction-filtering:
-    name: FDP-46 Scored Transaction Filtering
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    needs:
-      - fdp45-fraud-case-work-queue-read-model
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "21"
-          cache: maven
-
-      - name: Ensure FDP-46 backend tests are not skipped
-        run: |
-          if grep -R "@Disabled" alert-service/src/test/java/com/frauddetection/alert/controller/ScoredTransactionControllerValidationTest.java alert-service/src/test/java/com/frauddetection/alert/service/ScoredTransactionSearchPolicyTest.java alert-service/src/test/java/com/frauddetection/alert/service/TransactionMonitoringServiceSearchTest.java alert-service/src/test/java/com/frauddetection/alert/mapper/ScoredTransactionDocumentMapperTest.java alert-service/src/test/java/com/frauddetection/alert/service/ScoredTransactionSearchIndexReadinessTest.java alert-service/src/test/java/com/frauddetection/alert/audit/read/ReadAccessAuditEndpointTest.java alert-service/src/test/java/com/frauddetection/alert/observability/AlertServiceMetricsTest.java alert-service/src/test/java/com/frauddetection/alert/security/config/AlertSecurityConfigTest.java; then
-            echo "FDP-46 backend tests must not be disabled" >&2
-            exit 1
-          fi
-
-      - name: Run FDP-46 backend search and audit tests
-        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=ScoredTransactionControllerValidationTest,ScoredTransactionSearchPolicyTest,TransactionMonitoringServiceSearchTest,ScoredTransactionDocumentMapperTest,ScoredTransactionSearchIndexReadinessTest,ReadAccessAuditClassifierTest,ReadAccessAuditEndpointTest,ReadAccessAuditServiceTest,ReadAccessAuditResponseAdviceTest,Fdp45ReadAccessAuditResponseAdviceMarkerTest,AlertServiceMetricsTest,AlertSecurityConfigTest" test
-
-      - name: Verify FDP-46 backend test reports
-        if: always()
-        run: |
-          python - <<'PY'
-          import pathlib
-          import sys
-          import xml.etree.ElementTree as ET
-
-          required = {
-              "com.frauddetection.alert.controller.ScoredTransactionControllerValidationTest",
-              "com.frauddetection.alert.service.ScoredTransactionSearchPolicyTest",
-              "com.frauddetection.alert.service.TransactionMonitoringServiceSearchTest",
-              "com.frauddetection.alert.mapper.ScoredTransactionDocumentMapperTest",
-              "com.frauddetection.alert.service.ScoredTransactionSearchIndexReadinessTest",
-              "com.frauddetection.alert.audit.read.ReadAccessAuditClassifierTest",
-              "com.frauddetection.alert.audit.read.ReadAccessAuditEndpointTest",
-              "com.frauddetection.alert.audit.read.ReadAccessAuditServiceTest",
-              "com.frauddetection.alert.audit.read.ReadAccessAuditResponseAdviceTest",
-              "com.frauddetection.alert.audit.read.Fdp45ReadAccessAuditResponseAdviceMarkerTest",
-              "com.frauddetection.alert.observability.AlertServiceMetricsTest",
-              "com.frauddetection.alert.security.config.AlertSecurityConfigTest",
-          }
-          reports = pathlib.Path("alert-service/target/surefire-reports")
-          for class_name in sorted(required):
-              report = reports / f"TEST-{class_name}.xml"
-              if not report.exists():
-                  print(f"Missing FDP-46 Surefire XML: {report}", file=sys.stderr)
-                  sys.exit(1)
-              root = ET.parse(report).getroot()
-              tests = int(root.attrib.get("tests", "0"))
-              skipped = int(root.attrib.get("skipped", "0"))
-              failures = int(root.attrib.get("failures", "0"))
-              errors = int(root.attrib.get("errors", "0"))
-              if tests <= 0 or skipped > 0 or failures > 0 or errors > 0:
-                  print(f"FDP-46 test class did not fully execute: {class_name} tests={tests} skipped={skipped} failures={failures} errors={errors}", file=sys.stderr)
-                  sys.exit(1)
-          PY
-
   fdp28-proof:
     name: FDP-28 Docker Integration Proof
     runs-on: ubuntu-latest
@@ -643,14 +326,12 @@ jobs:
             alert-service/target/failsafe-reports/
 
   fdp47-analyst-console-ux-and-summary:
-    name: FDP-47 Analyst Console UX and Summary
+    name: Analyst Console Product Gate
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     needs:
       - frontend
       - fdp45-fraud-case-work-queue-read-model
-      - fdp46-fraud-case-work-queue-ui
-      - fdp46-scored-transaction-filtering
 
     steps:
       - name: Checkout
@@ -671,18 +352,19 @@ jobs:
           cache-dependency-path: analyst-console-ui/package-lock.json
 
       - name: Ensure FDP-47 tests are not skipped
-        run: |
-          if grep -R "@Disabled" alert-service/src/test/java/com/frauddetection/alert/controller/FraudCaseWorkQueueSummaryControllerTest.java alert-service/src/test/java/com/frauddetection/alert/audit/read/ReadAccessResultCountExtractorTest.java alert-service/src/test/java/com/frauddetection/alert/fraudcase/Fdp47FraudCaseWorkQueueSummaryContractTest.java alert-service/src/test/java/com/frauddetection/alert/observability/Fdp45FraudCaseWorkQueueObservabilityTest.java; then
-            echo "FDP-47 backend tests must not be disabled" >&2
-            exit 1
-          fi
-          if grep -R "it\.skip\|describe\.skip\|test\.skip" analyst-console-ui/src/App.test.jsx analyst-console-ui/src/pages/AlertsListPage.test.jsx analyst-console-ui/src/components/FraudCaseWorkQueuePanel.test.jsx; then
-            echo "FDP-47 frontend tests must not be skipped" >&2
-            exit 1
-          fi
+        run: node scripts/ci/guard-test-activation.mjs --suite fdp47
+
+      - name: Run FDP-46 backend search and audit tests
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=ScoredTransactionControllerValidationTest,ScoredTransactionSearchPolicyTest,TransactionMonitoringServiceSearchTest,ScoredTransactionDocumentMapperTest,ScoredTransactionSearchIndexReadinessTest,ReadAccessAuditClassifierTest,ReadAccessAuditEndpointTest,ReadAccessAuditServiceTest,ReadAccessAuditResponseAdviceTest,Fdp45ReadAccessAuditResponseAdviceMarkerTest,AlertServiceMetricsTest,AlertSecurityConfigTest" test
+
+      - name: Verify FDP-46 backend test reports
+        run: node scripts/ci/verify-junit-reports.mjs --suite fdp46
 
       - name: Run FDP-47 backend summary tests
         run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=FraudCaseWorkQueueSummaryControllerTest,ReadAccessAuditClassifierTest,ReadAccessResultCountExtractorTest,Fdp45FraudCaseReadModelSingleSourceOfTruthTest,Fdp45FraudCaseWorkQueueReadOnlySafetyTest,Fdp45FraudCaseWorkQueueOpenApiContractTest,Fdp47FraudCaseWorkQueueSummaryContractTest,Fdp45FraudCaseWorkQueueObservabilityTest,FraudCaseSecurityIntegrationTest" test
+
+      - name: Verify FDP-47 backend test reports
+        run: node scripts/ci/verify-junit-reports.mjs --suite fdp47
 
       - name: Install frontend dependencies
         working-directory: analyst-console-ui
@@ -724,49 +406,13 @@ jobs:
           cache-dependency-path: analyst-console-ui/package-lock.json
 
       - name: Ensure FDP-48 tests are not skipped
-        run: |
-          if grep -R "@Disabled" alert-service/src/test/java/com/frauddetection/alert/security/config/BffSessionSecurityIntegrationTest.java alert-service/src/test/java/com/frauddetection/alert/security/auth/BffSecurityPropertiesTest.java alert-service/src/test/java/com/frauddetection/alert/security/auth/BffLogoutSuccessHandlerTest.java alert-service/src/test/java/com/frauddetection/alert/security/auth/OidcAnalystAuthoritiesMapperTest.java alert-service/src/test/java/com/frauddetection/alert/security/config/AlertSecurityConfigJwtEnabledTest.java alert-service/src/test/java/com/frauddetection/alert/observability/AlertServiceMetricsTest.java; then
-            echo "FDP-48 backend tests must not be disabled" >&2
-            exit 1
-          fi
-          if grep -R "it\.skip\|describe\.skip\|test\.skip\|it\.only\|describe\.only\|test\.only" analyst-console-ui/src/auth/authProvider.test.js analyst-console-ui/src/api/alertsApi.test.js analyst-console-ui/src/fraudCases/useFraudCaseWorkQueue.test.js analyst-console-ui/src/fraudCases/useFraudCaseWorkQueueSummary.test.js analyst-console-ui/src/workspace/workspaceDataHooks.test.js analyst-console-ui/src/workspace/useWorkspaceRoute.test.js; then
-            echo "FDP-48 frontend tests must not be skipped or focused" >&2
-            exit 1
-          fi
+        run: node scripts/ci/guard-test-activation.mjs --suite fdp48
 
       - name: Run FDP-48 backend BFF security tests
         run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=BffSessionSecurityIntegrationTest,BffSecurityPropertiesTest,BffLogoutSuccessHandlerTest,OidcAnalystAuthoritiesMapperTest,AlertSecurityConfigJwtEnabledTest,AlertServiceMetricsTest" test
 
       - name: Verify FDP-48 backend reports
-        run: |
-          python - <<'PY'
-          import pathlib
-          import sys
-          import xml.etree.ElementTree as ET
-
-          required = {
-              "com.frauddetection.alert.security.config.BffSessionSecurityIntegrationTest",
-              "com.frauddetection.alert.security.auth.BffSecurityPropertiesTest",
-              "com.frauddetection.alert.security.auth.BffLogoutSuccessHandlerTest",
-              "com.frauddetection.alert.security.auth.OidcAnalystAuthoritiesMapperTest",
-              "com.frauddetection.alert.security.config.AlertSecurityConfigJwtEnabledTest",
-              "com.frauddetection.alert.observability.AlertServiceMetricsTest",
-          }
-          reports = pathlib.Path("alert-service/target/surefire-reports")
-          for class_name in sorted(required):
-              report = reports / f"TEST-{class_name}.xml"
-              if not report.exists():
-                  print(f"Missing FDP-48 Surefire XML: {report}", file=sys.stderr)
-                  sys.exit(1)
-              root = ET.parse(report).getroot()
-              tests = int(root.attrib.get("tests", "0"))
-              skipped = int(root.attrib.get("skipped", "0"))
-              failures = int(root.attrib.get("failures", "0"))
-              errors = int(root.attrib.get("errors", "0"))
-              if tests <= 0 or skipped > 0 or failures > 0 or errors > 0:
-                  print(f"FDP-48 test class did not fully execute: {class_name} tests={tests} skipped={skipped} failures={failures} errors={errors}", file=sys.stderr)
-                  sys.exit(1)
-          PY
+        run: node scripts/ci/verify-junit-reports.mjs --suite fdp48
 
       - name: Install frontend dependencies
         working-directory: analyst-console-ui
@@ -781,17 +427,7 @@ jobs:
         run: npm run check:api-client-boundary
 
       - name: Verify FDP-48 frontend report
-        working-directory: analyst-console-ui
-        run: |
-          test -f test-results/fdp48-vitest.xml
-          grep -q "authProvider.test.js" test-results/fdp48-vitest.xml
-          grep -q "alertsApi.test.js" test-results/fdp48-vitest.xml
-          grep -q "workspaceDataHooks.test.js" test-results/fdp48-vitest.xml
-          grep -q "useWorkspaceRoute.test.js" test-results/fdp48-vitest.xml
-          if grep -q 'skipped="[1-9]' test-results/fdp48-vitest.xml; then
-            echo "FDP-48 frontend tests must not be skipped" >&2
-            exit 1
-          fi
+        run: node scripts/ci/verify-vitest-reports.mjs --suite fdp48
 
       - name: Build FDP-48 UI
         working-directory: analyst-console-ui
@@ -826,76 +462,13 @@ jobs:
 
       # FDP-49 protects post-BFF route/auth boundaries and must remain required for merge.
       - name: Ensure FDP-49 tests are not skipped
-        run: |
-          if grep -R "@Disabled" \
-            alert-service/src/test/java/com/frauddetection/alert/security/config/AuthorizationRulesCoverageTest.java \
-            alert-service/src/test/java/com/frauddetection/alert/security/config/AuthorizationRuleGroupRegistrationTest.java \
-            alert-service/src/test/java/com/frauddetection/alert/security/config/RouteCoverageAgainstMvcMappingsTest.java \
-            alert-service/src/test/java/com/frauddetection/alert/security/config/SecurityMatcherOrderRegressionTest.java \
-            alert-service/src/test/java/com/frauddetection/alert/security/config/DenyByDefaultSecurityTest.java \
-            alert-service/src/test/java/com/frauddetection/alert/security/config/SpaFallbackSecurityTest.java \
-            alert-service/src/test/java/com/frauddetection/alert/security/config/BffCsrfBoundaryRegressionTest.java \
-            alert-service/src/test/java/com/frauddetection/alert/security/config/BearerVsSessionCsrfRegressionTest.java \
-            alert-service/src/test/java/com/frauddetection/alert/security/config/BffSessionSecurityIntegrationTest.java \
-            alert-service/src/test/java/com/frauddetection/alert/security/config/SecurityRouteRegistryDocumentationTest.java \
-            alert-service/src/test/java/com/frauddetection/alert/security/config/SecurityRouteOwnershipRegistryTest.java \
-            alert-service/src/test/java/com/frauddetection/alert/security/config/SingleSecurityFilterChainGuardTest.java \
-            alert-service/src/test/java/com/frauddetection/alert/security/config/Fdp49NoNewBusinessSemanticsTest.java; then
-            echo "FDP-49 backend tests must not be disabled" >&2
-            exit 1
-          fi
-          if grep -R "it\.skip\|describe\.skip\|test\.skip\|it\.only\|describe\.only\|test\.only" \
-            analyst-console-ui/src/api/apiClientBoundary.test.js \
-            analyst-console-ui/src/auth/authProvider.test.js \
-            analyst-console-ui/src/api/alertsApi.test.js \
-            analyst-console-ui/src/workspace/workspaceDataHooks.test.js \
-            analyst-console-ui/src/fraudCases/useFraudCaseWorkQueue.test.js \
-            analyst-console-ui/src/fraudCases/useFraudCaseWorkQueueSummary.test.js; then
-            echo "FDP-49 frontend tests must not be skipped or focused" >&2
-            exit 1
-          fi
+        run: node scripts/ci/guard-test-activation.mjs --suite fdp49
 
       - name: Run FDP-49 backend security route tests
         run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=AuthorizationRulesCoverageTest,AuthorizationRuleGroupRegistrationTest,RouteCoverageAgainstMvcMappingsTest,SecurityMatcherOrderRegressionTest,DenyByDefaultSecurityTest,SpaFallbackSecurityTest,BffCsrfBoundaryRegressionTest,BearerVsSessionCsrfRegressionTest,BffSessionSecurityIntegrationTest,SecurityRouteRegistryDocumentationTest,SecurityRouteOwnershipRegistryTest,SingleSecurityFilterChainGuardTest,Fdp49NoNewBusinessSemanticsTest,AlertServiceMetricsTest" test
 
       - name: Verify FDP-49 backend reports
-        run: |
-          python - <<'PY'
-          import pathlib
-          import sys
-          import xml.etree.ElementTree as ET
-
-          required = {
-              "com.frauddetection.alert.security.config.AuthorizationRulesCoverageTest",
-              "com.frauddetection.alert.security.config.AuthorizationRuleGroupRegistrationTest",
-              "com.frauddetection.alert.security.config.RouteCoverageAgainstMvcMappingsTest",
-              "com.frauddetection.alert.security.config.SecurityMatcherOrderRegressionTest",
-              "com.frauddetection.alert.security.config.DenyByDefaultSecurityTest",
-              "com.frauddetection.alert.security.config.SpaFallbackSecurityTest",
-              "com.frauddetection.alert.security.config.BffCsrfBoundaryRegressionTest",
-              "com.frauddetection.alert.security.config.BearerVsSessionCsrfRegressionTest",
-              "com.frauddetection.alert.security.config.BffSessionSecurityIntegrationTest",
-              "com.frauddetection.alert.security.config.SecurityRouteRegistryDocumentationTest",
-              "com.frauddetection.alert.security.config.SecurityRouteOwnershipRegistryTest",
-              "com.frauddetection.alert.security.config.SingleSecurityFilterChainGuardTest",
-              "com.frauddetection.alert.security.config.Fdp49NoNewBusinessSemanticsTest",
-              "com.frauddetection.alert.observability.AlertServiceMetricsTest",
-          }
-          reports = pathlib.Path("alert-service/target/surefire-reports")
-          for class_name in sorted(required):
-              report = reports / f"TEST-{class_name}.xml"
-              if not report.exists():
-                  print(f"Missing FDP-49 Surefire XML: {report}", file=sys.stderr)
-                  sys.exit(1)
-              root = ET.parse(report).getroot()
-              tests = int(root.attrib.get("tests", "0"))
-              skipped = int(root.attrib.get("skipped", "0"))
-              failures = int(root.attrib.get("failures", "0"))
-              errors = int(root.attrib.get("errors", "0"))
-              if tests <= 0 or skipped > 0 or failures > 0 or errors > 0:
-                  print(f"FDP-49 test class did not fully execute: {class_name} tests={tests} skipped={skipped} failures={failures} errors={errors}", file=sys.stderr)
-                  sys.exit(1)
-          PY
+        run: node scripts/ci/verify-junit-reports.mjs --suite fdp49
 
       - name: Run FDP-49 security grep guardrails
         run: |
@@ -928,21 +501,7 @@ jobs:
           echo "fdp49_api_client_boundary_guard_ran=true" > test-results/fdp49-api-client-boundary-guard.txt
 
       - name: Verify FDP-49 frontend report
-        working-directory: analyst-console-ui
-        run: |
-          test -f test-results/fdp49-vitest.xml
-          grep -q "apiClientBoundary.test.js" test-results/fdp49-vitest.xml
-          grep -q "authProvider.test.js" test-results/fdp49-vitest.xml
-          grep -q "alertsApi.test.js" test-results/fdp49-vitest.xml
-          grep -q "workspaceDataHooks.test.js" test-results/fdp49-vitest.xml
-          grep -q "useFraudCaseWorkQueue.test.js" test-results/fdp49-vitest.xml
-          grep -q "useFraudCaseWorkQueueSummary.test.js" test-results/fdp49-vitest.xml
-          test -f test-results/fdp49-api-client-boundary-guard.txt
-          grep -q "fdp49_api_client_boundary_guard_ran=true" test-results/fdp49-api-client-boundary-guard.txt
-          if grep -q 'skipped="[1-9]' test-results/fdp49-vitest.xml; then
-            echo "FDP-49 frontend tests must not be skipped" >&2
-            exit 1
-          fi
+        run: node scripts/ci/verify-vitest-reports.mjs --suite fdp49
 
       - name: Build FDP-49 UI
         working-directory: analyst-console-ui
@@ -959,10 +518,33 @@ jobs:
             analyst-console-ui/test-results/fdp49-vitest.xml
             analyst-console-ui/test-results/fdp49-api-client-boundary-guard.txt
 
-  fdp50-frontend-api-client-runtime-boundary:
-    name: FDP-50 Frontend API Client Runtime Boundary
+  fdp54-ci-docs-governance:
+    name: FDP-54 CI Docs Governance
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify FDP-54 shared scope helpers
+        run: node scripts/check-fdp-scope-helpers-smoke.mjs
+
+      - name: Guard documentation overclaims
+        run: node scripts/check-doc-overclaims.mjs
+
+      - name: Compare CI jobs with evidence map
+        run: node scripts/compare-ci-jobs.mjs
+
+  analyst-console-frontend-architecture-gate:
+    name: Analyst Console Frontend Architecture Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs:
       - frontend
       - fdp49-security-route-boundary-hardening
@@ -984,398 +566,85 @@ jobs:
         working-directory: analyst-console-ui
         run: npm ci
 
-      - name: Ensure FDP-50 tests are not skipped or focused
-        run: |
-          if grep -R "it\.skip\|describe\.skip\|test\.skip\|it\.only\|describe\.only\|test\.only" \
-            analyst-console-ui/src/api/apiClientBoundary.test.js \
-            analyst-console-ui/src/auth/authProvider.test.js \
-            analyst-console-ui/src/api/alertsApi.test.js \
-            analyst-console-ui/src/workspace/workspaceDataHooks.test.js \
-            analyst-console-ui/src/workspace/useWorkspaceRoute.test.js \
-            analyst-console-ui/src/fraudCases/useFraudCaseWorkQueue.test.js \
-            analyst-console-ui/src/fraudCases/useFraudCaseWorkQueueSummary.test.js \
-            analyst-console-ui/src/App.test.jsx; then
-            echo "FDP-50 frontend tests must not be skipped or focused" >&2
-            exit 1
-          fi
+      - name: Ensure frontend architecture tests are not skipped or focused
+        run: node scripts/ci/guard-test-activation.mjs --suite frontend-architecture
 
-      - name: Run FDP-50 frontend runtime boundary tests
+      - name: FDP-50 API client boundary
         working-directory: analyst-console-ui
-        run: npm test -- --run src/api/apiClientBoundary.test.js src/auth/authProvider.test.js src/api/alertsApi.test.js src/workspace/workspaceDataHooks.test.js src/workspace/useWorkspaceRoute.test.js src/fraudCases/useFraudCaseWorkQueue.test.js src/fraudCases/useFraudCaseWorkQueueSummary.test.js src/App.test.jsx --reporter=default --reporter=junit --outputFile=./test-results/fdp50-vitest.xml
+        run: |
+          echo "::group::FDP-50 API client boundary"
+          npm test -- --run src/api/apiClientBoundary.test.js src/auth/authProvider.test.js src/api/alertsApi.test.js src/workspace/workspaceDataHooks.test.js src/workspace/useWorkspaceRoute.test.js src/fraudCases/useFraudCaseWorkQueue.test.js src/fraudCases/useFraudCaseWorkQueueSummary.test.js src/App.test.jsx --reporter=default --reporter=junit --outputFile=./test-results/fdp50-vitest.xml
+          echo "::endgroup::"
 
-      - name: Build FDP-50 UI
+      - name: FDP-51 runtime provider
+        working-directory: analyst-console-ui
+        run: |
+          echo "::group::FDP-51 runtime provider"
+          npm test -- --run src/workspace/WorkspaceRuntimeProvider.test.jsx src/workspace/useWorkspaceCounters.test.js src/workspace/useGovernanceAuditWorkflow.test.js src/workspace/workspaceRefreshContract.test.js src/workspace/workspaceDataHooks.test.js src/components/GovernanceReviewQueue.test.jsx src/pages/AlertDetailsPage.test.jsx src/pages/FraudCaseDetailsPage.test.jsx src/pages/AlertsListPage.test.jsx src/App.test.jsx src/api/alertsApi.test.js src/api/apiClientBoundary.test.js --reporter=default --reporter=junit --outputFile=./test-results/fdp51-vitest.xml
+          echo "::endgroup::"
+
+      - name: FDP-52 detail UX
+        working-directory: analyst-console-ui
+        run: |
+          echo "::group::FDP-52 detail UX"
+          npm test -- --run src/workspace/WorkspaceDashboardShell.test.jsx src/workspace/WorkspaceDetailRouter.test.jsx src/workspace/AnalystWorkspaceContainer.test.jsx src/workspace/FraudTransactionWorkspaceContainer.test.jsx src/workspace/TransactionScoringWorkspaceContainer.test.jsx src/workspace/GovernanceWorkspaceContainer.test.jsx src/workspace/ReportsWorkspaceContainer.test.jsx src/workspace/WorkspaceContainerBoundary.test.jsx src/components/DetailHeader.test.jsx src/components/DetailStateBanner.test.jsx src/utils/idempotencyKey.test.js src/pages/AlertDetailsPage.test.jsx src/pages/FraudCaseDetailsPage.test.jsx src/App.test.jsx --reporter=default --reporter=junit --outputFile=./test-results/fdp52-vitest.xml
+          echo "::endgroup::"
+
+      - name: FDP-53 runtime ownership
+        working-directory: analyst-console-ui
+        run: |
+          echo "::group::FDP-53 runtime ownership"
+          npm test -- --run src/workspace/WorkspaceDashboardShell.test.jsx src/workspace/WorkspaceRouteRegistry.test.jsx src/workspace/WorkspaceRuntimes.test.jsx src/workspace/workspaceRefreshContract.test.js src/workspace/useWorkspaceRefreshNotice.test.js src/workspace/workspaceRuntimeResult.test.js src/workspace/useWorkspaceRoute.test.js src/pages/AlertsListPage.test.jsx src/workspace/ReportsWorkspaceContainer.test.jsx src/workspace/WorkspaceDetailRouter.test.jsx src/workspace/WorkspaceContainerBoundary.test.jsx src/pages/AlertDetailsPage.test.jsx src/pages/FraudCaseDetailsPage.test.jsx src/App.test.jsx --reporter=default --reporter=junit --outputFile=./test-results/fdp53-vitest.xml
+          echo "::endgroup::"
+
+      - name: Build architecture-gated UI
         working-directory: analyst-console-ui
         run: npm run build
 
-      - name: Guard FDP-50 frontend API client boundary
-        working-directory: analyst-console-ui
-        run: |
-          npm run check:api-client-boundary:fdp50
-          echo "fdp50_api_client_boundary_guard_ran=true" > test-results/fdp50-api-client-boundary-guard.txt
-
-      - name: Guard FDP-50 scope
+      - name: Run frontend architecture scope guards
         working-directory: analyst-console-ui
         env:
           FDP50_SCOPE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
+          FDP51_SCOPE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
+          FDP52_SCOPE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
+          FDP53_SCOPE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
         run: |
+          echo "::group::FDP-50 API client boundary guard"
+          npm run check:api-client-boundary:fdp50
+          echo "fdp50_api_client_boundary_guard_ran=true" > test-results/frontend-architecture-guards.txt
+          echo "::endgroup::"
+          echo "::group::FDP-50 scope guard"
           npm run check:scope:fdp50
-          echo "fdp50_scope_guard_ran=true" > test-results/fdp50-scope-guard.txt
+          echo "fdp50_scope_guard_ran=true" >> test-results/frontend-architecture-guards.txt
+          echo "::endgroup::"
+          echo "::group::FDP-51 scope guard"
+          npm run check:scope:fdp51
+          echo "fdp51_scope_guard_ran=true" >> test-results/frontend-architecture-guards.txt
+          echo "::endgroup::"
+          echo "::group::FDP-52 scope guard"
+          npm run check:scope:fdp52
+          echo "fdp52_scope_guard_ran=true" >> test-results/frontend-architecture-guards.txt
+          echo "::endgroup::"
+          echo "::group::FDP-53 scope guard"
+          npm run check:fdp53-scope
+          echo "fdp53_scope_guard_ran=true" >> test-results/frontend-architecture-guards.txt
+          echo "::endgroup::"
 
-      - name: Verify FDP-50 frontend report
-        working-directory: analyst-console-ui
-        run: |
-          test -f test-results/fdp50-vitest.xml
-          grep -q "apiClientBoundary.test.js" test-results/fdp50-vitest.xml
-          grep -q "authProvider.test.js" test-results/fdp50-vitest.xml
-          grep -q "alertsApi.test.js" test-results/fdp50-vitest.xml
-          grep -q "workspaceDataHooks.test.js" test-results/fdp50-vitest.xml
-          grep -q "useWorkspaceRoute.test.js" test-results/fdp50-vitest.xml
-          grep -q "useFraudCaseWorkQueue.test.js" test-results/fdp50-vitest.xml
-          grep -q "useFraudCaseWorkQueueSummary.test.js" test-results/fdp50-vitest.xml
-          grep -q "App.test.jsx" test-results/fdp50-vitest.xml
-          test -f test-results/fdp50-api-client-boundary-guard.txt
-          test -f test-results/fdp50-scope-guard.txt
-          grep -q "fdp50_api_client_boundary_guard_ran=true" test-results/fdp50-api-client-boundary-guard.txt
-          grep -q "fdp50_scope_guard_ran=true" test-results/fdp50-scope-guard.txt
-          if grep -q 'skipped="[1-9]' test-results/fdp50-vitest.xml; then
-            echo "FDP-50 frontend tests must not be skipped" >&2
-            exit 1
-          fi
+      - name: Verify frontend architecture reports
+        run: node scripts/ci/verify-vitest-reports.mjs --suite frontend-architecture
 
-      - name: Upload FDP-50 runtime boundary reports
+      - name: Upload frontend architecture gate reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: fdp50-frontend-api-client-runtime-boundary-reports
+          name: analyst-console-frontend-architecture-gate-reports
           if-no-files-found: ignore
           path: |
             analyst-console-ui/test-results/fdp50-vitest.xml
-            analyst-console-ui/test-results/fdp50-api-client-boundary-guard.txt
-            analyst-console-ui/test-results/fdp50-scope-guard.txt
-
-  fdp51-analyst-console-workspace-runtime:
-    name: FDP-51 Analyst Console Workspace Runtime
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    needs:
-      - frontend
-      - fdp50-frontend-api-client-runtime-boundary
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: analyst-console-ui/package-lock.json
-
-      - name: Install frontend dependencies
-        working-directory: analyst-console-ui
-        run: npm ci
-
-      - name: Ensure FDP-51 tests are not skipped or focused
-        run: |
-          if grep -R "it\.skip\|describe\.skip\|test\.skip\|it\.only\|describe\.only\|test\.only" \
-            analyst-console-ui/src/workspace/WorkspaceRuntimeProvider.test.jsx \
-            analyst-console-ui/src/workspace/useWorkspaceCounters.test.js \
-            analyst-console-ui/src/workspace/useGovernanceAuditWorkflow.test.js \
-            analyst-console-ui/src/workspace/workspaceRefreshContract.test.js \
-            analyst-console-ui/src/workspace/workspaceDataHooks.test.js \
-            analyst-console-ui/src/components/GovernanceReviewQueue.test.jsx \
-            analyst-console-ui/src/pages/AlertDetailsPage.test.jsx \
-            analyst-console-ui/src/pages/FraudCaseDetailsPage.test.jsx \
-            analyst-console-ui/src/pages/AlertsListPage.test.jsx \
-            analyst-console-ui/src/App.test.jsx \
-            analyst-console-ui/src/api/alertsApi.test.js \
-            analyst-console-ui/src/api/apiClientBoundary.test.js; then
-            echo "FDP-51 frontend tests must not be skipped or focused" >&2
-            exit 1
-          fi
-
-      - name: Run FDP-51 workspace runtime tests
-        working-directory: analyst-console-ui
-        run: npm test -- --run src/workspace/WorkspaceRuntimeProvider.test.jsx src/workspace/useWorkspaceCounters.test.js src/workspace/useGovernanceAuditWorkflow.test.js src/workspace/workspaceRefreshContract.test.js src/workspace/workspaceDataHooks.test.js src/components/GovernanceReviewQueue.test.jsx src/pages/AlertDetailsPage.test.jsx src/pages/FraudCaseDetailsPage.test.jsx src/pages/AlertsListPage.test.jsx src/App.test.jsx src/api/alertsApi.test.js src/api/apiClientBoundary.test.js --reporter=default --reporter=junit --outputFile=./test-results/fdp51-vitest.xml
-
-      - name: Build FDP-51 UI
-        working-directory: analyst-console-ui
-        run: npm run build
-
-      - name: Guard FDP-51 frontend API client boundary
-        working-directory: analyst-console-ui
-        run: |
-          npm run check:api-client-boundary:fdp50
-          echo "fdp51_api_client_boundary_guard_ran=true" > test-results/fdp51-api-client-boundary-guard.txt
-
-      - name: Guard FDP-51 scope
-        working-directory: analyst-console-ui
-        env:
-          FDP51_SCOPE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
-        run: |
-          npm run check:scope:fdp51
-          echo "fdp51_scope_guard_ran=true" > test-results/fdp51-scope-guard.txt
-
-      - name: Verify FDP-51 workspace runtime report
-        working-directory: analyst-console-ui
-        run: |
-          test -f test-results/fdp51-vitest.xml
-          grep -q "WorkspaceRuntimeProvider.test.jsx" test-results/fdp51-vitest.xml
-          grep -q "useWorkspaceCounters.test.js" test-results/fdp51-vitest.xml
-          grep -q "useGovernanceAuditWorkflow.test.js" test-results/fdp51-vitest.xml
-          grep -q "workspaceRefreshContract.test.js" test-results/fdp51-vitest.xml
-          grep -q "workspaceDataHooks.test.js" test-results/fdp51-vitest.xml
-          grep -q "GovernanceReviewQueue.test.jsx" test-results/fdp51-vitest.xml
-          grep -q "AlertDetailsPage.test.jsx" test-results/fdp51-vitest.xml
-          grep -q "FraudCaseDetailsPage.test.jsx" test-results/fdp51-vitest.xml
-          grep -q "AlertsListPage.test.jsx" test-results/fdp51-vitest.xml
-          grep -q "App.test.jsx" test-results/fdp51-vitest.xml
-          grep -q "alertsApi.test.js" test-results/fdp51-vitest.xml
-          grep -q "apiClientBoundary.test.js" test-results/fdp51-vitest.xml
-          test -f test-results/fdp51-api-client-boundary-guard.txt
-          test -f test-results/fdp51-scope-guard.txt
-          grep -q "fdp51_api_client_boundary_guard_ran=true" test-results/fdp51-api-client-boundary-guard.txt
-          grep -q "fdp51_scope_guard_ran=true" test-results/fdp51-scope-guard.txt
-          if grep -q 'skipped="[1-9]' test-results/fdp51-vitest.xml; then
-            echo "FDP-51 frontend tests must not be skipped" >&2
-            exit 1
-          fi
-
-      - name: Upload FDP-51 workspace runtime reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: fdp51-analyst-console-workspace-runtime-reports
-          if-no-files-found: ignore
-          path: |
             analyst-console-ui/test-results/fdp51-vitest.xml
-            analyst-console-ui/test-results/fdp51-api-client-boundary-guard.txt
-            analyst-console-ui/test-results/fdp51-scope-guard.txt
-
-  fdp52-workspace-split-detail-ux:
-    name: FDP-52 Workspace Split Detail UX
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    needs:
-      - frontend
-      - fdp50-frontend-api-client-runtime-boundary
-      - fdp51-analyst-console-workspace-runtime
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: analyst-console-ui/package-lock.json
-
-      - name: Install frontend dependencies
-        working-directory: analyst-console-ui
-        run: npm ci
-
-      - name: Ensure FDP-52 tests are not skipped or focused
-        run: |
-          if grep -R "it\.skip\|describe\.skip\|test\.skip\|it\.only\|describe\.only\|test\.only" \
-            analyst-console-ui/src/workspace/WorkspaceDashboardShell.test.jsx \
-            analyst-console-ui/src/workspace/WorkspaceDetailRouter.test.jsx \
-            analyst-console-ui/src/workspace/AnalystWorkspaceContainer.test.jsx \
-            analyst-console-ui/src/workspace/FraudTransactionWorkspaceContainer.test.jsx \
-            analyst-console-ui/src/workspace/TransactionScoringWorkspaceContainer.test.jsx \
-            analyst-console-ui/src/workspace/GovernanceWorkspaceContainer.test.jsx \
-            analyst-console-ui/src/workspace/ReportsWorkspaceContainer.test.jsx \
-            analyst-console-ui/src/workspace/WorkspaceContainerBoundary.test.jsx \
-            analyst-console-ui/src/components/DetailHeader.test.jsx \
-            analyst-console-ui/src/components/DetailStateBanner.test.jsx \
-            analyst-console-ui/src/utils/idempotencyKey.test.js \
-            analyst-console-ui/src/pages/AlertDetailsPage.test.jsx \
-            analyst-console-ui/src/pages/FraudCaseDetailsPage.test.jsx \
-            analyst-console-ui/src/App.test.jsx; then
-            echo "FDP-52 frontend tests must not be skipped or focused" >&2
-            exit 1
-          fi
-
-      - name: Run FDP-52 workspace split and detail UX tests
-        working-directory: analyst-console-ui
-        run: npm test -- --run src/workspace/WorkspaceDashboardShell.test.jsx src/workspace/WorkspaceDetailRouter.test.jsx src/workspace/AnalystWorkspaceContainer.test.jsx src/workspace/FraudTransactionWorkspaceContainer.test.jsx src/workspace/TransactionScoringWorkspaceContainer.test.jsx src/workspace/GovernanceWorkspaceContainer.test.jsx src/workspace/ReportsWorkspaceContainer.test.jsx src/workspace/WorkspaceContainerBoundary.test.jsx src/components/DetailHeader.test.jsx src/components/DetailStateBanner.test.jsx src/utils/idempotencyKey.test.js src/pages/AlertDetailsPage.test.jsx src/pages/FraudCaseDetailsPage.test.jsx src/App.test.jsx --reporter=default --reporter=junit --outputFile=./test-results/fdp52-vitest.xml
-
-      - name: Build FDP-52 UI
-        working-directory: analyst-console-ui
-        run: npm run build
-
-      - name: Guard FDP-50 and FDP-51 boundaries
-        working-directory: analyst-console-ui
-        env:
-          FDP51_SCOPE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
-        run: |
-          npm run check:api-client-boundary:fdp50
-          npm run check:scope:fdp51
-          echo "fdp52_prior_boundary_guards_ran=true" > test-results/fdp52-prior-boundary-guards.txt
-
-      - name: Guard FDP-52 scope
-        working-directory: analyst-console-ui
-        env:
-          FDP52_SCOPE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
-        run: |
-          npm run check:scope:fdp52
-          echo "fdp52_scope_guard_ran=true" > test-results/fdp52-scope-guard.txt
-
-      - name: Verify FDP-52 report
-        working-directory: analyst-console-ui
-        run: |
-          test -f test-results/fdp52-vitest.xml
-          grep -q "WorkspaceDashboardShell.test.jsx" test-results/fdp52-vitest.xml
-          grep -q "WorkspaceDetailRouter.test.jsx" test-results/fdp52-vitest.xml
-          grep -q "AnalystWorkspaceContainer.test.jsx" test-results/fdp52-vitest.xml
-          grep -q "FraudTransactionWorkspaceContainer.test.jsx" test-results/fdp52-vitest.xml
-          grep -q "TransactionScoringWorkspaceContainer.test.jsx" test-results/fdp52-vitest.xml
-          grep -q "GovernanceWorkspaceContainer.test.jsx" test-results/fdp52-vitest.xml
-          grep -q "ReportsWorkspaceContainer.test.jsx" test-results/fdp52-vitest.xml
-          grep -q "WorkspaceContainerBoundary.test.jsx" test-results/fdp52-vitest.xml
-          grep -q "DetailHeader.test.jsx" test-results/fdp52-vitest.xml
-          grep -q "DetailStateBanner.test.jsx" test-results/fdp52-vitest.xml
-          grep -q "idempotencyKey.test.js" test-results/fdp52-vitest.xml
-          grep -q "AlertDetailsPage.test.jsx" test-results/fdp52-vitest.xml
-          grep -q "FraudCaseDetailsPage.test.jsx" test-results/fdp52-vitest.xml
-          test -f test-results/fdp52-prior-boundary-guards.txt
-          test -f test-results/fdp52-scope-guard.txt
-          grep -q "fdp52_prior_boundary_guards_ran=true" test-results/fdp52-prior-boundary-guards.txt
-          grep -q "fdp52_scope_guard_ran=true" test-results/fdp52-scope-guard.txt
-          if grep -q 'skipped="[1-9]' test-results/fdp52-vitest.xml; then
-            echo "FDP-52 frontend tests must not be skipped" >&2
-            exit 1
-          fi
-
-      - name: Upload FDP-52 workspace split detail UX reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: fdp52-workspace-split-detail-ux-reports
-          if-no-files-found: ignore
-          path: |
             analyst-console-ui/test-results/fdp52-vitest.xml
-            analyst-console-ui/test-results/fdp52-prior-boundary-guards.txt
-            analyst-console-ui/test-results/fdp52-scope-guard.txt
-
-  fdp53-workspace-runtime-ownership:
-    name: FDP-53 Workspace Runtime Ownership
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    needs:
-      - frontend
-      - fdp50-frontend-api-client-runtime-boundary
-      - fdp51-analyst-console-workspace-runtime
-      - fdp52-workspace-split-detail-ux
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: analyst-console-ui/package-lock.json
-
-      - name: Install frontend dependencies
-        working-directory: analyst-console-ui
-        run: npm ci
-
-      - name: Ensure FDP-53 tests are not skipped or focused
-        run: |
-          if grep -R "it\.skip\|describe\.skip\|test\.skip\|it\.only\|describe\.only\|test\.only" \
-            analyst-console-ui/src/workspace/WorkspaceDashboardShell.test.jsx \
-            analyst-console-ui/src/workspace/WorkspaceRouteRegistry.test.jsx \
-            analyst-console-ui/src/workspace/WorkspaceRuntimes.test.jsx \
-            analyst-console-ui/src/workspace/workspaceRefreshContract.test.js \
-            analyst-console-ui/src/workspace/useWorkspaceRefreshNotice.test.js \
-            analyst-console-ui/src/workspace/workspaceRuntimeResult.test.js \
-            analyst-console-ui/src/workspace/useWorkspaceRoute.test.js \
-            analyst-console-ui/src/pages/AlertsListPage.test.jsx \
-            analyst-console-ui/src/workspace/ReportsWorkspaceContainer.test.jsx \
-            analyst-console-ui/src/workspace/WorkspaceDetailRouter.test.jsx \
-            analyst-console-ui/src/workspace/WorkspaceContainerBoundary.test.jsx \
-            analyst-console-ui/src/pages/AlertDetailsPage.test.jsx \
-            analyst-console-ui/src/pages/FraudCaseDetailsPage.test.jsx \
-            analyst-console-ui/src/App.test.jsx; then
-            echo "FDP-53 frontend tests must not be skipped or focused" >&2
-            exit 1
-          fi
-
-      - name: Run FDP-53 workspace runtime ownership tests
-        working-directory: analyst-console-ui
-        run: npm test -- --run src/workspace/WorkspaceDashboardShell.test.jsx src/workspace/WorkspaceRouteRegistry.test.jsx src/workspace/WorkspaceRuntimes.test.jsx src/workspace/workspaceRefreshContract.test.js src/workspace/useWorkspaceRefreshNotice.test.js src/workspace/workspaceRuntimeResult.test.js src/workspace/useWorkspaceRoute.test.js src/pages/AlertsListPage.test.jsx src/workspace/ReportsWorkspaceContainer.test.jsx src/workspace/WorkspaceDetailRouter.test.jsx src/workspace/WorkspaceContainerBoundary.test.jsx src/pages/AlertDetailsPage.test.jsx src/pages/FraudCaseDetailsPage.test.jsx src/App.test.jsx --reporter=default --reporter=junit --outputFile=./test-results/fdp53-vitest.xml
-
-      - name: Build FDP-53 UI
-        working-directory: analyst-console-ui
-        run: npm run build
-
-      - name: Guard prior frontend boundaries
-        working-directory: analyst-console-ui
-        env:
-          FDP51_SCOPE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
-          FDP52_SCOPE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
-        run: |
-          npm run check:api-client-boundary:fdp50
-          npm run check:scope:fdp51
-          npm run check:scope:fdp52
-          echo "fdp53_prior_boundary_guards_ran=true" > test-results/fdp53-prior-boundary-guards.txt
-
-      - name: Guard FDP-53 scope
-        working-directory: analyst-console-ui
-        env:
-          FDP53_SCOPE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
-        run: |
-          npm run check:fdp53-scope
-          echo "fdp53_scope_guard_ran=true" > test-results/fdp53-scope-guard.txt
-
-      - name: Verify FDP-53 report
-        working-directory: analyst-console-ui
-        run: |
-          test -f test-results/fdp53-vitest.xml
-          grep -q "WorkspaceDashboardShell.test.jsx" test-results/fdp53-vitest.xml
-          grep -q "WorkspaceRouteRegistry.test.jsx" test-results/fdp53-vitest.xml
-          grep -q "WorkspaceRuntimes.test.jsx" test-results/fdp53-vitest.xml
-          grep -q "workspaceRefreshContract.test.js" test-results/fdp53-vitest.xml
-          grep -q "useWorkspaceRefreshNotice.test.js" test-results/fdp53-vitest.xml
-          grep -q "workspaceRuntimeResult.test.js" test-results/fdp53-vitest.xml
-          grep -q "useWorkspaceRoute.test.js" test-results/fdp53-vitest.xml
-          grep -q "AlertsListPage.test.jsx" test-results/fdp53-vitest.xml
-          grep -q "ReportsWorkspaceContainer.test.jsx" test-results/fdp53-vitest.xml
-          grep -q "WorkspaceDetailRouter.test.jsx" test-results/fdp53-vitest.xml
-          grep -q "WorkspaceContainerBoundary.test.jsx" test-results/fdp53-vitest.xml
-          grep -q "AlertDetailsPage.test.jsx" test-results/fdp53-vitest.xml
-          grep -q "FraudCaseDetailsPage.test.jsx" test-results/fdp53-vitest.xml
-          grep -q "App.test.jsx" test-results/fdp53-vitest.xml
-          test -f test-results/fdp53-prior-boundary-guards.txt
-          test -f test-results/fdp53-scope-guard.txt
-          grep -q "fdp53_prior_boundary_guards_ran=true" test-results/fdp53-prior-boundary-guards.txt
-          grep -q "fdp53_scope_guard_ran=true" test-results/fdp53-scope-guard.txt
-          if grep -q 'skipped="[1-9]' test-results/fdp53-vitest.xml; then
-            echo "FDP-53 frontend tests must not be skipped" >&2
-            exit 1
-          fi
-
-      - name: Upload FDP-53 workspace runtime ownership reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: fdp53-workspace-runtime-ownership-reports
-          if-no-files-found: ignore
-          path: |
             analyst-console-ui/test-results/fdp53-vitest.xml
-            analyst-console-ui/test-results/fdp53-prior-boundary-guards.txt
-            analyst-console-ui/test-results/fdp53-scope-guard.txt
+            analyst-console-ui/test-results/frontend-architecture-guards.txt
 
   fdp36-real-chaos:
     name: FDP-36 Real Alert-Service Kill Proof
@@ -1393,60 +662,22 @@ jobs:
           java-version: "21"
           cache: maven
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Verify Docker is available for Testcontainers
         run: docker version
 
       - name: Run FDP-36 real alert-service kill suite
         run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dgroups=real-chaos,docker-chaos,service-chaos,integration" "-Dtest=RegulatedMutationRealAlertServiceChaosIT,RegulatedMutationRealAlertServiceEvidenceIntegrityIT,RegulatedMutationLiveInFlightKillIT" test
 
-      - name: Generate FDP-36 proof summary
+      - name: Verify FDP-36 proof artifacts
         if: always()
-        run: |
-          mkdir -p alert-service/target/fdp36-chaos
-          SUMMARY=alert-service/target/fdp36-chaos/fdp36-proof-summary.md
-          TESTCASE_COUNT=$(find alert-service/target/surefire-reports -name 'TEST-RegulatedMutation*IT.xml' -print0 2>/dev/null | xargs -0 grep -h '<testcase ' 2>/dev/null | wc -l | tr -d ' ')
-          KILLED_IDS=$(grep -ho 'killed_process=[0-9][0-9]*' alert-service/target/fdp36-chaos/evidence-summary.md 2>/dev/null | cut -d= -f2 | sort -u | paste -sd ',' -)
-          RESTARTED_IDS=$(grep -ho 'restarted_process=[0-9][0-9]*' alert-service/target/fdp36-chaos/evidence-summary.md 2>/dev/null | cut -d= -f2 | sort -u | paste -sd ',' -)
-          {
-            echo "# FDP-36 Proof Summary"
-            echo
-            echo "- commit_sha: ${GITHUB_SHA:-local}"
-            echo "- run_timestamp_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            echo "- killed_target_name: actual alert-service JVM/process"
-            echo "- killed_process_ids: ${KILLED_IDS:-NOT_RECORDED}"
-            echo "- restarted_process_ids: ${RESTARTED_IDS:-NOT_RECORDED}"
-            echo "- proof_levels: REAL_ALERT_SERVICE_KILL, REAL_ALERT_SERVICE_RESTART_API_PROOF, LIVE_IN_FLIGHT_REQUEST_KILL"
-            echo "- scenario_count: ${TESTCASE_COUNT}"
-            echo "- test_classes_executed: RegulatedMutationRealAlertServiceChaosIT, RegulatedMutationRealAlertServiceEvidenceIntegrityIT, RegulatedMutationLiveInFlightKillIT"
-            echo "- surefire_xml_report_paths: alert-service/target/surefire-reports/TEST-RegulatedMutationRealAlertServiceChaosIT.xml, alert-service/target/surefire-reports/TEST-RegulatedMutationRealAlertServiceEvidenceIntegrityIT.xml, alert-service/target/surefire-reports/TEST-RegulatedMutationLiveInFlightKillIT.xml"
-            echo "- final_status: ${{ job.status }}"
-            echo
-            echo "killed target: actual alert-service JVM/process"
-            echo "Docker/Testcontainers are infrastructure dependencies, not the killed alert-service image."
-            echo "FDP-36 real chaos is not sufficient without regulated-mutation-regression."
-          } > "$SUMMARY"
-
-      - name: Print FDP-36 chaos evidence summary
-        if: always()
-        run: |
-          echo "killed target: actual alert-service JVM/process"
-          echo "Docker/Testcontainers are infrastructure dependencies, not the killed alert-service image."
-          echo "FDP-36 real chaos is not sufficient without regulated-mutation-regression."
-          echo "restarted target: actual alert-service JVM/process"
-          echo "scenario count: $(find alert-service/target/surefire-reports -name 'TEST-RegulatedMutationRealAlertService*.xml' -print0 | xargs -0 grep -h '<testcase ' | wc -l)"
-          echo "proof levels covered: REAL_ALERT_SERVICE_KILL, REAL_ALERT_SERVICE_RESTART_API_PROOF, LIVE_IN_FLIGHT_REQUEST_KILL"
-          if [ -f alert-service/target/fdp36-chaos/fdp36-proof-summary.md ]; then
-            cat alert-service/target/fdp36-chaos/fdp36-proof-summary.md
-          else
-            echo "missing alert-service/target/fdp36-chaos/fdp36-proof-summary.md"
-            exit 1
-          fi
-          if [ -f alert-service/target/fdp36-chaos/evidence-summary.md ]; then
-            cat alert-service/target/fdp36-chaos/evidence-summary.md
-          else
-            echo "missing alert-service/target/fdp36-chaos/evidence-summary.md"
-            exit 1
-          fi
+        env:
+          FDP36_JOB_STATUS: ${{ job.status }}
+        run: node scripts/ci/verify-fdp36-artifacts.mjs
 
       - name: Upload FDP-36 real chaos reports
         if: always()
@@ -1479,6 +710,11 @@ jobs:
           java-version: "21"
           cache: maven
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Verify Docker is available for production-image chaos
         run: docker version
 
@@ -1501,134 +737,7 @@ jobs:
 
       - name: Verify FDP-37 proof artifacts
         if: always()
-        run: |
-          SUMMARY_MD=alert-service/target/fdp37-chaos/fdp37-proof-summary.md
-          SUMMARY_JSON=alert-service/target/fdp37-chaos/fdp37-proof-summary.json
-          ENABLEMENT_MD=alert-service/target/fdp37-chaos/fdp37-enablement-review-pack.md
-          ENABLEMENT_JSON=alert-service/target/fdp37-chaos/fdp37-enablement-review-pack.json
-          EVIDENCE=alert-service/target/fdp37-chaos/evidence-summary.md
-          ROLLBACK_MD=alert-service/target/fdp37-chaos/fdp37-rollback-validation.md
-          ROLLBACK_JSON=alert-service/target/fdp37-chaos/fdp37-rollback-validation.json
-          test -f "$SUMMARY_MD"
-          test -f "$SUMMARY_JSON"
-          test -f "$ENABLEMENT_MD"
-          test -f "$ENABLEMENT_JSON"
-          test -f "$EVIDENCE"
-          test -f "$ROLLBACK_MD"
-          test -f "$ROLLBACK_JSON"
-          python - <<'PY'
-          import json
-          import os
-          import pathlib
-          import sys
-          import xml.etree.ElementTree as ET
-
-          reports = pathlib.Path("alert-service/target/surefire-reports")
-          required = [
-              "RegulatedMutationProductionImageChaosIT",
-              "RegulatedMutationProductionImageEvidenceIntegrityIT",
-              "RegulatedMutationProductionImageConfigParityIT",
-              "RegulatedMutationProductionImageRollbackIT",
-              "RegulatedMutationProductionImageRequiredTransactionChaosIT",
-          ]
-          for class_name in required:
-              report = reports / f"TEST-com.frauddetection.alert.regulated.{class_name}.xml"
-              if not report.exists():
-                  print(f"Missing required FDP-37 Surefire XML: {report}", file=sys.stderr)
-                  sys.exit(1)
-              root = ET.parse(report).getroot()
-              skipped = int(root.attrib.get("skipped", "0"))
-              tests = int(root.attrib.get("tests", "0"))
-              if tests <= 0 or skipped > 0:
-                  print(f"FDP-37 required test class did not fully execute: {class_name} tests={tests} skipped={skipped}", file=sys.stderr)
-                  sys.exit(1)
-
-          summary = json.loads(pathlib.Path("alert-service/target/fdp37-chaos/fdp37-proof-summary.json").read_text())
-          expected_sha = os.environ["GITHUB_SHA"]
-          expected_image = f"fdp37-alert-service:{expected_sha}"
-          checks = {
-              "commit_sha": summary.get("commit_sha") == expected_sha,
-              "image_name": expected_image in summary.get("image_name", ""),
-              "image_id": str(summary.get("image_id", "")).startswith("sha256:"),
-              "image_digest_or_id": summary.get("image_digest_or_id") not in (None, "", "LOCAL_IMAGE_DIGEST_NOT_PROVIDED"),
-              "dockerfile_path": summary.get("dockerfile_path") == "deployment/Dockerfile.backend",
-              "network_mode": summary.get("network_mode") == "testcontainers-shared-network",
-              "host_networking_used": summary.get("host_networking_used") is False,
-              "killed_container_id_masked": summary.get("killed_container_id_masked") not in (None, "", "absent"),
-              "restarted_container_id_masked": summary.get("restarted_container_id_masked") not in (None, "", "absent"),
-              "scenario_count": int(summary.get("scenario_count", 0)) >= 5,
-              "final_result": summary.get("final_result") == "PASS",
-              "live_in_flight_proof_executed": summary.get("live_in_flight_proof_executed") is False,
-          }
-          failed = [name for name, ok in checks.items() if not ok]
-          if failed:
-              print(f"FDP-37 proof summary failed checks: {failed}", file=sys.stderr)
-              sys.exit(1)
-
-          rollback = json.loads(pathlib.Path("alert-service/target/fdp37-chaos/fdp37-rollback-validation.json").read_text())
-          rollback_required = [
-              "checkpoint_renewal_can_be_disabled_without_disabling_fencing",
-              "FDP32_fencing_remains_active",
-              "recovery_commands_visible_after_rollback",
-              "API_returns_recovery_or_in_progress_after_rollback",
-              "no_new_success_claims_after_rollback",
-          ]
-          if any(rollback.get(name) is not True for name in rollback_required):
-              print("FDP-37 rollback validation artifact is incomplete or false", file=sys.stderr)
-              sys.exit(1)
-
-          enablement = json.loads(pathlib.Path("alert-service/target/fdp37-chaos/fdp37-enablement-review-pack.json").read_text())
-          enablement_checks = {
-              "commit_sha": enablement.get("commit_sha") == expected_sha,
-              "image_id": str(enablement.get("image_id", "")).startswith("sha256:"),
-              "image_digest_or_id": enablement.get("image_digest_or_id") not in (None, "", "LOCAL_IMAGE_DIGEST_NOT_PROVIDED"),
-              "dockerfile_path": enablement.get("dockerfile_path") == "deployment/Dockerfile.backend",
-              "fdp37_job_status": enablement.get("fdp37_job_status") == "PASS",
-              "regulated_mutation_regression_status": enablement.get("regulated_mutation_regression_status") == "PASS",
-              "fdp35_status": enablement.get("fdp35_status") == "PASS",
-              "fdp36_status": enablement.get("fdp36_status") == "PASS",
-              "required_transaction_scenario_executed": enablement.get("required_transaction_scenario_executed") is True,
-              "production_enablement": enablement.get("production_enablement") is False,
-              "release_config_pr_required": enablement.get("release_config_pr_required") is True,
-              "human_approval_required": enablement.get("human_approval_required") is True,
-              "operator_drill_required_before_enablement": enablement.get("operator_drill_required_before_enablement") is True,
-          }
-          failed_enablement = [name for name, ok in enablement_checks.items() if not ok]
-          if failed_enablement:
-              print(f"FDP-37 enablement review pack failed checks: {failed_enablement}", file=sys.stderr)
-              sys.exit(1)
-          PY
-          grep -q "fdp37-alert-service:${GITHUB_SHA}" "$SUMMARY_MD"
-          grep -q "${GITHUB_SHA}" "$SUMMARY_MD"
-          grep -q 'PRODUCTION_IMAGE_CONTAINER_KILL' "$EVIDENCE"
-          grep -q 'PRODUCTION_IMAGE_RESTART_API_PROOF' "$EVIDENCE"
-          grep -q 'transaction_mode=REQUIRED' "$EVIDENCE"
-          grep -q 'network_mode=testcontainers-shared-network' "$EVIDENCE"
-          grep -q 'host_networking_used=false' "$EVIDENCE"
-          grep -q 'READY_FOR_ENABLEMENT_REVIEW is not production enablement' "$SUMMARY_MD"
-          grep -q 'READY_FOR_ENABLEMENT_REVIEW' "$ENABLEMENT_MD"
-          grep -q 'live_in_flight_proof_executed: `false`' "$SUMMARY_MD"
-          grep -q 'no_new_success_claims_after_rollback: `true`' "$ROLLBACK_MD"
-          if grep -R 'network_mode=host\|network_mode: host\|Linux CI host networking' "$SUMMARY_MD" "$EVIDENCE" "$ENABLEMENT_MD"; then
-            echo "FDP-37 proof artifacts must not use host networking"
-            exit 1
-          fi
-          if grep -R 'TO_BE_FILLED_BY_CI\|PLACEHOLDER\|LOCAL_IMAGE_ID_NOT_PROVIDED\|LOCAL_IMAGE_DIGEST_NOT_PROVIDED' "$SUMMARY_MD" "$SUMMARY_JSON" "$ENABLEMENT_MD" "$ENABLEMENT_JSON"; then
-            echo "FDP-37 proof artifacts cannot contain placeholders in CI"
-            exit 1
-          fi
-          if grep -R 'LIVE_IN_FLIGHT_REQUEST_KILL' docs/fdp-37-*.md docs/adr/fdp-37-*.md docs/testing/fdp-37-*.md docs/ops/fdp-37-*.md; then
-            echo "FDP-37 docs cannot claim live in-flight proof unless the required artifact contains LIVE_IN_FLIGHT_REQUEST_KILL"
-            exit 1
-          fi
-          if grep -Eiq 'alpine|busybox|dummy' "$SUMMARY_MD" "$EVIDENCE"; then
-            echo "FDP-37 production-image chaos cannot use dummy/alpine/busybox images"
-            exit 1
-          fi
-          echo "FDP-37 killed image/container evidence:"
-          cat "$EVIDENCE"
-          echo
-          cat "$SUMMARY_MD"
+        run: node scripts/ci/verify-fdp37-artifacts.mjs
 
       - name: Package FDP-37 production image chaos artifacts
         if: always()
@@ -1711,6 +820,11 @@ jobs:
           java-version: "21"
           cache: maven
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Verify Docker is available for FDP-38 fixture chaos
         run: docker version
 
@@ -1734,199 +848,7 @@ jobs:
 
       - name: Verify FDP-38 proof artifacts
         if: always()
-        run: |
-          SUMMARY_MD=alert-service/target/fdp38-chaos/fdp38-proof-summary.md
-          SUMMARY_JSON=alert-service/target/fdp38-chaos/fdp38-proof-summary.json
-          EVIDENCE_MD=alert-service/target/fdp38-chaos/fdp38-live-checkpoint-evidence.md
-          PROVENANCE_JSON=alert-service/target/fdp38-chaos/fdp38-fixture-image-provenance.json
-          test -f "$SUMMARY_MD"
-          test -f "$SUMMARY_JSON"
-          test -f "$EVIDENCE_MD"
-          test -f "$PROVENANCE_JSON"
-          for checkpoint in after-attempted-audit-before-business-mutation before-legacy-business-mutation before-fdp29-local-finalize before-success-audit-retry; do
-            test -f "alert-service/target/fdp38-chaos/fdp38-proof-summary-${checkpoint}.md"
-            test -f "alert-service/target/fdp38-chaos/fdp38-proof-summary-${checkpoint}.json"
-          done
-          python - <<'PY'
-          import json
-          import os
-          import pathlib
-          import sys
-          import xml.etree.ElementTree as ET
-
-          reports = pathlib.Path("alert-service/target/surefire-reports")
-          required = {
-              "BEFORE_LEGACY_BUSINESS_MUTATION": {
-                  "class": "RegulatedMutationLiveCheckpointBeforeBusinessMutationIT",
-                  "method": "beforeLegacyBusinessMutationLiveKillDoesNotCommitOrPublish",
-                  "precondition_setup": "LIVE_HTTP_FLOW_FROM_INITIAL_REQUEST",
-              },
-              "AFTER_ATTEMPTED_AUDIT_BEFORE_BUSINESS_MUTATION": {
-                  "class": "RegulatedMutationLiveCheckpointAfterAttemptedAuditIT",
-                  "method": "afterAttemptedAuditBeforeBusinessMutationLiveKillPreservesAttemptedAuditOnly",
-                  "precondition_setup": "LIVE_HTTP_FLOW_FROM_INITIAL_REQUEST",
-              },
-              "BEFORE_FDP29_LOCAL_FINALIZE": {
-                  "class": "RegulatedMutationLiveCheckpointBeforeFdp29FinalizeIT",
-                  "method": "beforeFdp29LocalFinalizeLiveKillDoesNotClaimFinality",
-                  "precondition_setup": "LIVE_HTTP_FLOW_FROM_INITIAL_REQUEST",
-              },
-              "BEFORE_SUCCESS_AUDIT_RETRY": {
-                  "class": "RegulatedMutationLiveCheckpointBeforeSuccessAuditRetryIT",
-                  "method": "beforeSuccessAuditRetryLiveKillDoesNotDuplicateBusinessMutationOrOutbox",
-                  "precondition_setup": "SEEDED_DURABLE_PRECONDITION_THEN_RUNTIME_REACHED_CHECKPOINT",
-              },
-          }
-          for checkpoint, metadata in required.items():
-              class_name = metadata["class"]
-              report = reports / f"TEST-com.frauddetection.alert.regulated.{class_name}.xml"
-              if not report.exists():
-                  print(f"Missing required FDP-38 Surefire XML: {report}", file=sys.stderr)
-                  sys.exit(1)
-              root = ET.parse(report).getroot()
-              tests = int(root.attrib.get("tests", "0"))
-              skipped = int(root.attrib.get("skipped", "0"))
-              failures = int(root.attrib.get("failures", "0"))
-              errors = int(root.attrib.get("errors", "0"))
-              if tests <= 0 or skipped > 0 or failures > 0 or errors > 0:
-                  print(f"FDP-38 required test class did not fully execute: {class_name} tests={tests} skipped={skipped} failures={failures} errors={errors}", file=sys.stderr)
-                  sys.exit(1)
-              method_names = {case.attrib.get("name") for case in root.findall("testcase")}
-              if metadata["method"] not in method_names:
-                  print(f"FDP-38 checkpoint method missing for {checkpoint}: {metadata['method']}", file=sys.stderr)
-                  sys.exit(1)
-
-          expected_sha = os.environ["GITHUB_SHA"]
-          expected_image = f"fdp38-alert-service-test-fixture:{expected_sha}"
-          summary = json.loads(pathlib.Path("alert-service/target/fdp38-chaos/fdp38-proof-summary.json").read_text())
-          checks = {
-              "commit_sha": summary.get("commit_sha") == expected_sha,
-              "fixture_image_name": summary.get("fixture_image_name") == expected_image,
-              "fixture_image_id": str(summary.get("fixture_image_id", "")).startswith("sha256:"),
-              "fixture_image_digest_or_id": summary.get("fixture_image_digest_or_id") not in (None, "", "LOCAL_IMAGE_DIGEST_NOT_PROVIDED"),
-              "fixture_image_kind": summary.get("fixture_image_kind") == "test-fixture-production-like",
-              "fixture_image": summary.get("fixture_image") is True,
-              "release_image": summary.get("release_image") is False,
-              "contains_test_classes": summary.get("contains_test_classes") is True,
-              "contains_test_profiles": summary.get("contains_test_profiles") is True,
-              "release_candidate_allowed": summary.get("release_candidate_allowed") is False,
-              "production_deployable": summary.get("production_deployable") is False,
-              "production_enablement": summary.get("production_enablement") is False,
-              "live_runtime_checkpoint_proof_executed": summary.get("live_runtime_checkpoint_proof_executed") is True,
-              "proof_levels": "LIVE_IN_FLIGHT_REQUEST_KILL" in str(summary.get("proof_levels")),
-              "state_reach_methods": "RUNTIME_REACHED_TEST_FIXTURE" in str(summary.get("state_reach_methods")),
-              "runtime_reached_production_image": summary.get("runtime_reached_production_image") is False,
-              "checkpoint_count": int(summary.get("checkpoint_count", 0)) == len(required),
-              "killed_container_id_masked": summary.get("killed_container_id_masked") not in (None, "", "absent"),
-              "restarted_container_id_masked": summary.get("restarted_container_id_masked") not in (None, "", "absent"),
-              "no_false_success": summary.get("no_false_success") is True,
-              "no_duplicate_mutation": summary.get("no_duplicate_mutation") is True,
-              "no_duplicate_outbox": summary.get("no_duplicate_outbox") is True,
-              "no_duplicate_success_audit": summary.get("no_duplicate_success_audit") is True,
-              "recovery_wins": summary.get("recovery_wins") is True,
-              "final_result": summary.get("final_result") == "PASS",
-          }
-          failed = [name for name, ok in checks.items() if not ok]
-          if failed:
-              print(f"FDP-38 proof summary failed checks: {failed}", file=sys.stderr)
-              sys.exit(1)
-          checkpoint_names = set(summary.get("checkpoint_names", []))
-          if checkpoint_names != set(required):
-              print(f"FDP-38 checkpoint registration mismatch: {checkpoint_names}", file=sys.stderr)
-              sys.exit(1)
-          preconditions = summary.get("precondition_setup", {})
-          false_success = summary.get("false_success_evaluation", {})
-          failed_reasons = summary.get("failed_false_success_reasons", [])
-          if failed_reasons != []:
-              print(f"FDP-38 false success reasons must be empty: {failed_reasons}", file=sys.stderr)
-              sys.exit(1)
-          required_invariants = {
-              "public_success_status_absent",
-              "committed_snapshot_absent_when_not_allowed",
-              "finalized_status_absent_when_not_allowed",
-              "success_audit_absent_when_not_allowed",
-              "outbox_absent_when_not_allowed",
-              "business_mutation_absent_when_not_allowed",
-              "duplicate_mutation_absent",
-              "duplicate_outbox_absent",
-              "duplicate_success_audit_absent",
-              "passed",
-              "failed_reasons",
-          }
-          for checkpoint, metadata in required.items():
-              if preconditions.get(checkpoint) != metadata["precondition_setup"]:
-                  print(f"FDP-38 wrong precondition setup for {checkpoint}: {preconditions.get(checkpoint)}", file=sys.stderr)
-                  sys.exit(1)
-              evaluation = false_success.get(checkpoint)
-              if not isinstance(evaluation, dict):
-                  print(f"FDP-38 missing false success evaluation for {checkpoint}", file=sys.stderr)
-                  sys.exit(1)
-              missing = required_invariants - set(evaluation)
-              if missing:
-                  print(f"FDP-38 false success evaluation missing keys for {checkpoint}: {missing}", file=sys.stderr)
-                  sys.exit(1)
-              if evaluation.get("passed") is not True or evaluation.get("failed_reasons") != []:
-                  print(f"FDP-38 false success evaluation failed for {checkpoint}: {evaluation}", file=sys.stderr)
-                  sys.exit(1)
-
-          artifact_text = "\n".join(pathlib.Path(path).read_text() for path in [
-              "alert-service/target/fdp38-chaos/fdp38-proof-summary.md",
-              "alert-service/target/fdp38-chaos/fdp38-live-checkpoint-evidence.md",
-          ])
-          for token in ["PLACEHOLDER", "TO_BE_FILLED", "LOCAL_IMAGE_ID_NOT_PROVIDED", "LOCAL_IMAGE_DIGEST_NOT_PROVIDED"]:
-              if token in artifact_text or token in json.dumps(summary):
-                  print(f"FDP-38 artifacts contain placeholder token: {token}", file=sys.stderr)
-                  sys.exit(1)
-          for checkpoint in required:
-              if checkpoint not in artifact_text or f"precondition_setup={required[checkpoint]['precondition_setup']}" not in artifact_text:
-                  print(f"FDP-38 evidence markdown missing checkpoint/precondition: {checkpoint}", file=sys.stderr)
-                  sys.exit(1)
-
-          provenance = json.loads(pathlib.Path("alert-service/target/fdp38-chaos/fdp38-fixture-image-provenance.json").read_text())
-          if provenance.get("release_image") is not False or provenance.get("fixture_image") is not True:
-              print("FDP-38 provenance must be fixture_image=true and release_image=false", file=sys.stderr)
-              sys.exit(1)
-          for key, expected in {
-              "contains_test_classes": True,
-              "contains_test_profiles": True,
-              "release_candidate_allowed": False,
-              "production_deployable": False,
-          }.items():
-              if provenance.get(key) is not expected:
-                  print(f"FDP-38 provenance wrong {key}: {provenance.get(key)}", file=sys.stderr)
-                  sys.exit(1)
-          if "fdp38-alert-service-test-fixture" not in provenance.get("image_name", ""):
-              print("FDP-38 fixture image provenance has wrong image name", file=sys.stderr)
-              sys.exit(1)
-          ci = pathlib.Path(".github/workflows/ci.yml").read_text()
-          fdp38_start = ci.index("fdp38-live-runtime-checkpoint-chaos:")
-          docker_start = ci.index("\n  docker:", fdp38_start)
-          fdp39_start = ci.find("\n  fdp39-release-governance:", fdp38_start)
-          fdp38_allowed_end = fdp39_start if fdp39_start >= 0 else docker_start
-          for occurrence in [idx for idx in range(len(ci)) if ci.startswith("Dockerfile.alert-service-fdp38-fixture", idx)]:
-              if not ((fdp38_start < occurrence < fdp38_allowed_end) or (fdp39_start >= 0 and fdp39_start < occurrence < docker_start)):
-                  print("FDP-38 fixture Dockerfile is referenced outside the FDP-38/FDP-39 CI jobs", file=sys.stderr)
-                  sys.exit(1)
-          compose = pathlib.Path("deployment/docker-compose.yml").read_text()
-          if "Dockerfile.alert-service-fdp38-fixture" in compose:
-              print("FDP-38 fixture Dockerfile must not be used by release compose", file=sys.stderr)
-              sys.exit(1)
-          if "docker build -f deployment/Dockerfile.backend --build-arg MODULE_NAME=alert-service -t fdp37-alert-service" not in ci:
-              print("FDP-37 production-image job must continue using deployment/Dockerfile.backend", file=sys.stderr)
-              sys.exit(1)
-          PY
-          grep -q 'LIVE_IN_FLIGHT_REQUEST_KILL' "$SUMMARY_MD" "$EVIDENCE_MD"
-          grep -q 'RUNTIME_REACHED_TEST_FIXTURE' "$SUMMARY_MD" "$EVIDENCE_MD"
-          grep -q 'checkpoint_reached=true' "$EVIDENCE_MD"
-          grep -q 'no_false_success=true' "$EVIDENCE_MD"
-          grep -q 'release_image=false' "$EVIDENCE_MD"
-          grep -q 'release_candidate_allowed=false' "$EVIDENCE_MD"
-          grep -q 'production_deployable=false' "$EVIDENCE_MD"
-          grep -q 'fixture image is not a production image' docs/fdp-38-merge-gate.md
-          if grep -R 'release_image: `true`\|release_candidate_allowed: `true`\|production_deployable: `true`\|RUNTIME_REACHED_PRODUCTION_IMAGE: `claimed`\|production_enablement: `true`' "$SUMMARY_MD" "$EVIDENCE_MD" "$PROVENANCE_JSON" docs/fdp-38-*.md docs/adr/fdp-38-*.md docs/testing/fdp-38-*.md; then
-            echo "FDP-38 artifacts/docs cannot claim production image live proof or production enablement"
-            exit 1
-          fi
+        run: node scripts/ci/verify-fdp38-artifacts.mjs
 
       - name: Upload FDP-38 live runtime checkpoint artifacts
         if: always()
@@ -1967,6 +889,11 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
 
       - name: Verify Docker is available for FDP-39 release governance
         run: docker version
@@ -2028,141 +955,7 @@ jobs:
 
       - name: Verify FDP-39 governance artifacts
         if: always()
-        run: |
-          set -euo pipefail
-          ARTIFACT_DIR=alert-service/target/fdp39-governance
-          test -f "$ARTIFACT_DIR/fdp39-release-image-separation.json"
-          test -f "$ARTIFACT_DIR/fdp39-fixture-dockerfile-usage.md"
-          test -f "$ARTIFACT_DIR/fdp39-artifact-provenance.json"
-          test -f "$ARTIFACT_DIR/fdp39-artifact-provenance.md"
-          test -f "$ARTIFACT_DIR/fdp39-enablement-governance-pack.json"
-          test -f "$ARTIFACT_DIR/fdp39-enablement-governance-pack.md"
-          test -f "$ARTIFACT_DIR/fdp39-rollback-governance.json"
-          test -f "$ARTIFACT_DIR/fdp39-ci-proof-summary.md"
-          test -f "$ARTIFACT_DIR/fdp39-runtime-immutability.json"
-          test -f "$ARTIFACT_DIR/fdp39-fixture-dockerfile-usage.json"
-          test -f "$ARTIFACT_DIR/fdp39-ops-inspection-governance.json"
-          python - <<'PY'
-          import json
-          import os
-          import pathlib
-          import sys
-          import xml.etree.ElementTree as ET
-
-          artifact_dir = pathlib.Path("alert-service/target/fdp39-governance")
-          required_tests = [
-              "RegulatedMutationReleaseImageSeparationTest",
-              "FixtureDockerfileMustNotBeUsedByReleaseWorkflowTest",
-              "Fdp39GovernanceArtifactsTest",
-              "Fdp39NoOverclaimDocumentationTest",
-              "Fdp39MustNotChangeRuntimeMutationSemanticsTest",
-              "RegulatedMutationRecoveryInspectionGovernanceTest",
-          ]
-          reports = pathlib.Path("alert-service/target/surefire-reports")
-          for class_name in required_tests:
-              report = reports / f"TEST-com.frauddetection.alert.regulated.{class_name}.xml"
-              if not report.exists():
-                  print(f"Missing FDP-39 Surefire XML: {report}", file=sys.stderr)
-                  sys.exit(1)
-              root = ET.parse(report).getroot()
-              tests = int(root.attrib.get("tests", "0"))
-              skipped = int(root.attrib.get("skipped", "0"))
-              failures = int(root.attrib.get("failures", "0"))
-              errors = int(root.attrib.get("errors", "0"))
-              if tests <= 0 or skipped > 0 or failures > 0 or errors > 0:
-                  print(f"FDP-39 test class did not fully execute: {class_name} tests={tests} skipped={skipped} failures={failures} errors={errors}", file=sys.stderr)
-                  sys.exit(1)
-
-          separation = json.loads((artifact_dir / "fdp39-release-image-separation.json").read_text())
-          provenance = json.loads((artifact_dir / "fdp39-artifact-provenance.json").read_text())
-          enablement = json.loads((artifact_dir / "fdp39-enablement-governance-pack.json").read_text())
-          rollback = json.loads((artifact_dir / "fdp39-rollback-governance.json").read_text())
-          expected_sha = os.environ["GITHUB_SHA"]
-          checks = {
-              "separation_release_image_scan_performed": separation.get("release_image_scan_performed") is True,
-              "separation_release_image_safe": separation.get("release_image_safe") is True,
-              "separation_forbidden_tokens": separation.get("forbidden_token_count") == 0,
-              "separation_scanned_files": int(separation.get("scanned_file_count", 0)) > 0,
-              "separation_fixture_code_absent": separation.get("fixture_code_present") is False,
-              "separation_test_classes_absent": separation.get("test_classes_present") is False,
-              "separation_profile_absent": separation.get("fdp38_profile_present") is False,
-              "separation_release_dockerfile": separation.get("release_dockerfile_path") == "deployment/Dockerfile.backend",
-              "provenance_commit": provenance.get("commit_sha") == expected_sha,
-              "provenance_release_image": provenance.get("release_image_name") == f"fdp39-alert-service:{expected_sha}",
-              "provenance_release_id": str(provenance.get("release_image_id", "")).startswith("sha256:"),
-              "provenance_release_digest": str(provenance.get("release_image_digest_or_id", "")).startswith("sha256:") or "@sha256:" in str(provenance.get("release_image_digest_or_id", "")),
-              "provenance_ci_mode": provenance.get("ci_mode") is True,
-              "provenance_no_local_fallback": provenance.get("local_fallback_used") is False,
-              "provenance_complete": provenance.get("immutable_provenance_complete") is True,
-              "provenance_fixture_image": provenance.get("fixture_image_name") == f"fdp38-alert-service-test-fixture:{expected_sha}",
-              "provenance_fixture_id": str(provenance.get("fixture_image_id", "")).startswith("sha256:"),
-              "provenance_fixture_not_release": provenance.get("fixture_image_release_candidate_allowed") is False,
-              "enablement_ready": enablement.get("ready_for_enablement_review") is True,
-              "enablement_production_disabled": enablement.get("production_enabled") is False,
-              "enablement_bank_disabled": enablement.get("bank_enabled") is False,
-              "enablement_human_approval": enablement.get("human_approval_required") is True,
-              "enablement_dual_control": enablement.get("dual_control_required") is True,
-              "rollback_plan_present": rollback.get("rollback_plan_present") is True,
-              "rollback_keeps_fencing": rollback.get("rollback_does_not_disable_fencing") is True,
-              "rollback_no_enablement_change": rollback.get("production_enablement_not_changed") is True,
-          }
-          failed = [name for name, ok in checks.items() if not ok]
-          if failed:
-              print(f"FDP-39 governance artifact checks failed: {failed}", file=sys.stderr)
-              sys.exit(1)
-
-          runtime = json.loads((artifact_dir / "fdp39-runtime-immutability.json").read_text())
-          fixture_usage = json.loads((artifact_dir / "fdp39-fixture-dockerfile-usage.json").read_text())
-          ops = json.loads((artifact_dir / "fdp39-ops-inspection-governance.json").read_text())
-          expected_event = os.environ["FDP39_EVENT_NAME"]
-          expected_diff_base = os.environ.get("FDP39_DIFF_BASE_SHA", "")
-          runtime_mode = runtime.get("comparison_mode")
-          runtime_changed_file_count = int(runtime.get("changed_file_count", 0))
-          additional = {
-              "runtime_diff_computed": runtime.get("diff_computed") is True,
-              "runtime_event": runtime.get("event_name") == expected_event,
-              "runtime_comparison_mode": runtime_mode in {"pull-request-merge-base-to-head", "push-before-to-head"},
-              "runtime_head_sha": runtime.get("head_sha") == expected_sha,
-              "runtime_base_sha": bool(runtime.get("base_sha")),
-              "runtime_changed_file_count": runtime_changed_file_count > 0,
-              "runtime_unchanged": runtime.get("runtime_semantics_unchanged") is True,
-              "runtime_protected_count": runtime.get("protected_runtime_file_count") == 0,
-              "fixture_forbidden_count": fixture_usage.get("forbidden_occurrence_count") == 0,
-              "fixture_release_safe": fixture_usage.get("fixture_dockerfile_release_safe") is True,
-              "ops_admin_only": ops.get("admin_only_verified") is True,
-              "ops_masking": ops.get("masking_verified") is True,
-              "ops_audit": ops.get("audit_on_access_verified") is True,
-              "ops_rate_limit": ops.get("rate_limit_verified") is True,
-              "ops_audit_failure_policy": ops.get("audit_failure_policy_verified") is True,
-          }
-          if expected_event == "push":
-              additional["runtime_push_comparison_mode"] = runtime_mode == "push-before-to-head"
-              additional["runtime_push_base_sha"] = runtime.get("base_sha") == expected_diff_base
-          if expected_event == "pull_request":
-              additional["runtime_pr_comparison_mode"] = runtime_mode == "pull-request-merge-base-to-head"
-          failed_additional = [name for name, ok in additional.items() if not ok]
-          if failed_additional:
-              print(f"FDP-39 additional governance artifact checks failed: {failed_additional}", file=sys.stderr)
-              sys.exit(1)
-
-          generated = "\n".join(path.read_text(errors="ignore") for path in artifact_dir.glob("fdp39-*.*"))
-          forbidden = ["LOCAL_", "PLACEHOLDER", "TO_BE_FILLED", "NOT_PROVIDED", "UNKNOWN", "BANK_CERTIFIED"]
-          for token in forbidden:
-              if token in generated:
-                  print(f"FDP-39 generated artifacts contain forbidden token: {token}", file=sys.stderr)
-                  sys.exit(1)
-          if "`READY_FOR_ENABLEMENT_REVIEW` is not `PRODUCTION_ENABLED`" not in generated:
-              print("FDP-39 enablement artifact must explicitly deny PRODUCTION_ENABLED", file=sys.stderr)
-              sys.exit(1)
-          PY
-          grep -q 'READY_FOR_ENABLEMENT_REVIEW' docs/fdp-39-merge-gate.md docs/release/fdp-39-branch-readme.md
-          grep -q 'Fixture proof is not production proof' docs/release/fdp-39-final-regulated-mutation-proof-matrix.md
-          grep -q 'production_enabled: `false`' "$ARTIFACT_DIR/fdp39-enablement-governance-pack.md"
-          grep -q 'fixture_image_release_candidate_allowed: `false`' "$ARTIFACT_DIR/fdp39-artifact-provenance.md"
-          if grep -R 'RUNTIME_REACHED_PRODUCTION_IMAGE.*claimed\|production_enablement: `true`\|bank_enabled: `true`\|production_enabled: `true`' docs/fdp-39-*.md docs/adr/fdp-39-*.md docs/release/fdp-39-*.md "$ARTIFACT_DIR"; then
-            echo "FDP-39 docs/artifacts contain a forbidden positive enablement claim"
-            exit 1
-          fi
+        run: node scripts/ci/verify-fdp39-artifacts.mjs
 
       - name: Upload FDP-39 release governance artifacts
         if: always()
@@ -2207,168 +1000,29 @@ jobs:
           java-version: "21"
           cache: maven
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Run FDP-40 release controls tests
-        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp40.ci-mode=true" "-Dfdp40.event-name=${FDP40_EVENT_NAME}" "-Dfdp40.base-sha=${FDP40_DIFF_BASE_SHA}" "-Dfdp40.head-sha=${FDP40_DIFF_HEAD_SHA}" "-Dfdp40.base-ref=${FDP40_BASE_REF}" "-Dfdp40.release-manifest=../docs/release/fdp-40-release-manifest-template.yaml" "-Dfdp40.attestation=../docs/release/fdp-40-attestation-readiness-template.json" "-Dfdp40.fdp39-provenance=../docs/release/fdp-40-fdp39-provenance-reference.json" "-Dfdp40.required-checks-matrix=../docs/release/fdp-40-required-checks-matrix.json" "-Dtest=Fdp40ReleaseManifestValidationTest,Fdp40SignedProvenanceReadinessTest,Fdp40ReleaseEvidenceVerificationTest,Fdp40ReleaseEvidenceVerificationNegativeTest,Fdp40RegistryPromotionPolicyTest,Fdp40RegistryImmutabilityReadinessTest,Fdp40RequiredChecksMatrixTest,Fdp40EnvironmentProtectionGateTest,Fdp40DeploymentEnvironmentReadinessTest,Fdp40BranchProtectionReadinessTest,Fdp40ExternalPlatformControlsMatrixTest,Fdp40EnablementPrTemplateTest,Fdp40SingleReleaseOwnerGovernanceTest,Fdp40UnsupportedClaimsMatrixTest,Fdp40NoOverclaimDocumentationTest,Fdp40MustNotChangeRuntimeMutationSemanticsTest,Fdp40FinalProofPackTest,Fdp40SbomReadinessTest,Fdp40CosignVerificationReadinessTest,Fdp40ResidualPlatformGapsTest,Fdp40ScriptExecutionReadinessTest,Fdp40DocumentationFormattingTest,Fdp40LocalPathHygieneTest" test
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp40.ci-mode=true" "-Dfdp40.event-name=${FDP40_EVENT_NAME}" "-Dfdp40.base-sha=${FDP40_DIFF_BASE_SHA}" "-Dfdp40.head-sha=${FDP40_DIFF_HEAD_SHA}" "-Dfdp40.base-ref=${FDP40_BASE_REF}" "-Dfdp40.release-manifest=../docs/release/fdp_40_release_manifest_template.yaml" "-Dfdp40.attestation=../docs/release/fdp_40_attestation_readiness_template.json" "-Dfdp40.fdp39-provenance=../docs/release/fdp_40_fdp39_provenance_reference.json" "-Dfdp40.required-checks-matrix=../docs/release/fdp_40_required_checks_matrix.json" "-Dtest=Fdp40ReleaseManifestValidationTest,Fdp40SignedProvenanceReadinessTest,Fdp40ReleaseEvidenceVerificationTest,Fdp40ReleaseEvidenceVerificationNegativeTest,Fdp40RegistryPromotionPolicyTest,Fdp40RegistryImmutabilityReadinessTest,Fdp40RequiredChecksMatrixTest,Fdp40EnvironmentProtectionGateTest,Fdp40DeploymentEnvironmentReadinessTest,Fdp40BranchProtectionReadinessTest,Fdp40ExternalPlatformControlsMatrixTest,Fdp40EnablementPrTemplateTest,Fdp40SingleReleaseOwnerGovernanceTest,Fdp40UnsupportedClaimsMatrixTest,Fdp40NoOverclaimDocumentationTest,Fdp40MustNotChangeRuntimeMutationSemanticsTest,Fdp40FinalProofPackTest,Fdp40SbomReadinessTest,Fdp40CosignVerificationReadinessTest,Fdp40ResidualPlatformGapsTest,Fdp40ScriptExecutionReadinessTest,Fdp40DocumentationFormattingTest,Fdp40LocalPathHygieneTest" test
 
       - name: Validate FDP-40 release manifest
-        run: bash scripts/fdp40-validate-release-manifest.sh docs/release/fdp-40-release-manifest-template.yaml
+        run: bash scripts/fdp40-validate-release-manifest.sh docs/release/fdp_40_release_manifest_template.yaml
 
       - name: Validate FDP-40 attestation readiness
-        run: bash scripts/fdp40-validate-attestation-readiness.sh docs/release/fdp-40-attestation-readiness-template.json docs/release/fdp-40-release-manifest-template.yaml
+        run: bash scripts/fdp40-validate-attestation-readiness.sh docs/release/fdp_40_attestation_readiness_template.json docs/release/fdp_40_release_manifest_template.yaml
 
       - name: Verify FDP-40 release evidence
-        run: bash scripts/fdp40-verify-release-evidence.sh docs/release/fdp-40-release-manifest-template.yaml docs/release/fdp-40-attestation-readiness-template.json docs/release/fdp-40-fdp39-provenance-reference.json docs/release/fdp-40-required-checks-matrix.json
+        run: bash scripts/fdp40-verify-release-evidence.sh docs/release/fdp_40_release_manifest_template.yaml docs/release/fdp_40_attestation_readiness_template.json docs/release/fdp_40_fdp39_provenance_reference.json docs/release/fdp_40_required_checks_matrix.json
 
       - name: Verify FDP-40 cosign readiness mode
         run: bash scripts/fdp40-verify-cosign-signature.sh
 
       - name: Verify FDP-40 release controls artifacts
         if: always()
-        run: |
-          set -euo pipefail
-          ARTIFACT_DIR=alert-service/target/fdp40-release
-          test -f "$ARTIFACT_DIR/fdp40-release-evidence-verification.json"
-          test -f "$ARTIFACT_DIR/fdp40-release-evidence-verification.md"
-          test -f "$ARTIFACT_DIR/fdp40-registry-promotion-policy.json"
-          test -f "$ARTIFACT_DIR/fdp40-runtime-immutability.json"
-          test -f "$ARTIFACT_DIR/fdp40-proof-pack.json"
-          test -f "$ARTIFACT_DIR/fdp40-proof-pack.md"
-          test -f "target/fdp40-release/fdp40-release-evidence-verification.json"
-          test -f "target/fdp40-release/fdp40-cosign-verification.json"
-          python - <<'PY'
-          import json
-          import os
-          import pathlib
-          import sys
-          import xml.etree.ElementTree as ET
-
-          artifact_dir = pathlib.Path("alert-service/target/fdp40-release")
-          reports = pathlib.Path("alert-service/target/surefire-reports")
-          required_tests = [
-              "Fdp40ReleaseManifestValidationTest",
-              "Fdp40SignedProvenanceReadinessTest",
-              "Fdp40ReleaseEvidenceVerificationTest",
-              "Fdp40ReleaseEvidenceVerificationNegativeTest",
-              "Fdp40RegistryPromotionPolicyTest",
-              "Fdp40RegistryImmutabilityReadinessTest",
-              "Fdp40RequiredChecksMatrixTest",
-              "Fdp40EnvironmentProtectionGateTest",
-              "Fdp40DeploymentEnvironmentReadinessTest",
-              "Fdp40BranchProtectionReadinessTest",
-              "Fdp40ExternalPlatformControlsMatrixTest",
-              "Fdp40EnablementPrTemplateTest",
-              "Fdp40SingleReleaseOwnerGovernanceTest",
-              "Fdp40UnsupportedClaimsMatrixTest",
-              "Fdp40NoOverclaimDocumentationTest",
-              "Fdp40MustNotChangeRuntimeMutationSemanticsTest",
-              "Fdp40FinalProofPackTest",
-              "Fdp40SbomReadinessTest",
-              "Fdp40CosignVerificationReadinessTest",
-              "Fdp40ResidualPlatformGapsTest",
-              "Fdp40ScriptExecutionReadinessTest",
-              "Fdp40DocumentationFormattingTest",
-              "Fdp40LocalPathHygieneTest",
-          ]
-          for class_name in required_tests:
-              report = reports / f"TEST-com.frauddetection.alert.regulated.{class_name}.xml"
-              if not report.exists():
-                  print(f"Missing FDP-40 Surefire XML: {report}", file=sys.stderr)
-                  sys.exit(1)
-              root = ET.parse(report).getroot()
-              tests = int(root.attrib.get("tests", "0"))
-              skipped = int(root.attrib.get("skipped", "0"))
-              failures = int(root.attrib.get("failures", "0"))
-              errors = int(root.attrib.get("errors", "0"))
-              if tests <= 0 or skipped > 0 or failures > 0 or errors > 0:
-                  print(f"FDP-40 test class did not fully execute: {class_name} tests={tests} skipped={skipped} failures={failures} errors={errors}", file=sys.stderr)
-                  sys.exit(1)
-
-          verification = json.loads((artifact_dir / "fdp40-release-evidence-verification.json").read_text())
-          script_verification = json.loads(pathlib.Path("target/fdp40-release/fdp40-release-evidence-verification.json").read_text())
-          cosign = json.loads(pathlib.Path("target/fdp40-release/fdp40-cosign-verification.json").read_text())
-          runtime = json.loads((artifact_dir / "fdp40-runtime-immutability.json").read_text())
-          proof = json.loads((artifact_dir / "fdp40-proof-pack.json").read_text())
-          registry = json.loads((artifact_dir / "fdp40-registry-promotion-policy.json").read_text())
-          expected_event = os.environ["FDP40_EVENT_NAME"]
-          expected_diff_base = os.environ.get("FDP40_DIFF_BASE_SHA", "")
-          runtime_mode = runtime.get("comparison_mode")
-          runtime_changed_file_count = int(runtime.get("changed_file_count", 0))
-          checks = {
-              "verification_passed": verification.get("verification_passed") is True,
-              "script_verification_passed": script_verification.get("verification_passed") is True,
-              "script_readiness_only": script_verification.get("readiness_only") is True,
-              "script_external_controls": script_verification.get("external_platform_controls_required") is True,
-              "script_bank_disabled": script_verification.get("bank_enabled_false") is True,
-              "script_single_owner": script_verification.get("single_release_owner_model") is True,
-              "script_dual_control_false": script_verification.get("dual_control_required") is False,
-              "script_signing_readiness": script_verification.get("signed_provenance_readiness") is True,
-              "script_signing_not_enforced": script_verification.get("signing_enforced_by_fdp40") is False,
-              "script_registry_not_verified": script_verification.get("registry_immutability_verified_by_fdp40") is False,
-              "script_required_checks_not_platform_verified": script_verification.get("required_checks_platform_enforcement_verified_by_fdp40") is False,
-              "cosign_readiness_only": cosign.get("readiness_only") is True,
-              "cosign_not_performed": cosign.get("verification_performed") is False,
-              "manifest_valid": verification.get("manifest_valid") is True,
-              "attestation_valid": verification.get("attestation_valid") is True,
-              "fdp39_digest_match": verification.get("fdp39_digest_match") is True,
-              "fixture_not_promoted": verification.get("fixture_not_promoted") is True,
-              "required_checks_present": verification.get("required_checks_present") is True,
-              "production_enabled_false": verification.get("production_enabled_false") is True,
-              "bank_enabled_false": verification.get("bank_enabled_false") is True,
-              "single_release_owner_model": verification.get("single_release_owner_model") is True,
-              "dual_control_required_false": verification.get("dual_control_required") is False,
-              "release_owner_required": verification.get("release_owner_required") is True,
-              "release_owner_must_be_named": verification.get("release_owner_must_be_named") is True,
-              "signing_readiness": verification.get("signed_provenance_readiness") is True,
-              "signing_not_enforced": verification.get("signing_enforced_by_fdp40") is False,
-              "registry_not_verified": verification.get("registry_immutability_verified_by_fdp40") is False,
-              "required_checks_defined": verification.get("required_checks_defined") is True,
-              "required_checks_not_platform_verified": verification.get("required_checks_platform_enforcement_verified_by_fdp40") is False,
-              "runtime_diff_computed": runtime.get("diff_computed") is True,
-              "runtime_event": runtime.get("event_name") == expected_event,
-              "runtime_comparison_mode": runtime_mode in {"pull-request-merge-base-to-head", "push-before-to-head"},
-              "runtime_head_sha": runtime.get("head_sha") == os.environ["GITHUB_SHA"],
-              "runtime_base_sha": bool(runtime.get("base_sha")),
-              "runtime_changed_file_count": runtime_changed_file_count > 0,
-              "runtime_unchanged": runtime.get("runtime_semantics_unchanged") is True,
-              "runtime_protected_count": runtime.get("protected_runtime_file_count") == 0,
-              "registry_policy_valid": registry.get("promotion_policy_valid") is True,
-              "registry_no_mutable_tag": registry.get("mutable_tag_only_allowed") is False,
-              "registry_no_fixture": registry.get("fixture_image_promotion_allowed") is False,
-              "proof_ready": proof.get("release_controls_ready_for_review") is True,
-              "proof_readiness_only": proof.get("readiness_only") is True,
-              "proof_external_platform_controls": proof.get("external_platform_controls_required") is True,
-              "proof_signing_not_performed": proof.get("signing_verification_performed") is False,
-              "proof_signing_not_enforced": proof.get("signing_enforced_by_fdp40") is False,
-              "proof_production_disabled": proof.get("production_enabled") is False,
-              "proof_bank_disabled": proof.get("bank_enabled") is False,
-              "proof_single_owner": proof.get("single_release_owner_model") is True,
-              "proof_dual_control_false": proof.get("dual_control_required") is False,
-              "proof_no_external_finality": proof.get("external_finality_claimed") is False,
-              "proof_no_distributed_acid": proof.get("distributed_acid_claimed") is False,
-              "proof_no_bank_cert": proof.get("bank_certification_claimed") is False,
-          }
-          if expected_event == "push":
-              checks["runtime_push_comparison_mode"] = runtime_mode == "push-before-to-head"
-              checks["runtime_push_base_sha"] = runtime.get("base_sha") == expected_diff_base
-          if expected_event == "pull_request":
-              checks["runtime_pr_comparison_mode"] = runtime_mode == "pull-request-merge-base-to-head"
-          failed = [name for name, ok in checks.items() if not ok]
-          if failed:
-              print(f"FDP-40 artifact checks failed: {failed}", file=sys.stderr)
-              sys.exit(1)
-          generated = "\n".join(path.read_text(errors="ignore") for path in artifact_dir.glob("fdp40-*.*"))
-          for token in ["LOCAL_", "PLACEHOLDER", "TO_BE_FILLED", "NOT_PROVIDED", "UNKNOWN", "BANK_CERTIFIED"]:
-              if token in generated:
-                  print(f"FDP-40 generated artifacts contain forbidden token: {token}", file=sys.stderr)
-                  sys.exit(1)
-          PY
-          grep -q 'READY_FOR_ENABLEMENT_REVIEW is not PRODUCTION_ENABLED' docs/release/fdp-40-branch-readme.md .github/PULL_REQUEST_TEMPLATE/fdp-enablement-config-change.md
-          grep -q 'single release owner model' docs/release/fdp-40-single-release-owner-governance.md .github/PULL_REQUEST_TEMPLATE/fdp-enablement-config-change.md
-          grep -q 'signed image does not mean external finality' docs/release/fdp-40-unsupported-claims-matrix.md
-          if grep -R 'production_enabled: `true`\|bank_certification_claimed: `true`\|external_finality_claimed: `true`\|distributed_acid_claimed: `true`\|dual_control_required: `true`' docs/fdp-40-*.md docs/adr/fdp-40-*.md docs/release/fdp-40-*.md "$ARTIFACT_DIR"; then
-            echo "FDP-40 docs/artifacts contain a forbidden positive enablement or finality claim"
-            exit 1
-          fi
+        run: node scripts/ci/verify-fdp40-artifacts.mjs
 
       - name: Upload FDP-40 release controls artifacts
         if: always()
@@ -2397,10 +1051,7 @@ jobs:
       - fdp37-production-image-chaos
       - fdp38-live-runtime-checkpoint-chaos
       - fdp39-release-governance
-      - fdp50-frontend-api-client-runtime-boundary
-      - fdp51-analyst-console-workspace-runtime
-      - fdp52-workspace-split-detail-ux
-      - fdp53-workspace-runtime-ownership
+      - analyst-console-frontend-architecture-gate
       - regulated-mutation-regression
 
     steps:

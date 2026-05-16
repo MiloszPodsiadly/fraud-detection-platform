@@ -46,8 +46,8 @@ class Fdp40NoOverclaimDocumentationTest {
 
     @Test
     void fdp40DocsTemplatesAndGeneratedArtifactsDoNotContainPositiveOverclaims() throws Exception {
-        String combined = readTree(Path.of("../docs/release"), "fdp-40", ".md")
-                + "\n" + readTree(Path.of("../docs/adr"), "fdp-40", ".md")
+        String combined = readTree(Path.of("../docs/release"), "fdp_40", ".md")
+                + "\n" + readTree(Path.of("../docs/adr"), "fdp_40", ".md")
                 + "\n" + readTree(Path.of("target/fdp40-release"), "fdp40-", ".md")
                 + "\n" + readTree(Path.of("target/fdp40-release"), "fdp40-", ".json")
                 + "\n" + readTree(Path.of("../.github/PULL_REQUEST_TEMPLATE"), "fdp-enablement", ".md");

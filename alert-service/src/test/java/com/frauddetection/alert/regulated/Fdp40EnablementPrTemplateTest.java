@@ -11,7 +11,7 @@ class Fdp40EnablementPrTemplateTest {
 
     @Test
     void enablementPrTemplateRequiresSingleReleaseOwnerDigestConfigPrAndRollbackEvidence() throws Exception {
-        Path template = Path.of("../.github/PULL_REQUEST_TEMPLATE/fdp-enablement-config-change.md");
+        Path template = Path.of("../.github/PULL_REQUEST_TEMPLATE/fdp_enablement_config_change.md");
         assertThat(Files.exists(template)).isTrue();
         String content = Files.readString(template);
 

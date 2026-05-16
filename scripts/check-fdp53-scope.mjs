@@ -30,6 +30,12 @@ const forbiddenExportWorkflowPattern = /\bexport\s+(workflow|button|action|csv|d
 const prefetchPattern = /\b(prefetch|pre-load|preload|warm[ -]?up)\b/i;
 const newAuthModePattern = /\b(new auth mode|auth mode|oidc mode|bearer mode|session mode)\b/i;
 const defaultWrapperPattern = /from\s+["'][^"']*\/api\/alertsApi\.js["']/;
+const fdp54GovernanceFiles = new Set([
+  "scripts/check-doc-overclaims.mjs",
+  "scripts/check-fdp-scope-helpers-smoke.mjs",
+  "scripts/compare-ci-jobs.mjs",
+  "scripts/fdp-scope/scopeGuardHelpers.mjs"
+]);
 
 for (const file of changedFiles) {
   const normalized = file.replaceAll("\\", "/");
@@ -128,6 +134,8 @@ function isCheckedTextFile(file) {
 
 function isAllowedNarrativeFile(file) {
   return isScopeGuardScript(file)
+    || fdp54GovernanceFiles.has(file)
+    || file.startsWith("scripts/ci/")
     || file.startsWith("docs/")
     || file.startsWith(".github/workflows/")
     || /\.(test|spec)\.[jt]sx?$/.test(file);

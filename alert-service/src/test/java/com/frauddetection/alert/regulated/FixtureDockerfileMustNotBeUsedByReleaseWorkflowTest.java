@@ -26,7 +26,10 @@ class FixtureDockerfileMustNotBeUsedByReleaseWorkflowTest {
         assertFilesDoNotContain(Path.of("../deployment"), List.of(
                 "Dockerfile.alert-service-fdp38-fixture"
         ));
-        assertFilesDoNotContain(Path.of("../scripts"), List.of("fdp39-generate-governance-artifacts.sh"));
+        assertFilesDoNotContain(Path.of("../scripts"), List.of(
+                "fdp39-generate-governance-artifacts.sh",
+                "verify-fdp38-artifacts.mjs"
+        ));
         assertThat(Files.readString(Path.of("../README.md"))).doesNotContain(FIXTURE_DOCKERFILE);
 
         String ci = Files.readString(Path.of("../.github/workflows/ci.yml"));
@@ -57,7 +60,7 @@ class FixtureDockerfileMustNotBeUsedByReleaseWorkflowTest {
     }
 
     private List<Occurrence> findOccurrences() throws IOException {
-        assertThat(Files.exists(Path.of("../docs/release/fdp-39-fixture-dockerfile-allowlist.json")))
+        assertThat(Files.exists(Path.of("../docs/release/fdp_39_fixture_dockerfile_allowlist.json")))
                 .as("FDP-39 fixture Dockerfile structural allowlist must exist")
                 .isTrue();
         List<Path> roots = List.of(
@@ -103,10 +106,11 @@ class FixtureDockerfileMustNotBeUsedByReleaseWorkflowTest {
                     || jobName.equals("fdp39-release-governance");
         }
         return path.equals("scripts/fdp39-generate-governance-artifacts.sh")
+                || path.equals("scripts/ci/verify-fdp38-artifacts.mjs")
                 || path.equals("deployment/Dockerfile.alert-service-fdp38-fixture")
-                || path.matches("docs/fdp-38-.*\\.md")
-                || path.matches("docs/adr/fdp-39-.*\\.md")
-                || path.matches("docs/release/fdp-39-.*\\.(md|json)")
+                || path.matches("docs/fdp/fdp_38_.*\\.md")
+                || path.matches("docs/adr/fdp_39_.*\\.md")
+                || path.matches("docs/release/fdp_39_.*\\.(md|json)")
                 || path.startsWith("alert-service/src/test/");
     }
 

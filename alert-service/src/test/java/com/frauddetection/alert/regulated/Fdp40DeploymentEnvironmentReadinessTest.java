@@ -14,8 +14,8 @@ class Fdp40DeploymentEnvironmentReadinessTest {
 
     @Test
     void deploymentEnvironmentProtectionIsRequiredButExternal() throws Exception {
-        String docs = Files.readString(Path.of("../docs/release/fdp-40-deployment-environment-readiness.md"));
-        Map<String, Object> readiness = readJson(Path.of("../docs/release/fdp-40-deployment-environment-readiness.json"));
+        String docs = Files.readString(Path.of("../docs/release/fdp_40_deployment_environment_readiness.md"));
+        Map<String, Object> readiness = readJson(Path.of("../docs/release/fdp_40_deployment_environment_readiness.json"));
 
         assertThat(docs)
                 .contains("does not verify those protections through GitHub or deployment-platform APIs")

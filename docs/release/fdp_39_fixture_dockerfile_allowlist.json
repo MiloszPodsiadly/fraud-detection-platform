@@ -1,0 +1,23 @@
+{
+  "allowed_references": [
+    ".github/workflows/ci.yml#fdp38-live-runtime-checkpoint-chaos",
+    ".github/workflows/ci.yml#fdp39-release-governance",
+    "scripts/fdp39-generate-governance-artifacts.sh",
+    "deployment/Dockerfile.alert-service-fdp38-fixture",
+    "docs/fdp/fdp_38_*.md",
+    "docs/adr/fdp_39_*.md",
+    "docs/release/fdp_39_*.md",
+    "alert-service/src/test/**"
+  ],
+  "forbidden_contexts": [
+    "release",
+    "deploy",
+    "promote",
+    "production",
+    "docker",
+    "helm",
+    "k8s",
+    "deployment/docker-compose*.yml",
+    "index.md"
+  ]
+}

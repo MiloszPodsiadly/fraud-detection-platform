@@ -13,11 +13,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 class Fdp44FraudCaseIdempotencyOperationalDocsNoOverclaimTest {
 
     private static final List<String> DOCS = List.of(
-            "docs/api/fraud-case-api.md",
-            "docs/fdp-43-merge-gate.md",
-            "docs/fdp-44-merge-gate.md",
-            "docs/runbooks/fraud-case-lifecycle-idempotency.md",
-            "docs/observability/fraud-case-lifecycle-idempotency-dashboard.md"
+            "docs/api/fraud_case_api.md",
+            "docs/fdp/fdp_43_merge_gate.md",
+            "docs/fdp/fdp_44_merge_gate.md",
+            "docs/runbooks/fraud_case_operations.md",
+            "docs/observability/fraud_case_lifecycle_idempotency_dashboard.md"
     );
 
     private static final List<String> FORBIDDEN_CLAIMS = List.of(

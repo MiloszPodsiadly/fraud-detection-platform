@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-manifest="${1:-docs/release/fdp-40-release-manifest-template.yaml}"
-attestation="${2:-docs/release/fdp-40-attestation-readiness-template.json}"
-fdp39="${3:-docs/release/fdp-40-fdp39-provenance-reference.json}"
-checks="${4:-docs/release/fdp-40-required-checks-matrix.json}"
+manifest="${1:-docs/release/fdp_40_release_manifest_template.yaml}"
+attestation="${2:-docs/release/fdp_40_attestation_readiness_template.json}"
+fdp39="${3:-docs/release/fdp_40_fdp39_provenance_reference.json}"
+checks="${4:-docs/release/fdp_40_required_checks_matrix.json}"
 output_dir="target/fdp40-release"
 mkdir -p "$output_dir"
 

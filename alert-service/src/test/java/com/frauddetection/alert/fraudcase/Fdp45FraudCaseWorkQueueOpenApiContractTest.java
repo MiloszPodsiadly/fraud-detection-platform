@@ -12,7 +12,7 @@ class Fdp45FraudCaseWorkQueueOpenApiContractTest {
 
     @Test
     void oldListAndWorkQueueOpenApiContractsShouldMatchImplementedParamsAndSchemas() throws Exception {
-        String openApi = Files.readString(projectRoot().resolve("docs/openapi/alert-service.openapi.yaml"));
+        String openApi = Files.readString(projectRoot().resolve("docs/openapi/alert_service.openapi.yaml"));
         String oldEndpoint = section(openApi, "  /api/v1/fraud-cases:", "    post:");
         String workQueueEndpoint = section(openApi, "  /api/v1/fraud-cases/work-queue:", "  /api/v1/fraud-cases/{caseId}:");
         String workQueueSchema = section(openApi, "    FraudCaseWorkQueueSlice:", "    FraudCaseSlaStatus:");

@@ -58,7 +58,7 @@ describe("WorkspaceRuntimeProvider", () => {
   });
 
   it("documents that the provider is not a security boundary", () => {
-    const docs = readFileSync(join(process.cwd(), "../docs/fdp-51-workspace-runtime-provider.md"), "utf8");
+    const docs = readFileSync(join(process.cwd(), "../docs/fdp/fdp_51_workspace_runtime_provider.md"), "utf8");
     const source = readFileSync(join(process.cwd(), "src/workspace/WorkspaceRuntimeProvider.jsx"), "utf8");
 
     expect(docs).toContain("not an authorization or security enforcement boundary");

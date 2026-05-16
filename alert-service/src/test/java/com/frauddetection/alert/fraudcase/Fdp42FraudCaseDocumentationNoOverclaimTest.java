@@ -12,11 +12,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 class Fdp42FraudCaseDocumentationNoOverclaimTest {
 
     private static final List<String> FDP42_DOCS = List.of(
-            "docs/product/fraud-case-management.md",
-            "docs/api/fraud-case-api.md",
-            "docs/architecture/fraud-case-management-architecture.md",
-            "docs/fdp-42-merge-gate.md",
-            "docs/fdp-42-summary.md",
+            "docs/product/fraud_case_management.md",
+            "docs/api/fraud_case_api.md",
+            "docs/architecture/fraud_case_management_architecture.md",
+            "docs/fdp/fdp_42_merge_gate.md",
+            "docs/fdp/fdp_42_summary.md",
             "docs/index.md"
     );
 

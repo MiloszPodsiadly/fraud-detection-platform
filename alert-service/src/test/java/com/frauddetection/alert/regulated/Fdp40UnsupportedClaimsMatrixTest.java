@@ -25,7 +25,7 @@ class Fdp40UnsupportedClaimsMatrixTest {
 
     @Test
     void unsupportedClaimsMatrixContainsExactNonClaimLanguage() throws Exception {
-        String matrix = Files.readString(Path.of("../docs/release/fdp-40-unsupported-claims-matrix.md"));
+        String matrix = Files.readString(Path.of("../docs/release/fdp_40_unsupported_claims_matrix.md"));
 
         for (String nonClaim : REQUIRED_NON_CLAIMS) {
             assertThat(matrix).contains(nonClaim);

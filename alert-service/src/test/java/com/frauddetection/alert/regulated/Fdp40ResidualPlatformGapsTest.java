@@ -12,7 +12,7 @@ class Fdp40ResidualPlatformGapsTest {
 
     @Test
     void residualPlatformGapsAreExplicitForFutureHardening() throws Exception {
-        String docs = Files.readString(Path.of("../docs/release/fdp-40-residual-platform-gaps.md"));
+        String docs = Files.readString(Path.of("../docs/release/fdp_40_residual_platform_gaps.md"));
 
         List.of(
                 "Real cosign/Sigstore verification",
