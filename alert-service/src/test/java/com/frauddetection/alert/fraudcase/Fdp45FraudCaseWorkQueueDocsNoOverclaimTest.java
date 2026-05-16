@@ -12,7 +12,7 @@ class Fdp45FraudCaseWorkQueueDocsNoOverclaimTest {
 
     @Test
     void fdp45DocsShouldDescribeReadinessWithoutMutationOrFinalityOverclaims() throws IOException {
-        String docs = Files.readString(projectRoot().resolve("docs/fdp-45-work-queue-readiness.md")).toLowerCase();
+        String docs = Files.readString(projectRoot().resolve("docs/fdp/fdp_45_work_queue_readiness.md")).toLowerCase();
 
         assertThat(docs)
                 .contains("existing fraud-case query path")

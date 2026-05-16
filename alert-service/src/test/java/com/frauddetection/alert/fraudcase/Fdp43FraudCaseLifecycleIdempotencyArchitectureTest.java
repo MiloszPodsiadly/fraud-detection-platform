@@ -95,7 +95,7 @@ class Fdp43FraudCaseLifecycleIdempotencyArchitectureTest {
 
     @Test
     void openApiShouldDocumentFdp43LifecycleIdempotencyContract() {
-        String openApi = compact(read(repoRoot().resolve(Path.of("docs", "openapi", "alert-service.openapi.yaml"))));
+        String openApi = compact(read(repoRoot().resolve(Path.of("docs", "openapi", "alert_service.openapi.yaml"))));
 
         assertThat(openApi)
                 .contains("x-idempotency-key")
@@ -111,7 +111,7 @@ class Fdp43FraudCaseLifecycleIdempotencyArchitectureTest {
 
     @Test
     void fdp43DocsShouldStateRequiredGuaranteesAndNoGoClaims() {
-        String docs = read(repoRoot().resolve(Path.of("docs", "fdp-43-merge-gate.md"))).toLowerCase(java.util.Locale.ROOT);
+        String docs = read(repoRoot().resolve(Path.of("docs", "fdp", "fdp_43_merge_gate.md"))).toLowerCase(java.util.Locale.ROOT);
 
         assertThat(docs)
                 .contains("shared canonical hashing and key validation")

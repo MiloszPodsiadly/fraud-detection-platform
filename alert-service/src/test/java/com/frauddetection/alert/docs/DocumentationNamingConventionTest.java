@@ -14,8 +14,8 @@ class DocumentationNamingConventionTest {
 
     private static final Set<String> ALLOWED_SPECIAL_NAMES = Set.of(
             "README.md",
-            "alert-service.openapi.yaml",
-            "ml-inference-service.openapi.yaml"
+            "alert_service.openapi.yaml",
+            "ml_inference_service.openapi.yaml"
     );
 
     private static final List<String> CURRENT_DOC_FOLDERS = List.of(
@@ -29,7 +29,7 @@ class DocumentationNamingConventionTest {
     );
 
     @Test
-    void currentDocumentationUsesConsistentLowerKebabNames() throws Exception {
+    void currentDocumentationUsesConsistentSnakeCaseNames() throws Exception {
         for (String folder : CURRENT_DOC_FOLDERS) {
             Path root = Path.of(folder);
             if (!Files.exists(root)) {
@@ -44,25 +44,25 @@ class DocumentationNamingConventionTest {
                         continue;
                     }
                     assertThat(fileName)
-                            .as("Current docs should use lower-kebab names: " + path)
-                            .matches("[a-z0-9]+(?:-[a-z0-9]+)*\\.md");
+                            .as("Current docs should use snake_case names: " + path)
+                            .matches("[a-z0-9]+(?:_[a-z0-9]+)*\\.md");
                 }
             }
         }
     }
 
     @Test
-    void styleGuideDocumentsLowerKebabForHistoricalFdpFiles() throws Exception {
-        String guide = Files.readString(Path.of("../docs/documentation-style-guide.md"));
-        String map = Files.readString(Path.of("../docs/documentation-naming-map.md"));
+    void styleGuideDocumentsSnakeCaseForCurrentAndEvidenceFiles() throws Exception {
+        String guide = Files.readString(Path.of("../docs/documentation_style_guide.md"));
+        String map = Files.readString(Path.of("../docs/documentation_naming_map.md"));
 
         assertThat(guide)
-                .contains("Historical FDP docs")
-                .contains("filenames use lowercase")
-                .contains("`fdp-*` form");
+                .contains("FDP branch evidence")
+                .contains("lowercase underscore")
+                .contains("`fdp_*`");
         assertThat(map)
                 .contains("Moved Current Docs")
-                .contains("lower-kebab")
+                .contains("snake_case")
                 .contains("Renaming documentation does not change API behavior");
     }
 }

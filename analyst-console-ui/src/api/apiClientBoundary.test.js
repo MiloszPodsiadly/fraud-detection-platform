@@ -155,7 +155,7 @@ describe("api client boundary", () => {
   it("lets explicit changed files bypass git base resolution for FDP-50 scope fixtures", () => {
     expect(() => runScopeGuard({
       FDP50_SCOPE_BASE: "refs/heads/does-not-exist-fdp50",
-      FDP50_SCOPE_CHANGED_FILES: "docs/fdp-50-frontend-api-client-boundary.md"
+      FDP50_SCOPE_CHANGED_FILES: "docs/fdp/fdp_50_frontend_api_client_boundary.md"
     })).not.toThrow();
   });
 
@@ -183,7 +183,7 @@ describe("api client boundary", () => {
         "alert-service/src/main/java/com/frauddetection/alert/security/config/FraudCaseAuthorizationRules.java",
         "alert-service/src/main/java/com/frauddetection/alert/security/config/BffSessionSecurityConfigurer.java",
         "alert-service/src/test/java/com/frauddetection/alert/controller/Fdp50RetiredRouteTest.java",
-        "docs/fdp-50-legacy-api-removal.md",
+        "docs/release/fdp_50_legacy_api_removal.md",
         "scripts/check-fdp50-scope.mjs"
       ].join(",")
     })).not.toThrow();
@@ -199,8 +199,8 @@ describe("api client boundary", () => {
   });
 
   it("documents the FDP-50 frontend API client boundary", () => {
-    const fdp50 = readFileSync(join(process.cwd(), "../docs/fdp-50-frontend-api-client-boundary.md"), "utf8");
-    const howTo = readFileSync(join(process.cwd(), "../docs/frontend/api-client-boundary.md"), "utf8");
+    const fdp50 = readFileSync(join(process.cwd(), "../docs/fdp/fdp_50_frontend_api_client_boundary.md"), "utf8");
+    const howTo = readFileSync(join(process.cwd(), "../docs/frontend/api_client_boundary.md"), "utf8");
     const combined = `${fdp50}\n${howTo}`;
 
     expect(combined).toContain("createAlertsApiClient");

@@ -1,0 +1,842 @@
+{
+    "scope":  "Repository documentation audit inventory. Excludes documents/ prompt inputs, build outputs, dependency folders, .git internals, and local tmp folders.",
+    "generated_on":  "2026-05-16",
+    "total_artifacts":  167,
+    "artifacts":  [
+                      {
+                          "path":  ".github/PULL_REQUEST_TEMPLATE/fdp_enablement_config_change.md",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "deployment/service-identity/jwks.json",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "deployment/service-identity/mtls/README.md",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "deployment/service-identity/README.md",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/adr/fdp_29_evidence_gated_finalize.md",
+                          "type":  "architecture",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/adr/fdp_36_real_chaos_enable_readiness.md",
+                          "type":  "architecture",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/adr/fdp_37_production_image_chaos_enable_gate.md",
+                          "type":  "architecture",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/adr/fdp_38_live_runtime_checkpoint_fixture_proof.md",
+                          "type":  "architecture",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/adr/fdp_39_release_artifact_separation_governance.md",
+                          "type":  "architecture",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/adr/fdp_40_platform_release_controls_signed_provenance_readiness.md",
+                          "type":  "architecture",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/adr/index.md",
+                          "type":  "architecture",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/api/api_error_contract.md",
+                          "type":  "api",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/api/api_surface_v1.md",
+                          "type":  "api",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/api/evidence_gated_finalize_response_contract.md",
+                          "type":  "api",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/api/fraud_case_api.md",
+                          "type":  "api",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/api/index.md",
+                          "type":  "api",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/api/openapi_safety_audit.json",
+                          "type":  "api",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/api/openapi_safety_audit.md",
+                          "type":  "api",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/api/public_api_semantics.md",
+                          "type":  "api",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/api/status_truth_table.md",
+                          "type":  "api",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/architecture/alert_service_failure_windows.md",
+                          "type":  "architecture",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/architecture/alert_service_source_of_truth.md",
+                          "type":  "architecture",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/architecture/alert_service_write_path_inventory.md",
+                          "type":  "architecture",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/architecture/current_architecture.md",
+                          "type":  "architecture",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/architecture/diagrams.md",
+                          "type":  "architecture",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/architecture/evidence_gated_finalize_compatibility_matrix.md",
+                          "type":  "architecture",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/architecture/evidence_gated_finalize_failure_windows.md",
+                          "type":  "architecture",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/architecture/evidence_gated_finalize_idempotency_replay.md",
+                          "type":  "architecture",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/architecture/evidence_gated_finalize_preconditions.md",
+                          "type":  "architecture",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/architecture/evidence_gated_finalize_rollout.md",
+                          "type":  "architecture",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/architecture/evidence_gated_finalize_state_machine.md",
+                          "type":  "architecture",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/architecture/fraud_case_management_architecture.md",
+                          "type":  "architecture",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/architecture/index.md",
+                          "type":  "architecture",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/architecture/regulated_mutation_safe_checkpoint_policy.md",
+                          "type":  "architecture",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/architecture/regulated_mutation_safe_checkpoints.md",
+                          "type":  "architecture",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/assets/architecture_alert_case_roadmap.svg",
+                          "type":  "asset",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/assets/architecture_claim_replay_checkpoint.svg",
+                          "type":  "asset",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/assets/architecture_regulated_mutation_lifecycle.svg",
+                          "type":  "asset",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/assets/architecture_release_governance.svg",
+                          "type":  "asset",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/assets/index.md",
+                          "type":  "asset",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/assets/readme_architecture.svg",
+                          "type":  "asset",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/assets/readme_runtime_flow.svg",
+                          "type":  "asset",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/assets/readme_security_audit.svg",
+                          "type":  "asset",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/ci_consolidation_plan.md",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/ci_evidence_map.md",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/configuration/index.md",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/configuration/configuration_guide.md",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/deployment/alert_service_config_matrix.md",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/deployment/index.md",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/documentation_audit.md",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/documentation_cleanup_merge_gate.md",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/documentation_inventory.json",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/documentation_inventory.md",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/documentation_naming_map.md",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/documentation_style_guide.md",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/fdp/branch_index.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/evidence_status.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_25_regulated_mutation_commit.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_27_merge_gate.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_28_invariant_proof_report.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_28b_chaos_handoff.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_29_design_checklist.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_29_evidence_gated_finalize_handoff.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_29_implementation_merge_gate.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_30_executor_split.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_31_claim_replay_policy_extraction.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_32_lease_fencing_stale_worker_protection.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_32_merge_gate.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_33_lease_renewal_operational_readiness.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_33_merge_gate.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_34_merge_gate.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_35_merge_gate.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_36_enablement_decision_checklist.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_36_merge_gate.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_37_enablement_decision_checklist.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_37_merge_gate.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_38_merge_gate.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_39_merge_gate.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_40_merge_gate.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_42_merge_gate.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_42_summary.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_43_merge_gate.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_44_merge_gate.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_45_work_queue_readiness.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_46_fraud_case_work_queue_ui.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_47_analyst_console_ux_and_summary.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_48_branch_readme.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_50_frontend_api_client_boundary.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_51_workspace_runtime_provider.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_52_workspace_detail_ux.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/fdp_53_workspace_runtime_ownership.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/fdp/index.md",
+                          "type":  "branch-evidence",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/frontend/api_client_boundary.md",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/frontend/index.md",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/index.md",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/ml/index.md",
+                          "type":  "ml",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/ml/ml_governance_drift_v1.md",
+                          "type":  "ml",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/observability/alert_service_slo.md",
+                          "type":  "observability",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/observability/fdp_33_lease_renewal_dashboard.md",
+                          "type":  "observability",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/observability/fdp_35_regulated_mutation_alert_thresholds.md",
+                          "type":  "observability",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/observability/fdp_35_regulated_mutation_dashboard_spec.md",
+                          "type":  "observability",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/observability/fraud_case_lifecycle_idempotency_dashboard.md",
+                          "type":  "observability",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/observability/index.md",
+                          "type":  "observability",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/observability/operations_observability_v2.md",
+                          "type":  "observability",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/openapi/alert_service.openapi.yaml",
+                          "type":  "api",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/openapi/index.md",
+                          "type":  "api",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/openapi/ml_inference_service.openapi.yaml",
+                          "type":  "api",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/operations/fdp_35_regulated_mutation_rollback_plan.md",
+                          "type":  "project",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/operations/index.md",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/ops/fdp_37_dashboard_and_alert_thresholds.md",
+                          "type":  "observability",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/ops/fdp_37_rollback_validation_output_template.md",
+                          "type":  "observability",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/ops/index.md",
+                          "type":  "observability",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/product/fraud_case_management.md",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/product/index.md",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/release/fdp_39_approval_and_rollback_matrix.md",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_39_branch_readme.md",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_39_enablement_governance.md",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_39_final_regulated_mutation_proof_matrix.md",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_39_fixture_dockerfile_allowlist.json",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_39_release_artifact_separation_matrix.md",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_40_attestation_readiness_template.json",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_40_branch_protection_readiness.json",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_40_branch_protection_readiness.md",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_40_branch_readme.md",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_40_cosign_verification_readiness.md",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_40_deployment_environment_readiness.json",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_40_deployment_environment_readiness.md",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_40_environment_protection_gates.json",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_40_environment_protection_gates.md",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_40_external_platform_controls_matrix.json",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_40_external_platform_controls_matrix.md",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_40_fdp39_provenance_reference.json",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_40_proof_artifact_schema.md",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_40_registry_immutability_readiness.json",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_40_registry_immutability_readiness.md",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_40_registry_promotion_policy.json",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_40_registry_promotion_policy.md",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_40_release_manifest_template.yaml",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_40_required_checks_matrix.json",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_40_required_checks_matrix.md",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_40_residual_platform_gaps.md",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_40_sbom_readiness_policy.md",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_40_sbom_readiness_template.json",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_40_signed_provenance_policy.md",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_40_single_release_owner_governance.json",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_40_single_release_owner_governance.md",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_40_unsupported_claims_matrix.md",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/fdp_50_legacy_api_removal.md",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/release/index.md",
+                          "type":  "release-proof",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/release/release_governance.md",
+                          "type":  "release-proof",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/reviewer_checklist.md",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/runbooks/alert_service_operations.md",
+                          "type":  "runbook",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/runbooks/fraud_case_operations.md",
+                          "type":  "runbook",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/runbooks/index.md",
+                          "type":  "runbook",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/runbooks/regulated_mutation_drills.md",
+                          "type":  "runbook",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/runbooks/regulated_mutation_recovery.md",
+                          "type":  "runbook",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/security/endpoint_authorization_map.md",
+                          "type":  "security",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/security/index.md",
+                          "type":  "security",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/security/internal_service_identity.md",
+                          "type":  "security",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/security/security_architecture.md",
+                          "type":  "security",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/templates/fdp_branch_readme_template.md",
+                          "type":  "project",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/testing/evidence_gated_finalize_test_plan.md",
+                          "type":  "release-proof",
+                          "status":  "current-source-of-truth"
+                      },
+                      {
+                          "path":  "docs/testing/fdp_35_regulated_mutation_readiness_proof.md",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/testing/fdp_36_real_chaos_proof.md",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/testing/fdp_37_production_image_chaos_proof.md",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/testing/fdp_38_live_runtime_checkpoint_proof.md",
+                          "type":  "release-proof",
+                          "status":  "branch-evidence-or-template"
+                      },
+                      {
+                          "path":  "docs/testing/index.md",
+                          "type":  "release-proof",
+                          "status":  "current-source-of-truth"
+                      }
+                  ]
+}

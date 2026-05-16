@@ -15,13 +15,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class Fdp40SignedProvenanceReadinessTest {
 
-    private static final Path MANIFEST = Path.of("../docs/release/fdp-40-release-manifest-template.yaml");
-    private static final Path ATTESTATION = Path.of("../docs/release/fdp-40-attestation-readiness-template.json");
+    private static final Path MANIFEST = Path.of("../docs/release/fdp_40_release_manifest_template.yaml");
+    private static final Path ATTESTATION = Path.of("../docs/release/fdp_40_attestation_readiness_template.json");
 
     @Test
     void signedProvenanceReadinessRequiresReleaseImageAttestationFields() throws Exception {
         assertThat(Files.exists(Path.of("../scripts/fdp40-validate-attestation-readiness.sh"))).isTrue();
-        assertThat(Files.readString(Path.of("../docs/release/fdp-40-signed-provenance-policy.md")))
+        assertThat(Files.readString(Path.of("../docs/release/fdp_40_signed_provenance_policy.md")))
                 .contains("signed_provenance_readiness: true")
                 .contains("signing_verification_performed: false")
                 .contains("signing_enforced_by_fdp40: false")

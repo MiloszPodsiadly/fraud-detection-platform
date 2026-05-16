@@ -31,8 +31,8 @@ class Fdp45FraudCaseWorkQueueSortFieldCoverageTest {
         FraudCaseDocument document = documentWithEveryCursorSortValue();
         FraudCaseWorkQueueCursorCodec codec = FraudCaseWorkQueueCursorCodec.localDefault();
         MongoFraudCaseSearchRepository repository = new MongoFraudCaseSearchRepository(null);
-        String docs = Files.readString(projectRoot().resolve("docs/fdp-45-work-queue-readiness.md"));
-        String openApi = Files.readString(projectRoot().resolve("docs/openapi/alert-service.openapi.yaml"));
+        String docs = Files.readString(projectRoot().resolve("docs/fdp/fdp_45_work_queue_readiness.md"));
+        String openApi = Files.readString(projectRoot().resolve("docs/openapi/alert_service.openapi.yaml"));
 
         for (String field : FraudCaseReadQueryPolicy.SORT_FIELDS) {
             String encoded = codec.encode(Sort.Order.asc(field), document, "query-hash");

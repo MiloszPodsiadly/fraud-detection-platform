@@ -12,7 +12,7 @@ class Fdp45SensitiveReadAuditUnavailableRunbookTest {
 
     @Test
     void runbookDocumentsFailClosedAuditUnavailableResponseWithoutRawIdentifiers() throws IOException {
-        Path runbook = projectRoot().resolve("docs/runbooks/fdp-45-sensitive-read-audit-unavailable.md");
+        Path runbook = projectRoot().resolve("docs/runbooks/fraud_case_operations.md");
         String body = Files.readString(runbook).toLowerCase();
 
         assertThat(body)

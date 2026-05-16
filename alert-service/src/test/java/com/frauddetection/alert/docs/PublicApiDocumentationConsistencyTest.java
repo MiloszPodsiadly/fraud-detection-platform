@@ -18,14 +18,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 class PublicApiDocumentationConsistencyTest {
 
     private static final Pattern UPPERCASE_TOKEN = Pattern.compile("\\b[A-Z][A-Z0-9_]{3,}\\b");
-    private static final Set<String> NON_STATUS_TOKENS = Set.of("HTTP", "WORM", "ACID");
+    private static final Set<String> NON_STATUS_TOKENS = Set.of(
+            "HTTP",
+            "WORM",
+            "ACID",
+            "FRAUD_CASE_VALIDATION_FAILED",
+            "MISSING_IDEMPOTENCY_KEY"
+    );
 
     @Test
     void publicStatusDocsCoverEverySubmitDecisionOperationStatus() throws Exception {
         Path docsRoot = DocumentationTestSupport.docsRoot();
-        String truthTable = Files.readString(docsRoot.resolve("api/status-truth-table.md"));
-        String semantics = Files.readString(docsRoot.resolve("api/public-api-semantics.md"));
-        String openApi = Files.readString(docsRoot.resolve("openapi/alert-service.openapi.yaml"));
+        String truthTable = Files.readString(docsRoot.resolve("api/status_truth_table.md"));
+        String semantics = Files.readString(docsRoot.resolve("api/public_api_semantics.md"));
+        String openApi = Files.readString(docsRoot.resolve("openapi/alert_service.openapi.yaml"));
 
         for (SubmitDecisionOperationStatus status : SubmitDecisionOperationStatus.values()) {
             assertThat(truthTable).contains(status.name());
@@ -53,7 +59,7 @@ class PublicApiDocumentationConsistencyTest {
 
     @Test
     void publicResponseFieldDocsCoverCurrentDtoFields() throws Exception {
-        String semantics = Files.readString(DocumentationTestSupport.docsRoot().resolve("api/public-api-semantics.md"));
+        String semantics = Files.readString(DocumentationTestSupport.docsRoot().resolve("api/public_api_semantics.md"));
 
         List<String> submitDecisionFields = List.of(
                 "alertId",
@@ -88,9 +94,9 @@ class PublicApiDocumentationConsistencyTest {
     @Test
     void publicDocsRejectKnownFalseEquivalences() throws Exception {
         Path docsRoot = DocumentationTestSupport.docsRoot();
-        String combined = Files.readString(docsRoot.resolve("api/public-api-semantics.md"))
-                + "\n" + Files.readString(docsRoot.resolve("api/status-truth-table.md"))
-                + "\n" + Files.readString(docsRoot.resolve("api/openapi-safety-audit.md"));
+        String combined = Files.readString(docsRoot.resolve("api/public_api_semantics.md"))
+                + "\n" + Files.readString(docsRoot.resolve("api/status_truth_table.md"))
+                + "\n" + Files.readString(docsRoot.resolve("api/openapi_safety_audit.md"));
 
         assertThat(combined)
                 .contains("not external finality")

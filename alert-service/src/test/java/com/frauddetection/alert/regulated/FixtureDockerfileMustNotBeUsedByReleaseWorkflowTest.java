@@ -57,7 +57,7 @@ class FixtureDockerfileMustNotBeUsedByReleaseWorkflowTest {
     }
 
     private List<Occurrence> findOccurrences() throws IOException {
-        assertThat(Files.exists(Path.of("../docs/release/fdp-39-fixture-dockerfile-allowlist.json")))
+        assertThat(Files.exists(Path.of("../docs/release/fdp_39_fixture_dockerfile_allowlist.json")))
                 .as("FDP-39 fixture Dockerfile structural allowlist must exist")
                 .isTrue();
         List<Path> roots = List.of(
@@ -104,9 +104,9 @@ class FixtureDockerfileMustNotBeUsedByReleaseWorkflowTest {
         }
         return path.equals("scripts/fdp39-generate-governance-artifacts.sh")
                 || path.equals("deployment/Dockerfile.alert-service-fdp38-fixture")
-                || path.matches("docs/fdp-38-.*\\.md")
-                || path.matches("docs/adr/fdp-39-.*\\.md")
-                || path.matches("docs/release/fdp-39-.*\\.(md|json)")
+                || path.matches("docs/fdp/fdp_38_.*\\.md")
+                || path.matches("docs/adr/fdp_39_.*\\.md")
+                || path.matches("docs/release/fdp_39_.*\\.(md|json)")
                 || path.startsWith("alert-service/src/test/");
     }
 

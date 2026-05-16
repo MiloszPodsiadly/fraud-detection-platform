@@ -30,10 +30,10 @@ class AuditEvidenceExportOpenApiContractTest {
     }
 
     private Path openApiPath() {
-        Path fromRoot = Path.of("docs", "openapi", "alert-service.openapi.yaml");
+        Path fromRoot = Path.of("docs", "openapi", "alert_service.openapi.yaml");
         if (Files.exists(fromRoot)) {
             return fromRoot;
         }
-        return Path.of("..", "docs", "openapi", "alert-service.openapi.yaml");
+        return Path.of("..", "docs", "openapi", "alert_service.openapi.yaml");
     }
 }

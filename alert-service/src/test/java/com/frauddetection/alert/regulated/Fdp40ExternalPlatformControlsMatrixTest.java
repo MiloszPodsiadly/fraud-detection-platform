@@ -32,12 +32,12 @@ class Fdp40ExternalPlatformControlsMatrixTest {
 
     @Test
     void externalPlatformControlsAreExplicitReadinessGaps() throws Exception {
-        String docs = Files.readString(Path.of("../docs/release/fdp-40-external-platform-controls-matrix.md"));
+        String docs = Files.readString(Path.of("../docs/release/fdp_40_external_platform_controls_matrix.md"));
         assertThat(docs)
                 .contains("readiness is not full platform enforcement")
                 .contains("Production enablement is NO-GO");
 
-        Map<String, Object> matrix = readJson(Path.of("../docs/release/fdp-40-external-platform-controls-matrix.json"));
+        Map<String, Object> matrix = readJson(Path.of("../docs/release/fdp_40_external_platform_controls_matrix.json"));
         List<Map<String, Object>> controls = ((List<?>) matrix.get("controls")).stream()
                 .map(item -> (Map<String, Object>) item)
                 .toList();

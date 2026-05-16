@@ -1,6 +1,15 @@
-# Runbook Index And Standards
+# Runbook Index
 
 Status: current runbook standard.
+
+## Current Runbooks
+
+| Runbook | Use when |
+| --- | --- |
+| [Alert service operations](alert_service_operations.md) | Runtime operations, trust incidents, outbox ambiguity, audit degradation, and startup closure. |
+| [Regulated mutation recovery](regulated_mutation_recovery.md) | Lease renewal failures, checkpoint renewal failures, finalize recovery, and local audit-chain contention. |
+| [Regulated mutation drills](regulated_mutation_drills.md) | Modeled recovery drills and real alert-service kill-restart drill evidence. |
+| [Fraud case operations](fraud_case_operations.md) | Fraud-case lifecycle idempotency, work queue cursor rotation, and sensitive-read audit failures. |
 
 ## Required Sections
 
@@ -18,15 +27,6 @@ Professional operator runbooks should contain:
 10. Example output
 11. Escalation
 12. Non-claims
-
-## Priority Runbooks
-
-- Stale or expired regulated mutation lease: `fdp-33-lease-renewal-runbook.md`
-- Checkpoint renewal failure: `fdp-34-safe-checkpoint-renewal-runbook.md`
-- Recovery required: `fdp-29-finalize-recovery-required.md`
-- Production readiness recovery drill: `fdp-35-regulated-mutation-recovery-drill-runbook.md`
-- Real chaos recovery drill: `fdp-36-real-chaos-recovery-drill-runbook.md`
-- Alert-service production operations: `alert-service-production-runbooks.md`
 
 ## Ops Endpoint Rules
 

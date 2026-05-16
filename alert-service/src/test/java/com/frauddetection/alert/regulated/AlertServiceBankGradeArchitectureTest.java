@@ -64,8 +64,8 @@ class AlertServiceBankGradeArchitectureTest {
     @Test
     void docsMustNotOverclaimBankGradeClosure() throws Exception {
         String combined = Files.readString(Path.of("../README.md"))
-                + "\n" + readIfExists("../docs/architecture/alert-service-source-of-truth.md")
-                + "\n" + readIfExists("../docs/fdp-27-merge-gate.md");
+                + "\n" + readIfExists("../docs/architecture/alert_service_source_of_truth.md")
+                + "\n" + readIfExists("../docs/fdp/fdp_27_merge_gate.md");
 
         assertContextual(combined, "distributed ACID");
         assertContextual(combined, "exactly-once");
@@ -79,7 +79,7 @@ class AlertServiceBankGradeArchitectureTest {
 
     @Test
     void sourceOfTruthDocsMustNamePersistentDocumentsAndCollections() throws Exception {
-        String sourceOfTruth = Files.readString(Path.of("../docs/architecture/alert-service-source-of-truth.md"));
+        String sourceOfTruth = Files.readString(Path.of("../docs/architecture/alert_service_source_of_truth.md"));
 
         assertThat(sourceOfTruth).contains(
                 "RegulatedMutationCommandDocument",

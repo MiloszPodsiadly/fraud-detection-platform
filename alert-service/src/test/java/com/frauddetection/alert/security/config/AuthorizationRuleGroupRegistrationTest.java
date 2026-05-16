@@ -14,7 +14,7 @@ class AuthorizationRuleGroupRegistrationTest {
         String composer = SecurityRuleSource.source(
                 "src/main/java/com/frauddetection/alert/security/config/AlertEndpointAuthorizationRules.java");
         String docs = SecurityRuleSource.sourceFromPath(
-                SecurityRuleSource.repositoryFile("docs/security/endpoint-authorization-map.md"));
+                SecurityRuleSource.repositoryFile("docs/security/endpoint_authorization_map.md"));
 
         assertThat(discoveredGroups).containsExactlyInAnyOrderElementsOf(SecurityRuleSource.ROUTE_GROUPS);
         assertThat(discoveredGroups).allSatisfy(group -> {

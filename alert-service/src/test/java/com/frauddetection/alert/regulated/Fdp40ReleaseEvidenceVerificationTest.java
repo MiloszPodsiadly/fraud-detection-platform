@@ -25,10 +25,10 @@ class Fdp40ReleaseEvidenceVerificationTest {
     void releaseEvidenceVerificationProducesPassArtifact() throws Exception {
         assertThat(Files.exists(Path.of("../scripts/fdp40-verify-release-evidence.sh"))).isTrue();
 
-        Map<String, String> manifest = readYamlKeyValues(Path.of("../docs/release/fdp-40-release-manifest-template.yaml"));
-        Map<String, Object> attestation = readJson(Path.of("../docs/release/fdp-40-attestation-readiness-template.json"));
-        Map<String, Object> fdp39 = readJson(Path.of("../docs/release/fdp-40-fdp39-provenance-reference.json"));
-        Map<String, Object> checks = readJson(Path.of("../docs/release/fdp-40-required-checks-matrix.json"));
+        Map<String, String> manifest = readYamlKeyValues(Path.of("../docs/release/fdp_40_release_manifest_template.yaml"));
+        Map<String, Object> attestation = readJson(Path.of("../docs/release/fdp_40_attestation_readiness_template.json"));
+        Map<String, Object> fdp39 = readJson(Path.of("../docs/release/fdp_40_fdp39_provenance_reference.json"));
+        Map<String, Object> checks = readJson(Path.of("../docs/release/fdp_40_required_checks_matrix.json"));
 
         assertReleaseManifestValid(manifest);
         assertAttestationValid(attestation, manifest);

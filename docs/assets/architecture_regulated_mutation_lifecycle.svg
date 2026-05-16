@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-labelledby="title desc">
+  <title id="title">Regulated mutation lifecycle</title>
+  <desc id="desc">State flow from request acceptance through local evidence, finalize, external pending evidence, confirmation, and recovery paths.</desc>
+  <defs>
+    <marker id="arrow-rm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font: 700 26px Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 14px Arial, sans-serif; fill: #475569; }
+      .lane { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.4; rx: 16; }
+      .laneTitle { font: 700 13px Arial, sans-serif; fill: #334155; letter-spacing: .4px; }
+      .state { fill: #eff6ff; stroke: #3b82f6; stroke-width: 1.4; rx: 12; }
+      .commit { fill: #ecfdf5; stroke: #22c55e; }
+      .pending { fill: #fff7ed; stroke: #f97316; }
+      .risk { fill: #fef2f2; stroke: #ef4444; }
+      .label { font: 700 13px Arial, sans-serif; fill: #111827; }
+      .small { font: 400 11px Arial, sans-serif; fill: #475569; }
+      .arrow { stroke: #334155; stroke-width: 2.2; fill: none; marker-end: url(#arrow-rm); }
+      .dashed { stroke: #64748b; stroke-width: 1.9; fill: none; marker-end: url(#arrow-rm); stroke-dasharray: 7 5; }
+      .note { fill: #f1f5f9; stroke: #cbd5e1; stroke-width: 1.2; rx: 12; }
+    </style>
+  </defs>
+  <rect class="bg" width="1200" height="560"/>
+  <text class="title" x="48" y="52">Regulated Mutation Lifecycle</text>
+  <text class="subtitle" x="48" y="78">Local command state, durable evidence, replay snapshots, and bounded recovery.</text>
+
+  <rect class="lane" x="40" y="110" width="1120" height="120"/>
+  <text class="laneTitle" x="64" y="140">COMMAND AND LOCAL EVIDENCE</text>
+  <rect class="state" x="70" y="162" width="145" height="48"/>
+  <text class="label" x="92" y="186">REQUESTED</text>
+  <text class="small" x="92" y="202">canonical intent</text>
+  <rect class="state" x="265" y="162" width="165" height="48"/>
+  <text class="label" x="287" y="186">AUDIT ATTEMPTED</text>
+  <text class="small" x="287" y="202">local audit proof</text>
+  <rect class="state" x="480" y="162" width="175" height="48"/>
+  <text class="label" x="502" y="186">EVIDENCE PREPARED</text>
+  <text class="small" x="502" y="202">preconditions satisfied</text>
+  <path class="arrow" d="M 215 186 L 265 186"/>
+  <path class="arrow" d="M 430 186 L 480 186"/>
+
+  <rect class="lane" x="40" y="260" width="1120" height="150"/>
+  <text class="laneTitle" x="64" y="290">LOCAL FINALIZE TRANSACTION</text>
+  <rect class="state pending" x="125" y="320" width="150" height="54"/>
+  <text class="label" x="152" y="343">FINALIZING</text>
+  <text class="small" x="152" y="360">lease fenced</text>
+  <rect class="state commit" x="350" y="320" width="215" height="54"/>
+  <text class="label" x="376" y="343">FINALIZED PENDING</text>
+  <text class="small" x="376" y="360">business + outbox + snapshot</text>
+  <rect class="state commit" x="640" y="320" width="215" height="54"/>
+  <text class="label" x="666" y="343">EVIDENCE CONFIRMED</text>
+  <text class="small" x="666" y="360">explicit confirmation only</text>
+  <path class="arrow" d="M 655 210 C 680 245 215 278 200 320"/>
+  <path class="arrow" d="M 275 347 L 350 347"/>
+  <path class="dashed" d="M 565 347 L 640 347"/>
+
+  <rect class="lane" x="40" y="440" width="1120" height="76"/>
+  <text class="laneTitle" x="64" y="470">FAIL-CLOSED AND RECOVERY PATHS</text>
+  <rect class="state risk" x="295" y="482" width="190" height="28"/>
+  <text class="label" x="315" y="501">REJECTED / VALIDATION</text>
+  <rect class="state risk" x="545" y="482" width="205" height="28"/>
+  <text class="label" x="567" y="501">RECOVERY REQUIRED</text>
+  <rect class="note" x="820" y="460" width="285" height="42"/>
+  <text class="small" x="842" y="480">No updated resource is returned until</text>
+  <text class="small" x="842" y="496">local finalize is durably proven.</text>
+  <path class="dashed" d="M 347 210 C 330 288 322 390 390 482"/>
+  <path class="dashed" d="M 200 374 C 260 430 450 446 545 494"/>
+  <path class="dashed" d="M 748 374 C 720 425 690 455 650 482"/>
+</svg>

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-attestation="${1:-docs/release/fdp-40-attestation-readiness-template.json}"
-manifest="${2:-docs/release/fdp-40-release-manifest-template.yaml}"
+attestation="${1:-docs/release/fdp_40_attestation_readiness_template.json}"
+manifest="${2:-docs/release/fdp_40_release_manifest_template.yaml}"
 
 if command -v python3 >/dev/null 2>&1 && python3 --version >/dev/null 2>&1; then
   PYTHON_CMD="python3"

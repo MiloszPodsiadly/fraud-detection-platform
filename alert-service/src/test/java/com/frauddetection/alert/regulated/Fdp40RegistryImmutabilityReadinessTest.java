@@ -14,8 +14,8 @@ class Fdp40RegistryImmutabilityReadinessTest {
 
     @Test
     void registryImmutabilityRequiresExternalProviderEvidence() throws Exception {
-        String docs = Files.readString(Path.of("../docs/release/fdp-40-registry-immutability-readiness.md"));
-        Map<String, Object> readiness = readJson(Path.of("../docs/release/fdp-40-registry-immutability-readiness.json"));
+        String docs = Files.readString(Path.of("../docs/release/fdp_40_registry_immutability_readiness.md"));
+        Map<String, Object> readiness = readJson(Path.of("../docs/release/fdp_40_registry_immutability_readiness.json"));
 
         assertThat(docs)
                 .contains("does not verify registry immutability through registry provider APIs")

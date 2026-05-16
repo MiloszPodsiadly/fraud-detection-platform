@@ -14,7 +14,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class Fdp40ReleaseManifestValidationTest {
 
-    private static final Path MANIFEST = Path.of("../docs/release/fdp-40-release-manifest-template.yaml");
+    private static final Path MANIFEST = Path.of("../docs/release/fdp_40_release_manifest_template.yaml");
 
     @Test
     void releaseManifestTemplateIsDigestBoundAndTiedToFdp39Provenance() throws Exception {

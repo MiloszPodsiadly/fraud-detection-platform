@@ -12,7 +12,7 @@ class Fdp45FraudCaseLegacyExactCountCompatibilityDocsTest {
 
     @Test
     void docsAndSourceSeparateWorkQueueSliceFromListExactCountDebt() throws IOException {
-        String docs = Files.readString(projectRoot().resolve("docs/fdp-45-work-queue-readiness.md"))
+        String docs = Files.readString(projectRoot().resolve("docs/fdp/fdp_45_work_queue_readiness.md"))
                 .toLowerCase()
                 .replaceAll("\\s+", " ");
         String queryService = Files.readString(sourceRoot().resolve("service/FraudCaseQueryService.java"));

@@ -10,7 +10,7 @@ class ConfigurationDocumentationSafetyTest {
 
     @Test
     void configurationGuideSeparatesLocalFixtureAndProductionLikeUse() throws Exception {
-        String guide = Files.readString(DocumentationTestSupport.docsRoot().resolve("configuration/configuration-guide.md"));
+        String guide = Files.readString(DocumentationTestSupport.docsRoot().resolve("configuration/configuration_guide.md"));
 
         assertThat(guide)
                 .contains("Mode/profile")

@@ -17,11 +17,11 @@ class DocumentationReadabilityTest {
 
     private static final List<Path> CURRENT_DOCS = List.of(
             Path.of("docs/index.md"),
-            Path.of("docs/documentation-audit.md"),
-            Path.of("docs/api/public-api-semantics.md"),
-            Path.of("docs/configuration/configuration-guide.md"),
-            Path.of("docs/documentation-cleanup-merge-gate.md"),
-            Path.of("docs/documentation-style-guide.md")
+            Path.of("docs/documentation_audit.md"),
+            Path.of("docs/api/public_api_semantics.md"),
+            Path.of("docs/configuration/configuration_guide.md"),
+            Path.of("docs/documentation_cleanup_merge_gate.md"),
+            Path.of("docs/documentation_style_guide.md")
     );
 
     private static final List<String> FORBIDDEN_BLOB_PREFIXES = List.of(
@@ -71,9 +71,9 @@ class DocumentationReadabilityTest {
     @Test
     void openApiAndYamlDocsRemainStructured() throws Exception {
         List<Path> yamlDocs = List.of(
-                DocumentationTestSupport.docsRoot().resolve("openapi/alert-service.openapi.yaml"),
-                DocumentationTestSupport.docsRoot().resolve("openapi/ml-inference-service.openapi.yaml"),
-                DocumentationTestSupport.docsRoot().resolve("release/fdp-40-release-manifest-template.yaml")
+                DocumentationTestSupport.docsRoot().resolve("openapi/alert_service.openapi.yaml"),
+                DocumentationTestSupport.docsRoot().resolve("openapi/ml_inference_service.openapi.yaml"),
+                DocumentationTestSupport.docsRoot().resolve("release/fdp_40_release_manifest_template.yaml")
         );
         for (Path path : yamlDocs) {
             String content = Files.readString(path);
@@ -81,10 +81,10 @@ class DocumentationReadabilityTest {
             assertThat(content).as(path + " must avoid tab indentation").doesNotContain("\t");
             assertThat(content).as(path + " must contain key-value YAML structure").contains(":");
         }
-        assertThat(Files.readString(DocumentationTestSupport.docsRoot().resolve("openapi/alert-service.openapi.yaml")))
+        assertThat(Files.readString(DocumentationTestSupport.docsRoot().resolve("openapi/alert_service.openapi.yaml")))
                 .contains("openapi: 3.0.3")
                 .contains("This portfolio API specification does not represent bank certification");
-        assertThat(Files.readString(DocumentationTestSupport.docsRoot().resolve("openapi/ml-inference-service.openapi.yaml")))
+        assertThat(Files.readString(DocumentationTestSupport.docsRoot().resolve("openapi/ml_inference_service.openapi.yaml")))
                 .contains("openapi: 3.0.3")
                 .contains("This portfolio API specification does not represent bank certification");
     }

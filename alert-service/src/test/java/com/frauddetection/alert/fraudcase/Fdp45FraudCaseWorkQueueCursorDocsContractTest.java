@@ -11,7 +11,7 @@ class Fdp45FraudCaseWorkQueueCursorDocsContractTest {
 
     @Test
     void docsShouldDescribeFinalCursorContractWithoutLeakingSensitiveValues() throws Exception {
-        String docs = Files.readString(projectRoot().resolve("docs/fdp-45-work-queue-readiness.md"))
+        String docs = Files.readString(projectRoot().resolve("docs/fdp/fdp_45_work_queue_readiness.md"))
                 .toLowerCase(java.util.Locale.ROOT);
 
         assertThat(docs)
@@ -34,7 +34,7 @@ class Fdp45FraudCaseWorkQueueCursorDocsContractTest {
 
     @Test
     void openApiShouldDescribeFilterBoundCursorAndPageConflict() throws Exception {
-        String openApi = Files.readString(projectRoot().resolve("docs/openapi/alert-service.openapi.yaml"))
+        String openApi = Files.readString(projectRoot().resolve("docs/openapi/alert_service.openapi.yaml"))
                 .toLowerCase(java.util.Locale.ROOT);
 
         assertThat(openApi)
@@ -49,7 +49,7 @@ class Fdp45FraudCaseWorkQueueCursorDocsContractTest {
 
     @Test
     void rotationRunbookShouldDescribeInvalidationRecoveryAndCursorHandling() throws Exception {
-        String runbook = Files.readString(projectRoot().resolve("docs/runbooks/fdp-45-work-queue-cursor-secret-rotation.md"))
+        String runbook = Files.readString(projectRoot().resolve("docs/runbooks/fraud_case_operations.md"))
                 .toLowerCase(java.util.Locale.ROOT);
 
         assertThat(runbook)

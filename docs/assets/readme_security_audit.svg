@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-labelledby="title desc">
+  <title id="title">Security and audit boundaries</title>
+  <desc id="desc">Security boundary diagram showing identity modes, backend authorization, analyst writes, audit records, outbox evidence, and trust authority verification.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+    <style>
+      .bg { fill: #f8fafc; }
+      .panel { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.4; rx: 16; }
+      .title { font: 700 25px Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 14px Arial, sans-serif; fill: #475569; }
+      .section { font: 700 15px Arial, sans-serif; fill: #334155; letter-spacing: .4px; }
+      .box { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1.3; rx: 10; }
+      .identity { fill: #eff6ff; stroke: #3b82f6; }
+      .control { fill: #fff7ed; stroke: #f97316; }
+      .evidence { fill: #f5f3ff; stroke: #8b5cf6; }
+      .label { font: 700 14px Arial, sans-serif; fill: #111827; }
+      .small { font: 400 12px Arial, sans-serif; fill: #475569; }
+      .arrow { stroke: #334155; stroke-width: 2.2; fill: none; marker-end: url(#arrow); }
+      .soft { stroke: #64748b; stroke-width: 1.8; fill: none; marker-end: url(#arrow); stroke-dasharray: 6 5; }
+    </style>
+  </defs>
+  <rect class="bg" width="1200" height="560"/>
+  <text class="title" x="48" y="52">Security And Audit Boundaries</text>
+  <text class="subtitle" x="48" y="78">Authentication selects the actor. Backend RBAC authorizes the action. Audit stores the evidence.</text>
+
+  <rect class="panel" x="50" y="120" width="255" height="310"/>
+  <text class="section" x="75" y="153">IDENTITY MODES</text>
+  <rect class="box identity" x="78" y="178" width="198" height="58"/>
+  <text class="label" x="98" y="208">Demo auth</text>
+  <text class="small" x="98" y="226">local/dev only</text>
+  <rect class="box identity" x="78" y="258" width="198" height="58"/>
+  <text class="label" x="98" y="288">Local OIDC</text>
+  <text class="small" x="98" y="306">Keycloak override</text>
+  <rect class="box identity" x="78" y="338" width="198" height="58"/>
+  <text class="label" x="98" y="368">JWT resource server</text>
+  <text class="small" x="98" y="386">claim mapping</text>
+
+  <rect class="panel" x="365" y="120" width="335" height="310"/>
+  <text class="section" x="390" y="153">BACKEND ENFORCEMENT</text>
+  <rect class="box control" x="395" y="178" width="270" height="58"/>
+  <text class="label" x="418" y="208">AnalystPrincipal</text>
+  <text class="small" x="418" y="226">backend-resolved actor identity</text>
+  <rect class="box control" x="395" y="258" width="270" height="58"/>
+  <text class="label" x="418" y="288">RBAC authorities</text>
+  <text class="small" x="418" y="306">endpoint and action checks</text>
+  <rect class="box control" x="395" y="338" width="270" height="58"/>
+  <text class="label" x="418" y="368">Analyst and recovery APIs</text>
+  <text class="small" x="418" y="386">decisions, cases, trust operations</text>
+
+  <rect class="panel" x="760" y="120" width="340" height="310"/>
+  <text class="section" x="785" y="153">AUDIT AND TRUST EVIDENCE</text>
+  <rect class="box evidence" x="790" y="178" width="280" height="58"/>
+  <text class="label" x="812" y="208">Append-only audit records</text>
+  <text class="small" x="812" y="226">actor, action, resource, outcome</text>
+  <rect class="box evidence" x="790" y="258" width="280" height="58"/>
+  <text class="label" x="812" y="288">Transactional outbox evidence</text>
+  <text class="small" x="812" y="306">local recovery and confirmation state</text>
+  <rect class="box evidence" x="790" y="338" width="280" height="58"/>
+  <text class="label" x="812" y="368">Audit trust authority</text>
+  <text class="small" x="812" y="386">local sign and verify workflow</text>
+
+  <path class="arrow" d="M276 367 H395"/>
+  <path class="arrow" d="M665 287 H790"/>
+  <path class="arrow" d="M665 367 H790"/>
+  <path class="soft" d="M276 207 C330 207 340 207 395 207"/>
+  <path class="soft" d="M276 287 H395"/>
+  <path class="arrow" d="M930 236 V258"/>
+  <path class="arrow" d="M930 316 V338"/>
+
+  <rect class="panel" x="50" y="465" width="1050" height="48"/>
+  <text class="small" x="75" y="494">Non-claims: local audit evidence is not WORM storage, legal notarization, bank certification, distributed ACID, exactly-once Kafka, or external finality.</text>
+</svg>

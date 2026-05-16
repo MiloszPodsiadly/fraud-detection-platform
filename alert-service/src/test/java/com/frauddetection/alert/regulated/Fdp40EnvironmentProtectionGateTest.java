@@ -16,18 +16,18 @@ class Fdp40EnvironmentProtectionGateTest {
 
     @Test
     void environmentProtectionGatesRequireSingleReleaseOwnerApprovalAndImmutableDigest() throws Exception {
-        assertThat(Files.readString(Path.of("../docs/release/fdp-40-environment-protection-gates.md")))
+        assertThat(Files.readString(Path.of("../docs/release/fdp_40_environment_protection_gates.md")))
                 .contains("single release owner model")
                 .contains("does not require dual-control")
                 .contains("FDP-29 enablement requires a separate config PR");
-        Map<String, Object> gates = readJson(Path.of("../docs/release/fdp-40-environment-protection-gates.json"));
+        Map<String, Object> gates = readJson(Path.of("../docs/release/fdp_40_environment_protection_gates.json"));
 
         assertGatesValid(gates);
     }
 
     @Test
     void invalidEnvironmentGateCasesFailClosed() throws Exception {
-        Map<String, Object> valid = readJson(Path.of("../docs/release/fdp-40-environment-protection-gates.json"));
+        Map<String, Object> valid = readJson(Path.of("../docs/release/fdp_40_environment_protection_gates.json"));
 
         assertInvalid(valid, gates -> gates.put("staging_deploy_requires_approval", false));
         assertInvalid(valid, gates -> gates.put("production_deploy_requires_approval", false));

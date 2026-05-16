@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="500" viewBox="0 0 1200 500" role="img" aria-labelledby="title desc">
+  <title id="title">Release governance flow</title>
+  <desc id="desc">Flow from commit through CI, image evidence, manifest, owner review, platform controls, and separate enablement decision.</desc>
+  <defs>
+    <marker id="arrow-rg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font: 700 26px Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 14px Arial, sans-serif; fill: #475569; }
+      .box { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.4; rx: 14; }
+      .ci { fill: #eff6ff; stroke: #3b82f6; }
+      .evidence { fill: #f5f3ff; stroke: #8b5cf6; }
+      .owner { fill: #ecfdf5; stroke: #22c55e; }
+      .decision { fill: #fff7ed; stroke: #f97316; }
+      .stop { fill: #fef2f2; stroke: #ef4444; }
+      .label { font: 700 13px Arial, sans-serif; fill: #111827; }
+      .small { font: 400 11px Arial, sans-serif; fill: #475569; }
+      .arrow { stroke: #334155; stroke-width: 2.1; fill: none; marker-end: url(#arrow-rg); }
+      .dashed { stroke: #64748b; stroke-width: 1.8; fill: none; marker-end: url(#arrow-rg); stroke-dasharray: 7 5; }
+    </style>
+  </defs>
+  <rect class="bg" width="1200" height="500"/>
+  <text class="title" x="48" y="52">Release Governance Flow</text>
+  <text class="subtitle" x="48" y="78">CI proof and release evidence support review; enablement remains a separate approval path.</text>
+
+  <rect class="box ci" x="65" y="145" width="145" height="70"/>
+  <text class="label" x="100" y="175">Commit</text>
+  <text class="small" x="90" y="195">source change</text>
+  <rect class="box ci" x="265" y="145" width="160" height="70"/>
+  <text class="label" x="300" y="175">Required CI</text>
+  <text class="small" x="292" y="195">quality gates</text>
+  <rect class="box evidence" x="480" y="145" width="170" height="70"/>
+  <text class="label" x="515" y="175">Image Digest</text>
+  <text class="small" x="512" y="195">immutable evidence</text>
+  <rect class="box evidence" x="705" y="145" width="170" height="70"/>
+  <text class="label" x="742" y="175">Manifest</text>
+  <text class="small" x="735" y="195">release evidence</text>
+  <rect class="box owner" x="930" y="145" width="190" height="70"/>
+  <text class="label" x="965" y="175">Owner Review</text>
+  <text class="small" x="958" y="195">single accountable owner</text>
+
+  <path class="arrow" d="M 210 180 L 265 180"/>
+  <path class="arrow" d="M 425 180 L 480 180"/>
+  <path class="arrow" d="M 650 180 L 705 180"/>
+  <path class="arrow" d="M 875 180 L 930 180"/>
+
+  <rect class="box owner" x="300" y="300" width="210" height="72"/>
+  <text class="label" x="330" y="330">Platform Controls</text>
+  <text class="small" x="330" y="350">environment, registry, protection</text>
+  <rect class="box decision" x="585" y="292" width="170" height="88"/>
+  <text class="label" x="628" y="325">Decision</text>
+  <text class="small" x="620" y="345">approve, defer, or no-go</text>
+  <rect class="box owner" x="835" y="300" width="200" height="72"/>
+  <text class="label" x="865" y="330">Config PR</text>
+  <text class="small" x="865" y="350">separate enablement change</text>
+  <rect class="box stop" x="585" y="410" width="170" height="50"/>
+  <text class="label" x="642" y="440">NO-GO</text>
+
+  <path class="arrow" d="M 1025 215 C 1025 265 525 260 405 300"/>
+  <path class="arrow" d="M 510 336 L 585 336"/>
+  <path class="arrow" d="M 755 336 L 835 336"/>
+  <path class="dashed" d="M 670 380 L 670 410"/>
+</svg>
