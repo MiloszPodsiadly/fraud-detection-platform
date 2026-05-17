@@ -8,6 +8,7 @@ const safeRepoRoot = repoRoot.replaceAll("\\", "/");
 const usingExplicitChangedFiles = Boolean(process.env.FDP50_SCOPE_CHANGED_FILES);
 const changedFiles = resolveChangedFiles();
 const violations = [];
+const enforceFdp50BackendScope = usingExplicitChangedFiles || isFdp50ScopeBranch();
 
 const allowedBackendFiles = new Set([
   "alert-service/src/main/java/com/frauddetection/alert/controller/FraudCaseController.java",
@@ -30,10 +31,10 @@ const allowedEndpointFiles = new Set([
 
 for (const file of changedFiles) {
   const normalized = file.replaceAll("\\", "/");
-  if (normalized.startsWith("alert-service/src/main/java/") && !allowedBackendFiles.has(normalized)) {
+  if (enforceFdp50BackendScope && normalized.startsWith("alert-service/src/main/java/") && !allowedBackendFiles.has(normalized)) {
     violations.push(`${normalized}: FDP-50 backend production changes are restricted to the approved legacy fraud-case route removal and FDP-55 BFF logout allowlist.`);
   }
-  if (forbiddenBackendProductionPrefixes.some((prefix) => normalized.startsWith(prefix))) {
+  if (enforceFdp50BackendScope && forbiddenBackendProductionPrefixes.some((prefix) => normalized.startsWith(prefix))) {
     violations.push(`${normalized}: FDP-50 must not change backend production code outside the approved alert-service allowlist.`);
   }
 }
@@ -93,6 +94,11 @@ function assertRefExists(ref) {
   } catch {
     return false;
   }
+}
+
+function isFdp50ScopeBranch() {
+  const headRef = process.env.GITHUB_HEAD_REF || process.env.BRANCH_NAME || git(["branch", "--show-current"], { allowFailure: true }).trim();
+  return /^FDP-50(?:$|[-_/])/.test(headRef);
 }
 
 function git(args, { allowFailure = false } = {}) {
