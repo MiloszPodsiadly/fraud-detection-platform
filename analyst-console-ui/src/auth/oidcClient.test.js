@@ -20,7 +20,7 @@ describe("oidcClient", () => {
 
   it("uses oidc-client-ts through a lazy adapter boundary", async () => {
     const signinRedirect = vi.fn().mockResolvedValue(undefined);
-    const getUser = vi.fn().mockResolvedValue({ profile: { sub: "user-1" } });
+    const getUser = vi.fn().mockResolvedValue({ id_token: "id-token-1", profile: { sub: "user-1" } });
     const signinRedirectCallback = vi.fn().mockResolvedValue({ profile: { sub: "user-1" } });
     const signoutRedirect = vi.fn().mockResolvedValue(undefined);
     const removeUser = vi.fn().mockResolvedValue(undefined);
@@ -65,13 +65,14 @@ describe("oidcClient", () => {
       response_type: "code"
     }));
     expect(stateStoreFactory).toHaveBeenCalledWith({ store: window.sessionStorage });
-    expect(getUser).toHaveBeenCalledTimes(1);
-    expect(removeUser).toHaveBeenCalledTimes(2);
+    expect(getUser).toHaveBeenCalledTimes(2);
+    expect(removeUser).toHaveBeenCalledTimes(1);
     expect(signinRedirect).toHaveBeenCalledTimes(1);
     expect(signinRedirectCallback).toHaveBeenCalledTimes(1);
     expect(signoutRedirect).toHaveBeenCalledTimes(1);
     expect(signoutRedirect).toHaveBeenCalledWith({
       client_id: "analyst-console-ui",
+      id_token_hint: "id-token-1",
       post_logout_redirect_uri: "http://localhost:5173/"
     });
   });

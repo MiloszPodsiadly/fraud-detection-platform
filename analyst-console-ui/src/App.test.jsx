@@ -445,7 +445,7 @@ describe("App", () => {
     expect(screen.queryByRole("heading", { name: "Session required" })).not.toBeInTheDocument();
   });
 
-  it("does not fetch fraud case summary when transaction scoring is the initial workspace", async () => {
+  it("loads the global fraud case counter when transaction scoring is the initial workspace", async () => {
     callbackPath.value = false;
     window.history.replaceState({}, "", "/?workspace=transaction-scoring");
     refreshSession.mockResolvedValue(authenticatedSession());
@@ -455,11 +455,13 @@ describe("App", () => {
       getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
     };
     listScoredTransactions.mockResolvedValue(transactionPage("txn-visible"));
+    getFraudCaseWorkQueueSummary.mockResolvedValue(summary(47));
 
     render(<App />);
 
     expect(await screen.findByText("txn-visible")).toBeInTheDocument();
-    expect(getFraudCaseWorkQueueSummary).not.toHaveBeenCalled();
+    await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("link", { name: /Global fraud cases\s*47/ })).toBeInTheDocument();
     expect(listFraudCaseWorkQueue).not.toHaveBeenCalled();
   });
 
@@ -478,15 +480,15 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByText("txn-visible")).toBeInTheDocument();
-    expect(getFraudCaseWorkQueueSummary).not.toHaveBeenCalled();
+    await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
 
     fireEvent.click(screen.getByRole("link", { name: "Fraud Case" }));
 
-    await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(2));
     expect(await screen.findByRole("link", { name: /Global fraud cases\s*47/ })).toBeInTheDocument();
   });
 
-  it("does not retry fraud case summary after switching away from the fraud case workspace", async () => {
+  it("keeps the global fraud case counter available after switching away without retrying the hidden work queue", async () => {
     callbackPath.value = false;
     refreshSession.mockResolvedValue(authenticatedSession());
     providerState.value = {
@@ -502,10 +504,11 @@ describe("App", () => {
     await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole("link", { name: "Transaction Scoring" }));
     expect(await screen.findByText("txn-visible")).toBeInTheDocument();
+    await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(2));
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
 
     await waitFor(() => expect(listScoredTransactions).toHaveBeenCalledTimes(3));
-    expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1);
+    expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(2);
     expect(listFraudCaseWorkQueue).toHaveBeenCalledTimes(1);
   });
 

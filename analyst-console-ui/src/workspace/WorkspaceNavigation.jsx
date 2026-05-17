@@ -31,7 +31,7 @@ export function WorkspaceNavigation({
   const fraudCaseGlobalCount = fraudCaseSummary?.totalFraudCases ?? fraudCaseTotalElements;
   const fraudCaseSummaryLabel = fraudCaseSummaryError
     ? "Unavailable"
-    : fraudCaseGlobalCount === undefined ? "Unavailable" : String(fraudCaseGlobalCount);
+    : fraudCaseGlobalCount == null ? "Unavailable" : String(fraudCaseGlobalCount);
   const fraudCaseSummaryGeneratedAt = fraudCaseSummary?.generatedAt
     ? new Date(fraudCaseSummary.generatedAt).toLocaleString()
     : null;

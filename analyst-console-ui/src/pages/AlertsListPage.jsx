@@ -17,7 +17,7 @@ export function AlertsListPage({
   transactionPage,
   advisoryQueue,
   governanceAnalytics,
-  fraudCaseSummary = { totalFraudCases: 0 },
+  fraudCaseSummary,
   fraudCaseTotalElements,
   fraudCaseSummaryError,
   isFraudCaseSummaryLoading = false,

@@ -43,13 +43,12 @@ export function createOidcClient({
     },
     async beginLogout() {
       const userManager = await getUserManager();
-      if (typeof userManager.removeUser === "function") {
-        await userManager.removeUser();
-      }
-      return userManager.signoutRedirect({
+      const user = typeof userManager.getUser === "function" ? await userManager.getUser() : null;
+      return userManager.signoutRedirect(compactLogoutArgs({
         client_id: settings.client_id,
+        id_token_hint: user?.id_token,
         post_logout_redirect_uri: settings.post_logout_redirect_uri
-      });
+      }));
     }
   };
 
@@ -85,4 +84,10 @@ function createUserStore(WebStorageStateStore) {
 
 function normalizeEnv(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function compactLogoutArgs(args) {
+  return Object.fromEntries(
+    Object.entries(args).filter(([, value]) => normalizeEnv(value))
+  );
 }
