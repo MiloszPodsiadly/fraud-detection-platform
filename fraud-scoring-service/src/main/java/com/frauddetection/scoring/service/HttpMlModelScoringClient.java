@@ -1,6 +1,7 @@
 package com.frauddetection.scoring.service;
 
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.reason.ReasonCode;
 import com.frauddetection.scoring.domain.MlModelInput;
 import com.frauddetection.scoring.domain.MlModelOutput;
 import com.frauddetection.scoring.observability.ScoringMetrics;
@@ -68,7 +69,7 @@ public class HttpMlModelScoringClient implements MlModelScoringClient {
                 "python-fraud-model",
                 "unavailable",
                 Instant.now(),
-                List.of("ML_MODEL_UNAVAILABLE"),
+                List.of(ReasonCode.ML_MODEL_UNAVAILABLE.wireValue()),
                 Map.of(
                         "modelAvailable", false,
                         "fallbackReason", fallbackReason

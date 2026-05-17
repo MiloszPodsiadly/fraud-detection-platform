@@ -65,6 +65,18 @@ public class ScoringMetrics {
         ).increment();
     }
 
+    public void recordReasonCodeParseUnsupported(String source, String parserMode, int count) {
+        if (count <= 0) {
+            return;
+        }
+        counter(
+                "fraud.scoring.reason_code.parse.unsupported",
+                "service", "fraud-scoring-service",
+                "source", normalizeReason(source),
+                "parser_mode", normalizeReason(parserMode)
+        ).increment(count);
+    }
+
     private Counter counter(String name, String... tags) {
         return Counter.builder(name).tags(tags).register(meterRegistry);
     }

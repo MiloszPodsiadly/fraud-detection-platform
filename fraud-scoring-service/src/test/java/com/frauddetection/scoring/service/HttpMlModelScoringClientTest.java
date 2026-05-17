@@ -1,6 +1,7 @@
 package com.frauddetection.scoring.service;
 
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.reason.ReasonCode;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
 import com.frauddetection.scoring.domain.MlModelInput;
@@ -69,6 +70,7 @@ class HttpMlModelScoringClientTest {
 
         assertThat(result.available()).isFalse();
         assertThat(result.riskLevel()).isEqualTo(RiskLevel.LOW);
+        assertThat(result.reasonCodes()).containsExactly(ReasonCode.ML_MODEL_UNAVAILABLE.wireValue());
         assertThat(result.explanationMetadata()).containsEntry("modelAvailable", false);
         assertThat(meterRegistry.get("fraud.scoring.ml.client.requests")
                 .tags("outcome", "error")

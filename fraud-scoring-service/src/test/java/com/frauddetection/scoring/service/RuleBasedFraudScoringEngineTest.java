@@ -1,13 +1,17 @@
 package com.frauddetection.scoring.service;
 
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.reason.ReasonCode;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.config.ScoringMode;
 import com.frauddetection.scoring.config.ScoringProperties;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
@@ -49,7 +53,15 @@ class RuleBasedFraudScoringEngineTest {
 
         assertThat(result.fraudScore()).isGreaterThanOrEqualTo(0.90d);
         assertThat(result.riskLevel()).isEqualTo(RiskLevel.CRITICAL);
-        assertThat(result.reasonCodes()).contains("DEVICE_NOVELTY", "COUNTRY_MISMATCH", "TRANSACTION_VELOCITY", "HIGH_TRANSACTION_AMOUNT");
+        assertThat(result.reasonCodes()).contains(
+                ReasonCode.DEVICE_NOVELTY.wireValue(),
+                ReasonCode.COUNTRY_MISMATCH.wireValue(),
+                ReasonCode.TRANSACTION_VELOCITY.wireValue(),
+                ReasonCode.HIGH_TRANSACTION_AMOUNT.wireValue()
+        );
+        assertThat(result.reasonCodes()).allSatisfy(reasonCode ->
+                assertThat(ReasonCode.known(reasonCode)).isPresent()
+        );
         assertThat(result.modelName()).isEqualTo("rule-based-engine");
         assertThat(result.modelVersion()).isEqualTo("v1");
         assertThat(result.inferenceTimestamp()).isNotNull();
@@ -125,7 +137,14 @@ class RuleBasedFraudScoringEngineTest {
         var result = engine.score(FraudScoringRequest.from(event));
 
         assertThat(result.riskLevel()).isEqualTo(RiskLevel.LOW);
-        assertThat(result.reasonCodes()).contains("HIGH_TRANSACTION_AMOUNT");
+        assertThat(result.reasonCodes()).contains(ReasonCode.HIGH_TRANSACTION_AMOUNT.wireValue());
         assertThat(result.alertRecommended()).isFalse();
+    }
+
+    @Test
+    void shouldUseCanonicalReasonCodeTaxonomyInsteadOfRawReasonCodeStrings() throws IOException {
+        String source = Files.readString(Path.of("src/main/java/com/frauddetection/scoring/service/RuleBasedFraudScoringEngine.java"));
+
+        assertThat(source).doesNotContain("reasonCodes.add(\"");
     }
 }

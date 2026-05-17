@@ -1,6 +1,7 @@
 package com.frauddetection.scoring.service;
 
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.reason.ReasonCode;
 import com.frauddetection.scoring.domain.MlModelInput;
 import com.frauddetection.scoring.domain.MlModelOutput;
 import org.springframework.stereotype.Component;
@@ -21,7 +22,7 @@ public class PlaceholderMlModelScoringClient implements MlModelScoringClient {
                 "ml-placeholder",
                 "unavailable",
                 Instant.now(),
-                List.of("ML_MODEL_UNAVAILABLE"),
+                List.of(ReasonCode.ML_MODEL_UNAVAILABLE.wireValue()),
                 Map.of(
                         "modelAvailable", false,
                         "fallbackReason", "No ML model runtime is configured yet."
