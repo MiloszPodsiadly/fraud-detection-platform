@@ -168,7 +168,7 @@ class CompositeFraudScoringEngineTest {
         ScoringProperties properties = new ScoringProperties(0.75d, 0.90d, mode);
         return new CompositeFraudScoringEngine(
                 new RuleBasedFraudScoringEngine(properties),
-                new MlFraudScoringEngine(mlModelScoringClient),
+                new MlFraudScoringEngine(mlModelScoringClient, scoringMetrics),
                 properties,
                 scoringMetrics
         );

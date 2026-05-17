@@ -7,6 +7,7 @@ Status: current product documentation index.
 | Document | Scope |
 | --- | --- |
 | [Fraud Case Management](fraud_case_management.md) | Current product-domain source of truth for fraud-case triage, lifecycle, local idempotency, audit, and non-claims. |
+| [Reason Codes](reason_codes.md) | Current product-domain semantics for scoring reason codes, legacy compatibility, UNKNOWN handling, and non-claims. |
 
 ## Related Technical Sources
 

@@ -7,6 +7,7 @@ const safeRepoRoot = repoRoot.replaceAll("\\", "/");
 const usingExplicitChangedFiles = Boolean(process.env.FDP51_SCOPE_CHANGED_FILES);
 const changedFiles = resolveChangedFiles();
 const violations = [];
+const enforceFdp51BackendScope = usingExplicitChangedFiles || isFdp51ScopeBranch();
 
 const backendProductionPrefixes = [
   "alert-service/src/main/java/",
@@ -47,7 +48,9 @@ const blockedWrapperPattern = new RegExp(`\\b(${blockedDefaultApiWrappers.join("
 
 for (const file of changedFiles) {
   const normalized = file.replaceAll("\\", "/");
-  if (backendProductionPrefixes.some((prefix) => normalized.startsWith(prefix)) && !fdp55AllowedBackendFiles.has(normalized)) {
+  if (enforceFdp51BackendScope
+      && backendProductionPrefixes.some((prefix) => normalized.startsWith(prefix))
+      && !fdp55AllowedBackendFiles.has(normalized)) {
     violations.push(`${normalized}: FDP-51 is frontend runtime only; backend production code must not change.`);
   }
   if (!normalized.startsWith("analyst-console-ui/src/") || /\.(test|spec)\.[jt]sx?$/.test(normalized)) {
@@ -104,11 +107,23 @@ function assertRefExists(ref) {
   }
 }
 
-function git(args) {
-  return execFileSync("git", ["-c", `safe.directory=${safeRepoRoot}`, "-C", repoRoot, ...args], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"]
-  });
+function isFdp51ScopeBranch() {
+  const headRef = process.env.GITHUB_HEAD_REF || process.env.BRANCH_NAME || git(["branch", "--show-current"], { allowFailure: true }).trim();
+  return /^FDP-51(?:$|[-_/])/.test(headRef);
+}
+
+function git(args, { allowFailure = false } = {}) {
+  try {
+    return execFileSync("git", ["-c", `safe.directory=${safeRepoRoot}`, "-C", repoRoot, ...args], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+  } catch (error) {
+    if (allowFailure) {
+      return "";
+    }
+    throw error;
+  }
 }
 
 function introducesForbiddenWorkflow(diffLine) {

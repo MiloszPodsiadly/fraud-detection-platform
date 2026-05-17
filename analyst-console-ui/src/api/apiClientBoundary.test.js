@@ -169,10 +169,32 @@ describe("api client boundary", () => {
     expect(script).toContain("out of scope for FDP-51");
     expect(script).toContain("blockedDefaultApiWrappers");
     expect(script).toContain("runtime-provided API clients");
+    expect(script).toContain("isFdp51ScopeBranch");
     expect(() => runScopeGuard({
       FDP51_SCOPE_BASE: "refs/heads/does-not-exist-fdp51",
       FDP51_SCOPE_CHANGED_FILES: "analyst-console-ui/src/workspace/useRuntime.js"
     }, "fdp51")).not.toThrow();
+  });
+
+  it("still rejects explicit backend production files in the FDP-51 scope guard", () => {
+    const failure = captureScopeFailure({
+      FDP51_SCOPE_BASE: "refs/heads/does-not-exist-fdp51",
+      FDP51_SCOPE_CHANGED_FILES: "fraud-scoring-service/src/main/java/com/frauddetection/scoring/service/MlFraudScoringEngine.java"
+    }, "fdp51");
+
+    expect(failure).toContain("FDP-51 is frontend runtime only; backend production code must not change.");
+  });
+
+  it("keeps the FDP-53 backend guard branch-scoped while honoring explicit fixtures", () => {
+    const script = readFileSync(join(process.cwd(), "../scripts/check-fdp53-scope.mjs"), "utf8");
+
+    expect(script).toContain("isFdp53ScopeBranch");
+    const failure = captureScopeFailure({
+      FDP53_SCOPE_BASE: "refs/heads/does-not-exist-fdp53",
+      FDP53_SCOPE_CHANGED_FILES: "fraud-scoring-service/src/main/java/com/frauddetection/scoring/service/MlFraudScoringEngine.java"
+    }, "fdp53");
+
+    expect(failure).toContain("FDP-53 is frontend runtime decomposition only; backend production code/resources must not change.");
   });
 
   it("allows only approved backend production files in the FDP-50 scope guard", () => {
@@ -246,7 +268,12 @@ function captureBoundaryFailure(root, version = "fdp49") {
 }
 
 function runScopeGuard(env = {}, version = "fdp50") {
-  const script = version === "fdp51" ? "../scripts/check-fdp51-scope.mjs" : "../scripts/check-fdp50-scope.mjs";
+  const scripts = {
+    fdp50: "../scripts/check-fdp50-scope.mjs",
+    fdp51: "../scripts/check-fdp51-scope.mjs",
+    fdp53: "../scripts/check-fdp53-scope.mjs"
+  };
+  const script = scripts[version] ?? scripts.fdp50;
   execFileSync("node", [script], {
     cwd: process.cwd(),
     env: { ...process.env, ...env },
