@@ -8,6 +8,7 @@ const safeRepoRoot = repoRoot.replaceAll("\\", "/");
 const usingExplicitChangedFiles = Boolean(process.env.FDP53_SCOPE_CHANGED_FILES);
 const changedFiles = resolveChangedFiles();
 const violations = [];
+const enforceFdp53BackendScope = usingExplicitChangedFiles || isFdp53ScopeBranch();
 
 const backendProductionPrefixes = [
   "alert-service/src/main/java/",
@@ -42,7 +43,9 @@ const fdp54GovernanceFiles = new Set([
 
 for (const file of changedFiles) {
   const normalized = file.replaceAll("\\", "/");
-  if (backendProductionPrefixes.some((prefix) => normalized.startsWith(prefix)) && !fdp55AllowedBackendFiles.has(normalized)) {
+  if (enforceFdp53BackendScope
+      && backendProductionPrefixes.some((prefix) => normalized.startsWith(prefix))
+      && !fdp55AllowedBackendFiles.has(normalized)) {
     violations.push(`${normalized}: FDP-53 is frontend runtime decomposition only; backend production code/resources must not change.`);
   }
   if (!isCheckedTextFile(normalized)) {
@@ -189,6 +192,11 @@ function assertRefExists(ref) {
   }
 }
 
+function isFdp53ScopeBranch() {
+  const headRef = process.env.GITHUB_HEAD_REF || process.env.BRANCH_NAME || git(["branch", "--show-current"], { allowFailure: true }).trim();
+  return /^FDP-53(?:$|[-_/])/.test(headRef);
+}
+
 function fileContentAsAddedLines(file) {
   try {
     return readFile(file).split(/\r?\n/).map((line) => `+${line}`).join("\n");
@@ -201,9 +209,16 @@ function readFile(file) {
   return readFileSync(join(repoRoot, file), "utf8");
 }
 
-function git(args) {
-  return execFileSync("git", ["-c", `safe.directory=${safeRepoRoot}`, "-C", repoRoot, ...args], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"]
-  });
+function git(args, { allowFailure = false } = {}) {
+  try {
+    return execFileSync("git", ["-c", `safe.directory=${safeRepoRoot}`, "-C", repoRoot, ...args], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+  } catch (error) {
+    if (allowFailure) {
+      return "";
+    }
+    throw error;
+  }
 }
