@@ -182,6 +182,7 @@ describe("api client boundary", () => {
         "alert-service/src/main/java/com/frauddetection/alert/controller/FraudCaseController.java",
         "alert-service/src/main/java/com/frauddetection/alert/security/config/FraudCaseAuthorizationRules.java",
         "alert-service/src/main/java/com/frauddetection/alert/security/config/BffSessionSecurityConfigurer.java",
+        "alert-service/src/main/java/com/frauddetection/alert/security/auth/BffLogoutSuccessHandler.java",
         "alert-service/src/test/java/com/frauddetection/alert/controller/Fdp50RetiredRouteTest.java",
         "docs/release/fdp_50_legacy_api_removal.md",
         "scripts/check-fdp50-scope.mjs"
@@ -195,7 +196,7 @@ describe("api client boundary", () => {
       FDP50_SCOPE_CHANGED_FILES: "alert-service/src/main/java/com/frauddetection/alert/service/FraudCaseManagementService.java"
     });
 
-    expect(failure).toContain("FDP-50 backend production changes are restricted to the approved legacy fraud-case route removal allowlist.");
+    expect(failure).toContain("FDP-50 backend production changes are restricted to the approved legacy fraud-case route removal and FDP-55 BFF logout allowlist.");
   });
 
   it("documents the FDP-50 frontend API client boundary", () => {

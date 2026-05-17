@@ -15,6 +15,9 @@ const backendProductionPrefixes = [
   "alert-service/src/main/java/",
   "alert-service/src/main/resources/"
 ];
+const fdp55AllowedBackendFiles = new Set([
+  "alert-service/src/main/java/com/frauddetection/alert/security/auth/BffLogoutSuccessHandler.java"
+]);
 const allowedEndpointFiles = new Set([
   "analyst-console-ui/src/api/alertsApi.js"
 ]);
@@ -29,7 +32,7 @@ const fdp54GovernanceFiles = new Set([
 
 for (const file of changedFiles) {
   const normalized = file.replaceAll("\\", "/");
-  if (fileMatchesAnyPrefix(normalized, backendProductionPrefixes)) {
+  if (fileMatchesAnyPrefix(normalized, backendProductionPrefixes) && !fdp55AllowedBackendFiles.has(normalized)) {
     violations.push(`${normalized}: FDP-52 is frontend UX decomposition only; backend production code/resources must not change.`);
   }
   if (!isCheckedTextFile(normalized)) {
