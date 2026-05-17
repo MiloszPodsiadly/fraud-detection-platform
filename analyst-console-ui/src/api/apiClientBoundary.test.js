@@ -169,10 +169,20 @@ describe("api client boundary", () => {
     expect(script).toContain("out of scope for FDP-51");
     expect(script).toContain("blockedDefaultApiWrappers");
     expect(script).toContain("runtime-provided API clients");
+    expect(script).toContain("isFdp51ScopeBranch");
     expect(() => runScopeGuard({
       FDP51_SCOPE_BASE: "refs/heads/does-not-exist-fdp51",
       FDP51_SCOPE_CHANGED_FILES: "analyst-console-ui/src/workspace/useRuntime.js"
     }, "fdp51")).not.toThrow();
+  });
+
+  it("still rejects explicit backend production files in the FDP-51 scope guard", () => {
+    const failure = captureScopeFailure({
+      FDP51_SCOPE_BASE: "refs/heads/does-not-exist-fdp51",
+      FDP51_SCOPE_CHANGED_FILES: "fraud-scoring-service/src/main/java/com/frauddetection/scoring/service/MlFraudScoringEngine.java"
+    }, "fdp51");
+
+    expect(failure).toContain("FDP-51 is frontend runtime only; backend production code must not change.");
   });
 
   it("allows only approved backend production files in the FDP-50 scope guard", () => {
