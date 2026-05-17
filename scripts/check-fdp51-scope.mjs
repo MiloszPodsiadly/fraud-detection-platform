@@ -16,6 +16,9 @@ const backendProductionPrefixes = [
   "audit-trust-authority/src/main/java/",
   "ml-inference-service/"
 ];
+const fdp55AllowedBackendFiles = new Set([
+  "alert-service/src/main/java/com/frauddetection/alert/security/auth/BffLogoutSuccessHandler.java"
+]);
 const allowedEndpointFiles = new Set([
   "analyst-console-ui/src/api/alertsApi.js"
 ]);
@@ -44,7 +47,7 @@ const blockedWrapperPattern = new RegExp(`\\b(${blockedDefaultApiWrappers.join("
 
 for (const file of changedFiles) {
   const normalized = file.replaceAll("\\", "/");
-  if (backendProductionPrefixes.some((prefix) => normalized.startsWith(prefix))) {
+  if (backendProductionPrefixes.some((prefix) => normalized.startsWith(prefix)) && !fdp55AllowedBackendFiles.has(normalized)) {
     violations.push(`${normalized}: FDP-51 is frontend runtime only; backend production code must not change.`);
   }
   if (!normalized.startsWith("analyst-console-ui/src/") || /\.(test|spec)\.[jt]sx?$/.test(normalized)) {

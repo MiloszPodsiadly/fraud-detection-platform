@@ -37,6 +37,7 @@ export function WorkspaceDashboardShell({
   const workspaceCounterState = useWorkspaceCounters({
     enabled: sharedWorkspaceReadsEnabled,
     includeAlerts: activeRoute.key !== "fraudTransaction",
+    includeFraudCases: activeRoute.key !== "analyst",
     includeTransactions: activeRoute.key !== "transactionScoring"
   });
   const { refresh: refreshWorkspaceCounters, setCounterValue } = workspaceCounterState;
@@ -111,8 +112,10 @@ export function WorkspaceDashboardShell({
             canWriteGovernanceAudit={canWriteGovernanceAudit}
             alertPage={navigationState.alertPage}
             fraudCaseSummary={navigationState.fraudCaseSummary}
-            fraudCaseSummaryError={navigationState.fraudCaseSummaryError}
-            isFraudCaseSummaryLoading={navigationState.isFraudCaseSummaryLoading}
+            fraudCaseTotalElements={workspaceCounterState.counters.fraudCases}
+            fraudCaseSummaryError={navigationState.fraudCaseSummaryError || workspaceCounterState.errorByCounter.fraudCases}
+            isFraudCaseSummaryLoading={navigationState.isFraudCaseSummaryLoading
+              || (activeRoute.key !== "analyst" && workspaceCounterState.isLoading && workspaceCounterState.counters.fraudCases == null)}
             onWorkspaceChange={navigateWorkspace}
             transactionPage={navigationState.transactionPage}
             advisoryQueue={navigationState.advisoryQueue}

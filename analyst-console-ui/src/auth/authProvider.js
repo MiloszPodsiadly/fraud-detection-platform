@@ -74,6 +74,9 @@ export function createBffAuthProvider(fetchSession = defaultFetchSession, naviga
     },
     async beginLogout() {
       logoutError = null;
+      if (snapshot.session.userId) {
+        snapshot = normalizeBffSessionSnapshot(await fetchSession());
+      }
       const headers = csrfHeaders(snapshot.csrf);
       if (snapshot.session.userId && Object.keys(headers).length === 0) {
         logoutError = new Error("Logout requires a current CSRF token.");

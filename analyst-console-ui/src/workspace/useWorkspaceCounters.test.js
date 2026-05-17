@@ -3,12 +3,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useWorkspaceCounters } from "./useWorkspaceCounters.js";
 
 const listAlerts = vi.fn();
+const getFraudCaseWorkQueueSummary = vi.fn();
 const listScoredTransactions = vi.fn();
 
 describe("useWorkspaceCounters", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     listAlerts.mockResolvedValue(page(2));
+    getFraudCaseWorkQueueSummary.mockResolvedValue({ totalFraudCases: 7 });
     listScoredTransactions.mockResolvedValue(page(4));
   });
 
@@ -21,7 +23,7 @@ describe("useWorkspaceCounters", () => {
       canReadTransactions: true
     }));
 
-    await waitFor(() => expect(result.current.counters).toEqual({ alerts: 2, transactions: 4 }));
+    await waitFor(() => expect(result.current.counters).toEqual({ alerts: 2, fraudCases: null, transactions: 4 }));
     expect(listAlerts).toHaveBeenCalledWith({ page: 0, size: 1 }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(listScoredTransactions).toHaveBeenCalledWith({
       page: 0,
@@ -31,6 +33,21 @@ describe("useWorkspaceCounters", () => {
       status: "ALL"
     }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(result.current.degraded).toBe(false);
+  });
+
+  it("loads the global fraud case counter without mounting the fraud case work queue", async () => {
+    const client = apiClient();
+    const { result } = renderHook(() => useWorkspaceCounters({
+      enabled: true,
+      apiClient: client,
+      includeAlerts: false,
+      includeFraudCases: true,
+      includeTransactions: false,
+      canReadFraudCases: true
+    }));
+
+    await waitFor(() => expect(result.current.counters).toEqual({ alerts: null, fraudCases: 7, transactions: null }));
+    expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledWith(expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
   it("surfaces partial counter failure without converting missing authority to zero", async () => {
@@ -45,7 +62,7 @@ describe("useWorkspaceCounters", () => {
     }));
 
     await waitFor(() => expect(result.current.degraded).toBe(true));
-    expect(result.current.counters).toEqual({ alerts: null, transactions: 4 });
+    expect(result.current.counters).toEqual({ alerts: null, fraudCases: null, transactions: 4 });
     expect(result.current.errorByCounter.alerts).toBe("alerts unavailable");
     expect(result.current.stale).toBe(false);
   });
@@ -58,7 +75,7 @@ describe("useWorkspaceCounters", () => {
       canReadAlerts: true,
       canReadTransactions: true
     }));
-    await waitFor(() => expect(result.current.counters).toEqual({ alerts: 2, transactions: 4 }));
+    await waitFor(() => expect(result.current.counters).toEqual({ alerts: 2, fraudCases: null, transactions: 4 }));
 
     listAlerts.mockRejectedValue(new Error("alerts unavailable"));
     listScoredTransactions.mockResolvedValue(page(5));
@@ -67,7 +84,7 @@ describe("useWorkspaceCounters", () => {
     });
 
     await waitFor(() => expect(result.current.degraded).toBe(true));
-    expect(result.current.counters).toEqual({ alerts: 2, transactions: 5 });
+    expect(result.current.counters).toEqual({ alerts: 2, fraudCases: null, transactions: 5 });
     expect(result.current.stale).toBe(true);
   });
 
@@ -79,11 +96,11 @@ describe("useWorkspaceCounters", () => {
       canReadAlerts: true,
       canReadTransactions: true
     }), { initialProps: { enabled: true } });
-    await waitFor(() => expect(result.current.counters).toEqual({ alerts: 2, transactions: 4 }));
+    await waitFor(() => expect(result.current.counters).toEqual({ alerts: 2, fraudCases: null, transactions: 4 }));
 
     rerender({ enabled: false });
 
-    await waitFor(() => expect(result.current.counters).toEqual({ alerts: null, transactions: null }));
+    await waitFor(() => expect(result.current.counters).toEqual({ alerts: null, fraudCases: null, transactions: null }));
     expect(result.current.degraded).toBe(false);
   });
 
@@ -97,7 +114,7 @@ describe("useWorkspaceCounters", () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(listAlerts).not.toHaveBeenCalled();
     expect(listScoredTransactions).not.toHaveBeenCalled();
-    expect(result.current.counters).toEqual({ alerts: null, transactions: null });
+    expect(result.current.counters).toEqual({ alerts: null, fraudCases: null, transactions: null });
   });
 
   it("clears a counter when its capability becomes false", async () => {
@@ -108,7 +125,7 @@ describe("useWorkspaceCounters", () => {
       canReadAlerts,
       canReadTransactions: true
     }), { initialProps: { canReadAlerts: true } });
-    await waitFor(() => expect(result.current.counters).toEqual({ alerts: 2, transactions: 4 }));
+    await waitFor(() => expect(result.current.counters).toEqual({ alerts: 2, fraudCases: null, transactions: 4 }));
 
     rerender({ canReadAlerts: false });
 
@@ -176,7 +193,7 @@ describe("useWorkspaceCounters", () => {
       secondTransactions.resolve(page(20));
       await Promise.all([secondAlerts.promise, secondTransactions.promise]);
     });
-    await waitFor(() => expect(result.current.counters).toEqual({ alerts: 10, transactions: 20 }));
+    await waitFor(() => expect(result.current.counters).toEqual({ alerts: 10, fraudCases: null, transactions: 20 }));
 
     await act(async () => {
       firstAlerts.resolve(page(1));
@@ -184,7 +201,7 @@ describe("useWorkspaceCounters", () => {
       await Promise.all([firstAlerts.promise, firstTransactions.promise]);
     });
 
-    expect(result.current.counters).toEqual({ alerts: 10, transactions: 20 });
+    expect(result.current.counters).toEqual({ alerts: 10, fraudCases: null, transactions: 20 });
   });
 
   it("does not mark aborted counter requests fresh", async () => {
@@ -213,7 +230,7 @@ describe("useWorkspaceCounters", () => {
       canReadAlerts: true,
       canReadTransactions: true
     }));
-    await waitFor(() => expect(result.current.counters).toEqual({ alerts: 2, transactions: 4 }));
+    await waitFor(() => expect(result.current.counters).toEqual({ alerts: 2, fraudCases: null, transactions: 4 }));
     listAlerts.mockRejectedValue(new Error("alerts unavailable"));
     listScoredTransactions.mockResolvedValue(page(5));
     await act(async () => {
@@ -236,6 +253,7 @@ describe("useWorkspaceCounters", () => {
 function apiClient() {
   return {
     listAlerts,
+    getFraudCaseWorkQueueSummary,
     listScoredTransactions
   };
 }

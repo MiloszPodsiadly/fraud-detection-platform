@@ -4,6 +4,7 @@ import { useOptionalWorkspaceRuntime } from "./useWorkspaceRuntime.js";
 
 const INITIAL_COUNTERS = {
   alerts: null,
+  fraudCases: null,
   transactions: null
 };
 
@@ -19,10 +20,12 @@ const INITIAL_STATE = {
 export function useWorkspaceCounters({
   enabled = true,
   includeAlerts = true,
+  includeFraudCases = true,
   includeTransactions = true,
   apiClient,
   workspaceSessionResetKey,
   canReadAlerts,
+  canReadFraudCases,
   canReadTransactions
 } = {}) {
   const runtime = useOptionalWorkspaceRuntime();
@@ -31,6 +34,9 @@ export function useWorkspaceCounters({
     ? workspaceSessionResetKey
     : runtime?.workspaceSessionResetKey;
   const effectiveCanReadAlerts = canReadAlerts !== undefined ? canReadAlerts : runtime?.canReadAlerts;
+  const effectiveCanReadFraudCases = canReadFraudCases !== undefined
+    ? canReadFraudCases
+    : runtime?.canReadFraudCases;
   const effectiveCanReadTransactions = canReadTransactions !== undefined
     ? canReadTransactions
     : runtime?.canReadTransactions;
@@ -62,8 +68,10 @@ export function useWorkspaceCounters({
       apiClient: effectiveApiClient,
       signal: abortController.signal,
       includeAlerts,
+      includeFraudCases,
       includeTransactions,
       canReadAlerts: effectiveCanReadAlerts,
+      canReadFraudCases: effectiveCanReadFraudCases,
       canReadTransactions: effectiveCanReadTransactions
     });
 
@@ -73,8 +81,10 @@ export function useWorkspaceCounters({
           ...current,
           counters: clearUnavailableCounters(current.counters, {
             includeAlerts,
+            includeFraudCases,
             includeTransactions,
             canReadAlerts: effectiveCanReadAlerts,
+            canReadFraudCases: effectiveCanReadFraudCases,
             canReadTransactions: effectiveCanReadTransactions
           }),
           isLoading: false,
@@ -93,8 +103,10 @@ export function useWorkspaceCounters({
 
     setState((current) => reduceCounterResults(current, requests, results, {
       includeAlerts,
+      includeFraudCases,
       includeTransactions,
       canReadAlerts: effectiveCanReadAlerts,
+      canReadFraudCases: effectiveCanReadFraudCases,
       canReadTransactions: effectiveCanReadTransactions
     }));
     if (abortControllerRef.current === abortController) {
@@ -104,9 +116,11 @@ export function useWorkspaceCounters({
     clearState,
     effectiveApiClient,
     effectiveCanReadAlerts,
+    effectiveCanReadFraudCases,
     effectiveCanReadTransactions,
     enabled,
     includeAlerts,
+    includeFraudCases,
     includeTransactions
   ]);
 
@@ -151,15 +165,25 @@ function buildCounterRequests({
   apiClient,
   signal,
   includeAlerts,
+  includeFraudCases,
   includeTransactions,
   canReadAlerts,
+  canReadFraudCases,
   canReadTransactions
 }) {
   const requests = [];
   if (includeAlerts && canReadAlerts === true) {
     requests.push({
       name: "alerts",
-      promise: apiClient.listAlerts({ page: 0, size: 1 }, { signal })
+      promise: apiClient.listAlerts({ page: 0, size: 1 }, { signal }),
+      readValue: (page) => page.totalElements
+    });
+  }
+  if (includeFraudCases && canReadFraudCases === true && typeof apiClient.getFraudCaseWorkQueueSummary === "function") {
+    requests.push({
+      name: "fraudCases",
+      promise: apiClient.getFraudCaseWorkQueueSummary({ signal }),
+      readValue: (summary) => summary.totalFraudCases
     });
   }
   if (includeTransactions && canReadTransactions === true) {
@@ -171,7 +195,8 @@ function buildCounterRequests({
         query: "",
         riskLevel: "ALL",
         status: "ALL"
-      }, { signal })
+      }, { signal }),
+      readValue: (page) => page.totalElements
     });
   }
   return requests;
@@ -187,7 +212,7 @@ function reduceCounterResults(current, requests, results, authorityState) {
   requests.forEach((request, index) => {
     const result = results[index];
     if (result.status === "fulfilled") {
-      counters[request.name] = result.value.totalElements ?? counters[request.name];
+      counters[request.name] = request.readValue(result.value) ?? counters[request.name];
       hasSuccessfulRefresh = true;
       return;
     }
@@ -223,12 +248,15 @@ function reduceCounterResults(current, requests, results, authorityState) {
 
 function clearUnavailableCounters(counters, {
   includeAlerts,
+  includeFraudCases,
   includeTransactions,
   canReadAlerts,
+  canReadFraudCases,
   canReadTransactions
 }) {
   return {
     alerts: includeAlerts && canReadAlerts !== true ? null : counters.alerts,
+    fraudCases: includeFraudCases && canReadFraudCases !== true ? null : counters.fraudCases,
     transactions: includeTransactions && canReadTransactions !== true ? null : counters.transactions
   };
 }

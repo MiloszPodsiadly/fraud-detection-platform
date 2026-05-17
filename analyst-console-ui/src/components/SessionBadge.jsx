@@ -42,8 +42,8 @@ export function SessionBadge({ session, sessionState, authProvider, onSessionCha
 
     try {
       setProviderActionError("");
-      onSessionChange(EMPTY_SESSION);
       await provider.beginLogout();
+      onSessionChange(EMPTY_SESSION);
     } catch (error) {
       setProviderActionError(error instanceof Error ? error.message : "OIDC sign-out could not be started.");
     }

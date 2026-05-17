@@ -3,15 +3,13 @@ import { describe, expect, it } from "vitest";
 import { useWorkspaceRefreshNotice } from "./useWorkspaceRefreshNotice.js";
 
 describe("useWorkspaceRefreshNotice", () => {
-  it("surfaces blocked refresh and clears on successful refresh", () => {
+  it("keeps blocked refresh silent and clears on successful refresh", () => {
     const { result } = renderHook(() => useWorkspaceRefreshNotice("analyst"));
 
     act(() => {
       result.current.consumeRefreshResult({ refreshed: false, reason: "blocked-session" });
     });
-    expect(result.current.refreshNotice).toEqual(expect.objectContaining({
-      message: "Refresh was skipped because the current session is not active."
-    }));
+    expect(result.current.refreshNotice).toBeNull();
 
     act(() => {
       result.current.consumeRefreshResult({ refreshed: true, workspaceRefresh: "started", countersRefresh: "started" });

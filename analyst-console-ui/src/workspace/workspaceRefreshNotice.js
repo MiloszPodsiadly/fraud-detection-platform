@@ -3,11 +3,7 @@ export function noticeForWorkspaceRefreshResult(result) {
     return null;
   }
   if (result.reason === "blocked-session") {
-    return {
-      tone: "warning",
-      title: "Refresh skipped.",
-      message: "Refresh was skipped because the current session is not active."
-    };
+    return null;
   }
   if (result.reason === "refresh-failed") {
     return {

@@ -15,7 +15,8 @@ const allowedBackendFiles = new Set([
   "alert-service/src/main/java/com/frauddetection/alert/security/config/BffSessionSecurityConfigurer.java",
   "alert-service/src/main/java/com/frauddetection/alert/audit/read/ReadAccessAuditClassifier.java",
   "alert-service/src/main/java/com/frauddetection/alert/observability/AlertServiceMetrics.java",
-  "alert-service/src/main/java/com/frauddetection/alert/fraudcase/FraudCaseReadQueryPolicy.java"
+  "alert-service/src/main/java/com/frauddetection/alert/fraudcase/FraudCaseReadQueryPolicy.java",
+  "alert-service/src/main/java/com/frauddetection/alert/security/auth/BffLogoutSuccessHandler.java"
 ]);
 const forbiddenBackendProductionPrefixes = [
   "transaction-ingest-service/src/main/java/",
@@ -30,7 +31,7 @@ const allowedEndpointFiles = new Set([
 for (const file of changedFiles) {
   const normalized = file.replaceAll("\\", "/");
   if (normalized.startsWith("alert-service/src/main/java/") && !allowedBackendFiles.has(normalized)) {
-    violations.push(`${normalized}: FDP-50 backend production changes are restricted to the approved legacy fraud-case route removal allowlist.`);
+    violations.push(`${normalized}: FDP-50 backend production changes are restricted to the approved legacy fraud-case route removal and FDP-55 BFF logout allowlist.`);
   }
   if (forbiddenBackendProductionPrefixes.some((prefix) => normalized.startsWith(prefix))) {
     violations.push(`${normalized}: FDP-50 must not change backend production code outside the approved alert-service allowlist.`);
