@@ -83,6 +83,8 @@ public enum ReasonCode {
             "Recent amount accumulation",
             "Recent accumulated amount contributed to the score."
     ),
+    // Legacy-compatible wire value. This is a rapid-transfer case-candidate scoring signal only.
+    // It does not mean a fraud case exists or fraud is confirmed.
     RAPID_TRANSFER_FRAUD_CASE(
             "RAPID_TRANSFER_FRAUD_CASE",
             ReasonCodeCategory.VELOCITY,
@@ -181,6 +183,19 @@ public enum ReasonCode {
         LinkedHashSet<String> values = new LinkedHashSet<>();
         for (ReasonCodeParseResult result : parsedReasonCodes) {
             if (result != null) {
+                values.add(result.wireValue());
+            }
+        }
+        return List.copyOf(values);
+    }
+
+    public static List<String> supportedWireValues(List<ReasonCodeParseResult> parsedReasonCodes) {
+        if (parsedReasonCodes == null || parsedReasonCodes.isEmpty()) {
+            return List.of();
+        }
+        LinkedHashSet<String> values = new LinkedHashSet<>();
+        for (ReasonCodeParseResult result : parsedReasonCodes) {
+            if (result != null && result.supported() && result.reasonCode() != UNKNOWN) {
                 values.add(result.wireValue());
             }
         }

@@ -62,6 +62,7 @@ class RuleBasedFraudScoringEngineTest {
         assertThat(result.reasonCodes()).allSatisfy(reasonCode ->
                 assertThat(ReasonCode.known(reasonCode)).isPresent()
         );
+        assertThat(result.reasonCodes()).doesNotContain(ReasonCode.UNKNOWN.wireValue());
         assertThat(result.modelName()).isEqualTo("rule-based-engine");
         assertThat(result.modelVersion()).isEqualTo("v1");
         assertThat(result.inferenceTimestamp()).isNotNull();

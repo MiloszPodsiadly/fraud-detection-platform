@@ -37,15 +37,19 @@ class ReasonCodeTest {
     }
 
     @Test
-    void definitionsDoNotClaimVerdictsEvidenceOrFinalRisk() {
+    void definitionsDoNotClaimVerdictsEvidenceCaseCreationOrFinalRisk() {
         assertThat(ReasonCode.values()).allSatisfy(reasonCode -> {
-            String combined = (reasonCode.name() + " " + reasonCode.title() + " " + reasonCode.description())
+            String combined = (reasonCode.title() + " " + reasonCode.description())
                     .toLowerCase(Locale.ROOT);
             assertThat(combined).doesNotContain("confirmed fraud");
             assertThat(combined).doesNotContain("fraud proof");
             assertThat(combined).doesNotContain("evidence exists");
             assertThat(combined).doesNotContain("final outcome");
             assertThat(combined).doesNotContain("final risk");
+            assertThat(combined).doesNotContain("case created");
+            assertThat(combined).doesNotContain("fraud case exists");
+            assertThat(combined).doesNotContain("verdict");
+            assertThat(combined).doesNotContain("analyst confirmed");
         });
     }
 
@@ -79,6 +83,15 @@ class ReasonCodeTest {
     }
 
     @Test
+    void unknownCompatibilityMarkerIsNotKnownScoringSignal() {
+        List<ReasonCodeParseResult> parsed = ReasonCode.parseLegacyList(List.of("UNKNOWN"));
+
+        assertThat(ReasonCode.known("UNKNOWN")).isEmpty();
+        assertThat(ReasonCode.parseLegacy("UNKNOWN").reasonCode()).isEqualTo(ReasonCode.UNKNOWN);
+        assertThat(ReasonCode.supportedWireValues(parsed)).isEmpty();
+    }
+
+    @Test
     void nullListMeansNoReasonCodeDataRatherThanConcreteUnknownSignal() {
         assertThat(ReasonCode.parseLegacyList(null)).isEmpty();
         assertThat(ReasonCode.parseLegacyList(List.of())).isEmpty();
@@ -97,5 +110,35 @@ class ReasonCodeTest {
                 .contains("some-new-future-code");
         assertThat(ReasonCode.wireValues(parsed))
                 .containsExactly("COUNTRY_MISMATCH", "UNKNOWN");
+    }
+
+    @Test
+    void supportedWireValuesOnlyEmitKnownScoringSignals() {
+        List<ReasonCodeParseResult> parsed = ReasonCode.parseLegacyList(Arrays.asList(
+                "COUNTRY_MISMATCH",
+                "some-new-future-code",
+                " ",
+                null,
+                "FRAUD_CONFIRMED",
+                "AML_ESCALATION_REQUIRED",
+                "UNKNOWN"
+        ));
+
+        assertThat(ReasonCode.supportedWireValues(parsed))
+                .containsExactly("COUNTRY_MISMATCH");
+    }
+
+    @Test
+    void rapidTransferFraudCaseIsCandidateSignalOnly() {
+        ReasonCode reasonCode = ReasonCode.RAPID_TRANSFER_FRAUD_CASE;
+        String definition = (reasonCode.title() + " " + reasonCode.description()).toLowerCase(Locale.ROOT);
+
+        assertThat(reasonCode.category()).isEqualTo(ReasonCodeCategory.VELOCITY);
+        assertThat(reasonCode.description()).containsAnyOf("candidate", "signal");
+        assertThat(definition).doesNotContain("confirmed");
+        assertThat(definition).doesNotContain("exists");
+        assertThat(definition).doesNotContain("created");
+        assertThat(definition).doesNotContain("verdict");
+        assertThat(definition).doesNotContain("final");
     }
 }

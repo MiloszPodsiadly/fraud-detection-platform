@@ -44,7 +44,7 @@ public class MlFraudScoringEngine implements FraudScoringEngine {
                 output.modelName(),
                 output.modelVersion(),
                 output.inferenceTimestamp(),
-                ReasonCode.wireValues(parsedReasonCodes),
+                ReasonCode.supportedWireValues(parsedReasonCodes),
                 scoreDetails,
                 request.featureSnapshot(),
                 explanationMetadata,

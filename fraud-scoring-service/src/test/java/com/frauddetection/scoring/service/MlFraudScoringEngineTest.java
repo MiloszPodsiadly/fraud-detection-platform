@@ -18,7 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class MlFraudScoringEngineTest {
 
     @Test
-    void shouldNormalizeLegacyModelReasonCodesAndSurfaceUnsupportedCount() {
+    void unsupportedModelReasonCodesAreNotReturnedAsScoringSignals() {
         SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
         MlFraudScoringEngine engine = new MlFraudScoringEngine(input -> new MlModelOutput(
                 true,
@@ -27,7 +27,7 @@ class MlFraudScoringEngineTest {
                 "python-logistic-fraud-model",
                 "test-version",
                 Instant.now(),
-                Arrays.asList("countryMismatch", "some-new-future-code", " ", null),
+                Arrays.asList("countryMismatch", "some-new-future-code", " ", null, "FRAUD_CONFIRMED", "AML_ESCALATION_REQUIRED"),
                 Map.of("modelAvailable", true),
                 Map.of("modelAvailable", true),
                 null
@@ -36,15 +36,20 @@ class MlFraudScoringEngineTest {
         var result = engine.score(FraudScoringRequest.from(TransactionFixtures.enrichedTransaction().build()));
 
         assertThat(result.reasonCodes()).containsExactly(
-                ReasonCode.COUNTRY_MISMATCH.wireValue(),
-                ReasonCode.UNKNOWN.wireValue()
+                ReasonCode.COUNTRY_MISMATCH.wireValue()
         );
-        assertThat(result.scoreDetails()).containsEntry("unsupportedReasonCodeCount", 3);
-        assertThat(result.explanationMetadata()).containsEntry("unsupportedReasonCodeCount", 3);
+        assertThat(result.reasonCodes()).doesNotContain(
+                ReasonCode.UNKNOWN.wireValue(),
+                "some-new-future-code",
+                "FRAUD_CONFIRMED",
+                "AML_ESCALATION_REQUIRED"
+        );
+        assertThat(result.scoreDetails()).containsEntry("unsupportedReasonCodeCount", 5);
+        assertThat(result.explanationMetadata()).containsEntry("unsupportedReasonCodeCount", 5);
         assertThat(meterRegistry.get("fraud.scoring.reason_code.parse.unsupported")
                 .tags("service", "fraud-scoring-service", "source", "ml_model", "parser_mode", "legacy")
                 .counter()
-                .count()).isEqualTo(3.0d);
+                .count()).isEqualTo(5.0d);
     }
 
     @Test
