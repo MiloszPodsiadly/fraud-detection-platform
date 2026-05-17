@@ -287,17 +287,29 @@ describe("authProvider", () => {
   });
 
   it("redirects bff logout through the provider logout endpoint", async () => {
-    const fetchSession = vi.fn().mockResolvedValue({
-      authenticated: true,
-      sessionStatus: "AUTHENTICATED",
-      userId: "server-user-1",
-      roles: ["FRAUD_OPS_ADMIN"],
-      authorities: ["alert:read"],
-      csrf: {
-        headerName: "X-CSRF-TOKEN",
-        token: "csrf-1"
-      }
-    });
+    const fetchSession = vi.fn()
+      .mockResolvedValueOnce({
+        authenticated: true,
+        sessionStatus: "AUTHENTICATED",
+        userId: "server-user-1",
+        roles: ["FRAUD_OPS_ADMIN"],
+        authorities: ["alert:read"],
+        csrf: {
+          headerName: "X-CSRF-TOKEN",
+          token: "csrf-1"
+        }
+      })
+      .mockResolvedValueOnce({
+        authenticated: true,
+        sessionStatus: "AUTHENTICATED",
+        userId: "server-user-1",
+        roles: ["FRAUD_OPS_ADMIN"],
+        authorities: ["alert:read"],
+        csrf: {
+          headerName: "X-CSRF-TOKEN",
+          token: "csrf-2"
+        }
+      });
     const navigate = vi.fn();
     const logoutFetch = vi.fn().mockResolvedValue({
       ok: true,
@@ -315,9 +327,10 @@ describe("authProvider", () => {
       method: "POST",
       credentials: "same-origin",
       headers: {
-        "X-CSRF-TOKEN": "csrf-1"
+        "X-CSRF-TOKEN": "csrf-2"
       }
     });
+    expect(fetchSession).toHaveBeenCalledTimes(2);
     expect(logoutFetch.mock.calls[0][1].headers.Authorization).toBeUndefined();
     expect(navigate).toHaveBeenCalledWith(
       "http://localhost:8086/realms/fraud-detection/protocol/openid-connect/logout?client_id=analyst-console-ui"

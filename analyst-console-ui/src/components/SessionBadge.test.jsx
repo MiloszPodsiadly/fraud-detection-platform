@@ -126,8 +126,11 @@ describe("SessionBadge", () => {
     await waitFor(() => expect(beginLogin).toHaveBeenCalledTimes(1));
   });
 
-  it("clears the local session view before starting oidc logout", async () => {
-    const beginLogout = vi.fn().mockResolvedValue(undefined);
+  it("keeps the local session view until oidc logout succeeds", async () => {
+    let resolveLogout;
+    const beginLogout = vi.fn(() => new Promise((resolve) => {
+      resolveLogout = resolve;
+    }));
     const onSessionChange = vi.fn();
     const authProvider = createOidcAuthProvider(createInMemoryOidcSessionSource({
       accessToken: "token-1",
@@ -151,6 +154,37 @@ describe("SessionBadge", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
 
     await waitFor(() => expect(beginLogout).toHaveBeenCalledTimes(1));
-    expect(onSessionChange).toHaveBeenCalledWith({ userId: "", roles: [], extraAuthorities: [] });
+    expect(onSessionChange).not.toHaveBeenCalled();
+    resolveLogout();
+    await waitFor(() => expect(onSessionChange).toHaveBeenCalledWith({ userId: "", roles: [], extraAuthorities: [] }));
+  });
+
+  it("keeps the local session view when oidc logout fails", async () => {
+    const beginLogout = vi.fn().mockRejectedValue(new Error("Logout request failed with status 403."));
+    const onSessionChange = vi.fn();
+    const authProvider = createOidcAuthProvider(createInMemoryOidcSessionSource({
+      accessToken: "token-1",
+      session: { userId: "oidc-1", roles: ["ANALYST"] }
+    }), {
+      beginLogin: vi.fn(),
+      completeLoginCallback: vi.fn(),
+      beginLogout,
+      hasConfiguration: () => true
+    });
+
+    render(
+      <SessionBadge
+        session={normalizeSession({ userId: "oidc-1", roles: ["ANALYST"] })}
+        sessionState={{ status: SESSION_STATES.AUTHENTICATED }}
+        authProvider={authProvider}
+        onSessionChange={onSessionChange}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+
+    await screen.findByRole("alert");
+    expect(screen.getByText("Logout request failed with status 403.")).toBeInTheDocument();
+    expect(onSessionChange).not.toHaveBeenCalled();
   });
 });
