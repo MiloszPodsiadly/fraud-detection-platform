@@ -71,21 +71,23 @@ describe("AlertsListPage frame", () => {
     expect(screen.queryByText(/Last refreshed/)).not.toBeInTheDocument();
   });
 
-  it("does not render not-mounted reports or compliance data as business zero", () => {
+  it("renders unavailable workspace counters as zero when the user has no loaded data", () => {
     render(
       <AlertsListPage
         workspacePage="analyst"
         workspaceCounters={{ alerts: null, transactions: null }}
         workspaceCountersStatus={{ failedCounters: [], errorByCounter: {}, stale: false }}
-        fraudCaseSummary={{ totalFraudCases: 4 }}
         sessionState={{ status: SESSION_STATES.AUTHENTICATED }}
       >
         <section><h2>Fraud Case Work Queue</h2></section>
       </AlertsListPage>
     );
 
-    expect(screen.getByRole("link", { name: /Audit analytics\s*Unavailable/ })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Governance\s*Unavailable/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Transactions\s*0/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Alerts\s*0/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Global fraud cases\s*0/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Audit analytics\s*0/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Governance\s*0/ })).toBeInTheDocument();
   });
 
   it("distinguishes missing authority from stale or unavailable counters", () => {
