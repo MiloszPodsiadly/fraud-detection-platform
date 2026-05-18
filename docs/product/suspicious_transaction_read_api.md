@@ -37,6 +37,37 @@ Both endpoints require SUSPICIOUS_TRANSACTION_READ.
 - regex search is not supported.
 - raw query passthrough is not supported.
 
+## Search Pagination Semantics
+
+SuspiciousTransaction search uses bounded slice-style pagination.
+
+The response includes:
+
+- content
+- page
+- size
+- hasNext
+
+The response does not include:
+
+- totalElements
+- totalPages
+- full collection count
+
+Reason:
+A full count over suspicious_transactions can be expensive for broad or empty filters. FDP-62 avoids unbounded count scans
+by fetching at most size + 1 records.
+
+Rules:
+
+- default size = 20.
+- max size = 100.
+- fetch limit = size + 1.
+- hasNext indicates whether another page exists.
+- no total collection count is computed.
+- no raw query passthrough.
+- no regex search.
+
 Allowed filters:
 
 - status
