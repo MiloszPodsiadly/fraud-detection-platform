@@ -3,6 +3,10 @@ package com.frauddetection.alert.service;
 import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
 import com.frauddetection.alert.api.SubmitAnalystDecisionResponse;
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
+import com.frauddetection.alert.evidence.AlertEvidenceSnapshotProjectionService;
+import com.frauddetection.alert.evidence.AlertEvidenceSnapshotProperties;
+import com.frauddetection.alert.evidence.EvidenceStatus;
+import com.frauddetection.alert.evidence.ScoringEvidenceSnapshotMapper;
 import com.frauddetection.alert.mapper.AlertDocumentMapper;
 import com.frauddetection.alert.mapper.FraudAlertEventMapper;
 import com.frauddetection.alert.messaging.FraudAlertEventPublisher;
@@ -10,9 +14,16 @@ import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.common.events.contract.FraudAlertEvent;
+import com.frauddetection.common.events.contract.TransactionScoredEvent;
+import com.frauddetection.common.events.evidence.ScoringEvidenceItem;
+import com.frauddetection.common.events.evidence.ScoringEvidenceSeverity;
+import com.frauddetection.common.events.evidence.ScoringEvidenceSource;
+import com.frauddetection.common.events.evidence.ScoringEvidenceStatus;
+import com.frauddetection.common.events.evidence.ScoringEvidenceType;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DuplicateKeyException;
 
@@ -46,6 +57,54 @@ class AlertManagementServiceTest {
 
         verify(repository).save(any(AlertDocument.class));
         verify(alertPublisher).publish(any(FraudAlertEvent.class));
+    }
+
+    @Test
+    void alertCreationStoresProjectedEvidenceSnapshotWithoutChangingDecision() {
+        AlertRepository repository = mock(AlertRepository.class);
+        FraudAlertEventPublisher alertPublisher = mock(FraudAlertEventPublisher.class);
+        FraudCaseManagementService fraudCaseManagementService = mock(FraudCaseManagementService.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        SubmitDecisionRegulatedMutationService submitDecisionService = mock(SubmitDecisionRegulatedMutationService.class);
+        var service = service(repository, alertPublisher, fraudCaseManagementService, metrics, submitDecisionService);
+        var base = TransactionFixtures.scoredTransaction().build();
+        var event = new TransactionScoredEvent(
+                base.eventId(),
+                base.transactionId(),
+                base.correlationId(),
+                base.customerId(),
+                base.accountId(),
+                base.createdAt(),
+                base.transactionTimestamp(),
+                base.transactionAmount(),
+                base.merchantInfo(),
+                base.deviceInfo(),
+                base.locationInfo(),
+                base.customerContext(),
+                base.fraudScore(),
+                base.riskLevel(),
+                base.scoringStrategy(),
+                base.modelName(),
+                base.modelVersion(),
+                base.inferenceTimestamp(),
+                base.reasonCodes(),
+                base.scoreDetails(),
+                base.featureSnapshot(),
+                true,
+                List.of(scoringEvidence())
+        );
+        ArgumentCaptor<AlertDocument> captor = ArgumentCaptor.forClass(AlertDocument.class);
+
+        when(repository.existsByTransactionId(event.transactionId())).thenReturn(false);
+        when(repository.save(any(AlertDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.handleScoredTransaction(event);
+
+        verify(repository).save(captor.capture());
+        AlertDocument saved = captor.getValue();
+        assertThat(saved.getAlertStatus()).isEqualTo(AlertStatus.OPEN);
+        assertThat(saved.getEvidenceSnapshot()).singleElement().satisfies(item ->
+                assertThat(item.status()).isEqualTo(EvidenceStatus.AVAILABLE));
     }
 
     @Test
@@ -112,10 +171,31 @@ class AlertManagementServiceTest {
                 new AlertDocumentMapper(),
                 new FraudAlertEventMapper(),
                 new AlertCaseFactory(),
+                new AlertEvidenceSnapshotProjectionService(
+                        new ScoringEvidenceSnapshotMapper(),
+                        new AlertEvidenceSnapshotProperties(null)
+                ),
                 alertPublisher,
                 fraudCaseManagementService,
                 metrics,
                 submitDecisionService
+        );
+    }
+
+    private ScoringEvidenceItem scoringEvidence() {
+        return new ScoringEvidenceItem(
+                "evidence-1",
+                "COUNTRY_MISMATCH",
+                ScoringEvidenceType.GEO_SIGNAL,
+                ScoringEvidenceSource.RULE_BASED_SCORING,
+                ScoringEvidenceStatus.AVAILABLE,
+                ScoringEvidenceSeverity.HIGH,
+                "Country mismatch",
+                "Transaction geography differed from expected context.",
+                null,
+                null,
+                Map.of(),
+                Instant.parse("2026-05-18T10:00:00Z")
         );
     }
 }

@@ -49,7 +49,7 @@ class EvidenceRequiresCorrelationIdTest {
                 .containsEntry("correlationIdState", "null")
                 .containsEntry("supportedEvidenceCreated", false)
                 .containsEntry("reasonCodeApplicable", false)
-                .containsEntry("evidenceProjectionState", "missing_correlation_id");
+                .containsEntry("evidenceProjectionState", EvidenceProjectionState.PARTIAL_MISSING_CORRELATION_ID.name());
         assertThat(evidence).noneMatch(item -> item.getStatus() == EvidenceStatus.AVAILABLE);
     }
 
@@ -73,7 +73,7 @@ class EvidenceRequiresCorrelationIdTest {
                 .containsEntry("correlationIdState", "blank")
                 .containsEntry("supportedEvidenceCreated", false)
                 .containsEntry("reasonCodeApplicable", false)
-                .containsEntry("evidenceProjectionState", "missing_correlation_id");
+                .containsEntry("evidenceProjectionState", EvidenceProjectionState.PARTIAL_MISSING_CORRELATION_ID.name());
         assertThat(evidence).noneMatch(item -> item.getStatus() == EvidenceStatus.AVAILABLE);
     }
 }
