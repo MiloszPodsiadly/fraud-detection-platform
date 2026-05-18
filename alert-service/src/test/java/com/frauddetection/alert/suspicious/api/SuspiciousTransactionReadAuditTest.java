@@ -7,8 +7,6 @@ import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.servlet.HandlerMapping;
 
@@ -65,9 +63,12 @@ class SuspiciousTransactionReadAuditTest {
 
     @Test
     void searchEmitsAuditWithBoundedFilterSummary() {
-        when(service.search(any())).thenReturn(new PageImpl<>(List.of(
-                SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT"))
-        )));
+        when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(
+                List.of(SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT"))),
+                0,
+                20,
+                false
+        ));
 
         controller.search(new org.springframework.util.LinkedMultiValueMap<>(), new MockHttpServletRequest());
 
@@ -78,6 +79,36 @@ class SuspiciousTransactionReadAuditTest {
                 eq(1),
                 org.mockito.ArgumentMatchers.any()
         );
+    }
+
+    @Test
+    void searchAuditUsesContentSizeForResultCount() {
+        when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(
+                List.of(
+                        SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT")),
+                        SuspiciousTransactionResponseContractTest.minimalResponse(List.of("RAPID_TRANSFER"))
+                ),
+                0,
+                20,
+                true
+        ));
+
+        controller.search(new org.springframework.util.LinkedMultiValueMap<>(), new MockHttpServletRequest());
+
+        verify(auditService).audit(
+                eq(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_SEARCH),
+                eq(ReadAccessResourceType.SUSPICIOUS_TRANSACTION),
+                eq(null),
+                eq(2),
+                org.mockito.ArgumentMatchers.any()
+        );
+    }
+
+    @Test
+    void searchAuditDoesNotReferenceTotalElements() {
+        assertThat(SuspiciousTransactionSliceResponse.class.getRecordComponents())
+                .extracting(java.lang.reflect.RecordComponent::getName)
+                .doesNotContain("totalElements", "totalPages", "totalCount");
     }
 
     @Test

@@ -40,4 +40,19 @@ class SuspiciousTransactionReadMetricsTest {
                 .forEach(id -> assertThat(id.getTags().stream().map(tag -> tag.getKey()).toList())
                         .containsOnly("outcome", "status", "riskLevel"));
     }
+
+    @Test
+    void searchMetricsRemainLowCardinalityAfterSliceMigration() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AlertServiceMetrics metrics = new AlertServiceMetrics(registry);
+
+        metrics.recordSuspiciousTransactionApiSearch("success", "ANY", "ANY");
+
+        registry.getMeters().stream()
+                .map(Meter::getId)
+                .filter(id -> id.getName().equals("fraud.suspicious_transaction.api.search"))
+                .forEach(id -> assertThat(id.getTags().stream().map(tag -> tag.getKey()).toList())
+                        .doesNotContain("totalElements", "hasNext", "page", "size", "customerId", "transactionId")
+                        .containsOnly("outcome", "status", "riskLevel"));
+    }
 }

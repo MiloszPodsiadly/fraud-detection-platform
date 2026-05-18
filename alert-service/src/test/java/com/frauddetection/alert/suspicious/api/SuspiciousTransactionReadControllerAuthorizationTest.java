@@ -15,7 +15,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.ActiveProfiles;
@@ -78,7 +77,7 @@ class SuspiciousTransactionReadControllerAuthorizationTest {
 
     @Test
     void suspiciousTransactionReadAuthorityAllowsListAndSingleRead() throws Exception {
-        when(service.search(any())).thenReturn(new PageImpl<>(List.of()));
+        when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(List.of(), 0, 20, false));
         when(service.findById("suspicious-1")).thenReturn(Optional.of(
                 SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT"))
         ));

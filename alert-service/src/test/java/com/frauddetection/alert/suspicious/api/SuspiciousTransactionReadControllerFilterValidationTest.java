@@ -50,8 +50,7 @@ class SuspiciousTransactionReadControllerFilterValidationTest {
 
     @Test
     void regexLikeCustomerIdIsTreatedAsLiteralFilter() throws Exception {
-        org.springframework.data.domain.Page<SuspiciousTransactionResponse> empty =
-                new org.springframework.data.domain.PageImpl<>(java.util.List.of());
+        SuspiciousTransactionSliceResponse empty = new SuspiciousTransactionSliceResponse(java.util.List.of(), 0, 20, false);
         SuspiciousTransactionReadService service = mock(SuspiciousTransactionReadService.class);
         org.mockito.Mockito.when(service.search(org.mockito.ArgumentMatchers.any())).thenReturn(empty);
         MockMvc mvc = MockMvcBuilders

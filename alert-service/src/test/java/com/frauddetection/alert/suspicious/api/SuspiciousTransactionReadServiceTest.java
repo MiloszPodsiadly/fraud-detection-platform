@@ -60,29 +60,102 @@ class SuspiciousTransactionReadServiceTest {
         params.add("sort", "riskScore,desc");
         params.add("size", "20");
         SuspiciousTransactionSearchQuery query = SuspiciousTransactionSearchQuery.from(params);
-        when(mongoTemplate.count(any(Query.class), eq(SuspiciousTransactionDocument.class))).thenReturn(1L);
         when(mongoTemplate.find(any(Query.class), eq(SuspiciousTransactionDocument.class))).thenReturn(List.of(document("suspicious-1")));
 
-        var page = service.search(query);
+        SuspiciousTransactionSliceResponse slice = service.search(query);
 
-        assertThat(page.getContent()).hasSize(1);
-        assertThat(page.getContent().getFirst().evidenceStatus()).isEqualTo(EvidenceStatus.PARTIAL);
+        assertThat(slice.content()).hasSize(1);
+        assertThat(slice.content().getFirst().evidenceStatus()).isEqualTo(EvidenceStatus.PARTIAL);
         ArgumentCaptor<Query> queryCaptor = ArgumentCaptor.forClass(Query.class);
         verify(mongoTemplate).find(queryCaptor.capture(), eq(SuspiciousTransactionDocument.class));
-        assertThat(queryCaptor.getValue().getLimit()).isEqualTo(20);
+        assertThat(queryCaptor.getValue().getLimit()).isEqualTo(21);
         assertThat(queryCaptor.getValue().getSortObject().toJson()).contains("riskScore");
+        verify(mongoTemplate, never()).count(any(Query.class), eq(SuspiciousTransactionDocument.class));
         verify(repository, never()).findAll();
     }
 
     @Test
-    void emptySearchReturnsEmptyPage() {
-        when(mongoTemplate.count(any(Query.class), eq(SuspiciousTransactionDocument.class))).thenReturn(0L);
+    void searchDoesNotExecuteCountForEmptyFilters() {
         when(mongoTemplate.find(any(Query.class), eq(SuspiciousTransactionDocument.class))).thenReturn(List.of());
 
-        var page = service.search(SuspiciousTransactionSearchQuery.from(new LinkedMultiValueMap<>()));
+        service.search(SuspiciousTransactionSearchQuery.from(new LinkedMultiValueMap<>()));
 
-        assertThat(page.getContent()).isEmpty();
-        assertThat(page.getTotalElements()).isZero();
+        verify(mongoTemplate, never()).count(any(Query.class), eq(SuspiciousTransactionDocument.class));
+        verify(mongoTemplate).find(any(Query.class), eq(SuspiciousTransactionDocument.class));
+    }
+
+    @Test
+    void searchFetchesAtMostSizePlusOne() {
+        LinkedMultiValueMap<String, String> params = new LinkedMultiValueMap<>();
+        params.add("size", "20");
+        when(mongoTemplate.find(any(Query.class), eq(SuspiciousTransactionDocument.class))).thenReturn(List.of());
+
+        service.search(SuspiciousTransactionSearchQuery.from(params));
+
+        ArgumentCaptor<Query> queryCaptor = ArgumentCaptor.forClass(Query.class);
+        verify(mongoTemplate).find(queryCaptor.capture(), eq(SuspiciousTransactionDocument.class));
+        assertThat(queryCaptor.getValue().getLimit()).isEqualTo(21);
+    }
+
+    @Test
+    void searchWithExtraItemReturnsHasNextTrue() {
+        when(mongoTemplate.find(any(Query.class), eq(SuspiciousTransactionDocument.class)))
+                .thenReturn(documents(21));
+
+        SuspiciousTransactionSliceResponse response = service.search(SuspiciousTransactionSearchQuery.from(new LinkedMultiValueMap<>()));
+
+        assertThat(response.content()).hasSize(20);
+        assertThat(response.hasNext()).isTrue();
+    }
+
+    @Test
+    void searchWithLessThanSizeReturnsHasNextFalse() {
+        when(mongoTemplate.find(any(Query.class), eq(SuspiciousTransactionDocument.class)))
+                .thenReturn(documents(5));
+
+        SuspiciousTransactionSliceResponse response = service.search(SuspiciousTransactionSearchQuery.from(new LinkedMultiValueMap<>()));
+
+        assertThat(response.content()).hasSize(5);
+        assertThat(response.hasNext()).isFalse();
+    }
+
+    @Test
+    void searchWithExactlySizeReturnsHasNextFalse() {
+        when(mongoTemplate.find(any(Query.class), eq(SuspiciousTransactionDocument.class)))
+                .thenReturn(documents(20));
+
+        SuspiciousTransactionSliceResponse response = service.search(SuspiciousTransactionSearchQuery.from(new LinkedMultiValueMap<>()));
+
+        assertThat(response.content()).hasSize(20);
+        assertThat(response.hasNext()).isFalse();
+    }
+
+    @Test
+    void emptySearchReturnsEmptySlice() {
+        LinkedMultiValueMap<String, String> params = new LinkedMultiValueMap<>();
+        params.add("page", "2");
+        params.add("size", "20");
+        when(mongoTemplate.find(any(Query.class), eq(SuspiciousTransactionDocument.class))).thenReturn(List.of());
+
+        SuspiciousTransactionSliceResponse response = service.search(SuspiciousTransactionSearchQuery.from(params));
+
+        assertThat(response.content()).isEmpty();
+        assertThat(response.page()).isEqualTo(2);
+        assertThat(response.size()).isEqualTo(20);
+        assertThat(response.hasNext()).isFalse();
+    }
+
+    @Test
+    void searchResponseDoesNotExposeTotalElementsOrTotalPages() {
+        assertThat(java.util.Arrays.stream(SuspiciousTransactionSliceResponse.class.getRecordComponents())
+                .map(java.lang.reflect.RecordComponent::getName)
+                .toList()).doesNotContain("totalElements", "totalPages", "totalCount");
+    }
+
+    private static List<SuspiciousTransactionDocument> documents(int count) {
+        return java.util.stream.IntStream.rangeClosed(1, count)
+                .mapToObj(index -> document("suspicious-" + index))
+                .toList();
     }
 
     static SuspiciousTransactionDocument document(String id) {

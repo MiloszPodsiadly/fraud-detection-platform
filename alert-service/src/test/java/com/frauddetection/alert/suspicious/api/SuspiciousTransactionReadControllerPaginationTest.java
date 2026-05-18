@@ -5,7 +5,6 @@ import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -36,12 +35,13 @@ class SuspiciousTransactionReadControllerPaginationTest {
 
     @Test
     void defaultPageAndSizeWorks() throws Exception {
-        when(service.search(any())).thenReturn(new PageImpl<>(List.of()));
+        when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(List.of(), 0, 20, false));
 
         mockMvc.perform(get("/internal/suspicious-transactions"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isArray())
-                .andExpect(jsonPath("$.size").value(0));
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(20));
     }
 
     @Test
@@ -52,11 +52,37 @@ class SuspiciousTransactionReadControllerPaginationTest {
 
     @Test
     void emptyPageReturnsOk() throws Exception {
-        when(service.search(any())).thenReturn(new PageImpl<>(List.of()));
+        when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(List.of(), 0, 20, false));
 
         mockMvc.perform(get("/internal/suspicious-transactions").queryParam("size", "20"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content").isEmpty());
+                .andExpect(jsonPath("$.content").isEmpty())
+                .andExpect(jsonPath("$.hasNext").value(false));
+    }
+
+    @Test
+    void resultWithExtraItemReturnsHasNextTrue() throws Exception {
+        when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(
+                List.of(SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT"))),
+                0,
+                1,
+                true
+        ));
+
+        mockMvc.perform(get("/internal/suspicious-transactions").queryParam("size", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isArray())
+                .andExpect(jsonPath("$.hasNext").value(true));
+    }
+
+    @Test
+    void responseDoesNotContainTotalElementsOrTotalPages() throws Exception {
+        when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(List.of(), 0, 20, false));
+
+        mockMvc.perform(get("/internal/suspicious-transactions"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").doesNotExist())
+                .andExpect(jsonPath("$.totalPages").doesNotExist());
     }
 
     @Test
