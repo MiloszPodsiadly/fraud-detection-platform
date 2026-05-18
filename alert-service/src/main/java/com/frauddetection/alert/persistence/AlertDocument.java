@@ -3,6 +3,7 @@ package com.frauddetection.alert.persistence;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.alert.evidence.EvidenceSnapshotItem;
 import com.frauddetection.common.events.contract.FraudDecisionEvent;
 import com.frauddetection.common.events.model.CustomerContext;
 import com.frauddetection.common.events.model.DeviceInfo;
@@ -42,6 +43,7 @@ public class AlertDocument {
     private CustomerContext customerContext;
     private Map<String, Object> scoreDetails;
     private Map<String, Object> featureSnapshot;
+    private List<EvidenceSnapshotItem> evidenceSnapshot = List.of();
     private AnalystDecision analystDecision;
     private String analystId;
     private String decisionReason;
@@ -107,6 +109,8 @@ public class AlertDocument {
     public void setScoreDetails(Map<String, Object> scoreDetails) { this.scoreDetails = scoreDetails; }
     public Map<String, Object> getFeatureSnapshot() { return featureSnapshot; }
     public void setFeatureSnapshot(Map<String, Object> featureSnapshot) { this.featureSnapshot = featureSnapshot; }
+    public List<EvidenceSnapshotItem> getEvidenceSnapshot() { return evidenceSnapshot == null ? List.of() : List.copyOf(evidenceSnapshot); }
+    public void setEvidenceSnapshot(List<EvidenceSnapshotItem> evidenceSnapshot) { this.evidenceSnapshot = evidenceSnapshot == null ? List.of() : List.copyOf(evidenceSnapshot); }
     public AnalystDecision getAnalystDecision() { return analystDecision; }
     public void setAnalystDecision(AnalystDecision analystDecision) { this.analystDecision = analystDecision; }
     public String getAnalystId() { return analystId; }

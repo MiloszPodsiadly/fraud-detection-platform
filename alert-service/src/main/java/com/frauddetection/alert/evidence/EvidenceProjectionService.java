@@ -214,7 +214,7 @@ public class EvidenceProjectionService {
                             "missingTransactionId", true,
                             "transactionIdState", valueState(event.transactionId()),
                             "supportedEvidenceCreated", false,
-                            "evidenceProjectionState", "missing_transaction_id"
+                            "evidenceProjectionState", EvidenceProjectionState.PARTIAL_MISSING_TRANSACTION_ID.name()
                     )
             );
         }
@@ -229,7 +229,7 @@ public class EvidenceProjectionService {
                             "missingCorrelationId", true,
                             "correlationIdState", valueState(event.correlationId()),
                             "supportedEvidenceCreated", false,
-                            "evidenceProjectionState", "missing_correlation_id"
+                            "evidenceProjectionState", EvidenceProjectionState.PARTIAL_MISSING_CORRELATION_ID.name()
                     )
             );
         }
@@ -244,7 +244,7 @@ public class EvidenceProjectionService {
                             "missingSourceEventId", true,
                             "sourceEventIdState", valueState(event.eventId()),
                             "supportedEvidenceCreated", false,
-                            "evidenceProjectionState", "missing_source_event_id"
+                            "evidenceProjectionState", EvidenceProjectionState.PARTIAL_MISSING_SOURCE_EVENT_ID.name()
                     )
             );
         }

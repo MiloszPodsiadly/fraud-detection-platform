@@ -3,6 +3,7 @@ package com.frauddetection.alert.service;
 import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
 import com.frauddetection.alert.api.SubmitAnalystDecisionResponse;
 import com.frauddetection.alert.domain.AlertCase;
+import com.frauddetection.alert.evidence.AlertEvidenceSnapshotProjectionService;
 import com.frauddetection.alert.exception.AlertNotFoundException;
 import com.frauddetection.alert.mapper.AlertDocumentMapper;
 import com.frauddetection.alert.mapper.FraudAlertEventMapper;
@@ -30,6 +31,7 @@ public class AlertManagementService implements AlertManagementUseCase {
     private final AlertDocumentMapper alertDocumentMapper;
     private final FraudAlertEventMapper fraudAlertEventMapper;
     private final AlertCaseFactory alertCaseFactory;
+    private final AlertEvidenceSnapshotProjectionService evidenceSnapshotProjectionService;
     private final FraudAlertEventPublisher fraudAlertEventPublisher;
     private final FraudCaseManagementService fraudCaseManagementService;
     private final AlertServiceMetrics metrics;
@@ -40,6 +42,7 @@ public class AlertManagementService implements AlertManagementUseCase {
             AlertDocumentMapper alertDocumentMapper,
             FraudAlertEventMapper fraudAlertEventMapper,
             AlertCaseFactory alertCaseFactory,
+            AlertEvidenceSnapshotProjectionService evidenceSnapshotProjectionService,
             FraudAlertEventPublisher fraudAlertEventPublisher,
             FraudCaseManagementService fraudCaseManagementService,
             AlertServiceMetrics metrics,
@@ -49,6 +52,7 @@ public class AlertManagementService implements AlertManagementUseCase {
         this.alertDocumentMapper = alertDocumentMapper;
         this.fraudAlertEventMapper = fraudAlertEventMapper;
         this.alertCaseFactory = alertCaseFactory;
+        this.evidenceSnapshotProjectionService = evidenceSnapshotProjectionService;
         this.fraudAlertEventPublisher = fraudAlertEventPublisher;
         this.fraudCaseManagementService = fraudCaseManagementService;
         this.metrics = metrics;
@@ -67,7 +71,9 @@ public class AlertManagementService implements AlertManagementUseCase {
 
         AlertDocument saved;
         try {
-            saved = alertRepository.save(alertDocumentMapper.toDocument(alertCase));
+            AlertDocument document = alertDocumentMapper.toDocument(alertCase);
+            document.setEvidenceSnapshot(evidenceSnapshotProjectionService.project(event));
+            saved = alertRepository.save(document);
         } catch (DuplicateKeyException exception) {
             log.atInfo()
                     .addKeyValue("transactionId", event.transactionId())
