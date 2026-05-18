@@ -72,6 +72,8 @@ public class AlertManagementService implements AlertManagementUseCase {
         AlertDocument saved;
         try {
             AlertDocument document = alertDocumentMapper.toDocument(alertCase);
+            // Evidence snapshot projection must not control case lifecycle. Projection failure is represented as ERROR
+            // diagnostic so alert creation can continue without creating fake AVAILABLE evidence.
             document.setEvidenceSnapshot(evidenceSnapshotProjectionService.projectOrDiagnostic(event));
             saved = alertRepository.save(document);
         } catch (DuplicateKeyException exception) {

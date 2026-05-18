@@ -22,6 +22,11 @@ import java.util.Map;
 @Document(collection = "alerts")
 public class AlertDocument {
 
+    /*
+     * This is a hard persistence safety cap. Normal snapshot truncation is performed by
+     * AlertEvidenceSnapshotProjectionService using configured max-items. AlertDocument rejects snapshots above the hard
+     * cap because it cannot create context-rich truncation diagnostics.
+     */
     public static final int MAX_EVIDENCE_SNAPSHOT_ITEMS = AlertEvidenceSnapshotProperties.HARD_MAX_ITEMS;
 
     @Id

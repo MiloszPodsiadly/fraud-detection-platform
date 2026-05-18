@@ -82,8 +82,8 @@ public record EvidenceSnapshotItem(
                 value,
                 baselineValue,
                 diagnosticAttributes(evidenceType),
-                observedAt,
-                observedAt == null ? Instant.EPOCH : observedAt,
+                legacyObservedAt(evidenceType, severity, source, status, observedAt),
+                legacyObservedAt(evidenceType, severity, source, status, observedAt),
                 null,
                 null,
                 null,
@@ -100,6 +100,23 @@ public record EvidenceSnapshotItem(
             );
         }
         return Map.of();
+    }
+
+    private static Instant legacyObservedAt(
+            EvidenceType evidenceType,
+            EvidenceSeverity severity,
+            EvidenceSource source,
+            EvidenceStatus status,
+            Instant observedAt
+    ) {
+        Objects.requireNonNull(evidenceType, "evidenceType is required");
+        Objects.requireNonNull(severity, "severity is required");
+        Objects.requireNonNull(source, "source is required");
+        Objects.requireNonNull(status, "status is required");
+        if (observedAt == null) {
+            throw new IllegalArgumentException("observedAt is required for legacy EvidenceSnapshotItem constructor");
+        }
+        return observedAt;
     }
 
     private static boolean isUnknownReasonCode(String reasonCode) {

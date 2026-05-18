@@ -48,6 +48,11 @@ public class AlertEvidenceSnapshotProjectionService {
         this.clock = clock == null ? Clock.systemUTC() : clock;
     }
 
+    /**
+     * Production alert-creation entrypoint.
+     * Never throws projection runtime failures to the caller and returns an ERROR DIAGNOSTIC snapshot on unexpected
+     * projection failure. Alert creation code must use this method instead of {@link #project(TransactionScoredEvent)}.
+     */
     public List<EvidenceSnapshotItem> projectOrDiagnostic(TransactionScoredEvent event) {
         try {
             return project(event);
@@ -62,6 +67,11 @@ public class AlertEvidenceSnapshotProjectionService {
         }
     }
 
+    /**
+     * Strict projection method for controlled internal use and tests.
+     * May throw on invalid input; do not call from the alert creation path.
+     * Use {@link #projectOrDiagnostic(TransactionScoredEvent)} for production alert creation.
+     */
     public List<EvidenceSnapshotItem> project(TransactionScoredEvent event) {
         Objects.requireNonNull(event, "event is required");
 
@@ -90,9 +100,7 @@ public class AlertEvidenceSnapshotProjectionService {
         List<EvidenceSnapshotItem> projected = new ArrayList<>(Math.min(retainLimit, incomingCount));
         for (int index = 0; index < scoringEvidence.size() && projected.size() < retainLimit; index++) {
             ScoringEvidenceItem item = scoringEvidence.get(index);
-            if (item != null) {
-                projected.add(projectItem(event, item, index));
-            }
+            projected.add(item == null ? nullItemDiagnostic(event, index) : projectItem(event, item, index));
         }
         if (willTruncate) {
             projected.add(truncationDiagnostic(event, incomingCount, projected.size()));
@@ -178,6 +186,23 @@ public class AlertEvidenceSnapshotProjectionService {
                         "retainedEvidenceCount", retainedCount,
                         "truncatedEvidenceCount", originalCount - retainedCount,
                         "maxEvidenceSnapshotItems", properties.maxItems()
+                )
+        );
+    }
+
+    private EvidenceSnapshotItem nullItemDiagnostic(TransactionScoredEvent event, int index) {
+        return projectionDiagnostic(
+                event,
+                EvidenceProjectionState.ERROR_PROJECTION_FAILED,
+                "Alert evidence snapshot projection failed",
+                "Scoring evidence item was missing and could not be projected.",
+                "null_scoring_evidence_item",
+                index,
+                EvidenceStatus.ERROR,
+                Map.of(
+                        "projectionError", true,
+                        "projectionErrorType", "NullScoringEvidenceItem",
+                        "invalidScoringEvidenceIndex", index
                 )
         );
     }
