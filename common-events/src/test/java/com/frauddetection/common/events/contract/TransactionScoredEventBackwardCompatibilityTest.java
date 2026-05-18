@@ -55,6 +55,48 @@ class TransactionScoredEventBackwardCompatibilityTest {
         assertThat(event.scoringEvidence()).isEmpty();
     }
 
+    @Test
+    void harmlessFutureScoringEvidenceAttributeDoesNotBreakDeserialization() throws Exception {
+        String json = """
+                {
+                  "eventId": "evt-1",
+                  "transactionId": "txn-1",
+                  "correlationId": "corr-1",
+                  "customerId": "cust-1",
+                  "accountId": "acct-1",
+                  "createdAt": "2026-05-18T09:00:00Z",
+                  "transactionTimestamp": "2026-05-18T09:00:00Z",
+                  "fraudScore": 0.82,
+                  "riskLevel": "HIGH",
+                  "scoringStrategy": "RULE_BASED",
+                  "modelName": "rule-based-engine",
+                  "modelVersion": "v1",
+                  "inferenceTimestamp": "2026-05-18T09:00:01Z",
+                  "reasonCodes": ["COUNTRY_MISMATCH"],
+                  "scoreDetails": {"finalScore": 0.82},
+                  "featureSnapshot": {"featureFlagCount": 1},
+                  "alertRecommended": true,
+                  "scoringEvidence": [{
+                    "evidenceId": "RULE_BASED_SCORING:country_mismatch:0",
+                    "reasonCode": "COUNTRY_MISMATCH",
+                    "evidenceType": "GEO_SIGNAL",
+                    "source": "RULE_BASED_SCORING",
+                    "status": "AVAILABLE",
+                    "severity": "HIGH",
+                    "title": "Country mismatch",
+                    "description": "Transaction geography differed from expected context.",
+                    "attributes": {"futureHarmlessAttribute": "safe-bounded-value"},
+                    "observedAt": "2026-05-18T09:00:01Z"
+                  }]
+                }
+                """;
+
+        TransactionScoredEvent event = objectMapper().readValue(json, TransactionScoredEvent.class);
+
+        assertThat(event.scoringEvidence()).singleElement().satisfies(item ->
+                assertThat(item.attributes()).containsEntry("futureHarmlessAttribute", "safe-bounded-value"));
+    }
+
     private TransactionScoredEvent oldEvent() {
         return new TransactionScoredEvent(
                 "evt-1",

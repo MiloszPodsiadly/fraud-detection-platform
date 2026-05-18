@@ -5,26 +5,42 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 public final class ScoringEvidenceAttributes {
 
     private static final int MAX_STRING_LENGTH = 256;
-    private static final List<String> SENSITIVE_KEY_MARKERS = List.of(
-            "customer",
-            "account",
-            "card",
+    private static final Set<String> ALLOWED_KEYS = Set.of(
+            "diagnostic",
+            "supportedEvidenceCreated",
+            "reasonCodeApplicable",
+            "unsupportedReasonCodePresent",
+            "unsupportedReasonCodeCount",
+            "unsupportedReasonCodeLength",
+            "parseStatus",
+            "scoringEvidenceState",
+            "modelAvailable",
+            "fallbackUsed",
+            "fallbackReasonCode",
+            "fallbackReasonLength",
+            "fallbackReasonProvided",
+            "diagnosticIndex"
+    );
+    private static final List<String> SENSITIVE_EXACT_KEYS = List.of(
+            "customerid",
+            "accountid",
+            "cardnumber",
             "iban",
             "pesel",
             "ssn",
             "email",
             "phone",
-            "name",
             "address",
-            "raw",
-            "payload",
+            "fullname",
             "featuresnapshot",
             "modelpayload"
     );
+    private static final List<String> SENSITIVE_KEY_MARKERS = List.of("raw", "payload");
 
     private ScoringEvidenceAttributes() {
     }
@@ -45,6 +61,14 @@ public final class ScoringEvidenceAttributes {
         String normalized = key.replace("_", "")
                 .replace("-", "")
                 .toLowerCase(Locale.ROOT);
+        if (!ALLOWED_KEYS.contains(key)) {
+            throw new IllegalArgumentException("Unsupported scoring evidence attribute key: " + key);
+        }
+        for (String exactKey : SENSITIVE_EXACT_KEYS) {
+            if (normalized.equals(exactKey)) {
+                throw new IllegalArgumentException("Unsafe scoring evidence attribute key: " + key);
+            }
+        }
         for (String marker : SENSITIVE_KEY_MARKERS) {
             if (normalized.contains(marker)) {
                 throw new IllegalArgumentException("Unsafe scoring evidence attribute key: " + key);
