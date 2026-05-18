@@ -110,9 +110,15 @@ public class SuspiciousTransactionProjectionService {
         document.setRiskLevel(event.riskLevel());
         document.setDetectionSource(detectionSource(event));
         document.setReasonCodes(event.reasonCodes());
-        document.setEvidenceStatus(evidenceStatus(event.scoringEvidence()));
+        EvidenceStatus evidenceStatus = evidenceStatus(event);
+        document.setEvidenceStatus(evidenceStatus);
         document.setEvidenceSnapshotItemCount(safeCount(event.scoringEvidence()));
-        document.setEvidenceProjectionState(evidenceProjectionState(event.scoringEvidence()));
+        document.setEvidenceProjectionState(evidenceProjectionState(evidenceStatus));
+        if (!hasText(event.correlationId())) {
+            log.atWarn()
+                    .addKeyValue("reason", "missing_correlation_id")
+                    .log("Suspicious transaction read-model projection has partial lineage metadata.");
+        }
         document.setLinkedAlertId(hasText(linkedAlertId) ? linkedAlertId : document.getLinkedAlertId());
         document.setStatus(hasText(document.getLinkedAlertId()) ? SuspiciousTransactionStatus.ALERT_CREATED : SuspiciousTransactionStatus.NEW);
         document.setDetectedAt(event.inferenceTimestamp() == null ? now : event.inferenceTimestamp());
@@ -131,40 +137,53 @@ public class SuspiciousTransactionProjectionService {
         return riskLevel == RiskLevel.HIGH || riskLevel == RiskLevel.CRITICAL;
     }
 
-    private EvidenceStatus evidenceStatus(List<ScoringEvidenceItem> scoringEvidence) {
+    private EvidenceStatus evidenceStatus(TransactionScoredEvent event) {
+        EvidenceStatus status = evidenceStatus(event.scoringEvidence());
+        if (!hasText(event.correlationId()) && status == EvidenceStatus.AVAILABLE) {
+            return EvidenceStatus.PARTIAL;
+        }
+        return status;
+    }
+
+    EvidenceStatus evidenceStatus(List<ScoringEvidenceItem> scoringEvidence) {
         if (scoringEvidence == null || scoringEvidence.isEmpty()) {
             return EvidenceStatus.PARTIAL;
         }
         boolean hasAvailable = false;
         boolean hasError = false;
-        boolean hasPartial = false;
+        boolean hasPartialOrLegacy = false;
+        boolean hasUnavailableOrNotApplicable = false;
         for (ScoringEvidenceItem item : scoringEvidence) {
             if (item == null || item.status() == null) {
-                hasPartial = true;
+                hasError = true;
                 continue;
             }
-            if (item.status() == ScoringEvidenceStatus.AVAILABLE) {
-                hasAvailable = true;
-            } else if (item.status() == ScoringEvidenceStatus.ERROR) {
-                hasError = true;
-            } else if (item.status() == ScoringEvidenceStatus.PARTIAL || item.status() == ScoringEvidenceStatus.LEGACY) {
-                hasPartial = true;
+            switch (item.status()) {
+                case AVAILABLE -> hasAvailable = true;
+                case ERROR -> hasError = true;
+                case PARTIAL, LEGACY -> hasPartialOrLegacy = true;
+                case UNAVAILABLE, NOT_APPLICABLE -> hasUnavailableOrNotApplicable = true;
             }
-        }
-        if (hasAvailable) {
-            return EvidenceStatus.AVAILABLE;
         }
         if (hasError) {
             return EvidenceStatus.ERROR;
         }
-        if (hasPartial) {
+        if (hasPartialOrLegacy) {
             return EvidenceStatus.PARTIAL;
+        }
+        if (hasAvailable && hasUnavailableOrNotApplicable) {
+            return EvidenceStatus.PARTIAL;
+        }
+        if (hasUnavailableOrNotApplicable) {
+            return EvidenceStatus.UNAVAILABLE;
+        }
+        if (hasAvailable) {
+            return EvidenceStatus.AVAILABLE;
         }
         return EvidenceStatus.UNAVAILABLE;
     }
 
-    private String evidenceProjectionState(List<ScoringEvidenceItem> scoringEvidence) {
-        EvidenceStatus status = evidenceStatus(scoringEvidence);
+    String evidenceProjectionState(EvidenceStatus status) {
         return switch (status) {
             case AVAILABLE -> "AVAILABLE_METADATA";
             case ERROR -> "ERROR_METADATA";

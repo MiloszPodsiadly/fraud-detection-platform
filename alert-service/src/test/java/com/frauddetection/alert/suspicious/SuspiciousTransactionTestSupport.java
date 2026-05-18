@@ -125,6 +125,34 @@ final class SuspiciousTransactionTestSupport {
         );
     }
 
+    static TransactionScoredEvent withCorrelationId(TransactionScoredEvent base, String correlationId) {
+        return new TransactionScoredEvent(
+                base.eventId(),
+                base.transactionId(),
+                correlationId,
+                base.customerId(),
+                base.accountId(),
+                base.createdAt(),
+                base.transactionTimestamp(),
+                base.transactionAmount(),
+                base.merchantInfo(),
+                base.deviceInfo(),
+                base.locationInfo(),
+                base.customerContext(),
+                base.fraudScore(),
+                base.riskLevel(),
+                base.scoringStrategy(),
+                base.modelName(),
+                base.modelVersion(),
+                base.inferenceTimestamp(),
+                base.reasonCodes(),
+                base.scoreDetails(),
+                base.featureSnapshot(),
+                base.alertRecommended(),
+                base.scoringEvidence()
+        );
+    }
+
     static ScoringEvidenceItem availableEvidence() {
         return evidence(ScoringEvidenceStatus.AVAILABLE, ScoringEvidenceSource.RULE_BASED_SCORING);
     }
@@ -139,6 +167,14 @@ final class SuspiciousTransactionTestSupport {
 
     static ScoringEvidenceItem errorEvidence() {
         return evidence(ScoringEvidenceStatus.ERROR, ScoringEvidenceSource.RULE_BASED_SCORING);
+    }
+
+    static ScoringEvidenceItem legacyEvidence() {
+        return evidence(ScoringEvidenceStatus.LEGACY, ScoringEvidenceSource.LEGACY_SCORING);
+    }
+
+    static ScoringEvidenceItem notApplicableEvidence() {
+        return evidence(ScoringEvidenceStatus.NOT_APPLICABLE, ScoringEvidenceSource.RULE_BASED_SCORING);
     }
 
     static ScoringEvidenceItem mlEvidence() {
