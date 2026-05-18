@@ -72,6 +72,50 @@ class SuspiciousTransactionReadMetricsTest {
     }
 
     @Test
+    void singleReadMetricsLabelsOnlyOutcomeStatusRiskLevel() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AlertServiceMetrics metrics = new AlertServiceMetrics(registry);
+
+        metrics.recordSuspiciousTransactionApiRead("success", "ALERT_CREATED", "CRITICAL");
+
+        registry.getMeters().stream()
+                .map(Meter::getId)
+                .filter(id -> id.getName().equals("fraud.suspicious_transaction.api.read"))
+                .forEach(id -> assertThat(id.getTags().stream().map(tag -> tag.getKey()).toList())
+                        .containsOnly("outcome", "status", "riskLevel"));
+    }
+
+    @Test
+    void singleReadMetricsDoNotUseSuspiciousTransactionId() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AlertServiceMetrics metrics = new AlertServiceMetrics(registry);
+
+        metrics.recordSuspiciousTransactionApiRead("success", "NEW", "HIGH");
+
+        registry.getMeters().stream()
+                .map(Meter::getId)
+                .filter(id -> id.getName().equals("fraud.suspicious_transaction.api.read"))
+                .forEach(id -> assertThat(id.getTags().stream().map(tag -> tag.getKey()).toList())
+                        .doesNotContain("suspiciousTransactionId", "cursor", "customerId", "accountId")
+                        .containsOnly("outcome", "status", "riskLevel"));
+    }
+
+    @Test
+    void notFoundReadMetricsDoNotUseSuspiciousTransactionId() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AlertServiceMetrics metrics = new AlertServiceMetrics(registry);
+
+        metrics.recordSuspiciousTransactionApiRead("not_found", "ANY", "ANY");
+
+        registry.getMeters().stream()
+                .map(Meter::getId)
+                .filter(id -> id.getName().equals("fraud.suspicious_transaction.api.read"))
+                .forEach(id -> assertThat(id.getTags().stream().map(tag -> tag.getKey()).toList())
+                        .doesNotContain("suspiciousTransactionId")
+                        .containsOnly("outcome", "status", "riskLevel"));
+    }
+
+    @Test
     void searchMetricsDoNotIncludeRawFilters() {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         AlertServiceMetrics metrics = new AlertServiceMetrics(registry);

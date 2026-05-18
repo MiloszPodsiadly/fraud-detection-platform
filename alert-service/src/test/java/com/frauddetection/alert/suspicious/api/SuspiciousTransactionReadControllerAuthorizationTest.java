@@ -25,9 +25,11 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(SuspiciousTransactionReadController.class)
@@ -63,6 +65,8 @@ class SuspiciousTransactionReadControllerAuthorizationTest {
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/internal/suspicious-transactions/suspicious-1"))
                 .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(service);
     }
 
     @Test
@@ -73,11 +77,13 @@ class SuspiciousTransactionReadControllerAuthorizationTest {
         mockMvc.perform(get("/internal/suspicious-transactions/suspicious-1")
                         .with(authentication(auth(AnalystAuthority.ALERT_READ))))
                 .andExpect(status().isForbidden());
+
+        verifyNoInteractions(service);
     }
 
     @Test
     void suspiciousTransactionReadAuthorityAllowsListAndSingleRead() throws Exception {
-        when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(List.of(), 0, 20, false));
+        when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(List.of(), 20, false, null));
         when(service.findById("suspicious-1")).thenReturn(Optional.of(
                 SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT"))
         ));
@@ -87,7 +93,43 @@ class SuspiciousTransactionReadControllerAuthorizationTest {
                 .andExpect(status().isOk());
         mockMvc.perform(get("/internal/suspicious-transactions/suspicious-1")
                         .with(authentication(auth(AnalystAuthority.SUSPICIOUS_TRANSACTION_READ))))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.customerId").value("customer-1"))
+                .andExpect(jsonPath("$.accountId").value("account-1"));
+    }
+
+    @Test
+    void responseMayContainCustomerAndAccountIdentifiersOnlyBehindAuthority() throws Exception {
+        when(service.findById("suspicious-1")).thenReturn(Optional.of(
+                SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT"))
+        ));
+
+        mockMvc.perform(get("/internal/suspicious-transactions/suspicious-1")
+                        .with(authentication(auth(AnalystAuthority.SUSPICIOUS_TRANSACTION_READ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.customerId").value("customer-1"))
+                .andExpect(jsonPath("$.accountId").value("account-1"));
+    }
+
+    @Test
+    void unauthenticatedCannotReadCustomerAccountIdentifiers() throws Exception {
+        mockMvc.perform(get("/internal/suspicious-transactions/suspicious-1"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.customerId").doesNotExist())
+                .andExpect(jsonPath("$.accountId").doesNotExist());
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void missingAuthorityCannotReadCustomerAccountIdentifiers() throws Exception {
+        mockMvc.perform(get("/internal/suspicious-transactions/suspicious-1")
+                        .with(authentication(auth(AnalystAuthority.ALERT_READ))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.customerId").doesNotExist())
+                .andExpect(jsonPath("$.accountId").doesNotExist());
+
+        verifyNoInteractions(service);
     }
 
     private UsernamePasswordAuthenticationToken auth(String authority) {

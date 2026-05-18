@@ -1,5 +1,6 @@
 package com.frauddetection.alert.suspicious.api;
 
+import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
 import com.frauddetection.alert.audit.read.ReadAccessAuditClassifier;
 import com.frauddetection.alert.audit.read.ReadAccessAuditOutcome;
 import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
@@ -10,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.servlet.HandlerMapping;
 
+import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Optional;
 
@@ -17,6 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -29,14 +32,14 @@ class SuspiciousTransactionReadAuditTest {
             new SuspiciousTransactionReadController(service, auditService, metrics);
 
     @Test
-    void singleSuccessfulReadEmitsAudit() {
+    void singleReadAuditMayUseSuspiciousTransactionIdAsResourceId() {
         when(service.findById("suspicious-1")).thenReturn(Optional.of(
                 SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT"))
         ));
 
         controller.findById("suspicious-1", new MockHttpServletRequest());
 
-        verify(auditService).audit(
+        verify(auditService, times(1)).audit(
                 eq(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_READ),
                 eq(ReadAccessResourceType.SUSPICIOUS_TRANSACTION),
                 eq("suspicious-1"),
@@ -46,13 +49,13 @@ class SuspiciousTransactionReadAuditTest {
     }
 
     @Test
-    void singleNotFoundEmitsRejectedAudit() {
+    void suspiciousTransactionNotFoundAuditedExactlyOnce() {
         when(service.findById("missing")).thenReturn(Optional.empty());
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.findById("missing", new MockHttpServletRequest()))
                 .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
 
-        verify(auditService).auditAttempt(
+        verify(auditService, times(1)).auditAttempt(
                 eq(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_READ),
                 eq(ReadAccessResourceType.SUSPICIOUS_TRANSACTION),
                 eq("missing"),
@@ -62,17 +65,17 @@ class SuspiciousTransactionReadAuditTest {
     }
 
     @Test
-    void searchEmitsAuditWithBoundedFilterSummary() {
+    void suspiciousTransactionSearchAuditedExactlyOnce() {
         when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(
                 List.of(SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT"))),
-                0,
                 20,
-                false
+                false,
+                null
         ));
 
         controller.search(new org.springframework.util.LinkedMultiValueMap<>(), new MockHttpServletRequest());
 
-        verify(auditService).audit(
+        verify(auditService, times(1)).audit(
                 eq(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_SEARCH),
                 eq(ReadAccessResourceType.SUSPICIOUS_TRANSACTION),
                 eq(null),
@@ -88,14 +91,14 @@ class SuspiciousTransactionReadAuditTest {
                         SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT")),
                         SuspiciousTransactionResponseContractTest.minimalResponse(List.of("RAPID_TRANSFER"))
                 ),
-                0,
                 20,
-                true
+                true,
+                "cursor-2"
         ));
 
         controller.search(new org.springframework.util.LinkedMultiValueMap<>(), new MockHttpServletRequest());
 
-        verify(auditService).audit(
+        verify(auditService, times(1)).audit(
                 eq(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_SEARCH),
                 eq(ReadAccessResourceType.SUSPICIOUS_TRANSACTION),
                 eq(null),
@@ -134,16 +137,53 @@ class SuspiciousTransactionReadAuditTest {
     @Test
     void searchAuditDoesNotIncludeFullResponseBody() {
         SuspiciousTransactionResponse response = SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT"));
-        when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(List.of(response), 0, 20, false));
+        when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(List.of(response), 20, false, null));
 
         controller.search(new org.springframework.util.LinkedMultiValueMap<>(), new MockHttpServletRequest());
 
-        verify(auditService).audit(
+        verify(auditService, times(1)).audit(
                 eq(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_SEARCH),
                 eq(ReadAccessResourceType.SUSPICIOUS_TRANSACTION),
                 eq(null),
                 eq(1),
                 org.mockito.ArgumentMatchers.any()
         );
+    }
+
+    @Test
+    void suspiciousTransactionReadAuditedExactlyOnce() {
+        when(service.findById("suspicious-1")).thenReturn(Optional.of(
+                SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT"))
+        ));
+
+        controller.findById("suspicious-1", new MockHttpServletRequest());
+
+        verify(auditService, times(1)).audit(
+                eq(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_READ),
+                eq(ReadAccessResourceType.SUSPICIOUS_TRANSACTION),
+                eq("suspicious-1"),
+                eq(1),
+                org.mockito.ArgumentMatchers.any()
+        );
+    }
+
+    @Test
+    void auditedSensitiveReadAnnotationIsMarkerOnlyForSuspiciousTransactionEndpoint() throws Exception {
+        Method search = SuspiciousTransactionReadController.class.getMethod(
+                "search",
+                org.springframework.util.MultiValueMap.class,
+                jakarta.servlet.http.HttpServletRequest.class
+        );
+        Method read = SuspiciousTransactionReadController.class.getMethod(
+                "findById",
+                String.class,
+                jakarta.servlet.http.HttpServletRequest.class
+        );
+
+        assertThat(search.getAnnotation(AuditedSensitiveRead.class)).isNotNull();
+        assertThat(read.getAnnotation(AuditedSensitiveRead.class)).isNotNull();
+        assertThat(AuditedSensitiveRead.class.getDeclaredMethods())
+                .extracting(Method::getName)
+                .containsExactly("action");
     }
 }

@@ -43,8 +43,8 @@ class SuspiciousTransactionNoUnboundedQueryTest {
         assertThat(Arrays.stream(SuspiciousTransactionSliceResponse.class.getRecordComponents())
                 .map(java.lang.reflect.RecordComponent::getName)
                 .toList())
-                .containsExactly("content", "page", "size", "hasNext")
-                .doesNotContain("totalElements", "totalPages", "totalCount");
+                .containsExactly("content", "size", "hasNext", "nextCursor")
+                .doesNotContain("page", "totalElements", "totalPages", "totalCount", "offset");
     }
 
     @Test
@@ -52,7 +52,11 @@ class SuspiciousTransactionNoUnboundedQueryTest {
         SuspiciousTransactionRepository repository = mock(SuspiciousTransactionRepository.class);
         MongoTemplate mongoTemplate = mock(MongoTemplate.class);
         when(mongoTemplate.find(any(Query.class), eq(SuspiciousTransactionDocument.class))).thenReturn(List.of());
-        SuspiciousTransactionReadService service = new SuspiciousTransactionReadService(repository, mongoTemplate);
+        SuspiciousTransactionReadService service = new SuspiciousTransactionReadService(
+                repository,
+                mongoTemplate,
+                new SuspiciousTransactionCursorCodec()
+        );
 
         service.search(SuspiciousTransactionSearchQuery.from(new org.springframework.util.LinkedMultiValueMap<>()));
 
@@ -60,21 +64,19 @@ class SuspiciousTransactionNoUnboundedQueryTest {
         verify(mongoTemplate, never()).count(any(Query.class), eq(SuspiciousTransactionDocument.class));
         verify(mongoTemplate).find(queryCaptor.capture(), eq(SuspiciousTransactionDocument.class));
         assertThat(queryCaptor.getValue().getLimit()).isEqualTo(SuspiciousTransactionSearchQuery.DEFAULT_SIZE + 1);
+        assertThat(queryCaptor.getValue().getSkip()).isZero();
     }
 
     @Test
-    void repositorySearchMethodsUsePageableAndPage() {
-        List<Method> searchMethods = Arrays.stream(SuspiciousTransactionRepository.class.getDeclaredMethods())
-                .filter(method -> method.getName().startsWith("findBy"))
-                .filter(method -> !method.getName().equals("findByTransactionIdAndSourceEventId"))
+    void readServiceSearchDoesNotExposePageOrPageableContract() {
+        List<Method> serviceSearchMethods = Arrays.stream(SuspiciousTransactionReadService.class.getDeclaredMethods())
+                .filter(method -> method.getName().equals("search"))
                 .toList();
 
-        assertThat(searchMethods).isNotEmpty();
-        assertThat(searchMethods).allSatisfy(method -> {
-            assertThat(method.getReturnType()).isEqualTo(Page.class);
-            assertThat(Arrays.asList(method.getParameterTypes())).contains(Pageable.class);
+        assertThat(serviceSearchMethods).hasSize(1);
+        assertThat(serviceSearchMethods).allSatisfy(method -> {
+            assertThat(method.getReturnType()).isNotEqualTo(Page.class);
+            assertThat(Arrays.asList(method.getParameterTypes())).doesNotContain(Pageable.class);
         });
-        assertThat(Arrays.stream(SuspiciousTransactionRepository.class.getDeclaredMethods())
-                .noneMatch(method -> method.getName().equals("findAll"))).isTrue();
     }
 }

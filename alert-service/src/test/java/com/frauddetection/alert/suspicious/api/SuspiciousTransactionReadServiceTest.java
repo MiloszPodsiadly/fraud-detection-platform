@@ -28,7 +28,9 @@ class SuspiciousTransactionReadServiceTest {
 
     private final SuspiciousTransactionRepository repository = mock(SuspiciousTransactionRepository.class);
     private final MongoTemplate mongoTemplate = mock(MongoTemplate.class);
-    private final SuspiciousTransactionReadService service = new SuspiciousTransactionReadService(repository, mongoTemplate);
+    private final SuspiciousTransactionCursorCodec cursorCodec = new SuspiciousTransactionCursorCodec();
+    private final SuspiciousTransactionReadService service =
+            new SuspiciousTransactionReadService(repository, mongoTemplate, cursorCodec);
 
     @Test
     void findByIdReturnsMappedResponseAndDoesNotQueryTransactionId() {
@@ -51,13 +53,12 @@ class SuspiciousTransactionReadServiceTest {
     }
 
     @Test
-    void searchUsesBoundedPageableAndMapsPageContent() {
+    void searchUsesBoundedKeysetQueryAndMapsContent() {
         LinkedMultiValueMap<String, String> params = new LinkedMultiValueMap<>();
         params.add("status", "NEW");
         params.add("riskLevel", "HIGH");
         params.add("customerId", "customer-1");
         params.add("detectedFrom", "2026-05-18T00:00:00Z");
-        params.add("sort", "riskScore,desc");
         params.add("size", "20");
         SuspiciousTransactionSearchQuery query = SuspiciousTransactionSearchQuery.from(params);
         when(mongoTemplate.find(any(Query.class), eq(SuspiciousTransactionDocument.class))).thenReturn(List.of(document("suspicious-1")));
@@ -69,7 +70,9 @@ class SuspiciousTransactionReadServiceTest {
         ArgumentCaptor<Query> queryCaptor = ArgumentCaptor.forClass(Query.class);
         verify(mongoTemplate).find(queryCaptor.capture(), eq(SuspiciousTransactionDocument.class));
         assertThat(queryCaptor.getValue().getLimit()).isEqualTo(21);
-        assertThat(queryCaptor.getValue().getSortObject().toJson()).contains("riskScore");
+        assertThat(queryCaptor.getValue().getSortObject().toJson())
+                .contains("detectedAt")
+                .contains("suspiciousTransactionId");
         verify(mongoTemplate, never()).count(any(Query.class), eq(SuspiciousTransactionDocument.class));
         verify(repository, never()).findAll();
     }
@@ -98,6 +101,67 @@ class SuspiciousTransactionReadServiceTest {
     }
 
     @Test
+    void searchDoesNotUseSkip() {
+        when(mongoTemplate.find(any(Query.class), eq(SuspiciousTransactionDocument.class))).thenReturn(List.of());
+
+        service.search(SuspiciousTransactionSearchQuery.from(new LinkedMultiValueMap<>()));
+
+        ArgumentCaptor<Query> queryCaptor = ArgumentCaptor.forClass(Query.class);
+        verify(mongoTemplate).find(queryCaptor.capture(), eq(SuspiciousTransactionDocument.class));
+        assertThat(queryCaptor.getValue().getSkip()).isZero();
+    }
+
+    @Test
+    void firstPageUsesFixedSort() {
+        when(mongoTemplate.find(any(Query.class), eq(SuspiciousTransactionDocument.class))).thenReturn(List.of());
+
+        service.search(SuspiciousTransactionSearchQuery.from(new LinkedMultiValueMap<>()));
+
+        ArgumentCaptor<Query> queryCaptor = ArgumentCaptor.forClass(Query.class);
+        verify(mongoTemplate).find(queryCaptor.capture(), eq(SuspiciousTransactionDocument.class));
+        assertThat(queryCaptor.getValue().getSortObject().toJson())
+                .contains("\"detectedAt\": -1")
+                .contains("\"suspiciousTransactionId\": -1");
+    }
+
+    @Test
+    void nextPageUsesCursorCriteria() {
+        LinkedMultiValueMap<String, String> params = new LinkedMultiValueMap<>();
+        params.add("cursor", cursorCodec.encode(Instant.parse("2026-05-18T10:00:00Z"), "suspicious-2"));
+        when(mongoTemplate.find(any(Query.class), eq(SuspiciousTransactionDocument.class))).thenReturn(List.of());
+
+        service.search(SuspiciousTransactionSearchQuery.from(params));
+
+        ArgumentCaptor<Query> queryCaptor = ArgumentCaptor.forClass(Query.class);
+        verify(mongoTemplate).find(queryCaptor.capture(), eq(SuspiciousTransactionDocument.class));
+        assertThat(queryCaptor.getValue().getQueryObject().toString())
+                .contains("$or")
+                .contains("detectedAt")
+                .contains("suspiciousTransactionId")
+                .contains("suspicious-2");
+    }
+
+    @Test
+    void filteredNextPageCombinesFiltersAndCursorInSingleBoundedQuery() {
+        LinkedMultiValueMap<String, String> params = new LinkedMultiValueMap<>();
+        params.add("status", "NEW");
+        params.add("riskLevel", "HIGH");
+        params.add("cursor", cursorCodec.encode(Instant.parse("2026-05-18T10:00:00Z"), "suspicious-2"));
+        when(mongoTemplate.find(any(Query.class), eq(SuspiciousTransactionDocument.class))).thenReturn(List.of());
+
+        service.search(SuspiciousTransactionSearchQuery.from(params));
+
+        ArgumentCaptor<Query> queryCaptor = ArgumentCaptor.forClass(Query.class);
+        verify(mongoTemplate).find(queryCaptor.capture(), eq(SuspiciousTransactionDocument.class));
+        assertThat(queryCaptor.getValue().getQueryObject().toString())
+                .contains("$and")
+                .contains("$or")
+                .contains("status")
+                .contains("riskLevel")
+                .contains("suspicious-2");
+    }
+
+    @Test
     void searchWithExtraItemReturnsHasNextTrue() {
         when(mongoTemplate.find(any(Query.class), eq(SuspiciousTransactionDocument.class)))
                 .thenReturn(documents(21));
@@ -106,6 +170,7 @@ class SuspiciousTransactionReadServiceTest {
 
         assertThat(response.content()).hasSize(20);
         assertThat(response.hasNext()).isTrue();
+        assertThat(response.nextCursor()).isNotBlank();
     }
 
     @Test
@@ -117,6 +182,7 @@ class SuspiciousTransactionReadServiceTest {
 
         assertThat(response.content()).hasSize(5);
         assertThat(response.hasNext()).isFalse();
+        assertThat(response.nextCursor()).isNull();
     }
 
     @Test
@@ -128,28 +194,55 @@ class SuspiciousTransactionReadServiceTest {
 
         assertThat(response.content()).hasSize(20);
         assertThat(response.hasNext()).isFalse();
+        assertThat(response.nextCursor()).isNull();
     }
 
     @Test
-    void emptySearchReturnsEmptySlice() {
+    void emptySearchReturnsEmptyCursorSlice() {
         LinkedMultiValueMap<String, String> params = new LinkedMultiValueMap<>();
-        params.add("page", "2");
         params.add("size", "20");
         when(mongoTemplate.find(any(Query.class), eq(SuspiciousTransactionDocument.class))).thenReturn(List.of());
 
         SuspiciousTransactionSliceResponse response = service.search(SuspiciousTransactionSearchQuery.from(params));
 
         assertThat(response.content()).isEmpty();
-        assertThat(response.page()).isEqualTo(2);
         assertThat(response.size()).isEqualTo(20);
         assertThat(response.hasNext()).isFalse();
+        assertThat(response.nextCursor()).isNull();
+    }
+
+    @Test
+    void nextCursorGeneratedFromLastReturnedItem() {
+        when(mongoTemplate.find(any(Query.class), eq(SuspiciousTransactionDocument.class)))
+                .thenReturn(documents(3));
+        LinkedMultiValueMap<String, String> params = new LinkedMultiValueMap<>();
+        params.add("size", "2");
+
+        SuspiciousTransactionSliceResponse response = service.search(SuspiciousTransactionSearchQuery.from(params));
+
+        assertThat(response.content()).hasSize(2);
+        SuspiciousTransactionCursor cursor = cursorCodec.decode(response.nextCursor());
+        assertThat(cursor.suspiciousTransactionId()).isEqualTo("suspicious-2");
+    }
+
+    @Test
+    void emptySearchUsesCursorSliceNoCountNoSkip() {
+        when(mongoTemplate.find(any(Query.class), eq(SuspiciousTransactionDocument.class))).thenReturn(List.of());
+
+        service.search(SuspiciousTransactionSearchQuery.from(new LinkedMultiValueMap<>()));
+
+        ArgumentCaptor<Query> queryCaptor = ArgumentCaptor.forClass(Query.class);
+        verify(mongoTemplate, never()).count(any(Query.class), eq(SuspiciousTransactionDocument.class));
+        verify(mongoTemplate).find(queryCaptor.capture(), eq(SuspiciousTransactionDocument.class));
+        assertThat(queryCaptor.getValue().getSkip()).isZero();
+        assertThat(queryCaptor.getValue().getLimit()).isEqualTo(SuspiciousTransactionSearchQuery.DEFAULT_SIZE + 1);
     }
 
     @Test
     void searchResponseDoesNotExposeTotalElementsOrTotalPages() {
         assertThat(java.util.Arrays.stream(SuspiciousTransactionSliceResponse.class.getRecordComponents())
                 .map(java.lang.reflect.RecordComponent::getName)
-                .toList()).doesNotContain("totalElements", "totalPages", "totalCount");
+                .toList()).doesNotContain("page", "totalElements", "totalPages", "totalCount", "offset");
     }
 
     private static List<SuspiciousTransactionDocument> documents(int count) {

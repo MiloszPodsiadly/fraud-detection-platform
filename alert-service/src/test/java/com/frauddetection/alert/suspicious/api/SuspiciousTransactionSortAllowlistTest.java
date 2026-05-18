@@ -9,31 +9,29 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class SuspiciousTransactionSortAllowlistTest {
 
     @Test
-    void allowedSortFieldsAreAccepted() {
-        for (String field : java.util.List.of("detectedAt", "updatedAt", "riskScore", "riskLevel", "status")) {
-            LinkedMultiValueMap<String, String> params = new LinkedMultiValueMap<>();
-            params.add("sort", field + ",asc");
+    void sortParameterIsRejectedBecauseSearchUsesFixedKeysetSort() {
+        LinkedMultiValueMap<String, String> params = new LinkedMultiValueMap<>();
+        params.add("sort", "detectedAt,desc");
 
-            assertThat(SuspiciousTransactionSearchQuery.from(params).sortField()).isEqualTo(field);
-        }
+        assertThatThrownBy(() -> SuspiciousTransactionSearchQuery.from(params))
+                .isInstanceOf(SuspiciousTransactionReadValidationException.class);
     }
 
     @Test
-    void defaultSortIsDetectedAtDescending() {
+    void fixedSortIsDetectedAtThenSuspiciousTransactionIdDescending() {
         SuspiciousTransactionSearchQuery query = SuspiciousTransactionSearchQuery.from(new LinkedMultiValueMap<>());
 
         assertThat(query.sortField()).isEqualTo("detectedAt");
         assertThat(query.sortDirection()).isEqualTo("DESC");
+        assertThat(SuspiciousTransactionSearchQuery.TIE_BREAKER_SORT_FIELD).isEqualTo("suspiciousTransactionId");
     }
 
     @Test
-    void forbiddenAndUnknownSortFieldsAreRejected() {
-        for (String field : java.util.List.of("transactionId", "customerId", "sourceEventId", "unknown")) {
-            LinkedMultiValueMap<String, String> params = new LinkedMultiValueMap<>();
-            params.add("sort", field + ",desc");
+    void unknownSortFieldsAreRejectedAsUnknownParameters() {
+        LinkedMultiValueMap<String, String> params = new LinkedMultiValueMap<>();
+        params.add("sort", "customerId,desc");
 
-            assertThatThrownBy(() -> SuspiciousTransactionSearchQuery.from(params))
-                    .isInstanceOf(SuspiciousTransactionReadValidationException.class);
-        }
+        assertThatThrownBy(() -> SuspiciousTransactionSearchQuery.from(params))
+                .isInstanceOf(SuspiciousTransactionReadValidationException.class);
     }
 }

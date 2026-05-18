@@ -34,15 +34,15 @@ class SuspiciousTransactionReadControllerPaginationTest {
     }
 
     @Test
-    void defaultPageAndSizeWorks() throws Exception {
-        when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(List.of(), 0, 20, false));
+    void defaultCursorSliceAndSizeWorks() throws Exception {
+        when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(List.of(), 20, false, null));
 
         mockMvc.perform(get("/internal/suspicious-transactions"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isArray())
-                .andExpect(jsonPath("$.page").value(0))
                 .andExpect(jsonPath("$.size").value(20))
-                .andExpect(jsonPath("$.hasNext").value(false));
+                .andExpect(jsonPath("$.hasNext").value(false))
+                .andExpect(jsonPath("$.nextCursor").doesNotExist());
     }
 
     @Test
@@ -52,8 +52,8 @@ class SuspiciousTransactionReadControllerPaginationTest {
     }
 
     @Test
-    void emptyPageReturnsOk() throws Exception {
-        when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(List.of(), 0, 20, false));
+    void emptySearchReturnsOk() throws Exception {
+        when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(List.of(), 20, false, null));
 
         mockMvc.perform(get("/internal/suspicious-transactions").queryParam("size", "20"))
                 .andExpect(status().isOk())
@@ -65,26 +65,52 @@ class SuspiciousTransactionReadControllerPaginationTest {
     void resultWithExtraItemReturnsHasNextTrue() throws Exception {
         when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(
                 List.of(SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT"))),
-                0,
                 1,
-                true
+                true,
+                "next-cursor"
         ));
 
         mockMvc.perform(get("/internal/suspicious-transactions").queryParam("size", "1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isArray())
-                .andExpect(jsonPath("$.hasNext").value(true));
+                .andExpect(jsonPath("$.hasNext").value(true))
+                .andExpect(jsonPath("$.nextCursor").value("next-cursor"));
     }
 
     @Test
     void responseDoesNotContainTotalElementsOrTotalPages() throws Exception {
-        when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(List.of(), 0, 20, false));
+        when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(List.of(), 20, false, null));
 
         mockMvc.perform(get("/internal/suspicious-transactions"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.hasNext").exists())
+                .andExpect(jsonPath("$.page").doesNotExist())
                 .andExpect(jsonPath("$.totalElements").doesNotExist())
-                .andExpect(jsonPath("$.totalPages").doesNotExist());
+                .andExpect(jsonPath("$.totalPages").doesNotExist())
+                .andExpect(jsonPath("$.totalCount").doesNotExist());
+    }
+
+    @Test
+    void invalidCursorReturnsBadRequest() throws Exception {
+        when(service.search(any())).thenThrow(
+                new SuspiciousTransactionReadValidationException("INVALID_SUSPICIOUS_TRANSACTION_CURSOR")
+        );
+
+        mockMvc.perform(get("/internal/suspicious-transactions").queryParam("cursor", "invalid"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.details[0]").value("code:INVALID_SUSPICIOUS_TRANSACTION_CURSOR"));
+    }
+
+    @Test
+    void pageParameterIsRejected() throws Exception {
+        mockMvc.perform(get("/internal/suspicious-transactions").queryParam("page", "1"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void sortParameterIsRejected() throws Exception {
+        mockMvc.perform(get("/internal/suspicious-transactions").queryParam("sort", "updatedAt,desc"))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
