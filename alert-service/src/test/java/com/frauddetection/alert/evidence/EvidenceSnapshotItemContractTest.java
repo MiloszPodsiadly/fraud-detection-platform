@@ -59,6 +59,45 @@ class EvidenceSnapshotItemContractTest {
     }
 
     @Test
+    void legacyConstructorRequiresObservedAt() {
+        assertThatThrownBy(() -> new EvidenceSnapshotItem(
+                "COUNTRY_MISMATCH",
+                EvidenceType.GEO_SIGNAL,
+                EvidenceSeverity.HIGH,
+                EvidenceSource.FRAUD_SCORING_SERVICE,
+                EvidenceStatus.AVAILABLE,
+                "Title",
+                "Description",
+                null,
+                null,
+                null
+        ))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("observedAt is required");
+    }
+
+    @Test
+    void legacyConstructorUsesObservedAtAsProjectedAt() {
+        Instant observedAt = Instant.parse("2026-05-18T10:00:00Z");
+
+        EvidenceSnapshotItem item = new EvidenceSnapshotItem(
+                "COUNTRY_MISMATCH",
+                EvidenceType.GEO_SIGNAL,
+                EvidenceSeverity.HIGH,
+                EvidenceSource.FRAUD_SCORING_SERVICE,
+                EvidenceStatus.AVAILABLE,
+                "Title",
+                "Description",
+                null,
+                null,
+                observedAt
+        );
+
+        assertThat(item.observedAt()).isEqualTo(observedAt);
+        assertThat(item.projectedAt()).isEqualTo(observedAt);
+    }
+
+    @Test
     void noForbiddenVerdictFields() {
         assertThat(Arrays.stream(EvidenceSnapshotItem.class.getRecordComponents()).map(RecordComponent::getName))
                 .doesNotContain("fraudConfirmed", "verdict", "finalOutcome", "proof", "legalProof");

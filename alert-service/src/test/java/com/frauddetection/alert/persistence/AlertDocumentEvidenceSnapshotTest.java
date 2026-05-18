@@ -1,5 +1,6 @@
 package com.frauddetection.alert.persistence;
 
+import com.frauddetection.alert.evidence.AlertEvidenceSnapshotProperties;
 import com.frauddetection.alert.evidence.EvidenceSeverity;
 import com.frauddetection.alert.evidence.EvidenceSnapshotItem;
 import com.frauddetection.alert.evidence.EvidenceSource;
@@ -60,6 +61,12 @@ class AlertDocumentEvidenceSnapshotTest {
         document.setEvidenceSnapshot(hardMax);
 
         assertThat(document.getEvidenceSnapshot()).hasSize(AlertDocument.MAX_EVIDENCE_SNAPSHOT_ITEMS);
+    }
+
+    @Test
+    void alertDocumentHardCapMatchesPropertiesHardMax() {
+        assertThat(AlertDocument.MAX_EVIDENCE_SNAPSHOT_ITEMS)
+                .isEqualTo(AlertEvidenceSnapshotProperties.HARD_MAX_ITEMS);
     }
 
     @Test

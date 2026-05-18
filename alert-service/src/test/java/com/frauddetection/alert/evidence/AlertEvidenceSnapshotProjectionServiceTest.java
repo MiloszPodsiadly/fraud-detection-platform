@@ -20,8 +20,12 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class AlertEvidenceSnapshotProjectionServiceTest {
 
@@ -212,6 +216,64 @@ class AlertEvidenceSnapshotProjectionServiceTest {
     }
 
     @Test
+    void strictProjectRejectsNullEvent() {
+        assertThatThrownBy(() -> service(50).project(null))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessageContaining("event is required");
+    }
+
+    @Test
+    void projectOrDiagnosticNullEventReturnsErrorDiagnostic() {
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+
+        List<EvidenceSnapshotItem> snapshot = service(new ScoringEvidenceSnapshotMapper(), 50, metrics)
+                .projectOrDiagnostic(null);
+
+        assertThat(snapshot).singleElement().satisfies(item -> {
+            assertThat(item.status()).isEqualTo(EvidenceStatus.ERROR);
+            assertThat(item.evidenceType()).isEqualTo(EvidenceType.DIAGNOSTIC);
+            assertThat(item.source()).isEqualTo(EvidenceSource.ALERT_SERVICE);
+            assertThat(item.reasonCode()).isNull();
+            assertThat(item.sourceEventId()).isNull();
+            assertThat(item.transactionId()).isNull();
+            assertThat(item.correlationId()).isNull();
+            assertThat(item.attributes())
+                    .containsEntry("diagnostic", true)
+                    .containsEntry("supportedEvidenceCreated", false)
+                    .containsEntry("reasonCodeApplicable", false)
+                    .containsEntry("projectionError", true)
+                    .containsEntry("projectionErrorType", "NullPointerException")
+                    .containsEntry("evidenceProjectionState", EvidenceProjectionState.ERROR_PROJECTION_FAILED.name());
+            assertThat(item.attributes()).doesNotContainValue("event is required");
+        });
+        assertThat(snapshot).noneMatch(item -> item.status() == EvidenceStatus.AVAILABLE);
+        verify(metrics, times(1)).recordEvidenceSnapshotProjectionError();
+    }
+
+    @Test
+    void nullScoringEvidenceItemCreatesErrorDiagnostic() {
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        List<ScoringEvidenceItem> scoringEvidence = new ArrayList<>();
+        scoringEvidence.add(null);
+        TransactionScoredEvent event = mockedEvent(scoringEvidence);
+
+        List<EvidenceSnapshotItem> snapshot = service(new ScoringEvidenceSnapshotMapper(), 50, metrics).project(event);
+
+        assertThat(snapshot).singleElement().satisfies(item -> {
+            assertThat(item.status()).isEqualTo(EvidenceStatus.ERROR);
+            assertThat(item.evidenceType()).isEqualTo(EvidenceType.DIAGNOSTIC);
+            assertThat(item.reasonCode()).isNull();
+            assertThat(item.attributes())
+                    .containsEntry("projectionError", true)
+                    .containsEntry("projectionErrorType", "NullScoringEvidenceItem")
+                    .containsEntry("invalidScoringEvidenceIndex", 0)
+                    .containsEntry("evidenceProjectionState", EvidenceProjectionState.ERROR_PROJECTION_FAILED.name());
+        });
+        assertThat(snapshot).noneMatch(item -> item.status() == EvidenceStatus.AVAILABLE);
+        verify(metrics, times(1)).recordEvidenceSnapshotProjectionError();
+    }
+
+    @Test
     void projectionDoesNotDuplicateTypedLineageFieldsIntoAttributes() {
         EvidenceSnapshotItem item = first(project(available()));
 
@@ -233,7 +295,10 @@ class AlertEvidenceSnapshotProjectionServiceTest {
 
         service(mapper, 50, metrics).project(event(RiskLevel.HIGH, true, List.of(available())));
 
-        verify(metrics).recordEvidenceSnapshotProjectionError();
+        verify(metrics, times(1)).recordEvidenceSnapshotProjectionError();
+        verify(metrics, never()).recordEvidenceSnapshotProjectionSuccess();
+        verify(metrics, never()).recordEvidenceSnapshotProjectionDiagnostic(EvidenceProjectionState.ERROR_PROJECTION_FAILED);
+        verify(metrics, never()).recordEvidenceSnapshotProjectionTruncated();
     }
 
     @Test
@@ -246,7 +311,9 @@ class AlertEvidenceSnapshotProjectionServiceTest {
                 available("C")
         )));
 
-        verify(metrics).recordEvidenceSnapshotProjectionTruncated();
+        verify(metrics, times(1)).recordEvidenceSnapshotProjectionTruncated();
+        verify(metrics, never()).recordEvidenceSnapshotProjectionError();
+        verify(metrics, never()).recordEvidenceSnapshotProjectionSuccess();
     }
 
     @Test
@@ -255,7 +322,44 @@ class AlertEvidenceSnapshotProjectionServiceTest {
 
         service(new ScoringEvidenceSnapshotMapper(), 50, metrics).project(event(RiskLevel.HIGH, true, List.of()));
 
-        verify(metrics).recordEvidenceSnapshotProjectionDiagnostic(EvidenceProjectionState.PARTIAL_EMPTY_SCORING_EVIDENCE);
+        verify(metrics, times(1)).recordEvidenceSnapshotProjectionDiagnostic(EvidenceProjectionState.PARTIAL_EMPTY_SCORING_EVIDENCE);
+        verify(metrics, never()).recordEvidenceSnapshotProjectionError();
+        verify(metrics, never()).recordEvidenceSnapshotProjectionSuccess();
+        verify(metrics, never()).recordEvidenceSnapshotProjectionTruncated();
+    }
+
+    @Test
+    void cleanAvailableProjectionRecordsSuccessOnly() {
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+
+        service(new ScoringEvidenceSnapshotMapper(), 50, metrics).project(event(RiskLevel.HIGH, true, List.of(available())));
+
+        verify(metrics, times(1)).recordEvidenceSnapshotProjectionSuccess();
+        verify(metrics, never()).recordEvidenceSnapshotProjectionError();
+        verify(metrics, never()).recordEvidenceSnapshotProjectionDiagnostic(EvidenceProjectionState.PROJECTED);
+        verify(metrics, never()).recordEvidenceSnapshotProjectionTruncated();
+    }
+
+    @Test
+    void projectOrDiagnosticTopLevelFailureRecordsSingleProjectionError() {
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        AlertEvidenceSnapshotProjectionService service = new AlertEvidenceSnapshotProjectionService(
+                new ScoringEvidenceSnapshotMapper(),
+                new AlertEvidenceSnapshotProperties(50),
+                metrics,
+                Clock.fixed(PROJECTED_AT, ZoneOffset.UTC)
+        ) {
+            @Override
+            public List<EvidenceSnapshotItem> project(TransactionScoredEvent event) {
+                throw new IllegalStateException("raw exception message");
+            }
+        };
+
+        service.projectOrDiagnostic(event(RiskLevel.HIGH, true, List.of(available())));
+
+        verify(metrics, times(1)).recordEvidenceSnapshotProjectionError();
+        verify(metrics, never()).recordEvidenceSnapshotProjectionSuccess();
+        verify(metrics, never()).recordEvidenceSnapshotProjectionTruncated();
     }
 
     @Test
@@ -310,6 +414,21 @@ class AlertEvidenceSnapshotProjectionServiceTest {
 
     private AlertServiceMetrics metrics() {
         return new AlertServiceMetrics(new SimpleMeterRegistry());
+    }
+
+    private TransactionScoredEvent mockedEvent(List<ScoringEvidenceItem> scoringEvidence) {
+        TransactionScoredEvent event = mock(TransactionScoredEvent.class);
+        when(event.eventId()).thenReturn("event-1");
+        when(event.transactionId()).thenReturn("txn-1");
+        when(event.correlationId()).thenReturn("corr-1");
+        when(event.riskLevel()).thenReturn(RiskLevel.HIGH);
+        when(event.alertRecommended()).thenReturn(true);
+        when(event.inferenceTimestamp()).thenReturn(OBSERVED_AT);
+        when(event.scoringStrategy()).thenReturn("RULE_BASED");
+        when(event.modelName()).thenReturn("rule-based");
+        when(event.modelVersion()).thenReturn("v1");
+        when(event.scoringEvidence()).thenReturn(scoringEvidence);
+        return event;
     }
 
     private TransactionScoredEvent event(RiskLevel riskLevel, boolean alertRecommended, List<ScoringEvidenceItem> scoringEvidence) {
