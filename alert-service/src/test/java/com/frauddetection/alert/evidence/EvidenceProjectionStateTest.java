@@ -20,8 +20,15 @@ class EvidenceProjectionStateTest {
                 EvidenceProjectionState.PARTIAL_TRUNCATED,
                 EvidenceProjectionState.UNAVAILABLE_UNSUPPORTED_EVIDENCE,
                 EvidenceProjectionState.ERROR_PROJECTION_FAILED,
-                EvidenceProjectionState.LEGACY_NOT_PROJECTED
+                EvidenceProjectionState.ERROR_PROJECTED,
+                EvidenceProjectionState.LEGACY_PROJECTED
         );
+    }
+
+    @Test
+    void noStateNameSaysNotProjectedForProjectedItems() {
+        assertThat(Arrays.stream(EvidenceProjectionState.values()).map(Enum::name))
+                .noneMatch(name -> name.contains("NOT_PROJECTED"));
     }
 
     @Test

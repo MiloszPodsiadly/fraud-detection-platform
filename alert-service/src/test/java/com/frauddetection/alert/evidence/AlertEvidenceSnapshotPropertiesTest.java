@@ -13,13 +13,15 @@ class AlertEvidenceSnapshotPropertiesTest {
     }
 
     @Test
-    void minAndHardMaxAreAccepted() {
-        assertThat(new AlertEvidenceSnapshotProperties(1).maxItems()).isEqualTo(1);
+    void minTwoAndHardMaxAreAccepted() {
+        assertThat(new AlertEvidenceSnapshotProperties(2).maxItems()).isEqualTo(2);
         assertThat(new AlertEvidenceSnapshotProperties(100).maxItems()).isEqualTo(100);
     }
 
     @Test
     void invalidBoundsFailFast() {
+        assertThatThrownBy(() -> new AlertEvidenceSnapshotProperties(1))
+                .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new AlertEvidenceSnapshotProperties(0))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new AlertEvidenceSnapshotProperties(-1))

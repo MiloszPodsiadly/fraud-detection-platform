@@ -23,12 +23,18 @@ class AlertEvidenceSnapshotDocumentationContractTest {
                 .contains("not external-authority verification")
                 .contains("does not mutate case lifecycle")
                 .contains("Default max item count is 50")
-                .contains("No silent truncation is allowed");
+                .contains("No silent truncation is allowed")
+                .contains("If alert evidence snapshot projection fails, alert creation must not produce fake AVAILABLE evidence")
+                .contains("AlertDocument does not silently truncate")
+                .contains("ERROR_PROJECTION_FAILED")
+                .contains("ERROR_PROJECTED")
+                .contains("LEGACY_PROJECTED");
 
         assertThat(docs.toLowerCase())
                 .doesNotContain("legal proof")
                 .doesNotContain("confirmed fraud evidence")
-                .doesNotContain("final verdict");
+                .doesNotContain("final verdict")
+                .doesNotContain("legacy_not_projected");
     }
 
     private Path docsPath() {

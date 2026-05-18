@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.lang.reflect.Field;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -39,6 +40,26 @@ class AlertDocumentEvidenceSnapshotTest {
         assertThat(document.getEvidenceSnapshot()).hasSize(1);
         assertThatThrownBy(() -> document.getEvidenceSnapshot().add(item()))
                 .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    void setterRejectsUnboundedEvidenceSnapshot() {
+        AlertDocument document = new AlertDocument();
+        List<EvidenceSnapshotItem> oversized = Collections.nCopies(AlertDocument.MAX_EVIDENCE_SNAPSHOT_ITEMS + 1, item());
+
+        assertThatThrownBy(() -> document.setEvidenceSnapshot(oversized))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("evidenceSnapshot must not exceed");
+    }
+
+    @Test
+    void setterAcceptsHardMaxEvidenceSnapshot() {
+        AlertDocument document = new AlertDocument();
+        List<EvidenceSnapshotItem> hardMax = Collections.nCopies(AlertDocument.MAX_EVIDENCE_SNAPSHOT_ITEMS, item());
+
+        document.setEvidenceSnapshot(hardMax);
+
+        assertThat(document.getEvidenceSnapshot()).hasSize(AlertDocument.MAX_EVIDENCE_SNAPSHOT_ITEMS);
     }
 
     @Test

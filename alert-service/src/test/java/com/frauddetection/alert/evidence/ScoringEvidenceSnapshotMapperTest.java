@@ -7,6 +7,7 @@ import com.frauddetection.common.events.evidence.ScoringEvidenceType;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ScoringEvidenceSnapshotMapperTest {
 
@@ -41,8 +42,15 @@ class ScoringEvidenceSnapshotMapperTest {
     }
 
     @Test
-    void diagnosticAndNullStatusesNeverMapToAvailable() {
+    void diagnosticStatusNeverMapsToAvailable() {
         assertThat(mapper.mapStatus(ScoringEvidenceStatus.PARTIAL)).isNotEqualTo(EvidenceStatus.AVAILABLE);
-        assertThat(mapper.mapStatus(null)).isNotEqualTo(EvidenceStatus.AVAILABLE);
+    }
+
+    @Test
+    void nullInputsThrow() {
+        assertThatThrownBy(() -> mapper.mapType(null)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> mapper.mapStatus(null)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> mapper.mapSeverity(null)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> mapper.mapSource(null)).isInstanceOf(IllegalArgumentException.class);
     }
 }
