@@ -16,6 +16,7 @@ Evidence is not WORM.
 Evidence is not notarized.
 Evidence does not prove that a fraud case exists.
 Evidence severity is not final risk level.
+Evidence is not complete when correlation or transaction linkage is missing.
 
 ## Status Semantics
 
@@ -35,6 +36,23 @@ UNKNOWN must not be treated as supported evidence signal.
 `ReasonCode` explains why something contributed to score.
 Evidence records what observation supports that explanation.
 
+## Correlation And Lineage
+
+Projected evidence must preserve source-event lineage and correlation linkage.
+
+New projected evidence requires:
+
+- Transaction linkage.
+- Correlation linkage.
+- Source event lineage where available.
+
+Missing correlationId or transactionId must not produce AVAILABLE evidence.
+It must be represented as PARTIAL or UNAVAILABLE diagnostic context.
+
+Evidence identity must include source event lineage to avoid collisions during replay, re-scoring, or reprocessing.
+
+Evidence with missing lineage is not fully available investigation evidence.
+
 ## Out Of Scope
 
 - No UI.
@@ -45,3 +63,6 @@ Evidence records what observation supports that explanation.
 - No legal immutability claim.
 - No suspicious transaction model.
 - No public REST API.
+- No public evidence search API.
+- No production backfill.
+- No evidence replay/idempotency policy beyond local projection identity.
