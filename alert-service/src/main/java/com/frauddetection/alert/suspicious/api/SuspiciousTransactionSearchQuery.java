@@ -2,9 +2,6 @@ package com.frauddetection.alert.suspicious.api;
 
 import com.frauddetection.alert.suspicious.SuspiciousTransactionStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
 import org.springframework.util.MultiValueMap;
 import org.springframework.util.StringUtils;
 
@@ -21,15 +18,15 @@ public record SuspiciousTransactionSearchQuery(
         String linkedAlertId,
         Instant detectedFrom,
         Instant detectedTo,
-        int page,
         int size,
-        String sort
+        String cursor
 ) {
 
-    public static final int DEFAULT_PAGE = 0;
     public static final int DEFAULT_SIZE = 20;
     public static final int MAX_SIZE = 100;
-    public static final String DEFAULT_SORT = "detectedAt,desc";
+    public static final String SORT_FIELD = "detectedAt";
+    public static final String TIE_BREAKER_SORT_FIELD = "suspiciousTransactionId";
+    public static final String SORT_DIRECTION = "DESC";
 
     private static final Set<String> ALLOWED_PARAMETERS = Set.of(
             "status",
@@ -38,34 +35,16 @@ public record SuspiciousTransactionSearchQuery(
             "linkedAlertId",
             "detectedFrom",
             "detectedTo",
-            "page",
             "size",
-            "sort"
-    );
-    private static final Set<String> ALLOWED_SORT_FIELDS = Set.of(
-            "detectedAt",
-            "updatedAt",
-            "riskScore",
-            "riskLevel",
-            "status"
-    );
-    private static final Set<String> FORBIDDEN_SORT_FIELDS = Set.of(
-            "customerId",
-            "accountId",
-            "transactionId",
-            "sourceEventId",
-            "correlationId",
-            "suspiciousTransactionId",
-            "linkedAlertId"
+            "cursor"
     );
 
     public SuspiciousTransactionSearchQuery {
         customerId = normalizeText(customerId);
         linkedAlertId = normalizeText(linkedAlertId);
-        sort = StringUtils.hasText(sort) ? sort.trim() : DEFAULT_SORT;
-        validatePageAndSize(page, size);
+        cursor = normalizeCursor(cursor);
+        validateSize(size);
         validateDetectedRange(detectedFrom, detectedTo);
-        validateSort(sort);
     }
 
     public static SuspiciousTransactionSearchQuery from(MultiValueMap<String, String> parameters) {
@@ -77,23 +56,17 @@ public record SuspiciousTransactionSearchQuery(
                 requiredNonBlankIfPresent(parameters, "linkedAlertId"),
                 instantValue(value(parameters, "detectedFrom")),
                 instantValue(value(parameters, "detectedTo")),
-                intValue(value(parameters, "page"), DEFAULT_PAGE),
                 intValue(value(parameters, "size"), DEFAULT_SIZE),
-                value(parameters, "sort")
+                value(parameters, "cursor")
         );
     }
 
-    public Pageable pageable() {
-        Sort.Direction direction = sortDirection(sort);
-        return PageRequest.of(page, size, Sort.by(direction, sortField(sort)));
-    }
-
     public String sortField() {
-        return sortField(sort);
+        return SORT_FIELD;
     }
 
     public String sortDirection() {
-        return sortDirection(sort).name();
+        return SORT_DIRECTION;
     }
 
     public boolean hasStatusFilter() {
@@ -117,7 +90,7 @@ public record SuspiciousTransactionSearchQuery(
     }
 
     public static boolean isAllowedSortField(String field) {
-        return ALLOWED_SORT_FIELDS.contains(field);
+        return SORT_FIELD.equals(field);
     }
 
     private static void validateParameters(MultiValueMap<String, String> parameters) {
@@ -185,8 +158,8 @@ public record SuspiciousTransactionSearchQuery(
         }
     }
 
-    private static void validatePageAndSize(int page, int size) {
-        if (page < 0 || size < 1 || size > MAX_SIZE) {
+    private static void validateSize(int size) {
+        if (size < 1 || size > MAX_SIZE) {
             throw invalid();
         }
     }
@@ -197,34 +170,18 @@ public record SuspiciousTransactionSearchQuery(
         }
     }
 
-    private static void validateSort(String sort) {
-        String field = sortField(sort);
-        sortDirection(sort);
-        if (FORBIDDEN_SORT_FIELDS.contains(field) || !ALLOWED_SORT_FIELDS.contains(field)) {
-            throw invalid();
-        }
-    }
-
-    private static String sortField(String sort) {
-        String[] parts = sort.split(",", -1);
-        if (parts.length > 2 || !StringUtils.hasText(parts[0])) {
-            throw invalid();
-        }
-        return parts[0].trim();
-    }
-
-    private static Sort.Direction sortDirection(String sort) {
-        String[] parts = sort.split(",", -1);
-        String value = parts.length == 1 ? "desc" : parts[1].trim();
-        return switch (value.toLowerCase(Locale.ROOT)) {
-            case "asc" -> Sort.Direction.ASC;
-            case "desc" -> Sort.Direction.DESC;
-            default -> throw invalid();
-        };
-    }
-
     private static String normalizeText(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private static String normalizeCursor(String value) {
+        if (value == null) {
+            return null;
+        }
+        if (!StringUtils.hasText(value)) {
+            throw invalid();
+        }
+        return value.trim();
     }
 
     private static SuspiciousTransactionReadValidationException invalid() {

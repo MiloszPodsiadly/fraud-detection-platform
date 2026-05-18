@@ -61,6 +61,9 @@ public class SuspiciousTransactionReadController {
                     request
             );
             return response;
+        } catch (SuspiciousTransactionReadValidationException exception) {
+            metrics.recordSuspiciousTransactionApiSearch("validation_error", statusLabel(query), riskLevelLabel(query));
+            throw exception;
         } catch (RuntimeException exception) {
             metrics.recordSuspiciousTransactionApiSearch("error", statusLabel(query), riskLevelLabel(query));
             throw exception;

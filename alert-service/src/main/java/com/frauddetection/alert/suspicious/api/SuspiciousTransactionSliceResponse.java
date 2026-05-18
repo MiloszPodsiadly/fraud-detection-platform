@@ -4,12 +4,13 @@ import java.util.List;
 
 public record SuspiciousTransactionSliceResponse(
         List<SuspiciousTransactionResponse> content,
-        int page,
         int size,
-        boolean hasNext
+        boolean hasNext,
+        String nextCursor
 ) {
 
     public SuspiciousTransactionSliceResponse {
         content = content == null ? List.of() : List.copyOf(content);
+        nextCursor = hasNext ? nextCursor : null;
     }
 }
