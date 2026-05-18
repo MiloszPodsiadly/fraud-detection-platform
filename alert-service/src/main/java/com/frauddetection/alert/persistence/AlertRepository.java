@@ -10,6 +10,8 @@ public interface AlertRepository extends MongoRepository<AlertDocument, String> 
 
     boolean existsByTransactionId(String transactionId);
 
+    Optional<AlertDocument> findByTransactionId(String transactionId);
+
     List<AlertDocument> findTop100ByDecisionOutboxStatusOrderByDecidedAtAsc(String decisionOutboxStatus);
 
     long countByDecisionOutboxStatus(String decisionOutboxStatus);

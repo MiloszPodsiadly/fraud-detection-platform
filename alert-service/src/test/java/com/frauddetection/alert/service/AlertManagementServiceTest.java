@@ -18,6 +18,7 @@ import com.frauddetection.alert.messaging.FraudAlertEventPublisher;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
+import com.frauddetection.alert.suspicious.SuspiciousTransactionProjectionService;
 import com.frauddetection.common.events.contract.FraudAlertEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.evidence.ScoringEvidenceItem;
@@ -39,9 +40,11 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -170,6 +173,132 @@ class AlertManagementServiceTest {
     }
 
     @Test
+    void alertCreationCreatesSuspiciousTransaction() {
+        AlertRepository repository = mock(AlertRepository.class);
+        FraudAlertEventPublisher alertPublisher = mock(FraudAlertEventPublisher.class);
+        FraudCaseManagementService fraudCaseManagementService = mock(FraudCaseManagementService.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        SubmitDecisionRegulatedMutationService submitDecisionService = mock(SubmitDecisionRegulatedMutationService.class);
+        SuspiciousTransactionProjectionService suspiciousProjection = mock(SuspiciousTransactionProjectionService.class);
+        var service = service(repository, alertPublisher, fraudCaseManagementService, metrics, submitDecisionService, suspiciousProjection);
+        var event = TransactionFixtures.scoredTransaction().build();
+
+        when(repository.existsByTransactionId(event.transactionId())).thenReturn(false);
+        when(repository.save(any(AlertDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.handleScoredTransaction(event);
+
+        verify(suspiciousProjection).projectOrUpdate(eq(event), any());
+    }
+
+    @Test
+    void alertCreationLinksSuspiciousTransactionToCreatedAlert() {
+        AlertRepository repository = mock(AlertRepository.class);
+        FraudAlertEventPublisher alertPublisher = mock(FraudAlertEventPublisher.class);
+        FraudCaseManagementService fraudCaseManagementService = mock(FraudCaseManagementService.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        SubmitDecisionRegulatedMutationService submitDecisionService = mock(SubmitDecisionRegulatedMutationService.class);
+        SuspiciousTransactionProjectionService suspiciousProjection = mock(SuspiciousTransactionProjectionService.class);
+        var service = service(repository, alertPublisher, fraudCaseManagementService, metrics, submitDecisionService, suspiciousProjection);
+        var event = TransactionFixtures.scoredTransaction().build();
+        ArgumentCaptor<AlertDocument> captor = ArgumentCaptor.forClass(AlertDocument.class);
+
+        when(repository.existsByTransactionId(event.transactionId())).thenReturn(false);
+        when(repository.save(any(AlertDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.handleScoredTransaction(event);
+
+        verify(repository).save(captor.capture());
+        verify(suspiciousProjection).projectOrUpdate(event, captor.getValue().getAlertId());
+    }
+
+    @Test
+    void existingAlertDoesNotPreventSuspiciousTransactionReconciliation() {
+        AlertRepository repository = mock(AlertRepository.class);
+        FraudAlertEventPublisher alertPublisher = mock(FraudAlertEventPublisher.class);
+        FraudCaseManagementService fraudCaseManagementService = mock(FraudCaseManagementService.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        SubmitDecisionRegulatedMutationService submitDecisionService = mock(SubmitDecisionRegulatedMutationService.class);
+        SuspiciousTransactionProjectionService suspiciousProjection = mock(SuspiciousTransactionProjectionService.class);
+        var service = service(repository, alertPublisher, fraudCaseManagementService, metrics, submitDecisionService, suspiciousProjection);
+        var event = TransactionFixtures.scoredTransaction().build();
+        AlertDocument existing = new AlertDocument();
+        existing.setAlertId("alert-existing");
+
+        when(repository.existsByTransactionId(event.transactionId())).thenReturn(true);
+        when(repository.findByTransactionId(event.transactionId())).thenReturn(java.util.Optional.of(existing));
+
+        service.handleScoredTransaction(event);
+
+        verify(repository, never()).save(any(AlertDocument.class));
+        verify(suspiciousProjection).projectOrUpdate(event, "alert-existing");
+    }
+
+    @Test
+    void duplicateAlertRaceDoesNotPreventSuspiciousTransactionReconciliation() {
+        AlertRepository repository = mock(AlertRepository.class);
+        FraudAlertEventPublisher alertPublisher = mock(FraudAlertEventPublisher.class);
+        FraudCaseManagementService fraudCaseManagementService = mock(FraudCaseManagementService.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        SubmitDecisionRegulatedMutationService submitDecisionService = mock(SubmitDecisionRegulatedMutationService.class);
+        SuspiciousTransactionProjectionService suspiciousProjection = mock(SuspiciousTransactionProjectionService.class);
+        var service = service(repository, alertPublisher, fraudCaseManagementService, metrics, submitDecisionService, suspiciousProjection);
+        var event = TransactionFixtures.scoredTransaction().build();
+        AlertDocument existing = new AlertDocument();
+        existing.setAlertId("alert-existing");
+
+        when(repository.existsByTransactionId(event.transactionId())).thenReturn(false);
+        when(repository.save(any(AlertDocument.class))).thenThrow(new DuplicateKeyException("duplicate transaction alert"));
+        when(repository.findByTransactionId(event.transactionId())).thenReturn(java.util.Optional.of(existing));
+
+        service.handleScoredTransaction(event);
+
+        verify(alertPublisher, never()).publish(any(FraudAlertEvent.class));
+        verify(suspiciousProjection).projectOrUpdate(event, "alert-existing");
+    }
+
+    @Test
+    void suspiciousTransactionProjectionFailureDoesNotBreakAlertCreation() {
+        AlertRepository repository = mock(AlertRepository.class);
+        FraudAlertEventPublisher alertPublisher = mock(FraudAlertEventPublisher.class);
+        FraudCaseManagementService fraudCaseManagementService = mock(FraudCaseManagementService.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        SubmitDecisionRegulatedMutationService submitDecisionService = mock(SubmitDecisionRegulatedMutationService.class);
+        SuspiciousTransactionProjectionService suspiciousProjection = mock(SuspiciousTransactionProjectionService.class);
+        var service = service(repository, alertPublisher, fraudCaseManagementService, metrics, submitDecisionService, suspiciousProjection);
+        var event = TransactionFixtures.scoredTransaction().build();
+
+        when(repository.existsByTransactionId(event.transactionId())).thenReturn(false);
+        when(repository.save(any(AlertDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        doThrow(new IllegalStateException("projection failed")).when(suspiciousProjection).projectOrUpdate(any(), any());
+
+        service.handleScoredTransaction(event);
+
+        verify(alertPublisher).publish(any(FraudAlertEvent.class));
+        verify(metrics).recordSuspiciousTransactionProjectionError("projection_error");
+    }
+
+    @Test
+    void suspiciousTransactionDoesNotMutateCaseLifecycleBeyondExistingScoredTransactionPath() {
+        AlertRepository repository = mock(AlertRepository.class);
+        FraudAlertEventPublisher alertPublisher = mock(FraudAlertEventPublisher.class);
+        FraudCaseManagementService fraudCaseManagementService = mock(FraudCaseManagementService.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        SubmitDecisionRegulatedMutationService submitDecisionService = mock(SubmitDecisionRegulatedMutationService.class);
+        SuspiciousTransactionProjectionService suspiciousProjection = mock(SuspiciousTransactionProjectionService.class);
+        var service = service(repository, alertPublisher, fraudCaseManagementService, metrics, submitDecisionService, suspiciousProjection);
+        var event = TransactionFixtures.scoredTransaction().build();
+
+        when(repository.existsByTransactionId(event.transactionId())).thenReturn(false);
+        when(repository.save(any(AlertDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.handleScoredTransaction(event);
+
+        verify(fraudCaseManagementService).handleScoredTransaction(event);
+        verify(suspiciousProjection).projectOrUpdate(eq(event), any());
+    }
+
+    @Test
     void shouldDelegateAnalystDecisionToRegulatedMutationCoordinatorBoundary() {
         AlertRepository repository = mock(AlertRepository.class);
         FraudAlertEventPublisher alertPublisher = mock(FraudAlertEventPublisher.class);
@@ -240,6 +369,33 @@ class AlertManagementServiceTest {
                 projectionService,
                 alertPublisher,
                 fraudCaseManagementService,
+                mock(SuspiciousTransactionProjectionService.class),
+                metrics,
+                submitDecisionService
+        );
+    }
+
+    private AlertManagementService service(
+            AlertRepository repository,
+            FraudAlertEventPublisher alertPublisher,
+            FraudCaseManagementService fraudCaseManagementService,
+            AlertServiceMetrics metrics,
+            SubmitDecisionRegulatedMutationService submitDecisionService,
+            SuspiciousTransactionProjectionService suspiciousProjection
+    ) {
+        return new AlertManagementService(
+                repository,
+                new AlertDocumentMapper(),
+                new FraudAlertEventMapper(),
+                new AlertCaseFactory(),
+                new AlertEvidenceSnapshotProjectionService(
+                        new ScoringEvidenceSnapshotMapper(),
+                        new AlertEvidenceSnapshotProperties(null),
+                        metrics
+                ),
+                alertPublisher,
+                fraudCaseManagementService,
+                suspiciousProjection,
                 metrics,
                 submitDecisionService
         );

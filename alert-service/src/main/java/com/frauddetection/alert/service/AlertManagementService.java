@@ -11,8 +11,10 @@ import com.frauddetection.alert.messaging.FraudAlertEventPublisher;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
+import com.frauddetection.alert.suspicious.SuspiciousTransactionProjectionService;
 import com.frauddetection.common.events.contract.FraudAlertEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
+import com.frauddetection.common.events.enums.RiskLevel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
@@ -34,6 +36,7 @@ public class AlertManagementService implements AlertManagementUseCase {
     private final AlertEvidenceSnapshotProjectionService evidenceSnapshotProjectionService;
     private final FraudAlertEventPublisher fraudAlertEventPublisher;
     private final FraudCaseManagementService fraudCaseManagementService;
+    private final SuspiciousTransactionProjectionService suspiciousTransactionProjectionService;
     private final AlertServiceMetrics metrics;
     private final SubmitDecisionRegulatedMutationService submitDecisionRegulatedMutationService;
 
@@ -45,6 +48,7 @@ public class AlertManagementService implements AlertManagementUseCase {
             AlertEvidenceSnapshotProjectionService evidenceSnapshotProjectionService,
             FraudAlertEventPublisher fraudAlertEventPublisher,
             FraudCaseManagementService fraudCaseManagementService,
+            SuspiciousTransactionProjectionService suspiciousTransactionProjectionService,
             AlertServiceMetrics metrics,
             SubmitDecisionRegulatedMutationService submitDecisionRegulatedMutationService
     ) {
@@ -55,6 +59,7 @@ public class AlertManagementService implements AlertManagementUseCase {
         this.evidenceSnapshotProjectionService = evidenceSnapshotProjectionService;
         this.fraudAlertEventPublisher = fraudAlertEventPublisher;
         this.fraudCaseManagementService = fraudCaseManagementService;
+        this.suspiciousTransactionProjectionService = suspiciousTransactionProjectionService;
         this.metrics = metrics;
         this.submitDecisionRegulatedMutationService = submitDecisionRegulatedMutationService;
     }
@@ -63,7 +68,18 @@ public class AlertManagementService implements AlertManagementUseCase {
     public void handleScoredTransaction(TransactionScoredEvent event) {
         fraudCaseManagementService.handleScoredTransaction(event);
 
-        if (!Boolean.TRUE.equals(event.alertRecommended()) || alertRepository.existsByTransactionId(event.transactionId())) {
+        if (!isAlertWorthy(event)) {
+            projectSuspiciousTransaction(event, null);
+            return;
+        }
+
+        if (!Boolean.TRUE.equals(event.alertRecommended())) {
+            projectSuspiciousTransaction(event, null);
+            return;
+        }
+
+        if (alertRepository.existsByTransactionId(event.transactionId())) {
+            reconcileSuspiciousTransactionWithExistingAlert(event);
             return;
         }
 
@@ -81,13 +97,41 @@ public class AlertManagementService implements AlertManagementUseCase {
                     .addKeyValue("transactionId", event.transactionId())
                     .addKeyValue("correlationId", event.correlationId())
                     .log("Skipped duplicate fraud alert.");
+            reconcileSuspiciousTransactionWithExistingAlert(event);
             return;
         }
+
+        projectSuspiciousTransaction(event, saved.getAlertId());
 
         FraudAlertEvent fraudAlertEvent = fraudAlertEventMapper.toEvent(alertDocumentMapper.toDomain(saved));
         fraudAlertEventPublisher.publish(fraudAlertEvent);
 
         log.atInfo().addKeyValue("alertId", saved.getAlertId()).addKeyValue("transactionId", saved.getTransactionId()).log("Created fraud alert.");
+    }
+
+    private void reconcileSuspiciousTransactionWithExistingAlert(TransactionScoredEvent event) {
+        String existingAlertId = alertRepository.findByTransactionId(event.transactionId())
+                .map(AlertDocument::getAlertId)
+                .orElse(null);
+        projectSuspiciousTransaction(event, existingAlertId);
+    }
+
+    private void projectSuspiciousTransaction(TransactionScoredEvent event, String linkedAlertId) {
+        try {
+            suspiciousTransactionProjectionService.projectOrUpdate(event, linkedAlertId);
+        } catch (RuntimeException exception) {
+            metrics.recordSuspiciousTransactionProjectionError("projection_error");
+            log.atWarn()
+                    .addKeyValue("reason", "projection_error")
+                    .addKeyValue("exceptionType", exception.getClass().getSimpleName())
+                    .log("Suspicious transaction read-model reconciliation failed during alert handling.");
+        }
+    }
+
+    private boolean isAlertWorthy(TransactionScoredEvent event) {
+        return event != null && (Boolean.TRUE.equals(event.alertRecommended())
+                || event.riskLevel() == RiskLevel.HIGH
+                || event.riskLevel() == RiskLevel.CRITICAL);
     }
 
     @Override
