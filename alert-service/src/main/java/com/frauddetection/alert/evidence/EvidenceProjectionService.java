@@ -5,6 +5,7 @@ import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.reason.ReasonCode;
 import com.frauddetection.common.events.reason.ReasonCodeParseResult;
 import com.frauddetection.common.events.reason.ReasonCodeParseStatus;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -21,8 +22,9 @@ public class EvidenceProjectionService {
     private final ReasonCodeEvidenceTypeMapper mapper;
     private final Clock clock;
 
-    public EvidenceProjectionService() {
-        this(new ReasonCodeEvidenceTypeMapper(), Clock.systemUTC());
+    @Autowired
+    public EvidenceProjectionService(ReasonCodeEvidenceTypeMapper mapper) {
+        this(mapper, Clock.systemUTC());
     }
 
     EvidenceProjectionService(ReasonCodeEvidenceTypeMapper mapper, Clock clock) {
@@ -110,6 +112,7 @@ public class EvidenceProjectionService {
                 Map.of(
                         "reasonCodeParseStatus", parsed.status().name(),
                         "unsupportedReasonCodePresent", parsed.rawValue() != null && !parsed.rawValue().isBlank(),
+                        "unsupportedReasonCodeLength", parsed.rawValue() == null ? 0 : parsed.rawValue().length(),
                         "supportedEvidenceCreated", false,
                         "diagnosticIndex", index
                 )
@@ -133,7 +136,11 @@ public class EvidenceProjectionService {
         document.setValue(diagnosticCode);
         Map<String, Object> mergedAttributes = new LinkedHashMap<>(attributes);
         mergedAttributes.put("diagnostic", true);
-        mergedAttributes.put("sourceEventId", event.eventId());
+        mergedAttributes.put("supportedEvidenceCreated", false);
+        mergedAttributes.put("reasonCodeApplicable", false);
+        if (hasText(event.eventId())) {
+            mergedAttributes.put("sourceEventId", event.eventId());
+        }
         document.setAttributes(mergedAttributes);
         return document;
     }
@@ -223,6 +230,21 @@ public class EvidenceProjectionService {
                             "correlationIdState", valueState(event.correlationId()),
                             "supportedEvidenceCreated", false,
                             "evidenceProjectionState", "missing_correlation_id"
+                    )
+            );
+        }
+        if (!hasText(event.eventId())) {
+            return diagnosticEvidence(
+                    event,
+                    EvidenceStatus.PARTIAL,
+                    "Scoring context missing source event id",
+                    "Evidence projection could not create fully available evidence because source event id is missing.",
+                    "missing_source_event_id",
+                    Map.of(
+                            "missingSourceEventId", true,
+                            "sourceEventIdState", valueState(event.eventId()),
+                            "supportedEvidenceCreated", false,
+                            "evidenceProjectionState", "missing_source_event_id"
                     )
             );
         }
