@@ -55,4 +55,34 @@ class SuspiciousTransactionReadMetricsTest {
                         .doesNotContain("totalElements", "hasNext", "page", "size", "customerId", "transactionId")
                         .containsOnly("outcome", "status", "riskLevel"));
     }
+
+    @Test
+    void readMetricsDoNotIncludeCustomerOrAccountIdentifiers() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AlertServiceMetrics metrics = new AlertServiceMetrics(registry);
+
+        metrics.recordSuspiciousTransactionApiRead("success", "NEW", "HIGH");
+
+        registry.getMeters().stream()
+                .map(Meter::getId)
+                .filter(id -> id.getName().equals("fraud.suspicious_transaction.api.read"))
+                .forEach(id -> assertThat(id.getTags().stream().map(tag -> tag.getKey()).toList())
+                        .doesNotContain("customerId", "accountId", "transactionId", "suspiciousTransactionId")
+                        .containsOnly("outcome", "status", "riskLevel"));
+    }
+
+    @Test
+    void searchMetricsDoNotIncludeRawFilters() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AlertServiceMetrics metrics = new AlertServiceMetrics(registry);
+
+        metrics.recordSuspiciousTransactionApiSearch("success", "ALERT_CREATED", "CRITICAL");
+
+        registry.getMeters().stream()
+                .map(Meter::getId)
+                .filter(id -> id.getName().equals("fraud.suspicious_transaction.api.search"))
+                .forEach(id -> assertThat(id.getTags().stream().map(tag -> tag.getKey()).toList())
+                        .doesNotContain("rawFilters", "customerId", "accountId", "linkedAlertId", "transactionId")
+                        .containsOnly("outcome", "status", "riskLevel"));
+    }
 }

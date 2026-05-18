@@ -41,7 +41,8 @@ class SuspiciousTransactionReadControllerPaginationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isArray())
                 .andExpect(jsonPath("$.page").value(0))
-                .andExpect(jsonPath("$.size").value(20));
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.hasNext").value(false));
     }
 
     @Test
@@ -81,6 +82,7 @@ class SuspiciousTransactionReadControllerPaginationTest {
 
         mockMvc.perform(get("/internal/suspicious-transactions"))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.hasNext").exists())
                 .andExpect(jsonPath("$.totalElements").doesNotExist())
                 .andExpect(jsonPath("$.totalPages").doesNotExist());
     }

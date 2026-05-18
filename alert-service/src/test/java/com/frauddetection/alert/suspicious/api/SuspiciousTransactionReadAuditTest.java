@@ -116,6 +116,7 @@ class SuspiciousTransactionReadAuditTest {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/internal/suspicious-transactions");
         request.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/internal/suspicious-transactions");
         request.addParameter("customerId", "customer-secret");
+        request.addParameter("linkedAlertId", "alert-secret");
         request.addParameter("riskLevel", "HIGH");
         request.addParameter("size", "20");
 
@@ -123,9 +124,26 @@ class SuspiciousTransactionReadAuditTest {
 
         assertThat(target.filterBucket())
                 .contains("hasCustomerFilter=true")
+                .contains("hasLinkedAlertFilter=true")
                 .contains("hasRiskLevelFilter=true")
                 .contains("pageSizeBucket=LE_20")
-                .doesNotContain("customer-secret", "response", "payload", "reasonCodes");
+                .doesNotContain("customer-secret", "alert-secret", "response", "payload", "reasonCodes");
         assertThat(target.queryHash()).isNotBlank();
+    }
+
+    @Test
+    void searchAuditDoesNotIncludeFullResponseBody() {
+        SuspiciousTransactionResponse response = SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT"));
+        when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(List.of(response), 0, 20, false));
+
+        controller.search(new org.springframework.util.LinkedMultiValueMap<>(), new MockHttpServletRequest());
+
+        verify(auditService).audit(
+                eq(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_SEARCH),
+                eq(ReadAccessResourceType.SUSPICIOUS_TRANSACTION),
+                eq(null),
+                eq(1),
+                org.mockito.ArgumentMatchers.any()
+        );
     }
 }
