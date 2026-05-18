@@ -28,6 +28,9 @@ public class EvidenceDocument {
     private String correlationId;
 
     @Indexed
+    private String sourceEventId;
+
+    @Indexed
     private String reasonCode;
 
     @Indexed
@@ -101,6 +104,14 @@ public class EvidenceDocument {
 
     public void setCorrelationId(String correlationId) {
         this.correlationId = correlationId;
+    }
+
+    public String getSourceEventId() {
+        return sourceEventId;
+    }
+
+    public void setSourceEventId(String sourceEventId) {
+        this.sourceEventId = sourceEventId;
     }
 
     public String getReasonCode() {

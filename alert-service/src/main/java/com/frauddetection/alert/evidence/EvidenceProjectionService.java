@@ -32,6 +32,11 @@ public class EvidenceProjectionService {
 
     public List<EvidenceDocument> projectFromScoredEvent(TransactionScoredEvent event) {
         Objects.requireNonNull(event, "event is required");
+        EvidenceDocument linkageDiagnostic = linkageDiagnostic(event);
+        if (linkageDiagnostic != null) {
+            return List.of(linkageDiagnostic);
+        }
+
         List<EvidenceDocument> evidence = new ArrayList<>();
         List<String> reasonCodes = event.reasonCodes();
         if (reasonCodes == null || reasonCodes.isEmpty()) {
@@ -80,10 +85,13 @@ public class EvidenceProjectionService {
         document.setTitle(reasonCode.title());
         document.setDescription(reasonCode.description());
         document.setValue(reasonCode.wireValue());
-        document.setAttributes(Map.of(
-                "reasonCodeParseStatus", parsed.status().name(),
-                "evidenceSemantics", "investigation_context"
-        ));
+        Map<String, Object> attributes = new LinkedHashMap<>();
+        attributes.put("reasonCodeParseStatus", parsed.status().name());
+        attributes.put("evidenceSemantics", "investigation_context");
+        if (hasText(event.eventId())) {
+            attributes.put("sourceEventId", event.eventId());
+        }
+        document.setAttributes(attributes);
         return document;
     }
 
@@ -125,6 +133,7 @@ public class EvidenceProjectionService {
         document.setValue(diagnosticCode);
         Map<String, Object> mergedAttributes = new LinkedHashMap<>(attributes);
         mergedAttributes.put("diagnostic", true);
+        mergedAttributes.put("sourceEventId", event.eventId());
         document.setAttributes(mergedAttributes);
         return document;
     }
@@ -134,6 +143,7 @@ public class EvidenceProjectionService {
         document.setTransactionId(event.transactionId());
         document.setCustomerId(event.customerId());
         document.setCorrelationId(event.correlationId());
+        document.setSourceEventId(event.eventId());
         document.setEntityType(EvidenceEntityType.SCORED_TRANSACTION);
         document.setEntityId(event.transactionId());
         document.setCreatedAt(clock.instant());
@@ -176,10 +186,58 @@ public class EvidenceProjectionService {
     }
 
     private String evidenceId(TransactionScoredEvent event, Object code, Object index) {
-        return "%s:%s:%s".formatted(nullSafe(event.transactionId()), code, index);
+        return "%s:%s:%s:%s:%s".formatted(
+                safeId(event.correlationId(), "missing-correlation"),
+                safeId(event.eventId(), "missing-event"),
+                safeId(event.transactionId(), "missing-transaction"),
+                safeId(String.valueOf(code), "missing-code"),
+                safeId(String.valueOf(index), "missing-index")
+        );
     }
 
-    private String nullSafe(String value) {
-        return value == null || value.isBlank() ? "unknown-transaction" : value;
+    private EvidenceDocument linkageDiagnostic(TransactionScoredEvent event) {
+        if (!hasText(event.transactionId())) {
+            return diagnosticEvidence(
+                    event,
+                    EvidenceStatus.PARTIAL,
+                    "Scoring context missing transaction id",
+                    "Evidence projection could not create fully available evidence because transactionId is missing.",
+                    "missing_transaction_id",
+                    Map.of(
+                            "missingTransactionId", true,
+                            "transactionIdState", valueState(event.transactionId()),
+                            "supportedEvidenceCreated", false,
+                            "evidenceProjectionState", "missing_transaction_id"
+                    )
+            );
+        }
+        if (!hasText(event.correlationId())) {
+            return diagnosticEvidence(
+                    event,
+                    EvidenceStatus.PARTIAL,
+                    "Scoring context missing correlation id",
+                    "Evidence projection could not create fully available evidence because correlationId is missing.",
+                    "missing_correlation_id",
+                    Map.of(
+                            "missingCorrelationId", true,
+                            "correlationIdState", valueState(event.correlationId()),
+                            "supportedEvidenceCreated", false,
+                            "evidenceProjectionState", "missing_correlation_id"
+                    )
+            );
+        }
+        return null;
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    private String valueState(String value) {
+        return value == null ? "null" : "blank";
+    }
+
+    private String safeId(String value, String fallback) {
+        return hasText(value) ? value.trim() : fallback;
     }
 }
