@@ -4,6 +4,7 @@ import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.read.ReadAccessAuditOutcome;
 import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.evidence.EvidenceProjectionState;
 import com.frauddetection.alert.outbox.OutboxBacklogResponse;
 import com.frauddetection.alert.security.error.SecurityFailureClassifier;
 import io.micrometer.core.instrument.Counter;
@@ -89,6 +90,26 @@ public class AlertServiceMetrics {
 
     public void recordAnalystDecisionSubmitted() {
         counter("fraud.alert.decision.submissions", "outcome", "success").increment();
+    }
+
+    public void recordEvidenceSnapshotProjectionSuccess() {
+        counter("fraud.alert.evidence_snapshot.projection.success", "outcome", "success").increment();
+    }
+
+    public void recordEvidenceSnapshotProjectionDiagnostic(EvidenceProjectionState state) {
+        counter(
+                "fraud.alert.evidence_snapshot.projection.diagnostic",
+                "outcome", "diagnostic",
+                "state", normalizeEvidenceProjectionState(state)
+        ).increment();
+    }
+
+    public void recordEvidenceSnapshotProjectionTruncated() {
+        counter("fraud.alert.evidence_snapshot.projection.truncated", "outcome", "truncated").increment();
+    }
+
+    public void recordEvidenceSnapshotProjectionError() {
+        counter("fraud.alert.evidence_snapshot.projection.error", "outcome", "error").increment();
     }
 
     public void recordPostCommitAuditDegraded(String operation) {
@@ -1174,6 +1195,25 @@ public class AlertServiceMetrics {
                  "ACTOR_INTENT_MISMATCH", "RESOURCE_INTENT_MISMATCH", "ACTION_INTENT_MISMATCH",
                  "SUCCESS_AUDIT_KEY_UNAVAILABLE" -> reason;
             default -> "UNKNOWN";
+        };
+    }
+
+    private String normalizeEvidenceProjectionState(EvidenceProjectionState state) {
+        if (state == null) {
+            return "UNKNOWN";
+        }
+        return switch (state) {
+            case PROJECTED,
+                 PARTIAL_MISSING_SOURCE_EVENT_ID,
+                 PARTIAL_MISSING_TRANSACTION_ID,
+                 PARTIAL_MISSING_CORRELATION_ID,
+                 PARTIAL_MISSING_REQUIRED_LINEAGE,
+                 PARTIAL_EMPTY_SCORING_EVIDENCE,
+                 PARTIAL_TRUNCATED,
+                 UNAVAILABLE_UNSUPPORTED_EVIDENCE,
+                 ERROR_PROJECTED,
+                 ERROR_PROJECTION_FAILED,
+                 LEGACY_PROJECTED -> state.name();
         };
     }
 

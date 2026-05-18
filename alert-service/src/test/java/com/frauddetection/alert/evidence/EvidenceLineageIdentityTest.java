@@ -133,7 +133,7 @@ class EvidenceLineageIdentityTest {
                 .containsEntry("sourceEventIdState", expectedState)
                 .containsEntry("supportedEvidenceCreated", false)
                 .containsEntry("reasonCodeApplicable", false)
-                .containsEntry("evidenceProjectionState", "missing_source_event_id");
+                .containsEntry("evidenceProjectionState", EvidenceProjectionState.PARTIAL_MISSING_SOURCE_EVENT_ID.name());
         assertThat(evidence).noneMatch(item -> item.getStatus() == EvidenceStatus.AVAILABLE);
     }
 }
