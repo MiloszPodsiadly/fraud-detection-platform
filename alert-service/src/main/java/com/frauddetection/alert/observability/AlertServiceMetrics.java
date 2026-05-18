@@ -7,6 +7,7 @@ import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
 import com.frauddetection.alert.evidence.EvidenceProjectionState;
 import com.frauddetection.alert.outbox.OutboxBacklogResponse;
 import com.frauddetection.alert.security.error.SecurityFailureClassifier;
+import com.frauddetection.alert.suspicious.SuspiciousTransactionStatus;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.Gauge;
@@ -110,6 +111,33 @@ public class AlertServiceMetrics {
 
     public void recordEvidenceSnapshotProjectionError() {
         counter("fraud.alert.evidence_snapshot.projection.error", "outcome", "error").increment();
+    }
+
+    public void recordSuspiciousTransactionProjection(String outcome, SuspiciousTransactionStatus status) {
+        String normalizedOutcome = normalizeSuspiciousTransactionProjectionOutcome(outcome);
+        counter(
+                "fraud.suspicious_transaction.projection." + normalizedOutcome,
+                "outcome", normalizedOutcome,
+                "status", normalizeSuspiciousTransactionStatus(status)
+        ).increment();
+    }
+
+    public void recordSuspiciousTransactionProjectionSkipped(String reason) {
+        counter(
+                "fraud.suspicious_transaction.projection.skipped",
+                "outcome", "skipped",
+                "status", "UNKNOWN",
+                "reason", normalizeSuspiciousTransactionProjectionReason(reason)
+        ).increment();
+    }
+
+    public void recordSuspiciousTransactionProjectionError(String reason) {
+        counter(
+                "fraud.suspicious_transaction.projection.error",
+                "outcome", "error",
+                "status", "UNKNOWN",
+                "reason", normalizeSuspiciousTransactionProjectionReason(reason)
+        ).increment();
     }
 
     public void recordPostCommitAuditDegraded(String operation) {
@@ -1214,6 +1242,29 @@ public class AlertServiceMetrics {
                  ERROR_PROJECTED,
                  ERROR_PROJECTION_FAILED,
                  LEGACY_PROJECTED -> state.name();
+        };
+    }
+
+    private String normalizeSuspiciousTransactionProjectionOutcome(String outcome) {
+        return switch (outcome) {
+            case "created", "updated", "skipped", "error" -> outcome;
+            default -> "error";
+        };
+    }
+
+    private String normalizeSuspiciousTransactionStatus(SuspiciousTransactionStatus status) {
+        if (status == null) {
+            return "UNKNOWN";
+        }
+        return switch (status) {
+            case NEW, ALERT_CREATED, LEGACY_IMPORTED -> status.name();
+        };
+    }
+
+    private String normalizeSuspiciousTransactionProjectionReason(String reason) {
+        return switch (reason) {
+            case "non_alert_worthy", "missing_required_lineage", "duplicate_retry", "projection_error" -> reason;
+            default -> "projection_error";
         };
     }
 
