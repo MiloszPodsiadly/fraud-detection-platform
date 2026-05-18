@@ -36,6 +36,8 @@ public class ReadAccessResultCountExtractor {
         return switch (category) {
             case ALERT_DETAIL, FRAUD_CASE_DETAIL, GOVERNANCE_ADVISORY_DETAIL -> 1;
             case SCORED_TRANSACTION_SEARCH,
+                    SUSPICIOUS_TRANSACTION_SEARCH,
+                    SUSPICIOUS_TRANSACTION_READ,
                     FRAUD_CASE_WORK_QUEUE,
                     FRAUD_CASE_WORK_QUEUE_SUMMARY,
                     GOVERNANCE_ADVISORY_LIST,

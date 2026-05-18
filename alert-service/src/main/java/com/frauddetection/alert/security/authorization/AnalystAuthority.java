@@ -25,6 +25,7 @@ public final class AnalystAuthority {
     public static final String TRUST_INCIDENT_REFRESH = "trust-incident:refresh";
     public static final String TRUST_INCIDENT_ACK = "trust-incident:ack";
     public static final String TRUST_INCIDENT_RESOLVE = "trust-incident:resolve";
+    public static final String SUSPICIOUS_TRANSACTION_READ = "suspicious-transaction:read";
 
     public static final Set<String> ALL = Set.of(
             ALERT_READ,
@@ -47,7 +48,8 @@ public final class AnalystAuthority {
             TRUST_INCIDENT_READ,
             TRUST_INCIDENT_REFRESH,
             TRUST_INCIDENT_ACK,
-            TRUST_INCIDENT_RESOLVE
+            TRUST_INCIDENT_RESOLVE,
+            SUSPICIOUS_TRANSACTION_READ
     );
 
     private AnalystAuthority() {

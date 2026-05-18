@@ -11,6 +11,8 @@ class AlertEndpointAuthorizationRules {
     private final AlertAuthorizationRules alertAuthorizationRules = new AlertAuthorizationRules();
     private final FraudCaseAuthorizationRules fraudCaseAuthorizationRules = new FraudCaseAuthorizationRules();
     private final TransactionAuthorizationRules transactionAuthorizationRules = new TransactionAuthorizationRules();
+    private final SuspiciousTransactionAuthorizationRules suspiciousTransactionAuthorizationRules =
+            new SuspiciousTransactionAuthorizationRules();
     private final AuditAuthorizationRules auditAuthorizationRules = new AuditAuthorizationRules();
     private final RecoveryAuthorizationRules recoveryAuthorizationRules = new RecoveryAuthorizationRules();
     private final TrustAuthorizationRules trustAuthorizationRules = new TrustAuthorizationRules();
@@ -29,6 +31,7 @@ class AlertEndpointAuthorizationRules {
         alertAuthorizationRules.configure(authorize);
         fraudCaseAuthorizationRules.configure(authorize);
         transactionAuthorizationRules.configure(authorize);
+        suspiciousTransactionAuthorizationRules.configure(authorize);
         auditAuthorizationRules.configure(authorize);
         recoveryAuthorizationRules.configure(authorize);
         trustAuthorizationRules.configure(authorize);

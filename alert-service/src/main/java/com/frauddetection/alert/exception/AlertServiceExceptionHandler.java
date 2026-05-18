@@ -26,6 +26,7 @@ import com.frauddetection.alert.governance.audit.InvalidGovernanceAuditDecisionE
 import com.frauddetection.alert.regulated.MissingIdempotencyKeyException;
 import com.frauddetection.alert.service.ConflictingIdempotencyKeyException;
 import com.frauddetection.alert.service.ScoredTransactionSearchValidationException;
+import com.frauddetection.alert.suspicious.api.SuspiciousTransactionReadValidationException;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -253,6 +254,13 @@ public class AlertServiceExceptionHandler {
 
     @ExceptionHandler(ScoredTransactionSearchValidationException.class)
     public ResponseEntity<ApiErrorResponse> handleScoredTransactionSearchValidation(ScoredTransactionSearchValidationException exception) {
+        return ResponseEntity.badRequest().body(
+                new ApiErrorResponse(Instant.now(), 400, "Bad Request", exception.getMessage(), List.of("code:" + exception.code()))
+        );
+    }
+
+    @ExceptionHandler(SuspiciousTransactionReadValidationException.class)
+    public ResponseEntity<ApiErrorResponse> handleSuspiciousTransactionReadValidation(SuspiciousTransactionReadValidationException exception) {
         return ResponseEntity.badRequest().body(
                 new ApiErrorResponse(Instant.now(), 400, "Bad Request", exception.getMessage(), List.of("code:" + exception.code()))
         );
