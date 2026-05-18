@@ -2,8 +2,6 @@ package com.frauddetection.alert.suspicious.api;
 
 import com.frauddetection.alert.suspicious.SuspiciousTransactionDocument;
 import com.frauddetection.alert.suspicious.SuspiciousTransactionRepository;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -36,17 +34,25 @@ public class SuspiciousTransactionReadService {
                 .map(SuspiciousTransactionResponse::from);
     }
 
-    public Page<SuspiciousTransactionResponse> search(SuspiciousTransactionSearchQuery query) {
+    public SuspiciousTransactionSliceResponse search(SuspiciousTransactionSearchQuery query) {
         SuspiciousTransactionSearchQuery boundedQuery = Objects.requireNonNull(query, "query is required");
+        int size = boundedQuery.size();
+        int page = boundedQuery.page();
         Query mongoQuery = mongoQuery(boundedQuery);
-        long total = mongoTemplate.count(mongoQuery, SuspiciousTransactionDocument.class);
-        List<SuspiciousTransactionResponse> content = mongoTemplate.find(
-                        mongoQuery.with(boundedQuery.pageable()),
-                        SuspiciousTransactionDocument.class
-                ).stream()
+        mongoQuery.with(boundedQuery.pageable().getSort());
+        mongoQuery.skip((long) page * size);
+        mongoQuery.limit(size + 1);
+
+        List<SuspiciousTransactionDocument> documents = mongoTemplate.find(
+                mongoQuery,
+                SuspiciousTransactionDocument.class
+        );
+        boolean hasNext = documents.size() > size;
+        List<SuspiciousTransactionResponse> content = documents.stream()
+                .limit(size)
                 .map(SuspiciousTransactionResponse::from)
                 .toList();
-        return new PageImpl<>(content, boundedQuery.pageable(), total);
+        return new SuspiciousTransactionSliceResponse(content, page, size, hasNext);
     }
 
     private Query mongoQuery(SuspiciousTransactionSearchQuery query) {

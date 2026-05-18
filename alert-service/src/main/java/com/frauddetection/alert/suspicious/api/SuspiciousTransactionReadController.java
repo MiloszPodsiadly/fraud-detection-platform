@@ -1,6 +1,5 @@
 package com.frauddetection.alert.suspicious.api;
 
-import com.frauddetection.alert.api.PagedResponse;
 import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
 import com.frauddetection.alert.audit.read.ReadAccessAuditOutcome;
 import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
@@ -8,7 +7,6 @@ import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.util.MultiValueMap;
 import org.springframework.validation.annotation.Validated;
@@ -40,7 +38,7 @@ public class SuspiciousTransactionReadController {
 
     @GetMapping
     @AuditedSensitiveRead
-    public PagedResponse<SuspiciousTransactionResponse> search(
+    public SuspiciousTransactionSliceResponse search(
             @RequestParam MultiValueMap<String, String> rawParams,
             HttpServletRequest request
     ) {
@@ -52,15 +50,9 @@ public class SuspiciousTransactionReadController {
             throw exception;
         }
         try {
-            Page<SuspiciousTransactionResponse> result = service.search(query);
-            PagedResponse<SuspiciousTransactionResponse> response = new PagedResponse<>(
-                    result.getContent(),
-                    result.getTotalElements(),
-                    result.getTotalPages(),
-                    result.getNumber(),
-                    result.getSize()
-            );
+            SuspiciousTransactionSliceResponse response = service.search(query);
             metrics.recordSuspiciousTransactionApiSearch("success", statusLabel(query), riskLevelLabel(query));
+            // AuditedSensitiveRead is marker-only; explicit audit records the bounded slice result count.
             sensitiveReadAuditService.audit(
                     ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_SEARCH,
                     ReadAccessResourceType.SUSPICIOUS_TRANSACTION,
