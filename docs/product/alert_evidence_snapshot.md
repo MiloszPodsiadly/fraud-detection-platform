@@ -42,6 +42,35 @@ Truncation is explicit.
 If truncation occurs, the final snapshot contains max - 1 retained items plus one PARTIAL DIAGNOSTIC truncation item.
 No silent truncation is allowed.
 
+## Failure Handling
+
+If alert evidence snapshot projection fails, alert creation must not produce fake AVAILABLE evidence.
+The alert-service records an ERROR DIAGNOSTIC snapshot item instead.
+The diagnostic records projection failure state without raw exception message, raw event payload, raw model payload, or PII.
+
+## Boundedness Boundaries
+
+Snapshot projection enforces configured max item count.
+AlertDocument also enforces a hard persistence cap to prevent unbounded internal misuse.
+Projection truncation is explicit and diagnostic.
+AlertDocument does not silently truncate; it rejects oversized snapshots at persistence model boundary.
+
+## Projection States
+
+Allowed projection states are:
+
+- PROJECTED
+- PARTIAL_MISSING_SOURCE_EVENT_ID
+- PARTIAL_MISSING_TRANSACTION_ID
+- PARTIAL_MISSING_CORRELATION_ID
+- PARTIAL_MISSING_REQUIRED_LINEAGE
+- PARTIAL_EMPTY_SCORING_EVIDENCE
+- PARTIAL_TRUNCATED
+- UNAVAILABLE_UNSUPPORTED_EVIDENCE
+- ERROR_PROJECTED
+- ERROR_PROJECTION_FAILED
+- LEGACY_PROJECTED
+
 ## Lineage
 
 Each projected snapshot item preserves:
