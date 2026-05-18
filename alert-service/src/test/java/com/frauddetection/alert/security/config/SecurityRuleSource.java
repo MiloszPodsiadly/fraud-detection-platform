@@ -19,6 +19,7 @@ final class SecurityRuleSource {
             "AlertAuthorizationRules",
             "FraudCaseAuthorizationRules",
             "TransactionAuthorizationRules",
+            "SuspiciousTransactionAuthorizationRules",
             "GovernanceAuthorizationRules",
             "AuditAuthorizationRules",
             "TrustAuthorizationRules",

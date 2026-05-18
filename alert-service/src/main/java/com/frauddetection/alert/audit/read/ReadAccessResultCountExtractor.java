@@ -6,6 +6,7 @@ import com.frauddetection.alert.api.FraudCaseWorkQueueSummaryResponse;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryAnalyticsResponse;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryListResponse;
 import com.frauddetection.alert.governance.audit.GovernanceAuditHistoryResponse;
+import com.frauddetection.alert.suspicious.api.SuspiciousTransactionSliceResponse;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -19,6 +20,9 @@ public class ReadAccessResultCountExtractor {
             return size(pagedResponse.content());
         }
         if (body instanceof FraudCaseWorkQueueSliceResponse sliceResponse) {
+            return size(sliceResponse.content());
+        }
+        if (body instanceof SuspiciousTransactionSliceResponse sliceResponse) {
             return size(sliceResponse.content());
         }
         if (body instanceof FraudCaseWorkQueueSummaryResponse) {
@@ -36,6 +40,8 @@ public class ReadAccessResultCountExtractor {
         return switch (category) {
             case ALERT_DETAIL, FRAUD_CASE_DETAIL, GOVERNANCE_ADVISORY_DETAIL -> 1;
             case SCORED_TRANSACTION_SEARCH,
+                    SUSPICIOUS_TRANSACTION_SEARCH,
+                    SUSPICIOUS_TRANSACTION_READ,
                     FRAUD_CASE_WORK_QUEUE,
                     FRAUD_CASE_WORK_QUEUE_SUMMARY,
                     GOVERNANCE_ADVISORY_LIST,

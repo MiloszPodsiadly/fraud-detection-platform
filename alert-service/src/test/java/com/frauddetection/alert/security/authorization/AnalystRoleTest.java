@@ -24,7 +24,8 @@ class AnalystRoleTest {
                         AnalystAuthority.AUDIT_VERIFY,
                         AnalystAuthority.AUDIT_EXPORT,
                         AnalystAuthority.AUDIT_DEGRADATION_RESOLVE,
-                        AnalystAuthority.DECISION_OUTBOX_RECONCILE
+                        AnalystAuthority.DECISION_OUTBOX_RECONCILE,
+                        AnalystAuthority.SUSPICIOUS_TRANSACTION_READ
                 );
     }
 

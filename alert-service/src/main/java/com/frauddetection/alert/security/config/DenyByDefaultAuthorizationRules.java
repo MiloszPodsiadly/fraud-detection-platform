@@ -18,6 +18,7 @@ class DenyByDefaultAuthorizationRules implements EndpointAuthorizationRuleGroup 
                 // Guardrail for future backend endpoints added without explicit route group ownership.
                 .requestMatchers("/api/v1/**").denyAll()
                 .requestMatchers("/api/**").denyAll()
+                .requestMatchers("/internal/**").denyAll()
                 .requestMatchers("/governance/**").denyAll()
                 .requestMatchers("/system/**").denyAll()
                 .requestMatchers("/bff/**").denyAll()

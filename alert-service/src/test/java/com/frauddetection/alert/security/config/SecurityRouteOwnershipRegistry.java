@@ -15,6 +15,7 @@ final class SecurityRouteOwnershipRegistry {
             "/api/v1/**",
             "/governance/**",
             "/system/**",
+            "/internal/**",
             "/bff/**",
             "/actuator/**"
     );
@@ -38,6 +39,9 @@ final class SecurityRouteOwnershipRegistry {
         fraudCaseRoutes(routes, "/api/v1/fraud-cases");
         route(routes, "GET", "/api/v1/fraud-cases/work-queue/summary", "FraudCaseAuthorizationRules");
         route(routes, "GET", "/api/v1/transactions/scored", "TransactionAuthorizationRules");
+        route(routes, "GET", "/internal/suspicious-transactions", "SuspiciousTransactionAuthorizationRules");
+        route(routes, "GET", "/internal/suspicious-transactions/{suspiciousTransactionId}",
+                "SuspiciousTransactionAuthorizationRules");
         route(routes, "GET", "/governance/advisories/analytics", "GovernanceAuthorizationRules");
         route(routes, "GET", "/governance/advisories", "GovernanceAuthorizationRules");
         route(routes, "GET", "/governance/advisories/{eventId}", "GovernanceAuthorizationRules");

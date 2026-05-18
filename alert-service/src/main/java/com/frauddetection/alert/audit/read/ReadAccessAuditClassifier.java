@@ -1,6 +1,7 @@
 package com.frauddetection.alert.audit.read;
 
 import com.frauddetection.alert.service.ScoredTransactionSearchPolicy;
+import com.frauddetection.alert.suspicious.api.SuspiciousTransactionSearchQuery;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerMapping;
@@ -40,6 +41,12 @@ public class ReadAccessAuditClassifier {
         if ("/api/v1/transactions/scored".equals(pattern)) {
             return Optional.of(target(ReadAccessEndpointCategory.SCORED_TRANSACTION_SEARCH, ReadAccessResourceType.SCORED_TRANSACTION, null, request));
         }
+        if ("/internal/suspicious-transactions".equals(pattern)) {
+            return Optional.of(target(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_SEARCH, ReadAccessResourceType.SUSPICIOUS_TRANSACTION, null, request));
+        }
+        if ("/internal/suspicious-transactions/{suspiciousTransactionId}".equals(pattern)) {
+            return Optional.of(target(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_READ, ReadAccessResourceType.SUSPICIOUS_TRANSACTION, variables.get("suspiciousTransactionId"), request));
+        }
         if ("/governance/advisories".equals(pattern)) {
             return Optional.of(target(ReadAccessEndpointCategory.GOVERNANCE_ADVISORY_LIST, ReadAccessResourceType.GOVERNANCE_ADVISORY_LIST, null, request));
         }
@@ -74,9 +81,29 @@ public class ReadAccessAuditClassifier {
 
     private String filterBucket(ReadAccessEndpointCategory category, HttpServletRequest request) {
         if (category != ReadAccessEndpointCategory.SCORED_TRANSACTION_SEARCH) {
+            if (category == ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_SEARCH) {
+                return suspiciousTransactionFilterBucket(request);
+            }
             return null;
         }
         return new ScoredTransactionSearchPolicy().filterBucket(requestParameters(request));
+    }
+
+    private String suspiciousTransactionFilterBucket(HttpServletRequest request) {
+        try {
+            SuspiciousTransactionSearchQuery query = SuspiciousTransactionSearchQuery.from(requestParameters(request));
+            String pageSizeBucket = query.size() <= 20 ? "LE_20" : query.size() <= 50 ? "LE_50" : "LE_100";
+            return "hasStatusFilter=" + query.hasStatusFilter()
+                    + ";hasRiskLevelFilter=" + query.hasRiskLevelFilter()
+                    + ";hasCustomerFilter=" + query.hasCustomerFilter()
+                    + ";hasLinkedAlertFilter=" + query.hasLinkedAlertFilter()
+                    + ";hasDetectedRange=" + query.hasDetectedRange()
+                    + ";pageSizeBucket=" + pageSizeBucket
+                    + ";sortField=" + query.sortField()
+                    + ";sortDirection=" + query.sortDirection();
+        } catch (RuntimeException exception) {
+            return "validation_error";
+        }
     }
 
     private org.springframework.util.MultiValueMap<String, String> requestParameters(HttpServletRequest request) {

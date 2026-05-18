@@ -22,9 +22,9 @@ Unsafe cookie-backed routes require CSRF. Stateless bearer APIs may bypass CSRF 
 
 ## Adding a new backend endpoint safely
 
-Every backend endpoint must be explicitly owned by a route group. New endpoints under `/api/**`, `/api/v1/**`, `/governance/**`, `/system/**`, `/bff/**`, and `/actuator/**` are denied by default until a route group allowlists them. This is the FDP-49 deny by default rule.
+Every backend endpoint must be explicitly owned by a route group. New endpoints under `/api/**`, `/api/v1/**`, `/internal/**`, `/governance/**`, `/system/**`, `/bff/**`, and `/actuator/**` are denied by default until a route group allowlists them. This is the FDP-49 deny by default rule.
 
-Never add broad `permitAll` rules such as `/api/**`, `/api/v1/**`, `/governance/**`, `/system/**`, or `/bff/**`. Every public endpoint must explain why it is public.
+Never add broad `permitAll` rules such as `/api/**`, `/api/v1/**`, `/internal/**`, `/governance/**`, `/system/**`, or `/bff/**`. Every public endpoint must explain why it is public.
 
 The SPA fallback must remain GET-only and must not catch backend-looking paths. Unsafe cookie-backed routes require CSRF. Stateless bearer APIs may bypass CSRF only when no `JSESSIONID` is present, and they still require valid JWT authentication and RBAC authorization.
 
@@ -51,6 +51,7 @@ Do not choose an owner based on URL prefix alone. Choose owner by resource seman
 
 - `FraudCaseAuthorizationRules` owns fraud-case lifecycle, read, and audit routes only when the primary resource is a fraud case.
 - `AuditAuthorizationRules` owns audit evidence, audit integrity, audit export, audit degradations, and trust-attestation evidence routes.
+- `SuspiciousTransactionAuthorizationRules` owns protected internal SuspiciousTransaction read-model routes.
 - `GovernanceAuthorizationRules` owns governance advisory projection, analytics, and advisory audit routes.
 - `RecoveryAuthorizationRules` owns operational recovery routes: outbox recovery, regulated mutation recovery, and unknown confirmations.
 - `TrustAuthorizationRules` owns trust incident and system trust-level operational views.
@@ -100,12 +101,13 @@ Production BFF hardening remains deployment responsibility unless configured in 
 | `/api/v1/alerts/**` | `AlertAuthorizationRules` | `ALERT_READ`, `ASSISTANT_SUMMARY_READ`, `ALERT_DECISION_SUBMIT` | Protected | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |
 | `/api/v1/fraud-cases/**` | `FraudCaseAuthorizationRules` | `FRAUD_CASE_READ`, `FRAUD_CASE_AUDIT_READ`, `FRAUD_CASE_UPDATE` | Protected | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |
 | `GET /api/v1/transactions/scored` | `TransactionAuthorizationRules` | `TRANSACTION_MONITOR_READ` | Protected | Safe method only | `AuthorizationRulesCoverageTest` |
+| `GET /internal/suspicious-transactions`, `GET /internal/suspicious-transactions/{suspiciousTransactionId}` | `SuspiciousTransactionAuthorizationRules` | `SUSPICIOUS_TRANSACTION_READ` | Protected internal read-only API | Safe method only | `AuthorizationRulesCoverageTest` |
 | `/governance/advisories/**` | `GovernanceAuthorizationRules` | `TRANSACTION_MONITOR_READ`, `GOVERNANCE_ADVISORY_AUDIT_WRITE` | Protected or denied | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |
 | `/api/v1/audit/**` | `AuditAuthorizationRules` | `AUDIT_READ`, `AUDIT_VERIFY`, `AUDIT_EXPORT`, `AUDIT_DEGRADATION_RESOLVE` | Protected | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |
 | `/system/trust-level`, `/api/v1/trust/incidents/**` | `TrustAuthorizationRules` | `AUDIT_VERIFY`, trust incident authorities | Protected | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |
 | `/api/v1/decision-outbox/**`, `/api/v1/regulated-mutations/**`, `/api/v1/outbox/**` | `RecoveryAuthorizationRules` | Recovery, outbox, and audit verification authorities | Protected | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |
 | `POST /bff/logout` | `BffAuthorizationRules` | Authenticated BFF session | Protected BFF lifecycle | CSRF required in BFF mode | `BffCsrfBoundaryRegressionTest` |
-| Unknown `/api/**`, `/api/v1/**`, `/governance/**`, `/system/**`, `/bff/**`, `/actuator/**` | `DenyByDefaultAuthorizationRules` | None | Deny by default | Denied before SPA fallback | `DenyByDefaultSecurityTest` |
+| Unknown `/api/**`, `/api/v1/**`, `/internal/**`, `/governance/**`, `/system/**`, `/bff/**`, `/actuator/**` | `DenyByDefaultAuthorizationRules` | None | Deny by default | Denied before SPA fallback | `DenyByDefaultSecurityTest` |
 | Known frontend routes such as `GET /analyst-console` | `SpaFallbackAuthorizationRules` | Public SPA fallback | GET-only fallback | Unsafe methods denied | `SpaFallbackSecurityTest` |
 | Any other route | `DenyByDefaultAuthorizationRules` | None | Final deny | Denied | `SecurityMatcherOrderRegressionTest` |
 
@@ -130,6 +132,7 @@ The FDP-49 route ownership docs represent these Spring MVC controllers:
 - `OutboxRecoveryController`
 - `RegulatedMutationRecoveryController`
 - `ScoredTransactionController`
+- `SuspiciousTransactionReadController`
 - `SystemTrustLevelController`
 - `TrustIncidentController`
 

@@ -140,6 +140,24 @@ public class AlertServiceMetrics {
         ).increment();
     }
 
+    public void recordSuspiciousTransactionApiRead(String outcome, String status, String riskLevel) {
+        counter(
+                "fraud.suspicious_transaction.api.read",
+                "outcome", normalizeSuspiciousTransactionApiOutcome(outcome),
+                "status", normalizeSuspiciousTransactionApiStatus(status),
+                "riskLevel", normalizeSuspiciousTransactionApiRiskLevel(riskLevel)
+        ).increment();
+    }
+
+    public void recordSuspiciousTransactionApiSearch(String outcome, String status, String riskLevel) {
+        counter(
+                "fraud.suspicious_transaction.api.search",
+                "outcome", normalizeSuspiciousTransactionApiOutcome(outcome),
+                "status", normalizeSuspiciousTransactionApiStatus(status),
+                "riskLevel", normalizeSuspiciousTransactionApiRiskLevel(riskLevel)
+        ).increment();
+    }
+
     public void recordPostCommitAuditDegraded(String operation) {
         counter(
                 "fraud_platform_post_commit_audit_degraded_total",
@@ -1266,6 +1284,27 @@ public class AlertServiceMetrics {
             case "non_alert_worthy", "missing_required_lineage", "duplicate_retry", "duplicate_readback_missing",
                  "duplicate_readback_failed", "projection_error" -> reason;
             default -> "projection_error";
+        };
+    }
+
+    private String normalizeSuspiciousTransactionApiOutcome(String outcome) {
+        return switch (outcome) {
+            case "success", "not_found", "forbidden", "validation_error", "error" -> outcome;
+            default -> "error";
+        };
+    }
+
+    private String normalizeSuspiciousTransactionApiStatus(String status) {
+        return switch (status) {
+            case "NEW", "ALERT_CREATED", "LEGACY_IMPORTED", "ANY" -> status;
+            default -> "ANY";
+        };
+    }
+
+    private String normalizeSuspiciousTransactionApiRiskLevel(String riskLevel) {
+        return switch (riskLevel) {
+            case "LOW", "MEDIUM", "HIGH", "CRITICAL", "ANY" -> riskLevel;
+            default -> "ANY";
         };
     }
 

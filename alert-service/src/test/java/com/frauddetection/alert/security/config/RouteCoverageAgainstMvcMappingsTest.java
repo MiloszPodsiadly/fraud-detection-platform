@@ -48,6 +48,8 @@ import com.frauddetection.alert.service.FraudCaseManagementService;
 import com.frauddetection.alert.service.FraudCaseQueryService;
 import com.frauddetection.alert.service.ScoredTransactionSearchPolicy;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
+import com.frauddetection.alert.suspicious.api.SuspiciousTransactionReadController;
+import com.frauddetection.alert.suspicious.api.SuspiciousTransactionReadService;
 import com.frauddetection.alert.system.SystemTrustLevelController;
 import com.frauddetection.alert.trust.TrustIncidentController;
 import com.frauddetection.alert.trust.TrustIncidentPreviewRateLimiter;
@@ -94,6 +96,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         SystemTrustLevelController.class,
         GovernanceAdvisoryController.class,
         GovernanceAuditController.class,
+        SuspiciousTransactionReadController.class,
         AnalystSessionController.class
 })
 @Import({
@@ -195,6 +198,9 @@ class RouteCoverageAgainstMvcMappingsTest {
 
     @MockBean
     private GovernanceAdvisoryProjectionService governanceAdvisoryProjectionService;
+
+    @MockBean
+    private SuspiciousTransactionReadService suspiciousTransactionReadService;
 
     @Test
     void everyApplicationControllerMappingHasExplicitFdp49SecurityOwnership() {

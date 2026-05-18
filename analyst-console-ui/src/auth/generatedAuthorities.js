@@ -23,6 +23,7 @@ export const AUTHORITIES = Object.freeze({
   TRUST_INCIDENT_REFRESH: "trust-incident:refresh",
   TRUST_INCIDENT_ACK: "trust-incident:ack",
   TRUST_INCIDENT_RESOLVE: "trust-incident:resolve",
+  SUSPICIOUS_TRANSACTION_READ: "suspicious-transaction:read",
 });
 
 export const AUTHORITY_VALUES = Object.freeze([
@@ -47,4 +48,5 @@ export const AUTHORITY_VALUES = Object.freeze([
   "trust-incident:refresh",
   "trust-incident:ack",
   "trust-incident:resolve",
+  "suspicious-transaction:read",
 ]);
