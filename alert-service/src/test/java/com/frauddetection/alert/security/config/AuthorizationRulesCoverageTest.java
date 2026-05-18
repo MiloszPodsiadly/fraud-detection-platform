@@ -63,6 +63,20 @@ class AuthorizationRulesCoverageTest extends AbstractSecurityRouteBoundaryWebMvc
     }
 
     @Test
+    void suspiciousTransactionRoutesRequireExplicitSuspiciousTransactionAuthority() throws Exception {
+        expectSecurityLayerDoesNotReject(get("/internal/suspicious-transactions")
+                .with(userWith(AnalystAuthority.SUSPICIOUS_TRANSACTION_READ)));
+        expectSecurityLayerDoesNotReject(get("/internal/suspicious-transactions/suspicious-1")
+                .with(userWith(AnalystAuthority.SUSPICIOUS_TRANSACTION_READ)));
+        expectDenied(get("/internal/suspicious-transactions").with(userWith(AnalystAuthority.TRANSACTION_MONITOR_READ)));
+        expectDenied(get("/internal/suspicious-transactions"));
+        expectDenied(get("/internal/suspicious-transactions/not-real/sibling")
+                .with(userWith(AnalystAuthority.SUSPICIOUS_TRANSACTION_READ)));
+        expectDenied(post("/internal/suspicious-transactions")
+                .with(userWith(AnalystAuthority.SUSPICIOUS_TRANSACTION_READ)).with(csrf()));
+    }
+
+    @Test
     void governanceRoutesRequireExplicitGovernanceAuthorities() throws Exception {
         expectSecurityLayerDoesNotReject(get("/governance/advisories")
                 .with(userWith(AnalystAuthority.TRANSACTION_MONITOR_READ)));
@@ -111,6 +125,7 @@ class AuthorizationRulesCoverageTest extends AbstractSecurityRouteBoundaryWebMvc
         expectDenied(get("/api/v1/anything").with(reader()));
         expectDenied(get("/governance/anything").with(reader()));
         expectDenied(get("/system/anything").with(reader()));
+        expectDenied(get("/internal/anything").with(reader()));
         expectDenied(get("/bff/anything").with(reader()));
     }
 
