@@ -3,13 +3,17 @@ import {
   fileMatchesAnyPrefix,
   getChangedFiles,
   printViolationsAndExit,
+  repoRoot,
   readFileIfExists,
   runGitDiff
 } from "./fdp-scope/scopeGuardHelpers.mjs";
+import { execFileSync } from "node:child_process";
 
 const usingExplicitChangedFiles = Boolean(process.env.FDP52_SCOPE_CHANGED_FILES);
 const changedFiles = getChangedFiles({ baseEnvVar: "FDP52_SCOPE_BASE" });
 const violations = [];
+const enforceFdp52BackendScope = usingExplicitChangedFiles || isFdp52ScopeBranch();
+const safeRepoRoot = repoRoot.replaceAll("\\", "/");
 
 const backendProductionPrefixes = [
   "alert-service/src/main/java/",
@@ -32,7 +36,9 @@ const fdp54GovernanceFiles = new Set([
 
 for (const file of changedFiles) {
   const normalized = file.replaceAll("\\", "/");
-  if (fileMatchesAnyPrefix(normalized, backendProductionPrefixes) && !fdp55AllowedBackendFiles.has(normalized)) {
+  if (enforceFdp52BackendScope
+      && fileMatchesAnyPrefix(normalized, backendProductionPrefixes)
+      && !fdp55AllowedBackendFiles.has(normalized)) {
     violations.push(`${normalized}: FDP-52 is frontend UX decomposition only; backend production code/resources must not change.`);
   }
   if (!isCheckedTextFile(normalized)) {
@@ -67,6 +73,22 @@ function introducesForbiddenScope(sourceLine) {
 
 function isScopeGuardScript(file) {
   return /^scripts\/check-fdp\d+-scope\.mjs$/.test(file);
+}
+
+function isFdp52ScopeBranch() {
+  const headRef = process.env.GITHUB_HEAD_REF || process.env.BRANCH_NAME || currentBranch();
+  return /^FDP-52(?:$|[-_/])/.test(headRef);
+}
+
+function currentBranch() {
+  try {
+    return execFileSync("git", ["-c", `safe.directory=${safeRepoRoot}`, "-C", repoRoot, "branch", "--show-current"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"]
+    }).trim();
+  } catch {
+    return "";
+  }
 }
 
 function isFdp54GovernanceFile(file) {
