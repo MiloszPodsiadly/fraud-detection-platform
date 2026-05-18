@@ -7,8 +7,7 @@ public enum AnalystRole {
             AnalystAuthority.ALERT_READ,
             AnalystAuthority.ASSISTANT_SUMMARY_READ,
             AnalystAuthority.FRAUD_CASE_READ,
-            AnalystAuthority.TRANSACTION_MONITOR_READ,
-            AnalystAuthority.SUSPICIOUS_TRANSACTION_READ
+            AnalystAuthority.TRANSACTION_MONITOR_READ
     )),
     ANALYST(Set.of(
             AnalystAuthority.ALERT_READ,
