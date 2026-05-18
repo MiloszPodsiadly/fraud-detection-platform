@@ -37,14 +37,8 @@ class MlFallbackScoringEvidenceTest {
     }
 
     @Test
-    void compositeMlFallbackAddsFallbackDiagnosticWithoutChangingRuleDecision() {
-        ScoringProperties properties = new ScoringProperties(0.75d, 0.90d, ScoringMode.ML);
-        CompositeFraudScoringEngine engine = new CompositeFraudScoringEngine(
-                new RuleBasedFraudScoringEngine(properties),
-                new MlFraudScoringEngine(new PlaceholderMlModelScoringClient(), new ScoringMetrics(new SimpleMeterRegistry())),
-                properties,
-                new ScoringMetrics(new SimpleMeterRegistry())
-        );
+    void mlModeUnavailableAddsScoringFallbackDiagnosticAndPreservesRuntimeEvidence() {
+        CompositeFraudScoringEngine engine = engine(ScoringMode.ML);
 
         var result = engine.score(FraudScoringRequest.from(TransactionFixtures.enrichedTransaction().build()));
 
@@ -55,6 +49,53 @@ class MlFallbackScoringEvidenceTest {
                     assertThat(item.source()).isEqualTo(ScoringEvidenceSource.SCORING_FALLBACK);
                     assertThat(item.status()).isEqualTo(ScoringEvidenceStatus.LEGACY);
                     assertThat(item.reasonCode()).isNull();
+                    assertThat(item.attributes()).containsEntry("scoringEvidenceState", "ml_decision_fallback_used");
+                })
+                .anySatisfy(item -> {
+                    assertThat(item.source()).isEqualTo(ScoringEvidenceSource.ML_RUNTIME);
+                    assertThat(item.status()).isEqualTo(ScoringEvidenceStatus.UNAVAILABLE);
+                    assertThat(item.reasonCode()).isEqualTo(ReasonCode.ML_MODEL_UNAVAILABLE.wireValue());
+                })
+                .anySatisfy(item -> {
+                    assertThat(item.source()).isEqualTo(ScoringEvidenceSource.RULE_BASED_SCORING);
+                    assertThat(item.status()).isEqualTo(ScoringEvidenceStatus.AVAILABLE);
                 });
+        assertThat(result.scoringEvidence()).noneMatch(item ->
+                item.source() == ScoringEvidenceSource.ML_MODEL && item.status() == ScoringEvidenceStatus.AVAILABLE);
+    }
+
+    @Test
+    void shadowModeMlUnavailableDoesNotEmitScoringFallbackButEmitsMlRuntimeDiagnostic() {
+        var result = engine(ScoringMode.SHADOW)
+                .score(FraudScoringRequest.from(TransactionFixtures.enrichedTransaction().build()));
+
+        assertThat(result.scoringEvidence()).noneMatch(item -> item.source() == ScoringEvidenceSource.SCORING_FALLBACK);
+        assertThat(result.scoringEvidence()).anySatisfy(item -> {
+            assertThat(item.source()).isEqualTo(ScoringEvidenceSource.ML_RUNTIME);
+            assertThat(item.status()).isEqualTo(ScoringEvidenceStatus.UNAVAILABLE);
+        });
+    }
+
+    @Test
+    void compareModeMlUnavailableDoesNotEmitScoringFallbackButEmitsMlRuntimeDiagnostic() {
+        var result = engine(ScoringMode.COMPARE)
+                .score(FraudScoringRequest.from(TransactionFixtures.enrichedTransaction().build()));
+
+        assertThat(result.scoringEvidence()).noneMatch(item -> item.source() == ScoringEvidenceSource.SCORING_FALLBACK);
+        assertThat(result.scoringEvidence()).anySatisfy(item -> {
+            assertThat(item.source()).isEqualTo(ScoringEvidenceSource.ML_RUNTIME);
+            assertThat(item.status()).isEqualTo(ScoringEvidenceStatus.UNAVAILABLE);
+        });
+    }
+
+    private CompositeFraudScoringEngine engine(ScoringMode mode) {
+        ScoringProperties properties = new ScoringProperties(0.75d, 0.90d, mode);
+        ScoringMetrics scoringMetrics = new ScoringMetrics(new SimpleMeterRegistry());
+        return new CompositeFraudScoringEngine(
+                new RuleBasedFraudScoringEngine(properties),
+                new MlFraudScoringEngine(new PlaceholderMlModelScoringClient(), scoringMetrics),
+                properties,
+                scoringMetrics
+        );
     }
 }

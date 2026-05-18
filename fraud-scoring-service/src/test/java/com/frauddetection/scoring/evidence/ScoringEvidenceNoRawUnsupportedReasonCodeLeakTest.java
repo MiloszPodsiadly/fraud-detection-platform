@@ -34,4 +34,37 @@ class ScoringEvidenceNoRawUnsupportedReasonCodeLeakTest {
                             .doesNotContain("future-code");
                 });
     }
+
+    @Test
+    void modelUnavailableDoesNotStoreRawFallbackReason() {
+        ScoringEvidenceFactory factory = new ScoringEvidenceFactory();
+
+        var evidence = factory.modelUnavailable(
+                "ML inference service request failed at http://internal-host/token?customerId=123",
+                Instant.now()
+        );
+
+        assertThat(evidence.attributes())
+                .containsEntry("fallbackReasonCode", "ml_request_failed")
+                .containsEntry("fallbackReasonProvided", true);
+        assertThat(evidence.attributes()).containsKey("fallbackReasonLength");
+        assertThat(evidence.attributes().toString())
+                .doesNotContain("http://internal-host")
+                .doesNotContain("customerId")
+                .doesNotContain("request failed at");
+    }
+
+    @Test
+    void longFallbackReasonStoresLengthOnlyAndControlledCode() {
+        ScoringEvidenceFactory factory = new ScoringEvidenceFactory();
+        String fallbackReason = "x".repeat(300);
+
+        var evidence = factory.modelUnavailable(fallbackReason, Instant.now());
+
+        assertThat(evidence.attributes())
+                .containsEntry("fallbackReasonCode", "unknown_fallback_reason")
+                .containsEntry("fallbackReasonLength", 300)
+                .containsEntry("fallbackReasonProvided", true);
+        assertThat(evidence.attributes().toString()).doesNotContain(fallbackReason);
+    }
 }

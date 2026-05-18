@@ -1,6 +1,8 @@
 package com.frauddetection.scoring.service;
 
 import com.frauddetection.common.events.evidence.ScoringEvidenceItem;
+import com.frauddetection.common.events.evidence.ScoringEvidenceSource;
+import com.frauddetection.common.events.evidence.ScoringEvidenceStatus;
 import com.frauddetection.scoring.config.ScoringMode;
 import com.frauddetection.scoring.config.ScoringProperties;
 import com.frauddetection.scoring.domain.FraudScoreResult;
@@ -15,6 +17,7 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @Component
@@ -61,10 +64,12 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
         return withDiagnostics(ruleBasedFraudScoringEngine.score(request), Map.of(
                 "mode", ScoringMode.ML.name(),
                 "fallbackUsed", true,
-                "fallbackReason", fallbackReason(mlResult),
+                "fallbackReasonCode", fallbackReasonCode(fallbackReason(mlResult)),
+                "fallbackReasonLength", fallbackReason(mlResult).length(),
+                "fallbackReasonProvided", !fallbackReason(mlResult).isBlank(),
                 "mlModelName", mlResult.modelName(),
                 "mlModelVersion", mlResult.modelVersion()
-        ));
+        ), mlResult.scoringEvidence());
     }
 
     private FraudScoreResult scoreWithShadow(FraudScoringRequest request) {
@@ -81,14 +86,16 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
         diagnostics.put("shadowRiskLevel", mlResult.riskLevel().name());
         diagnostics.put("modelMonitoring", ModelMonitoringMetrics.from(ScoringMode.SHADOW, ruleResult, mlResult, isModelAvailable(mlResult)));
         if (!isModelAvailable(mlResult)) {
-            diagnostics.put("shadowFallbackReason", fallbackReason(mlResult));
+            diagnostics.put("shadowFallbackReasonCode", fallbackReasonCode(fallbackReason(mlResult)));
+            diagnostics.put("shadowFallbackReasonLength", fallbackReason(mlResult).length());
+            diagnostics.put("shadowFallbackReasonProvided", !fallbackReason(mlResult).isBlank());
             scoringMetrics.recordFallback(ScoringMode.SHADOW, fallbackReason(mlResult));
         } else {
             recordDisagreements(ScoringMode.SHADOW, ruleResult, mlResult);
         }
 
         logModelMonitoring(request, diagnostics);
-        return withDiagnostics(ruleResult, diagnostics);
+        return withDiagnostics(ruleResult, diagnostics, mlRuntimeEvidence(mlResult));
     }
 
     private FraudScoreResult scoreWithComparison(FraudScoringRequest request) {
@@ -107,14 +114,16 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
         diagnostics.put("riskLevelMatch", ruleResult.riskLevel() == mlResult.riskLevel());
         diagnostics.put("modelMonitoring", ModelMonitoringMetrics.from(ScoringMode.COMPARE, ruleResult, mlResult, isModelAvailable(mlResult)));
         if (!isModelAvailable(mlResult)) {
-            diagnostics.put("mlFallbackReason", fallbackReason(mlResult));
+            diagnostics.put("mlFallbackReasonCode", fallbackReasonCode(fallbackReason(mlResult)));
+            diagnostics.put("mlFallbackReasonLength", fallbackReason(mlResult).length());
+            diagnostics.put("mlFallbackReasonProvided", !fallbackReason(mlResult).isBlank());
             scoringMetrics.recordFallback(ScoringMode.COMPARE, fallbackReason(mlResult));
         } else {
             recordDisagreements(ScoringMode.COMPARE, ruleResult, mlResult);
         }
 
         logModelMonitoring(request, diagnostics);
-        return withDiagnostics(ruleResult, diagnostics);
+        return withDiagnostics(ruleResult, diagnostics, mlRuntimeEvidence(mlResult));
     }
 
     private boolean isModelAvailable(FraudScoreResult result) {
@@ -124,6 +133,29 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
     private String fallbackReason(FraudScoreResult result) {
         Object reason = result.explanationMetadata().get("fallbackReason");
         return reason == null ? "ML model result is unavailable." : reason.toString();
+    }
+
+    private String fallbackReasonCode(String fallbackReason) {
+        if (fallbackReason == null || fallbackReason.isBlank()) {
+            return "unknown_fallback_reason";
+        }
+        String normalized = fallbackReason.toLowerCase(Locale.ROOT);
+        if (normalized.contains("request failed")) {
+            return "ml_request_failed";
+        }
+        if (normalized.contains("invalid") || normalized.contains("empty response")) {
+            return "ml_response_invalid";
+        }
+        if (normalized.contains("runtime")) {
+            return "ml_runtime_unavailable";
+        }
+        if (normalized.contains("unavailable") || normalized.contains("not configured")) {
+            return "ml_model_unavailable";
+        }
+        if (normalized.contains("fallback")) {
+            return "scoring_fallback_used";
+        }
+        return "unknown_fallback_reason";
     }
 
     private double score(FraudScoreResult result) {
@@ -139,7 +171,11 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
         }
     }
 
-    private FraudScoreResult withDiagnostics(FraudScoreResult result, Map<String, Object> diagnostics) {
+    private FraudScoreResult withDiagnostics(
+            FraudScoreResult result,
+            Map<String, Object> diagnostics,
+            List<ScoringEvidenceItem> additionalEvidence
+    ) {
         Map<String, Object> scoreDetails = new LinkedHashMap<>(result.scoreDetails());
         scoreDetails.put("mlDiagnostics", diagnostics);
 
@@ -147,9 +183,16 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
         explanationMetadata.put("mlDiagnostics", diagnostics);
 
         List<ScoringEvidenceItem> scoringEvidence = new ArrayList<>(result.scoringEvidence());
-        if (fallbackObserved(diagnostics)) {
-            scoringEvidence.add(scoringEvidenceFactory.fallbackDiagnostic(
-                    "ml_fallback_used",
+        appendMissingEvidence(scoringEvidence, additionalEvidence);
+        if (decisionFallbackObserved(diagnostics)) {
+            scoringEvidence.add(scoringEvidenceFactory.decisionFallbackDiagnostic(
+                    result.inferenceTimestamp(),
+                    scoringEvidence.size()
+            ));
+        } else if (shadowOrCompareRuntimeDiagnosticObserved(diagnostics)
+                && scoringEvidence.stream().noneMatch(this::isMlRuntimeUnavailableEvidence)) {
+            scoringEvidence.add(scoringEvidenceFactory.mlRuntimeDiagnostic(
+                    diagnostics.containsKey("shadowFallbackReasonCode") ? "shadow_ml_unavailable" : "compare_ml_unavailable",
                     result.inferenceTimestamp(),
                     scoringEvidence.size()
             ));
@@ -171,10 +214,38 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
         );
     }
 
-    private boolean fallbackObserved(Map<String, Object> diagnostics) {
-        return Boolean.TRUE.equals(diagnostics.get("fallbackUsed"))
-                || diagnostics.containsKey("shadowFallbackReason")
-                || diagnostics.containsKey("mlFallbackReason");
+    private void appendMissingEvidence(List<ScoringEvidenceItem> scoringEvidence, List<ScoringEvidenceItem> additionalEvidence) {
+        if (additionalEvidence == null || additionalEvidence.isEmpty()) {
+            return;
+        }
+        for (ScoringEvidenceItem item : additionalEvidence) {
+            if (item != null && scoringEvidence.stream().noneMatch(existing -> existing.evidenceId().equals(item.evidenceId()))) {
+                scoringEvidence.add(item);
+            }
+        }
+    }
+
+    private List<ScoringEvidenceItem> mlRuntimeEvidence(FraudScoreResult mlResult) {
+        if (mlResult == null || mlResult.scoringEvidence() == null) {
+            return List.of();
+        }
+        return mlResult.scoringEvidence().stream()
+                .filter(this::isMlRuntimeUnavailableEvidence)
+                .toList();
+    }
+
+    private boolean isMlRuntimeUnavailableEvidence(ScoringEvidenceItem item) {
+        return item.source() == ScoringEvidenceSource.ML_RUNTIME
+                && item.status() == ScoringEvidenceStatus.UNAVAILABLE;
+    }
+
+    private boolean decisionFallbackObserved(Map<String, Object> diagnostics) {
+        return Boolean.TRUE.equals(diagnostics.get("fallbackUsed"));
+    }
+
+    private boolean shadowOrCompareRuntimeDiagnosticObserved(Map<String, Object> diagnostics) {
+        return diagnostics.containsKey("shadowFallbackReasonCode")
+                || diagnostics.containsKey("mlFallbackReasonCode");
     }
 
     @SuppressWarnings("unchecked")

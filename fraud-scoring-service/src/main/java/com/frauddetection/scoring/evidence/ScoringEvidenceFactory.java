@@ -1,5 +1,6 @@
 package com.frauddetection.scoring.evidence;
 
+import com.frauddetection.common.events.evidence.ScoringEvidenceAttributes;
 import com.frauddetection.common.events.evidence.ScoringEvidenceItem;
 import com.frauddetection.common.events.evidence.ScoringEvidenceSeverity;
 import com.frauddetection.common.events.evidence.ScoringEvidenceSource;
@@ -14,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -52,7 +54,7 @@ public class ScoringEvidenceFactory {
                 reasonCode.description(),
                 null,
                 null,
-                attributes,
+                ScoringEvidenceAttributes.safeCopy(attributes),
                 observedAt
         ));
     }
@@ -136,6 +138,7 @@ public class ScoringEvidenceFactory {
                         "diagnostic", true,
                         "supportedEvidenceCreated", false,
                         "reasonCodeApplicable", false,
+                        "diagnosticIndex", index,
                         "scoringEvidenceState", "missing_supported_reason_codes"
                 ),
                 observedAt,
@@ -149,6 +152,7 @@ public class ScoringEvidenceFactory {
             Instant observedAt,
             int index
     ) {
+        parsedReasonCodes = parsedReasonCodes == null ? List.of() : parsedReasonCodes;
         int count = unsupportedReasonCodeCount(parsedReasonCodes);
         int maxLength = maxUnsupportedReasonCodeLength(parsedReasonCodes);
         return diagnostic(
@@ -161,6 +165,7 @@ public class ScoringEvidenceFactory {
                         "diagnostic", true,
                         "supportedEvidenceCreated", false,
                         "reasonCodeApplicable", false,
+                        "diagnosticIndex", index,
                         "unsupportedReasonCodePresent", count > 0,
                         "unsupportedReasonCodeCount", count,
                         "unsupportedReasonCodeLength", maxLength,
@@ -179,9 +184,9 @@ public class ScoringEvidenceFactory {
         attributes.put("reasonCodeApplicable", true);
         attributes.put("modelAvailable", false);
         attributes.put("scoringEvidenceState", "ml_model_unavailable");
-        if (fallbackReason != null && fallbackReason.length() <= 256) {
-            attributes.put("fallbackReason", fallbackReason);
-        }
+        attributes.put("fallbackReasonCode", fallbackReasonCode(fallbackReason));
+        attributes.put("fallbackReasonLength", fallbackReason == null ? 0 : fallbackReason.length());
+        attributes.put("fallbackReasonProvided", fallbackReason != null && !fallbackReason.isBlank());
         return new ScoringEvidenceItem(
                 evidenceId(ScoringEvidenceSource.ML_RUNTIME, ReasonCode.ML_MODEL_UNAVAILABLE.wireValue(), 0),
                 ReasonCode.ML_MODEL_UNAVAILABLE.wireValue(),
@@ -193,24 +198,45 @@ public class ScoringEvidenceFactory {
                 ReasonCode.ML_MODEL_UNAVAILABLE.description(),
                 null,
                 null,
-                attributes,
+                ScoringEvidenceAttributes.safeCopy(attributes),
                 observedAt
         );
     }
 
-    public ScoringEvidenceItem fallbackDiagnostic(String state, Instant observedAt, int index) {
+    public ScoringEvidenceItem decisionFallbackDiagnostic(Instant observedAt, int index) {
         return diagnostic(
                 ScoringEvidenceSource.SCORING_FALLBACK,
                 ScoringEvidenceStatus.LEGACY,
                 ScoringEvidenceSeverity.LOW,
-                state,
+                "ml_decision_fallback_used",
                 "Fallback scoring path was used and recorded as diagnostic scoring evidence.",
                 Map.of(
                         "diagnostic", true,
                         "fallbackUsed", true,
                         "supportedEvidenceCreated", false,
                         "reasonCodeApplicable", false,
-                        "scoringEvidenceState", state
+                        "diagnosticIndex", index,
+                        "scoringEvidenceState", "ml_decision_fallback_used"
+                ),
+                observedAt,
+                index
+        );
+    }
+
+    public ScoringEvidenceItem mlRuntimeDiagnostic(String state, Instant observedAt, int index) {
+        String safeState = state == null || state.isBlank() ? "missing-code" : state;
+        return diagnostic(
+                ScoringEvidenceSource.ML_RUNTIME,
+                ScoringEvidenceStatus.UNAVAILABLE,
+                ScoringEvidenceSeverity.LOW,
+                safeState,
+                "ML runtime context was unavailable for non-decision scoring diagnostics.",
+                Map.of(
+                        "diagnostic", true,
+                        "supportedEvidenceCreated", false,
+                        "reasonCodeApplicable", false,
+                        "diagnosticIndex", index,
+                        "scoringEvidenceState", safeState
                 ),
                 observedAt,
                 index
@@ -227,8 +253,11 @@ public class ScoringEvidenceFactory {
             Instant observedAt,
             int index
     ) {
+        String safeState = state == null || state.isBlank() ? "missing-code" : state;
+        Map<String, Object> safeAttributes = new LinkedHashMap<>(attributes);
+        safeAttributes.put("scoringEvidenceState", safeState);
         return new ScoringEvidenceItem(
-                evidenceId(source, state, index),
+                evidenceId(source, safeState, index),
                 null,
                 ScoringEvidenceType.DIAGNOSTIC,
                 source,
@@ -238,7 +267,7 @@ public class ScoringEvidenceFactory {
                 description,
                 null,
                 null,
-                attributes,
+                ScoringEvidenceAttributes.safeCopy(safeAttributes),
                 observedAt
         );
     }
@@ -287,10 +316,38 @@ public class ScoringEvidenceFactory {
                 statuses.add(parsedReasonCode.status().name());
             }
         }
+        if (statuses.isEmpty()) {
+            return "NONE";
+        }
         return statuses.stream().distinct().count() == 1 ? statuses.getFirst() : "MIXED";
     }
 
     private String evidenceId(ScoringEvidenceSource source, String code, int index) {
-        return source.name() + ":" + code.toLowerCase().replace(' ', '_') + ":" + index;
+        String safeSource = source == null ? "UNKNOWN_SOURCE" : source.name();
+        String safeCode = code == null || code.isBlank() ? "missing-code" : code.trim();
+        return safeSource + ":" + safeCode.toLowerCase(Locale.ROOT).replace(' ', '_') + ":" + index;
+    }
+
+    private String fallbackReasonCode(String fallbackReason) {
+        if (fallbackReason == null || fallbackReason.isBlank()) {
+            return "unknown_fallback_reason";
+        }
+        String normalized = fallbackReason.toLowerCase(Locale.ROOT);
+        if (normalized.contains("request failed")) {
+            return "ml_request_failed";
+        }
+        if (normalized.contains("invalid") || normalized.contains("empty response")) {
+            return "ml_response_invalid";
+        }
+        if (normalized.contains("runtime")) {
+            return "ml_runtime_unavailable";
+        }
+        if (normalized.contains("unavailable") || normalized.contains("not configured")) {
+            return "ml_model_unavailable";
+        }
+        if (normalized.contains("fallback")) {
+            return "scoring_fallback_used";
+        }
+        return "unknown_fallback_reason";
     }
 }
