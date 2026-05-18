@@ -26,6 +26,8 @@ There is no public unauthenticated endpoint for this read model.
 ## Authorization
 
 Both endpoints require SUSPICIOUS_TRANSACTION_READ.
+This authority is not granted to the read-only viewer role because the response includes customerId and accountId.
+It is granted to analyst, reviewer, and fraud-ops administrator roles.
 
 ## Pagination And Filters
 
@@ -52,11 +54,14 @@ The response does not include:
 
 - totalElements
 - totalPages
+- totalCount
 - full collection count
 
 Reason:
 A full count over suspicious_transactions can be expensive for broad or empty filters. FDP-62 avoids unbounded count scans
 by fetching at most size + 1 records.
+
+Clients must use hasNext to navigate. They must not rely on total page count.
 
 Rules:
 
