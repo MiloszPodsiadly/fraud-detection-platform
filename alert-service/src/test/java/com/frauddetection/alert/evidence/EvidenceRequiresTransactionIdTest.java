@@ -70,6 +70,7 @@ class EvidenceRequiresTransactionIdTest {
                 .containsEntry("missingTransactionId", true)
                 .containsEntry("transactionIdState", expectedState)
                 .containsEntry("supportedEvidenceCreated", false)
+                .containsEntry("reasonCodeApplicable", false)
                 .containsEntry("evidenceProjectionState", "missing_transaction_id");
         assertThat(evidence).noneMatch(item -> item.getStatus() == EvidenceStatus.AVAILABLE);
     }

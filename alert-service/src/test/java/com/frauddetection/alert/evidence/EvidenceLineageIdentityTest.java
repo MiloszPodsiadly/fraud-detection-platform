@@ -64,4 +64,76 @@ class EvidenceLineageIdentityTest {
 
         assertThat(evidence.getSourceEventId()).isEqualTo("event-lineage-3");
     }
+
+    @Test
+    void missingSourceEventIdDoesNotCreateAvailableEvidence() {
+        List<EvidenceDocument> evidence = service.projectFromScoredEvent(scoredEvent(
+                null,
+                "txn-1",
+                "corr-1",
+                RiskLevel.HIGH,
+                List.of("COUNTRY_MISMATCH")
+        ));
+
+        assertSourceEventLinkageDiagnostic(evidence, "null");
+    }
+
+    @Test
+    void blankSourceEventIdDoesNotCreateAvailableEvidence() {
+        List<EvidenceDocument> evidence = service.projectFromScoredEvent(scoredEvent(
+                "   ",
+                "txn-1",
+                "corr-1",
+                RiskLevel.HIGH,
+                List.of("COUNTRY_MISMATCH")
+        ));
+
+        assertSourceEventLinkageDiagnostic(evidence, "blank");
+    }
+
+    @Test
+    void availableEvidenceAlwaysHasSourceEventId() {
+        EvidenceDocument evidence = service.projectFromScoredEvent(scoredEvent(
+                "event-lineage-4",
+                "txn-1",
+                "corr-1",
+                RiskLevel.HIGH,
+                List.of("COUNTRY_MISMATCH")
+        )).getFirst();
+
+        assertThat(evidence.getStatus()).isEqualTo(EvidenceStatus.AVAILABLE);
+        assertThat(evidence.getSourceEventId()).isEqualTo("event-lineage-4");
+        assertThat(evidence.getEvidenceId()).contains("event-lineage-4");
+        assertThat(evidence.getEvidenceId()).doesNotContain("missing-event");
+    }
+
+    @Test
+    void evidenceIdDoesNotUseMissingEventForAvailableEvidence() {
+        List<EvidenceDocument> evidence = service.projectFromScoredEvent(scoredEvent(
+                null,
+                "txn-1",
+                "corr-1",
+                RiskLevel.HIGH,
+                List.of("COUNTRY_MISMATCH")
+        ));
+
+        assertThat(evidence).noneMatch(item -> item.getStatus() == EvidenceStatus.AVAILABLE);
+        assertThat(evidence.getFirst().getEvidenceId()).contains("missing-event");
+    }
+
+    private void assertSourceEventLinkageDiagnostic(List<EvidenceDocument> evidence, String expectedState) {
+        assertThat(evidence).hasSize(1);
+        EvidenceDocument diagnostic = evidence.getFirst();
+        assertThat(diagnostic.getEvidenceType()).isEqualTo(EvidenceType.DIAGNOSTIC);
+        assertThat(diagnostic.getStatus()).isEqualTo(EvidenceStatus.PARTIAL);
+        assertThat(diagnostic.getReasonCode()).isNull();
+        assertThat(diagnostic.getValue()).isEqualTo("missing_source_event_id");
+        assertThat(diagnostic.getAttributes())
+                .containsEntry("missingSourceEventId", true)
+                .containsEntry("sourceEventIdState", expectedState)
+                .containsEntry("supportedEvidenceCreated", false)
+                .containsEntry("reasonCodeApplicable", false)
+                .containsEntry("evidenceProjectionState", "missing_source_event_id");
+        assertThat(evidence).noneMatch(item -> item.getStatus() == EvidenceStatus.AVAILABLE);
+    }
 }
