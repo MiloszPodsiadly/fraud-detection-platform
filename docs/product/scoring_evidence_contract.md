@@ -90,6 +90,13 @@ Consumers that read `scoringEvidence` must not use it as a fraud decision or fin
 ## Attributes Safety Policy
 
 Attributes must be safe, bounded metadata only.
+ScoringEvidence attributes are validated at DTO boundary and at producer factory boundary.
+`ScoringEvidenceItem` is safe to deserialize only when attributes satisfy the contract-level safety policy.
+Unsafe attributes fail explicitly.
+
+The contract allows forward-compatible harmless attributes when they are bounded primitive metadata.
+Harmless future attributes may be accepted only if they are bounded primitive metadata and do not match unsafe key
+patterns.
 
 Allowed values are bounded primitives and lists of bounded primitive values:
 
@@ -101,9 +108,15 @@ Allowed values are bounded primitives and lists of bounded primitive values:
 Attributes must not contain:
 
 - PII
+- raw payload attributes
 - raw model payload
 - raw unsupported reason-code value
+- customer/account/card identifiers
+- model payload dumps
 - full `featureSnapshot` dumps
+- nested object/map attributes
+- arbitrary object values
+- strings longer than the configured bound
 - nested unbounded JSON
 - high-cardinality sensitive identifiers
 
