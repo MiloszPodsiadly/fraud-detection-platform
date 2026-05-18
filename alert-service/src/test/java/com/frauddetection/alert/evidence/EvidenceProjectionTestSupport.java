@@ -16,10 +16,20 @@ final class EvidenceProjectionTestSupport {
     }
 
     static TransactionScoredEvent scoredEvent(RiskLevel riskLevel, List<String> reasonCodes) {
+        return scoredEvent("event-1", "txn-1", "corr-1", riskLevel, reasonCodes);
+    }
+
+    static TransactionScoredEvent scoredEvent(
+            String eventId,
+            String transactionId,
+            String correlationId,
+            RiskLevel riskLevel,
+            List<String> reasonCodes
+    ) {
         return new TransactionScoredEvent(
-                "event-1",
-                "txn-1",
-                "corr-1",
+                eventId,
+                transactionId,
+                correlationId,
                 "customer-1",
                 "account-1",
                 CREATED_AT,

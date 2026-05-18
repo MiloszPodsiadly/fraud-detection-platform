@@ -11,7 +11,7 @@ import java.util.List;
 import static com.frauddetection.alert.evidence.EvidenceProjectionTestSupport.scoredEvent;
 import static org.assertj.core.api.Assertions.assertThat;
 
-class EvidenceRequiresCorrelationIdTest {
+class EvidenceRequiresTransactionIdTest {
 
     private final EvidenceProjectionService service = new EvidenceProjectionService(
             new ReasonCodeEvidenceTypeMapper(),
@@ -19,59 +19,58 @@ class EvidenceRequiresCorrelationIdTest {
     );
 
     @Test
-    void projectedEvidenceCarriesCorrelationIdWhenEventHasOne() {
-        List<EvidenceDocument> evidence = service.projectFromScoredEvent(scoredEvent(
-                RiskLevel.HIGH,
-                List.of("COUNTRY_MISMATCH")
-        ));
-
-        assertThat(evidence.getFirst().getCorrelationId()).isEqualTo("corr-1");
-    }
-
-    @Test
-    void missingCorrelationIdDoesNotCreateAvailableEvidence() {
+    void missingTransactionIdDoesNotCreateAvailableEvidence() {
         List<EvidenceDocument> evidence = service.projectFromScoredEvent(scoredEvent(
                 "event-1",
-                "txn-1",
                 null,
+                "corr-1",
                 RiskLevel.HIGH,
                 List.of("COUNTRY_MISMATCH")
         ));
 
-        assertThat(evidence).hasSize(1);
-        EvidenceDocument diagnostic = evidence.getFirst();
-        assertThat(diagnostic.getEvidenceType()).isEqualTo(EvidenceType.DIAGNOSTIC);
-        assertThat(diagnostic.getStatus()).isEqualTo(EvidenceStatus.PARTIAL);
-        assertThat(diagnostic.getReasonCode()).isNull();
-        assertThat(diagnostic.getValue()).isEqualTo("missing_correlation_id");
-        assertThat(diagnostic.getAttributes())
-                .containsEntry("missingCorrelationId", true)
-                .containsEntry("correlationIdState", "null")
-                .containsEntry("supportedEvidenceCreated", false)
-                .containsEntry("evidenceProjectionState", "missing_correlation_id");
-        assertThat(evidence).noneMatch(item -> item.getStatus() == EvidenceStatus.AVAILABLE);
+        assertTransactionLinkageDiagnostic(evidence, "null");
     }
 
     @Test
-    void blankCorrelationIdDoesNotCreateAvailableEvidence() {
+    void blankTransactionIdDoesNotCreateAvailableEvidence() {
         List<EvidenceDocument> evidence = service.projectFromScoredEvent(scoredEvent(
                 "event-1",
-                "txn-1",
                 "   ",
+                "corr-1",
                 RiskLevel.HIGH,
                 List.of("COUNTRY_MISMATCH")
         ));
 
+        assertTransactionLinkageDiagnostic(evidence, "blank");
+    }
+
+    @Test
+    void generatedDiagnosticIdDoesNotUseUnknownTransactionForAvailableEvidence() {
+        List<EvidenceDocument> evidence = service.projectFromScoredEvent(scoredEvent(
+                "event-1",
+                null,
+                "corr-1",
+                RiskLevel.HIGH,
+                List.of("COUNTRY_MISMATCH")
+        ));
+
+        assertThat(evidence).noneMatch(item -> item.getStatus() == EvidenceStatus.AVAILABLE);
+        assertThat(evidence.getFirst().getEvidenceId()).doesNotContain("unknown-transaction");
+    }
+
+    private void assertTransactionLinkageDiagnostic(List<EvidenceDocument> evidence, String expectedState) {
         assertThat(evidence).hasSize(1);
         EvidenceDocument diagnostic = evidence.getFirst();
         assertThat(diagnostic.getEvidenceType()).isEqualTo(EvidenceType.DIAGNOSTIC);
         assertThat(diagnostic.getStatus()).isEqualTo(EvidenceStatus.PARTIAL);
+        assertThat(diagnostic.getStatus()).isNotEqualTo(EvidenceStatus.AVAILABLE);
         assertThat(diagnostic.getReasonCode()).isNull();
+        assertThat(diagnostic.getValue()).isEqualTo("missing_transaction_id");
         assertThat(diagnostic.getAttributes())
-                .containsEntry("missingCorrelationId", true)
-                .containsEntry("correlationIdState", "blank")
+                .containsEntry("missingTransactionId", true)
+                .containsEntry("transactionIdState", expectedState)
                 .containsEntry("supportedEvidenceCreated", false)
-                .containsEntry("evidenceProjectionState", "missing_correlation_id");
+                .containsEntry("evidenceProjectionState", "missing_transaction_id");
         assertThat(evidence).noneMatch(item -> item.getStatus() == EvidenceStatus.AVAILABLE);
     }
 }

@@ -17,6 +17,7 @@ class EvidenceRepositoryIndexTest {
                 "alertId",
                 "customerId",
                 "correlationId",
+                "sourceEventId",
                 "reasonCode",
                 "source",
                 "status",

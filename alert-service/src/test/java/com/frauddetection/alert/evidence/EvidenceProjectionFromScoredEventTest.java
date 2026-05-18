@@ -37,6 +37,8 @@ class EvidenceProjectionFromScoredEventTest {
         assertThat(item.getTransactionId()).isEqualTo("txn-1");
         assertThat(item.getCustomerId()).isEqualTo("customer-1");
         assertThat(item.getCorrelationId()).isEqualTo("corr-1");
+        assertThat(item.getSourceEventId()).isEqualTo("event-1");
+        assertThat(item.getEvidenceId()).contains("event-1");
         assertThat(item.getObservedAt()).isEqualTo(EvidenceProjectionTestSupport.INFERENCE_AT);
         assertThat(item.getCreatedAt()).isEqualTo(CREATED_AT);
         assertThat(item.getScoringStrategy()).isEqualTo("RULE_BASED");
