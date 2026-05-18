@@ -1,11 +1,13 @@
 package com.frauddetection.scoring.service;
 
+import com.frauddetection.common.events.evidence.ScoringEvidenceItem;
 import com.frauddetection.common.events.reason.ReasonCode;
 import com.frauddetection.common.events.reason.ReasonCodeParseResult;
 import com.frauddetection.scoring.domain.FraudScoreResult;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
 import com.frauddetection.scoring.domain.MlModelInput;
 import com.frauddetection.scoring.domain.MlModelOutput;
+import com.frauddetection.scoring.evidence.ScoringEvidenceFactory;
 import com.frauddetection.scoring.observability.ScoringMetrics;
 import org.springframework.stereotype.Component;
 
@@ -18,6 +20,7 @@ public class MlFraudScoringEngine implements FraudScoringEngine {
 
     private final MlModelScoringClient mlModelScoringClient;
     private final ScoringMetrics scoringMetrics;
+    private final ScoringEvidenceFactory scoringEvidenceFactory = new ScoringEvidenceFactory();
 
     public MlFraudScoringEngine(MlModelScoringClient mlModelScoringClient, ScoringMetrics scoringMetrics) {
         this.mlModelScoringClient = mlModelScoringClient;
@@ -36,6 +39,13 @@ public class MlFraudScoringEngine implements FraudScoringEngine {
             explanationMetadata.put("unsupportedReasonCodeCount", unsupportedReasonCodeCount);
             scoringMetrics.recordReasonCodeParseUnsupported("ml_model", "legacy", unsupportedReasonCodeCount);
         }
+        List<ScoringEvidenceItem> scoringEvidence = scoringEvidenceFactory.modelEvidence(
+                parsedReasonCodes,
+                output.available(),
+                output.riskLevel(),
+                output.inferenceTimestamp(),
+                output.fallbackReason()
+        );
 
         return new FraudScoreResult(
                 output.fraudScore(),
@@ -49,7 +59,8 @@ public class MlFraudScoringEngine implements FraudScoringEngine {
                 request.featureSnapshot(),
                 explanationMetadata,
                 output.available() && (output.riskLevel() == com.frauddetection.common.events.enums.RiskLevel.HIGH
-                        || output.riskLevel() == com.frauddetection.common.events.enums.RiskLevel.CRITICAL)
+                        || output.riskLevel() == com.frauddetection.common.events.enums.RiskLevel.CRITICAL),
+                scoringEvidence
         );
     }
 

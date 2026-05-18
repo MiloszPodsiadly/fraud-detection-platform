@@ -1,8 +1,10 @@
 package com.frauddetection.scoring.service;
 
+import com.frauddetection.common.events.evidence.ScoringEvidenceItem;
 import com.frauddetection.scoring.config.ScoringMode;
 import com.frauddetection.scoring.config.ScoringProperties;
 import com.frauddetection.scoring.domain.FraudScoreResult;
+import com.frauddetection.scoring.evidence.ScoringEvidenceFactory;
 import com.frauddetection.scoring.observability.ScoringMetrics;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
 import org.slf4j.Logger;
@@ -10,7 +12,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @Component
@@ -23,6 +27,7 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
     private final MlFraudScoringEngine mlFraudScoringEngine;
     private final ScoringProperties scoringProperties;
     private final ScoringMetrics scoringMetrics;
+    private final ScoringEvidenceFactory scoringEvidenceFactory = new ScoringEvidenceFactory();
 
     public CompositeFraudScoringEngine(
             RuleBasedFraudScoringEngine ruleBasedFraudScoringEngine,
@@ -141,6 +146,15 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
         Map<String, Object> explanationMetadata = new LinkedHashMap<>(result.explanationMetadata());
         explanationMetadata.put("mlDiagnostics", diagnostics);
 
+        List<ScoringEvidenceItem> scoringEvidence = new ArrayList<>(result.scoringEvidence());
+        if (fallbackObserved(diagnostics)) {
+            scoringEvidence.add(scoringEvidenceFactory.fallbackDiagnostic(
+                    "ml_fallback_used",
+                    result.inferenceTimestamp(),
+                    scoringEvidence.size()
+            ));
+        }
+
         return new FraudScoreResult(
                 result.fraudScore(),
                 result.riskLevel(),
@@ -152,8 +166,15 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
                 scoreDetails,
                 result.featureSnapshot(),
                 explanationMetadata,
-                result.alertRecommended()
+                result.alertRecommended(),
+                scoringEvidence
         );
+    }
+
+    private boolean fallbackObserved(Map<String, Object> diagnostics) {
+        return Boolean.TRUE.equals(diagnostics.get("fallbackUsed"))
+                || diagnostics.containsKey("shadowFallbackReason")
+                || diagnostics.containsKey("mlFallbackReason");
     }
 
     @SuppressWarnings("unchecked")
