@@ -12,13 +12,14 @@ reinterpreting unbounded score details.
 
 ## Non-claims
 
-ScoringEvidence is not confirmed fraud.
-ScoringEvidence is not an analyst decision.
+ScoringEvidence is internal scoring explanation context only.
+ScoringEvidence is not a fraud decision.
+ScoringEvidence is not an analyst disposition.
 ScoringEvidence is not a final outcome.
-ScoringEvidence is not legal proof.
-ScoringEvidence is not WORM.
-ScoringEvidence is not notarized.
-ScoringEvidence is not external auditor verification.
+ScoringEvidence is not a legally binding evidence record.
+ScoringEvidence does not provide write-once immutable storage guarantees.
+ScoringEvidence is not a third-party attested record.
+ScoringEvidence is not independently verified by an external authority.
 ScoringEvidence does not prove that a fraud case exists.
 ScoringEvidence severity is not final risk level.
 
@@ -54,6 +55,9 @@ ScoringEvidence references reason codes by canonical wire value and adds typed e
 `UNKNOWN` is diagnostic only. It must not become supported scoring evidence.
 Unsupported, future, blank, or malformed reason-code input creates diagnostic evidence or diagnostic metadata
 without storing the raw unsupported value.
+
+ScoringEvidenceItem `evidenceId` is stable within a single scored event. It is not a globally unique persistence
+identifier. Downstream persistence layers must combine it with event identity if they need global uniqueness.
 
 ## Relationship To FDP-57 Alert-Service EvidenceDocument
 
@@ -123,6 +127,11 @@ ML fallback is represented through runtime or fallback evidence. It must not app
 
 FDP-58 does not add:
 
+- legally immutable archival storage
+- third-party attestation
+- legally binding evidence-record semantics
+- independent external-authority verification
+- alert evidence snapshot persistence
 - UI
 - public evidence API
 - public scoring evidence API
@@ -135,7 +144,3 @@ FDP-58 does not add:
 - manual evidence editing
 - case lifecycle mutation
 - Mongo backfill
-- WORM
-- notarization
-- legal proof
-- external auditor verification
