@@ -43,6 +43,20 @@ class ScoringEvidenceItemContractTest {
     }
 
     @Test
+    void availableRejectsLowercaseUnknownReasonCode() {
+        assertThatThrownBy(() -> available("unknown", ScoringEvidenceType.MODEL_EXPLANATION, ScoringEvidenceSeverity.LOW, Instant.now()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("UNKNOWN cannot be AVAILABLE");
+    }
+
+    @Test
+    void availableRejectsTrimmedUnknownReasonCode() {
+        assertThatThrownBy(() -> available(" UNKNOWN ", ScoringEvidenceType.MODEL_EXPLANATION, ScoringEvidenceSeverity.LOW, Instant.now()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("UNKNOWN cannot be AVAILABLE");
+    }
+
+    @Test
     void availableScoringEvidenceCannotBeDiagnostic() {
         assertThatThrownBy(() -> available("COUNTRY_MISMATCH", ScoringEvidenceType.DIAGNOSTIC, ScoringEvidenceSeverity.HIGH, Instant.now()))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -130,6 +144,45 @@ class ScoringEvidenceItemContractTest {
     }
 
     @Test
+    void dtoRejectsUnsafeCustomerIdAttribute() {
+        assertThatThrownBy(() -> availableWithAttributes(Map.of("customerId", "cust-1")))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void dtoRejectsRawPayloadAttribute() {
+        assertThatThrownBy(() -> availableWithAttributes(Map.of("rawModelPayload", "{}")))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void dtoRejectsNestedAttributeMap() {
+        assertThatThrownBy(() -> availableWithAttributes(Map.of("futureHarmlessAttribute", Map.of("nested", true))))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void dtoRejectsArbitraryAttributeObject() {
+        assertThatThrownBy(() -> availableWithAttributes(Map.of("futureHarmlessAttribute", new Object())))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void dtoAllowsFutureHarmlessAttribute() {
+        ScoringEvidenceItem item = availableWithAttributes(Map.of("futureHarmlessAttribute", "safe-bounded-value"));
+
+        assertThat(item.attributes()).containsEntry("futureHarmlessAttribute", "safe-bounded-value");
+    }
+
+    @Test
+    void attributesMapIsImmutable() {
+        ScoringEvidenceItem item = availableWithAttributes(Map.of("futureHarmlessAttribute", "safe-bounded-value"));
+
+        assertThatThrownBy(() -> item.attributes().put("anotherSafeAttribute", "value"))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
     void doesNotExposeForbiddenVerdictOrProofFields() {
         assertThat(Arrays.stream(ScoringEvidenceItem.class.getRecordComponents())
                 .map(RecordComponent::getName))
@@ -187,6 +240,23 @@ class ScoringEvidenceItemContractTest {
                 null,
                 Map.of(),
                 observedAt
+        );
+    }
+
+    private ScoringEvidenceItem availableWithAttributes(Map<String, Object> attributes) {
+        return new ScoringEvidenceItem(
+                "evidence-id",
+                "COUNTRY_MISMATCH",
+                ScoringEvidenceType.GEO_SIGNAL,
+                ScoringEvidenceSource.RULE_BASED_SCORING,
+                ScoringEvidenceStatus.AVAILABLE,
+                ScoringEvidenceSeverity.HIGH,
+                "Country mismatch",
+                "Transaction geography differed from expected context.",
+                null,
+                null,
+                attributes,
+                Instant.now()
         );
     }
 }

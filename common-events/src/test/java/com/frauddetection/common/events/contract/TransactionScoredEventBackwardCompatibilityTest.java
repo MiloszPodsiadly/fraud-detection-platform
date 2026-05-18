@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class TransactionScoredEventBackwardCompatibilityTest {
 
@@ -97,6 +98,33 @@ class TransactionScoredEventBackwardCompatibilityTest {
                 assertThat(item.attributes()).containsEntry("futureHarmlessAttribute", "safe-bounded-value"));
     }
 
+    @Test
+    void unsafeScoringEvidenceAttributeFailsExplicitly() {
+        assertThatThrownBy(() -> objectMapper().readValue(scoredEventWithAttributesJson("""
+                {"customerId": "cust-1"}
+                """), TransactionScoredEvent.class))
+                .isInstanceOf(Exception.class)
+                .hasRootCauseInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void rawPayloadScoringEvidenceAttributeFailsExplicitly() {
+        assertThatThrownBy(() -> objectMapper().readValue(scoredEventWithAttributesJson("""
+                {"rawModelPayload": "{}"}
+                """), TransactionScoredEvent.class))
+                .isInstanceOf(Exception.class)
+                .hasRootCauseInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void nestedScoringEvidenceAttributeFailsExplicitly() {
+        assertThatThrownBy(() -> objectMapper().readValue(scoredEventWithAttributesJson("""
+                {"futureHarmlessAttribute": {"nested": true}}
+                """), TransactionScoredEvent.class))
+                .isInstanceOf(Exception.class)
+                .hasRootCauseInstanceOf(IllegalArgumentException.class);
+    }
+
     private TransactionScoredEvent oldEvent() {
         return new TransactionScoredEvent(
                 "evt-1",
@@ -126,5 +154,41 @@ class TransactionScoredEventBackwardCompatibilityTest {
 
     private ObjectMapper objectMapper() {
         return new ObjectMapper().registerModule(new JavaTimeModule());
+    }
+
+    private String scoredEventWithAttributesJson(String attributesJson) {
+        return """
+                {
+                  "eventId": "evt-1",
+                  "transactionId": "txn-1",
+                  "correlationId": "corr-1",
+                  "customerId": "cust-1",
+                  "accountId": "acct-1",
+                  "createdAt": "2026-05-18T09:00:00Z",
+                  "transactionTimestamp": "2026-05-18T09:00:00Z",
+                  "fraudScore": 0.82,
+                  "riskLevel": "HIGH",
+                  "scoringStrategy": "RULE_BASED",
+                  "modelName": "rule-based-engine",
+                  "modelVersion": "v1",
+                  "inferenceTimestamp": "2026-05-18T09:00:01Z",
+                  "reasonCodes": ["COUNTRY_MISMATCH"],
+                  "scoreDetails": {"finalScore": 0.82},
+                  "featureSnapshot": {"featureFlagCount": 1},
+                  "alertRecommended": true,
+                  "scoringEvidence": [{
+                    "evidenceId": "RULE_BASED_SCORING:country_mismatch:0",
+                    "reasonCode": "COUNTRY_MISMATCH",
+                    "evidenceType": "GEO_SIGNAL",
+                    "source": "RULE_BASED_SCORING",
+                    "status": "AVAILABLE",
+                    "severity": "HIGH",
+                    "title": "Country mismatch",
+                    "description": "Transaction geography differed from expected context.",
+                    "attributes": %s,
+                    "observedAt": "2026-05-18T09:00:01Z"
+                  }]
+                }
+                """.formatted(attributesJson);
     }
 }

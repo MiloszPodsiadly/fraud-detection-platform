@@ -5,27 +5,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 
 public final class ScoringEvidenceAttributes {
 
     private static final int MAX_STRING_LENGTH = 256;
-    private static final Set<String> ALLOWED_KEYS = Set.of(
-            "diagnostic",
-            "supportedEvidenceCreated",
-            "reasonCodeApplicable",
-            "unsupportedReasonCodePresent",
-            "unsupportedReasonCodeCount",
-            "unsupportedReasonCodeLength",
-            "parseStatus",
-            "scoringEvidenceState",
-            "modelAvailable",
-            "fallbackUsed",
-            "fallbackReasonCode",
-            "fallbackReasonLength",
-            "fallbackReasonProvided",
-            "diagnosticIndex"
-    );
     private static final List<String> SENSITIVE_EXACT_KEYS = List.of(
             "customerid",
             "accountid",
@@ -38,7 +21,11 @@ public final class ScoringEvidenceAttributes {
             "address",
             "fullname",
             "featuresnapshot",
-            "modelpayload"
+            "modelpayload",
+            "rawmodelpayload",
+            "rawunsupportedreasoncode",
+            "fallbackreason",
+            "rawfallbackreason"
     );
     private static final List<String> SENSITIVE_KEY_MARKERS = List.of("raw", "payload");
 
@@ -61,9 +48,6 @@ public final class ScoringEvidenceAttributes {
         String normalized = key.replace("_", "")
                 .replace("-", "")
                 .toLowerCase(Locale.ROOT);
-        if (!ALLOWED_KEYS.contains(key)) {
-            throw new IllegalArgumentException("Unsupported scoring evidence attribute key: " + key);
-        }
         for (String exactKey : SENSITIVE_EXACT_KEYS) {
             if (normalized.equals(exactKey)) {
                 throw new IllegalArgumentException("Unsafe scoring evidence attribute key: " + key);

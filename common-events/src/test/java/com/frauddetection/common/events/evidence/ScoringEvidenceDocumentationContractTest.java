@@ -25,6 +25,11 @@ class ScoringEvidenceDocumentationContractTest {
                 .contains("FDP-58 is additive.")
                 .contains("ReasonCode remains the source of truth")
                 .contains("`UNKNOWN` is diagnostic only")
+                .contains("validated at DTO boundary and at producer factory boundary")
+                .contains("forward-compatible harmless attributes")
+                .contains("Unsafe attributes fail explicitly")
+                .contains("nested object/map attributes")
+                .contains("arbitrary object values")
                 .contains("raw unsupported reason-code value")
                 .contains("event. It is not a globally unique persistence")
                 .contains("ML fallback is represented through runtime or fallback evidence.");
