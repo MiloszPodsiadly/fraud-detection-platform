@@ -38,6 +38,8 @@ It does not represent final outcome.
 ## Boundedness
 
 Default max item count is 50.
+Projection configuration accepts max item counts from 2 through 100.
+AlertDocument hard persistence cap is 100.
 Truncation is explicit.
 If truncation occurs, the final snapshot contains max - 1 retained items plus one PARTIAL DIAGNOSTIC truncation item.
 No silent truncation is allowed.
@@ -54,6 +56,19 @@ Snapshot projection enforces configured max item count.
 AlertDocument also enforces a hard persistence cap to prevent unbounded internal misuse.
 Projection truncation is explicit and diagnostic.
 AlertDocument does not silently truncate; it rejects oversized snapshots at persistence model boundary.
+The explicit truncation diagnostic is created by projection service, not by persistence entity.
+
+## Operational Signal
+
+Projection errors are not normal degraded success.
+They indicate that alert-service could not project scoring evidence into the snapshot and had to persist an ERROR
+diagnostic item.
+The metric fraud.alert.evidence_snapshot.projection.error should be treated as an operational incident signal when
+non-zero or increasing.
+Error diagnostics must not contain raw exception messages.
+Error diagnostics must not contain stack traces.
+Error diagnostics must not contain raw event payloads.
+Error diagnostics must not create AVAILABLE evidence.
 
 ## Projection States
 
@@ -85,6 +100,11 @@ Each projected snapshot item preserves:
 
 Missing eventId, transactionId, or correlationId creates PARTIAL diagnostic evidence, not AVAILABLE evidence.
 Missing ScoringEvidence for HIGH or CRITICAL scoring creates PARTIAL diagnostic evidence, not silent success.
+
+## Case Lifecycle Separation
+
+FDP-59 does not change case lifecycle ordering.
+Evidence snapshot projection records alert-side scoring context only.
 
 ## Out Of Scope
 
