@@ -1,11 +1,14 @@
 package com.frauddetection.scoring.service;
 
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
+import com.frauddetection.common.events.evidence.ScoringEvidenceItem;
+import com.frauddetection.common.events.evidence.ScoringEvidenceSource;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.reason.ReasonCode;
 import com.frauddetection.scoring.config.ScoringProperties;
 import com.frauddetection.scoring.domain.FraudScoreResult;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
+import com.frauddetection.scoring.evidence.ScoringEvidenceFactory;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -21,6 +24,7 @@ import java.util.Set;
 public class RuleBasedFraudScoringEngine implements FraudScoringEngine {
 
     private final ScoringProperties scoringProperties;
+    private final ScoringEvidenceFactory scoringEvidenceFactory = new ScoringEvidenceFactory();
 
     public RuleBasedFraudScoringEngine(ScoringProperties scoringProperties) {
         this.scoringProperties = scoringProperties;
@@ -83,6 +87,21 @@ public class RuleBasedFraudScoringEngine implements FraudScoringEngine {
         double cappedScore = Math.min(score, 0.99d);
         RiskLevel riskLevel = mapRiskLevel(cappedScore);
         boolean alertRecommended = riskLevel == RiskLevel.HIGH || riskLevel == RiskLevel.CRITICAL;
+        Instant inferenceTimestamp = Instant.now();
+        List<ScoringEvidenceItem> scoringEvidence = scoringEvidenceFactory.supportedReasonCodes(
+                reasonCodes,
+                ScoringEvidenceSource.RULE_BASED_SCORING,
+                riskLevel,
+                inferenceTimestamp
+        );
+        if (alertRecommended && scoringEvidence.isEmpty()) {
+            scoringEvidence = List.of(scoringEvidenceFactory.missingSupportedReasonCodes(
+                    ScoringEvidenceSource.RULE_BASED_SCORING,
+                    riskLevel,
+                    inferenceTimestamp,
+                    0
+            ));
+        }
 
         scoreDetails.put("baseScore", 0.05d);
         scoreDetails.put("finalScore", cappedScore);
@@ -101,12 +120,13 @@ public class RuleBasedFraudScoringEngine implements FraudScoringEngine {
                 "RULE_BASED",
                 "rule-based-engine",
                 "v1",
-                Instant.now(),
+                inferenceTimestamp,
                 new ArrayList<>(reasonCodes),
                 scoreDetails,
                 request.featureSnapshot(),
                 explanationMetadata,
-                alertRecommended
+                alertRecommended,
+                scoringEvidence
         );
     }
 

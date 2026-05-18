@@ -36,7 +36,8 @@ public class TransactionScoredEventMapper {
                 scoreResult.reasonCodes(),
                 scoreResult.scoreDetails(),
                 scoreResult.featureSnapshot(),
-                scoreResult.alertRecommended()
+                scoreResult.alertRecommended(),
+                scoreResult.scoringEvidence()
         );
     }
 }
