@@ -31,47 +31,64 @@ It is granted to analyst, reviewer, and fraud-ops administrator roles.
 
 ## Pagination And Filters
 
-- page must be greater than or equal to 0.
 - size defaults to 20.
 - size max is 100.
-- sort uses an allowlist only.
+- cursor is optional and opaque.
+- page and sort parameters are rejected.
 - filters are exact-match or bounded range filters.
 - regex search is not supported.
 - raw query passthrough is not supported.
 
 ## Search Pagination Semantics
 
-SuspiciousTransaction search uses bounded slice-style pagination.
+SuspiciousTransaction search uses bounded cursor/keyset slice pagination.
 
 The response includes:
 
 - content
-- page
 - size
 - hasNext
+- nextCursor
 
 The response does not include:
 
+- page
 - totalElements
 - totalPages
 - totalCount
-- full collection count
+- offset
+
+The endpoint does not use:
+
+- global count query
+- offset skip
+- unbounded list
+- raw query passthrough
+- regex search
 
 Reason:
 A full count over suspicious_transactions can be expensive for broad or empty filters. FDP-62 avoids unbounded count scans
-by fetching at most size + 1 records.
+by fetching at most size + 1 records with keyset predicates.
 
-Clients must use hasNext to navigate. They must not rely on total page count.
+Clients must navigate using nextCursor and must not rely on page number or total page count.
 
 Rules:
 
 - default size = 20.
 - max size = 100.
 - fetch limit = size + 1.
-- hasNext indicates whether another page exists.
+- hasNext indicates whether another cursor slice exists.
+- nextCursor is present only when hasNext is true.
 - no total collection count is computed.
+- no page number navigation is supported.
+- no offset skip is used.
 - no raw query passthrough.
 - no regex search.
+
+Unfiltered search:
+
+Allowed only as bounded cursor slice returning the most recent suspicious transactions first.
+It does not compute total count.
 
 Allowed filters:
 
@@ -82,13 +99,10 @@ Allowed filters:
 - detectedFrom
 - detectedTo
 
-## Sort Allowlist
+Sort order:
 
-- detectedAt
-- updatedAt
-- riskScore
-- riskLevel
-- status
+- detectedAt DESC
+- suspiciousTransactionId DESC
 
 ## Response Semantics
 
