@@ -10,6 +10,7 @@ Status: current product documentation index.
 | [Evidence Model](evidence_model.md) | Current product-domain semantics for typed evidence signals, status meanings, non-claims, and relationship to reason codes. |
 | [Reason Codes](reason_codes.md) | Current product-domain semantics for scoring reason codes, legacy compatibility, UNKNOWN handling, and non-claims. |
 | [Scoring Evidence Contract](scoring_evidence_contract.md) | Current product-domain semantics for typed scoring evidence, diagnostic evidence, compatibility, and attributes safety. |
+| [Alert Evidence Snapshot](alert_evidence_snapshot.md) | Current product-domain semantics for point-in-time alert evidence snapshot projection, boundedness, lineage, and non-claims. |
 
 ## Related Technical Sources
 
