@@ -46,10 +46,25 @@ New projected evidence requires:
 - Correlation linkage.
 - Source event lineage where available.
 
+AVAILABLE projected evidence requires:
+
+- transactionId.
+- correlationId.
+- sourceEventId.
+- source.
+- status.
+- supported reasonCode.
+
 Missing correlationId or transactionId must not produce AVAILABLE evidence.
 It must be represented as PARTIAL or UNAVAILABLE diagnostic context.
 
+Missing transactionId, correlationId, or sourceEventId must create PARTIAL diagnostic evidence, not AVAILABLE evidence.
+
+Diagnostic evidence may have reasonCode = null only when reasonCodeApplicable = false is explicit in attributes.
+
 Evidence identity must include source event lineage to avoid collisions during replay, re-scoring, or reprocessing.
+
+Source event lineage is required for AVAILABLE projected evidence.
 
 Evidence with missing lineage is not fully available investigation evidence.
 
