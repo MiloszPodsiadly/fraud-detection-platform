@@ -46,6 +46,25 @@ FDP-60 does not add timeline.
 FDP-60 does not add grouping.
 FDP-60 does not add Mongo backfill.
 
+## Evidence Metadata Semantics
+
+SuspiciousTransaction stores minimal evidence metadata only.
+It does not store the full evidence snapshot.
+
+`evidenceStatus` is conservative summary metadata.
+`AVAILABLE` means no known degradation was present in scoring evidence metadata.
+If scoring evidence contains mixed AVAILABLE and degraded items, the summary must not be AVAILABLE.
+
+Rules:
+- empty scoring evidence -> PARTIAL
+- any ERROR -> ERROR
+- any PARTIAL or LEGACY -> PARTIAL
+- mixed AVAILABLE with UNAVAILABLE or NOT_APPLICABLE -> PARTIAL
+- only unavailable/not-applicable evidence -> UNAVAILABLE
+- all evidence available -> AVAILABLE
+
+This prevents a positive available signal from hiding partial, unavailable, legacy, or failed evidence.
+
 ## Idempotency
 
 The idempotency key is transactionId plus sourceEventId.

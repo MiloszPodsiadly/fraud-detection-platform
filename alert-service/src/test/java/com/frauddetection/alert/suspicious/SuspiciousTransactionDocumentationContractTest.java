@@ -23,6 +23,12 @@ class SuspiciousTransactionDocumentationContractTest {
                 .contains("SuspiciousTransaction is not final outcome")
                 .contains("SuspiciousTransaction is not legal proof")
                 .contains("FDP-60 does not store the full evidence snapshot")
+                .contains("minimal evidence metadata only")
+                .contains("`evidenceStatus` is conservative summary metadata")
+                .contains("`AVAILABLE` means no known degradation")
+                .contains("mixed AVAILABLE and degraded items")
+                .contains("must not be AVAILABLE")
+                .contains("does not store the full evidence snapshot")
                 .contains("transactionId plus sourceEventId")
                 .contains("transactionId alone is not sufficient");
     }
@@ -36,6 +42,12 @@ class SuspiciousTransactionDocumentationContractTest {
                 .doesNotContain("is confirmed fraud")
                 .doesNotContain("is final outcome")
                 .doesNotContain("is legal proof")
-                .doesNotContain("fraud verdict");
+                .doesNotContain("fraud verdict")
+                .doesNotContain("confirmed fraud signal")
+                .doesNotContain("final outcome signal")
+                .doesNotContain("analyst disposition")
+                .doesNotContain("legal proof claim")
+                .doesNotContain("adds public api")
+                .doesNotContain("adds ui");
     }
 }
