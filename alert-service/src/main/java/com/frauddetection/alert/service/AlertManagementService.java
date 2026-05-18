@@ -72,7 +72,7 @@ public class AlertManagementService implements AlertManagementUseCase {
         AlertDocument saved;
         try {
             AlertDocument document = alertDocumentMapper.toDocument(alertCase);
-            document.setEvidenceSnapshot(evidenceSnapshotProjectionService.project(event));
+            document.setEvidenceSnapshot(evidenceSnapshotProjectionService.projectOrDiagnostic(event));
             saved = alertRepository.save(document);
         } catch (DuplicateKeyException exception) {
             log.atInfo()

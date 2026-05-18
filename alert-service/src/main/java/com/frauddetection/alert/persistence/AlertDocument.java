@@ -3,6 +3,7 @@ package com.frauddetection.alert.persistence;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.alert.evidence.AlertEvidenceSnapshotProperties;
 import com.frauddetection.alert.evidence.EvidenceSnapshotItem;
 import com.frauddetection.common.events.contract.FraudDecisionEvent;
 import com.frauddetection.common.events.model.CustomerContext;
@@ -20,6 +21,8 @@ import java.util.Map;
 
 @Document(collection = "alerts")
 public class AlertDocument {
+
+    public static final int MAX_EVIDENCE_SNAPSHOT_ITEMS = AlertEvidenceSnapshotProperties.HARD_MAX_ITEMS;
 
     @Id
     private String alertId;
@@ -110,7 +113,16 @@ public class AlertDocument {
     public Map<String, Object> getFeatureSnapshot() { return featureSnapshot; }
     public void setFeatureSnapshot(Map<String, Object> featureSnapshot) { this.featureSnapshot = featureSnapshot; }
     public List<EvidenceSnapshotItem> getEvidenceSnapshot() { return evidenceSnapshot == null ? List.of() : List.copyOf(evidenceSnapshot); }
-    public void setEvidenceSnapshot(List<EvidenceSnapshotItem> evidenceSnapshot) { this.evidenceSnapshot = evidenceSnapshot == null ? List.of() : List.copyOf(evidenceSnapshot); }
+    public void setEvidenceSnapshot(List<EvidenceSnapshotItem> evidenceSnapshot) {
+        if (evidenceSnapshot == null) {
+            this.evidenceSnapshot = List.of();
+            return;
+        }
+        if (evidenceSnapshot.size() > MAX_EVIDENCE_SNAPSHOT_ITEMS) {
+            throw new IllegalArgumentException("evidenceSnapshot must not exceed " + MAX_EVIDENCE_SNAPSHOT_ITEMS + " items");
+        }
+        this.evidenceSnapshot = List.copyOf(evidenceSnapshot);
+    }
     public AnalystDecision getAnalystDecision() { return analystDecision; }
     public void setAnalystDecision(AnalystDecision analystDecision) { this.analystDecision = analystDecision; }
     public String getAnalystId() { return analystId; }

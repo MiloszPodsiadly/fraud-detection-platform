@@ -11,7 +11,7 @@ public class ScoringEvidenceSnapshotMapper {
 
     public EvidenceType mapType(ScoringEvidenceType type) {
         if (type == null) {
-            return EvidenceType.DIAGNOSTIC;
+            throw new IllegalArgumentException("scoring evidence type is required");
         }
         return switch (type) {
             case TRANSACTION_FEATURE -> EvidenceType.TRANSACTION_FEATURE;
@@ -29,7 +29,7 @@ public class ScoringEvidenceSnapshotMapper {
 
     public EvidenceStatus mapStatus(ScoringEvidenceStatus status) {
         if (status == null) {
-            return EvidenceStatus.UNAVAILABLE;
+            throw new IllegalArgumentException("scoring evidence status is required");
         }
         return switch (status) {
             case AVAILABLE -> EvidenceStatus.AVAILABLE;
@@ -43,7 +43,7 @@ public class ScoringEvidenceSnapshotMapper {
 
     public EvidenceSeverity mapSeverity(ScoringEvidenceSeverity severity) {
         if (severity == null) {
-            return EvidenceSeverity.LOW;
+            throw new IllegalArgumentException("scoring evidence severity is required");
         }
         return switch (severity) {
             case LOW -> EvidenceSeverity.LOW;
@@ -55,7 +55,7 @@ public class ScoringEvidenceSnapshotMapper {
 
     public EvidenceSource mapSource(ScoringEvidenceSource source) {
         if (source == null) {
-            return EvidenceSource.FRAUD_SCORING_SERVICE;
+            throw new IllegalArgumentException("scoring evidence source is required");
         }
         return switch (source) {
             case RULE_BASED_SCORING, SCORING_FALLBACK -> EvidenceSource.FRAUD_SCORING_SERVICE;
