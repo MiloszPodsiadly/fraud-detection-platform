@@ -1247,7 +1247,7 @@ public class AlertServiceMetrics {
 
     private String normalizeSuspiciousTransactionProjectionOutcome(String outcome) {
         return switch (outcome) {
-            case "created", "updated", "skipped", "error" -> outcome;
+            case "created", "updated", "skipped", "duplicate_retry", "error" -> outcome;
             default -> "error";
         };
     }
@@ -1263,7 +1263,8 @@ public class AlertServiceMetrics {
 
     private String normalizeSuspiciousTransactionProjectionReason(String reason) {
         return switch (reason) {
-            case "non_alert_worthy", "missing_required_lineage", "duplicate_retry", "projection_error" -> reason;
+            case "non_alert_worthy", "missing_required_lineage", "duplicate_retry", "duplicate_readback_missing",
+                 "duplicate_readback_failed", "projection_error" -> reason;
             default -> "projection_error";
         };
     }

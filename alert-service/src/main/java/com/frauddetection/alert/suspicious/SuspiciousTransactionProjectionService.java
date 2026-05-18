@@ -10,6 +10,7 @@ import com.frauddetection.common.events.evidence.ScoringEvidenceStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -78,6 +79,8 @@ public class SuspiciousTransactionProjectionService {
                     saved.getStatus()
             );
             return Optional.of(saved);
+        } catch (DuplicateKeyException exception) {
+            return readBackAfterDuplicateKey(event, linkedAlertId);
         } catch (RuntimeException exception) {
             metrics.recordSuspiciousTransactionProjectionError("projection_error");
             log.atWarn()
@@ -86,6 +89,51 @@ public class SuspiciousTransactionProjectionService {
                     .log("Suspicious transaction read-model projection failed.");
             return Optional.empty();
         }
+    }
+
+    private Optional<SuspiciousTransactionDocument> readBackAfterDuplicateKey(
+            TransactionScoredEvent event,
+            String linkedAlertId
+    ) {
+        try {
+            Optional<SuspiciousTransactionDocument> existing =
+                    repository.findByTransactionIdAndSourceEventId(event.transactionId(), event.eventId());
+            if (existing.isEmpty()) {
+                metrics.recordSuspiciousTransactionProjectionError("duplicate_readback_missing");
+                log.atWarn()
+                        .addKeyValue("reason", "duplicate_readback_missing")
+                        .log("Suspicious transaction duplicate insert race could not be resolved by readback.");
+                return Optional.empty();
+            }
+
+            SuspiciousTransactionDocument document = existing.get();
+            if (hasText(linkedAlertId) && !hasText(document.getLinkedAlertId())) {
+                document.setLinkedAlertId(linkedAlertId);
+                document.setStatus(SuspiciousTransactionStatus.ALERT_CREATED);
+                document.setUpdatedAt(clock.instant());
+                SuspiciousTransactionDocument saved = repository.save(document);
+                metrics.recordSuspiciousTransactionProjection("duplicate_retry", saved.getStatus());
+                logDuplicateReadbackResolved();
+                return Optional.of(saved);
+            }
+
+            metrics.recordSuspiciousTransactionProjection("duplicate_retry", document.getStatus());
+            logDuplicateReadbackResolved();
+            return existing;
+        } catch (RuntimeException readbackException) {
+            metrics.recordSuspiciousTransactionProjectionError("duplicate_readback_failed");
+            log.atWarn()
+                    .addKeyValue("reason", "duplicate_readback_failed")
+                    .addKeyValue("exceptionType", readbackException.getClass().getSimpleName())
+                    .log("Suspicious transaction duplicate readback failed.");
+            return Optional.empty();
+        }
+    }
+
+    private void logDuplicateReadbackResolved() {
+        log.atInfo()
+                .addKeyValue("reason", "duplicate_retry")
+                .log("Suspicious transaction duplicate insert race resolved by readback.");
     }
 
     private SuspiciousTransactionDocument newDocument(TransactionScoredEvent event, Instant now) {

@@ -29,6 +29,14 @@ class SuspiciousTransactionDocumentationContractTest {
                 .contains("mixed AVAILABLE and degraded items")
                 .contains("must not be AVAILABLE")
                 .contains("does not store the full evidence snapshot")
+                .contains("Duplicate-key race handling")
+                .contains("transactionId + sourceEventId")
+                .contains("unique index protected the idempotency invariant")
+                .contains("duplicate_retry")
+                .contains("not recorded as projection_error")
+                .contains("Readback must not use transactionId alone")
+                .contains("must not overwrite an existing linkedAlertId")
+                .contains("FDP-61 does not add public API, UI, case lifecycle mutation, or new statuses")
                 .contains("transactionId plus sourceEventId")
                 .contains("transactionId alone is not sufficient");
     }
