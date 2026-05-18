@@ -71,6 +71,33 @@ The idempotency key is transactionId plus sourceEventId.
 transactionId alone is not sufficient because the same transaction can be rescored, replayed, or backfilled with a
 different source event.
 
+## Duplicate-key race handling
+
+SuspiciousTransaction uses transactionId + sourceEventId as its idempotency key.
+
+A duplicate key during suspicious transaction projection can happen under concurrent retry or concurrent alert
+processing:
+
+- one worker creates the read-model document
+- another worker attempts the same insert
+- the unique index rejects the second insert
+
+This is not data corruption when readback succeeds.
+It means the unique index protected the idempotency invariant.
+
+Required semantics:
+- DuplicateKeyException during save triggers readback by transactionId + sourceEventId.
+- Successful readback is recorded as duplicate_retry.
+- Successful readback is not recorded as projection_error.
+- Failed readback after DuplicateKeyException is recorded as projection_error.
+- Readback must not use transactionId alone.
+
+If linkedAlertId is provided and the existing suspicious transaction has no linkedAlertId, the duplicate-key readback
+path may reconcile linkedAlertId and mark the read model as ALERT_CREATED.
+It must not overwrite an existing linkedAlertId.
+
+FDP-61 does not add public API, UI, case lifecycle mutation, or new statuses.
+
 ## Status Semantics
 
 NEW means a suspicious signal was captured and no alert link is set.
