@@ -6,6 +6,7 @@ import com.frauddetection.common.events.evidence.ScoringEvidenceStatus;
 import com.frauddetection.scoring.config.ScoringMode;
 import com.frauddetection.scoring.config.ScoringProperties;
 import com.frauddetection.scoring.domain.FraudScoreResult;
+import com.frauddetection.scoring.evidence.FallbackReasonCodes;
 import com.frauddetection.scoring.evidence.ScoringEvidenceFactory;
 import com.frauddetection.scoring.observability.ScoringMetrics;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
@@ -17,7 +18,6 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 @Component
@@ -64,7 +64,7 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
         return withDiagnostics(ruleBasedFraudScoringEngine.score(request), Map.of(
                 "mode", ScoringMode.ML.name(),
                 "fallbackUsed", true,
-                "fallbackReasonCode", fallbackReasonCode(fallbackReason(mlResult)),
+                "fallbackReasonCode", FallbackReasonCodes.from(fallbackReason(mlResult)),
                 "fallbackReasonLength", fallbackReason(mlResult).length(),
                 "fallbackReasonProvided", !fallbackReason(mlResult).isBlank(),
                 "mlModelName", mlResult.modelName(),
@@ -86,7 +86,7 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
         diagnostics.put("shadowRiskLevel", mlResult.riskLevel().name());
         diagnostics.put("modelMonitoring", ModelMonitoringMetrics.from(ScoringMode.SHADOW, ruleResult, mlResult, isModelAvailable(mlResult)));
         if (!isModelAvailable(mlResult)) {
-            diagnostics.put("shadowFallbackReasonCode", fallbackReasonCode(fallbackReason(mlResult)));
+            diagnostics.put("shadowFallbackReasonCode", FallbackReasonCodes.from(fallbackReason(mlResult)));
             diagnostics.put("shadowFallbackReasonLength", fallbackReason(mlResult).length());
             diagnostics.put("shadowFallbackReasonProvided", !fallbackReason(mlResult).isBlank());
             scoringMetrics.recordFallback(ScoringMode.SHADOW, fallbackReason(mlResult));
@@ -114,7 +114,7 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
         diagnostics.put("riskLevelMatch", ruleResult.riskLevel() == mlResult.riskLevel());
         diagnostics.put("modelMonitoring", ModelMonitoringMetrics.from(ScoringMode.COMPARE, ruleResult, mlResult, isModelAvailable(mlResult)));
         if (!isModelAvailable(mlResult)) {
-            diagnostics.put("mlFallbackReasonCode", fallbackReasonCode(fallbackReason(mlResult)));
+            diagnostics.put("mlFallbackReasonCode", FallbackReasonCodes.from(fallbackReason(mlResult)));
             diagnostics.put("mlFallbackReasonLength", fallbackReason(mlResult).length());
             diagnostics.put("mlFallbackReasonProvided", !fallbackReason(mlResult).isBlank());
             scoringMetrics.recordFallback(ScoringMode.COMPARE, fallbackReason(mlResult));
@@ -133,29 +133,6 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
     private String fallbackReason(FraudScoreResult result) {
         Object reason = result.explanationMetadata().get("fallbackReason");
         return reason == null ? "ML model result is unavailable." : reason.toString();
-    }
-
-    private String fallbackReasonCode(String fallbackReason) {
-        if (fallbackReason == null || fallbackReason.isBlank()) {
-            return "unknown_fallback_reason";
-        }
-        String normalized = fallbackReason.toLowerCase(Locale.ROOT);
-        if (normalized.contains("request failed")) {
-            return "ml_request_failed";
-        }
-        if (normalized.contains("invalid") || normalized.contains("empty response")) {
-            return "ml_response_invalid";
-        }
-        if (normalized.contains("runtime")) {
-            return "ml_runtime_unavailable";
-        }
-        if (normalized.contains("unavailable") || normalized.contains("not configured")) {
-            return "ml_model_unavailable";
-        }
-        if (normalized.contains("fallback")) {
-            return "scoring_fallback_used";
-        }
-        return "unknown_fallback_reason";
     }
 
     private double score(FraudScoreResult result) {
