@@ -18,7 +18,10 @@ import com.frauddetection.alert.messaging.FraudAlertEventPublisher;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
+import com.frauddetection.alert.suspicious.SuspiciousTransactionDocument;
 import com.frauddetection.alert.suspicious.SuspiciousTransactionProjectionService;
+import com.frauddetection.alert.suspicious.SuspiciousTransactionRepository;
+import com.frauddetection.alert.suspicious.SuspiciousTransactionStatus;
 import com.frauddetection.common.events.contract.FraudAlertEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.evidence.ScoringEvidenceItem;
@@ -29,6 +32,7 @@ import com.frauddetection.common.events.evidence.ScoringEvidenceType;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.junit.jupiter.api.Test;
@@ -43,6 +47,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
@@ -276,6 +281,40 @@ class AlertManagementServiceTest {
 
         verify(alertPublisher).publish(any(FraudAlertEvent.class));
         verify(metrics).recordSuspiciousTransactionProjectionError("projection_error");
+    }
+
+    @Test
+    void duplicateKeyReadbackDoesNotBreakAlertCreation() {
+        AlertRepository repository = mock(AlertRepository.class);
+        FraudAlertEventPublisher alertPublisher = mock(FraudAlertEventPublisher.class);
+        FraudCaseManagementService fraudCaseManagementService = mock(FraudCaseManagementService.class);
+        AlertServiceMetrics metrics = new AlertServiceMetrics(new SimpleMeterRegistry());
+        SubmitDecisionRegulatedMutationService submitDecisionService = mock(SubmitDecisionRegulatedMutationService.class);
+        SuspiciousTransactionRepository suspiciousRepository = mock(SuspiciousTransactionRepository.class);
+        SuspiciousTransactionProjectionService suspiciousProjection =
+                new SuspiciousTransactionProjectionService(suspiciousRepository, metrics);
+        var service = service(repository, alertPublisher, fraudCaseManagementService, metrics, submitDecisionService, suspiciousProjection);
+        var event = TransactionFixtures.scoredTransaction().build();
+        SuspiciousTransactionDocument existing = new SuspiciousTransactionDocument();
+        existing.setSuspiciousTransactionId("suspicious-existing");
+        existing.setTransactionId(event.transactionId());
+        existing.setSourceEventId(event.eventId());
+        existing.setStatus(SuspiciousTransactionStatus.NEW);
+
+        when(repository.existsByTransactionId(event.transactionId())).thenReturn(false);
+        when(repository.save(any(AlertDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(suspiciousRepository.findByTransactionIdAndSourceEventId(event.transactionId(), event.eventId()))
+                .thenReturn(java.util.Optional.empty())
+                .thenReturn(java.util.Optional.of(existing));
+        when(suspiciousRepository.save(any(SuspiciousTransactionDocument.class)))
+                .thenThrow(new DuplicateKeyException("duplicate suspicious transaction"))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.handleScoredTransaction(event);
+
+        verify(alertPublisher).publish(any(FraudAlertEvent.class));
+        verify(suspiciousRepository, times(2)).findByTransactionIdAndSourceEventId(event.transactionId(), event.eventId());
+        verify(suspiciousRepository, times(2)).save(any(SuspiciousTransactionDocument.class));
     }
 
     @Test
