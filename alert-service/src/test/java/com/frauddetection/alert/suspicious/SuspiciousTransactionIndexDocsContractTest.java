@@ -1,0 +1,40 @@
+package com.frauddetection.alert.suspicious;
+
+import org.junit.jupiter.api.Test;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class SuspiciousTransactionIndexDocsContractTest {
+
+    private static final Path DOCS = Path.of("..", "docs", "product", "suspicious_transaction_read_api.md");
+
+    @Test
+    void documentsMongoIndexSupportWithoutOverclaimingGuarantees() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs)
+                .contains("Mongo Index Support")
+                .contains("idx_suspicious_tx_cursor_detected_at_id_desc")
+                .contains("idx_suspicious_tx_status_cursor")
+                .contains("idx_suspicious_tx_risk_cursor")
+                .contains("idx_suspicious_tx_customer_cursor")
+                .contains("idx_suspicious_tx_alert_cursor")
+                .contains("suspicious_transaction_source_event_unique_idx")
+                .contains("performance support only")
+                .contains("does not change API behavior")
+                .contains("not a security control")
+                .contains("do not provide fraud proof")
+                .contains("audit assurance")
+                .contains("legal proof")
+                .doesNotContain("guaranteed fast")
+                .doesNotContain("fraud-proof")
+                .doesNotContain("legal proof guarantee")
+                .doesNotContain("security guarantee")
+                .doesNotContain("audit guarantee")
+                .doesNotContain("performance guarantee");
+    }
+}
