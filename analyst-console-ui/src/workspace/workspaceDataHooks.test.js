@@ -130,6 +130,30 @@ describe("workspace data hooks", () => {
     expect(result.current.items.map((item) => item.suspiciousTransactionId)).toEqual(["suspicious-1", "suspicious-2"]);
   });
 
+  it("suspiciousTransactionListDoesNotUseSummaryAsPaginationTotal", async () => {
+    listSuspiciousTransactions.mockResolvedValueOnce(suspiciousSlice([
+      suspiciousTransaction({ suspiciousTransactionId: "suspicious-1" })
+    ], {
+      hasNext: false,
+      nextCursor: null
+    }));
+    const apiClient = {
+      ...workspaceApiClient,
+      getSuspiciousTransactionSummary: vi.fn().mockRejectedValue(new Error("summary unavailable"))
+    };
+
+    const { result } = renderHook(() => useSuspiciousTransactionReadView({ enabled: true, apiClient }));
+
+    await waitFor(() => expect(result.current.items).toHaveLength(1));
+    expect(apiClient.getSuspiciousTransactionSummary).not.toHaveBeenCalled();
+    expect(result.current.slice).toEqual({
+      content: [expect.objectContaining({ suspiciousTransactionId: "suspicious-1" })],
+      size: 20,
+      hasNext: false,
+      nextCursor: null
+    });
+  });
+
   it("loads suspicious transaction detail only when an id is selected", async () => {
     const { result, rerender } = renderHook(
       ({ selectedSuspiciousTransactionId }) => useSuspiciousTransactionReadView({

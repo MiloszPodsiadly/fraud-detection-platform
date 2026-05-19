@@ -62,8 +62,8 @@ export function WorkspaceNavigation({
         : workspaceCounters.suspiciousTransactions ?? 0,
       authority: canReadSuspiciousTransactions,
       stale: isCounterStale("suspiciousTransactions", failedCounterNames, workspaceCountersStatus),
-      title: "Global point-in-time suspicious transaction signal count. The list view still uses cursor pagination.",
-      ariaLabel: `Global suspicious transaction signals ${workspaceCounters.suspiciousTransactions ?? 0}`
+      title: "Workspace signal total. Not page count, fraud count, case count, or analyst workload.",
+      ariaLabel: `Workspace signal total ${workspaceCounters.suspiciousTransactions ?? 0}`
     },
     analyst: {
       value: isFraudCaseSummaryLoading ? "..." : fraudCaseSummaryLabel,

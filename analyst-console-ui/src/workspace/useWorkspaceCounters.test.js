@@ -69,6 +69,43 @@ describe("useWorkspaceCounters", () => {
     expect(listSuspiciousTransactionsNotAvailable()).toBe(true);
   });
 
+  it("suspiciousTransactionWorkspaceCounterUsesSummaryEndpointOnly", async () => {
+    const client = apiClient();
+    const { result } = renderHook(() => useWorkspaceCounters({
+      enabled: true,
+      apiClient: client,
+      includeAlerts: false,
+      includeFraudCases: false,
+      includeSuspiciousTransactions: true,
+      includeTransactions: false,
+      canReadSuspiciousTransactions: true
+    }));
+
+    await waitFor(() => expect(result.current.counters.suspiciousTransactions).toBe(98));
+    expect(getSuspiciousTransactionSummary).toHaveBeenCalledTimes(1);
+    expect(listAlerts).not.toHaveBeenCalled();
+    expect(getFraudCaseWorkQueueSummary).not.toHaveBeenCalled();
+    expect(listScoredTransactions).not.toHaveBeenCalled();
+  });
+
+  it("summaryCounterFailureDoesNotBreakListView", async () => {
+    getSuspiciousTransactionSummary.mockRejectedValue(new Error("summary unavailable"));
+    const client = apiClient();
+    const { result } = renderHook(() => useWorkspaceCounters({
+      enabled: true,
+      apiClient: client,
+      includeAlerts: false,
+      includeFraudCases: false,
+      includeSuspiciousTransactions: true,
+      includeTransactions: false,
+      canReadSuspiciousTransactions: true
+    }));
+
+    await waitFor(() => expect(result.current.degraded).toBe(true));
+    expect(result.current.counters.suspiciousTransactions).toBeNull();
+    expect(result.current.errorByCounter.suspiciousTransactions).toBe("summary unavailable");
+  });
+
   it("surfaces partial counter failure without converting missing authority to zero", async () => {
     listAlerts.mockRejectedValue(new Error("alerts unavailable"));
     const client = apiClient();

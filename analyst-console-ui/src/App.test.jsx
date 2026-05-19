@@ -443,6 +443,57 @@ describe("App", () => {
     expect(getGovernanceAdvisoryAnalytics).not.toHaveBeenCalled();
   });
 
+  it("navigationHiddenWithoutSuspiciousTransactionRead", async () => {
+    callbackPath.value = false;
+    refreshSession.mockResolvedValue(authenticatedSession());
+    providerState.value = {
+      ...providerState.value,
+      getSessionState: () => ({ status: "authenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
+    };
+
+    render(<App />);
+
+    await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("link", { name: "Suspicious Transactions" })).not.toBeInTheDocument();
+    expect(listSuspiciousTransactions).not.toHaveBeenCalled();
+  });
+
+  it("directRouteWithoutAuthorityShowsAccessDeniedState", async () => {
+    callbackPath.value = false;
+    window.history.replaceState({}, "", "/?workspace=suspicious-transactions");
+    refreshSession.mockResolvedValue(authenticatedSession());
+    providerState.value = {
+      ...providerState.value,
+      getSessionState: () => ({ status: "authenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
+    };
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Access denied" })).toBeInTheDocument();
+    expect(listSuspiciousTransactions).not.toHaveBeenCalled();
+  });
+
+  it("backend403RendersAccessDeniedState", async () => {
+    callbackPath.value = false;
+    window.history.replaceState({}, "", "/?workspace=suspicious-transactions");
+    const session = authenticatedSessionWithSuspiciousRead();
+    refreshSession.mockResolvedValue(session);
+    providerState.value = {
+      ...providerState.value,
+      getInitialSession: () => session,
+      getSessionState: () => ({ status: "authenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
+    };
+    listSuspiciousTransactions.mockRejectedValue({ status: 403, message: "forbidden" });
+
+    render(<App />);
+
+    await waitFor(() => expect(listSuspiciousTransactions).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole("heading", { name: "Access denied" })).toBeInTheDocument();
+  });
+
   it("keeps transaction scoring usable when the fraud case global summary fails", async () => {
     callbackPath.value = false;
     refreshSession.mockResolvedValue(authenticatedSession());
@@ -615,13 +666,26 @@ describe("App", () => {
   });
 });
 
-function authenticatedSession() {
+function authenticatedSession(overrides = {}) {
   return {
     userId: "subject-1",
     roles: ["READ_ONLY_ANALYST"],
     extraAuthorities: [],
-    authorities: ["alert:read", "fraud-case:read", "transaction-monitor:read", "assistant-summary:read"]
+    authorities: ["alert:read", "fraud-case:read", "transaction-monitor:read", "assistant-summary:read"],
+    ...overrides
   };
+}
+
+function authenticatedSessionWithSuspiciousRead() {
+  return authenticatedSession({
+    authorities: [
+      "alert:read",
+      "fraud-case:read",
+      "transaction-monitor:read",
+      "assistant-summary:read",
+      "suspicious-transaction:read"
+    ]
+  });
 }
 
 function alertDetails(alertId) {

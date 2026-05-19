@@ -68,6 +68,16 @@ describe("WorkspaceRuntimeProvider", () => {
     expect(source).toContain("Backend authorization still enforces every protected API call");
   });
 
+  it("frontendGuardDoesNotClaimSecurityBoundary", () => {
+    const docs = readFileSync(join(process.cwd(), "../docs/product/suspicious_transaction_internal_ui.md"), "utf8");
+    const source = readFileSync(join(process.cwd(), "src/workspace/WorkspaceRuntimeProvider.jsx"), "utf8");
+
+    expect(docs).toContain("Frontend capability mapping is a session and UX hint only");
+    expect(docs).toContain("backend authorization is authoritative");
+    expect(docs).toContain("FDP-66 does not change production role provisioning");
+    expect(source).toContain("Backend authorization still enforces every protected API call");
+  });
+
   it("keeps governance advisory read and audit write capabilities separate", () => {
     const session = authenticatedSession({
       authorities: ["governance-advisory:audit:write"]

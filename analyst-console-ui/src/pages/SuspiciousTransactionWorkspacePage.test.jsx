@@ -23,10 +23,52 @@ describe("SuspiciousTransactionWorkspacePage", () => {
     expect(screen.getByRole("button", { name: "Load next" })).toBeInTheDocument();
     expect(screen.queryByText(/total pages/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Page 1/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/total suspicious transactions/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/showing .* of/i)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "View" }));
 
     expect(onOpenSuspiciousTransaction).toHaveBeenCalledWith("suspicious-1");
+  });
+
+  it("suspiciousTransactionListDoesNotUseSummaryAsPaginationTotal", () => {
+    render(
+      <SuspiciousTransactionWorkspacePage
+        readViewState={readViewState({
+          items: [suspiciousTransaction()],
+          slice: { content: [suspiciousTransaction()], size: 20, hasNext: false, nextCursor: null }
+        })}
+        canReadSuspiciousTransactions
+        onOpenSuspiciousTransaction={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Loaded signals in this view: 1")).toBeInTheDocument();
+    expect(screen.queryByText(/totalSuspiciousTransactions/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/total pages/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/last page/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /go to page/i })).not.toBeInTheDocument();
+  });
+
+  it("suspiciousTransactionListUsesOnlyCursorForLoadNext", () => {
+    const loadNext = vi.fn();
+    render(
+      <SuspiciousTransactionWorkspacePage
+        readViewState={readViewState({
+          items: [suspiciousTransaction()],
+          slice: { content: [suspiciousTransaction()], size: 20, hasNext: true, nextCursor: "cursor-2" },
+          loadNext
+        })}
+        canReadSuspiciousTransactions
+        onOpenSuspiciousTransaction={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Load next" }));
+
+    expect(loadNext).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/page number/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/offset/i)).not.toBeInTheDocument();
   });
 
   it("renders detail as read-only metadata without workflow actions", () => {
@@ -46,6 +88,76 @@ describe("SuspiciousTransactionWorkspacePage", () => {
     expect(screen.queryByRole("button", { name: /dismiss/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /submit/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/legal proof/i)).not.toBeInTheDocument();
+  });
+
+  it("linkedAlertIdIsRenderedAsReferenceOnly", () => {
+    render(
+      <SuspiciousTransactionWorkspacePage
+        readViewState={readViewState({ detail: suspiciousTransaction({ linkedAlertId: "alert-reference-1" }) })}
+        canReadSuspiciousTransactions
+        selectedSuspiciousTransactionId="suspicious-1"
+        onCloseSuspiciousTransaction={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Linked alert ID")).toBeInTheDocument();
+    expect(screen.getByText("alert-reference-1")).toBeInTheDocument();
+    expect(screen.getByText("Reference view")).toBeInTheDocument();
+  });
+
+  it("linkedAlertIdDoesNotRenderLinkCaseButton", () => {
+    render(
+      <SuspiciousTransactionWorkspacePage
+        readViewState={readViewState({ detail: suspiciousTransaction() })}
+        canReadSuspiciousTransactions
+        selectedSuspiciousTransactionId="suspicious-1"
+        onCloseSuspiciousTransaction={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByRole("button", { name: /link case/i })).not.toBeInTheDocument();
+  });
+
+  it("linkedAlertIdDoesNotRenderCreateCaseButton", () => {
+    render(
+      <SuspiciousTransactionWorkspacePage
+        readViewState={readViewState({ detail: suspiciousTransaction() })}
+        canReadSuspiciousTransactions
+        selectedSuspiciousTransactionId="suspicious-1"
+        onCloseSuspiciousTransaction={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByRole("button", { name: /create case/i })).not.toBeInTheDocument();
+  });
+
+  it("linkedAlertIdDoesNotRenderOpenWorkflowAction", () => {
+    render(
+      <SuspiciousTransactionWorkspacePage
+        readViewState={readViewState({ detail: suspiciousTransaction() })}
+        canReadSuspiciousTransactions
+        selectedSuspiciousTransactionId="suspicious-1"
+        onCloseSuspiciousTransaction={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByRole("button", { name: /open workflow/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/case lifecycle mutation/i)).toBeInTheDocument();
+  });
+
+  it("linkedAlertIdDoesNotTriggerMutationClientCall", () => {
+    const mutationClientCall = vi.fn();
+    render(
+      <SuspiciousTransactionWorkspacePage
+        readViewState={readViewState({ detail: suspiciousTransaction() })}
+        canReadSuspiciousTransactions
+        selectedSuspiciousTransactionId="suspicious-1"
+        onCloseSuspiciousTransaction={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("alert-1")).toBeInTheDocument();
+    expect(mutationClientCall).not.toHaveBeenCalled();
   });
 
   it("shows an access denied panel when the frontend authority hint is false", () => {
@@ -76,7 +188,7 @@ function readViewState(overrides = {}) {
   };
 }
 
-function suspiciousTransaction() {
+function suspiciousTransaction(overrides = {}) {
   return {
     suspiciousTransactionId: "suspicious-1",
     transactionId: "txn-1",
@@ -99,6 +211,7 @@ function suspiciousTransaction() {
     scoreDecisionId: "score-1",
     scoringStrategy: "rules",
     modelName: "fraud-model",
-    modelVersion: "2026-05"
+    modelVersion: "2026-05",
+    ...overrides
   };
 }

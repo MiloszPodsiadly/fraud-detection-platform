@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { isAbortError } from "../api/alertsApi.js";
 import { useOptionalWorkspaceRuntime } from "./useWorkspaceRuntime.js";
 
 const INITIAL_SLICE = {
@@ -177,4 +176,8 @@ function normalizeSlice(slice) {
     hasNext: Boolean(slice?.hasNext),
     nextCursor: slice?.hasNext ? slice?.nextCursor || null : null
   };
+}
+
+function isAbortError(error) {
+  return error?.name === "AbortError";
 }
