@@ -8,9 +8,17 @@ import com.frauddetection.alert.security.error.ApiAuthenticationEntryPoint;
 import com.frauddetection.alert.security.error.SecurityErrorResponseWriter;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.alert.security.session.AnalystSessionController;
+import com.frauddetection.alert.security.telemetry.SecurityDeniedAccessAuthStateClassifier;
+import com.frauddetection.alert.security.telemetry.SecurityDeniedAccessMethodClassifier;
+import com.frauddetection.alert.security.telemetry.SecurityDeniedAccessRouteClassifier;
+import com.frauddetection.alert.security.telemetry.SecurityDeniedAccessTelemetryRecorder;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -33,7 +41,12 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
         ApiAuthenticationEntryPoint.class,
         ApiAccessDeniedHandler.class,
         SecurityErrorResponseWriter.class,
-        CurrentAnalystUser.class
+        CurrentAnalystUser.class,
+        SecurityDeniedAccessTelemetryRecorder.class,
+        SecurityDeniedAccessRouteClassifier.class,
+        SecurityDeniedAccessMethodClassifier.class,
+        SecurityDeniedAccessAuthStateClassifier.class,
+        AbstractSecurityRouteBoundaryWebMvcTest.MeterConfig.class
 })
 @ActiveProfiles("test")
 @TestPropertySource(properties = {
@@ -81,5 +94,13 @@ abstract class AbstractSecurityRouteBoundaryWebMvcTest {
         ResultActions result = mockMvc.perform(request);
         result.andExpect(response -> assertThat(response.getResponse().getStatus())
                 .isIn(401, 403));
+    }
+
+    @TestConfiguration
+    static class MeterConfig {
+        @Bean
+        MeterRegistry meterRegistry() {
+            return new SimpleMeterRegistry();
+        }
     }
 }
