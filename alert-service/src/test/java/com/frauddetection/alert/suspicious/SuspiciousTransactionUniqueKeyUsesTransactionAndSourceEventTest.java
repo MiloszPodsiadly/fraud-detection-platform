@@ -1,8 +1,9 @@
 package com.frauddetection.alert.suspicious;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.data.mongodb.core.index.CompoundIndex;
 
+import static com.frauddetection.alert.suspicious.SuspiciousTransactionIndexTestSupport.IDEMPOTENCY_INDEX;
+import static com.frauddetection.alert.suspicious.SuspiciousTransactionIndexTestSupport.indexesByName;
 import static com.frauddetection.alert.suspicious.SuspiciousTransactionTestSupport.alertWorthyEvent;
 import static com.frauddetection.alert.suspicious.SuspiciousTransactionTestSupport.inMemoryRepository;
 import static com.frauddetection.alert.suspicious.SuspiciousTransactionTestSupport.metrics;
@@ -13,7 +14,7 @@ class SuspiciousTransactionUniqueKeyUsesTransactionAndSourceEventTest {
 
     @Test
     void documentDeclaresUniqueTransactionAndSourceEventIndex() {
-        CompoundIndex index = SuspiciousTransactionDocument.class.getAnnotation(CompoundIndex.class);
+        var index = indexesByName().get(IDEMPOTENCY_INDEX);
 
         assertThat(index.unique()).isTrue();
         assertThat(index.def()).contains("'transactionId': 1", "'sourceEventId': 1");

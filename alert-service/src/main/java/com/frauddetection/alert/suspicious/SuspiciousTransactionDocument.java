@@ -4,34 +4,36 @@ import com.frauddetection.alert.evidence.EvidenceStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
-import org.springframework.data.mongodb.core.index.IndexDirection;
-import org.springframework.data.mongodb.core.index.Indexed;
+import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.Instant;
 import java.util.List;
 
 @Document(collection = "suspicious_transactions")
-@CompoundIndex(
-        name = "suspicious_transaction_source_event_unique_idx",
-        def = "{'transactionId': 1, 'sourceEventId': 1}",
-        unique = true
-)
+@CompoundIndexes({
+        @CompoundIndex(name = "idx_suspicious_tx_cursor_detected_at_id_desc", def = "{'detectedAt': -1, '_id': -1}"),
+        @CompoundIndex(name = "idx_suspicious_tx_status_cursor", def = "{'status': 1, 'detectedAt': -1, '_id': -1}"),
+        @CompoundIndex(name = "idx_suspicious_tx_risk_cursor", def = "{'riskLevel': 1, 'detectedAt': -1, '_id': -1}"),
+        @CompoundIndex(name = "idx_suspicious_tx_customer_cursor", def = "{'customerId': 1, 'detectedAt': -1, '_id': -1}"),
+        @CompoundIndex(name = "idx_suspicious_tx_alert_cursor", def = "{'linkedAlertId': 1, 'detectedAt': -1, '_id': -1}"),
+        @CompoundIndex(
+                name = "suspicious_transaction_source_event_unique_idx",
+                def = "{'transactionId': 1, 'sourceEventId': 1}",
+                unique = true
+        )
+})
 public class SuspiciousTransactionDocument {
 
     @Id
     private String suspiciousTransactionId;
 
-    @Indexed
     private String transactionId;
 
-    @Indexed
     private String sourceEventId;
 
-    @Indexed
     private String correlationId;
 
-    @Indexed
     private String customerId;
 
     private String accountId;
@@ -46,13 +48,10 @@ public class SuspiciousTransactionDocument {
     private Integer evidenceSnapshotItemCount;
     private String evidenceProjectionState;
 
-    @Indexed
     private String linkedAlertId;
 
-    @Indexed
     private SuspiciousTransactionStatus status;
 
-    @Indexed(name = "suspicious_transaction_detected_at_idx", direction = IndexDirection.DESCENDING)
     private Instant detectedAt;
     private Instant createdAt;
     private Instant updatedAt;
