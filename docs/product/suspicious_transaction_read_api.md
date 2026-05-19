@@ -109,6 +109,8 @@ Sort order:
 The suspicious_transactions collection declares explicit Mongo indexes for the FDP-62 cursor/keyset read patterns.
 These indexes are performance support only: they support the current primary access paths, but this does not change API behavior,
 response fields, authorization, projection semantics, cursor semantics, or product workflow.
+FDP-63 verifies declared index definitions and, where integration proof is available, verifies that Spring Data creates
+the expected indexes in Mongo through runtime indexInfo inspection.
 
 Declared read indexes:
 
@@ -121,8 +123,8 @@ Declared read indexes:
 | idx_suspicious_tx_alert_cursor | linkedAlertId ASC, detectedAt DESC, _id DESC | linkedAlertId filter with cursor ordering |
 | suspicious_transaction_source_event_unique_idx | transactionId ASC, sourceEventId ASC | Idempotency for projection writes |
 
-The API field remains suspiciousTransactionId. The Mongo index uses _id because suspiciousTransactionId is mapped as the
-document ID.
+The API field remains suspiciousTransactionId. It maps to Mongo _id because suspiciousTransactionId is the document @Id.
+Cursor indexes use _id as the physical tie-breaker field.
 
 Combination indexes are intentionally not declared for multi-filter permutations such as status plus riskLevel,
 status plus customerId, customerId plus riskLevel, status plus linkedAlertId, accountId, correlationId, or reasonCodes.
@@ -133,6 +135,7 @@ null-heavy index cost is material for this collection.
 
 These indexes are not a security control. They do not provide fraud proof, audit assurance, or legal proof, and do not
 guarantee latency under every data distribution.
+Mongo query planner behavior can depend on Mongo version, data distribution, and selectivity.
 
 ## Response Semantics
 
