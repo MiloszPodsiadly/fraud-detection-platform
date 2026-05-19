@@ -73,4 +73,45 @@ class SuspiciousTransactionQueryTelemetrySlowLogTest {
                 .contains("query telemetry recording failed")
                 .doesNotContain("NullPointerException");
     }
+
+    @Test
+    void arbitrarySnapshotValuesDoNotReachSlowLog(CapturedOutput output) {
+        SuspiciousTransactionQueryTelemetryRecorder recorder =
+                new SuspiciousTransactionQueryTelemetryRecorder(new SimpleMeterRegistry(), Duration.ofMillis(50));
+
+        recorder.record(new SuspiciousTransactionQueryTelemetrySnapshot(
+                "customer-123",
+                "exception-message-secret",
+                "rawFilters={customerId=abc}",
+                "account-456",
+                "transaction-777",
+                "alert-999",
+                "cursor-eyJ-secret",
+                "source-event-999",
+                Duration.ofMillis(600)
+        ));
+
+        assertThat(output)
+                .contains(
+                        "endpoint=search",
+                        "outcome=error",
+                        "queryShape=unknown",
+                        "filterCountBucket=0",
+                        "resultSizeBucket=unknown",
+                        "hasNext=unknown",
+                        "cursorUsed=unknown",
+                        "durationBucket=500ms_plus"
+                )
+                .doesNotContain(
+                        "customer-123",
+                        "account-456",
+                        "alert-999",
+                        "cursor-eyJ",
+                        "transaction-777",
+                        "source-event-999",
+                        "correlation-123",
+                        "rawFilters={customerId=abc}",
+                        "exception-message-secret"
+                );
+    }
 }

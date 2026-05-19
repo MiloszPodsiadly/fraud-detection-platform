@@ -7,6 +7,8 @@ import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
 import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetryClassifier;
+import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetrySink;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.servlet.HandlerMapping;
@@ -29,7 +31,13 @@ class SuspiciousTransactionReadAuditTest {
     private final SensitiveReadAuditService auditService = mock(SensitiveReadAuditService.class);
     private final AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
     private final SuspiciousTransactionReadController controller =
-            new SuspiciousTransactionReadController(service, auditService, metrics);
+            new SuspiciousTransactionReadController(
+                    service,
+                    auditService,
+                    metrics,
+                    new SuspiciousTransactionQueryTelemetryClassifier(),
+                    testTelemetrySink()
+            );
 
     @Test
     void singleReadAuditMayUseSuspiciousTransactionIdAsResourceId() {
@@ -185,5 +193,10 @@ class SuspiciousTransactionReadAuditTest {
         assertThat(AuditedSensitiveRead.class.getDeclaredMethods())
                 .extracting(Method::getName)
                 .containsExactly("action");
+    }
+
+    private SuspiciousTransactionQueryTelemetrySink testTelemetrySink() {
+        return snapshot -> {
+        };
     }
 }

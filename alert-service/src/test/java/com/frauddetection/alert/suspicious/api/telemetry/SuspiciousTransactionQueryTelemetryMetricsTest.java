@@ -62,4 +62,42 @@ class SuspiciousTransactionQueryTelemetryMetricsTest {
         assertThat(SuspiciousTransactionQueryTelemetryRecorder.normalizedThreshold(Duration.ofMillis(1)))
                 .isEqualTo(SuspiciousTransactionQueryTelemetryRecorder.MIN_SLOW_QUERY_THRESHOLD);
     }
+
+    @Test
+    void arbitrarySnapshotValuesDoNotReachRecorderMetricTags() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        SuspiciousTransactionQueryTelemetryRecorder recorder =
+                new SuspiciousTransactionQueryTelemetryRecorder(registry, Duration.ofMillis(500));
+
+        recorder.record(new SuspiciousTransactionQueryTelemetrySnapshot(
+                "customer-123",
+                "exception-message-secret",
+                "rawFilters={customerId=abc}",
+                "account-456",
+                "transaction-777",
+                "alert-999",
+                "cursor-eyJ-secret",
+                "source-event-999",
+                Duration.ofMillis(600)
+        ));
+
+        String ids = registry.getMeters().stream()
+                .map(Meter::getId)
+                .map(Object::toString)
+                .collect(java.util.stream.Collectors.joining("\n"));
+
+        assertThat(ids)
+                .contains("tag(endpoint=search)", "tag(outcome=error)", "tag(queryShape=unknown)")
+                .doesNotContain(
+                        "customer-123",
+                        "account-456",
+                        "alert-999",
+                        "cursor-eyJ-secret",
+                        "transaction-777",
+                        "source-event-999",
+                        "correlation-123",
+                        "rawFilters={customerId=abc}",
+                        "exception-message-secret"
+                );
+    }
 }

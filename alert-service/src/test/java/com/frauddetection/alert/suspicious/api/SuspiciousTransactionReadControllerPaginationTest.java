@@ -3,6 +3,8 @@ package com.frauddetection.alert.suspicious.api;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetryClassifier;
+import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetrySink;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
@@ -28,7 +30,13 @@ class SuspiciousTransactionReadControllerPaginationTest {
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new SuspiciousTransactionReadController(service, auditService, metrics))
+                .standaloneSetup(new SuspiciousTransactionReadController(
+                        service,
+                        auditService,
+                        metrics,
+                        new SuspiciousTransactionQueryTelemetryClassifier(),
+                        testTelemetrySink()
+                ))
                 .setControllerAdvice(new AlertServiceExceptionHandler())
                 .build();
     }
@@ -119,5 +127,10 @@ class SuspiciousTransactionReadControllerPaginationTest {
 
         mockMvc.perform(get("/internal/suspicious-transactions/missing"))
                 .andExpect(status().isNotFound());
+    }
+
+    private SuspiciousTransactionQueryTelemetrySink testTelemetrySink() {
+        return snapshot -> {
+        };
     }
 }

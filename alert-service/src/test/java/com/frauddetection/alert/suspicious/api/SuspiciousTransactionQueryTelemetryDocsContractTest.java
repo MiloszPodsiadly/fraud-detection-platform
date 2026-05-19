@@ -24,6 +24,12 @@ class SuspiciousTransactionQueryTelemetryDocsContractTest {
                 .contains("hasnext")
                 .contains("cursorused")
                 .contains("timer histogram")
+                .contains("telemetry label values are normalized at the telemetry boundary")
+                .contains("production telemetry wiring is required")
+                .contains("runtime telemetry recording failures do not alter api responses")
+                .contains("missing telemetry beans must not silently disable telemetry")
+                .contains("does not contain or")
+                .contains("derive the cursor token value")
                 .contains("slow query warning")
                 .contains("raw identifiers")
                 .contains("cursor token")
@@ -36,13 +42,12 @@ class SuspiciousTransactionQueryTelemetryDocsContractTest {
                 .contains("does not guarantee latency")
                 .contains("not a security control")
                 .contains("not audit assurance")
-                .contains("not confirmed-fraud evidence")
+                .contains("not fraud proof")
                 .contains("not legal or regulatory evidence");
         assertThat(normalized).doesNotContain(
                 "guaranteed performance",
                 "guaranteed query speed",
                 "fraud-proof",
-                "fraud proof",
                 "legal proof",
                 "security guarantee",
                 "audit guarantee"

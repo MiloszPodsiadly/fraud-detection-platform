@@ -3,6 +3,7 @@ package com.frauddetection.alert.suspicious.api;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetryClassifier;
+import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetrySink;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 
@@ -26,8 +27,7 @@ class SuspiciousTransactionQueryTelemetryDoesNotChangeApiResponseTest {
                 null
         );
         when(service.search(any())).thenReturn(expected);
-        SuspiciousTransactionReadController controller = controller(service);
-        controller.setQueryTelemetry(new SuspiciousTransactionQueryTelemetryClassifier(), snapshot -> {
+        SuspiciousTransactionReadController controller = controller(service, snapshot -> {
             throw new IllegalStateException("raw-secret-exception-message");
         });
 
@@ -44,8 +44,7 @@ class SuspiciousTransactionQueryTelemetryDoesNotChangeApiResponseTest {
         SuspiciousTransactionReadService service = mock(SuspiciousTransactionReadService.class);
         SuspiciousTransactionResponse expected = SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT"));
         when(service.findById("suspicious-1")).thenReturn(Optional.of(expected));
-        SuspiciousTransactionReadController controller = controller(service);
-        controller.setQueryTelemetry(new SuspiciousTransactionQueryTelemetryClassifier(), snapshot -> {
+        SuspiciousTransactionReadController controller = controller(service, snapshot -> {
             throw new IllegalStateException("raw-secret-exception-message");
         });
 
@@ -54,11 +53,16 @@ class SuspiciousTransactionQueryTelemetryDoesNotChangeApiResponseTest {
         assertThat(actual).isEqualTo(expected);
     }
 
-    private SuspiciousTransactionReadController controller(SuspiciousTransactionReadService service) {
+    private SuspiciousTransactionReadController controller(
+            SuspiciousTransactionReadService service,
+            SuspiciousTransactionQueryTelemetrySink telemetrySink
+    ) {
         return new SuspiciousTransactionReadController(
                 service,
                 mock(SensitiveReadAuditService.class),
-                mock(AlertServiceMetrics.class)
+                mock(AlertServiceMetrics.class),
+                new SuspiciousTransactionQueryTelemetryClassifier(),
+                telemetrySink
         );
     }
 }

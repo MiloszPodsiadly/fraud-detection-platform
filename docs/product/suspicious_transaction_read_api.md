@@ -172,20 +172,28 @@ The query telemetry uses a timer histogram named `fraud.suspicious_transaction.a
 - filter count bucket: 0, 1, 2, or 3_plus.
 - result size bucket: 0, 1_10, 11_50, 51_100, or unknown.
 - hasNext: true, false, or unknown.
-- cursorUsed: true, false, or unknown.
+- cursorUsed: true, false, or unknown. It indicates whether a request used cursor pagination and does not contain or
+  derive the cursor token value.
 
-Duration is recorded by the timer histogram. The classifier also keeps a bounded duration bucket for diagnostics:
-lt_50ms, 50_100ms, 100_250ms, 250_500ms, or 500ms_plus.
+Telemetry label values are normalized at the telemetry boundary even if a caller bypasses the classifier. Unknown values
+fall back to bounded labels before metrics or logs are emitted.
+
+Duration is recorded by the Micrometer Timer/histogram. The durationBucket value is used for bounded slow-query logs and
+diagnostics, not as a high-cardinality metric label. Allowed duration buckets are lt_50ms, 50_100ms, 100_250ms,
+250_500ms, or 500ms_plus.
 
 Telemetry does not record raw identifiers, cursor token values, decoded cursor values, reason-code lists, model fields,
 raw filters, raw query text, raw exception messages, or response bodies. It must not become a data-extraction channel.
+
+Production telemetry wiring is required. Runtime telemetry recording failures do not alter API responses, but missing telemetry beans must not silently disable telemetry in production wiring.
 
 Slow query warning logs use a default threshold of 500ms and include only endpoint, outcome, query shape, filter count
 bucket, result size bucket, hasNext, cursorUsed, and duration bucket. They do not include raw identifiers, cursor tokens,
 decoded cursor values, raw filters, raw query text, raw exception messages, stack traces for expected validation or
 not-found outcomes, response bodies, or exact result counts.
 
-The telemetry is diagnostic. It is not a security control, not audit assurance, not confirmed-fraud evidence, and not legal or regulatory evidence.
+The telemetry is diagnostic. It informs future index decisions, but it does not guarantee performance. It is not a
+security control, not audit assurance, not fraud proof, and not legal or regulatory evidence.
 
 ## Out Of Scope
 

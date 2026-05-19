@@ -11,6 +11,8 @@ import com.frauddetection.alert.security.config.DemoAuthSecurityConfig;
 import com.frauddetection.alert.security.error.ApiAccessDeniedHandler;
 import com.frauddetection.alert.security.error.ApiAuthenticationEntryPoint;
 import com.frauddetection.alert.security.error.SecurityErrorResponseWriter;
+import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetryClassifier;
+import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetrySink;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -58,6 +60,12 @@ class SuspiciousTransactionReadControllerAuthorizationTest {
 
     @MockBean
     private AlertServiceMetrics metrics;
+
+    @MockBean
+    private SuspiciousTransactionQueryTelemetryClassifier queryTelemetryClassifier;
+
+    @MockBean
+    private SuspiciousTransactionQueryTelemetrySink queryTelemetrySink;
 
     @Test
     void unauthenticatedRequestsAreDenied() throws Exception {

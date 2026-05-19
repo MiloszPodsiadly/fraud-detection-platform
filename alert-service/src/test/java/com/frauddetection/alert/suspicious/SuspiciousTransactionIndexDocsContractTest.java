@@ -15,8 +15,12 @@ class SuspiciousTransactionIndexDocsContractTest {
     @Test
     void documentsMongoIndexSupportWithoutOverclaimingGuarantees() throws IOException {
         String docs = Files.readString(DOCS);
+        String mongoIndexSection = docs.substring(
+                docs.indexOf("## Mongo Index Support"),
+                docs.indexOf("## Response Semantics")
+        );
 
-        assertThat(docs)
+        assertThat(mongoIndexSection)
                 .contains("Mongo Index Support")
                 .contains("idx_suspicious_tx_cursor_detected_at_id_desc")
                 .contains("idx_suspicious_tx_status_cursor")

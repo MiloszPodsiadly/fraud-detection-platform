@@ -3,6 +3,8 @@ package com.frauddetection.alert.suspicious.api;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetryClassifier;
+import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetrySink;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
@@ -22,7 +24,9 @@ class SuspiciousTransactionReadControllerFilterValidationTest {
                 .standaloneSetup(new SuspiciousTransactionReadController(
                         mock(SuspiciousTransactionReadService.class),
                         mock(SensitiveReadAuditService.class),
-                        mock(AlertServiceMetrics.class)
+                        mock(AlertServiceMetrics.class),
+                        new SuspiciousTransactionQueryTelemetryClassifier(),
+                        testTelemetrySink()
                 ))
                 .setControllerAdvice(new AlertServiceExceptionHandler())
                 .build();
@@ -57,12 +61,19 @@ class SuspiciousTransactionReadControllerFilterValidationTest {
                 .standaloneSetup(new SuspiciousTransactionReadController(
                         service,
                         mock(SensitiveReadAuditService.class),
-                        mock(AlertServiceMetrics.class)
+                        mock(AlertServiceMetrics.class),
+                        new SuspiciousTransactionQueryTelemetryClassifier(),
+                        testTelemetrySink()
                 ))
                 .setControllerAdvice(new AlertServiceExceptionHandler())
                 .build();
 
         mvc.perform(get("/internal/suspicious-transactions").queryParam("customerId", "customer-.*"))
                 .andExpect(status().isOk());
+    }
+
+    private SuspiciousTransactionQueryTelemetrySink testTelemetrySink() {
+        return snapshot -> {
+        };
     }
 }

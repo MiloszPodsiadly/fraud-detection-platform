@@ -54,10 +54,90 @@ class SuspiciousTransactionQueryTelemetryClassifierTest {
         assertThat(snapshot.endpoint()).isEqualTo("read");
         assertThat(snapshot.outcome()).isEqualTo("not_found");
         assertThat(snapshot.queryShape()).isEqualTo("id_lookup");
+        assertThat(snapshot.filterCountBucket()).isEqualTo("0");
         assertThat(snapshot.resultSizeBucket()).isEqualTo("0");
         assertThat(snapshot.hasNext()).isEqualTo("unknown");
         assertThat(snapshot.cursorUsed()).isEqualTo("unknown");
         assertThat(snapshot.durationBucket()).isEqualTo("100_250ms");
+    }
+
+    @Test
+    void readByIdUsesIdLookupShapeAndZeroFilterCount() {
+        SuspiciousTransactionQueryTelemetrySnapshot snapshot = classifier.read("success", 1, Duration.ofMillis(25));
+
+        assertThat(snapshot.endpoint()).isEqualTo("read");
+        assertThat(snapshot.queryShape()).isEqualTo("id_lookup");
+        assertThat(snapshot.filterCountBucket()).isEqualTo("0");
+        assertThat(snapshot.hasNext()).isEqualTo("unknown");
+        assertThat(snapshot.cursorUsed()).isEqualTo("unknown");
+    }
+
+    @Test
+    void cursorUsedAllowsOnlyTrueFalseUnknown() {
+        assertThat(snapshotWithCursorUsed("true").cursorUsed()).isEqualTo("true");
+        assertThat(snapshotWithCursorUsed("false").cursorUsed()).isEqualTo("false");
+        assertThat(snapshotWithCursorUsed("unknown").cursorUsed()).isEqualTo("unknown");
+        assertThat(snapshotWithCursorUsed("cursor-eyJ-secret").cursorUsed()).isEqualTo("unknown");
+    }
+
+    @Test
+    void cursorTokenNeverAppearsInCursorUsed() {
+        SuspiciousTransactionQueryTelemetrySnapshot snapshot = classifier.search(
+                query("cursor", "cursor-eyJ-secret-value"),
+                "success",
+                0,
+                false,
+                Duration.ofMillis(10)
+        );
+
+        assertThat(snapshot.cursorUsed()).isEqualTo("true");
+        assertThat(snapshot.cursorUsed()).doesNotContain("cursor-eyJ-secret-value");
+        assertThat(snapshot.toString()).doesNotContain("cursor-eyJ-secret-value");
+    }
+
+    @Test
+    void decodedCursorValuesNeverAppearInTelemetry() {
+        SuspiciousTransactionQueryTelemetrySnapshot snapshot = new SuspiciousTransactionQueryTelemetrySnapshot(
+                "search",
+                "success",
+                "customer",
+                "1",
+                "0",
+                "false",
+                "detectedAt=2026-05-18T10:00:00Z,suspiciousTransactionId=suspicious-secret-1",
+                "lt_50ms",
+                Duration.ofMillis(10)
+        );
+
+        assertThat(snapshot.cursorUsed()).isEqualTo("unknown");
+        assertThat(snapshot.toString())
+                .doesNotContain("2026-05-18T10:00:00Z", "suspicious-secret-1");
+    }
+
+    @Test
+    void arbitrarySnapshotValuesAreNormalizedBeforeMetricTags() {
+        SuspiciousTransactionQueryTelemetrySnapshot snapshot = maliciousSnapshot();
+
+        assertThat(snapshot.endpoint()).isEqualTo("search");
+        assertThat(snapshot.outcome()).isEqualTo("error");
+        assertThat(snapshot.queryShape()).isEqualTo("unknown");
+        assertThat(snapshot.filterCountBucket()).isEqualTo("0");
+        assertThat(snapshot.resultSizeBucket()).isEqualTo("unknown");
+        assertThat(snapshot.hasNext()).isEqualTo("unknown");
+        assertThat(snapshot.cursorUsed()).isEqualTo("unknown");
+        assertThat(snapshot.durationBucket()).isEqualTo("500ms_plus");
+        assertThat(snapshot.metricTags().stream().map(tag -> tag.getValue()).toList())
+                .doesNotContain(
+                        "customer-123",
+                        "account-456",
+                        "alert-999",
+                        "cursor-eyJ-secret",
+                        "transaction-777",
+                        "source-event-999",
+                        "correlation-123",
+                        "rawFilters={customerId=abc}",
+                        "exception-message-secret"
+                );
     }
 
     @Test
@@ -90,5 +170,33 @@ class SuspiciousTransactionQueryTelemetryClassifierTest {
             params.add(pairs[i], pairs[i + 1]);
         }
         return SuspiciousTransactionSearchQuery.from(params);
+    }
+
+    private SuspiciousTransactionQueryTelemetrySnapshot snapshotWithCursorUsed(String cursorUsed) {
+        return new SuspiciousTransactionQueryTelemetrySnapshot(
+                "search",
+                "success",
+                "unfiltered",
+                "0",
+                "0",
+                "false",
+                cursorUsed,
+                "lt_50ms",
+                Duration.ofMillis(1)
+        );
+    }
+
+    private SuspiciousTransactionQueryTelemetrySnapshot maliciousSnapshot() {
+        return new SuspiciousTransactionQueryTelemetrySnapshot(
+                "customer-123",
+                "exception-message-secret",
+                "rawFilters={customerId=abc}",
+                "account-456",
+                "transaction-777",
+                "alert-999",
+                "cursor-eyJ-secret",
+                "source-event-999",
+                Duration.ofMillis(600)
+        );
     }
 }
