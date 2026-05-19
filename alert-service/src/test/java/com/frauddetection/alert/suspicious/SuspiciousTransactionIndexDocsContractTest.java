@@ -15,8 +15,12 @@ class SuspiciousTransactionIndexDocsContractTest {
     @Test
     void documentsMongoIndexSupportWithoutOverclaimingGuarantees() throws IOException {
         String docs = Files.readString(DOCS);
+        String mongoIndexSection = docs.substring(
+                docs.indexOf("## Mongo Index Support"),
+                docs.indexOf("## Response Semantics")
+        );
 
-        assertThat(docs)
+        assertThat(mongoIndexSection)
                 .contains("Mongo Index Support")
                 .contains("idx_suspicious_tx_cursor_detected_at_id_desc")
                 .contains("idx_suspicious_tx_status_cursor")
@@ -33,12 +37,13 @@ class SuspiciousTransactionIndexDocsContractTest {
                 .contains("Cursor indexes use _id as the physical tie-breaker field")
                 .contains("query planner behavior can depend on Mongo version, data distribution, and selectivity")
                 .contains("not a security control")
-                .contains("do not provide fraud proof")
+                .contains("not confirmed-fraud evidence")
                 .contains("audit assurance")
-                .contains("legal proof")
+                .contains("legal or regulatory")
                 .doesNotContain("guaranteed fast")
                 .doesNotContain("fraud-proof")
-                .doesNotContain("legal proof guarantee")
+                .doesNotContain("fraud proof")
+                .doesNotContain("legal proof")
                 .doesNotContain("security guarantee")
                 .doesNotContain("audit guarantee")
                 .doesNotContain("performance guarantee");
