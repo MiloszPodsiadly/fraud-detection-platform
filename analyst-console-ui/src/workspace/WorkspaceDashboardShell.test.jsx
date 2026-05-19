@@ -10,7 +10,7 @@ describe("WorkspaceDashboardShell FDP-53 composition", () => {
     expect(shellSource).toContain("resolveWorkspaceRouteResult(workspacePage)");
     expect(shellSource).toContain("const ActiveWorkspaceRuntime = activeRoute.Runtime");
     expect(shellSource).toContain("<ActiveWorkspaceRuntime");
-    expect(shellSource).toContain("workspaceRoutes={WORKSPACE_ROUTE_ENTRIES}");
+    expect(shellSource).toContain("workspaceRoutes={visibleWorkspaceRoutes(WORKSPACE_ROUTE_ENTRIES");
   });
 
   it("delegates refresh behavior to the single refresh contract", () => {

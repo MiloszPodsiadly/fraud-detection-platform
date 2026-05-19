@@ -33,6 +33,7 @@ describe("WorkspaceRuntimeProvider", () => {
     expect(result.current.apiClient).toEqual({ client: true });
     expect(result.current.canReadFraudCases).toBe(true);
     expect(result.current.canReadAlerts).toBe(true);
+    expect(result.current.canReadSuspiciousTransactions).toBe(false);
     expect(result.current.canReadGovernanceAdvisories).toBe(true);
     expect(result.current.canWriteGovernanceAudit).toBe(false);
     expect(result.current.runtimeStatus).toBe("ready");
@@ -40,7 +41,7 @@ describe("WorkspaceRuntimeProvider", () => {
 
   it("capabilities are frontend gating hints, not backend authorization enforcement", () => {
     const session = authenticatedSession({
-      authorities: ["alert:read", "fraud-case:read", "transaction-monitor:read"]
+      authorities: ["alert:read", "fraud-case:read", "transaction-monitor:read", "suspicious-transaction:read"]
     });
     const { result } = renderHook(() => useWorkspaceRuntime(), {
       wrapper: ({ children }) => (
@@ -53,6 +54,7 @@ describe("WorkspaceRuntimeProvider", () => {
     expect(result.current.canReadAlerts).toBe(true);
     expect(result.current.canReadFraudCases).toBe(true);
     expect(result.current.canReadTransactions).toBe(true);
+    expect(result.current.canReadSuspiciousTransactions).toBe(true);
     expect(result.current.canWriteGovernanceAudit).toBe(false);
     expect(result.current.apiClient).toEqual({ client: true });
   });
@@ -114,6 +116,7 @@ describe("WorkspaceRuntimeProvider", () => {
     expect(result.current.canReadAlerts).toBeUndefined();
     expect(result.current.canReadFraudCases).toBeUndefined();
     expect(result.current.canReadTransactions).toBeUndefined();
+    expect(result.current.canReadSuspiciousTransactions).toBeUndefined();
     expect(result.current.canReadGovernanceAdvisories).toBeUndefined();
     expect(result.current.canWriteGovernanceAudit).toBeUndefined();
   });

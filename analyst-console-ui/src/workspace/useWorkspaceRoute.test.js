@@ -10,7 +10,8 @@ describe("useWorkspaceRoute", () => {
       workspacePage: "transactionScoring",
       invalidWorkspaceRoute: null,
       selectedAlertId: "alert-1",
-      selectedFraudCaseId: null
+      selectedFraudCaseId: null,
+      selectedSuspiciousTransactionId: null
     });
   });
 
@@ -30,7 +31,19 @@ describe("useWorkspaceRoute", () => {
     expect(result.current.workspacePage).toBe("transactionScoring");
     expect(result.current.invalidWorkspaceRoute).toBeNull();
     expect(result.current.selectedAlertId).toBeNull();
+    expect(result.current.selectedSuspiciousTransactionId).toBeNull();
     expect(window.location.search).toBe("?workspace=transaction-scoring");
+  });
+
+  it("opens suspicious transaction detail on the dedicated workspace route", () => {
+    window.history.replaceState({}, "", "/?workspace=transaction-scoring");
+    const { result } = renderHook(() => useWorkspaceRoute());
+
+    act(() => result.current.openSuspiciousTransaction("suspicious-1"));
+
+    expect(result.current.workspacePage).toBe("suspiciousTransactions");
+    expect(result.current.selectedSuspiciousTransactionId).toBe("suspicious-1");
+    expect(window.location.search).toBe("?workspace=suspicious-transactions&suspiciousTransactionId=suspicious-1");
   });
 
   it("opens fraud case detail and responds to popstate", () => {

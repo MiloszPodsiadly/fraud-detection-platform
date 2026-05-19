@@ -2,6 +2,7 @@ import { AnalystWorkspaceRuntime } from "./AnalystWorkspaceRuntime.jsx";
 import { FraudTransactionWorkspaceRuntime } from "./FraudTransactionWorkspaceRuntime.jsx";
 import { GovernanceWorkspaceRuntime } from "./GovernanceWorkspaceRuntime.jsx";
 import { ReportsWorkspaceRuntime } from "./ReportsWorkspaceRuntime.jsx";
+import { SuspiciousTransactionWorkspaceRuntime } from "./SuspiciousTransactionWorkspaceRuntime.jsx";
 import { TransactionScoringWorkspaceRuntime } from "./TransactionScoringWorkspaceRuntime.jsx";
 
 const DEFAULT_WORKSPACE_KEY = "analyst";
@@ -26,6 +27,16 @@ export const WORKSPACE_ROUTE_REGISTRY = Object.freeze({
     capabilityKey: "canReadAlerts",
     heading: Object.freeze({ label: "Alert review queue" }),
     Runtime: FraudTransactionWorkspaceRuntime
+  }),
+  suspiciousTransactions: Object.freeze({
+    key: "suspiciousTransactions",
+    label: "Suspicious Transactions",
+    navigationLabel: "Suspicious signals",
+    routeValue: "suspicious-transactions",
+    href: "?workspace=suspicious-transactions",
+    capabilityKey: "canReadSuspiciousTransactions",
+    heading: Object.freeze({ label: "Suspicious transaction signals" }),
+    Runtime: SuspiciousTransactionWorkspaceRuntime
   }),
   analyst: Object.freeze({
     key: "analyst",
@@ -62,6 +73,7 @@ export const WORKSPACE_ROUTE_REGISTRY = Object.freeze({
 export const WORKSPACE_ROUTE_ORDER = Object.freeze([
   "transactionScoring",
   "fraudTransaction",
+  "suspiciousTransactions",
   "analyst",
   "reports",
   "compliance"

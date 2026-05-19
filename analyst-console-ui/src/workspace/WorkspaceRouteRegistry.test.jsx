@@ -17,6 +17,7 @@ describe("WorkspaceRouteRegistry", () => {
     const expectedOrder = [
       "transactionScoring",
       "fraudTransaction",
+      "suspiciousTransactions",
       "analyst",
       "reports",
       "compliance"
@@ -55,6 +56,7 @@ describe("WorkspaceRouteRegistry", () => {
       "canReadFraudCases",
       "canReadAlerts",
       "canReadTransactions",
+      "canReadSuspiciousTransactions",
       "canReadGovernanceAdvisories"
     ]);
 

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getConfiguredAuthProvider } from "./auth/authProvider.js";
 import { isOidcCallbackPath } from "./auth/oidcClient.js";
-import { normalizeSession } from "./auth/session.js";
+import { AUTHORITIES, hasAuthority, normalizeSession } from "./auth/session.js";
 import { SESSION_STATES, getSessionStateForProvider } from "./auth/sessionState.js";
 import { SessionBadge, SessionSettingsMenu } from "./components/SessionBadge.jsx";
 import { WorkspaceDashboardShell } from "./workspace/WorkspaceDashboardShell.jsx";
@@ -14,9 +14,11 @@ export default function App() {
     workspacePage,
     selectedAlertId,
     selectedFraudCaseId,
+    selectedSuspiciousTransactionId,
     navigateWorkspace,
     openAlert,
     openFraudCase,
+    openSuspiciousTransaction,
     clearSelection,
     workspaceHref,
     invalidWorkspaceRoute
@@ -29,7 +31,7 @@ export default function App() {
   const skipNextOidcBootstrapRef = useRef(false);
   const uiSessionBoundaryKey = useMemo(() => sessionBoundaryKeyFor(session, authProvider), [authProvider, session]);
   const previousSessionBoundaryKeyRef = useRef(uiSessionBoundaryKey);
-  const detailSelectionPendingBoundaryReset = Boolean(selectedAlertId || selectedFraudCaseId)
+  const detailSelectionPendingBoundaryReset = Boolean(selectedAlertId || selectedFraudCaseId || selectedSuspiciousTransactionId)
     && previousSessionBoundaryKeyRef.current !== uiSessionBoundaryKey;
 
   useEffect(() => {
@@ -42,10 +44,10 @@ export default function App() {
       return;
     }
     previousSessionBoundaryKeyRef.current = uiSessionBoundaryKey;
-    if (selectedAlertId || selectedFraudCaseId) {
+    if (selectedAlertId || selectedFraudCaseId || selectedSuspiciousTransactionId) {
       clearSelection();
     }
-  }, [clearSelection, selectedAlertId, selectedFraudCaseId, uiSessionBoundaryKey]);
+  }, [clearSelection, selectedAlertId, selectedFraudCaseId, selectedSuspiciousTransactionId, uiSessionBoundaryKey]);
 
   useEffect(() => {
     if ((!authProvider.requiresSessionBootstrap && authProvider.kind !== "oidc") || handlingOidcCallback || typeof authProvider.refreshSession !== "function") {
@@ -125,10 +127,12 @@ export default function App() {
     setSession(normalizeSession(nextSession));
   }
 
-  const detailMode = Boolean(selectedAlertId || selectedFraudCaseId) && !detailSelectionPendingBoundaryReset;
+  const detailMode = Boolean(selectedAlertId || selectedFraudCaseId || selectedSuspiciousTransactionId) && !detailSelectionPendingBoundaryReset;
   const runtimeSelectedAlertId = detailSelectionPendingBoundaryReset ? null : selectedAlertId;
   const runtimeSelectedFraudCaseId = detailSelectionPendingBoundaryReset ? null : selectedFraudCaseId;
+  const runtimeSelectedSuspiciousTransactionId = detailSelectionPendingBoundaryReset ? null : selectedSuspiciousTransactionId;
   const workspaceTitle = WORKSPACE_PAGES[workspacePage]?.label || WORKSPACE_PAGES.analyst.label;
+  const detailTitle = selectedSuspiciousTransactionId ? "Suspicious Transaction" : "Fraud Case";
 
   if (handlingOidcCallback) {
     return (
@@ -162,7 +166,7 @@ export default function App() {
         </a>
 
         <nav className="primaryNav" aria-label="Primary workspace navigation">
-          {Object.entries(WORKSPACE_PAGES).map(([page, item]) => (
+          {visiblePrimaryPages(WORKSPACE_PAGES, session).map(([page, item]) => (
             <a
               key={page}
               href={workspaceHref(page)}
@@ -204,7 +208,7 @@ export default function App() {
 
       <header className={detailMode ? "appHeader appHeaderCompact" : "appHeader appHeaderLanding"}>
         <div className="brandBlock">
-          <h1>{detailMode ? "Fraud Case" : workspaceTitle}</h1>
+          <h1>{detailMode ? detailTitle : workspaceTitle}</h1>
         </div>
       </header>
 
@@ -214,10 +218,12 @@ export default function App() {
             workspacePage={workspacePage}
             selectedAlertId={runtimeSelectedAlertId}
             selectedFraudCaseId={runtimeSelectedFraudCaseId}
+            selectedSuspiciousTransactionId={runtimeSelectedSuspiciousTransactionId}
             clearSelection={clearSelection}
             navigateWorkspace={navigateWorkspace}
             openAlert={openAlert}
             openFraudCase={openFraudCase}
+            openSuspiciousTransaction={openSuspiciousTransaction}
             invalidWorkspaceRoute={invalidWorkspaceRoute}
             sessionState={sessionState}
             setSessionState={setSessionState}
@@ -226,6 +232,13 @@ export default function App() {
       </main>
     </div>
   );
+}
+
+function visiblePrimaryPages(workspacePages, session) {
+  return Object.entries(workspacePages).filter(([page]) => (
+    page !== "suspiciousTransactions"
+    || hasAuthority(session, AUTHORITIES.SUSPICIOUS_TRANSACTION_READ)
+  ));
 }
 
 function sessionBoundaryKeyFor(session, authProvider) {

@@ -1068,6 +1068,10 @@ code {
   font-weight: 800;
 }
 
+.suspiciousTransactionFooter {
+  flex-wrap: wrap;
+}
+
 .queueBadge {
   display: inline-flex;
   align-items: center;
@@ -1853,6 +1857,62 @@ button:focus-visible,
   margin: 1rem 0;
 }
 
+.suspiciousTransactionToolbar {
+  margin: 0.75rem 0 1rem;
+}
+
+.suspiciousTransactionTable {
+  min-width: 78rem;
+}
+
+.suspiciousTransactionDetail {
+  display: grid;
+  gap: 1rem;
+}
+
+.suspiciousTransactionSummary {
+  margin: 0;
+}
+
+.detailGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.detailSection {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  background: rgba(248, 250, 252, 0.72);
+}
+
+.detailSection h3 {
+  margin: 0 0 0.8rem;
+  color: var(--ink);
+  font-size: 0.95rem;
+}
+
+.detailSection dl {
+  display: grid;
+  grid-template-columns: minmax(8rem, 12rem) minmax(0, 1fr);
+  gap: 0.65rem 0.8rem;
+  margin: 0;
+}
+
+.detailSection dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.detailSection dd {
+  min-width: 0;
+  margin: 0;
+  font-weight: 850;
+  overflow-wrap: anywhere;
+}
+
 .tagList {
   display: flex;
   flex-wrap: wrap;
@@ -2275,7 +2335,8 @@ button:focus-visible,
   .transactionDetailGrid,
   .fraudCaseGrid,
   .fraudCaseFacts,
-  .governanceAuditPanel {
+  .governanceAuditPanel,
+  .detailGrid {
     grid-template-columns: 1fr 1fr;
   }
 
@@ -2332,7 +2393,9 @@ button:focus-visible,
   .transactionDetailGrid,
   .fraudCaseGrid,
   .fraudCaseFacts,
-  .governanceAuditPanel {
+  .governanceAuditPanel,
+  .detailGrid,
+  .detailSection dl {
     grid-template-columns: 1fr;
   }
 

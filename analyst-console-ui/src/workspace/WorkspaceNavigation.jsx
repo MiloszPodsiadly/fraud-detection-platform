@@ -3,11 +3,12 @@ import { WORKSPACE_ROUTE_ENTRIES } from "./WorkspaceRouteRegistry.jsx";
 export function WorkspaceNavigation({
   workspacePage,
   workspaceRoutes = WORKSPACE_ROUTE_ENTRIES,
-  workspaceCounters = { alerts: null, transactions: null },
+  workspaceCounters = { alerts: null, fraudCases: null, suspiciousTransactions: null, transactions: null },
   workspaceCountersStatus = { failedCounters: [], errorByCounter: {}, stale: false },
   canReadFraudCases,
   canReadAlerts,
   canReadTransactions,
+  canReadSuspiciousTransactions,
   canReadGovernanceAdvisories,
   alertPage,
   transactionPage,
@@ -54,6 +55,15 @@ export function WorkspaceNavigation({
       value: alertGlobalCount,
       authority: canReadAlerts,
       stale: isCounterStale("alerts", failedCounterNames, workspaceCountersStatus)
+    },
+    suspiciousTransactions: {
+      value: canReadSuspiciousTransactions === false
+        ? "No access"
+        : workspaceCounters.suspiciousTransactions ?? 0,
+      authority: canReadSuspiciousTransactions,
+      stale: isCounterStale("suspiciousTransactions", failedCounterNames, workspaceCountersStatus),
+      title: "Global point-in-time suspicious transaction signal count. The list view still uses cursor pagination.",
+      ariaLabel: `Global suspicious transaction signals ${workspaceCounters.suspiciousTransactions ?? 0}`
     },
     analyst: {
       value: isFraudCaseSummaryLoading ? "..." : fraudCaseSummaryLabel,

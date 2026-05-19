@@ -11,10 +11,12 @@ export function WorkspaceDashboardShell({
   workspacePage,
   selectedAlertId,
   selectedFraudCaseId,
+  selectedSuspiciousTransactionId,
   clearSelection,
   navigateWorkspace,
   openAlert,
   openFraudCase,
+  openSuspiciousTransaction,
   invalidWorkspaceRoute,
   sessionState,
   setSessionState
@@ -25,6 +27,7 @@ export function WorkspaceDashboardShell({
     canReadFraudCases,
     canReadAlerts,
     canReadTransactions,
+    canReadSuspiciousTransactions,
     canReadGovernanceAdvisories,
     canWriteGovernanceAudit,
     runtimeStatus
@@ -54,6 +57,9 @@ export function WorkspaceDashboardShell({
       setSessionState={setSessionState}
       onOpenAlert={openAlert}
       onOpenFraudCase={openFraudCase}
+      selectedSuspiciousTransactionId={selectedSuspiciousTransactionId}
+      onOpenSuspiciousTransaction={openSuspiciousTransaction}
+      onCloseSuspiciousTransaction={clearSelection}
     >
       {({
         workspaceContent,
@@ -102,12 +108,13 @@ export function WorkspaceDashboardShell({
             workspacePage={activeRoute.key}
             routeFallbackNotice={routeFallbackNotice}
             refreshNotice={refreshNotice}
-            workspaceRoutes={WORKSPACE_ROUTE_ENTRIES}
+            workspaceRoutes={visibleWorkspaceRoutes(WORKSPACE_ROUTE_ENTRIES, { canReadSuspiciousTransactions })}
             workspaceCounters={workspaceCounterState.counters}
             workspaceCountersStatus={workspaceCounterState}
             canReadFraudCases={canReadFraudCases}
             canReadAlerts={canReadAlerts}
             canReadTransactions={canReadTransactions}
+            canReadSuspiciousTransactions={canReadSuspiciousTransactions}
             canReadGovernanceAdvisories={canReadGovernanceAdvisories}
             canWriteGovernanceAudit={canWriteGovernanceAudit}
             alertPage={navigationState.alertPage}
@@ -138,4 +145,8 @@ function fallbackNoticeFor({ invalidWorkspaceRoute, resolvedRoute }) {
     return null;
   }
   return `Unknown workspace route "${requestedKey}"; showing ${resolvedRoute.route.label} workspace.`;
+}
+
+function visibleWorkspaceRoutes(routes, { canReadSuspiciousTransactions }) {
+  return routes.filter((route) => route.key !== "suspiciousTransactions" || canReadSuspiciousTransactions === true);
 }

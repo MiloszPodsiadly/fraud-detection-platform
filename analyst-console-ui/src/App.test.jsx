@@ -16,6 +16,9 @@ const {
   getFraudCase,
   isAbortError,
   listScoredTransactions,
+  listSuspiciousTransactions,
+  getSuspiciousTransactionSummary,
+  getSuspiciousTransaction,
   createAlertsApiClient
 } = vi.hoisted(() => {
   const listAlerts = vi.fn();
@@ -27,6 +30,9 @@ const {
   const getAssistantSummary = vi.fn();
   const getFraudCase = vi.fn();
   const listScoredTransactions = vi.fn();
+  const listSuspiciousTransactions = vi.fn();
+  const getSuspiciousTransactionSummary = vi.fn();
+  const getSuspiciousTransaction = vi.fn();
   return {
     callbackPath: { value: true },
     completeLoginCallback: vi.fn(),
@@ -60,6 +66,9 @@ const {
     getFraudCase,
     isAbortError: (error) => error?.name === "AbortError",
     listScoredTransactions,
+    listSuspiciousTransactions,
+    getSuspiciousTransactionSummary,
+    getSuspiciousTransaction,
     createAlertsApiClient: vi.fn(() => ({
       listAlerts,
       listFraudCaseWorkQueue,
@@ -67,6 +76,9 @@ const {
       getGovernanceAdvisoryAnalytics,
       getFraudCaseWorkQueueSummary,
       listScoredTransactions,
+      listSuspiciousTransactions,
+      getSuspiciousTransactionSummary,
+      getSuspiciousTransaction,
       getGovernanceAdvisoryAudit: vi.fn(),
       getAlert,
       getAssistantSummary,
@@ -89,6 +101,9 @@ vi.mock("./api/alertsApi.js", () => ({
   getFraudCase,
   isAbortError,
   listScoredTransactions,
+  listSuspiciousTransactions,
+  getSuspiciousTransactionSummary,
+  getSuspiciousTransaction,
   getGovernanceAdvisoryAudit: vi.fn(),
   getAssistantSummary,
   getFraudCase,
@@ -124,6 +139,9 @@ describe("App", () => {
     getAlert.mockResolvedValue(alertDetails("alert-stable"));
     getAssistantSummary.mockResolvedValue({ summary: "Assistant summary" });
     getFraudCase.mockResolvedValue(fraudCaseDetails("case-stable"));
+    listSuspiciousTransactions.mockResolvedValue({ content: [], size: 20, hasNext: false, nextCursor: null });
+    getSuspiciousTransactionSummary.mockResolvedValue({ totalSuspiciousTransactions: 0 });
+    getSuspiciousTransaction.mockResolvedValue(suspiciousTransactionDetails("suspicious-stable"));
     listGovernanceAdvisories.mockResolvedValue({ status: "AVAILABLE", count: 0, retention_limit: 200, advisory_events: [] });
     getGovernanceAdvisoryAnalytics.mockResolvedValue({
       status: "AVAILABLE",
@@ -632,6 +650,26 @@ function fraudCaseDetails(caseId) {
     totalAmountPln: 1200,
     transactions: [],
     decisionTags: []
+  };
+}
+
+function suspiciousTransactionDetails(suspiciousTransactionId) {
+  return {
+    suspiciousTransactionId,
+    transactionId: "txn-1",
+    customerId: "customer-1",
+    accountId: "account-1",
+    riskScore: 0.94,
+    riskLevel: "CRITICAL",
+    detectionSource: "SCORING",
+    status: "NEW",
+    detectedAt: "2026-05-16T12:00:00Z",
+    createdAt: "2026-05-16T12:00:00Z",
+    updatedAt: "2026-05-16T12:00:00Z",
+    reasonCodes: ["HIGH_AMOUNT_ACTIVITY"],
+    evidenceStatus: "AVAILABLE",
+    evidenceSnapshotItemCount: 1,
+    evidenceProjectionState: "PROJECTED"
   };
 }
 

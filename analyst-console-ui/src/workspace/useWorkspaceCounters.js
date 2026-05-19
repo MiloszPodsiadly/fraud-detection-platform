@@ -5,6 +5,7 @@ import { useOptionalWorkspaceRuntime } from "./useWorkspaceRuntime.js";
 const INITIAL_COUNTERS = {
   alerts: null,
   fraudCases: null,
+  suspiciousTransactions: null,
   transactions: null
 };
 
@@ -21,11 +22,13 @@ export function useWorkspaceCounters({
   enabled = true,
   includeAlerts = true,
   includeFraudCases = true,
+  includeSuspiciousTransactions = true,
   includeTransactions = true,
   apiClient,
   workspaceSessionResetKey,
   canReadAlerts,
   canReadFraudCases,
+  canReadSuspiciousTransactions,
   canReadTransactions
 } = {}) {
   const runtime = useOptionalWorkspaceRuntime();
@@ -37,6 +40,9 @@ export function useWorkspaceCounters({
   const effectiveCanReadFraudCases = canReadFraudCases !== undefined
     ? canReadFraudCases
     : runtime?.canReadFraudCases;
+  const effectiveCanReadSuspiciousTransactions = canReadSuspiciousTransactions !== undefined
+    ? canReadSuspiciousTransactions
+    : runtime?.canReadSuspiciousTransactions;
   const effectiveCanReadTransactions = canReadTransactions !== undefined
     ? canReadTransactions
     : runtime?.canReadTransactions;
@@ -69,9 +75,11 @@ export function useWorkspaceCounters({
       signal: abortController.signal,
       includeAlerts,
       includeFraudCases,
+      includeSuspiciousTransactions,
       includeTransactions,
       canReadAlerts: effectiveCanReadAlerts,
       canReadFraudCases: effectiveCanReadFraudCases,
+      canReadSuspiciousTransactions: effectiveCanReadSuspiciousTransactions,
       canReadTransactions: effectiveCanReadTransactions
     });
 
@@ -82,9 +90,11 @@ export function useWorkspaceCounters({
           counters: clearUnavailableCounters(current.counters, {
             includeAlerts,
             includeFraudCases,
+            includeSuspiciousTransactions,
             includeTransactions,
             canReadAlerts: effectiveCanReadAlerts,
             canReadFraudCases: effectiveCanReadFraudCases,
+            canReadSuspiciousTransactions: effectiveCanReadSuspiciousTransactions,
             canReadTransactions: effectiveCanReadTransactions
           }),
           isLoading: false,
@@ -104,9 +114,11 @@ export function useWorkspaceCounters({
     setState((current) => reduceCounterResults(current, requests, results, {
       includeAlerts,
       includeFraudCases,
+      includeSuspiciousTransactions,
       includeTransactions,
       canReadAlerts: effectiveCanReadAlerts,
       canReadFraudCases: effectiveCanReadFraudCases,
+      canReadSuspiciousTransactions: effectiveCanReadSuspiciousTransactions,
       canReadTransactions: effectiveCanReadTransactions
     }));
     if (abortControllerRef.current === abortController) {
@@ -117,10 +129,12 @@ export function useWorkspaceCounters({
     effectiveApiClient,
     effectiveCanReadAlerts,
     effectiveCanReadFraudCases,
+    effectiveCanReadSuspiciousTransactions,
     effectiveCanReadTransactions,
     enabled,
     includeAlerts,
     includeFraudCases,
+    includeSuspiciousTransactions,
     includeTransactions
   ]);
 
@@ -166,9 +180,11 @@ function buildCounterRequests({
   signal,
   includeAlerts,
   includeFraudCases,
+  includeSuspiciousTransactions,
   includeTransactions,
   canReadAlerts,
   canReadFraudCases,
+  canReadSuspiciousTransactions,
   canReadTransactions
 }) {
   const requests = [];
@@ -184,6 +200,17 @@ function buildCounterRequests({
       name: "fraudCases",
       promise: apiClient.getFraudCaseWorkQueueSummary({ signal }),
       readValue: (summary) => summary.totalFraudCases
+    });
+  }
+  if (
+    includeSuspiciousTransactions
+    && canReadSuspiciousTransactions === true
+    && typeof apiClient.getSuspiciousTransactionSummary === "function"
+  ) {
+    requests.push({
+      name: "suspiciousTransactions",
+      promise: apiClient.getSuspiciousTransactionSummary({ signal }),
+      readValue: (summary) => summary.totalSuspiciousTransactions
     });
   }
   if (includeTransactions && canReadTransactions === true) {
@@ -249,14 +276,19 @@ function reduceCounterResults(current, requests, results, authorityState) {
 function clearUnavailableCounters(counters, {
   includeAlerts,
   includeFraudCases,
+  includeSuspiciousTransactions,
   includeTransactions,
   canReadAlerts,
   canReadFraudCases,
+  canReadSuspiciousTransactions,
   canReadTransactions
 }) {
   return {
     alerts: includeAlerts && canReadAlerts !== true ? null : counters.alerts,
     fraudCases: includeFraudCases && canReadFraudCases !== true ? null : counters.fraudCases,
+    suspiciousTransactions: includeSuspiciousTransactions && canReadSuspiciousTransactions !== true
+      ? null
+      : counters.suspiciousTransactions,
     transactions: includeTransactions && canReadTransactions !== true ? null : counters.transactions
   };
 }

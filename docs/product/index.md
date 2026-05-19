@@ -13,6 +13,7 @@ Status: current product documentation index.
 | [Alert Evidence Snapshot](alert_evidence_snapshot.md) | Current product-domain semantics for point-in-time alert evidence snapshot projection, boundedness, lineage, and non-claims. |
 | [Suspicious Transactions](suspicious_transactions.md) | Current product-domain semantics for the FDP-60 backend suspicious scoring signal read model and non-claims. |
 | [SuspiciousTransaction Internal Read API](suspicious_transaction_read_api.md) | Current product-domain semantics for the protected FDP-62 internal read-only SuspiciousTransaction API. |
+| [SuspiciousTransaction Internal UI](suspicious_transaction_internal_ui.md) | Current product-domain semantics for the FDP-66 internal read-only SuspiciousTransaction UI. |
 
 ## Related Technical Sources
 

@@ -8,6 +8,8 @@ const apiClient = {
   listFraudCaseWorkQueue: vi.fn(),
   listAlerts: vi.fn(),
   listScoredTransactions: vi.fn(),
+  listSuspiciousTransactions: vi.fn(),
+  getSuspiciousTransaction: vi.fn(),
   listGovernanceAdvisories: vi.fn(),
   getGovernanceAdvisoryAnalytics: vi.fn(),
   getGovernanceAdvisoryAudit: vi.fn(),
@@ -21,6 +23,8 @@ describe("workspace runtime ownership", () => {
     apiClient.listFraudCaseWorkQueue.mockResolvedValue(workQueueSlice([{ caseId: "case-1" }]));
     apiClient.listAlerts.mockResolvedValue(page([{ alertId: "alert-1" }]));
     apiClient.listScoredTransactions.mockResolvedValue(page([{ transactionId: "txn-1" }]));
+    apiClient.listSuspiciousTransactions.mockResolvedValue(suspiciousSlice([{ suspiciousTransactionId: "suspicious-1" }]));
+    apiClient.getSuspiciousTransaction.mockResolvedValue({ suspiciousTransactionId: "suspicious-1" });
     apiClient.listGovernanceAdvisories.mockResolvedValue({ status: "AVAILABLE", count: 0, advisory_events: [] });
     apiClient.getGovernanceAdvisoryAnalytics.mockResolvedValue(analytics(1));
     apiClient.getGovernanceAdvisoryAudit.mockResolvedValue({ status: "AVAILABLE", audit_events: [] });
@@ -36,6 +40,7 @@ describe("workspace runtime ownership", () => {
     await waitFor(() => expect(apiClient.getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1));
     expect(apiClient.listAlerts).not.toHaveBeenCalled();
     expect(apiClient.listScoredTransactions).not.toHaveBeenCalled();
+    expect(apiClient.listSuspiciousTransactions).not.toHaveBeenCalled();
 
     rerender(runtimeElement("analyst", {}, stableRuntime, stableProps));
 
@@ -55,6 +60,10 @@ describe("workspace runtime ownership", () => {
     rerender(runtimeElement("transactionScoring"));
     await waitFor(() => expect(apiClient.listScoredTransactions).toHaveBeenCalledTimes(1));
     expect(apiClient.listAlerts).toHaveBeenCalledTimes(1);
+
+    rerender(runtimeElement("suspiciousTransactions"));
+    await waitFor(() => expect(apiClient.listSuspiciousTransactions).toHaveBeenCalledTimes(1));
+    expect(apiClient.getSuspiciousTransaction).not.toHaveBeenCalled();
   });
 
   it("keeps governance queue and reports analytics as separate active owners", async () => {
@@ -78,6 +87,7 @@ describe("workspace runtime ownership", () => {
     ["analyst", "listFraudCaseWorkQueue"],
     ["fraudTransaction", "listAlerts"],
     ["transactionScoring", "listScoredTransactions"],
+    ["suspiciousTransactions", "listSuspiciousTransactions"],
     ["compliance", "listGovernanceAdvisories"],
     ["reports", "getGovernanceAdvisoryAnalytics"]
   ])("surfaces %s runtime API failures without replacing them with fake empty state", async (routeKey, methodName) => {
@@ -145,11 +155,21 @@ function runtimeValue(overrides = {}) {
     canReadFraudCases: true,
     canReadAlerts: true,
     canReadTransactions: true,
+    canReadSuspiciousTransactions: true,
     canReadGovernanceAdvisories: true,
     canWriteGovernanceAudit: false,
     workspaceSessionResetKey: "demo:analyst-1",
     runtimeStatus: "ready",
     ...overrides
+  };
+}
+
+function suspiciousSlice(content) {
+  return {
+    content,
+    size: content.length,
+    hasNext: false,
+    nextCursor: null
   };
 }
 
