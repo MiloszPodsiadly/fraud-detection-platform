@@ -15,7 +15,6 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.security.core.AuthenticationException;
-import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -891,16 +890,6 @@ public class AlertServiceMetrics {
                 "oidc_authority_mapping_misses_total",
                 "claim", normalizeOidcClaimName(claimName),
                 "outcome", "ignored"
-        ).increment();
-    }
-
-    public void recordAccessDenied(HttpServletRequest request, Authentication authentication) {
-        counter(
-                "fraud.security.access.denied",
-                "auth_type", SecurityFailureClassifier.authType(request),
-                "endpoint", endpoint(request),
-                "reason", SecurityFailureClassifier.accessDeniedReason(authentication),
-                "actor_type", SecurityFailureClassifier.actorType(authentication)
         ).increment();
     }
 
