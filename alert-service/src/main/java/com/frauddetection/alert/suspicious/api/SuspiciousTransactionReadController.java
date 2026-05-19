@@ -10,6 +10,8 @@ import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQu
 import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetrySink;
 import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetrySnapshot;
 import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.util.MultiValueMap;
 import org.springframework.validation.annotation.Validated;
@@ -27,6 +29,8 @@ import java.util.Objects;
 @RestController
 @RequestMapping("/internal/suspicious-transactions")
 public class SuspiciousTransactionReadController {
+
+    private static final Logger log = LoggerFactory.getLogger(SuspiciousTransactionReadController.class);
 
     private final SuspiciousTransactionReadService service;
     private final SensitiveReadAuditService sensitiveReadAuditService;
@@ -157,6 +161,12 @@ public class SuspiciousTransactionReadController {
             queryTelemetrySink.record(snapshot);
         } catch (RuntimeException exception) {
             // Telemetry is diagnostic only and must never alter the read API response path.
+            log.warn(
+                    "SuspiciousTransaction query telemetry sink failed endpoint={} outcome={} queryShape={}",
+                    snapshot == null ? "search" : snapshot.endpoint(),
+                    snapshot == null ? "error" : snapshot.outcome(),
+                    snapshot == null ? "unknown" : snapshot.queryShape()
+            );
         }
     }
 }
