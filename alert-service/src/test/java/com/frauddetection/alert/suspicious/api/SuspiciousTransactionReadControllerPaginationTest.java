@@ -65,6 +65,24 @@ class SuspiciousTransactionReadControllerPaginationTest {
     }
 
     @Test
+    void summaryEndpointReturnsOnlyAggregateCounter() throws Exception {
+        when(service.summary()).thenReturn(new SuspiciousTransactionSummaryResponse(98L));
+
+        mockMvc.perform(get("/internal/suspicious-transactions/summary"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalSuspiciousTransactions").value(98))
+                .andExpect(jsonPath("$.content").doesNotExist())
+                .andExpect(jsonPath("$.hasNext").doesNotExist())
+                .andExpect(jsonPath("$.nextCursor").doesNotExist())
+                .andExpect(jsonPath("$.totalPages").doesNotExist())
+                .andExpect(jsonPath("$.page").doesNotExist())
+                .andExpect(jsonPath("$.size").doesNotExist())
+                .andExpect(jsonPath("$.pageNumber").doesNotExist())
+                .andExpect(jsonPath("$.offset").doesNotExist())
+                .andExpect(jsonPath("$.sort").doesNotExist());
+    }
+
+    @Test
     void sizeMaxIsEnforced() throws Exception {
         mockMvc.perform(get("/internal/suspicious-transactions").queryParam("size", "101"))
                 .andExpect(status().isBadRequest());
@@ -104,9 +122,37 @@ class SuspiciousTransactionReadControllerPaginationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.hasNext").exists())
                 .andExpect(jsonPath("$.page").doesNotExist())
+                .andExpect(jsonPath("$.pageNumber").doesNotExist())
                 .andExpect(jsonPath("$.totalElements").doesNotExist())
                 .andExpect(jsonPath("$.totalPages").doesNotExist())
-                .andExpect(jsonPath("$.totalCount").doesNotExist());
+                .andExpect(jsonPath("$.totalCount").doesNotExist())
+                .andExpect(jsonPath("$.totalSuspiciousTransactions").doesNotExist());
+    }
+
+    @Test
+    void summaryEndpointDoesNotAffectCursorSearchContract() throws Exception {
+        when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(List.of(), 20, false, null));
+
+        mockMvc.perform(get("/internal/suspicious-transactions"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isArray())
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.hasNext").value(false))
+                .andExpect(jsonPath("$.totalSuspiciousTransactions").doesNotExist());
+    }
+
+    @Test
+    void summaryEndpointDoesNotExposeFraudVerdictFields() throws Exception {
+        when(service.summary()).thenReturn(new SuspiciousTransactionSummaryResponse(98L));
+
+        mockMvc.perform(get("/internal/suspicious-transactions/summary"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.confirmedFraud").doesNotExist())
+                .andExpect(jsonPath("$.confirmedFraudCount").doesNotExist())
+                .andExpect(jsonPath("$.fraudCount").doesNotExist())
+                .andExpect(jsonPath("$.finalOutcome").doesNotExist())
+                .andExpect(jsonPath("$.analystWorkload").doesNotExist())
+                .andExpect(jsonPath("$.caseCount").doesNotExist());
     }
 
     @Test

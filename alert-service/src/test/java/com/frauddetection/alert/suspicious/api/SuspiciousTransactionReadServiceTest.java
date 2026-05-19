@@ -63,6 +63,17 @@ class SuspiciousTransactionReadServiceTest {
     }
 
     @Test
+    void summaryServiceUsesRepositoryCountOnlyInSummaryPath() {
+        when(repository.count()).thenReturn(98L);
+
+        service.summary();
+
+        verify(repository).count();
+        verify(mongoTemplate, never()).find(any(Query.class), eq(SuspiciousTransactionDocument.class));
+        verify(mongoTemplate, never()).count(any(Query.class), eq(SuspiciousTransactionDocument.class));
+    }
+
+    @Test
     void searchUsesBoundedKeysetQueryAndMapsContent() {
         LinkedMultiValueMap<String, String> params = new LinkedMultiValueMap<>();
         params.add("status", "NEW");
@@ -252,7 +263,8 @@ class SuspiciousTransactionReadServiceTest {
     void searchResponseDoesNotExposeTotalElementsOrTotalPages() {
         assertThat(java.util.Arrays.stream(SuspiciousTransactionSliceResponse.class.getRecordComponents())
                 .map(java.lang.reflect.RecordComponent::getName)
-                .toList()).doesNotContain("page", "totalElements", "totalPages", "totalCount", "offset");
+                .toList()).doesNotContain("page", "pageNumber", "totalElements", "totalPages", "totalCount", "offset",
+                        "totalSuspiciousTransactions");
     }
 
     private static List<SuspiciousTransactionDocument> documents(int count) {

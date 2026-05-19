@@ -108,6 +108,21 @@ class SuspiciousTransactionReadAuditTest {
     }
 
     @Test
+    void summaryEndpointIsAuditedAsAggregateRead() {
+        when(service.summary()).thenReturn(new SuspiciousTransactionSummaryResponse(98L));
+
+        controller.summary(new MockHttpServletRequest());
+
+        verify(auditService, times(1)).audit(
+                eq(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_SUMMARY),
+                eq(ReadAccessResourceType.SUSPICIOUS_TRANSACTION),
+                eq(null),
+                eq(1),
+                org.mockito.ArgumentMatchers.any()
+        );
+    }
+
+    @Test
     void searchAuditUsesContentSizeForResultCount() {
         when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(
                 List.of(

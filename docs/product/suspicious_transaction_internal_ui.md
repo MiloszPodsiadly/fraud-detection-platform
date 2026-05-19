@@ -13,6 +13,14 @@ The UI consumes the protected internal read contract:
 - GET `/internal/suspicious-transactions`
 - GET `/internal/suspicious-transactions/{suspiciousTransactionId}`
 
+Accepted FDP-66 scope is limited to:
+
+- UI read-only list and detail views.
+- The existing cursor list and detail API.
+- One additive backend API change: GET `/internal/suspicious-transactions/summary` for the workspace aggregate counter.
+
+Only additive backend API change allowed in FDP-66 is GET /internal/suspicious-transactions/summary for workspace aggregate counter.
+
 ## Product Semantics
 
 Every list and detail view must preserve these meanings:
@@ -32,6 +40,10 @@ or case lifecycle state.
 The frontend navigation and route guard use the existing `SUSPICIOUS_TRANSACTION_READ` authority as a UX/request gate.
 The frontend guard is not a security boundary.
 Backend authorization remains authoritative for all internal read endpoints.
+Navigation visibility is driven by `SUSPICIOUS_TRANSACTION_READ`.
+Frontend capability mapping is a session and UX hint only; backend authorization is authoritative.
+FDP-66 does not change production role provisioning.
+Demo role authority mapping affects only local analyst-console demo/session behavior.
 
 The UI must not add roles, authorities, backend authorization rules, or bypass paths.
 
@@ -56,10 +68,21 @@ Allowed list fields:
 - status
 - detectedAt
 
-The workspace navigation may show the global suspicious signal total returned by the dedicated summary endpoint.
+The workspace navigation may show the workspace suspicious signal total returned by the dedicated summary endpoint.
+The backend field name is `totalSuspiciousTransactions`; visible UI copy uses system-signal language such as
+`Suspicious signals`, `System signal total`, or `Workspace signal total`.
 The cursor list itself must not expose a page-scoped total, total pages, page number navigation, offset navigation,
 or raw cursor values.
 The only forward pagination affordance is cursor-based `Load next` when the API returns `hasNext=true`.
+
+## Summary Counter Semantics
+
+GET `/internal/suspicious-transactions/summary` is read-only, requires `SUSPICIOUS_TRANSACTION_READ`, and is audited as
+an aggregate read. It returns only `totalSuspiciousTransactions` as a workspace-level aggregate counter.
+
+The summary endpoint is aggregate only. It is not pagination total metadata, not page count, not total pages, not a final outcome,
+not a confirmed fraud count, not analyst workload, and not a fraud-case count. It must not be used for offset navigation,
+page-number navigation, or deciding whether the cursor list has another slice.
 
 ## Detail View
 
@@ -94,6 +117,10 @@ or decoded cursor content.
 - No legal-proof claim.
 - No frontend telemetry that records identifiers, cursor values, raw responses, tokens, or emails.
 - No new backend filter.
+
+Negated safety disclaimers such as `Not confirmed fraud`, `Not an analyst decision`, `Not a final outcome`, `Not legal
+proof`, and `No case lifecycle mutation` are allowed. Affirmative workflow, fraud-verdict, case-linking, export, bulk,
+or final-decision wording is forbidden.
 
 ## UI Route
 

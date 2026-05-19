@@ -1,6 +1,6 @@
 # SuspiciousTransaction Internal Read API
 
-Status: current product documentation for FDP-64.
+Status: current product documentation for the protected internal SuspiciousTransaction read API.
 
 ## Purpose
 
@@ -36,8 +36,15 @@ GET /internal/suspicious-transactions/summary returns a point-in-time global agg
 
 - totalSuspiciousTransactions
 
-The summary endpoint exists for workspace navigation counters. It does not change cursor search semantics, does not add
-filter totals, does not return records, and does not support page number navigation.
+Only additive backend API change allowed in FDP-66 is GET /internal/suspicious-transactions/summary for workspace aggregate counter.
+
+The summary endpoint is read-only, requires SUSPICIOUS_TRANSACTION_READ, and is audited as an aggregate read. It exists
+for the workspace navigation counter only. It does not change cursor search semantics, does not add filter totals, does
+not return records, and does not support page number navigation.
+
+The summary endpoint returns only totalSuspiciousTransactions. It is aggregate only: not cursor pagination metadata, not
+page count, not total pages, not final outcome, not confirmed fraud count, not analyst workload, and not fraud case
+count. It must not be used for offset navigation or page-number navigation.
 
 ## Pagination And Filters
 
@@ -67,6 +74,7 @@ The response does not include:
 - totalPages
 - totalCount
 - offset
+- totalSuspiciousTransactions
 
 The endpoint does not use:
 
