@@ -133,8 +133,8 @@ New combinations require observed production telemetry and an explicit index dec
 The linkedAlertId read path uses a normal compound index. A partial index can be evaluated later if telemetry shows that
 null-heavy index cost is material for this collection.
 
-These indexes are not a security control. They do not provide fraud proof, audit assurance, or legal proof, and do not
-guarantee latency under every data distribution.
+These indexes are not a security control. They are not confirmed-fraud evidence, audit assurance, or legal or regulatory
+evidence, and they do not guarantee latency under every data distribution.
 Mongo query planner behavior can depend on Mongo version, data distribution, and selectivity.
 
 ## Response Semantics
@@ -157,6 +157,35 @@ API metrics use low-cardinality labels only:
 
 Metrics do not include transactionId, suspiciousTransactionId, customerId, accountId, sourceEventId, correlationId,
 linkedAlertId, raw filters, raw exception messages, reasonCodes, or modelName.
+
+## Query Telemetry
+
+SuspiciousTransaction search and single-read paths also emit low-cardinality query telemetry for the existing internal
+read API. The telemetry measures query shape and response shape so production observations can inform future index decisions.
+It does not change API behavior, does not add filters, does not add indexes, and does not guarantee latency.
+
+The query telemetry uses a timer histogram named `fraud.suspicious_transaction.api.query` with bounded dimensions:
+
+- endpoint: search or read.
+- outcome: success, not_found, validation_error, forbidden, or error.
+- query shape: id_lookup, unfiltered, status, risk, customer, linked_alert, date_range, multi_filter, or unknown.
+- filter count bucket: 0, 1, 2, or 3_plus.
+- result size bucket: 0, 1_10, 11_50, 51_100, or unknown.
+- hasNext: true, false, or unknown.
+- cursorUsed: true, false, or unknown.
+
+Duration is recorded by the timer histogram. The classifier also keeps a bounded duration bucket for diagnostics:
+lt_50ms, 50_100ms, 100_250ms, 250_500ms, or 500ms_plus.
+
+Telemetry does not record raw identifiers, cursor token values, decoded cursor values, reason-code lists, model fields,
+raw filters, raw query text, raw exception messages, or response bodies. It must not become a data-extraction channel.
+
+Slow query warning logs use a default threshold of 500ms and include only endpoint, outcome, query shape, filter count
+bucket, result size bucket, hasNext, cursorUsed, and duration bucket. They do not include raw identifiers, cursor tokens,
+decoded cursor values, raw filters, raw query text, raw exception messages, stack traces for expected validation or
+not-found outcomes, response bodies, or exact result counts.
+
+The telemetry is diagnostic. It is not a security control, not audit assurance, not confirmed-fraud evidence, and not legal or regulatory evidence.
 
 ## Out Of Scope
 
