@@ -183,6 +183,9 @@ usually records success, not_found, validation_error, or error. Denied access is
 before this controller executes and belongs to security-layer metrics or audit. FDP-64 does not claim to capture all
 denied access events.
 
+FDP-65 adds security-layer denied access telemetry for 401 and 403 decisions that happen before controllers run. See
+`../security/security_denied_access_telemetry.md`.
+
 Telemetry label values are normalized at the telemetry boundary even if a caller bypasses the classifier. Unknown values
 fall back to bounded labels before metrics or logs are emitted.
 
