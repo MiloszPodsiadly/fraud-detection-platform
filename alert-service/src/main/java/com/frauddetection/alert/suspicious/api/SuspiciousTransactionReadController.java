@@ -94,6 +94,25 @@ public class SuspiciousTransactionReadController {
         }
     }
 
+    @GetMapping("/summary")
+    @AuditedSensitiveRead
+    public SuspiciousTransactionSummaryResponse summary(HttpServletRequest request) {
+        try {
+            SuspiciousTransactionSummaryResponse response = service.summary();
+            sensitiveReadAuditService.audit(
+                    ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_SUMMARY,
+                    ReadAccessResourceType.SUSPICIOUS_TRANSACTION,
+                    null,
+                    1,
+                    request
+            );
+            return response;
+        } catch (RuntimeException exception) {
+            metrics.recordSuspiciousTransactionApiSearch("error", "ANY", "ANY");
+            throw exception;
+        }
+    }
+
     @GetMapping("/{suspiciousTransactionId}")
     @AuditedSensitiveRead
     public SuspiciousTransactionResponse findById(

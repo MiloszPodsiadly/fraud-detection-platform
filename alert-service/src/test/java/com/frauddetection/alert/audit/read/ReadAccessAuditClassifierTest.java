@@ -59,6 +59,18 @@ class ReadAccessAuditClassifierTest {
     }
 
     @Test
+    void shouldClassifySuspiciousTransactionSummaryAsAggregateReadOnlyEndpoint() {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/internal/suspicious-transactions/summary");
+        request.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/internal/suspicious-transactions/summary");
+
+        ReadAccessAuditTarget target = classifier.classify(request).orElseThrow();
+
+        assertThat(target.endpointCategory()).isEqualTo(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_SUMMARY);
+        assertThat(target.resourceType()).isEqualTo(ReadAccessResourceType.SUSPICIOUS_TRANSACTION);
+        assertThat(target.resourceId()).isNull();
+    }
+
+    @Test
     void shouldNotClassifyRetiredLegacyFraudCaseRouteAsSuccessfulSensitiveRead() {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/fraud-cases/work-queue");
         request.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/api/fraud-cases/**");

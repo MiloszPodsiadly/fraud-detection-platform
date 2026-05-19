@@ -38,6 +38,10 @@ public class SuspiciousTransactionReadService {
                 .map(SuspiciousTransactionResponse::from);
     }
 
+    public SuspiciousTransactionSummaryResponse summary() {
+        return new SuspiciousTransactionSummaryResponse(repository.count());
+    }
+
     public SuspiciousTransactionSliceResponse search(SuspiciousTransactionSearchQuery query) {
         SuspiciousTransactionSearchQuery boundedQuery = Objects.requireNonNull(query, "query is required");
         int size = boundedQuery.size();

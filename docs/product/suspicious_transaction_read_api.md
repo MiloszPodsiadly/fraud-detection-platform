@@ -19,15 +19,25 @@ It exposes system-detected suspicious scoring signals for internal operational r
 ## Endpoints
 
 - GET /internal/suspicious-transactions
+- GET /internal/suspicious-transactions/summary
 - GET /internal/suspicious-transactions/{suspiciousTransactionId}
 
 There is no public unauthenticated endpoint for this read model.
 
 ## Authorization
 
-Both endpoints require SUSPICIOUS_TRANSACTION_READ.
+All endpoints require SUSPICIOUS_TRANSACTION_READ.
 This authority is not granted to the read-only viewer role because the response includes customerId and accountId.
 It is granted to analyst, reviewer, and fraud-ops administrator roles.
+
+## Summary Semantics
+
+GET /internal/suspicious-transactions/summary returns a point-in-time global aggregate:
+
+- totalSuspiciousTransactions
+
+The summary endpoint exists for workspace navigation counters. It does not change cursor search semantics, does not add
+filter totals, does not return records, and does not support page number navigation.
 
 ## Pagination And Filters
 
@@ -60,15 +70,16 @@ The response does not include:
 
 The endpoint does not use:
 
-- global count query
 - offset skip
 - unbounded list
 - raw query passthrough
 - regex search
 
 Reason:
-A full count over suspicious_transactions can be expensive for broad or empty filters. This API avoids unbounded count scans
-by fetching at most size + 1 records with keyset predicates.
+The search API keeps list pagination stable and bounded by fetching at most size + 1 records with keyset predicates.
+It avoids unbounded count scans on the search path.
+Global aggregate counting is isolated in the summary endpoint so list clients do not infer page totals from search
+responses.
 
 Clients must navigate using nextCursor and must not rely on page number or total page count.
 
@@ -79,7 +90,7 @@ Rules:
 - fetch limit = size + 1.
 - hasNext indicates whether another cursor slice exists.
 - nextCursor is present only when hasNext is true.
-- no total collection count is computed.
+- no total collection count is computed by the search endpoint.
 - no page number navigation is supported.
 - no offset skip is used.
 - no raw query passthrough.

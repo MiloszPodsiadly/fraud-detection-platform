@@ -73,6 +73,8 @@ class SuspiciousTransactionReadControllerAuthorizationTest {
     void unauthenticatedRequestsAreDenied() throws Exception {
         mockMvc.perform(get("/internal/suspicious-transactions"))
                 .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/internal/suspicious-transactions/summary"))
+                .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/internal/suspicious-transactions/suspicious-1"))
                 .andExpect(status().isUnauthorized());
 
@@ -84,6 +86,9 @@ class SuspiciousTransactionReadControllerAuthorizationTest {
         mockMvc.perform(get("/internal/suspicious-transactions")
                         .with(authentication(auth(AnalystAuthority.ALERT_READ))))
                 .andExpect(status().isForbidden());
+        mockMvc.perform(get("/internal/suspicious-transactions/summary")
+                        .with(authentication(auth(AnalystAuthority.ALERT_READ))))
+                .andExpect(status().isForbidden());
         mockMvc.perform(get("/internal/suspicious-transactions/suspicious-1")
                         .with(authentication(auth(AnalystAuthority.ALERT_READ))))
                 .andExpect(status().isForbidden());
@@ -92,8 +97,9 @@ class SuspiciousTransactionReadControllerAuthorizationTest {
     }
 
     @Test
-    void suspiciousTransactionReadAuthorityAllowsListAndSingleRead() throws Exception {
+    void suspiciousTransactionReadAuthorityAllowsListSummaryAndSingleRead() throws Exception {
         when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(List.of(), 20, false, null));
+        when(service.summary()).thenReturn(new SuspiciousTransactionSummaryResponse(98L));
         when(service.findById("suspicious-1")).thenReturn(Optional.of(
                 SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT"))
         ));
@@ -101,6 +107,10 @@ class SuspiciousTransactionReadControllerAuthorizationTest {
         mockMvc.perform(get("/internal/suspicious-transactions")
                         .with(authentication(auth(AnalystAuthority.SUSPICIOUS_TRANSACTION_READ))))
                 .andExpect(status().isOk());
+        mockMvc.perform(get("/internal/suspicious-transactions/summary")
+                        .with(authentication(auth(AnalystAuthority.SUSPICIOUS_TRANSACTION_READ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalSuspiciousTransactions").value(98));
         mockMvc.perform(get("/internal/suspicious-transactions/suspicious-1")
                         .with(authentication(auth(AnalystAuthority.SUSPICIOUS_TRANSACTION_READ))))
                 .andExpect(status().isOk())

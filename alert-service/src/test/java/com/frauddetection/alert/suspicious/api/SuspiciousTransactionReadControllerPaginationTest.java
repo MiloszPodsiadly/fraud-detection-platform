@@ -54,6 +54,17 @@ class SuspiciousTransactionReadControllerPaginationTest {
     }
 
     @Test
+    void summaryReturnsAggregateCountOutsideCursorSliceResponse() throws Exception {
+        when(service.summary()).thenReturn(new SuspiciousTransactionSummaryResponse(98L));
+
+        mockMvc.perform(get("/internal/suspicious-transactions/summary"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalSuspiciousTransactions").value(98))
+                .andExpect(jsonPath("$.content").doesNotExist())
+                .andExpect(jsonPath("$.nextCursor").doesNotExist());
+    }
+
+    @Test
     void sizeMaxIsEnforced() throws Exception {
         mockMvc.perform(get("/internal/suspicious-transactions").queryParam("size", "101"))
                 .andExpect(status().isBadRequest());

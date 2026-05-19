@@ -93,6 +93,21 @@ class SuspiciousTransactionReadAuditTest {
     }
 
     @Test
+    void suspiciousTransactionSummaryAuditedExactlyOnceAsAggregateRead() {
+        when(service.summary()).thenReturn(new SuspiciousTransactionSummaryResponse(98L));
+
+        controller.summary(new MockHttpServletRequest());
+
+        verify(auditService, times(1)).audit(
+                eq(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_SUMMARY),
+                eq(ReadAccessResourceType.SUSPICIOUS_TRANSACTION),
+                eq(null),
+                eq(1),
+                org.mockito.ArgumentMatchers.any()
+        );
+    }
+
+    @Test
     void searchAuditUsesContentSizeForResultCount() {
         when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(
                 List.of(
@@ -187,9 +202,14 @@ class SuspiciousTransactionReadAuditTest {
                 String.class,
                 jakarta.servlet.http.HttpServletRequest.class
         );
+        Method summary = SuspiciousTransactionReadController.class.getMethod(
+                "summary",
+                jakarta.servlet.http.HttpServletRequest.class
+        );
 
         assertThat(search.getAnnotation(AuditedSensitiveRead.class)).isNotNull();
         assertThat(read.getAnnotation(AuditedSensitiveRead.class)).isNotNull();
+        assertThat(summary.getAnnotation(AuditedSensitiveRead.class)).isNotNull();
         assertThat(AuditedSensitiveRead.class.getDeclaredMethods())
                 .extracting(Method::getName)
                 .containsExactly("action");

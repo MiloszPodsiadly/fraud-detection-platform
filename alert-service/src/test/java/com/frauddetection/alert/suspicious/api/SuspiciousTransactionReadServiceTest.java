@@ -53,6 +53,16 @@ class SuspiciousTransactionReadServiceTest {
     }
 
     @Test
+    void summaryReturnsGlobalSuspiciousTransactionCountWithoutChangingSearchContract() {
+        when(repository.count()).thenReturn(98L);
+
+        SuspiciousTransactionSummaryResponse response = service.summary();
+
+        assertThat(response.totalSuspiciousTransactions()).isEqualTo(98L);
+        verify(mongoTemplate, never()).find(any(Query.class), eq(SuspiciousTransactionDocument.class));
+    }
+
+    @Test
     void searchUsesBoundedKeysetQueryAndMapsContent() {
         LinkedMultiValueMap<String, String> params = new LinkedMultiValueMap<>();
         params.add("status", "NEW");
