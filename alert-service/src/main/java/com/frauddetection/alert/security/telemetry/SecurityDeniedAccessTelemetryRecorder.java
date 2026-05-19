@@ -6,6 +6,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import java.util.Objects;
+
 @Component
 public class SecurityDeniedAccessTelemetryRecorder {
 
@@ -16,7 +18,7 @@ public class SecurityDeniedAccessTelemetryRecorder {
     private final MeterRegistry meterRegistry;
 
     public SecurityDeniedAccessTelemetryRecorder(MeterRegistry meterRegistry) {
-        this.meterRegistry = meterRegistry;
+        this.meterRegistry = Objects.requireNonNull(meterRegistry, "meterRegistry is required");
     }
 
     public void record(SecurityDeniedAccessSnapshot snapshot) {

@@ -6,6 +6,10 @@ import org.springframework.util.StringUtils;
 @Component
 public class SecurityDeniedAccessRouteClassifier {
 
+    /**
+     * Returns bounded route groups only. New route families require an explicit allowlisted routeGroup and tests.
+     * Unknown routes must return unknown/internal_other, never the raw path.
+     */
     public String classify(String path) {
         if (!StringUtils.hasText(path)) {
             return "unknown";

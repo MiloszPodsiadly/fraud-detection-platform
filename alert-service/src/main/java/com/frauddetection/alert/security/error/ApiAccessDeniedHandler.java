@@ -9,6 +9,8 @@ import com.frauddetection.alert.security.telemetry.SecurityDeniedAccessTelemetry
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -21,6 +23,8 @@ import java.util.Objects;
 
 @Component
 public class ApiAccessDeniedHandler implements AccessDeniedHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(ApiAccessDeniedHandler.class);
 
     private final SecurityErrorResponseWriter responseWriter;
     private final AlertServiceMetrics metrics;
@@ -65,15 +69,23 @@ public class ApiAccessDeniedHandler implements AccessDeniedHandler {
     }
 
     private void recordDeniedAccess(HttpServletRequest request, org.springframework.security.core.Authentication authentication) {
+        SecurityDeniedAccessSnapshot snapshot = new SecurityDeniedAccessSnapshot("unknown", "forbidden", "OTHER", "unknown");
         try {
-            deniedAccessTelemetryRecorder.record(new SecurityDeniedAccessSnapshot(
+            snapshot = new SecurityDeniedAccessSnapshot(
                     routeClassifier.classify(request == null ? null : request.getRequestURI()),
                     "forbidden",
                     methodClassifier.classify(request == null ? null : request.getMethod()),
                     authStateClassifier.classify(authentication)
-            ));
+            );
+            deniedAccessTelemetryRecorder.record(snapshot);
         } catch (RuntimeException exception) {
-            // Security telemetry is diagnostic only and must never change the 403 response.
+            log.debug(
+                    "Security denied-access telemetry failed outcome={} routeGroup={} method={} authState={}",
+                    snapshot.outcome(),
+                    snapshot.routeGroup(),
+                    snapshot.method(),
+                    snapshot.authState()
+            );
         }
     }
 }
