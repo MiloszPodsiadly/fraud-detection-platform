@@ -12,7 +12,7 @@ class SuspiciousTransactionQueryTelemetryDocsContractTest {
     @Test
     void documentsBoundedQueryTelemetryContract() throws Exception {
         String docs = Files.readString(Path.of("../docs/product/suspicious_transaction_read_api.md"));
-        String normalized = docs.toLowerCase();
+        String normalized = docs.toLowerCase().replaceAll("\\s+", " ");
 
         assertThat(docs).contains("## Query Telemetry");
         assertThat(normalized)
@@ -28,8 +28,19 @@ class SuspiciousTransactionQueryTelemetryDocsContractTest {
                 .contains("production telemetry wiring is required")
                 .contains("runtime telemetry recording failures do not alter api responses")
                 .contains("missing telemetry beans must not silently disable telemetry")
-                .contains("does not contain or")
-                .contains("derive the cursor token value")
+                .contains("boolean/tri-state pagination-shape indicator")
+                .contains("does not contain, hash, derive, or expose the cursor token or decoded cursor payload")
+                .contains("forbidden outcome is allowlisted for telemetry compatibility")
+                .contains("denied access")
+                .contains("security-layer metrics or audit")
+                .contains("does not claim to capture all denied access events")
+                .contains("filter count bucket counts search filter categories only")
+                .contains("path variable is not a search filter")
+                .contains("raw duration millis must not be used as a metric label")
+                .contains("tag cardinality must remain strictly bounded")
+                .contains("timer tag keys are strictly allowlisted")
+                .contains("custom telemetry sink failures are logged")
+                .contains("production sinks should log bounded failures without raw exception messages")
                 .contains("slow query warning")
                 .contains("raw identifiers")
                 .contains("cursor token")

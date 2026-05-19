@@ -56,6 +56,40 @@ class SuspiciousTransactionQueryTelemetryMetricsTest {
     }
 
     @Test
+    void queryMetricDoesNotUseDurationBucketOrRawDurationTags() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        SuspiciousTransactionQueryTelemetryRecorder recorder =
+                new SuspiciousTransactionQueryTelemetryRecorder(registry, Duration.ofMillis(500));
+
+        recorder.record(new SuspiciousTransactionQueryTelemetrySnapshot(
+                "search",
+                "success",
+                "unfiltered",
+                "0",
+                "0",
+                "false",
+                "false",
+                "50_100ms",
+                Duration.ofMillis(75)
+        ));
+
+        registry.getMeters().stream()
+                .map(Meter::getId)
+                .filter(id -> id.getName().equals(SuspiciousTransactionQueryTelemetryRecorder.QUERY_METRIC))
+                .forEach(id -> assertThat(id.getTags().stream().map(tag -> tag.getKey()).toList())
+                        .containsExactlyInAnyOrder(
+                                "endpoint",
+                                "outcome",
+                                "queryShape",
+                                "filterCountBucket",
+                                "resultSizeBucket",
+                                "hasNext",
+                                "cursorUsed"
+                        )
+                        .doesNotContain("durationBucket", "durationMillis"));
+    }
+
+    @Test
     void invalidSlowThresholdFallsBackToSafeDefaultAndTinyThresholdIsClamped() {
         assertThat(SuspiciousTransactionQueryTelemetryRecorder.normalizedThreshold(Duration.ZERO))
                 .isEqualTo(SuspiciousTransactionQueryTelemetryRecorder.DEFAULT_SLOW_QUERY_THRESHOLD);

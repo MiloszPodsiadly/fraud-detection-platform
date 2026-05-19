@@ -1,6 +1,6 @@
 # SuspiciousTransaction Internal Read API
 
-Status: current product documentation for FDP-62.
+Status: current product documentation for FDP-64.
 
 ## Purpose
 
@@ -67,7 +67,7 @@ The endpoint does not use:
 - regex search
 
 Reason:
-A full count over suspicious_transactions can be expensive for broad or empty filters. FDP-62 avoids unbounded count scans
+A full count over suspicious_transactions can be expensive for broad or empty filters. This API avoids unbounded count scans
 by fetching at most size + 1 records with keyset predicates.
 
 Clients must navigate using nextCursor and must not rely on page number or total page count.
@@ -106,11 +106,11 @@ Sort order:
 
 ## Mongo Index Support
 
-The suspicious_transactions collection declares explicit Mongo indexes for the FDP-62 cursor/keyset read patterns.
+The suspicious_transactions collection declares explicit Mongo indexes for the cursor/keyset read patterns.
 These indexes are performance support only: they support the current primary access paths, but this does not change API behavior,
 response fields, authorization, projection semantics, cursor semantics, or product workflow.
-FDP-63 verifies declared index definitions and, where integration proof is available, verifies that Spring Data creates
-the expected indexes in Mongo through runtime indexInfo inspection.
+Tests verify declared index definitions and, where integration proof is available, verify that Spring Data creates the
+expected indexes in Mongo through runtime indexInfo inspection.
 
 Declared read indexes:
 
@@ -172,20 +172,34 @@ The query telemetry uses a timer histogram named `fraud.suspicious_transaction.a
 - filter count bucket: 0, 1, 2, or 3_plus.
 - result size bucket: 0, 1_10, 11_50, 51_100, or unknown.
 - hasNext: true, false, or unknown.
-- cursorUsed: true, false, or unknown. It indicates whether a request used cursor pagination and does not contain or
-  derive the cursor token value.
+- cursorUsed: true, false, or unknown. cursorUsed is a boolean/tri-state pagination-shape indicator. It does not
+  contain, hash, derive, or expose the cursor token or decoded cursor payload.
+
+The filter count bucket counts search filter categories only. For single read-by-id, queryShape=id_lookup and
+filterCountBucket=0 because the path variable is not a search filter.
+
+The forbidden outcome is allowlisted for telemetry compatibility. Controller-level SuspiciousTransaction query telemetry
+usually records success, not_found, validation_error, or error. Denied access is normally rejected by Spring Security
+before this controller executes and belongs to security-layer metrics or audit. FDP-64 does not claim to capture all
+denied access events.
 
 Telemetry label values are normalized at the telemetry boundary even if a caller bypasses the classifier. Unknown values
 fall back to bounded labels before metrics or logs are emitted.
 
 Duration is recorded by the Micrometer Timer/histogram. The durationBucket value is used for bounded slow-query logs and
-diagnostics, not as a high-cardinality metric label. Allowed duration buckets are lt_50ms, 50_100ms, 100_250ms,
-250_500ms, or 500ms_plus.
+diagnostics, not as a normal metric label. Allowed duration buckets are lt_50ms, 50_100ms, 100_250ms, 250_500ms, or
+500ms_plus. Raw duration millis must not be used as a metric label.
+
+Because query duration is recorded by a Timer/histogram, tag cardinality must remain strictly bounded. New labels require
+explicit review. The Timer tag keys are strictly allowlisted to endpoint, outcome, queryShape, filterCountBucket,
+resultSizeBucket, hasNext, and cursorUsed.
 
 Telemetry does not record raw identifiers, cursor token values, decoded cursor values, reason-code lists, model fields,
 raw filters, raw query text, raw exception messages, or response bodies. It must not become a data-extraction channel.
 
-Production telemetry wiring is required. Runtime telemetry recording failures do not alter API responses, but missing telemetry beans must not silently disable telemetry in production wiring.
+Production telemetry wiring is required. Runtime telemetry recording failures do not alter API responses, but missing telemetry beans must not silently disable telemetry in production wiring. Custom telemetry sink failures are logged with
+bounded endpoint, outcome, and queryShape only. Production sinks should log bounded failures without raw exception
+messages.
 
 Slow query warning logs use a default threshold of 500ms and include only endpoint, outcome, query shape, filter count
 bucket, result size bucket, hasNext, cursorUsed, and duration bucket. They do not include raw identifiers, cursor tokens,
