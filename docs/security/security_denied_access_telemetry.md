@@ -51,6 +51,43 @@ Allowed authState values:
 - authenticated
 - unknown
 
+## Metric Contract Change
+
+FDP-65 replaces the previous access-denied metric tag schema. The metric name remains
+`fraud.security.access.denied`, but the allowed tag keys are now only:
+
+- routeGroup
+- outcome
+- method
+- authState
+
+The previous schema is replaced to avoid endpoint, reason, and auth-type drift and to keep denied-access telemetry
+bounded and security-layer oriented. Dashboards and alerts using `auth_type`, `endpoint`, `reason`, or `actor_type`
+must migrate to `routeGroup`, `outcome`, `method`, and `authState`.
+
+The service does not dual-emit legacy tags.
+
+## Route Group Maintenance
+
+Route groups are manually maintained. This is intentional: `unknown` and `internal_other` are safer fallbacks than raw
+path labels. Future route families must add an explicit bucket and tests before they appear in telemetry. Raw path
+values must never be emitted as a fallback.
+
+## Out of Scope
+
+FDP-65 only records security-layer denied access decisions:
+
+- unauthorized
+- forbidden
+
+It does not add telemetry for:
+
+- 404 not found responses
+- 405 method not allowed responses
+- application routing anomalies
+- controller exceptions
+- request anomaly detection
+
 ## Data Boundaries
 
 Security telemetry classifies denied access without exposing request values. Labels and logs must not contain:
@@ -70,6 +107,12 @@ Security telemetry classifies denied access without exposing request values. Lab
 - exception message
 - request body
 - response body
+
+`authState` is intentionally coarse. It must not include username, email, subject, session ID, client ID, token
+metadata, IP, user agent, or role list.
+
+FDP-65 uses metrics as the primary signal. It does not log every denied request. Logs are limited to bounded telemetry
+failure diagnostics.
 
 ## Non-Claims
 
