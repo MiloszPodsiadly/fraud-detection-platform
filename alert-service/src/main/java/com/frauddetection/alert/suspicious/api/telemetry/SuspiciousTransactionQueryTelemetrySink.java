@@ -4,9 +4,4 @@ package com.frauddetection.alert.suspicious.api.telemetry;
 public interface SuspiciousTransactionQueryTelemetrySink {
 
     void record(SuspiciousTransactionQueryTelemetrySnapshot snapshot);
-
-    static SuspiciousTransactionQueryTelemetrySink noop() {
-        return snapshot -> {
-        };
-    }
 }

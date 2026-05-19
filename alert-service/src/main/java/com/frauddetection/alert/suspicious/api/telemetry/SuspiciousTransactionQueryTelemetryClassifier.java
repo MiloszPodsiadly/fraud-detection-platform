@@ -58,7 +58,7 @@ public class SuspiciousTransactionQueryTelemetryClassifier {
                 "read",
                 normalizeOutcome(outcome),
                 "id_lookup",
-                "1",
+                "0",
                 resultSizeBucket(resultSize),
                 "unknown",
                 "unknown",

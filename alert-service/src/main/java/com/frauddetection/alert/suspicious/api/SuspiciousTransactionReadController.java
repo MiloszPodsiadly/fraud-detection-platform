@@ -10,7 +10,6 @@ import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQu
 import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetrySink;
 import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetrySnapshot;
 import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.util.MultiValueMap;
 import org.springframework.validation.annotation.Validated;
@@ -22,6 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Duration;
+import java.util.Objects;
 
 @Validated
 @RestController
@@ -31,27 +31,21 @@ public class SuspiciousTransactionReadController {
     private final SuspiciousTransactionReadService service;
     private final SensitiveReadAuditService sensitiveReadAuditService;
     private final AlertServiceMetrics metrics;
-    private SuspiciousTransactionQueryTelemetryClassifier queryTelemetryClassifier =
-            new SuspiciousTransactionQueryTelemetryClassifier();
-    private SuspiciousTransactionQueryTelemetrySink queryTelemetrySink = SuspiciousTransactionQueryTelemetrySink.noop();
+    private final SuspiciousTransactionQueryTelemetryClassifier queryTelemetryClassifier;
+    private final SuspiciousTransactionQueryTelemetrySink queryTelemetrySink;
 
     public SuspiciousTransactionReadController(
             SuspiciousTransactionReadService service,
             SensitiveReadAuditService sensitiveReadAuditService,
-            AlertServiceMetrics metrics
-    ) {
-        this.service = service;
-        this.sensitiveReadAuditService = sensitiveReadAuditService;
-        this.metrics = metrics;
-    }
-
-    @Autowired(required = false)
-    public void setQueryTelemetry(
+            AlertServiceMetrics metrics,
             SuspiciousTransactionQueryTelemetryClassifier queryTelemetryClassifier,
             SuspiciousTransactionQueryTelemetrySink queryTelemetrySink
     ) {
-        this.queryTelemetryClassifier = queryTelemetryClassifier;
-        this.queryTelemetrySink = queryTelemetrySink;
+        this.service = Objects.requireNonNull(service, "service is required");
+        this.sensitiveReadAuditService = Objects.requireNonNull(sensitiveReadAuditService, "sensitiveReadAuditService is required");
+        this.metrics = Objects.requireNonNull(metrics, "metrics is required");
+        this.queryTelemetryClassifier = Objects.requireNonNull(queryTelemetryClassifier, "queryTelemetryClassifier is required");
+        this.queryTelemetrySink = Objects.requireNonNull(queryTelemetrySink, "queryTelemetrySink is required");
     }
 
     @GetMapping
