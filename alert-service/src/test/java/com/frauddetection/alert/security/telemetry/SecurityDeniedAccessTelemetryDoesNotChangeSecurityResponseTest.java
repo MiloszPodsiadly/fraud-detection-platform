@@ -56,7 +56,7 @@ class SecurityDeniedAccessTelemetryDoesNotChangeSecurityResponseTest {
 
     @Test
     void telemetryFailureDoesNotChangeUnauthorizedOrForbiddenResponse() throws Exception {
-        SecurityDeniedAccessTelemetryRecorder throwingRecorder = new SecurityDeniedAccessTelemetryRecorder(null) {
+        SecurityDeniedAccessTelemetryRecorder throwingRecorder = new SecurityDeniedAccessTelemetryRecorder(new SimpleMeterRegistry()) {
             @Override
             public void record(SecurityDeniedAccessSnapshot snapshot) {
                 throw new IllegalStateException("customerId=customer-secret cursor=cursor-secret token=token-secret");

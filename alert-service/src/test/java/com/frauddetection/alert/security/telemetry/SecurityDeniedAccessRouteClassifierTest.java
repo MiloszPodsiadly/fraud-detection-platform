@@ -36,6 +36,24 @@ class SecurityDeniedAccessRouteClassifierTest {
     }
 
     @Test
+    void unknownRouteNeverFallsBackToRawPath() {
+        String routeGroup = classifier.classify("/api/v1/not-classified/raw-secret-id");
+
+        assertThat(routeGroup)
+                .isEqualTo("unknown")
+                .doesNotContain("raw-secret-id", "/api/v1/not-classified");
+    }
+
+    @Test
+    void newUnclassifiedInternalRouteFallsBackToInternalOther() {
+        String routeGroup = classifier.classify("/internal/new-route-family/raw-secret-id");
+
+        assertThat(routeGroup)
+                .isEqualTo("internal_other")
+                .doesNotContain("raw-secret-id", "/internal/new-route-family");
+    }
+
+    @Test
     void classifiesKnownStableRouteGroups() {
         assertThat(classifier.classify("/api/v1/alerts/alert-1")).isEqualTo("fraud_alert");
         assertThat(classifier.classify("/api/v1/fraud-cases/case-1")).isEqualTo("fraud_case");

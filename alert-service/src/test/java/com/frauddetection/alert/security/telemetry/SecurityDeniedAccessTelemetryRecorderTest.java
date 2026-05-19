@@ -1,6 +1,7 @@
 package com.frauddetection.alert.security.telemetry;
 
 import io.micrometer.core.instrument.Meter;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
@@ -8,10 +9,18 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SecurityDeniedAccessTelemetryRecorderTest {
 
     private static final Set<String> ALLOWED_TAG_KEYS = Set.of("routeGroup", "outcome", "method", "authState");
+
+    @Test
+    void recorderRequiresMeterRegistry() {
+        assertThatThrownBy(() -> new SecurityDeniedAccessTelemetryRecorder(null))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("meterRegistry is required");
+    }
 
     @Test
     void recordsDeniedAccessMetricWithStrictTags() {

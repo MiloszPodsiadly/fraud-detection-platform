@@ -1,18 +1,20 @@
 package com.frauddetection.alert.security.telemetry;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 @ExtendWith(OutputCaptureExtension.class)
 class SecurityDeniedAccessTelemetryNoRawExceptionMessageTest {
 
     @Test
-    void recorderFailureLogDoesNotExposeRawExceptionMessage(CapturedOutput output) {
-        SecurityDeniedAccessTelemetryRecorder recorder = new SecurityDeniedAccessTelemetryRecorder(null);
+    void runtimeRecorderFailureDoesNotLeakExceptionMessage(CapturedOutput output) {
+        SecurityDeniedAccessTelemetryRecorder recorder = new SecurityDeniedAccessTelemetryRecorder(mock(MeterRegistry.class));
 
         recorder.record(new SecurityDeniedAccessSnapshot(
                 "suspicious_transaction_read",

@@ -39,7 +39,18 @@ class SecurityDeniedAccessDocsContractTest {
                 .contains("not audit assurance")
                 .contains("not a security guarantee")
                 .contains("not fraud evidence")
-                .contains("not legal evidence");
+                .contains("not legal evidence")
+                .contains("metric contract change")
+                .contains("replaces the previous access-denied metric tag schema")
+                .contains("route group maintenance")
+                .contains("raw path values must never be emitted as a fallback")
+                .contains("out of scope")
+                .contains("404 not found responses")
+                .contains("405 method not allowed responses")
+                .contains("does not log every denied request")
+                .contains("logs are limited to bounded telemetry failure diagnostics")
+                .contains("`authstate` is intentionally coarse")
+                .contains("must not include username, email, subject, session id, client id, token metadata, ip, user agent, or role list");
         assertThat(normalized).doesNotContain(
                 "complete security audit",
                 "guaranteed attack detection",
