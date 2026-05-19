@@ -6,6 +6,7 @@ import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.security.authorization.AnalystAuthority;
 import com.frauddetection.alert.security.config.AlertSecurityConfig;
+import com.frauddetection.alert.security.config.SecurityDeniedAccessTelemetrySliceTestConfig;
 import com.frauddetection.alert.security.error.ApiAccessDeniedHandler;
 import com.frauddetection.alert.security.error.ApiAuthenticationEntryPoint;
 import com.frauddetection.alert.security.error.SecurityErrorResponseWriter;
@@ -45,7 +46,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         AlertSecurityConfig.class,
         ApiAuthenticationEntryPoint.class,
         ApiAccessDeniedHandler.class,
-        SecurityErrorResponseWriter.class
+        SecurityErrorResponseWriter.class,
+        SecurityDeniedAccessTelemetrySliceTestConfig.class
 })
 @ActiveProfiles("test")
 class RegulatedMutationRecoveryInspectionGovernanceTest {

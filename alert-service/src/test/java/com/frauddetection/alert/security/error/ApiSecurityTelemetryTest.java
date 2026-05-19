@@ -2,6 +2,10 @@ package com.frauddetection.alert.security.error;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.security.telemetry.SecurityDeniedAccessAuthStateClassifier;
+import com.frauddetection.alert.security.telemetry.SecurityDeniedAccessMethodClassifier;
+import com.frauddetection.alert.security.telemetry.SecurityDeniedAccessRouteClassifier;
+import com.frauddetection.alert.security.telemetry.SecurityDeniedAccessTelemetryRecorder;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -11,7 +15,10 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.InsufficientAuthenticationException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -29,7 +36,11 @@ class ApiSecurityTelemetryTest {
         AlertServiceMetrics metrics = new AlertServiceMetrics(meterRegistry);
         ApiAuthenticationEntryPoint entryPoint = new ApiAuthenticationEntryPoint(
                 new SecurityErrorResponseWriter(objectMapper),
-                metrics
+                metrics,
+                new SecurityDeniedAccessTelemetryRecorder(meterRegistry),
+                new SecurityDeniedAccessRouteClassifier(),
+                new SecurityDeniedAccessMethodClassifier(),
+                new SecurityDeniedAccessAuthStateClassifier()
         );
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/alerts");
         request.addHeader("Authorization", "Bearer token-invalid");
@@ -50,7 +61,11 @@ class ApiSecurityTelemetryTest {
         AlertServiceMetrics metrics = new AlertServiceMetrics(meterRegistry);
         ApiAuthenticationEntryPoint entryPoint = new ApiAuthenticationEntryPoint(
                 new SecurityErrorResponseWriter(new ObjectMapper().findAndRegisterModules()),
-                metrics
+                metrics,
+                new SecurityDeniedAccessTelemetryRecorder(meterRegistry),
+                new SecurityDeniedAccessRouteClassifier(),
+                new SecurityDeniedAccessMethodClassifier(),
+                new SecurityDeniedAccessAuthStateClassifier()
         );
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/alerts");
 
@@ -68,7 +83,11 @@ class ApiSecurityTelemetryTest {
         AlertServiceMetrics metrics = new AlertServiceMetrics(meterRegistry);
         ApiAuthenticationEntryPoint entryPoint = new ApiAuthenticationEntryPoint(
                 new SecurityErrorResponseWriter(new ObjectMapper().findAndRegisterModules()),
-                metrics
+                metrics,
+                new SecurityDeniedAccessTelemetryRecorder(meterRegistry),
+                new SecurityDeniedAccessRouteClassifier(),
+                new SecurityDeniedAccessMethodClassifier(),
+                new SecurityDeniedAccessAuthStateClassifier()
         );
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/alerts");
         request.addHeader("X-Demo-User-Id", "analyst-1");
@@ -87,20 +106,28 @@ class ApiSecurityTelemetryTest {
         AlertServiceMetrics metrics = new AlertServiceMetrics(meterRegistry);
         ApiAccessDeniedHandler handler = new ApiAccessDeniedHandler(
                 new SecurityErrorResponseWriter(new ObjectMapper().findAndRegisterModules()),
-                metrics
+                metrics,
+                new SecurityDeniedAccessTelemetryRecorder(meterRegistry),
+                new SecurityDeniedAccessRouteClassifier(),
+                new SecurityDeniedAccessMethodClassifier(),
+                new SecurityDeniedAccessAuthStateClassifier()
         );
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/alerts/alert-1/decision");
         request.addHeader("Authorization", "Bearer token-readonly");
-        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken("analyst-1", null));
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                "analyst-1",
+                null,
+                List.of(new SimpleGrantedAuthority("alert:read"))
+        ));
 
         handler.handle(request, new MockHttpServletResponse(), new AccessDeniedException("forbidden"));
 
         assertThat(meterRegistry.get("fraud.security.access.denied")
                 .tags(
-                        "auth_type", "jwt",
-                        "endpoint", "alerts_decision",
-                        "reason", "insufficient_authority",
-                        "actor_type", "authenticated"
+                        "routeGroup", "fraud_alert",
+                        "outcome", "forbidden",
+                        "method", "POST",
+                        "authState", "authenticated"
                 )
                 .counter()
                 .count()).isEqualTo(1.0d);

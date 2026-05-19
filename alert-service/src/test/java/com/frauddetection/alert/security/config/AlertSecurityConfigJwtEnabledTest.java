@@ -71,6 +71,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         ApiAuthenticationEntryPoint.class,
         ApiAccessDeniedHandler.class,
         SecurityErrorResponseWriter.class,
+        SecurityDeniedAccessTelemetrySliceTestConfig.class,
         AlertResponseMapper.class,
         FraudCaseResponseMapper.class,
         ScoredTransactionResponseMapper.class,

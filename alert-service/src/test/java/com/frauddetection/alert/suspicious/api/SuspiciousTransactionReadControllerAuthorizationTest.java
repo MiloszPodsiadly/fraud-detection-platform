@@ -8,6 +8,7 @@ import com.frauddetection.alert.security.auth.DemoAuthHeaderParser;
 import com.frauddetection.alert.security.authorization.AnalystAuthority;
 import com.frauddetection.alert.security.config.AlertSecurityConfig;
 import com.frauddetection.alert.security.config.DemoAuthSecurityConfig;
+import com.frauddetection.alert.security.config.SecurityDeniedAccessTelemetrySliceTestConfig;
 import com.frauddetection.alert.security.error.ApiAccessDeniedHandler;
 import com.frauddetection.alert.security.error.ApiAuthenticationEntryPoint;
 import com.frauddetection.alert.security.error.SecurityErrorResponseWriter;
@@ -43,6 +44,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         ApiAuthenticationEntryPoint.class,
         ApiAccessDeniedHandler.class,
         SecurityErrorResponseWriter.class,
+        SecurityDeniedAccessTelemetrySliceTestConfig.class,
         AlertServiceExceptionHandler.class
 })
 @ActiveProfiles("test")
