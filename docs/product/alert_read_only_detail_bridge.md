@@ -42,9 +42,12 @@ If a user has `SUSPICIOUS_TRANSACTION_READ` but not `ALERT_READ`, the Suspicious
 The linked alert context is opened from SuspiciousTransaction detail view.
 The route/state must retain `suspiciousTransactionId` and `linkedAlertId`.
 An `alertId` alone in the suspicious workspace is invalid bridge context.
+A `suspiciousTransactionId` plus `alertId` route without loaded source SuspiciousTransaction context is pending verification, not valid bridge context.
 
 FDP-67 is not a general-purpose alert lookup inside the SuspiciousTransaction workspace.
 The bridge requires source SuspiciousTransaction context before the frontend creates the read-only alert detail client.
+The UI must not fetch alert detail until the source `linkedAlertId` matches the selected `alertId`.
+If the source linked alert does not match the selected alert, the bridge fails closed.
 Frontend context binding is scope control, not security boundary.
 Backend alert-read authorization remains authoritative.
 

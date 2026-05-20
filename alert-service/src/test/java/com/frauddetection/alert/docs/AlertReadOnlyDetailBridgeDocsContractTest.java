@@ -65,6 +65,35 @@ class AlertReadOnlyDetailBridgeDocsContractTest {
     }
 
     @Test
+    void docsMentionNoAlertFetchBeforeSourceVerification() throws Exception {
+        String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
+
+        assertThat(lower).contains("must not fetch alert detail until the source `linkedalertid` matches the selected `alertid`");
+    }
+
+    @Test
+    void docsMentionSourceLinkedAlertMustMatchSelectedAlert() throws Exception {
+        String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
+
+        assertThat(lower).contains("source `linkedalertid` matches the selected `alertid`");
+    }
+
+    @Test
+    void docsMentionSourceMissingFailsClosed() throws Exception {
+        String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
+
+        assertThat(lower).contains("without loaded source suspicioustransaction context is pending verification");
+        assertThat(lower).contains("bridge fails closed");
+    }
+
+    @Test
+    void docsMentionContextBindingIsNotSecurityBoundary() throws Exception {
+        String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
+
+        assertThat(lower).contains("frontend context binding is scope control, not security boundary");
+    }
+
+    @Test
     void alertReadOnlyDetailBridgeDocsDoNotContainOverclaimWording() throws Exception {
         String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
 

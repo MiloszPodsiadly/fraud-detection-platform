@@ -133,6 +133,8 @@ Missing alert read authority shows no actionable alert link or an access-denied 
 Linked alert context is opened from SuspiciousTransaction detail view and route/state must retain both the source
 `suspiciousTransactionId` and the linked `alertId`. An `alertId` alone in the SuspiciousTransaction workspace is invalid
 bridge context. Frontend source-context binding is scope control, not security enforcement.
+The UI must not fetch alert detail until loaded source SuspiciousTransaction context has a `linkedAlertId` matching the
+selected `alertId`; missing source context remains pending verification and mismatched source context fails closed.
 
 ## Out Of Scope
 
