@@ -130,6 +130,10 @@ The frontend guard is not a security boundary. Backend authorization remains aut
 `SUSPICIOUS_TRANSACTION_READ` does not imply alert read access. Missing `linkedAlertId` shows no action.
 Missing alert read authority shows no actionable alert link or an access-denied state.
 
+Linked alert context is opened from SuspiciousTransaction detail view and route/state must retain both the source
+`suspiciousTransactionId` and the linked `alertId`. An `alertId` alone in the SuspiciousTransaction workspace is invalid
+bridge context. Frontend source-context binding is scope control, not security enforcement.
+
 ## Out Of Scope
 
 - No write endpoint.

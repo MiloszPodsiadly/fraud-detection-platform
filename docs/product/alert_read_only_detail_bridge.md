@@ -28,13 +28,25 @@ The bridge must not rename an alert into a fraud verdict, analyst disposition, c
 
 SuspiciousTransaction detail still requires `SUSPICIOUS_TRANSACTION_READ`.
 Linked alert detail requires `ALERT_READ`.
-`SUSPICIOUS_TRANSACTION_READ` does not imply alert read access.
+`SUSPICIOUS_TRANSACTION_READ` does not imply `ALERT_READ`.
+In plain terms, suspicious transaction read access does not imply alert read access.
 
 The frontend guard is a UX and request gate only.
 The frontend guard is not a security boundary.
 Backend authorization remains authoritative for direct and linked alert detail access.
 
 If a user has `SUSPICIOUS_TRANSACTION_READ` but not `ALERT_READ`, the SuspiciousTransaction detail may show that alert detail requires alert read access, but it must not render an actionable alert detail link.
+
+## Source Context Binding
+
+The linked alert context is opened from SuspiciousTransaction detail view.
+The route/state must retain `suspiciousTransactionId` and `linkedAlertId`.
+An `alertId` alone in the suspicious workspace is invalid bridge context.
+
+FDP-67 is not a general-purpose alert lookup inside the SuspiciousTransaction workspace.
+The bridge requires source SuspiciousTransaction context before the frontend creates the read-only alert detail client.
+Frontend context binding is scope control, not security boundary.
+Backend alert-read authorization remains authoritative.
 
 ## Read-Only Boundary
 

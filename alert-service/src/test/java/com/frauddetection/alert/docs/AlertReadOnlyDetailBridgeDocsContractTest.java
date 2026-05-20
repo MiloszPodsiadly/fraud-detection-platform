@@ -33,6 +33,38 @@ class AlertReadOnlyDetailBridgeDocsContractTest {
     }
 
     @Test
+    void docsMentionSourceSuspiciousTransactionContext() throws Exception {
+        String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
+
+        assertThat(lower).contains("linked alert context is opened from suspicioustransaction detail view");
+        assertThat(lower).contains("route/state must retain `suspicioustransactionid` and `linkedalertid`");
+        assertThat(lower).contains("requires source suspicioustransaction context");
+    }
+
+    @Test
+    void docsSayAlertIdAloneIsNotLinkedBridgeContext() throws Exception {
+        String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
+
+        assertThat(lower).contains("an `alertid` alone in the suspicious workspace is invalid bridge context");
+    }
+
+    @Test
+    void docsSayContextBindingIsNotSecurityBoundary() throws Exception {
+        String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
+
+        assertThat(lower).contains("frontend context binding is scope control, not security boundary");
+        assertThat(lower).contains("frontend guard is not a security boundary");
+    }
+
+    @Test
+    void docsSayBackendAuthorizationRemainsAuthoritative() throws Exception {
+        String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
+
+        assertThat(lower).contains("backend alert-read authorization remains authoritative");
+        assertThat(lower).contains("`suspicious_transaction_read` does not imply `alert_read`");
+    }
+
+    @Test
     void alertReadOnlyDetailBridgeDocsDoNotContainOverclaimWording() throws Exception {
         String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
 
