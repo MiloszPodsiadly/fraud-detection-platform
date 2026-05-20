@@ -14,6 +14,17 @@ vi.mock("../pages/AlertDetailsPage.jsx", () => ({
   )
 }));
 
+vi.mock("../pages/AlertReadOnlyContextPage.jsx", () => ({
+  AlertReadOnlyContextPage: ({ canReadAlert, workspaceLabel, alertReadClient, onBack }) => (
+    <section>
+      <h2>Dedicated read-only alert context {String(canReadAlert)}</h2>
+      <span>{workspaceLabel}</span>
+      <span>read client methods {Object.keys(alertReadClient || {}).join(",")}</span>
+      <button type="button" onClick={onBack}>Back to list</button>
+    </section>
+  )
+}));
+
 vi.mock("../pages/FraudCaseDetailsPage.jsx", () => ({
   FraudCaseDetailsPage: ({ canReadFraudCase, workspaceLabel, onBack }) => (
     <section>
@@ -93,8 +104,8 @@ describe("WorkspaceDetailRouter", () => {
       />
     );
 
-    expect(screen.getByRole("heading", { name: "Alert detail false" })).toBeInTheDocument();
-    expect(screen.getByText("read-only true")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Dedicated read-only alert context false" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Alert detail false" })).not.toBeInTheDocument();
   });
 
   it("SuspiciousTransactionAuthorityDoesNotGrantAlertDetailAccessTest", () => {
@@ -115,7 +126,7 @@ describe("WorkspaceDetailRouter", () => {
       />
     );
 
-    expect(screen.getByText("api methods getAlert")).toBeInTheDocument();
+    expect(screen.getByText("read client methods getAlert")).toBeInTheDocument();
   });
 
   it("FrontendGuardDoesNotClaimSecurityBoundaryTest", () => {
@@ -136,8 +147,8 @@ describe("WorkspaceDetailRouter", () => {
       />
     );
 
-    expect(screen.getByText("read-only true")).toBeInTheDocument();
-    expect(screen.getByText("api methods getAlert")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Dedicated read-only alert context true" })).toBeInTheDocument();
+    expect(screen.getByText("read client methods getAlert")).toBeInTheDocument();
   });
 
   it("alertIdOnlySuspiciousWorkspaceRouteShowsInvalidBridgeContext", () => {
@@ -218,8 +229,8 @@ describe("WorkspaceDetailRouter", () => {
       />
     );
 
-    expect(screen.getByText("read-only true")).toBeInTheDocument();
-    expect(screen.getByText("api methods getAlert")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Dedicated read-only alert context true" })).toBeInTheDocument();
+    expect(screen.getByText("read client methods getAlert")).toBeInTheDocument();
   });
 
   it("suspiciousTransactionAndAlertIdRouteWithoutLoadedSourceDoesNotCallGetAlert", () => {
@@ -338,8 +349,91 @@ describe("WorkspaceDetailRouter", () => {
       />
     );
 
-    expect(screen.getByText("read-only true")).toBeInTheDocument();
-    expect(screen.getByText("api methods getAlert")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Dedicated read-only alert context true" })).toBeInTheDocument();
+    expect(screen.getByText("read client methods getAlert")).toBeInTheDocument();
+  });
+
+  it("WorkspaceDetailRouterUsesAlertReadOnlyContextPageForSuspiciousBridgeTest", () => {
+    render(
+      <WorkspaceDetailRouter
+        selectedAlertId="alert-1"
+        selectedFraudCaseId={null}
+        alertQueueState={undefined}
+        session={{ userId: "analyst-1", authorities: ["alert:read", "suspicious-transaction:read"] }}
+        apiClient={{ getAlert: vi.fn(), submitAnalystDecision: vi.fn(), getAssistantSummary: vi.fn() }}
+        canReadAlerts
+        canReadFraudCases={false}
+        workspacePage="suspiciousTransactions"
+        selectedSuspiciousTransactionId="suspicious-1"
+        sourceSuspiciousTransaction={{ suspiciousTransactionId: "suspicious-1", linkedAlertId: "alert-1" }}
+        onCloseSelection={vi.fn()}
+        onRefreshDashboard={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("heading", { name: "Dedicated read-only alert context true" })).toBeInTheDocument();
+  });
+
+  it("WorkspaceDetailRouterDoesNotUseAlertDetailsPageForSuspiciousBridgeTest", () => {
+    render(
+      <WorkspaceDetailRouter
+        selectedAlertId="alert-1"
+        selectedFraudCaseId={null}
+        alertQueueState={undefined}
+        session={{ userId: "analyst-1", authorities: ["alert:read", "suspicious-transaction:read"] }}
+        apiClient={{ getAlert: vi.fn(), submitAnalystDecision: vi.fn(), getAssistantSummary: vi.fn() }}
+        canReadAlerts
+        canReadFraudCases={false}
+        workspacePage="suspiciousTransactions"
+        selectedSuspiciousTransactionId="suspicious-1"
+        sourceSuspiciousTransaction={{ suspiciousTransactionId: "suspicious-1", linkedAlertId: "alert-1" }}
+        onCloseSelection={vi.fn()}
+        onRefreshDashboard={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByRole("heading", { name: /Alert detail/ })).not.toBeInTheDocument();
+  });
+
+  it("NormalAlertDetailStillUsesAlertDetailsPageTest", () => {
+    render(
+      <WorkspaceDetailRouter
+        selectedAlertId="alert-1"
+        selectedFraudCaseId={null}
+        alertQueueState={undefined}
+        session={{ userId: "analyst-1", authorities: ["alert:read"] }}
+        apiClient={{ getAlert: vi.fn(), submitAnalystDecision: vi.fn(), getAssistantSummary: vi.fn() }}
+        canReadAlerts
+        canReadFraudCases={false}
+        workspacePage="fraudTransaction"
+        onCloseSelection={vi.fn()}
+        onRefreshDashboard={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("heading", { name: "Alert detail true" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /Dedicated read-only alert context/ })).not.toBeInTheDocument();
+  });
+
+  it("WorkspaceDetailRouterDoesNotPassReadOnlyContextToAlertDetailsPageForSuspiciousBridgeTest", () => {
+    render(
+      <WorkspaceDetailRouter
+        selectedAlertId="alert-1"
+        selectedFraudCaseId={null}
+        alertQueueState={undefined}
+        session={{ userId: "analyst-1", authorities: ["alert:read", "suspicious-transaction:read"] }}
+        apiClient={{ getAlert: vi.fn(), submitAnalystDecision: vi.fn(), getAssistantSummary: vi.fn() }}
+        canReadAlerts
+        canReadFraudCases={false}
+        workspacePage="suspiciousTransactions"
+        selectedSuspiciousTransactionId="suspicious-1"
+        sourceSuspiciousTransaction={{ suspiciousTransactionId: "suspicious-1", linkedAlertId: "alert-1" }}
+        onCloseSelection={vi.fn()}
+        onRefreshDashboard={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText("read-only true")).not.toBeInTheDocument();
   });
 
   it("sourceMissingStateDoesNotLogSuspiciousTransactionId", () => {

@@ -21,6 +21,7 @@ export function AlertDetailsPage({
   session,
   apiClient,
   canReadAlert = true,
+  // Kept for compatibility with older tests only; SuspiciousTransaction bridge uses AlertReadOnlyContextPage.
   readOnlyContext = false,
   sourceSuspiciousTransaction = null,
   workspaceLabel = "Fraud Transaction",
