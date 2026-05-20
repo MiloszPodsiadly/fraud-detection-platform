@@ -210,7 +210,7 @@ function buildCounterRequests({
     requests.push({
       name: "suspiciousTransactions",
       promise: apiClient.getSuspiciousTransactionSummary({ signal }),
-      readValue: (summary) => summary.totalSuspiciousTransactions
+      readValue: readSuspiciousTransactionSummaryTotal
     });
   }
   if (includeTransactions && canReadTransactions === true) {
@@ -239,18 +239,23 @@ function reduceCounterResults(current, requests, results, authorityState) {
   requests.forEach((request, index) => {
     const result = results[index];
     if (result.status === "fulfilled") {
-      counters[request.name] = request.readValue(result.value) ?? counters[request.name];
-      hasSuccessfulRefresh = true;
+      try {
+        counters[request.name] = request.readValue(result.value) ?? counters[request.name];
+        hasSuccessfulRefresh = true;
+      } catch (error) {
+        hasNonAbortFailure = true;
+        if (recordCounterFailure(errorByCounter, request.name, error, current, counters)) {
+          retainedStaleValue = true;
+        }
+      }
       return;
     }
     if (isAbortError(result.reason)) {
       return;
     }
     hasNonAbortFailure = true;
-    errorByCounter[request.name] = result.reason?.message || "Counter unavailable";
-    if (current.counters[request.name] !== null && current.counters[request.name] !== undefined) {
+    if (recordCounterFailure(errorByCounter, request.name, result.reason, current, counters)) {
       retainedStaleValue = true;
-      counters[request.name] = current.counters[request.name];
     }
   });
 
@@ -291,6 +296,29 @@ function clearUnavailableCounters(counters, {
       : counters.suspiciousTransactions,
     transactions: includeTransactions && canReadTransactions !== true ? null : counters.transactions
   };
+}
+
+function readSuspiciousTransactionSummaryTotal(summary) {
+  if (summary?.freshness === "UNAVAILABLE") {
+    throw new Error("Summary temporarily unavailable");
+  }
+  return summary?.totalSuspiciousTransactions;
+}
+
+function recordCounterFailure(errorByCounter, counterName, reason, current, counters) {
+  errorByCounter[counterName] = counterFailureMessage(counterName, reason);
+  if (current.counters[counterName] !== null && current.counters[counterName] !== undefined) {
+    counters[counterName] = current.counters[counterName];
+    return true;
+  }
+  return false;
+}
+
+function counterFailureMessage(counterName, reason) {
+  if (counterName === "suspiciousTransactions") {
+    return "Summary temporarily unavailable";
+  }
+  return reason?.message || "Counter unavailable";
 }
 
 function counterRecovered(current, counterName) {

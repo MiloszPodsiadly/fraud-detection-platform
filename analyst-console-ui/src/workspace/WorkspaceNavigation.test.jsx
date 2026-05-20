@@ -36,6 +36,49 @@ describe("WorkspaceNavigation suspicious transaction counter copy", () => {
     expect(screen.getByRole("link", { name: /Workspace signal total 98/i })).toBeInTheDocument();
   });
 
+  it("summaryCounterUnavailableUsesSystemSignalCopy", () => {
+    render(
+      <WorkspaceNavigation
+        workspacePage="suspiciousTransactions"
+        workspaceRoutes={[WORKSPACE_ROUTE_REGISTRY.suspiciousTransactions]}
+        workspaceCounters={{ alerts: null, fraudCases: null, suspiciousTransactions: null, transactions: null }}
+        workspaceCountersStatus={{
+          degraded: true,
+          failedCounters: ["suspiciousTransactions"],
+          errorByCounter: { suspiciousTransactions: "Summary temporarily unavailable" },
+          stale: false
+        }}
+        canReadSuspiciousTransactions
+      />
+    );
+
+    expect(screen.getByRole("link", { name: /Signal total unavailable/i })).toBeInTheDocument();
+    expect(screen.getByText("0")).toBeInTheDocument();
+    expect(screen.getByText("Signal total unavailable")).toBeInTheDocument();
+    expect(screen.queryByText(/raw backend/i)).not.toBeInTheDocument();
+  });
+
+  it("summaryCounterFailureDoesNotRenderRawError", () => {
+    render(
+      <WorkspaceNavigation
+        workspacePage="suspiciousTransactions"
+        workspaceRoutes={[WORKSPACE_ROUTE_REGISTRY.suspiciousTransactions]}
+        workspaceCounters={{ alerts: null, fraudCases: null, suspiciousTransactions: null, transactions: null }}
+        workspaceCountersStatus={{
+          degraded: true,
+          failedCounters: ["suspiciousTransactions"],
+          errorByCounter: { suspiciousTransactions: "MongoTimeoutException customer-1 cursor-secret" },
+          stale: false
+        }}
+        canReadSuspiciousTransactions
+      />
+    );
+
+    expect(screen.getByRole("link", { name: /Signal total unavailable/i })).toBeInTheDocument();
+    expect(screen.queryByText(/MongoTimeoutException/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/cursor-secret/i)).not.toBeInTheDocument();
+  });
+
   function renderSuspiciousNavigation(total) {
     return render(
       <WorkspaceNavigation

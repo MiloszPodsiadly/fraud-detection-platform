@@ -89,7 +89,7 @@ describe("useWorkspaceCounters", () => {
   });
 
   it("summaryCounterFailureDoesNotBreakListView", async () => {
-    getSuspiciousTransactionSummary.mockRejectedValue(new Error("summary unavailable"));
+    getSuspiciousTransactionSummary.mockRejectedValue(new Error("raw backend connection refused"));
     const client = apiClient();
     const { result } = renderHook(() => useWorkspaceCounters({
       enabled: true,
@@ -103,7 +103,53 @@ describe("useWorkspaceCounters", () => {
 
     await waitFor(() => expect(result.current.degraded).toBe(true));
     expect(result.current.counters.suspiciousTransactions).toBeNull();
-    expect(result.current.errorByCounter.suspiciousTransactions).toBe("summary unavailable");
+    expect(result.current.errorByCounter.suspiciousTransactions).toBe("Summary temporarily unavailable");
+  });
+
+  it("summaryCounterFailureDoesNotLogRawError", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    getSuspiciousTransactionSummary.mockRejectedValue(new Error("raw cursor token leaked"));
+    const client = apiClient();
+
+    const { result } = renderHook(() => useWorkspaceCounters({
+      enabled: true,
+      apiClient: client,
+      includeAlerts: false,
+      includeFraudCases: false,
+      includeSuspiciousTransactions: true,
+      includeTransactions: false,
+      canReadSuspiciousTransactions: true
+    }));
+
+    await waitFor(() => expect(result.current.degraded).toBe(true));
+    expect(consoleError).not.toHaveBeenCalled();
+    expect(consoleWarn).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+    consoleWarn.mockRestore();
+  });
+
+  it("summaryCounterUnavailableResponseUsesSafeCounterState", async () => {
+    getSuspiciousTransactionSummary.mockResolvedValue({
+      totalSuspiciousTransactions: 0,
+      freshness: "UNAVAILABLE",
+      cachedAt: null,
+      expiresAt: null
+    });
+    const client = apiClient();
+    const { result } = renderHook(() => useWorkspaceCounters({
+      enabled: true,
+      apiClient: client,
+      includeAlerts: false,
+      includeFraudCases: false,
+      includeSuspiciousTransactions: true,
+      includeTransactions: false,
+      canReadSuspiciousTransactions: true
+    }));
+
+    await waitFor(() => expect(result.current.degraded).toBe(true));
+    expect(result.current.counters.suspiciousTransactions).toBeNull();
+    expect(result.current.errorByCounter.suspiciousTransactions).toBe("Summary temporarily unavailable");
   });
 
   it("surfaces partial counter failure without converting missing authority to zero", async () => {
