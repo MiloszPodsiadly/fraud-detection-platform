@@ -94,6 +94,82 @@ class AlertReadOnlyDetailBridgeDocsContractTest {
     }
 
     @Test
+    void DocsMentionDedicatedAlertReadOnlyContextPageTest() throws Exception {
+        String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
+
+        assertThat(lower).contains("fdp-68 extracts that read-only alert context into `alertreadonlycontextpage`");
+        assertThat(lower).contains("fdp-68 is architecture hardening, not product feature expansion");
+        assertThat(lower).contains("dedicated read-only alert context page");
+    }
+
+    @Test
+    void DocsSaySuspiciousBridgeDoesNotUseAlertDetailsPageTest() throws Exception {
+        String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
+
+        assertThat(lower).contains("fdp-68 fully removes suspicioustransaction read-only bridge mode from `alertdetailspage`");
+        assertThat(lower).contains("`alertdetailspage` no longer accepts `readonlycontext` for the suspicioustransaction bridge");
+        assertThat(lower).contains("`alertdetailspage` remains the workflow-capable normal alert detail page");
+    }
+
+    @Test
+    void DocsSayGetAlertOnlyClientTest() throws Exception {
+        String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
+
+        assertThat(lower).contains("`alertreadonlycontextpage` depends only on a getalert-only client");
+        assertThat(lower).contains("existing get `/api/v1/alerts/{alertid}` response remains the read source");
+    }
+
+    @Test
+    void DocsSayNoBackendEndpointTest() throws Exception {
+        String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
+
+        assertThat(lower).contains("does not add a new backend endpoint");
+        assertThat(lower).contains("does not introduce a second alert read api");
+    }
+
+    @Test
+    void DocsSayNoWorkflowNoDecisionNoAssistantSummaryTest() throws Exception {
+        String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
+
+        assertThat(lower).contains("does not submit analyst decisions");
+        assertThat(lower).contains("does not expose assistant summary");
+        assertThat(lower).contains("does not expose an evidence proof panel");
+        assertThat(lower).contains("does not log raw identifiers");
+    }
+
+    @Test
+    void DocsSayContextBindingNotSecurityBoundaryTest() throws Exception {
+        String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
+
+        assertThat(lower).contains("component boundary is scope control, not a frontend security boundary");
+        assertThat(lower).contains("backend `alert_read` authorization remains authoritative");
+    }
+
+    @Test
+    void DocsSayAlertDetailsPageNoLongerHasReadOnlyContext() throws Exception {
+        String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
+
+        assertThat(lower).contains("`alertdetailspage` no longer accepts `readonlycontext`");
+        assertThat(lower).contains("fully removes suspicioustransaction read-only bridge mode from `alertdetailspage`");
+    }
+
+    @Test
+    void DocsSayAlertReadOnlyContextPageIsOnlySuspiciousBridgeComponent() throws Exception {
+        String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
+
+        assertThat(lower).contains("`alertreadonlycontextpage` is the only component for suspicioustransaction linked-alert read-only context");
+        assertThat(lower).contains("`alertreadonlycontextpage` depends only on a getalert-only client");
+    }
+
+    @Test
+    void DocsSayReadOnlySafeByConstructionNotConditionals() throws Exception {
+        String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
+
+        assertThat(lower).contains("makes the read-only path safe by construction");
+        assertThat(lower).contains("instead of conditionals inside the workflow page");
+    }
+
+    @Test
     void alertReadOnlyDetailBridgeDocsDoNotContainOverclaimWording() throws Exception {
         String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
 

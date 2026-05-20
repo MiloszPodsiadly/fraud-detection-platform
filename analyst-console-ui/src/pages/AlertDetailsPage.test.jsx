@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { ApiError } from "../api/apiError.js";
 import { WORKSPACE_DETAIL_RUNTIME_STATE } from "../workspace/workspaceRuntimeStates.js";
 import { AlertDetailsPage } from "./AlertDetailsPage.jsx";
 
@@ -286,220 +287,31 @@ describe("AlertDetailsPage", () => {
     expect(screen.getByText(/Alert queue summary is not mounted/)).toBeInTheDocument();
   });
 
-  it("AlertReadOnlyDetailRendersInvestigationContextTest", async () => {
-    render(readOnlyPage());
-
-    expect(await screen.findByText("Open alert")).toBeInTheDocument();
-    expect(screen.getByText(/Alert detail is investigation context/)).toBeInTheDocument();
-    expect(screen.getByText(/Not confirmed fraud/)).toBeInTheDocument();
-    expect(screen.getByText(/Not an analyst decision/)).toBeInTheDocument();
-    expect(screen.getByText(/Not a final outcome/)).toBeInTheDocument();
-    expect(screen.getByText(/Not a case lifecycle action/)).toBeInTheDocument();
+  it("AlertDetailsPageDoesNotAcceptReadOnlyContextTest", () => {
+    expect(pageSource()).not.toContain("readOnlyContext");
   });
 
-  it("AlertReadOnlyDetailDoesNotRenderMutationControlsTest", async () => {
-    render(readOnlyPage());
-
-    await screen.findByText("Open alert");
-
-    expect(screen.queryByRole("button", { name: /submit decision/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /close/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /reopen/i })).not.toBeInTheDocument();
+  it("AlertDetailsPageDoesNotAcceptSourceSuspiciousTransactionTest", () => {
+    expect(pageSource()).not.toContain("sourceSuspiciousTransaction");
   });
 
-  it("AlertReadOnlyDetailDoesNotRenderDecisionFormTest", async () => {
-    render(readOnlyPage());
-
-    await screen.findByText("Open alert");
-
-    expect(screen.queryByLabelText("Reason")).not.toBeInTheDocument();
-    expect(screen.queryByText("Decision state")).not.toBeInTheDocument();
+  it("AlertDetailsPageDoesNotContainReadOnlyAlertContextBannerTest", () => {
+    expect(pageSource()).not.toContain("ReadOnlyAlertContextBanner");
   });
 
-  it("AlertReadOnlyDetailDoesNotRenderCaseLifecycleControlsTest", async () => {
-    render(readOnlyPage());
-
-    await screen.findByText("Open alert");
-
-    expect(screen.queryByRole("button", { name: /create case/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /link case/i })).not.toBeInTheDocument();
+  it("AlertDetailsPageDoesNotContainLinkedAlertContextMismatchTest", () => {
+    const source = pageSource();
+    expect(source).not.toContain("linkedAlertContextMismatch");
+    expect(source).not.toContain("linkedAlertContextMatches");
   });
 
-  it("AlertReadOnlyDetailDoesNotRenderAssistantSummaryPanelTest", async () => {
-    const apiClient = readOnlyApiClient();
-    render(readOnlyPage({ apiClient }));
-
-    await screen.findByText("Open alert");
-
-    expect(apiClient.getAssistantSummary).not.toHaveBeenCalled();
-    expect(screen.queryByText(/assistant/i)).not.toBeInTheDocument();
-  });
-
-  it("AlertReadOnlyDetailDoesNotRenderEvidenceProofPanelTest", async () => {
-    render(readOnlyPage());
-
-    await screen.findByText("Open alert");
-
-    expect(screen.queryByText(/evidence proof/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Feature snapshot/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Score details/i)).not.toBeInTheDocument();
-  });
-
-  it("AlertReadOnlyDetailDoesNotUseFraudVerdictWordingTest", async () => {
-    render(readOnlyPage());
-
-    await screen.findByText("Open alert");
-
-    expect(screen.queryByText(/fraud verdict/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/fraud confirmed/i)).not.toBeInTheDocument();
-  });
-
-  it("AlertReadOnlyDetailDoesNotUseFinalOutcomeWordingTest", async () => {
-    render(readOnlyPage());
-
-    await screen.findByText("Open alert");
-
-    expect(screen.queryByText(/final outcome[^.]/i)).not.toBeInTheDocument();
-  });
-
-  it("AlertDetailBackendForbiddenRendersAccessDeniedTest", async () => {
-    const apiClient = {
-      getAlert: vi.fn().mockRejectedValue(new ApiError({ status: 403, message: "raw backend forbidden alert-secret" })),
-      getAssistantSummary: vi.fn()
-    };
-    render(readOnlyPage({ apiClient }));
-
-    expect(await screen.findByText("Insufficient permission")).toBeInTheDocument();
-    expect(screen.queryByText(/alert-secret/)).not.toBeInTheDocument();
-  });
-
-  it("AlertDetailBackendUnauthorizedRendersAccessDeniedTest", async () => {
-    const apiClient = {
-      getAlert: vi.fn().mockRejectedValue(new ApiError({ status: 401, message: "raw backend unauthorized alert-secret" })),
-      getAssistantSummary: vi.fn()
-    };
-    render(readOnlyPage({ apiClient }));
-
-    expect(await screen.findByText("Insufficient permission")).toBeInTheDocument();
-    expect(screen.queryByText(/alert-secret/)).not.toBeInTheDocument();
-  });
-
-  it("AlertDetailNotFoundRendersSafeNotFoundStateTest", async () => {
-    const apiClient = {
-      getAlert: vi.fn().mockRejectedValue(new ApiError({ status: 404, message: "raw backend missing alert-secret" })),
-      getAssistantSummary: vi.fn()
-    };
-    render(readOnlyPage({ apiClient }));
-
-    expect(await screen.findByText("Alert not found")).toBeInTheDocument();
-    expect(screen.queryByText(/alert-secret/)).not.toBeInTheDocument();
-  });
-
-  it("AlertDetailErrorDoesNotRenderRawBackendPayloadTest", async () => {
-    const apiClient = {
-      getAlert: vi.fn().mockRejectedValue(new ApiError({ status: 500, message: "MongoTimeoutException customer-secret alert-secret" })),
-      getAssistantSummary: vi.fn()
-    };
-    render(readOnlyPage({ apiClient }));
-
-    expect(await screen.findByText("Alert context is temporarily unavailable.")).toBeInTheDocument();
-    expect(screen.queryByText(/customer-secret/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/alert-secret/)).not.toBeInTheDocument();
-  });
-
-  it("linkedAlertContextMismatchShowsSafeState", async () => {
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    render(readOnlyPage({
-      sourceSuspiciousTransaction: suspiciousSource({ linkedAlertId: "alert-other" })
-    }));
-
-    expect(await screen.findByText("Linked alert context could not be verified.")).toBeInTheDocument();
-    expect(screen.queryByText(/alert-other/)).not.toBeInTheDocument();
-    expect(consoleError).not.toHaveBeenCalled();
-    expect(consoleWarn).not.toHaveBeenCalled();
-    consoleError.mockRestore();
-    consoleWarn.mockRestore();
-  });
-
-  it("linkedAlertContextMismatchDoesNotRenderAlertDetail", async () => {
-    render(readOnlyPage({
-      sourceSuspiciousTransaction: suspiciousSource({ transactionId: "txn-other" })
-    }));
-
-    expect(await screen.findByText("Linked alert context could not be verified.")).toBeInTheDocument();
-    expect(screen.queryByText("Open alert")).not.toBeInTheDocument();
-  });
-
-  it("linkedAlertContextMismatchDoesNotLogRawIds", async () => {
-    const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
-    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
-    render(readOnlyPage({
-      sourceSuspiciousTransaction: suspiciousSource({ customerId: "customer-secret" })
-    }));
-
-    expect(await screen.findByText("Linked alert context could not be verified.")).toBeInTheDocument();
-    expect(consoleLog).not.toHaveBeenCalled();
-    expect(consoleInfo).not.toHaveBeenCalled();
-    consoleLog.mockRestore();
-    consoleInfo.mockRestore();
-  });
-
-  it("matchingLinkedAlertContextRendersReadOnlyDetail", async () => {
-    render(readOnlyPage({ sourceSuspiciousTransaction: suspiciousSource() }));
-
-    expect(await screen.findByText("Open alert")).toBeInTheDocument();
-    expect(screen.getByText(/Read-only alert context/)).toBeInTheDocument();
-  });
-
-  it("readOnlyAlertContextUsesAlertScoreLabel", async () => {
-    render(readOnlyPage({ sourceSuspiciousTransaction: suspiciousSource() }));
-
-    expect(await screen.findByText("Open alert")).toBeInTheDocument();
-    expect(screen.getByText("Alert score")).toBeInTheDocument();
-  });
-
-  it("readOnlyAlertContextDoesNotRenderFraudScoreLabel", async () => {
-    render(readOnlyPage({ sourceSuspiciousTransaction: suspiciousSource() }));
-
-    expect(await screen.findByText("Open alert")).toBeInTheDocument();
-    expect(screen.queryByText("Fraud score")).not.toBeInTheDocument();
-  });
-
-  it("AlertReadOnlyContextHardGateDoesNotExposeWorkflowOrProofPanelsTest", async () => {
-    render(readOnlyPage({ sourceSuspiciousTransaction: suspiciousSource() }));
-
-    await screen.findByText("Open alert");
-    const allowedDisclaimerPattern = /Not confirmed fraud\. Not an analyst decision\.\s+Not a final outcome\./gi;
-    const bodyText = document.body.textContent.replace(allowedDisclaimerPattern, "").toLowerCase();
-    const restrictedLabels = [
-      "submit decision",
-      "decision state",
-      "anal" + "yst decision",
-      "anal" + "yst",
-      "decided at",
-      "ass" + "ign",
-      "cla" + "im",
-      "close",
-      "reopen",
-      "dismiss",
-      "confirm fraud",
-      "create case",
-      "link case",
-      "escalate",
-      "resolve",
-      "assistant",
-      "feature snapshot",
-      "score details",
-      "evidence proof",
-      "final outcome",
-      "case decision",
-      "legal proof"
-    ];
-
-    for (const label of restrictedLabels) {
-      expect(bodyText).not.toContain(label);
-    }
+  it("AlertDetailsPageDoesNotContainReadOnlyBridgeCopyTest", () => {
+    const source = pageSource();
+    expect(source).not.toContain("Alert detail is investigation context");
+    expect(source).not.toContain("Not confirmed fraud");
+    expect(source).not.toContain("Not an analyst decision");
+    expect(source).not.toContain("Not a final outcome");
+    expect(source).not.toContain("Not a case lifecycle action");
   });
 });
 
@@ -508,9 +320,7 @@ function page({
   apiClient,
   onDecisionSubmitted = vi.fn(),
   sessionValue = session(),
-  alertSummaryRuntimeState = WORKSPACE_DETAIL_RUNTIME_STATE.AVAILABLE,
-  readOnlyContext = false,
-  sourceSuspiciousTransaction = null
+  alertSummaryRuntimeState = WORKSPACE_DETAIL_RUNTIME_STATE.AVAILABLE
 }) {
   return (
     <AlertDetailsPage
@@ -519,36 +329,10 @@ function page({
       alertSummaryRuntimeState={alertSummaryRuntimeState}
       session={sessionValue}
       apiClient={apiClient}
-      readOnlyContext={readOnlyContext}
-      sourceSuspiciousTransaction={sourceSuspiciousTransaction}
       onBack={vi.fn()}
       onDecisionSubmitted={onDecisionSubmitted}
     />
   );
-}
-
-function readOnlyPage({
-  alertId = "alert-1",
-  apiClient = readOnlyApiClient(),
-  sessionValue = readOnlySession(),
-  sourceSuspiciousTransaction = null
-} = {}) {
-  return page({
-    alertId,
-    apiClient,
-    sessionValue,
-    alertSummaryRuntimeState: WORKSPACE_DETAIL_RUNTIME_STATE.NOT_MOUNTED,
-    readOnlyContext: true,
-    sourceSuspiciousTransaction
-  });
-}
-
-function readOnlyApiClient() {
-  return {
-    getAlert: vi.fn().mockResolvedValue(alertDetails("alert-1", "Open alert")),
-    getAssistantSummary: vi.fn(),
-    submitAnalystDecision: vi.fn()
-  };
 }
 
 function session() {
@@ -585,16 +369,6 @@ function alertDetails(alertId, alertReason) {
   };
 }
 
-function suspiciousSource(overrides = {}) {
-  return {
-    suspiciousTransactionId: "suspicious-1",
-    linkedAlertId: "alert-1",
-    transactionId: "txn-1",
-    customerId: "customer-1",
-    ...overrides
-  };
-}
-
 function summary(title) {
   return {
     recommendedNextAction: { title, rationale: "Review manually.", suggestedReviewSteps: [] },
@@ -612,4 +386,8 @@ function deferred() {
     reject = promiseReject;
   });
   return { promise, resolve, reject };
+}
+
+function pageSource() {
+  return readFileSync(resolve(process.cwd(), "src/pages/AlertDetailsPage.jsx"), "utf8");
 }

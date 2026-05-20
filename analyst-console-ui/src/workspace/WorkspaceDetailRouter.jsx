@@ -2,6 +2,7 @@ import { useEffect, useMemo } from "react";
 import { createAlertReadOnlyBridgeApiClient } from "../api/alertReadOnlyBridgeApi.js";
 import { EmptyState } from "../components/EmptyState.jsx";
 import { AlertDetailsPage } from "../pages/AlertDetailsPage.jsx";
+import { AlertReadOnlyContextPage } from "../pages/AlertReadOnlyContextPage.jsx";
 import { FraudCaseDetailsPage } from "../pages/FraudCaseDetailsPage.jsx";
 import { WORKSPACE_DETAIL_RUNTIME_STATE } from "./workspaceRuntimeStates.js";
 
@@ -34,8 +35,8 @@ export function WorkspaceDetailRouter({
   const readOnlyAlertContext = hasSuspiciousBridgeRoute
     && Boolean(sourceSuspiciousTransaction)
     && sourceLinkedAlertMatches;
-  const alertDetailApiClient = useMemo(
-    () => readOnlyAlertContext ? createAlertReadOnlyBridgeApiClient(apiClient) : apiClient,
+  const alertReadClient = useMemo(
+    () => readOnlyAlertContext ? createAlertReadOnlyBridgeApiClient(apiClient) : null,
     [apiClient, readOnlyAlertContext]
   );
 
@@ -92,7 +93,20 @@ export function WorkspaceDetailRouter({
     });
   }
 
-  if (selectedAlertId && alertDetailApiClient) {
+  if (readOnlyAlertContext) {
+    return (
+      <AlertReadOnlyContextPage
+        alertId={selectedAlertId}
+        sourceSuspiciousTransaction={sourceSuspiciousTransaction}
+        alertReadClient={alertReadClient}
+        canReadAlert={canReadAlerts}
+        workspaceLabel={workspaceLabel || workspaceLabelFor(workspacePage)}
+        onBack={closeAndRestoreFocus}
+      />
+    );
+  }
+
+  if (selectedAlertId && apiClient) {
     const effectiveAlertSummaryRuntimeState = alertSummaryRuntimeState
       || (alertQueueState ? WORKSPACE_DETAIL_RUNTIME_STATE.AVAILABLE : WORKSPACE_DETAIL_RUNTIME_STATE.NOT_MOUNTED);
     return (
@@ -101,10 +115,8 @@ export function WorkspaceDetailRouter({
         alertSummary={selectedAlertSummary}
         alertSummaryRuntimeState={effectiveAlertSummaryRuntimeState}
         session={session}
-        apiClient={alertDetailApiClient}
+        apiClient={apiClient}
         canReadAlert={canReadAlerts}
-        readOnlyContext={readOnlyAlertContext}
-        sourceSuspiciousTransaction={readOnlyAlertContext ? sourceSuspiciousTransaction : null}
         workspaceLabel={workspaceLabel || workspaceLabelFor(workspacePage)}
         onBack={closeAndRestoreFocus}
         onDecisionSubmitted={onRefreshDashboard}
