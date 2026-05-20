@@ -217,6 +217,7 @@ function SuspiciousTransactionDetailView({ readViewState, canReadAlerts, onOpenA
               <Field label="Linked alert ID" value={detail.linkedAlertId || "None"} />
               <LinkedAlertContext
                 linkedAlertId={detail.linkedAlertId}
+                suspiciousTransactionId={detail.suspiciousTransactionId}
                 canReadAlerts={canReadAlerts}
                 onOpenAlert={onOpenAlert}
               />
@@ -245,13 +246,22 @@ function SuspiciousTransactionDetailView({ readViewState, canReadAlerts, onOpenA
   );
 }
 
-function LinkedAlertContext({ linkedAlertId, canReadAlerts, onOpenAlert }) {
+function LinkedAlertContext({ linkedAlertId, suspiciousTransactionId, canReadAlerts, onOpenAlert }) {
   const normalizedLinkedAlertId = typeof linkedAlertId === "string" ? linkedAlertId.trim() : "";
+  const normalizedSuspiciousTransactionId = typeof suspiciousTransactionId === "string" ? suspiciousTransactionId.trim() : "";
   if (!normalizedLinkedAlertId) {
     return (
       <>
         <dt>Alert context</dt>
         <dd>No linked alert</dd>
+      </>
+    );
+  }
+  if (!normalizedSuspiciousTransactionId) {
+    return (
+      <>
+        <dt>Alert context</dt>
+        <dd>Linked alert context requires a source suspicious transaction.</dd>
       </>
     );
   }
@@ -270,7 +280,10 @@ function LinkedAlertContext({ linkedAlertId, canReadAlerts, onOpenAlert }) {
         <button
           className="secondaryButton compactButton"
           type="button"
-          onClick={() => onOpenAlert?.(normalizedLinkedAlertId)}
+          onClick={() => onOpenAlert?.({
+            alertId: normalizedLinkedAlertId,
+            suspiciousTransactionId: normalizedSuspiciousTransactionId
+          })}
         >
           View alert context
         </button>

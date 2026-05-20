@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { createAlertReadOnlyBridgeApiClient } from "../api/alertReadOnlyBridgeApi.js";
+import { EmptyState } from "../components/EmptyState.jsx";
 import { AlertDetailsPage } from "../pages/AlertDetailsPage.jsx";
 import { FraudCaseDetailsPage } from "../pages/FraudCaseDetailsPage.jsx";
 import { WORKSPACE_DETAIL_RUNTIME_STATE } from "./workspaceRuntimeStates.js";
@@ -15,6 +16,8 @@ export function WorkspaceDetailRouter({
   canReadFraudCases,
   workspacePage,
   workspaceLabel,
+  selectedSuspiciousTransactionId,
+  sourceSuspiciousTransaction,
   onCloseSelection,
   onRefreshDashboard
 }) {
@@ -22,7 +25,9 @@ export function WorkspaceDetailRouter({
     () => alertQueueState?.page?.content?.find((alert) => alert.alertId === selectedAlertId),
     [alertQueueState?.page?.content, selectedAlertId]
   );
-  const readOnlyAlertContext = workspacePage === "suspiciousTransactions";
+  const readOnlyAlertContext = workspacePage === "suspiciousTransactions"
+    && Boolean(selectedAlertId)
+    && Boolean(selectedSuspiciousTransactionId);
   const alertDetailApiClient = useMemo(
     () => readOnlyAlertContext ? createAlertReadOnlyBridgeApiClient(apiClient) : apiClient,
     [apiClient, readOnlyAlertContext]
@@ -49,6 +54,22 @@ export function WorkspaceDetailRouter({
     }, 0);
   }
 
+  if (workspacePage === "suspiciousTransactions" && selectedAlertId && !selectedSuspiciousTransactionId) {
+    return (
+      <section className="detailsLayout pageEnter">
+        <div className="panel detailsMain">
+          <EmptyState
+            title="Invalid linked alert context"
+            message="Linked alert context requires a source suspicious transaction."
+          />
+          <button className="secondaryButton" type="button" onClick={closeAndRestoreFocus}>
+            Back
+          </button>
+        </div>
+      </section>
+    );
+  }
+
   if (selectedAlertId && alertDetailApiClient) {
     const effectiveAlertSummaryRuntimeState = alertSummaryRuntimeState
       || (alertQueueState ? WORKSPACE_DETAIL_RUNTIME_STATE.AVAILABLE : WORKSPACE_DETAIL_RUNTIME_STATE.NOT_MOUNTED);
@@ -61,6 +82,7 @@ export function WorkspaceDetailRouter({
         apiClient={alertDetailApiClient}
         canReadAlert={canReadAlerts}
         readOnlyContext={readOnlyAlertContext}
+        sourceSuspiciousTransaction={readOnlyAlertContext ? sourceSuspiciousTransaction : null}
         workspaceLabel={workspaceLabel || workspaceLabelFor(workspacePage)}
         onBack={closeAndRestoreFocus}
         onDecisionSubmitted={onRefreshDashboard}

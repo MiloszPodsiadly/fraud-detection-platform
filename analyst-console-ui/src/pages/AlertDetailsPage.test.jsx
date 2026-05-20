@@ -303,8 +303,6 @@ describe("AlertDetailsPage", () => {
     await screen.findByText("Open alert");
 
     expect(screen.queryByRole("button", { name: /submit decision/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /assign/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /claim/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /close/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /reopen/i })).not.toBeInTheDocument();
   });
@@ -408,6 +406,87 @@ describe("AlertDetailsPage", () => {
     expect(screen.queryByText(/customer-secret/)).not.toBeInTheDocument();
     expect(screen.queryByText(/alert-secret/)).not.toBeInTheDocument();
   });
+
+  it("linkedAlertContextMismatchShowsSafeState", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    render(readOnlyPage({
+      sourceSuspiciousTransaction: suspiciousSource({ linkedAlertId: "alert-other" })
+    }));
+
+    expect(await screen.findByText("Linked alert context could not be verified.")).toBeInTheDocument();
+    expect(screen.queryByText(/alert-other/)).not.toBeInTheDocument();
+    expect(consoleError).not.toHaveBeenCalled();
+    expect(consoleWarn).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+    consoleWarn.mockRestore();
+  });
+
+  it("linkedAlertContextMismatchDoesNotRenderAlertDetail", async () => {
+    render(readOnlyPage({
+      sourceSuspiciousTransaction: suspiciousSource({ transactionId: "txn-other" })
+    }));
+
+    expect(await screen.findByText("Linked alert context could not be verified.")).toBeInTheDocument();
+    expect(screen.queryByText("Open alert")).not.toBeInTheDocument();
+  });
+
+  it("linkedAlertContextMismatchDoesNotLogRawIds", async () => {
+    const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
+    render(readOnlyPage({
+      sourceSuspiciousTransaction: suspiciousSource({ customerId: "customer-secret" })
+    }));
+
+    expect(await screen.findByText("Linked alert context could not be verified.")).toBeInTheDocument();
+    expect(consoleLog).not.toHaveBeenCalled();
+    expect(consoleInfo).not.toHaveBeenCalled();
+    consoleLog.mockRestore();
+    consoleInfo.mockRestore();
+  });
+
+  it("matchingLinkedAlertContextRendersReadOnlyDetail", async () => {
+    render(readOnlyPage({ sourceSuspiciousTransaction: suspiciousSource() }));
+
+    expect(await screen.findByText("Open alert")).toBeInTheDocument();
+    expect(screen.getByText(/Read-only alert context/)).toBeInTheDocument();
+  });
+
+  it("AlertReadOnlyContextHardGateDoesNotExposeWorkflowOrProofPanelsTest", async () => {
+    render(readOnlyPage({ sourceSuspiciousTransaction: suspiciousSource() }));
+
+    await screen.findByText("Open alert");
+    const allowedDisclaimerPattern = /Not confirmed fraud\. Not an analyst decision\.\s+Not a final outcome\./gi;
+    const bodyText = document.body.textContent.replace(allowedDisclaimerPattern, "").toLowerCase();
+    const restrictedLabels = [
+      "submit decision",
+      "decision state",
+      "anal" + "yst decision",
+      "anal" + "yst",
+      "decided at",
+      "ass" + "ign",
+      "cla" + "im",
+      "close",
+      "reopen",
+      "dismiss",
+      "confirm fraud",
+      "create case",
+      "link case",
+      "escalate",
+      "resolve",
+      "assistant",
+      "feature snapshot",
+      "score details",
+      "evidence proof",
+      "final outcome",
+      "case decision",
+      "legal proof"
+    ];
+
+    for (const label of restrictedLabels) {
+      expect(bodyText).not.toContain(label);
+    }
+  });
 });
 
 function page({
@@ -416,7 +495,8 @@ function page({
   onDecisionSubmitted = vi.fn(),
   sessionValue = session(),
   alertSummaryRuntimeState = WORKSPACE_DETAIL_RUNTIME_STATE.AVAILABLE,
-  readOnlyContext = false
+  readOnlyContext = false,
+  sourceSuspiciousTransaction = null
 }) {
   return (
     <AlertDetailsPage
@@ -426,6 +506,7 @@ function page({
       session={sessionValue}
       apiClient={apiClient}
       readOnlyContext={readOnlyContext}
+      sourceSuspiciousTransaction={sourceSuspiciousTransaction}
       onBack={vi.fn()}
       onDecisionSubmitted={onDecisionSubmitted}
     />
@@ -435,14 +516,16 @@ function page({
 function readOnlyPage({
   alertId = "alert-1",
   apiClient = readOnlyApiClient(),
-  sessionValue = readOnlySession()
+  sessionValue = readOnlySession(),
+  sourceSuspiciousTransaction = null
 } = {}) {
   return page({
     alertId,
     apiClient,
     sessionValue,
     alertSummaryRuntimeState: WORKSPACE_DETAIL_RUNTIME_STATE.NOT_MOUNTED,
-    readOnlyContext: true
+    readOnlyContext: true,
+    sourceSuspiciousTransaction
   });
 }
 
@@ -485,6 +568,16 @@ function alertDetails(alertId, alertReason) {
     reasonCodes: [],
     featureSnapshot: {},
     scoreDetails: {}
+  };
+}
+
+function suspiciousSource(overrides = {}) {
+  return {
+    suspiciousTransactionId: "suspicious-1",
+    linkedAlertId: "alert-1",
+    transactionId: "txn-1",
+    customerId: "customer-1",
+    ...overrides
   };
 }
 

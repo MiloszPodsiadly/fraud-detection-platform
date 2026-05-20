@@ -22,6 +22,7 @@ export function AlertDetailsPage({
   apiClient,
   canReadAlert = true,
   readOnlyContext = false,
+  sourceSuspiciousTransaction = null,
   workspaceLabel = "Fraud Transaction",
   onBack,
   onDecisionSubmitted
@@ -186,6 +187,10 @@ export function AlertDetailsPage({
     readOnlyContext
   });
   const decisionDisabled = isLoading || detailState === "stale" || Boolean(error && !alert);
+  const linkedAlertContextMismatch = readOnlyContext
+    && alert
+    && sourceSuspiciousTransaction
+    && !linkedAlertContextMatches(alert, sourceSuspiciousTransaction);
 
   return (
     <section className="detailsLayout pageEnter">
@@ -225,7 +230,10 @@ export function AlertDetailsPage({
         {!isLoading && canReadAlert === true && !error && !alert && detailState !== "not-found" && (
           <EmptyState title="Alert not found" message="The selected alert is no longer available." />
         )}
-        {!isLoading && canReadAlert === true && alert && (
+        {!isLoading && canReadAlert === true && linkedAlertContextMismatch && (
+          <ErrorState message="Linked alert context could not be verified." />
+        )}
+        {!isLoading && canReadAlert === true && alert && !linkedAlertContextMismatch && (
           <>
             <DetailHeader
               title={alert.alertReason}
@@ -365,6 +373,27 @@ function alertActionState({ canSubmitDecision, detailState, canReadAlert, hasAle
 function safeDomId(value) {
   const safe = String(value || "unknown").replace(/[^A-Za-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
   return safe || "unknown";
+}
+
+function linkedAlertContextMatches(alert, suspiciousTransaction) {
+  return stringMatch(alert.alertId, suspiciousTransaction.linkedAlertId)
+    && optionalStringMatch(alert.transactionId, suspiciousTransaction.transactionId)
+    && optionalStringMatch(alert.customerId, suspiciousTransaction.customerId)
+    && optionalStringMatch(alert.scoreDecisionId, suspiciousTransaction.scoreDecisionId);
+}
+
+function stringMatch(left, right) {
+  return normalizeComparable(left) !== "" && normalizeComparable(left) === normalizeComparable(right);
+}
+
+function optionalStringMatch(left, right) {
+  const normalizedLeft = normalizeComparable(left);
+  const normalizedRight = normalizeComparable(right);
+  return normalizedLeft === "" || normalizedRight === "" || normalizedLeft === normalizedRight;
+}
+
+function normalizeComparable(value) {
+  return value === null || value === undefined ? "" : String(value).trim();
 }
 
 function staleAlertMessage(error) {

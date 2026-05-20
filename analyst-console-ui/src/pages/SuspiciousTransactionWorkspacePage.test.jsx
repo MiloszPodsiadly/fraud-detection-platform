@@ -105,7 +105,7 @@ describe("SuspiciousTransactionWorkspacePage", () => {
     expect(screen.getByText("Reference view")).toBeInTheDocument();
   });
 
-  it("SuspiciousTransactionLinkedAlertRendersViewContextWhenAllowedTest", () => {
+  it("viewAlertContextPassesAlertIdAndSuspiciousTransactionId", () => {
     const onOpenAlert = vi.fn();
     render(
       <SuspiciousTransactionWorkspacePage
@@ -120,7 +120,28 @@ describe("SuspiciousTransactionWorkspacePage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "View alert context" }));
 
-    expect(onOpenAlert).toHaveBeenCalledWith("alert-reference-1");
+    expect(onOpenAlert).toHaveBeenCalledWith({
+      alertId: "alert-reference-1",
+      suspiciousTransactionId: "suspicious-1"
+    });
+  });
+
+  it("missingSuspiciousTransactionIdDoesNotRenderViewAlertContext", () => {
+    render(
+      <SuspiciousTransactionWorkspacePage
+        readViewState={readViewState({
+          detail: suspiciousTransaction({ suspiciousTransactionId: "", linkedAlertId: "alert-reference-1" })
+        })}
+        canReadSuspiciousTransactions
+        canReadAlerts
+        selectedSuspiciousTransactionId="suspicious-1"
+        onOpenAlert={vi.fn()}
+        onCloseSuspiciousTransaction={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Linked alert context requires a source suspicious transaction.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "View alert context" })).not.toBeInTheDocument();
   });
 
   it("SuspiciousTransactionLinkedAlertHiddenWhenMissingTest", () => {
@@ -139,7 +160,7 @@ describe("SuspiciousTransactionWorkspacePage", () => {
     expect(screen.queryByRole("button", { name: "View alert context" })).not.toBeInTheDocument();
   });
 
-  it("SuspiciousTransactionLinkedAlertNoActionWithoutAlertReadAuthorityTest", () => {
+  it("linkedAlertIdStillRequiresAlertReadAuthority", () => {
     render(
       <SuspiciousTransactionWorkspacePage
         readViewState={readViewState({ detail: suspiciousTransaction({ linkedAlertId: "alert-reference-1" }) })}
@@ -155,7 +176,7 @@ describe("SuspiciousTransactionWorkspacePage", () => {
     expect(screen.queryByRole("button", { name: "View alert context" })).not.toBeInTheDocument();
   });
 
-  it("SuspiciousTransactionReadAuthorityAloneDoesNotShowAlertLinkTest", () => {
+  it("missingAlertReadAuthorityDoesNotRenderViewAlertContext", () => {
     render(
       <SuspiciousTransactionWorkspacePage
         readViewState={readViewState({ detail: suspiciousTransaction({ linkedAlertId: "alert-reference-1" }) })}

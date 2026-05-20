@@ -86,6 +86,7 @@ describe("WorkspaceDetailRouter", () => {
         canReadAlerts={false}
         canReadFraudCases={false}
         workspacePage="suspiciousTransactions"
+        selectedSuspiciousTransactionId="suspicious-1"
         onCloseSelection={vi.fn()}
         onRefreshDashboard={vi.fn()}
       />
@@ -106,6 +107,7 @@ describe("WorkspaceDetailRouter", () => {
         canReadAlerts={false}
         canReadFraudCases={false}
         workspacePage="suspiciousTransactions"
+        selectedSuspiciousTransactionId="suspicious-1"
         onCloseSelection={vi.fn()}
         onRefreshDashboard={vi.fn()}
       />
@@ -125,6 +127,89 @@ describe("WorkspaceDetailRouter", () => {
         canReadAlerts
         canReadFraudCases={false}
         workspacePage="suspiciousTransactions"
+        selectedSuspiciousTransactionId="suspicious-1"
+        onCloseSelection={vi.fn()}
+        onRefreshDashboard={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("read-only true")).toBeInTheDocument();
+    expect(screen.getByText("api methods getAlert")).toBeInTheDocument();
+  });
+
+  it("alertIdOnlySuspiciousWorkspaceRouteShowsInvalidBridgeContext", () => {
+    render(
+      <WorkspaceDetailRouter
+        selectedAlertId="alert-1"
+        selectedFraudCaseId={null}
+        alertQueueState={undefined}
+        session={{ userId: "analyst-1", authorities: ["alert:read", "suspicious-transaction:read"] }}
+        apiClient={{ getAlert: vi.fn(), submitAnalystDecision: vi.fn(), getAssistantSummary: vi.fn() }}
+        canReadAlerts
+        canReadFraudCases={false}
+        workspacePage="suspiciousTransactions"
+        onCloseSelection={vi.fn()}
+        onRefreshDashboard={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Invalid linked alert context")).toBeInTheDocument();
+    expect(screen.getByText("Linked alert context requires a source suspicious transaction.")).toBeInTheDocument();
+  });
+
+  it("alertIdOnlySuspiciousWorkspaceRouteDoesNotExposeAlertDetail", () => {
+    render(
+      <WorkspaceDetailRouter
+        selectedAlertId="alert-1"
+        selectedFraudCaseId={null}
+        alertQueueState={undefined}
+        session={{ userId: "analyst-1", authorities: ["alert:read", "suspicious-transaction:read"] }}
+        apiClient={{ getAlert: vi.fn(), submitAnalystDecision: vi.fn(), getAssistantSummary: vi.fn() }}
+        canReadAlerts
+        canReadFraudCases={false}
+        workspacePage="suspiciousTransactions"
+        onCloseSelection={vi.fn()}
+        onRefreshDashboard={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByRole("heading", { name: "Alert detail true" })).not.toBeInTheDocument();
+  });
+
+  it("suspiciousWorkspaceAlertIdWithoutSuspiciousTransactionIdDoesNotCallGetAlertAsBridge", () => {
+    const getAlert = vi.fn();
+    render(
+      <WorkspaceDetailRouter
+        selectedAlertId="alert-1"
+        selectedFraudCaseId={null}
+        alertQueueState={undefined}
+        session={{ userId: "analyst-1", authorities: ["alert:read", "suspicious-transaction:read"] }}
+        apiClient={{ getAlert, submitAnalystDecision: vi.fn(), getAssistantSummary: vi.fn() }}
+        canReadAlerts
+        canReadFraudCases={false}
+        workspacePage="suspiciousTransactions"
+        onCloseSelection={vi.fn()}
+        onRefreshDashboard={vi.fn()}
+      />
+    );
+
+    expect(getAlert).not.toHaveBeenCalled();
+    expect(screen.getByText("Invalid linked alert context")).toBeInTheDocument();
+  });
+
+  it("suspiciousTransactionAndAlertIdRouteUsesReadOnlyBridgeClient", () => {
+    render(
+      <WorkspaceDetailRouter
+        selectedAlertId="alert-1"
+        selectedFraudCaseId={null}
+        alertQueueState={undefined}
+        session={{ userId: "analyst-1", authorities: ["alert:read", "suspicious-transaction:read"] }}
+        apiClient={{ getAlert: vi.fn(), submitAnalystDecision: vi.fn(), getAssistantSummary: vi.fn() }}
+        canReadAlerts
+        canReadFraudCases={false}
+        workspacePage="suspiciousTransactions"
+        selectedSuspiciousTransactionId="suspicious-1"
+        sourceSuspiciousTransaction={{ suspiciousTransactionId: "suspicious-1", linkedAlertId: "alert-1" }}
         onCloseSelection={vi.fn()}
         onRefreshDashboard={vi.fn()}
       />

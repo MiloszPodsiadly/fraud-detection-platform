@@ -38,6 +38,9 @@ export function SuspiciousTransactionWorkspaceRuntime({
         onCloseSuspiciousTransaction={onCloseSuspiciousTransaction}
       />
     ),
+    detailRouterState: {
+      sourceSuspiciousTransaction: selectedSuspiciousTransactionId ? readViewState.detail : null
+    },
     error: selectedSuspiciousTransactionId ? readViewState.detailError : readViewState.listError,
     refreshWorkspace
   }));

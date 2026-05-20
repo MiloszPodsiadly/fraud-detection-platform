@@ -97,6 +97,8 @@ export function WorkspaceDashboardShell({
               canReadFraudCases={canReadFraudCases}
               workspacePage={activeRoute.key}
               workspaceLabel={activeRoute.label}
+              selectedSuspiciousTransactionId={selectedSuspiciousTransactionId}
+              sourceSuspiciousTransaction={detailRouterState.sourceSuspiciousTransaction}
               onCloseSelection={closeSelection}
               onRefreshDashboard={refreshDashboardWithNotice}
             />
