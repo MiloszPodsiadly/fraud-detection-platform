@@ -55,10 +55,13 @@ Backend alert-read authorization remains authoritative.
 
 ## Dedicated Read-Only Component
 
-The SuspiciousTransaction bridge no longer uses `AlertDetailsPage` `readOnlyContext`.
-`AlertDetailsPage` remains the workflow-capable alert detail page.
-`AlertReadOnlyContextPage` is the dedicated read-only alert context page for the SuspiciousTransaction bridge.
+FDP-68 fully removes SuspiciousTransaction read-only bridge mode from `AlertDetailsPage`.
+`AlertDetailsPage` no longer accepts `readOnlyContext` for the SuspiciousTransaction bridge.
+`AlertDetailsPage` remains the workflow-capable normal alert detail page.
+`AlertReadOnlyContextPage` is the dedicated read-only alert context page and the only component for SuspiciousTransaction linked-alert read-only context.
+`AlertReadOnlyContextPage` is the only component for SuspiciousTransaction linked-alert read-only context.
 `AlertReadOnlyContextPage` depends only on a getAlert-only client.
+This removes the boolean-mode smell and makes the read-only path safe by construction instead of conditionals inside the workflow page.
 The existing GET `/api/v1/alerts/{alertId}` response remains the read source.
 
 This component boundary is scope control, not a frontend security boundary.
@@ -71,6 +74,7 @@ The bridge does not create or update cases.
 The bridge does not submit analyst decisions.
 The bridge does not assign, claim, close, reopen, dismiss, escalate, or confirm alerts.
 The bridge does not link cases.
+The bridge does not add workflow, decision, case lifecycle, assistant summary, or evidence proof panels.
 The bridge does not expose assistant summary.
 The bridge does not expose an evidence proof panel.
 The bridge does not expose full evidence snapshots or raw payload expansion.

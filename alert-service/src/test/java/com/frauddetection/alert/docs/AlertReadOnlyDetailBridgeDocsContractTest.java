@@ -106,8 +106,9 @@ class AlertReadOnlyDetailBridgeDocsContractTest {
     void DocsSaySuspiciousBridgeDoesNotUseAlertDetailsPageTest() throws Exception {
         String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
 
-        assertThat(lower).contains("suspicioustransaction bridge no longer uses `alertdetailspage` `readonlycontext`");
-        assertThat(lower).contains("`alertdetailspage` remains the workflow-capable alert detail page");
+        assertThat(lower).contains("fdp-68 fully removes suspicioustransaction read-only bridge mode from `alertdetailspage`");
+        assertThat(lower).contains("`alertdetailspage` no longer accepts `readonlycontext` for the suspicioustransaction bridge");
+        assertThat(lower).contains("`alertdetailspage` remains the workflow-capable normal alert detail page");
     }
 
     @Test
@@ -142,6 +143,30 @@ class AlertReadOnlyDetailBridgeDocsContractTest {
 
         assertThat(lower).contains("component boundary is scope control, not a frontend security boundary");
         assertThat(lower).contains("backend `alert_read` authorization remains authoritative");
+    }
+
+    @Test
+    void DocsSayAlertDetailsPageNoLongerHasReadOnlyContext() throws Exception {
+        String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
+
+        assertThat(lower).contains("`alertdetailspage` no longer accepts `readonlycontext`");
+        assertThat(lower).contains("fully removes suspicioustransaction read-only bridge mode from `alertdetailspage`");
+    }
+
+    @Test
+    void DocsSayAlertReadOnlyContextPageIsOnlySuspiciousBridgeComponent() throws Exception {
+        String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
+
+        assertThat(lower).contains("`alertreadonlycontextpage` is the only component for suspicioustransaction linked-alert read-only context");
+        assertThat(lower).contains("`alertreadonlycontextpage` depends only on a getalert-only client");
+    }
+
+    @Test
+    void DocsSayReadOnlySafeByConstructionNotConditionals() throws Exception {
+        String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
+
+        assertThat(lower).contains("makes the read-only path safe by construction");
+        assertThat(lower).contains("instead of conditionals inside the workflow page");
     }
 
     @Test
