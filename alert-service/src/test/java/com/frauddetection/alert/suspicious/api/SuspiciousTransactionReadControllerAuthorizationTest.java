@@ -99,7 +99,11 @@ class SuspiciousTransactionReadControllerAuthorizationTest {
     @Test
     void suspiciousTransactionReadAuthorityAllowsListSummaryAndSingleRead() throws Exception {
         when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(List.of(), 20, false, null));
-        when(service.summary()).thenReturn(new SuspiciousTransactionSummaryResponse(98L));
+        when(service.summary()).thenReturn(SuspiciousTransactionSummaryResponse.fresh(
+                98L,
+                java.time.Instant.parse("2026-05-19T10:00:00Z"),
+                java.time.Instant.parse("2026-05-19T10:00:30Z")
+        ));
         when(service.findById("suspicious-1")).thenReturn(Optional.of(
                 SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT"))
         ));

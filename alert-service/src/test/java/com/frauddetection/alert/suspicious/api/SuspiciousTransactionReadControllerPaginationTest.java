@@ -55,18 +55,21 @@ class SuspiciousTransactionReadControllerPaginationTest {
 
     @Test
     void summaryReturnsAggregateCountOutsideCursorSliceResponse() throws Exception {
-        when(service.summary()).thenReturn(new SuspiciousTransactionSummaryResponse(98L));
+        when(service.summary()).thenReturn(summaryResponse(98L));
 
         mockMvc.perform(get("/internal/suspicious-transactions/summary"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalSuspiciousTransactions").value(98))
+                .andExpect(jsonPath("$.freshness").value("FRESH"))
+                .andExpect(jsonPath("$.cachedAt").exists())
+                .andExpect(jsonPath("$.expiresAt").exists())
                 .andExpect(jsonPath("$.content").doesNotExist())
                 .andExpect(jsonPath("$.nextCursor").doesNotExist());
     }
 
     @Test
     void summaryEndpointReturnsOnlyAggregateCounter() throws Exception {
-        when(service.summary()).thenReturn(new SuspiciousTransactionSummaryResponse(98L));
+        when(service.summary()).thenReturn(summaryResponse(98L));
 
         mockMvc.perform(get("/internal/suspicious-transactions/summary"))
                 .andExpect(status().isOk())
@@ -143,7 +146,7 @@ class SuspiciousTransactionReadControllerPaginationTest {
 
     @Test
     void summaryEndpointDoesNotExposeFraudVerdictFields() throws Exception {
-        when(service.summary()).thenReturn(new SuspiciousTransactionSummaryResponse(98L));
+        when(service.summary()).thenReturn(summaryResponse(98L));
 
         mockMvc.perform(get("/internal/suspicious-transactions/summary"))
                 .andExpect(status().isOk())
@@ -189,5 +192,10 @@ class SuspiciousTransactionReadControllerPaginationTest {
     private SuspiciousTransactionQueryTelemetrySink testTelemetrySink() {
         return snapshot -> {
         };
+    }
+
+    private SuspiciousTransactionSummaryResponse summaryResponse(long total) {
+        java.time.Instant now = java.time.Instant.parse("2026-05-19T10:00:00Z");
+        return SuspiciousTransactionSummaryResponse.fresh(total, now, now.plusSeconds(30));
     }
 }

@@ -21,9 +21,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doThrow;
 
 class SuspiciousTransactionReadAuditTest {
 
@@ -93,8 +95,8 @@ class SuspiciousTransactionReadAuditTest {
     }
 
     @Test
-    void suspiciousTransactionSummaryAuditedExactlyOnceAsAggregateRead() {
-        when(service.summary()).thenReturn(new SuspiciousTransactionSummaryResponse(98L));
+    void summaryEndpointIsAuditedExactlyOnceAsAggregateRead() {
+        when(service.summary()).thenReturn(summaryResponse(98L));
 
         controller.summary(new MockHttpServletRequest());
 
@@ -108,18 +110,52 @@ class SuspiciousTransactionReadAuditTest {
     }
 
     @Test
-    void summaryEndpointIsAuditedAsAggregateRead() {
-        when(service.summary()).thenReturn(new SuspiciousTransactionSummaryResponse(98L));
+    void summarySuccessRecordsSummaryMetric() {
+        when(service.summary()).thenReturn(summaryResponse(98L));
 
         controller.summary(new MockHttpServletRequest());
 
-        verify(auditService, times(1)).audit(
-                eq(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_SUMMARY),
-                eq(ReadAccessResourceType.SUSPICIOUS_TRANSACTION),
-                eq(null),
-                eq(1),
-                org.mockito.ArgumentMatchers.any()
-        );
+        verify(metrics).recordSuspiciousTransactionSummaryRead("success", "FRESH");
+    }
+
+    @Test
+    void summaryUnavailableRecordsSummaryMetric() {
+        when(service.summary()).thenReturn(SuspiciousTransactionSummaryResponse.unavailable());
+
+        controller.summary(new MockHttpServletRequest());
+
+        verify(metrics).recordSuspiciousTransactionSummaryRead("unavailable", "UNAVAILABLE");
+    }
+
+    @Test
+    void summaryErrorRecordsSummaryMetric() {
+        when(service.summary()).thenThrow(new IllegalStateException("mongo unavailable"));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.summary(new MockHttpServletRequest()))
+                .isInstanceOf(IllegalStateException.class);
+
+        verify(metrics).recordSuspiciousTransactionSummaryRead("error", "UNAVAILABLE");
+    }
+
+    @Test
+    void summaryErrorDoesNotRecordSearchMetric() {
+        when(service.summary()).thenThrow(new IllegalStateException("mongo unavailable"));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.summary(new MockHttpServletRequest()))
+                .isInstanceOf(IllegalStateException.class);
+
+        verify(metrics, never()).recordSuspiciousTransactionApiSearch(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void summaryMetricFailureDoesNotBreakResponse() {
+        when(service.summary()).thenReturn(summaryResponse(98L));
+        doThrow(new IllegalStateException("registry unavailable"))
+                .when(metrics).recordSuspiciousTransactionSummaryRead("success", "FRESH");
+
+        SuspiciousTransactionSummaryResponse response = controller.summary(new MockHttpServletRequest());
+
+        assertThat(response.totalSuspiciousTransactions()).isEqualTo(98L);
     }
 
     @Test
@@ -233,5 +269,10 @@ class SuspiciousTransactionReadAuditTest {
     private SuspiciousTransactionQueryTelemetrySink testTelemetrySink() {
         return snapshot -> {
         };
+    }
+
+    private SuspiciousTransactionSummaryResponse summaryResponse(long total) {
+        java.time.Instant now = java.time.Instant.parse("2026-05-19T10:00:00Z");
+        return SuspiciousTransactionSummaryResponse.fresh(total, now, now.plusSeconds(30));
     }
 }

@@ -19,15 +19,18 @@ public class SuspiciousTransactionReadService {
     private final SuspiciousTransactionRepository repository;
     private final MongoTemplate mongoTemplate;
     private final SuspiciousTransactionCursorCodec cursorCodec;
+    private final SuspiciousTransactionSummaryService summaryService;
 
     public SuspiciousTransactionReadService(
             SuspiciousTransactionRepository repository,
             MongoTemplate mongoTemplate,
-            SuspiciousTransactionCursorCodec cursorCodec
+            SuspiciousTransactionCursorCodec cursorCodec,
+            SuspiciousTransactionSummaryService summaryService
     ) {
         this.repository = Objects.requireNonNull(repository, "repository is required");
         this.mongoTemplate = Objects.requireNonNull(mongoTemplate, "mongoTemplate is required");
         this.cursorCodec = Objects.requireNonNull(cursorCodec, "cursorCodec is required");
+        this.summaryService = Objects.requireNonNull(summaryService, "summaryService is required");
     }
 
     public Optional<SuspiciousTransactionResponse> findById(String suspiciousTransactionId) {
@@ -39,7 +42,7 @@ public class SuspiciousTransactionReadService {
     }
 
     public SuspiciousTransactionSummaryResponse summary() {
-        return new SuspiciousTransactionSummaryResponse(repository.count());
+        return summaryService.summary();
     }
 
     public SuspiciousTransactionSliceResponse search(SuspiciousTransactionSearchQuery query) {

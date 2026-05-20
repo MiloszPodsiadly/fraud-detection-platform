@@ -78,7 +78,14 @@ The only forward pagination affordance is cursor-based `Load next` when the API 
 ## Summary Counter Semantics
 
 GET `/internal/suspicious-transactions/summary` is read-only, requires `SUSPICIOUS_TRANSACTION_READ`, and is audited as
-an aggregate read. It returns only `totalSuspiciousTransactions` as a workspace-level aggregate counter.
+an aggregate read. It returns `totalSuspiciousTransactions` as the workspace-level aggregate counter plus cache freshness
+metadata (`freshness`, `cachedAt`, and `expiresAt`).
+
+The summary total is cached or materialized for the workspace counter and uses a configurable TTL. The default runtime
+TTL is 30 seconds. A fresh cached value is reused within the TTL so repeated workspace refreshes do not trigger a global
+collection count. If a refresh fails after a cached value exists, the endpoint returns the stale cached value with
+`freshness=STALE`. If no cached value exists and the refresh fails, the endpoint returns an unavailable summary with
+`freshness=UNAVAILABLE` and a zero total for safe UI rendering. The summary endpoint must not execute a global collection count on every request.
 
 The summary endpoint is aggregate only. It is not pagination total metadata, not page count, not total pages, not a final outcome,
 not a confirmed fraud count, not analyst workload, and not a fraud-case count. It must not be used for offset navigation,

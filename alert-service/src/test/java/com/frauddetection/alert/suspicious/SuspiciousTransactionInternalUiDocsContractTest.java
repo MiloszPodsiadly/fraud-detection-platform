@@ -54,8 +54,36 @@ class SuspiciousTransactionInternalUiDocsContractTest {
                 .contains("requires `SUSPICIOUS_TRANSACTION_READ`")
                 .contains("audited as")
                 .contains("aggregate read")
-                .contains("returns only `totalSuspiciousTransactions`")
+                .contains("returns `totalSuspiciousTransactions`")
                 .contains("workspace-level aggregate counter");
+    }
+
+    @Test
+    void docsMentionSummaryIsCachedOrMaterialized() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs)
+                .contains("cached or materialized")
+                .contains("fresh cached value");
+    }
+
+    @Test
+    void docsMentionSummaryTtl() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs)
+                .contains("configurable TTL")
+                .contains("30 seconds");
+    }
+
+    @Test
+    void docsMentionSummaryFreshness() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs)
+                .contains("freshness")
+                .contains("freshness=STALE")
+                .contains("freshness=UNAVAILABLE");
     }
 
     @Test
@@ -80,12 +108,26 @@ class SuspiciousTransactionInternalUiDocsContractTest {
     }
 
     @Test
+    void docsSaySummaryIsNotFraudCount() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs).contains("not a confirmed fraud count");
+    }
+
+    @Test
     void docsSaySummaryIsNotAnalystWorkload() throws IOException {
         String docs = Files.readString(DOCS);
 
         assertThat(docs)
                 .contains("not analyst workload")
                 .contains("not a fraud-case count");
+    }
+
+    @Test
+    void docsSaySummaryDoesNotLiveCountEveryRequest() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs).contains("The summary endpoint must not execute a global collection count on every request.");
     }
 
     @Test

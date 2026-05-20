@@ -106,9 +106,10 @@ public class SuspiciousTransactionReadController {
                     1,
                     request
             );
+            recordSummaryMetric(response);
             return response;
         } catch (RuntimeException exception) {
-            metrics.recordSuspiciousTransactionApiSearch("error", "ANY", "ANY");
+            recordSummaryMetric("error", SuspiciousTransactionSummaryFreshness.UNAVAILABLE);
             throw exception;
         }
     }
@@ -185,6 +186,28 @@ public class SuspiciousTransactionReadController {
                     snapshot == null ? "search" : snapshot.endpoint(),
                     snapshot == null ? "error" : snapshot.outcome(),
                     snapshot == null ? "unknown" : snapshot.queryShape()
+            );
+        }
+    }
+
+    private void recordSummaryMetric(SuspiciousTransactionSummaryResponse response) {
+        SuspiciousTransactionSummaryFreshness freshness = response.freshness();
+        String outcome = switch (freshness) {
+            case FRESH -> "success";
+            case STALE -> "stale";
+            case UNAVAILABLE -> "unavailable";
+        };
+        recordSummaryMetric(outcome, freshness);
+    }
+
+    private void recordSummaryMetric(String outcome, SuspiciousTransactionSummaryFreshness freshness) {
+        try {
+            metrics.recordSuspiciousTransactionSummaryRead(outcome, freshness == null ? "unavailable" : freshness.name());
+        } catch (RuntimeException exception) {
+            log.warn(
+                    "SuspiciousTransaction summary metric recording failed outcome={} freshness={}",
+                    outcome,
+                    freshness == null ? "UNAVAILABLE" : freshness.name()
             );
         }
     }

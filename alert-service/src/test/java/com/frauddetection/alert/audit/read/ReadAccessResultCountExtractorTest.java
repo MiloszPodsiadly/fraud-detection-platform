@@ -25,7 +25,11 @@ class ReadAccessResultCountExtractorTest {
     @Test
     void shouldCountSuspiciousTransactionSummaryAsOneAggregateReadResponse() {
         int resultCount = extractor.resultCount(
-                new SuspiciousTransactionSummaryResponse(98L),
+                SuspiciousTransactionSummaryResponse.fresh(
+                        98L,
+                        Instant.parse("2026-05-19T10:00:00Z"),
+                        Instant.parse("2026-05-19T10:00:30Z")
+                ),
                 ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_SUMMARY
         );
 
