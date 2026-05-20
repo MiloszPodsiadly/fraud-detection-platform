@@ -1,6 +1,7 @@
 package com.frauddetection.alert.suspicious.api;
 
 import com.frauddetection.alert.suspicious.SuspiciousTransactionRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -16,6 +17,7 @@ public class SuspiciousTransactionSummaryService {
     private final Clock clock;
     private volatile CachedSummary cachedSummary;
 
+    @Autowired
     public SuspiciousTransactionSummaryService(
             SuspiciousTransactionRepository repository,
             SuspiciousTransactionSummaryProperties properties
