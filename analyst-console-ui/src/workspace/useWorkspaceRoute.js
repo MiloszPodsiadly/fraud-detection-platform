@@ -29,10 +29,19 @@ export function useWorkspaceRoute() {
     setRoute(readWorkspaceRoute());
   }, []);
 
-  const openAlert = useCallback((alertId) => {
+  const openAlert = useCallback((alertRoute) => {
+    const alertId = typeof alertRoute === "object" && alertRoute !== null ? alertRoute.alertId : alertRoute;
+    const suspiciousTransactionId = typeof alertRoute === "object" && alertRoute !== null
+      ? alertRoute.suspiciousTransactionId
+      : null;
     const params = new URLSearchParams(window.location.search);
     params.delete("fraudCaseId");
-    params.delete("suspiciousTransactionId");
+    if (suspiciousTransactionId) {
+      params.set("workspace", "suspicious-transactions");
+      params.set("suspiciousTransactionId", suspiciousTransactionId);
+    } else {
+      params.delete("suspiciousTransactionId");
+    }
     params.set("alertId", alertId);
     pushRoute(params);
     setRoute(readWorkspaceRoute());

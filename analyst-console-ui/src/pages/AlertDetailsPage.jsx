@@ -21,6 +21,8 @@ export function AlertDetailsPage({
   session,
   apiClient,
   canReadAlert = true,
+  readOnlyContext = false,
+  sourceSuspiciousTransaction = null,
   workspaceLabel = "Fraud Transaction",
   onBack,
   onDecisionSubmitted
@@ -40,7 +42,7 @@ export function AlertDetailsPage({
   const currentContextRef = useRef({ alertId, apiClient });
   const currentAlertRef = useRef(null);
   const headingRef = useRef(null);
-  const canSubmitDecision = hasAuthority(session, AUTHORITIES.ALERT_DECISION_SUBMIT);
+  const canSubmitDecision = !readOnlyContext && hasAuthority(session, AUTHORITIES.ALERT_DECISION_SUBMIT);
   const detailHeadingId = `detail-heading-alert-${safeDomId(alertId)}`;
   const normalizedAlertSummaryRuntimeState = normalizeWorkspaceDetailRuntimeState(alertSummaryRuntimeState);
 
@@ -130,11 +132,13 @@ export function AlertDetailsPage({
       const loadedAt = new Date().toISOString();
       setLastSuccessfulLoadAt(loadedAt);
       setDetailState("loaded");
-      loadAssistantSummary({
-        alertId: currentAlertId,
-        apiClient: currentApiClient,
-        alertRequestSeq: requestSeq
-      });
+      if (!readOnlyContext) {
+        loadAssistantSummary({
+          alertId: currentAlertId,
+          apiClient: currentApiClient,
+          alertRequestSeq: requestSeq
+        });
+      }
       return { status: "loaded" };
     } catch (apiError) {
       if (alertRequestSeqRef.current !== requestSeq) {
@@ -143,8 +147,9 @@ export function AlertDetailsPage({
       if (isAbortError(apiError)) {
         return { status: "aborted" };
       }
-      setError(apiError.message);
-      setDetailState(currentAlertRef.current ? "stale" : "unavailable");
+      const safeState = readOnlyDetailFailureState(apiError, currentAlertRef.current, readOnlyContext);
+      setError(safeState.message);
+      setDetailState(safeState.state);
       return { status: "failed" };
     } finally {
       if (alertRequestSeqRef.current === requestSeq) {
@@ -154,7 +159,7 @@ export function AlertDetailsPage({
         }
       }
     }
-  }, [alertId, apiClient, canReadAlert, loadAssistantSummary]);
+  }, [alertId, apiClient, canReadAlert, loadAssistantSummary, readOnlyContext]);
 
   useEffect(() => {
     loadAlert();
@@ -178,9 +183,14 @@ export function AlertDetailsPage({
     canSubmitDecision,
     detailState,
     canReadAlert,
-    hasAlert: Boolean(alert)
+    hasAlert: Boolean(alert),
+    readOnlyContext
   });
   const decisionDisabled = isLoading || detailState === "stale" || Boolean(error && !alert);
+  const linkedAlertContextMismatch = readOnlyContext
+    && alert
+    && sourceSuspiciousTransaction
+    && !linkedAlertContextMatches(alert, sourceSuspiciousTransaction);
 
   return (
     <section className="detailsLayout pageEnter">
@@ -204,11 +214,26 @@ export function AlertDetailsPage({
             />
           </>
         )}
-        {!isLoading && canReadAlert === true && error && !alert && <ErrorState message={error} onRetry={loadAlert} />}
-        {!isLoading && canReadAlert === true && !error && !alert && (
+        {!isLoading && canReadAlert === true && detailState === "access-denied" && (
+          <PermissionNotice
+            session={session}
+            authority={AUTHORITIES.ALERT_READ}
+            action="reading alert detail"
+          />
+        )}
+        {!isLoading && canReadAlert === true && detailState === "not-found" && (
           <EmptyState title="Alert not found" message="The selected alert is no longer available." />
         )}
-        {!isLoading && canReadAlert === true && alert && (
+        {!isLoading && canReadAlert === true && error && !alert && detailState !== "access-denied" && detailState !== "not-found" && (
+          <ErrorState message={error} onRetry={loadAlert} />
+        )}
+        {!isLoading && canReadAlert === true && !error && !alert && detailState !== "not-found" && (
+          <EmptyState title="Alert not found" message="The selected alert is no longer available." />
+        )}
+        {!isLoading && canReadAlert === true && linkedAlertContextMismatch && (
+          <ErrorState message="Linked alert context could not be verified." />
+        )}
+        {!isLoading && canReadAlert === true && alert && !linkedAlertContextMismatch && (
           <>
             <DetailHeader
               title={alert.alertReason}
@@ -229,11 +254,12 @@ export function AlertDetailsPage({
               onRetry={loadAlert}
               retryLabel={`Retry alert ${alert.alertId} detail`}
             />
+            {readOnlyContext && <ReadOnlyAlertContextBanner />}
             <p className="muted">
               Created {formatDateTime(alert.createdAt)} with correlation ID{" "}
               <code>{alert.correlationId}</code>
             </p>
-            {!isWorkspaceDetailRuntimeAvailable(normalizedAlertSummaryRuntimeState) && !alertSummary && (
+            {!readOnlyContext && !isWorkspaceDetailRuntimeAvailable(normalizedAlertSummaryRuntimeState) && !alertSummary && (
               <DetailStateBanner
                 state="runtime-not-ready"
                 message="Alert queue summary is not mounted for this workspace; detail data is loaded directly from the alert service."
@@ -241,13 +267,13 @@ export function AlertDetailsPage({
             )}
 
             <div className="metricGrid">
-              <Metric label="Fraud score" value={formatScore(alert.fraudScore)} />
+              <Metric label={readOnlyContext ? "Alert score" : "Fraud score"} value={formatScore(alert.fraudScore)} />
               <Metric label="Status" value={alert.alertStatus} />
               <Metric label="Customer" value={alert.customerId} />
               <Metric label="Transaction" value={alert.transactionId} />
             </div>
 
-            <TransactionSummary alert={alert} />
+            {!readOnlyContext && <TransactionSummary alert={alert} />}
 
             <div className="splitGrid">
               <section className="subPanel">
@@ -263,29 +289,42 @@ export function AlertDetailsPage({
               </section>
 
               <section className="subPanel">
-                <h3>Decision state</h3>
+                <h3>{readOnlyContext ? "Operational state" : "Decision state"}</h3>
                 <dl className="kvList">
-                  <div><dt>Decision</dt><dd>{alert.analystDecision || "Pending"}</dd></div>
-                  <div><dt>Analyst</dt><dd>{alert.analystId || "Unassigned"}</dd></div>
-                  <div><dt>Decided at</dt><dd>{formatDateTime(alert.decidedAt)}</dd></div>
+                  <div><dt>Status</dt><dd>{alert.alertStatus || "Unknown"}</dd></div>
+                  <div><dt>Alert timestamp</dt><dd>{formatDateTime(alert.alertTimestamp)}</dd></div>
+                  {!readOnlyContext && (
+                    <>
+                      <div><dt>Decision</dt><dd>{alert.analystDecision || "Pending"}</dd></div>
+                      <div><dt>Analyst</dt><dd>{alert.analystId || "Unassigned"}</dd></div>
+                      <div><dt>Decided at</dt><dd>{formatDateTime(alert.decidedAt)}</dd></div>
+                    </>
+                  )}
                 </dl>
               </section>
             </div>
 
-            <AssistantSummaryPanel
-              summary={assistantSummary}
-              isLoading={isAssistantLoading}
-              error={assistantError}
-              onRetry={loadAssistantSummary}
-            />
+            {!readOnlyContext && (
+              <AssistantSummaryPanel
+                summary={assistantSummary}
+                isLoading={isAssistantLoading}
+                error={assistantError}
+                onRetry={loadAssistantSummary}
+              />
+            )}
 
-            <JsonInspector title="Feature snapshot" value={alert.featureSnapshot} />
-            <JsonInspector title="Score details" value={alert.scoreDetails} />
+            {!readOnlyContext && (
+              <>
+                <JsonInspector title="Feature snapshot" value={alert.featureSnapshot} />
+                <JsonInspector title="Score details" value={alert.scoreDetails} />
+              </>
+            )}
           </>
         )}
       </div>
 
-      <aside className="panel decisionRail">
+      {!readOnlyContext && (
+        <aside className="panel decisionRail">
         {canSubmitDecision ? (
           <AnalystDecisionForm
             alertId={alertId}
@@ -303,12 +342,22 @@ export function AlertDetailsPage({
             action="submitting an analyst decision"
           />
         )}
-      </aside>
+        </aside>
+      )}
     </section>
   );
 }
 
-function alertActionState({ canSubmitDecision, detailState, canReadAlert, hasAlert }) {
+function alertActionState({ canSubmitDecision, detailState, canReadAlert, hasAlert, readOnlyContext }) {
+  if (readOnlyContext) {
+    if (canReadAlert === false) {
+      return "Alert context unavailable: missing alert read authority";
+    }
+    if (canReadAlert !== true || (!hasAlert && detailState === "runtime-not-ready")) {
+      return "Alert context unavailable: runtime not ready";
+    }
+    return "Read-only alert context";
+  }
   if (canReadAlert === false || !canSubmitDecision) {
     return "Decision action unavailable: missing authority";
   }
@@ -326,10 +375,70 @@ function safeDomId(value) {
   return safe || "unknown";
 }
 
+function linkedAlertContextMatches(alert, suspiciousTransaction) {
+  return stringMatch(alert.alertId, suspiciousTransaction.linkedAlertId)
+    && optionalStringMatch(alert.transactionId, suspiciousTransaction.transactionId)
+    && optionalStringMatch(alert.customerId, suspiciousTransaction.customerId)
+    && optionalStringMatch(alert.scoreDecisionId, suspiciousTransaction.scoreDecisionId);
+}
+
+function stringMatch(left, right) {
+  return normalizeComparable(left) !== "" && normalizeComparable(left) === normalizeComparable(right);
+}
+
+function optionalStringMatch(left, right) {
+  const normalizedLeft = normalizeComparable(left);
+  const normalizedRight = normalizeComparable(right);
+  return normalizedLeft === "" || normalizedRight === "" || normalizedLeft === normalizedRight;
+}
+
+function normalizeComparable(value) {
+  return value === null || value === undefined ? "" : String(value).trim();
+}
+
 function staleAlertMessage(error) {
   return error
     ? `Refresh alert detail successfully before submitting a decision. Last refresh error: ${error}`
     : "Refresh alert detail successfully before submitting a decision.";
+}
+
+function readOnlyDetailFailureState(error, currentAlert, readOnlyContext) {
+  if (!readOnlyContext) {
+    return {
+      state: currentAlert ? "stale" : "unavailable",
+      message: error.message
+    };
+  }
+  if (error?.isUnauthorized || error?.isForbidden || error?.status === 401 || error?.status === 403) {
+    return {
+      state: "access-denied",
+      message: "Alert detail requires alert read access."
+    };
+  }
+  if (error?.status === 404) {
+    return {
+      state: "not-found",
+      message: ""
+    };
+  }
+  return {
+    state: currentAlert ? "stale" : "unavailable",
+    message: currentAlert
+      ? "Alert context refresh failed. Last loaded read-only context remains visible."
+      : "Alert context is temporarily unavailable."
+  };
+}
+
+function ReadOnlyAlertContextBanner() {
+  return (
+    <section className="subPanel" aria-label="Read-only alert context semantics">
+      <p className="eyebrow">Alert context</p>
+      <p className="sectionCopy">
+        Alert detail is investigation context. Not confirmed fraud. Not an analyst decision.
+        Not a final outcome. Not a case lifecycle action.
+      </p>
+    </section>
+  );
 }
 
 function Metric({ label, value }) {

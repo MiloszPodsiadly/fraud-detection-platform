@@ -113,6 +113,29 @@ Allowed detail fields:
 The detail view must not display full evidence snapshots, raw payloads, raw attribute maps, exported response bodies,
 or decoded cursor content.
 
+## Linked Alert Context
+
+FDP-67 adds read-only navigation from SuspiciousTransaction detail to linked alert detail when `linkedAlertId` is present
+and the session has alert read authority. The bridge uses the existing GET `/api/v1/alerts/{alertId}` endpoint.
+It does not introduce a second alert read API or a new backend endpoint.
+
+Alert detail is investigation context. It is not confirmed fraud, not an analyst decision, not a final outcome,
+not a case lifecycle action, and not legal proof.
+
+The bridge does not mutate SuspiciousTransaction, Alert, FraudCase, or AnalystDecision. It does not create or update
+cases, submit analyst decisions, expose assistant summary, expose an evidence proof panel, or expose full evidence
+snapshot expansion.
+
+The frontend guard is not a security boundary. Backend authorization remains authoritative.
+`SUSPICIOUS_TRANSACTION_READ` does not imply alert read access. Missing `linkedAlertId` shows no action.
+Missing alert read authority shows no actionable alert link or an access-denied state.
+
+Linked alert context is opened from SuspiciousTransaction detail view and route/state must retain both the source
+`suspiciousTransactionId` and the linked `alertId`. An `alertId` alone in the SuspiciousTransaction workspace is invalid
+bridge context. Frontend source-context binding is scope control, not security enforcement.
+The UI must not fetch alert detail until loaded source SuspiciousTransaction context has a `linkedAlertId` matching the
+selected `alertId`; missing source context remains pending verification and mismatched source context fails closed.
+
 ## Out Of Scope
 
 - No write endpoint.

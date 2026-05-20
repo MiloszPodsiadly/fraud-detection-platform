@@ -105,6 +105,92 @@ describe("SuspiciousTransactionWorkspacePage", () => {
     expect(screen.getByText("Reference view")).toBeInTheDocument();
   });
 
+  it("viewAlertContextPassesAlertIdAndSuspiciousTransactionId", () => {
+    const onOpenAlert = vi.fn();
+    render(
+      <SuspiciousTransactionWorkspacePage
+        readViewState={readViewState({ detail: suspiciousTransaction({ linkedAlertId: "alert-reference-1" }) })}
+        canReadSuspiciousTransactions
+        canReadAlerts
+        selectedSuspiciousTransactionId="suspicious-1"
+        onOpenAlert={onOpenAlert}
+        onCloseSuspiciousTransaction={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "View alert context" }));
+
+    expect(onOpenAlert).toHaveBeenCalledWith({
+      alertId: "alert-reference-1",
+      suspiciousTransactionId: "suspicious-1"
+    });
+  });
+
+  it("missingSuspiciousTransactionIdDoesNotRenderViewAlertContext", () => {
+    render(
+      <SuspiciousTransactionWorkspacePage
+        readViewState={readViewState({
+          detail: suspiciousTransaction({ suspiciousTransactionId: "", linkedAlertId: "alert-reference-1" })
+        })}
+        canReadSuspiciousTransactions
+        canReadAlerts
+        selectedSuspiciousTransactionId="suspicious-1"
+        onOpenAlert={vi.fn()}
+        onCloseSuspiciousTransaction={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Linked alert context requires a source suspicious transaction.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "View alert context" })).not.toBeInTheDocument();
+  });
+
+  it("SuspiciousTransactionLinkedAlertHiddenWhenMissingTest", () => {
+    render(
+      <SuspiciousTransactionWorkspacePage
+        readViewState={readViewState({ detail: suspiciousTransaction({ linkedAlertId: "" }) })}
+        canReadSuspiciousTransactions
+        canReadAlerts
+        selectedSuspiciousTransactionId="suspicious-1"
+        onOpenAlert={vi.fn()}
+        onCloseSuspiciousTransaction={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("No linked alert")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "View alert context" })).not.toBeInTheDocument();
+  });
+
+  it("linkedAlertIdStillRequiresAlertReadAuthority", () => {
+    render(
+      <SuspiciousTransactionWorkspacePage
+        readViewState={readViewState({ detail: suspiciousTransaction({ linkedAlertId: "alert-reference-1" }) })}
+        canReadSuspiciousTransactions
+        canReadAlerts={false}
+        selectedSuspiciousTransactionId="suspicious-1"
+        onOpenAlert={vi.fn()}
+        onCloseSuspiciousTransaction={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Alert detail requires alert read access")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "View alert context" })).not.toBeInTheDocument();
+  });
+
+  it("missingAlertReadAuthorityDoesNotRenderViewAlertContext", () => {
+    render(
+      <SuspiciousTransactionWorkspacePage
+        readViewState={readViewState({ detail: suspiciousTransaction({ linkedAlertId: "alert-reference-1" }) })}
+        canReadSuspiciousTransactions
+        canReadAlerts={false}
+        selectedSuspiciousTransactionId="suspicious-1"
+        onOpenAlert={vi.fn()}
+        onCloseSuspiciousTransaction={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByRole("button", { name: "View alert context" })).not.toBeInTheDocument();
+  });
+
   it("linkedAlertIdDoesNotRenderLinkCaseButton", () => {
     render(
       <SuspiciousTransactionWorkspacePage
@@ -151,12 +237,31 @@ describe("SuspiciousTransactionWorkspacePage", () => {
       <SuspiciousTransactionWorkspacePage
         readViewState={readViewState({ detail: suspiciousTransaction() })}
         canReadSuspiciousTransactions
+        canReadAlerts
         selectedSuspiciousTransactionId="suspicious-1"
         onCloseSuspiciousTransaction={vi.fn()}
       />
     );
 
     expect(screen.getByText("alert-1")).toBeInTheDocument();
+    expect(mutationClientCall).not.toHaveBeenCalled();
+  });
+
+  it("SuspiciousTransactionLinkedAlertDoesNotTriggerMutationCallTest", () => {
+    const mutationClientCall = vi.fn();
+    render(
+      <SuspiciousTransactionWorkspacePage
+        readViewState={readViewState({ detail: suspiciousTransaction() })}
+        canReadSuspiciousTransactions
+        canReadAlerts
+        selectedSuspiciousTransactionId="suspicious-1"
+        onOpenAlert={vi.fn()}
+        onCloseSuspiciousTransaction={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "View alert context" }));
+
     expect(mutationClientCall).not.toHaveBeenCalled();
   });
 

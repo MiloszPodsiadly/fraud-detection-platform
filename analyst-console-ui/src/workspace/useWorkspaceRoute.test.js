@@ -46,6 +46,18 @@ describe("useWorkspaceRoute", () => {
     expect(window.location.search).toBe("?workspace=suspicious-transactions&suspiciousTransactionId=suspicious-1");
   });
 
+  it("clickingViewAlertContextPreservesSuspiciousTransactionIdInRoute", () => {
+    window.history.replaceState({}, "", "/?workspace=suspicious-transactions&suspiciousTransactionId=suspicious-1");
+    const { result } = renderHook(() => useWorkspaceRoute());
+
+    act(() => result.current.openAlert({ alertId: "alert-1", suspiciousTransactionId: "suspicious-1" }));
+
+    expect(result.current.workspacePage).toBe("suspiciousTransactions");
+    expect(result.current.selectedSuspiciousTransactionId).toBe("suspicious-1");
+    expect(result.current.selectedAlertId).toBe("alert-1");
+    expect(window.location.search).toBe("?workspace=suspicious-transactions&suspiciousTransactionId=suspicious-1&alertId=alert-1");
+  });
+
   it("opens fraud case detail and responds to popstate", () => {
     window.history.replaceState({}, "", "/");
     const { result } = renderHook(() => useWorkspaceRoute());
