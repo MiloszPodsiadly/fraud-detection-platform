@@ -1,28 +1,31 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const alertDetailsPageMock = vi.hoisted(() => vi.fn(({ canReadAlert, workspaceLabel, alertSummaryRuntimeState, apiClient, onBack }) => (
+  <section>
+    <h2>Alert detail {String(canReadAlert)}</h2>
+    <span>{workspaceLabel}</span>
+    <span>{alertSummaryRuntimeState}</span>
+    <span>api methods {Object.keys(apiClient || {}).join(",")}</span>
+    <button type="button" onClick={onBack}>Back to list</button>
+  </section>
+)));
+
+const alertReadOnlyContextPageMock = vi.hoisted(() => vi.fn(({ canReadAlert, workspaceLabel, alertReadClient, onBack }) => (
+  <section>
+    <h2>Dedicated read-only alert context {String(canReadAlert)}</h2>
+    <span>{workspaceLabel}</span>
+    <span>read client methods {Object.keys(alertReadClient || {}).join(",")}</span>
+    <button type="button" onClick={onBack}>Back to list</button>
+  </section>
+)));
 
 vi.mock("../pages/AlertDetailsPage.jsx", () => ({
-  AlertDetailsPage: ({ canReadAlert, workspaceLabel, alertSummaryRuntimeState, readOnlyContext, apiClient, onBack }) => (
-    <section>
-      <h2>Alert detail {String(canReadAlert)}</h2>
-      <span>{workspaceLabel}</span>
-      <span>{alertSummaryRuntimeState}</span>
-      <span>read-only {String(readOnlyContext)}</span>
-      <span>api methods {Object.keys(apiClient || {}).join(",")}</span>
-      <button type="button" onClick={onBack}>Back to list</button>
-    </section>
-  )
+  AlertDetailsPage: alertDetailsPageMock
 }));
 
 vi.mock("../pages/AlertReadOnlyContextPage.jsx", () => ({
-  AlertReadOnlyContextPage: ({ canReadAlert, workspaceLabel, alertReadClient, onBack }) => (
-    <section>
-      <h2>Dedicated read-only alert context {String(canReadAlert)}</h2>
-      <span>{workspaceLabel}</span>
-      <span>read client methods {Object.keys(alertReadClient || {}).join(",")}</span>
-      <button type="button" onClick={onBack}>Back to list</button>
-    </section>
-  )
+  AlertReadOnlyContextPage: alertReadOnlyContextPageMock
 }));
 
 vi.mock("../pages/FraudCaseDetailsPage.jsx", () => ({
@@ -39,6 +42,10 @@ import { WorkspaceDetailRouter } from "./WorkspaceDetailRouter.jsx";
 import { WORKSPACE_DETAIL_RUNTIME_STATE } from "./workspaceRuntimeStates.js";
 
 describe("WorkspaceDetailRouter", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("passes alert read capability and restores focus to the originating alert control", async () => {
     const onCloseSelection = vi.fn();
     render(
@@ -372,6 +379,8 @@ describe("WorkspaceDetailRouter", () => {
     );
 
     expect(screen.getByRole("heading", { name: "Dedicated read-only alert context true" })).toBeInTheDocument();
+    expect(alertReadOnlyContextPageMock).toHaveBeenCalledTimes(1);
+    expect(alertDetailsPageMock).not.toHaveBeenCalled();
   });
 
   it("WorkspaceDetailRouterDoesNotUseAlertDetailsPageForSuspiciousBridgeTest", () => {
@@ -433,7 +442,56 @@ describe("WorkspaceDetailRouter", () => {
       />
     );
 
-    expect(screen.queryByText("read-only true")).not.toBeInTheDocument();
+    expect(alertDetailsPageMock).not.toHaveBeenCalled();
+    expect(alertReadOnlyContextPageMock).toHaveBeenCalledTimes(1);
+    expect(alertReadOnlyContextPageMock.mock.calls[0][0]).not.toHaveProperty("readOnlyContext");
+  });
+
+  it("SuspiciousBridgeStillRequiresSourceVerificationBeforeGetAlertTest", () => {
+    const missingSourceGetAlert = vi.fn();
+    const loadingSourceGetAlert = vi.fn();
+    const mismatchGetAlert = vi.fn();
+    const commonProps = {
+      selectedAlertId: "alert-1",
+      selectedFraudCaseId: null,
+      alertQueueState: undefined,
+      session: { userId: "analyst-1", authorities: ["alert:read", "suspicious-transaction:read"] },
+      canReadAlerts: true,
+      canReadFraudCases: false,
+      workspacePage: "suspiciousTransactions",
+      selectedSuspiciousTransactionId: "suspicious-1",
+      onCloseSelection: vi.fn(),
+      onRefreshDashboard: vi.fn()
+    };
+
+    const { rerender } = render(
+      <WorkspaceDetailRouter
+        {...commonProps}
+        apiClient={{ getAlert: missingSourceGetAlert, submitAnalystDecision: vi.fn(), getAssistantSummary: vi.fn() }}
+        sourceSuspiciousTransaction={null}
+      />
+    );
+    expect(missingSourceGetAlert).not.toHaveBeenCalled();
+
+    rerender(
+      <WorkspaceDetailRouter
+        {...commonProps}
+        apiClient={{ getAlert: loadingSourceGetAlert, submitAnalystDecision: vi.fn(), getAssistantSummary: vi.fn() }}
+        sourceSuspiciousTransaction={null}
+        sourceSuspiciousTransactionLoading
+      />
+    );
+    expect(loadingSourceGetAlert).not.toHaveBeenCalled();
+
+    rerender(
+      <WorkspaceDetailRouter
+        {...commonProps}
+        apiClient={{ getAlert: mismatchGetAlert, submitAnalystDecision: vi.fn(), getAssistantSummary: vi.fn() }}
+        sourceSuspiciousTransaction={{ suspiciousTransactionId: "suspicious-1", linkedAlertId: "alert-other" }}
+      />
+    );
+    expect(mismatchGetAlert).not.toHaveBeenCalled();
+    expect(alertDetailsPageMock).not.toHaveBeenCalled();
   });
 
   it("sourceMissingStateDoesNotLogSuspiciousTransactionId", () => {
