@@ -452,6 +452,20 @@ describe("AlertDetailsPage", () => {
     expect(screen.getByText(/Read-only alert context/)).toBeInTheDocument();
   });
 
+  it("readOnlyAlertContextUsesAlertScoreLabel", async () => {
+    render(readOnlyPage({ sourceSuspiciousTransaction: suspiciousSource() }));
+
+    expect(await screen.findByText("Open alert")).toBeInTheDocument();
+    expect(screen.getByText("Alert score")).toBeInTheDocument();
+  });
+
+  it("readOnlyAlertContextDoesNotRenderFraudScoreLabel", async () => {
+    render(readOnlyPage({ sourceSuspiciousTransaction: suspiciousSource() }));
+
+    expect(await screen.findByText("Open alert")).toBeInTheDocument();
+    expect(screen.queryByText("Fraud score")).not.toBeInTheDocument();
+  });
+
   it("AlertReadOnlyContextHardGateDoesNotExposeWorkflowOrProofPanelsTest", async () => {
     render(readOnlyPage({ sourceSuspiciousTransaction: suspiciousSource() }));
 

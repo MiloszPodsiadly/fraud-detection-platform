@@ -99,6 +99,8 @@ export function WorkspaceDashboardShell({
               workspaceLabel={activeRoute.label}
               selectedSuspiciousTransactionId={selectedSuspiciousTransactionId}
               sourceSuspiciousTransaction={detailRouterState.sourceSuspiciousTransaction}
+              sourceSuspiciousTransactionLoading={detailRouterState.sourceSuspiciousTransactionLoading}
+              sourceSuspiciousTransactionError={detailRouterState.sourceSuspiciousTransactionError}
               onCloseSelection={closeSelection}
               onRefreshDashboard={refreshDashboardWithNotice}
             />

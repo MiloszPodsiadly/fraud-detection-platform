@@ -267,7 +267,7 @@ export function AlertDetailsPage({
             )}
 
             <div className="metricGrid">
-              <Metric label="Fraud score" value={formatScore(alert.fraudScore)} />
+              <Metric label={readOnlyContext ? "Alert score" : "Fraud score"} value={formatScore(alert.fraudScore)} />
               <Metric label="Status" value={alert.alertStatus} />
               <Metric label="Customer" value={alert.customerId} />
               <Metric label="Transaction" value={alert.transactionId} />

@@ -18,6 +18,8 @@ export function WorkspaceDetailRouter({
   workspaceLabel,
   selectedSuspiciousTransactionId,
   sourceSuspiciousTransaction,
+  sourceSuspiciousTransactionLoading = false,
+  sourceSuspiciousTransactionError = null,
   onCloseSelection,
   onRefreshDashboard
 }) {
@@ -25,9 +27,13 @@ export function WorkspaceDetailRouter({
     () => alertQueueState?.page?.content?.find((alert) => alert.alertId === selectedAlertId),
     [alertQueueState?.page?.content, selectedAlertId]
   );
-  const readOnlyAlertContext = workspacePage === "suspiciousTransactions"
+  const hasSuspiciousBridgeRoute = workspacePage === "suspiciousTransactions"
     && Boolean(selectedAlertId)
     && Boolean(selectedSuspiciousTransactionId);
+  const sourceLinkedAlertMatches = normalizeBridgeId(sourceSuspiciousTransaction?.linkedAlertId) === normalizeBridgeId(selectedAlertId);
+  const readOnlyAlertContext = hasSuspiciousBridgeRoute
+    && Boolean(sourceSuspiciousTransaction)
+    && sourceLinkedAlertMatches;
   const alertDetailApiClient = useMemo(
     () => readOnlyAlertContext ? createAlertReadOnlyBridgeApiClient(apiClient) : apiClient,
     [apiClient, readOnlyAlertContext]
@@ -55,19 +61,35 @@ export function WorkspaceDetailRouter({
   }
 
   if (workspacePage === "suspiciousTransactions" && selectedAlertId && !selectedSuspiciousTransactionId) {
-    return (
-      <section className="detailsLayout pageEnter">
-        <div className="panel detailsMain">
-          <EmptyState
-            title="Invalid linked alert context"
-            message="Linked alert context requires a source suspicious transaction."
-          />
-          <button className="secondaryButton" type="button" onClick={closeAndRestoreFocus}>
-            Back
-          </button>
-        </div>
-      </section>
-    );
+    return renderBridgeState({
+      title: "Invalid linked alert context",
+      message: "Linked alert context requires a source suspicious transaction.",
+      onBack: closeAndRestoreFocus
+    });
+  }
+
+  if (hasSuspiciousBridgeRoute && (sourceSuspiciousTransactionLoading || !sourceSuspiciousTransaction) && !sourceSuspiciousTransactionError) {
+    return renderBridgeState({
+      title: "Verifying linked alert context",
+      message: "Verifying linked alert context",
+      onBack: closeAndRestoreFocus
+    });
+  }
+
+  if (hasSuspiciousBridgeRoute && sourceSuspiciousTransactionError) {
+    return renderBridgeState({
+      title: "Linked alert context unavailable",
+      message: "Linked alert context is unavailable.",
+      onBack: closeAndRestoreFocus
+    });
+  }
+
+  if (hasSuspiciousBridgeRoute && !sourceLinkedAlertMatches) {
+    return renderBridgeState({
+      title: "Invalid linked alert context",
+      message: "Linked alert context could not be verified.",
+      onBack: closeAndRestoreFocus
+    });
   }
 
   if (selectedAlertId && alertDetailApiClient) {
@@ -105,6 +127,23 @@ export function WorkspaceDetailRouter({
   }
 
   return null;
+}
+
+function renderBridgeState({ title, message, onBack }) {
+  return (
+    <section className="detailsLayout pageEnter">
+      <div className="panel detailsMain">
+        <EmptyState title={title} message={message} />
+        <button className="secondaryButton" type="button" onClick={onBack}>
+          Back
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function normalizeBridgeId(value) {
+  return value === null || value === undefined ? "" : String(value).trim();
 }
 
 function workspaceLabelFor(workspacePage) {

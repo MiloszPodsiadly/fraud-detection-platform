@@ -39,7 +39,9 @@ export function SuspiciousTransactionWorkspaceRuntime({
       />
     ),
     detailRouterState: {
-      sourceSuspiciousTransaction: selectedSuspiciousTransactionId ? readViewState.detail : null
+      sourceSuspiciousTransaction: selectedSuspiciousTransactionId ? readViewState.detail : null,
+      sourceSuspiciousTransactionLoading: readViewState.isLoadingDetail,
+      sourceSuspiciousTransactionError: readViewState.detailError
     },
     error: selectedSuspiciousTransactionId ? readViewState.detailError : readViewState.listError,
     refreshWorkspace
