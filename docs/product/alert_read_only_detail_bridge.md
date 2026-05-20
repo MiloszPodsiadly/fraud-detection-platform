@@ -1,17 +1,19 @@
 # Alert Read-Only Detail Bridge
 
-Status: current product documentation for FDP-67.
+Status: current product documentation for FDP-68.
 
 ## Purpose
 
 FDP-67 adds read-only navigation from SuspiciousTransaction detail to linked alert detail.
 The bridge gives analysts alert investigation context without opening an alert workflow surface.
+FDP-68 extracts that read-only alert context into `AlertReadOnlyContextPage`.
+FDP-68 is architecture hardening, not product feature expansion.
 
 The bridge uses the existing protected alert read API:
 
 - GET `/api/v1/alerts/{alertId}`
 
-FDP-67 does not introduce a second alert read API and does not add a new backend endpoint.
+FDP-68 does not introduce a second alert read API and does not add a new backend endpoint.
 
 ## Semantics
 
@@ -51,6 +53,17 @@ If the source linked alert does not match the selected alert, the bridge fails c
 Frontend context binding is scope control, not security boundary.
 Backend alert-read authorization remains authoritative.
 
+## Dedicated Read-Only Component
+
+The SuspiciousTransaction bridge no longer uses `AlertDetailsPage` `readOnlyContext`.
+`AlertDetailsPage` remains the workflow-capable alert detail page.
+`AlertReadOnlyContextPage` is the dedicated read-only alert context page for the SuspiciousTransaction bridge.
+`AlertReadOnlyContextPage` depends only on a getAlert-only client.
+The existing GET `/api/v1/alerts/{alertId}` response remains the read source.
+
+This component boundary is scope control, not a frontend security boundary.
+Backend `ALERT_READ` authorization remains authoritative.
+
 ## Read-Only Boundary
 
 The bridge does not mutate SuspiciousTransaction, Alert, FraudCase, or AnalystDecision.
@@ -61,6 +74,7 @@ The bridge does not link cases.
 The bridge does not expose assistant summary.
 The bridge does not expose an evidence proof panel.
 The bridge does not expose full evidence snapshots or raw payload expansion.
+The bridge does not log raw identifiers, emit raw identifier telemetry, or store raw identifiers in browser storage.
 
 Allowed read-only fields are limited to alert read-model context already returned by GET `/api/v1/alerts/{alertId}`:
 
