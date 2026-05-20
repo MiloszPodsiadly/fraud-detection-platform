@@ -7,11 +7,12 @@ export function SuspiciousTransactionWorkspaceRuntime({
   route,
   sharedWorkspaceReadsEnabled,
   selectedSuspiciousTransactionId,
+  onOpenAlert,
   onOpenSuspiciousTransaction,
   onCloseSuspiciousTransaction,
   children
 }) {
-  const { canReadSuspiciousTransactions } = useWorkspaceRuntime();
+  const { canReadAlerts, canReadSuspiciousTransactions } = useWorkspaceRuntime();
   const readViewState = useSuspiciousTransactionReadView({
     enabled: sharedWorkspaceReadsEnabled && canReadSuspiciousTransactions === true,
     selectedSuspiciousTransactionId
@@ -30,8 +31,10 @@ export function SuspiciousTransactionWorkspaceRuntime({
         headingLabel={route.heading.label}
         readViewState={readViewState}
         canReadSuspiciousTransactions={canReadSuspiciousTransactions}
+        canReadAlerts={canReadAlerts}
         selectedSuspiciousTransactionId={selectedSuspiciousTransactionId}
         onOpenSuspiciousTransaction={onOpenSuspiciousTransaction}
+        onOpenAlert={onOpenAlert}
         onCloseSuspiciousTransaction={onCloseSuspiciousTransaction}
       />
     ),

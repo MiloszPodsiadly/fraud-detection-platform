@@ -2,11 +2,13 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../pages/AlertDetailsPage.jsx", () => ({
-  AlertDetailsPage: ({ canReadAlert, workspaceLabel, alertSummaryRuntimeState, onBack }) => (
+  AlertDetailsPage: ({ canReadAlert, workspaceLabel, alertSummaryRuntimeState, readOnlyContext, apiClient, onBack }) => (
     <section>
       <h2>Alert detail {String(canReadAlert)}</h2>
       <span>{workspaceLabel}</span>
       <span>{alertSummaryRuntimeState}</span>
+      <span>read-only {String(readOnlyContext)}</span>
+      <span>api methods {Object.keys(apiClient || {}).join(",")}</span>
       <button type="button" onClick={onBack}>Back to list</button>
     </section>
   )
@@ -71,6 +73,65 @@ describe("WorkspaceDetailRouter", () => {
     );
 
     expect(screen.getByText(WORKSPACE_DETAIL_RUNTIME_STATE.NOT_MOUNTED)).toBeInTheDocument();
+  });
+
+  it("AlertDetailRequiresAlertReadAuthorityTest", () => {
+    render(
+      <WorkspaceDetailRouter
+        selectedAlertId="alert-1"
+        selectedFraudCaseId={null}
+        alertQueueState={undefined}
+        session={{ userId: "analyst-1", authorities: ["suspicious-transaction:read"] }}
+        apiClient={{ getAlert: vi.fn(), submitAnalystDecision: vi.fn(), getAssistantSummary: vi.fn() }}
+        canReadAlerts={false}
+        canReadFraudCases={false}
+        workspacePage="suspiciousTransactions"
+        onCloseSelection={vi.fn()}
+        onRefreshDashboard={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("heading", { name: "Alert detail false" })).toBeInTheDocument();
+    expect(screen.getByText("read-only true")).toBeInTheDocument();
+  });
+
+  it("SuspiciousTransactionAuthorityDoesNotGrantAlertDetailAccessTest", () => {
+    render(
+      <WorkspaceDetailRouter
+        selectedAlertId="alert-1"
+        selectedFraudCaseId={null}
+        alertQueueState={undefined}
+        session={{ userId: "analyst-1", authorities: ["suspicious-transaction:read"] }}
+        apiClient={{ getAlert: vi.fn(), submitAnalystDecision: vi.fn(), getAssistantSummary: vi.fn() }}
+        canReadAlerts={false}
+        canReadFraudCases={false}
+        workspacePage="suspiciousTransactions"
+        onCloseSelection={vi.fn()}
+        onRefreshDashboard={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("api methods getAlert")).toBeInTheDocument();
+  });
+
+  it("FrontendGuardDoesNotClaimSecurityBoundaryTest", () => {
+    render(
+      <WorkspaceDetailRouter
+        selectedAlertId="alert-1"
+        selectedFraudCaseId={null}
+        alertQueueState={undefined}
+        session={{ userId: "analyst-1", authorities: ["alert:read", "suspicious-transaction:read"] }}
+        apiClient={{ getAlert: vi.fn(), submitAnalystDecision: vi.fn(), getAssistantSummary: vi.fn() }}
+        canReadAlerts
+        canReadFraudCases={false}
+        workspacePage="suspiciousTransactions"
+        onCloseSelection={vi.fn()}
+        onRefreshDashboard={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("read-only true")).toBeInTheDocument();
+    expect(screen.getByText("api methods getAlert")).toBeInTheDocument();
   });
 
   it("passes fraud-case read capability and falls back to workspace heading focus", async () => {

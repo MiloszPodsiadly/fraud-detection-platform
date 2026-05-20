@@ -132,7 +132,11 @@ export default function App() {
   const runtimeSelectedFraudCaseId = detailSelectionPendingBoundaryReset ? null : selectedFraudCaseId;
   const runtimeSelectedSuspiciousTransactionId = detailSelectionPendingBoundaryReset ? null : selectedSuspiciousTransactionId;
   const workspaceTitle = WORKSPACE_PAGES[workspacePage]?.label || WORKSPACE_PAGES.analyst.label;
-  const detailTitle = selectedSuspiciousTransactionId ? "Suspicious Transaction" : "Fraud Case";
+  const detailTitle = selectedSuspiciousTransactionId
+    ? "Suspicious Transaction"
+    : selectedAlertId
+      ? "Alert Context"
+      : "Fraud Case";
 
   if (handlingOidcCallback) {
     return (

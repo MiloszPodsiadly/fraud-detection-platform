@@ -8,8 +8,10 @@ import { formatDateTime, formatScore } from "../utils/format.js";
 export function SuspiciousTransactionWorkspacePage({
   readViewState,
   canReadSuspiciousTransactions,
+  canReadAlerts,
   selectedSuspiciousTransactionId,
   onOpenSuspiciousTransaction,
+  onOpenAlert,
   onCloseSuspiciousTransaction,
   workspaceHeadingProps = {}
 }) {
@@ -21,6 +23,8 @@ export function SuspiciousTransactionWorkspacePage({
     return (
       <SuspiciousTransactionDetailView
         readViewState={readViewState}
+        canReadAlerts={canReadAlerts}
+        onOpenAlert={onOpenAlert}
         onBack={onCloseSuspiciousTransaction}
       />
     );
@@ -156,7 +160,7 @@ function SuspiciousTransactionTable({ items, onOpenSuspiciousTransaction }) {
   );
 }
 
-function SuspiciousTransactionDetailView({ readViewState, onBack }) {
+function SuspiciousTransactionDetailView({ readViewState, canReadAlerts, onOpenAlert, onBack }) {
   const {
     detail,
     isLoadingDetail,
@@ -211,6 +215,11 @@ function SuspiciousTransactionDetailView({ readViewState, onBack }) {
               <Field label="Customer ID" value={detail.customerId} />
               <Field label="Account ID" value={detail.accountId} />
               <Field label="Linked alert ID" value={detail.linkedAlertId || "None"} />
+              <LinkedAlertContext
+                linkedAlertId={detail.linkedAlertId}
+                canReadAlerts={canReadAlerts}
+                onOpenAlert={onOpenAlert}
+              />
             </FieldGroup>
             <FieldGroup title="Scoring metadata">
               <Field label="Detection source" value={detail.detectionSource} />
@@ -233,6 +242,40 @@ function SuspiciousTransactionDetailView({ readViewState, onBack }) {
         </>
       )}
     </section>
+  );
+}
+
+function LinkedAlertContext({ linkedAlertId, canReadAlerts, onOpenAlert }) {
+  const normalizedLinkedAlertId = typeof linkedAlertId === "string" ? linkedAlertId.trim() : "";
+  if (!normalizedLinkedAlertId) {
+    return (
+      <>
+        <dt>Alert context</dt>
+        <dd>No linked alert</dd>
+      </>
+    );
+  }
+  if (canReadAlerts !== true) {
+    return (
+      <>
+        <dt>Alert context</dt>
+        <dd>Alert detail requires alert read access</dd>
+      </>
+    );
+  }
+  return (
+    <>
+      <dt>Alert context</dt>
+      <dd>
+        <button
+          className="secondaryButton compactButton"
+          type="button"
+          onClick={() => onOpenAlert?.(normalizedLinkedAlertId)}
+        >
+          View alert context
+        </button>
+      </dd>
+    </>
   );
 }
 

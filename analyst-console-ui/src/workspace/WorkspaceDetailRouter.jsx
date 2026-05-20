@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from "react";
+import { createAlertReadOnlyBridgeApiClient } from "../api/alertReadOnlyBridgeApi.js";
 import { AlertDetailsPage } from "../pages/AlertDetailsPage.jsx";
 import { FraudCaseDetailsPage } from "../pages/FraudCaseDetailsPage.jsx";
 import { WORKSPACE_DETAIL_RUNTIME_STATE } from "./workspaceRuntimeStates.js";
@@ -20,6 +21,11 @@ export function WorkspaceDetailRouter({
   const selectedAlertSummary = useMemo(
     () => alertQueueState?.page?.content?.find((alert) => alert.alertId === selectedAlertId),
     [alertQueueState?.page?.content, selectedAlertId]
+  );
+  const readOnlyAlertContext = workspacePage === "suspiciousTransactions";
+  const alertDetailApiClient = useMemo(
+    () => readOnlyAlertContext ? createAlertReadOnlyBridgeApiClient(apiClient) : apiClient,
+    [apiClient, readOnlyAlertContext]
   );
 
   useEffect(() => {
@@ -43,7 +49,7 @@ export function WorkspaceDetailRouter({
     }, 0);
   }
 
-  if (selectedAlertId && apiClient) {
+  if (selectedAlertId && alertDetailApiClient) {
     const effectiveAlertSummaryRuntimeState = alertSummaryRuntimeState
       || (alertQueueState ? WORKSPACE_DETAIL_RUNTIME_STATE.AVAILABLE : WORKSPACE_DETAIL_RUNTIME_STATE.NOT_MOUNTED);
     return (
@@ -52,8 +58,9 @@ export function WorkspaceDetailRouter({
         alertSummary={selectedAlertSummary}
         alertSummaryRuntimeState={effectiveAlertSummaryRuntimeState}
         session={session}
-        apiClient={apiClient}
+        apiClient={alertDetailApiClient}
         canReadAlert={canReadAlerts}
+        readOnlyContext={readOnlyAlertContext}
         workspaceLabel={workspaceLabel || workspaceLabelFor(workspacePage)}
         onBack={closeAndRestoreFocus}
         onDecisionSubmitted={onRefreshDashboard}
