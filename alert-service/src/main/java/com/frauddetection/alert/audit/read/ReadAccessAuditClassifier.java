@@ -44,6 +44,9 @@ public class ReadAccessAuditClassifier {
         if ("/internal/suspicious-transactions".equals(pattern)) {
             return Optional.of(target(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_SEARCH, ReadAccessResourceType.SUSPICIOUS_TRANSACTION, null, request));
         }
+        if ("/internal/suspicious-transactions/summary".equals(pattern)) {
+            return Optional.of(target(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_SUMMARY, ReadAccessResourceType.SUSPICIOUS_TRANSACTION, null, request));
+        }
         if ("/internal/suspicious-transactions/{suspiciousTransactionId}".equals(pattern)) {
             return Optional.of(target(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_READ, ReadAccessResourceType.SUSPICIOUS_TRANSACTION, variables.get("suspiciousTransactionId"), request));
         }

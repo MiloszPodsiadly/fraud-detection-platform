@@ -4,18 +4,23 @@ import { useAlertQueue } from "./useAlertQueue.js";
 import { useGovernanceAnalytics } from "./useGovernanceAnalytics.js";
 import { useGovernanceQueue } from "./useGovernanceQueue.js";
 import { useScoredTransactionStream } from "./useScoredTransactionStream.js";
+import { useSuspiciousTransactionReadView } from "./useSuspiciousTransactionReadView.js";
 
 const getGovernanceAdvisoryAnalytics = vi.fn();
 const getGovernanceAdvisoryAudit = vi.fn();
 const listAlerts = vi.fn();
 const listGovernanceAdvisories = vi.fn();
 const listScoredTransactions = vi.fn();
+const listSuspiciousTransactions = vi.fn();
+const getSuspiciousTransaction = vi.fn();
 
 describe("workspace data hooks", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     listAlerts.mockResolvedValue(page([]));
     listScoredTransactions.mockResolvedValue(page([]));
+    listSuspiciousTransactions.mockResolvedValue(suspiciousSlice([]));
+    getSuspiciousTransaction.mockResolvedValue(suspiciousTransaction({ suspiciousTransactionId: "suspicious-1" }));
     listGovernanceAdvisories.mockResolvedValue({ status: "AVAILABLE", count: 0, advisory_events: [] });
     getGovernanceAdvisoryAudit.mockResolvedValue({ status: "AVAILABLE", audit_events: [] });
     getGovernanceAdvisoryAnalytics.mockResolvedValue({
@@ -46,11 +51,14 @@ describe("workspace data hooks", () => {
   it("does not fetch workspace data without an explicit apiClient", async () => {
     renderHook(() => useAlertQueue({ enabled: true, apiClient: null }));
     renderHook(() => useScoredTransactionStream({ enabled: true, apiClient: null }));
+    renderHook(() => useSuspiciousTransactionReadView({ enabled: true, apiClient: null }));
     renderHook(() => useGovernanceQueue({ enabled: true, apiClient: null }));
     renderHook(() => useGovernanceAnalytics({ enabled: true, apiClient: null }));
 
     expect(listAlerts).not.toHaveBeenCalled();
     expect(listScoredTransactions).not.toHaveBeenCalled();
+    expect(listSuspiciousTransactions).not.toHaveBeenCalled();
+    expect(getSuspiciousTransaction).not.toHaveBeenCalled();
     expect(listGovernanceAdvisories).not.toHaveBeenCalled();
     expect(getGovernanceAdvisoryAnalytics).not.toHaveBeenCalled();
   });
@@ -100,6 +108,81 @@ describe("workspace data hooks", () => {
 
     await waitFor(() => expect(result.current.page.content).toEqual([]));
     expect(result.current.error).toBeNull();
+  });
+
+  it("loads suspicious transaction cursor slices and appends the next slice", async () => {
+    listSuspiciousTransactions
+      .mockResolvedValueOnce(suspiciousSlice([suspiciousTransaction({ suspiciousTransactionId: "suspicious-1" })], {
+        hasNext: true,
+        nextCursor: "cursor-2"
+      }))
+      .mockResolvedValueOnce(suspiciousSlice([suspiciousTransaction({ suspiciousTransactionId: "suspicious-2" })]));
+
+    const { result } = renderHook(() => useSuspiciousTransactionReadView({ enabled: true, apiClient: workspaceApiClient }));
+
+    await waitFor(() => expect(result.current.items.map((item) => item.suspiciousTransactionId)).toEqual(["suspicious-1"]));
+    await act(async () => {
+      await result.current.loadNext();
+    });
+
+    expect(listSuspiciousTransactions).toHaveBeenNthCalledWith(1, { size: 20, cursor: null }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(listSuspiciousTransactions).toHaveBeenNthCalledWith(2, { size: 20, cursor: "cursor-2" }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(result.current.items.map((item) => item.suspiciousTransactionId)).toEqual(["suspicious-1", "suspicious-2"]);
+  });
+
+  it("suspiciousTransactionListDoesNotUseSummaryAsPaginationTotal", async () => {
+    listSuspiciousTransactions.mockResolvedValueOnce(suspiciousSlice([
+      suspiciousTransaction({ suspiciousTransactionId: "suspicious-1" })
+    ], {
+      hasNext: false,
+      nextCursor: null
+    }));
+    const apiClient = {
+      ...workspaceApiClient,
+      getSuspiciousTransactionSummary: vi.fn().mockRejectedValue(new Error("summary unavailable"))
+    };
+
+    const { result } = renderHook(() => useSuspiciousTransactionReadView({ enabled: true, apiClient }));
+
+    await waitFor(() => expect(result.current.items).toHaveLength(1));
+    expect(apiClient.getSuspiciousTransactionSummary).not.toHaveBeenCalled();
+    expect(result.current.slice).toEqual({
+      content: [expect.objectContaining({ suspiciousTransactionId: "suspicious-1" })],
+      size: 20,
+      hasNext: false,
+      nextCursor: null
+    });
+  });
+
+  it("loads suspicious transaction detail only when an id is selected", async () => {
+    const { result, rerender } = renderHook(
+      ({ selectedSuspiciousTransactionId }) => useSuspiciousTransactionReadView({
+        enabled: true,
+        apiClient: workspaceApiClient,
+        selectedSuspiciousTransactionId
+      }),
+      { initialProps: { selectedSuspiciousTransactionId: null } }
+    );
+    await waitFor(() => expect(listSuspiciousTransactions).toHaveBeenCalledTimes(1));
+    expect(getSuspiciousTransaction).not.toHaveBeenCalled();
+
+    rerender({ selectedSuspiciousTransactionId: "suspicious-1" });
+
+    await waitFor(() => expect(result.current.detail?.suspiciousTransactionId).toBe("suspicious-1"));
+    expect(getSuspiciousTransaction).toHaveBeenCalledWith("suspicious-1", expect.objectContaining({ signal: expect.any(AbortSignal) }));
+  });
+
+  it("clears suspicious transaction state when disabled after data was loaded", async () => {
+    listSuspiciousTransactions.mockResolvedValue(suspiciousSlice([suspiciousTransaction({ suspiciousTransactionId: "suspicious-1" })]));
+    const { result, rerender } = renderHook(({ enabled }) => useSuspiciousTransactionReadView({ enabled, apiClient: workspaceApiClient }), {
+      initialProps: { enabled: true }
+    });
+    await waitFor(() => expect(result.current.items).toHaveLength(1));
+
+    rerender({ enabled: false });
+
+    await waitFor(() => expect(result.current.items).toEqual([]));
+    expect(result.current.listError).toBeNull();
   });
 
   it("keeps scored transaction data isolated across apiClient session switch", async () => {
@@ -337,8 +420,37 @@ const workspaceApiClient = {
   getGovernanceAdvisoryAudit,
   listAlerts,
   listGovernanceAdvisories,
-  listScoredTransactions
+  listScoredTransactions,
+  listSuspiciousTransactions,
+  getSuspiciousTransaction
 };
+
+function suspiciousSlice(content, overrides = {}) {
+  return {
+    content,
+    size: 20,
+    hasNext: false,
+    nextCursor: null,
+    ...overrides
+  };
+}
+
+function suspiciousTransaction(overrides = {}) {
+  return {
+    suspiciousTransactionId: "suspicious-1",
+    transactionId: "txn-1",
+    riskScore: 0.94,
+    riskLevel: "CRITICAL",
+    detectionSource: "SCORING",
+    status: "NEW",
+    detectedAt: "2026-05-16T12:00:00Z",
+    reasonCodes: ["HIGH_AMOUNT_ACTIVITY"],
+    evidenceStatus: "AVAILABLE",
+    evidenceSnapshotItemCount: 1,
+    evidenceProjectionState: "PROJECTED",
+    ...overrides
+  };
+}
 
 function deferred() {
   let resolve;

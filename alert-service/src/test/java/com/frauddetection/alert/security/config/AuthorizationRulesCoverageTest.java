@@ -66,9 +66,13 @@ class AuthorizationRulesCoverageTest extends AbstractSecurityRouteBoundaryWebMvc
     void suspiciousTransactionRoutesRequireExplicitSuspiciousTransactionAuthority() throws Exception {
         expectSecurityLayerDoesNotReject(get("/internal/suspicious-transactions")
                 .with(userWith(AnalystAuthority.SUSPICIOUS_TRANSACTION_READ)));
+        expectSecurityLayerDoesNotReject(get("/internal/suspicious-transactions/summary")
+                .with(userWith(AnalystAuthority.SUSPICIOUS_TRANSACTION_READ)));
         expectSecurityLayerDoesNotReject(get("/internal/suspicious-transactions/suspicious-1")
                 .with(userWith(AnalystAuthority.SUSPICIOUS_TRANSACTION_READ)));
         expectDenied(get("/internal/suspicious-transactions").with(userWith(AnalystAuthority.TRANSACTION_MONITOR_READ)));
+        expectDenied(get("/internal/suspicious-transactions/summary")
+                .with(userWith(AnalystAuthority.TRANSACTION_MONITOR_READ)));
         expectDenied(get("/internal/suspicious-transactions"));
         expectDenied(get("/internal/suspicious-transactions/not-real/sibling")
                 .with(userWith(AnalystAuthority.SUSPICIOUS_TRANSACTION_READ)));

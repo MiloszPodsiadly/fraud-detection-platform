@@ -19,6 +19,7 @@ export function useWorkspaceRoute() {
     const params = new URLSearchParams(window.location.search);
     params.delete("alertId");
     params.delete("fraudCaseId");
+    params.delete("suspiciousTransactionId");
     if (nextPage === "analyst") {
       params.delete("workspace");
     } else {
@@ -31,6 +32,7 @@ export function useWorkspaceRoute() {
   const openAlert = useCallback((alertId) => {
     const params = new URLSearchParams(window.location.search);
     params.delete("fraudCaseId");
+    params.delete("suspiciousTransactionId");
     params.set("alertId", alertId);
     pushRoute(params);
     setRoute(readWorkspaceRoute());
@@ -39,7 +41,18 @@ export function useWorkspaceRoute() {
   const openFraudCase = useCallback((caseId) => {
     const params = new URLSearchParams(window.location.search);
     params.delete("alertId");
+    params.delete("suspiciousTransactionId");
     params.set("fraudCaseId", caseId);
+    pushRoute(params);
+    setRoute(readWorkspaceRoute());
+  }, []);
+
+  const openSuspiciousTransaction = useCallback((suspiciousTransactionId) => {
+    const params = new URLSearchParams(window.location.search);
+    params.delete("alertId");
+    params.delete("fraudCaseId");
+    params.set("workspace", "suspicious-transactions");
+    params.set("suspiciousTransactionId", suspiciousTransactionId);
     pushRoute(params);
     setRoute(readWorkspaceRoute());
   }, []);
@@ -48,6 +61,7 @@ export function useWorkspaceRoute() {
     const params = new URLSearchParams(window.location.search);
     params.delete("alertId");
     params.delete("fraudCaseId");
+    params.delete("suspiciousTransactionId");
     pushRoute(params);
     setRoute(readWorkspaceRoute());
   }, []);
@@ -57,6 +71,7 @@ export function useWorkspaceRoute() {
     navigateWorkspace,
     openAlert,
     openFraudCase,
+    openSuspiciousTransaction,
     clearSelection,
     workspaceHref
   };
@@ -65,13 +80,15 @@ export function useWorkspaceRoute() {
 export function readWorkspaceRoute() {
   const params = new URLSearchParams(window.location.search);
   const workspace = params.get("workspace");
+  const selectedSuspiciousTransactionId = params.get("suspiciousTransactionId");
   const matchedWorkspace = Object.entries(WORKSPACE_PAGES)
     .find(([, page]) => page.path === workspace)?.[0] || null;
   return {
-    workspacePage: matchedWorkspace || "analyst",
+    workspacePage: selectedSuspiciousTransactionId ? "suspiciousTransactions" : matchedWorkspace || "analyst",
     invalidWorkspaceRoute: workspace && !matchedWorkspace ? workspace : null,
     selectedAlertId: params.get("alertId"),
-    selectedFraudCaseId: params.get("fraudCaseId")
+    selectedFraudCaseId: params.get("fraudCaseId"),
+    selectedSuspiciousTransactionId
   };
 }
 

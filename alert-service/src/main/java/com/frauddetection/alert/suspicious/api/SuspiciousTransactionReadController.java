@@ -94,6 +94,26 @@ public class SuspiciousTransactionReadController {
         }
     }
 
+    @GetMapping("/summary")
+    @AuditedSensitiveRead
+    public SuspiciousTransactionSummaryResponse summary(HttpServletRequest request) {
+        try {
+            SuspiciousTransactionSummaryResponse response = service.summary();
+            sensitiveReadAuditService.audit(
+                    ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_SUMMARY,
+                    ReadAccessResourceType.SUSPICIOUS_TRANSACTION,
+                    null,
+                    1,
+                    request
+            );
+            recordSummaryMetric(response);
+            return response;
+        } catch (RuntimeException exception) {
+            recordSummaryMetric("error", SuspiciousTransactionSummaryFreshness.UNAVAILABLE);
+            throw exception;
+        }
+    }
+
     @GetMapping("/{suspiciousTransactionId}")
     @AuditedSensitiveRead
     public SuspiciousTransactionResponse findById(
@@ -166,6 +186,28 @@ public class SuspiciousTransactionReadController {
                     snapshot == null ? "search" : snapshot.endpoint(),
                     snapshot == null ? "error" : snapshot.outcome(),
                     snapshot == null ? "unknown" : snapshot.queryShape()
+            );
+        }
+    }
+
+    private void recordSummaryMetric(SuspiciousTransactionSummaryResponse response) {
+        SuspiciousTransactionSummaryFreshness freshness = response.freshness();
+        String outcome = switch (freshness) {
+            case FRESH -> "success";
+            case STALE -> "stale";
+            case UNAVAILABLE -> "unavailable";
+        };
+        recordSummaryMetric(outcome, freshness);
+    }
+
+    private void recordSummaryMetric(String outcome, SuspiciousTransactionSummaryFreshness freshness) {
+        try {
+            metrics.recordSuspiciousTransactionSummaryRead(outcome, freshness == null ? "unavailable" : freshness.name());
+        } catch (RuntimeException exception) {
+            log.warn(
+                    "SuspiciousTransaction summary metric recording failed outcome={} freshness={}",
+                    outcome,
+                    freshness == null ? "UNAVAILABLE" : freshness.name()
             );
         }
     }

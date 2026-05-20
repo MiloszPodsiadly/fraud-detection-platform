@@ -29,8 +29,9 @@ class SuspiciousTransactionReadServiceTest {
     private final SuspiciousTransactionRepository repository = mock(SuspiciousTransactionRepository.class);
     private final MongoTemplate mongoTemplate = mock(MongoTemplate.class);
     private final SuspiciousTransactionCursorCodec cursorCodec = new SuspiciousTransactionCursorCodec();
+    private final SuspiciousTransactionSummaryService summaryService = mock(SuspiciousTransactionSummaryService.class);
     private final SuspiciousTransactionReadService service =
-            new SuspiciousTransactionReadService(repository, mongoTemplate, cursorCodec);
+            new SuspiciousTransactionReadService(repository, mongoTemplate, cursorCodec, summaryService);
 
     @Test
     void findByIdReturnsMappedResponseAndDoesNotQueryTransactionId() {
@@ -50,6 +51,29 @@ class SuspiciousTransactionReadServiceTest {
         when(repository.findById("missing")).thenReturn(Optional.empty());
 
         assertThat(service.findById("missing")).isEmpty();
+    }
+
+    @Test
+    void summaryReturnsGlobalSuspiciousTransactionCountWithoutChangingSearchContract() {
+        when(summaryService.summary()).thenReturn(summaryResponse(98L));
+
+        SuspiciousTransactionSummaryResponse response = service.summary();
+
+        assertThat(response.totalSuspiciousTransactions()).isEqualTo(98L);
+        verify(summaryService).summary();
+        verify(mongoTemplate, never()).find(any(Query.class), eq(SuspiciousTransactionDocument.class));
+    }
+
+    @Test
+    void summaryDoesNotCallRepositoryCountFromReadService() {
+        when(summaryService.summary()).thenReturn(summaryResponse(98L));
+
+        service.summary();
+
+        verify(repository, never()).count();
+        verify(summaryService).summary();
+        verify(mongoTemplate, never()).find(any(Query.class), eq(SuspiciousTransactionDocument.class));
+        verify(mongoTemplate, never()).count(any(Query.class), eq(SuspiciousTransactionDocument.class));
     }
 
     @Test
@@ -242,7 +266,8 @@ class SuspiciousTransactionReadServiceTest {
     void searchResponseDoesNotExposeTotalElementsOrTotalPages() {
         assertThat(java.util.Arrays.stream(SuspiciousTransactionSliceResponse.class.getRecordComponents())
                 .map(java.lang.reflect.RecordComponent::getName)
-                .toList()).doesNotContain("page", "totalElements", "totalPages", "totalCount", "offset");
+                .toList()).doesNotContain("page", "pageNumber", "totalElements", "totalPages", "totalCount", "offset",
+                        "totalSuspiciousTransactions");
     }
 
     private static List<SuspiciousTransactionDocument> documents(int count) {
@@ -275,5 +300,10 @@ class SuspiciousTransactionReadServiceTest {
         document.setModelName("model-a");
         document.setModelVersion("v1");
         return document;
+    }
+
+    private static SuspiciousTransactionSummaryResponse summaryResponse(long total) {
+        Instant now = Instant.parse("2026-05-19T10:00:00Z");
+        return SuspiciousTransactionSummaryResponse.fresh(total, now, now.plusSeconds(30));
     }
 }

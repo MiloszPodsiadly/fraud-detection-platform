@@ -11,6 +11,8 @@ class SuspiciousTransactionAuthorizationRules implements EndpointAuthorizationRu
         authorize
                 .requestMatchers(HttpMethod.GET, "/internal/suspicious-transactions")
                 .hasAuthority(AnalystAuthority.SUSPICIOUS_TRANSACTION_READ)
+                .requestMatchers(HttpMethod.GET, "/internal/suspicious-transactions/summary")
+                .hasAuthority(AnalystAuthority.SUSPICIOUS_TRANSACTION_READ)
                 .requestMatchers(HttpMethod.GET, "/internal/suspicious-transactions/{suspiciousTransactionId}")
                 .hasAuthority(AnalystAuthority.SUSPICIOUS_TRANSACTION_READ);
     }

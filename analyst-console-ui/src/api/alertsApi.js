@@ -20,6 +20,9 @@ export function createAlertsApiClient({
     listFraudCaseWorkQueue: (requestParams, requestOptions) => listFraudCaseWorkQueueWithRequest(request, requestParams, requestOptions),
     getFraudCaseWorkQueueSummary: (requestOptions) => request("/api/v1/fraud-cases/work-queue/summary", requestOptions),
     listScoredTransactions: (requestParams, requestOptions) => listScoredTransactionsWithRequest(request, requestParams, requestOptions),
+    listSuspiciousTransactions: (requestParams, requestOptions) => listSuspiciousTransactionsWithRequest(request, requestParams, requestOptions),
+    getSuspiciousTransactionSummary: (requestOptions) => request("/internal/suspicious-transactions/summary", requestOptions),
+    getSuspiciousTransaction: (suspiciousTransactionId, requestOptions) => request(`/internal/suspicious-transactions/${encodeURIComponent(suspiciousTransactionId)}`, requestOptions),
     listGovernanceAdvisories: (requestParams, requestOptions) => listGovernanceAdvisoriesWithRequest(request, requestParams, requestOptions),
     getGovernanceAdvisoryAnalytics: (requestParams, requestOptions) => getGovernanceAdvisoryAnalyticsWithRequest(request, requestParams, requestOptions),
     getGovernanceAdvisoryAudit: (eventId, requestOptions) => request(`/governance/advisories/${encodeURIComponent(eventId)}/audit`, requestOptions),
@@ -154,6 +157,28 @@ function listScoredTransactionsWithRequest(request, { page = 0, size = 25, query
   appendOptionalParam(params, "riskLevel", riskLevel);
   appendOptionalParam(params, "classification", classification || status);
   return request(`/api/v1/transactions/scored?${params.toString()}`, { signal });
+}
+
+function listSuspiciousTransactionsWithRequest(request, {
+  size = 20,
+  cursor,
+  status,
+  riskLevel,
+  customerId,
+  linkedAlertId,
+  detectedFrom,
+  detectedTo
+} = {}, { signal } = {}) {
+  const params = new URLSearchParams();
+  params.set("size", String(Math.min(Math.max(Number(size) || 20, 1), 100)));
+  appendOptionalParam(params, "cursor", cursor);
+  appendOptionalParam(params, "status", status);
+  appendOptionalParam(params, "riskLevel", riskLevel);
+  appendOptionalParam(params, "customerId", customerId);
+  appendOptionalParam(params, "linkedAlertId", linkedAlertId);
+  appendOptionalParam(params, "detectedFrom", toUtcInstantParam(detectedFrom));
+  appendOptionalParam(params, "detectedTo", toUtcInstantParam(detectedTo));
+  return request(`/internal/suspicious-transactions?${params.toString()}`, { signal });
 }
 
 function listGovernanceAdvisoriesWithRequest(request, { severity = "ALL", modelVersion = "", lifecycleStatus = "ALL", limit = 25 } = {}, { signal } = {}) {

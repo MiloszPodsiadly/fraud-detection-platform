@@ -40,6 +40,7 @@ final class SecurityRouteOwnershipRegistry {
         route(routes, "GET", "/api/v1/fraud-cases/work-queue/summary", "FraudCaseAuthorizationRules");
         route(routes, "GET", "/api/v1/transactions/scored", "TransactionAuthorizationRules");
         route(routes, "GET", "/internal/suspicious-transactions", "SuspiciousTransactionAuthorizationRules");
+        route(routes, "GET", "/internal/suspicious-transactions/summary", "SuspiciousTransactionAuthorizationRules");
         route(routes, "GET", "/internal/suspicious-transactions/{suspiciousTransactionId}",
                 "SuspiciousTransactionAuthorizationRules");
         route(routes, "GET", "/governance/advisories/analytics", "GovernanceAuthorizationRules");

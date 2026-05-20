@@ -1,6 +1,6 @@
 # SuspiciousTransaction Internal Read API
 
-Status: current product documentation for FDP-64.
+Status: current product documentation for the protected internal SuspiciousTransaction read API.
 
 ## Purpose
 
@@ -19,15 +19,42 @@ It exposes system-detected suspicious scoring signals for internal operational r
 ## Endpoints
 
 - GET /internal/suspicious-transactions
+- GET /internal/suspicious-transactions/summary
 - GET /internal/suspicious-transactions/{suspiciousTransactionId}
 
 There is no public unauthenticated endpoint for this read model.
 
 ## Authorization
 
-Both endpoints require SUSPICIOUS_TRANSACTION_READ.
+All endpoints require SUSPICIOUS_TRANSACTION_READ.
 This authority is not granted to the read-only viewer role because the response includes customerId and accountId.
 It is granted to analyst, reviewer, and fraud-ops administrator roles.
+
+## Summary Semantics
+
+GET /internal/suspicious-transactions/summary returns a point-in-time global aggregate:
+
+- totalSuspiciousTransactions
+- freshness
+- cachedAt
+- expiresAt
+
+Only additive backend API change allowed in FDP-66 is GET /internal/suspicious-transactions/summary for workspace aggregate counter.
+
+The summary endpoint is read-only, requires SUSPICIOUS_TRANSACTION_READ, and is audited as an aggregate read. It exists
+for the workspace navigation counter only. It does not change cursor search semantics, does not add filter totals, does
+not return records, and does not support page number navigation.
+
+The summary endpoint returns totalSuspiciousTransactions as the only domain counter. Its other fields describe cache
+freshness: FRESH, STALE, or UNAVAILABLE, plus cachedAt and expiresAt timestamps when a cached value exists. The summary
+total is cached or materialized for a configurable TTL; the default runtime TTL is 30 seconds. Repeated requests within
+the TTL reuse the cached value. If refresh fails after a cached value exists, the endpoint returns the stale cached value.
+If refresh fails before a cache exists, the endpoint returns an unavailable summary with totalSuspiciousTransactions set
+to zero for safe client rendering. The summary endpoint must not execute a global collection count on every request.
+
+It is aggregate only: not cursor pagination metadata, not page count, not total pages, not final outcome, not confirmed
+fraud count, not analyst workload, and not fraud case count. It must not be used for offset navigation or page-number
+navigation.
 
 ## Pagination And Filters
 
@@ -57,18 +84,20 @@ The response does not include:
 - totalPages
 - totalCount
 - offset
+- totalSuspiciousTransactions
 
 The endpoint does not use:
 
-- global count query
 - offset skip
 - unbounded list
 - raw query passthrough
 - regex search
 
 Reason:
-A full count over suspicious_transactions can be expensive for broad or empty filters. This API avoids unbounded count scans
-by fetching at most size + 1 records with keyset predicates.
+The search API keeps list pagination stable and bounded by fetching at most size + 1 records with keyset predicates.
+It avoids unbounded count scans on the search path.
+Global aggregate counting is isolated in the summary endpoint so list clients do not infer page totals from search
+responses.
 
 Clients must navigate using nextCursor and must not rely on page number or total page count.
 
@@ -79,7 +108,7 @@ Rules:
 - fetch limit = size + 1.
 - hasNext indicates whether another cursor slice exists.
 - nextCursor is present only when hasNext is true.
-- no total collection count is computed.
+- no total collection count is computed by the search endpoint.
 - no page number navigation is supported.
 - no offset skip is used.
 - no raw query passthrough.
@@ -155,8 +184,14 @@ API metrics use low-cardinality labels only:
 - status
 - riskLevel
 
+The summary endpoint uses a dedicated counter named `fraud.suspicious_transaction.summary.read` with bounded labels:
+
+- outcome: success, stale, unavailable, or error.
+- freshness: fresh, stale, or unavailable.
+
 Metrics do not include transactionId, suspiciousTransactionId, customerId, accountId, sourceEventId, correlationId,
-linkedAlertId, raw filters, raw exception messages, reasonCodes, or modelName.
+linkedAlertId, raw filters, raw exception messages, reasonCodes, modelName, cursor values, exact counts, or response
+sizes as labels.
 
 ## Query Telemetry
 

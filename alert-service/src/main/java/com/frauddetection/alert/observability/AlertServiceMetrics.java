@@ -157,6 +157,14 @@ public class AlertServiceMetrics {
         ).increment();
     }
 
+    public void recordSuspiciousTransactionSummaryRead(String outcome, String freshness) {
+        counter(
+                "fraud.suspicious_transaction.summary.read",
+                "outcome", normalizeSuspiciousTransactionSummaryOutcome(outcome),
+                "freshness", normalizeSuspiciousTransactionSummaryFreshness(freshness)
+        ).increment();
+    }
+
     public void recordPostCommitAuditDegraded(String operation) {
         counter(
                 "fraud_platform_post_commit_audit_degraded_total",
@@ -1294,6 +1302,25 @@ public class AlertServiceMetrics {
         return switch (riskLevel) {
             case "LOW", "MEDIUM", "HIGH", "CRITICAL", "ANY" -> riskLevel;
             default -> "ANY";
+        };
+    }
+
+    private String normalizeSuspiciousTransactionSummaryOutcome(String outcome) {
+        return switch (outcome) {
+            case "success", "stale", "unavailable", "error" -> outcome;
+            default -> "error";
+        };
+    }
+
+    private String normalizeSuspiciousTransactionSummaryFreshness(String freshness) {
+        if (!StringUtils.hasText(freshness)) {
+            return "unavailable";
+        }
+        return switch (freshness.trim().toUpperCase()) {
+            case "FRESH" -> "fresh";
+            case "STALE" -> "stale";
+            case "UNAVAILABLE" -> "unavailable";
+            default -> "unavailable";
         };
     }
 

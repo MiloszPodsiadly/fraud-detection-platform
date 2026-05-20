@@ -33,6 +33,7 @@ describe("WorkspaceRuntimeProvider", () => {
     expect(result.current.apiClient).toEqual({ client: true });
     expect(result.current.canReadFraudCases).toBe(true);
     expect(result.current.canReadAlerts).toBe(true);
+    expect(result.current.canReadSuspiciousTransactions).toBe(false);
     expect(result.current.canReadGovernanceAdvisories).toBe(true);
     expect(result.current.canWriteGovernanceAudit).toBe(false);
     expect(result.current.runtimeStatus).toBe("ready");
@@ -40,7 +41,7 @@ describe("WorkspaceRuntimeProvider", () => {
 
   it("capabilities are frontend gating hints, not backend authorization enforcement", () => {
     const session = authenticatedSession({
-      authorities: ["alert:read", "fraud-case:read", "transaction-monitor:read"]
+      authorities: ["alert:read", "fraud-case:read", "transaction-monitor:read", "suspicious-transaction:read"]
     });
     const { result } = renderHook(() => useWorkspaceRuntime(), {
       wrapper: ({ children }) => (
@@ -53,6 +54,7 @@ describe("WorkspaceRuntimeProvider", () => {
     expect(result.current.canReadAlerts).toBe(true);
     expect(result.current.canReadFraudCases).toBe(true);
     expect(result.current.canReadTransactions).toBe(true);
+    expect(result.current.canReadSuspiciousTransactions).toBe(true);
     expect(result.current.canWriteGovernanceAudit).toBe(false);
     expect(result.current.apiClient).toEqual({ client: true });
   });
@@ -63,6 +65,16 @@ describe("WorkspaceRuntimeProvider", () => {
 
     expect(docs).toContain("not an authorization or security enforcement boundary");
     expect(docs).toContain("Backend authorization remains authoritative");
+    expect(source).toContain("Backend authorization still enforces every protected API call");
+  });
+
+  it("frontendGuardDoesNotClaimSecurityBoundary", () => {
+    const docs = readFileSync(join(process.cwd(), "../docs/product/suspicious_transaction_internal_ui.md"), "utf8");
+    const source = readFileSync(join(process.cwd(), "src/workspace/WorkspaceRuntimeProvider.jsx"), "utf8");
+
+    expect(docs).toContain("Frontend capability mapping is a session and UX hint only");
+    expect(docs).toContain("backend authorization is authoritative");
+    expect(docs).toContain("FDP-66 does not change production role provisioning");
     expect(source).toContain("Backend authorization still enforces every protected API call");
   });
 
@@ -114,6 +126,7 @@ describe("WorkspaceRuntimeProvider", () => {
     expect(result.current.canReadAlerts).toBeUndefined();
     expect(result.current.canReadFraudCases).toBeUndefined();
     expect(result.current.canReadTransactions).toBeUndefined();
+    expect(result.current.canReadSuspiciousTransactions).toBeUndefined();
     expect(result.current.canReadGovernanceAdvisories).toBeUndefined();
     expect(result.current.canWriteGovernanceAudit).toBeUndefined();
   });

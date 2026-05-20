@@ -25,8 +25,14 @@ class SuspiciousTransactionReadControllerNoMutationTest {
         }
         assertThat(Arrays.stream(SuspiciousTransactionReadController.class.getDeclaredMethods())
                 .filter(method -> method.isAnnotationPresent(GetMapping.class))
-                .count()).isEqualTo(2);
+                .count()).isEqualTo(3);
         assertThat(endpointText()).doesNotContain("export", "bulk", "dismiss", "confirm", "link-case");
+    }
+
+    @Test
+    void summaryEndpointAddsNoMutationEndpointsOrNewAuthorities() {
+        assertThat(endpointText()).contains("/summary");
+        assertThat(endpointText()).doesNotContain("post", "put", "patch", "delete", "assign", "claim", "decision");
     }
 
     private String endpointText() {

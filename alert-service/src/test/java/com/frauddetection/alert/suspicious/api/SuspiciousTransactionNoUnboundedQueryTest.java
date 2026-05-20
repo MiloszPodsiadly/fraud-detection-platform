@@ -55,7 +55,8 @@ class SuspiciousTransactionNoUnboundedQueryTest {
         SuspiciousTransactionReadService service = new SuspiciousTransactionReadService(
                 repository,
                 mongoTemplate,
-                new SuspiciousTransactionCursorCodec()
+                new SuspiciousTransactionCursorCodec(),
+                mock(SuspiciousTransactionSummaryService.class)
         );
 
         service.search(SuspiciousTransactionSearchQuery.from(new org.springframework.util.LinkedMultiValueMap<>()));

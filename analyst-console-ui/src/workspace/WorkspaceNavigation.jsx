@@ -3,11 +3,12 @@ import { WORKSPACE_ROUTE_ENTRIES } from "./WorkspaceRouteRegistry.jsx";
 export function WorkspaceNavigation({
   workspacePage,
   workspaceRoutes = WORKSPACE_ROUTE_ENTRIES,
-  workspaceCounters = { alerts: null, transactions: null },
+  workspaceCounters = { alerts: null, fraudCases: null, suspiciousTransactions: null, transactions: null },
   workspaceCountersStatus = { failedCounters: [], errorByCounter: {}, stale: false },
   canReadFraudCases,
   canReadAlerts,
   canReadTransactions,
+  canReadSuspiciousTransactions,
   canReadGovernanceAdvisories,
   alertPage,
   transactionPage,
@@ -22,6 +23,11 @@ export function WorkspaceNavigation({
   const failedCounterNames = workspaceCountersStatus.failedCounters?.length
     ? workspaceCountersStatus.failedCounters
     : Object.keys(workspaceCountersStatus.errorByCounter || {});
+  const suspiciousSummaryUnavailable = isCounterUnavailable(
+    "suspiciousTransactions",
+    failedCounterNames,
+    workspaceCountersStatus
+  ) && workspaceCounters.suspiciousTransactions == null;
   const transactionGlobalCount = canReadTransactions === false
     ? "No access"
     : workspaceCounters.transactions ?? transactionPage?.totalElements ?? 0;
@@ -54,6 +60,20 @@ export function WorkspaceNavigation({
       value: alertGlobalCount,
       authority: canReadAlerts,
       stale: isCounterStale("alerts", failedCounterNames, workspaceCountersStatus)
+    },
+    suspiciousTransactions: {
+      value: canReadSuspiciousTransactions === false
+        ? "No access"
+        : workspaceCounters.suspiciousTransactions ?? 0,
+      authority: canReadSuspiciousTransactions,
+      stale: isCounterStale("suspiciousTransactions", failedCounterNames, workspaceCountersStatus),
+      unavailable: suspiciousSummaryUnavailable,
+      title: suspiciousSummaryUnavailable
+        ? "Summary temporarily unavailable. Not page count, fraud count, case count, or analyst workload."
+        : "Workspace signal total. Not page count, fraud count, case count, or analyst workload.",
+      ariaLabel: suspiciousSummaryUnavailable
+        ? "Signal total unavailable"
+        : `Workspace signal total ${workspaceCounters.suspiciousTransactions ?? 0}`
     },
     analyst: {
       value: isFraudCaseSummaryLoading ? "..." : fraudCaseSummaryLabel,
@@ -88,6 +108,7 @@ export function WorkspaceNavigation({
           value={navigationState[route.key]?.value ?? 0}
           authority={navigationState[route.key]?.authority}
           stale={navigationState[route.key]?.stale}
+          unavailable={navigationState[route.key]?.unavailable}
           title={navigationState[route.key]?.title}
           ariaLabel={navigationState[route.key]?.ariaLabel}
           onWorkspaceChange={onWorkspaceChange}
@@ -97,7 +118,7 @@ export function WorkspaceNavigation({
   );
 }
 
-function WorkspaceTab({ page, href, activePage, label, value, authority, stale, title, ariaLabel, onWorkspaceChange }) {
+function WorkspaceTab({ page, href, activePage, label, value, authority, stale, unavailable, title, ariaLabel, onWorkspaceChange }) {
   return (
     <a
       href={href}
@@ -109,7 +130,7 @@ function WorkspaceTab({ page, href, activePage, label, value, authority, stale, 
     >
       <span>{label}</span>
       <strong>{value}</strong>
-      <CounterMeta authority={authority} stale={stale} />
+      <CounterMeta authority={authority} stale={stale} unavailable={unavailable} />
     </a>
   );
 }
@@ -122,14 +143,21 @@ function openWorkspace(event, onWorkspaceChange, page) {
   onWorkspaceChange(page);
 }
 
-function CounterMeta({ authority, stale = false }) {
+function CounterMeta({ authority, stale = false, unavailable = false }) {
   if (authority === false) {
     return <small className="counterMeta">Access unavailable</small>;
+  }
+  if (unavailable) {
+    return <small className="counterMeta">Signal total unavailable</small>;
   }
   if (stale) {
     return <small className="counterMeta">Last known</small>;
   }
   return null;
+}
+
+function isCounterUnavailable(counterName, failedCounterNames, workspaceCountersStatus) {
+  return Boolean(workspaceCountersStatus.degraded && failedCounterNames.includes(counterName));
 }
 
 function isCounterStale(counterName, failedCounterNames, workspaceCountersStatus) {

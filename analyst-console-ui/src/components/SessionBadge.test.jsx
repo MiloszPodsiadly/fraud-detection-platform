@@ -19,13 +19,14 @@ describe("SessionBadge", () => {
 
     expect(screen.getAllByText("reviewer-1")).toHaveLength(2);
     expect(screen.getByText("Authenticated")).toBeInTheDocument();
-    expect(screen.getByText("reviewer access active via local demo session. 8 authorities available.")).toBeInTheDocument();
+    expect(screen.getByText("reviewer access active via local demo session. 9 authorities available.")).toBeInTheDocument();
     expect(screen.getByText("local/dev only")).toBeInTheDocument();
     expect(screen.getByText("Demo auth mode")).toBeInTheDocument();
     expect(screen.getByLabelText("Role")).toHaveValue("REVIEWER");
     expect(screen.getByText("alert:decision:submit")).toBeInTheDocument();
     expect(screen.getByText("fraud-case:audit:read")).toBeInTheDocument();
     expect(screen.getByText("fraud-case:update")).toBeInTheDocument();
+    expect(screen.getByText("suspicious-transaction:read")).toBeInTheDocument();
   });
 
   it("renders an unauthenticated session state", () => {

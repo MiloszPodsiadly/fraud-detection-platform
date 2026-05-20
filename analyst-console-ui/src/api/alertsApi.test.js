@@ -21,6 +21,9 @@ describe("alertsApi auth headers", () => {
   const listFraudCaseWorkQueue = (...args) => apiClient.listFraudCaseWorkQueue(...args);
   const getFraudCaseWorkQueueSummary = (...args) => apiClient.getFraudCaseWorkQueueSummary(...args);
   const listScoredTransactions = (...args) => apiClient.listScoredTransactions(...args);
+  const listSuspiciousTransactions = (...args) => apiClient.listSuspiciousTransactions(...args);
+  const getSuspiciousTransactionSummary = (...args) => apiClient.getSuspiciousTransactionSummary(...args);
+  const getSuspiciousTransaction = (...args) => apiClient.getSuspiciousTransaction(...args);
   const listGovernanceAdvisories = (...args) => apiClient.listGovernanceAdvisories(...args);
   const getGovernanceAdvisoryAnalytics = (...args) => apiClient.getGovernanceAdvisoryAnalytics(...args);
   const getGovernanceAdvisoryAudit = (...args) => apiClient.getGovernanceAdvisoryAudit(...args);
@@ -315,6 +318,7 @@ describe("alertsApi auth headers", () => {
     await listFraudCaseWorkQueue();
     await getFraudCaseWorkQueueSummary();
     await listScoredTransactions();
+    await getSuspiciousTransactionSummary();
     await listGovernanceAdvisories();
     await getGovernanceAdvisoryAnalytics();
 
@@ -666,6 +670,78 @@ describe("alertsApi auth headers", () => {
       "/api/v1/transactions/scored?page=2&size=25&query=customer-1&riskLevel=CRITICAL&classification=SUSPICIOUS",
       expect.objectContaining({ headers: expect.objectContaining({ "Content-Type": "application/json" }) })
     );
+  });
+
+  it("uses cursor slice params for suspicious transaction reads without page or totals", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      content: [],
+      size: 20,
+      hasNext: false,
+      nextCursor: null
+    }));
+    const cursor = "opaque.cursor/with+symbols==";
+
+    await listSuspiciousTransactions({
+      size: 250,
+      cursor,
+      status: "NEW",
+      riskLevel: "CRITICAL",
+      customerId: " customer-1 ",
+      linkedAlertId: "",
+      detectedFrom: "2026-05-13T08:15",
+      detectedTo: null
+    });
+
+    const url = fetchMock.mock.calls[0][0];
+    const query = new URLSearchParams(url.split("?")[1]);
+    expect(url).toContain("/internal/suspicious-transactions?");
+    expect(query.get("size")).toBe("100");
+    expect(query.get("cursor")).toBe(cursor);
+    expect(query.get("status")).toBe("NEW");
+    expect(query.get("riskLevel")).toBe("CRITICAL");
+    expect(query.get("customerId")).toBe("customer-1");
+    expect(query.get("detectedFrom")).toBe(new Date("2026-05-13T08:15").toISOString());
+    expect(url).not.toContain("page=");
+    expect(url).not.toContain("totalElements");
+    expect(url).not.toContain("totalPages");
+    expect(url).not.toContain("linkedAlertId=");
+  });
+
+  it("loads a suspicious transaction detail through the internal GET path only", async () => {
+    const signal = new AbortController().signal;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      suspiciousTransactionId: "suspicious-1",
+      transactionId: "txn-1"
+    }));
+
+    await getSuspiciousTransaction("suspicious/1", { signal });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/internal/suspicious-transactions/suspicious%2F1",
+      expect.objectContaining({
+        signal,
+        headers: expect.objectContaining({ "Content-Type": "application/json" })
+      })
+    );
+    expect(fetchMock.mock.calls[0][1]).not.toEqual(expect.objectContaining({ method: expect.any(String) }));
+  });
+
+  it("loads suspicious transaction global summary through the internal summary path only", async () => {
+    const signal = new AbortController().signal;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      totalSuspiciousTransactions: 98
+    }));
+
+    await getSuspiciousTransactionSummary({ signal });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/internal/suspicious-transactions/summary",
+      expect.objectContaining({
+        signal,
+        headers: expect.objectContaining({ "Content-Type": "application/json" })
+      })
+    );
+    expect(fetchMock.mock.calls[0][1]).not.toEqual(expect.objectContaining({ method: expect.any(String) }));
   });
 
   it("surfaces work queue security and cursor errors without endpoint fallback", async () => {
