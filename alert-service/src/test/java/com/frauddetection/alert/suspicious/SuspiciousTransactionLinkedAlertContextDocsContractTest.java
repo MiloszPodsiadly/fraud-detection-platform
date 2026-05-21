@@ -78,24 +78,82 @@ class SuspiciousTransactionLinkedAlertContextDocsContractTest {
                 .contains("must not record raw alertId")
                 .contains("must not record raw linkedAlertId")
                 .contains("must not record raw customerId")
+                .contains("raw accountId")
+                .contains("raw transactionId")
                 .contains("must not record raw correlationId")
-                .contains("must not record raw exception message");
+                .contains("raw scoreDecisionId")
+                .contains("raw query string")
+                .contains("raw request path")
+                .contains("must not record raw exception message")
+                .contains("response body");
     }
 
     @Test
     void DocsExplainScoreDecisionIdLineageSourceTest() throws Exception {
         assertThat(docs())
                 .contains("scoreDecisionId is sourced from SuspiciousTransaction")
+                .contains("scoreDecisionId is lineage metadata for the source suspicious signal")
                 .contains("not used for alert-side compatibility unless the alert read model exposes an equivalent field")
                 .contains("Relationship validation currently uses alertId, transactionId, customerId, and correlationId where available");
+    }
+
+    @Test
+    void DocsDoNotClaimScoreDecisionIdAlertSideValidationTest() throws Exception {
+        assertThat(docs())
+                .doesNotContain("scoreDecisionId is validated against alert")
+                .doesNotContain("alert-side scoreDecisionId validation")
+                .doesNotContain("scoreDecisionId relationship validation");
     }
 
     @Test
     void DocsMentionClientsMustEvaluateStateTest() throws Exception {
         assertThat(docs())
                 .contains("Clients must evaluate state")
-                .contains("HTTP 200 does not imply LINKED_ALERT_AVAILABLE")
+                .contains("HTTP 200 does not imply linked alert context is available")
                 .contains("TEMPORARILY_UNAVAILABLE is a degraded read state");
+    }
+
+    @Test
+    void DocsMentionHttp200DoesNotMeanAvailableTest() throws Exception {
+        assertThat(docs())
+                .contains("HTTP 200 does not imply LINKED_ALERT_AVAILABLE")
+                .contains("UI/client must not render alert context fields for TEMPORARILY_UNAVAILABLE");
+    }
+
+    @Test
+    void DocsMentionErrorMetricForTemporaryUnavailableTest() throws Exception {
+        assertThat(docs())
+                .contains("fraud.suspicious_transaction.linked_alert.read{outcome=\"error\"}");
+    }
+
+    @Test
+    void DocsMentionUpdatedAtIsNullableTest() throws Exception {
+        assertThat(docs())
+                .contains("updatedAt is nullable")
+                .contains("Clients must not assume it is present")
+                .contains("updatedAt only when the alert read model exposes a reliable updated timestamp");
+    }
+
+    @Test
+    void DocsForbidFakeUpdatedTimestampTest() throws Exception {
+        assertThat(docs())
+                .contains("createdAt must not be treated as update time")
+                .contains("must not synthesize fake updatedAt values");
+    }
+
+    @Test
+    void DocsMentionUiMigrationIsOutOfScopeForFdp69Test() throws Exception {
+        assertThat(docs())
+                .contains("FDP-69 introduces the backend linked-alert context resolver")
+                .contains("FDP-69 does not migrate the UI workflow")
+                .contains("AlertReadOnlyContextPage may continue using the existing read-only client until FDP-70");
+    }
+
+    @Test
+    void DocsMentionFutureUiMigrationCanUseBackendResolverTest() throws Exception {
+        assertThat(docs())
+                .contains("Future FDP-70 may switch AlertReadOnlyContextPage to call GET")
+                .contains("/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert");
     }
 
     @Test

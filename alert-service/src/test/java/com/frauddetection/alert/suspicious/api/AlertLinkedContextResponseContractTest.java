@@ -121,6 +121,27 @@ class AlertLinkedContextResponseContractTest {
                 .doesNotContain("analystDecision", "caseId", "evidenceSnapshot", "rawPayload", "idempotency");
     }
 
+    @Test
+    void availableResponseAllowsNullUpdatedAt() {
+        AlertLinkedContextResponse response = AlertLinkedContextResponse.available(
+                "alert-1",
+                "transaction-1",
+                "customer-1",
+                "account-1",
+                0.94,
+                RiskLevel.CRITICAL,
+                AlertStatus.OPEN,
+                List.of("HIGH_AMOUNT"),
+                Instant.parse("2026-05-20T10:00:00Z"),
+                null,
+                "correlation-1",
+                "score-decision-1"
+        );
+
+        assertThat(response.createdAt()).isEqualTo(Instant.parse("2026-05-20T10:00:00Z"));
+        assertThat(response.updatedAt()).isNull();
+    }
+
     private List<String> fieldNames() {
         return Arrays.stream(AlertLinkedContextResponse.class.getRecordComponents())
                 .map(RecordComponent::getName)
