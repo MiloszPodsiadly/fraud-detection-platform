@@ -1,19 +1,23 @@
 # Alert Read-Only Detail Bridge
 
-Status: current product documentation for FDP-68.
+Status: current product documentation for the SuspiciousTransaction linked-alert read-only bridge.
 
 ## Purpose
 
-FDP-67 adds read-only navigation from SuspiciousTransaction detail to linked alert detail.
+The bridge provides read-only navigation from SuspiciousTransaction detail to linked alert context.
 The bridge gives analysts alert investigation context without opening an alert workflow surface.
-FDP-68 extracts that read-only alert context into `AlertReadOnlyContextPage`.
-FDP-68 is architecture hardening, not product feature expansion.
+`AlertReadOnlyContextPage` remains the dedicated UI component for this context.
 
-The bridge uses the existing protected alert read API:
+The backend relationship validation is authoritative. The backend exposes a dedicated internal read endpoint with the
+source SuspiciousTransaction identifier:
 
-- GET `/api/v1/alerts/{alertId}`
+- GET `/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`
 
-FDP-68 does not introduce a second alert read API and does not add a new backend endpoint.
+The backend derives `linkedAlertId` from the SuspiciousTransaction read model and validates the relationship before
+returning alert context. Clients cannot pass `alertId` in the path, query string, or request body.
+FDP-69 does not migrate the UI workflow. Until a dedicated UI migration uses this endpoint, the existing
+`AlertReadOnlyContextPage` remains a getAlert-only read component guarded by frontend source-context binding and backend
+`ALERT_READ` authorization.
 
 ## Semantics
 
@@ -30,28 +34,26 @@ The bridge must not rename an alert into a fraud verdict, analyst disposition, c
 
 SuspiciousTransaction detail still requires `SUSPICIOUS_TRANSACTION_READ`.
 Linked alert detail requires `ALERT_READ`.
+The internal linked-alert context endpoint requires both `SUSPICIOUS_TRANSACTION_READ` and `ALERT_READ`.
 `SUSPICIOUS_TRANSACTION_READ` does not imply `ALERT_READ`.
 In plain terms, suspicious transaction read access does not imply alert read access.
 
 The frontend guard is a UX and request gate only.
 The frontend guard is not a security boundary.
-Backend authorization remains authoritative for direct and linked alert detail access.
+Backend authorization remains authoritative for linked alert context access.
 
 If a user has `SUSPICIOUS_TRANSACTION_READ` but not `ALERT_READ`, the SuspiciousTransaction detail may show that alert detail requires alert read access, but it must not render an actionable alert detail link.
 
 ## Source Context Binding
 
 The linked alert context is opened from SuspiciousTransaction detail view.
-The route/state must retain `suspiciousTransactionId` and `linkedAlertId`.
+The route/state may retain `suspiciousTransactionId` and linked-alert context for UX continuity.
 An `alertId` alone in the suspicious workspace is invalid bridge context.
-A `suspiciousTransactionId` plus `alertId` route without loaded source SuspiciousTransaction context is pending verification, not valid bridge context.
 
 FDP-67 is not a general-purpose alert lookup inside the SuspiciousTransaction workspace.
-The bridge requires source SuspiciousTransaction context before the frontend creates the read-only alert detail client.
-The UI must not fetch alert detail until the source `linkedAlertId` matches the selected `alertId`.
-If the source linked alert does not match the selected alert, the bridge fails closed.
-Frontend context binding is scope control, not security boundary.
-Backend alert-read authorization remains authoritative.
+The backend loads the source SuspiciousTransaction, derives `linkedAlertId`, loads the alert, and fails closed if the
+relationship does not match. Frontend context binding is scope control, not security boundary.
+Backend relationship validation and alert-read authorization remain authoritative.
 
 ## Dedicated Read-Only Component
 
@@ -62,7 +64,8 @@ FDP-68 fully removes SuspiciousTransaction read-only bridge mode from `AlertDeta
 `AlertReadOnlyContextPage` is the only component for SuspiciousTransaction linked-alert read-only context.
 `AlertReadOnlyContextPage` depends only on a getAlert-only client.
 This removes the boolean-mode smell and makes the read-only path safe by construction instead of conditionals inside the workflow page.
-The existing GET `/api/v1/alerts/{alertId}` response remains the read source.
+The internal linked-alert endpoint is the backend source for validated read-only alert context when the UI is migrated to
+the FDP-69 contract.
 
 This component boundary is scope control, not a frontend security boundary.
 Backend `ALERT_READ` authorization remains authoritative.
@@ -80,26 +83,37 @@ The bridge does not expose an evidence proof panel.
 The bridge does not expose full evidence snapshots or raw payload expansion.
 The bridge does not log raw identifiers, emit raw identifier telemetry, or store raw identifiers in browser storage.
 
-Allowed read-only fields are limited to alert read-model context already returned by GET `/api/v1/alerts/{alertId}`:
+Allowed read-only fields are limited to minimal alert read-model context:
 
 - alertId
 - transactionId
 - customerId
+- accountId when already present in the linked read model
 - correlationId
 - riskScore or fraudScore as read-model score
 - riskLevel
 - alert status as operational read-model status
 - reasonCodes as metadata
 - createdAt
-- alertTimestamp
-- existing alert metadata returned by the protected read contract
+- updatedAt when already present in the linked read model
+- scoreDecisionId when already present in the linked SuspiciousTransaction context
+
+The response must not expose analyst decisions, idempotency keys, case lifecycle state, assistant summaries, full
+evidence snapshots, legal-proof material, raw payloads, score details, or feature snapshots.
+
+Sensitive read audit and metrics use bounded outcome labels only: available, no linked alert, suspicious transaction not
+found, linked alert not found, relationship mismatch, unavailable, or error. Logs, metrics, and audit metadata must not
+record raw alert IDs, customer/account identifiers, correlation IDs, raw paths, raw query strings, exception messages,
+or idempotency keys.
 
 ## UI States
 
 Missing `linkedAlertId` shows `No linked alert` and does not render an action.
 Missing alert read authority shows no actionable alert link or an access-denied state.
 Backend 401 and 403 responses render an access-denied state.
-Backend 404 renders a safe not-found state.
+Missing SuspiciousTransaction renders a safe not-found state.
+Missing linked alert renders a bounded linked-alert-not-found state without alert fields.
+Relationship mismatch renders a bounded mismatch state without alert fields.
 Other backend failures render a safe unavailable state and must not display raw backend payloads.
 
 ## Non-Claims
