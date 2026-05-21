@@ -58,6 +58,9 @@ class SuspiciousTransactionReadControllerAuthorizationTest {
     private SuspiciousTransactionReadService service;
 
     @MockBean
+    private SuspiciousTransactionLinkedAlertContextService linkedAlertContextService;
+
+    @MockBean
     private SensitiveReadAuditService sensitiveReadAuditService;
 
     @MockBean
@@ -77,8 +80,11 @@ class SuspiciousTransactionReadControllerAuthorizationTest {
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/internal/suspicious-transactions/suspicious-1"))
                 .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/internal/suspicious-transactions/suspicious-1/linked-alert"))
+                .andExpect(status().isUnauthorized());
 
         verifyNoInteractions(service);
+        verifyNoInteractions(linkedAlertContextService);
     }
 
     @Test
@@ -92,8 +98,12 @@ class SuspiciousTransactionReadControllerAuthorizationTest {
         mockMvc.perform(get("/internal/suspicious-transactions/suspicious-1")
                         .with(authentication(auth(AnalystAuthority.ALERT_READ))))
                 .andExpect(status().isForbidden());
+        mockMvc.perform(get("/internal/suspicious-transactions/suspicious-1/linked-alert")
+                        .with(authentication(auth(AnalystAuthority.ALERT_READ))))
+                .andExpect(status().isForbidden());
 
         verifyNoInteractions(service);
+        verifyNoInteractions(linkedAlertContextService);
     }
 
     @Test
@@ -132,6 +142,26 @@ class SuspiciousTransactionReadControllerAuthorizationTest {
     }
 
     @Test
+    void linkedAlertContextRequiresBothSuspiciousTransactionAndAlertRead() throws Exception {
+        when(linkedAlertContextService.resolveLinkedAlertContext("suspicious-1"))
+                .thenReturn(AlertLinkedContextResponse.noLinkedAlert());
+
+        mockMvc.perform(get("/internal/suspicious-transactions/suspicious-1/linked-alert")
+                        .with(authentication(auth(AnalystAuthority.SUSPICIOUS_TRANSACTION_READ))))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/internal/suspicious-transactions/suspicious-1/linked-alert")
+                        .with(authentication(auth(AnalystAuthority.ALERT_READ))))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/internal/suspicious-transactions/suspicious-1/linked-alert")
+                        .with(authentication(auth(
+                                AnalystAuthority.SUSPICIOUS_TRANSACTION_READ,
+                                AnalystAuthority.ALERT_READ
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("NO_LINKED_ALERT"));
+    }
+
+    @Test
     void responseMayContainCustomerAndAccountIdentifiersOnlyBehindAuthority() throws Exception {
         when(service.findById("suspicious-1")).thenReturn(Optional.of(
                 SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT"))
@@ -165,11 +195,11 @@ class SuspiciousTransactionReadControllerAuthorizationTest {
         verifyNoInteractions(service);
     }
 
-    private UsernamePasswordAuthenticationToken auth(String authority) {
+    private UsernamePasswordAuthenticationToken auth(String... authorities) {
         return new UsernamePasswordAuthenticationToken(
                 "analyst-1",
                 null,
-                List.of(new SimpleGrantedAuthority(authority))
+                java.util.Arrays.stream(authorities).map(SimpleGrantedAuthority::new).toList()
         );
     }
 }

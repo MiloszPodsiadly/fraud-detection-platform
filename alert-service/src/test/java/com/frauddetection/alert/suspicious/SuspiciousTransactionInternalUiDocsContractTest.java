@@ -18,11 +18,12 @@ class SuspiciousTransactionInternalUiDocsContractTest {
         String docs = Files.readString(DOCS);
 
         assertThat(docs)
-                .contains("FDP-66 internal read-only UI")
+                .contains("SuspiciousTransaction internal read-only UI")
                 .contains("protected read API")
                 .contains("GET `/internal/suspicious-transactions/summary`")
                 .contains("GET `/internal/suspicious-transactions`")
                 .contains("GET `/internal/suspicious-transactions/{suspiciousTransactionId}`")
+                .contains("GET `/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`")
                 .contains("System-detected suspicious signal")
                 .contains("Not confirmed fraud")
                 .contains("Not an analyst decision")
@@ -40,10 +41,10 @@ class SuspiciousTransactionInternalUiDocsContractTest {
         String docs = Files.readString(DOCS);
 
         assertThat(docs)
-                .contains("Accepted FDP-66 scope is limited to")
+                .contains("Current SuspiciousTransaction internal UI scope is limited to")
                 .contains("UI read-only list and detail views")
-                .contains("existing cursor list and detail API")
-                .contains("Only additive backend API change allowed in FDP-66 is GET /internal/suspicious-transactions/summary for workspace aggregate counter");
+                .contains("cursor list, detail, summary, and linked-alert context read APIs")
+                .contains("Relationship-validated linked alert context");
     }
 
     @Test

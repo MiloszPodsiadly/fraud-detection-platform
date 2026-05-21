@@ -1,6 +1,6 @@
 # SuspiciousTransaction Internal UI
 
-Status: current product documentation for the FDP-66 internal read-only UI.
+Status: current product documentation for the SuspiciousTransaction internal read-only UI.
 
 ## Purpose
 
@@ -12,14 +12,13 @@ The UI consumes the protected internal read contract:
 - GET `/internal/suspicious-transactions/summary`
 - GET `/internal/suspicious-transactions`
 - GET `/internal/suspicious-transactions/{suspiciousTransactionId}`
+- GET `/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`
 
-Accepted FDP-66 scope is limited to:
+Current SuspiciousTransaction internal UI scope is limited to:
 
 - UI read-only list and detail views.
-- The existing cursor list and detail API.
-- One additive backend API change: GET `/internal/suspicious-transactions/summary` for the workspace aggregate counter.
-
-Only additive backend API change allowed in FDP-66 is GET /internal/suspicious-transactions/summary for workspace aggregate counter.
+- The cursor list, detail, summary, and linked-alert context read APIs.
+- Relationship-validated linked alert context returned through the SuspiciousTransaction boundary.
 
 ## Product Semantics
 
@@ -115,9 +114,16 @@ or decoded cursor content.
 
 ## Linked Alert Context
 
-FDP-67 adds read-only navigation from SuspiciousTransaction detail to linked alert detail when `linkedAlertId` is present
-and the session has alert read authority. The bridge uses the existing GET `/api/v1/alerts/{alertId}` endpoint.
-It does not introduce a second alert read API or a new backend endpoint.
+The linked alert bridge opens read-only alert context when `linkedAlertId` is present and the session has alert read
+authority. FDP-69 adds the backend endpoint GET
+`/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert` for relationship-validated alert context.
+The backend derives `linkedAlertId` from the SuspiciousTransaction read model and validates the relationship before
+returning alert context. The loaded SuspiciousTransaction document must match the path `suspiciousTransactionId`.
+The client cannot pass `alertId`.
+FDP-69 introduces the backend linked-alert context resolver. FDP-69 does not migrate the UI workflow.
+AlertReadOnlyContextPage may continue using the existing read-only client until FDP-70.
+Future FDP-70 may switch AlertReadOnlyContextPage to call GET
+`/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`.
 
 Alert detail is investigation context. It is not confirmed fraud, not an analyst decision, not a final outcome,
 not a case lifecycle action, and not legal proof.
@@ -126,15 +132,43 @@ The bridge does not mutate SuspiciousTransaction, Alert, FraudCase, or AnalystDe
 cases, submit analyst decisions, expose assistant summary, expose an evidence proof panel, or expose full evidence
 snapshot expansion.
 
-The frontend guard is not a security boundary. Backend authorization remains authoritative.
+The frontend guard is not a security boundary. Backend authorization and relationship validation remain authoritative.
 `SUSPICIOUS_TRANSACTION_READ` does not imply alert read access. Missing `linkedAlertId` shows no action.
 Missing alert read authority shows no actionable alert link or an access-denied state.
+The endpoint requires both `SUSPICIOUS_TRANSACTION_READ` and `ALERT_READ`.
 
 Linked alert context is opened from SuspiciousTransaction detail view and route/state must retain both the source
 `suspiciousTransactionId` and the linked `alertId`. An `alertId` alone in the SuspiciousTransaction workspace is invalid
 bridge context. Frontend source-context binding is scope control, not security enforcement.
-The UI must not fetch alert detail until loaded source SuspiciousTransaction context has a `linkedAlertId` matching the
-selected `alertId`; missing source context remains pending verification and mismatched source context fails closed.
+The backend must not accept `alertId` in the path, query string, or request body for this context. Relationship mismatch
+fails closed without alert fields. Relationship validation currently uses alertId, transactionId, customerId, and
+correlationId where available.
+
+The linked-alert response is minimal read-only context: alertId, transactionId, customerId, accountId when already
+present, alert score, riskLevel, alertStatus, reasonCodes, createdAt, updatedAt only when the alert read model exposes a
+reliable updated timestamp, correlationId, and scoreDecisionId when already present.
+updatedAt is nullable. Clients must not assume it is present. createdAt must not be treated as update time, and the
+endpoint must not synthesize fake updatedAt values.
+scoreDecisionId is sourced from SuspiciousTransaction.
+scoreDecisionId is lineage metadata for the source suspicious signal.
+scoreDecisionId is not used for alert-side compatibility unless the alert read model exposes an equivalent field.
+It must not expose analyst decisions, idempotency keys, case lifecycle state, assistant summaries, legal-proof material,
+full evidence snapshots, raw payloads, score details, or feature snapshots.
+
+Sensitive read audit and metrics use bounded outcomes only. Metrics and ordinary logs must not contain raw identifiers,
+raw paths, raw query strings, raw exception messages, or idempotency keys.
+Linked-alert context read uses the existing sensitive-read audit target policy. The source SuspiciousTransaction
+resourceId may be used as the audited resource identifier. Audit metadata must not include raw alertId, raw
+linkedAlertId, raw customerId, raw accountId, raw transactionId, raw correlationId, raw scoreDecisionId, raw query
+string, raw request path, raw exception message, or response body.
+
+Clients must evaluate state. HTTP 200 does not imply linked alert context is available.
+HTTP 200 does not imply LINKED_ALERT_AVAILABLE.
+TEMPORARILY_UNAVAILABLE is a degraded read state and must not be rendered as linked alert context.
+UI/client must not render alert context fields for TEMPORARILY_UNAVAILABLE.
+TEMPORARILY_UNAVAILABLE returns no alert fields. Dashboards and alerts should monitor
+`fraud.suspicious_transaction.linked_alert.read{outcome="error"}`. A rejected client-supplied `alertId` query parameter
+returns 400 and records a bounded validation error metric.
 
 ## Out Of Scope
 

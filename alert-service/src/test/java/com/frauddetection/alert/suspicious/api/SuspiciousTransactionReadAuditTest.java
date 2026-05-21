@@ -35,6 +35,7 @@ class SuspiciousTransactionReadAuditTest {
     private final SuspiciousTransactionReadController controller =
             new SuspiciousTransactionReadController(
                     service,
+                    mock(SuspiciousTransactionLinkedAlertContextService.class),
                     auditService,
                     metrics,
                     new SuspiciousTransactionQueryTelemetryClassifier(),
@@ -242,6 +243,54 @@ class SuspiciousTransactionReadAuditTest {
     }
 
     @Test
+    void linkedAlertContextReadAuditedAsSensitiveRead() {
+        SuspiciousTransactionLinkedAlertContextService linkedService = mock(SuspiciousTransactionLinkedAlertContextService.class);
+        SuspiciousTransactionReadController linkedController = new SuspiciousTransactionReadController(
+                service,
+                linkedService,
+                auditService,
+                metrics,
+                new SuspiciousTransactionQueryTelemetryClassifier(),
+                testTelemetrySink()
+        );
+        when(linkedService.resolveLinkedAlertContext("suspicious-1"))
+                .thenReturn(AlertLinkedContextResponse.noLinkedAlert());
+
+        linkedController.linkedAlertContext("suspicious-1", new MockHttpServletRequest());
+
+        verify(auditService).audit(
+                eq(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_LINKED_ALERT_CONTEXT),
+                eq(ReadAccessResourceType.SUSPICIOUS_TRANSACTION),
+                eq("suspicious-1"),
+                eq(0),
+                org.mockito.ArgumentMatchers.any()
+        );
+    }
+
+    @Test
+    void classifierRecognizesLinkedAlertContextRouteWithoutRawAlertId() {
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "GET",
+                "/internal/suspicious-transactions/suspicious-secret/linked-alert"
+        );
+        request.setAttribute(
+                HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE,
+                "/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert"
+        );
+        request.setAttribute(
+                HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE,
+                java.util.Map.of("suspiciousTransactionId", "suspicious-secret")
+        );
+
+        var target = new ReadAccessAuditClassifier().classify(request).orElseThrow();
+
+        assertThat(target.endpointCategory()).isEqualTo(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_LINKED_ALERT_CONTEXT);
+        assertThat(target.resourceType()).isEqualTo(ReadAccessResourceType.SUSPICIOUS_TRANSACTION);
+        assertThat(target.resourceId()).isEqualTo("suspicious-secret");
+        assertThat(target.queryHash()).isNull();
+    }
+
+    @Test
     void auditedSensitiveReadAnnotationIsMarkerOnlyForSuspiciousTransactionEndpoint() throws Exception {
         Method search = SuspiciousTransactionReadController.class.getMethod(
                 "search",
@@ -257,10 +306,16 @@ class SuspiciousTransactionReadAuditTest {
                 "summary",
                 jakarta.servlet.http.HttpServletRequest.class
         );
+        Method linkedAlertContext = SuspiciousTransactionReadController.class.getMethod(
+                "linkedAlertContext",
+                String.class,
+                jakarta.servlet.http.HttpServletRequest.class
+        );
 
         assertThat(search.getAnnotation(AuditedSensitiveRead.class)).isNotNull();
         assertThat(read.getAnnotation(AuditedSensitiveRead.class)).isNotNull();
         assertThat(summary.getAnnotation(AuditedSensitiveRead.class)).isNotNull();
+        assertThat(linkedAlertContext.getAnnotation(AuditedSensitiveRead.class)).isNotNull();
         assertThat(AuditedSensitiveRead.class.getDeclaredMethods())
                 .extracting(Method::getName)
                 .containsExactly("action");

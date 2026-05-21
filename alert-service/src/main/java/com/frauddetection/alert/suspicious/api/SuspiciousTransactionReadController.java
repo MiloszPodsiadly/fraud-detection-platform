@@ -33,6 +33,7 @@ public class SuspiciousTransactionReadController {
     private static final Logger log = LoggerFactory.getLogger(SuspiciousTransactionReadController.class);
 
     private final SuspiciousTransactionReadService service;
+    private final SuspiciousTransactionLinkedAlertContextService linkedAlertContextService;
     private final SensitiveReadAuditService sensitiveReadAuditService;
     private final AlertServiceMetrics metrics;
     private final SuspiciousTransactionQueryTelemetryClassifier queryTelemetryClassifier;
@@ -40,12 +41,14 @@ public class SuspiciousTransactionReadController {
 
     public SuspiciousTransactionReadController(
             SuspiciousTransactionReadService service,
+            SuspiciousTransactionLinkedAlertContextService linkedAlertContextService,
             SensitiveReadAuditService sensitiveReadAuditService,
             AlertServiceMetrics metrics,
             SuspiciousTransactionQueryTelemetryClassifier queryTelemetryClassifier,
             SuspiciousTransactionQueryTelemetrySink queryTelemetrySink
     ) {
         this.service = Objects.requireNonNull(service, "service is required");
+        this.linkedAlertContextService = Objects.requireNonNull(linkedAlertContextService, "linkedAlertContextService is required");
         this.sensitiveReadAuditService = Objects.requireNonNull(sensitiveReadAuditService, "sensitiveReadAuditService is required");
         this.metrics = Objects.requireNonNull(metrics, "metrics is required");
         this.queryTelemetryClassifier = Objects.requireNonNull(queryTelemetryClassifier, "queryTelemetryClassifier is required");
@@ -112,6 +115,65 @@ public class SuspiciousTransactionReadController {
             recordSummaryMetric("error", SuspiciousTransactionSummaryFreshness.UNAVAILABLE);
             throw exception;
         }
+    }
+
+    @GetMapping(value = "/{suspiciousTransactionId}/linked-alert", params = "alertId")
+    @AuditedSensitiveRead
+    public AlertLinkedContextResponse rejectClientSelectedAlertId(
+            @PathVariable String suspiciousTransactionId,
+            HttpServletRequest request
+    ) {
+        recordLinkedAlertContextMetric("validation_error");
+        sensitiveReadAuditService.auditAttempt(
+                ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_LINKED_ALERT_CONTEXT,
+                ReadAccessResourceType.SUSPICIOUS_TRANSACTION,
+                suspiciousTransactionId,
+                ReadAccessAuditOutcome.REJECTED,
+                request
+        );
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "alertId query parameter is not accepted.");
+    }
+
+    @GetMapping(value = "/{suspiciousTransactionId}/linked-alert", params = "!alertId")
+    @AuditedSensitiveRead
+    public AlertLinkedContextResponse linkedAlertContext(
+            @PathVariable String suspiciousTransactionId,
+            HttpServletRequest request
+    ) {
+        AlertLinkedContextResponse response;
+        try {
+            response = linkedAlertContextService.resolveLinkedAlertContext(suspiciousTransactionId);
+        } catch (SuspiciousTransactionLinkedAlertContextNotFoundException exception) {
+            recordLinkedAlertContextMetric("suspicious_transaction_not_found");
+            sensitiveReadAuditService.auditAttempt(
+                    ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_LINKED_ALERT_CONTEXT,
+                    ReadAccessResourceType.SUSPICIOUS_TRANSACTION,
+                    suspiciousTransactionId,
+                    ReadAccessAuditOutcome.REJECTED,
+                    request
+            );
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Suspicious transaction not found.");
+        } catch (RuntimeException exception) {
+            recordLinkedAlertContextMetric("error");
+            sensitiveReadAuditService.auditAttempt(
+                    ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_LINKED_ALERT_CONTEXT,
+                    ReadAccessResourceType.SUSPICIOUS_TRANSACTION,
+                    suspiciousTransactionId,
+                    ReadAccessAuditOutcome.FAILED,
+                    request
+            );
+            return AlertLinkedContextResponse.temporarilyUnavailable();
+        }
+        String outcome = linkedAlertOutcome(response.state());
+        recordLinkedAlertContextMetric(outcome);
+        sensitiveReadAuditService.audit(
+                ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_LINKED_ALERT_CONTEXT,
+                ReadAccessResourceType.SUSPICIOUS_TRANSACTION,
+                suspiciousTransactionId,
+                response.state() == LinkedAlertContextState.LINKED_ALERT_AVAILABLE ? 1 : 0,
+                request
+        );
+        return response;
     }
 
     @GetMapping("/{suspiciousTransactionId}")
@@ -209,6 +271,27 @@ public class SuspiciousTransactionReadController {
                     outcome,
                     freshness == null ? "UNAVAILABLE" : freshness.name()
             );
+        }
+    }
+
+    private String linkedAlertOutcome(LinkedAlertContextState state) {
+        if (state == null) {
+            return "unavailable";
+        }
+        return switch (state) {
+            case LINKED_ALERT_AVAILABLE -> "available";
+            case NO_LINKED_ALERT -> "no_linked_alert";
+            case LINKED_ALERT_NOT_FOUND -> "linked_alert_not_found";
+            case LINKED_ALERT_RELATIONSHIP_MISMATCH -> "relationship_mismatch";
+            case TEMPORARILY_UNAVAILABLE -> "unavailable";
+        };
+    }
+
+    private void recordLinkedAlertContextMetric(String outcome) {
+        try {
+            metrics.recordSuspiciousTransactionLinkedAlertRead(outcome);
+        } catch (RuntimeException exception) {
+            log.warn("SuspiciousTransaction linked alert context metric recording failed outcome={}", outcome);
         }
     }
 }
