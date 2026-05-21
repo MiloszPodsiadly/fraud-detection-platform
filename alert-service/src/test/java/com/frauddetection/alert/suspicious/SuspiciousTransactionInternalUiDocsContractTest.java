@@ -214,6 +214,16 @@ class SuspiciousTransactionInternalUiDocsContractTest {
     }
 
     @Test
+    void DocsMentionStaleSourceMismatchExplicitStateTest() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs)
+                .contains("A known source identifier mismatch is not treated as normal loading")
+                .contains("explicit fail-closed")
+                .contains("stale-source/source-mismatch state without raw identifiers");
+    }
+
+    @Test
     void DocsMentionFrontendDoesNotValidateLinkedAlertRelationshipTest() throws IOException {
         String docs = Files.readString(DOCS);
 

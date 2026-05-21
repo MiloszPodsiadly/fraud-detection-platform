@@ -51,6 +51,9 @@ The bridge must not rename an alert into a fraud verdict, analyst disposition, c
 The router may check that the loaded source SuspiciousTransaction `suspiciousTransactionId` matches the selected route
 `suspiciousTransactionId` before mounting linked-alert context. This prevents stale route/source races.
 The source identifier mismatch fails closed before any linked-alert resolver fetch.
+Known source identifier mismatch is not treated as normal loading. It renders an explicit fail-closed
+stale-source/source-mismatch state.
+The stale-source/source-mismatch state is safe UI copy only and does not show raw identifiers.
 This allowed frontend check is UX route readiness, not linked-alert relationship validation.
 
 Allowed frontend route readiness check:

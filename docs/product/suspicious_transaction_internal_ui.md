@@ -139,6 +139,8 @@ WorkspaceDetailRouter may check that `sourceSuspiciousTransaction.suspiciousTran
 `selectedSuspiciousTransactionId` before mounting linked-alert context. This prevents stale route/source races and is
 UX route readiness, not linked-alert relationship validation.
 A source identifier mismatch fails closed before any linked-alert resolver fetch.
+A known source identifier mismatch is not treated as normal loading. It renders an explicit fail-closed
+stale-source/source-mismatch state without raw identifiers.
 AlertReadOnlyContextPage owns resolver state rendering.
 The backend owns linked-alert relationship validation.
 No frontend relationship validation is a source of truth.

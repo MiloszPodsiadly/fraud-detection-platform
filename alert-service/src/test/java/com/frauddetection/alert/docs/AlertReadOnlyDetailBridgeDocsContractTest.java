@@ -220,6 +220,39 @@ class AlertReadOnlyDetailBridgeDocsContractTest {
     }
 
     @Test
+    void DocsMentionStaleSourceMismatchExplicitStateTest() throws Exception {
+        String docs = Files.readString(docPath());
+
+        assertThat(docs)
+                .contains("Known source identifier mismatch is not treated as normal loading")
+                .contains("explicit fail-closed")
+                .contains("stale-source/source-mismatch state");
+    }
+
+    @Test
+    void DocsMentionMismatchDoesNotFetchResolverTest() throws Exception {
+        String docs = Files.readString(docPath());
+
+        assertThat(docs).contains("mismatch fails closed before any linked-alert resolver fetch");
+    }
+
+    @Test
+    void DocsMentionMismatchIsRouteReadinessNotRelationshipValidationTest() throws Exception {
+        String docs = Files.readString(docPath());
+
+        assertThat(docs)
+                .contains("This allowed frontend check is UX route readiness, not linked-alert relationship validation")
+                .contains("sourceSuspiciousTransaction.suspiciousTransactionId === selectedSuspiciousTransactionId");
+    }
+
+    @Test
+    void DocsMentionNoRawIdsInMismatchStateTest() throws Exception {
+        String docs = Files.readString(docPath());
+
+        assertThat(docs).contains("The stale-source/source-mismatch state is safe UI copy only and does not show raw identifiers");
+    }
+
+    @Test
     void DocsMentionFrontendDoesNotValidateLinkedAlertRelationshipTest() throws Exception {
         String docs = Files.readString(docPath());
 
