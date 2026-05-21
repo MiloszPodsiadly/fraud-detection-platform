@@ -32,6 +32,7 @@ class SuspiciousTransactionReadControllerPaginationTest {
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new SuspiciousTransactionReadController(
                         service,
+                        mock(SuspiciousTransactionLinkedAlertContextService.class),
                         auditService,
                         metrics,
                         new SuspiciousTransactionQueryTelemetryClassifier(),

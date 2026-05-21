@@ -11,7 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SuspiciousTransactionNoUiScopeTest {
 
     @Test
-    void analystConsoleSuspiciousTransactionSurfaceMustRemainFdp66ReadOnly() throws IOException {
+    void analystConsoleSuspiciousTransactionSurfaceMustRemainReadOnly() throws IOException {
         Path uiRoot = Path.of("../analyst-console-ui/src");
         if (!Files.exists(uiRoot)) {
             return;
@@ -24,9 +24,10 @@ class SuspiciousTransactionNoUiScopeTest {
 
         String docs = Files.readString(Path.of("../docs/product/suspicious_transaction_internal_ui.md"));
         assertThat(docs)
-                .contains("FDP-66 internal read-only UI")
+                .contains("SuspiciousTransaction internal read-only UI")
                 .contains("SUSPICIOUS_TRANSACTION_READ")
                 .contains("Backend authorization remains authoritative")
+                .contains("relationship validation remain authoritative")
                 .contains("No write endpoint")
                 .contains("No confirm, dismiss, submit, link-case, assign, claim, export, or bulk action");
 

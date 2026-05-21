@@ -22,6 +22,7 @@ class SuspiciousTransactionQueryTelemetryWiringTest {
     void suspiciousTransactionReadControllerRequiresTelemetryClassifier() {
         assertThatNullPointerException().isThrownBy(() -> new SuspiciousTransactionReadController(
                         mock(SuspiciousTransactionReadService.class),
+                        mock(SuspiciousTransactionLinkedAlertContextService.class),
                         mock(SensitiveReadAuditService.class),
                         mock(AlertServiceMetrics.class),
                         null,
@@ -35,6 +36,7 @@ class SuspiciousTransactionQueryTelemetryWiringTest {
     void suspiciousTransactionReadControllerRequiresTelemetrySink() {
         assertThatNullPointerException().isThrownBy(() -> new SuspiciousTransactionReadController(
                         mock(SuspiciousTransactionReadService.class),
+                        mock(SuspiciousTransactionLinkedAlertContextService.class),
                         mock(SensitiveReadAuditService.class),
                         mock(AlertServiceMetrics.class),
                         new SuspiciousTransactionQueryTelemetryClassifier(),

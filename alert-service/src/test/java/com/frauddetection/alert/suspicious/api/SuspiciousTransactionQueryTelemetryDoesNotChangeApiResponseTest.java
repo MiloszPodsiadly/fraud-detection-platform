@@ -98,6 +98,7 @@ class SuspiciousTransactionQueryTelemetryDoesNotChangeApiResponseTest {
     ) {
         return new SuspiciousTransactionReadController(
                 service,
+                mock(SuspiciousTransactionLinkedAlertContextService.class),
                 mock(SensitiveReadAuditService.class),
                 mock(AlertServiceMetrics.class),
                 new SuspiciousTransactionQueryTelemetryClassifier(),

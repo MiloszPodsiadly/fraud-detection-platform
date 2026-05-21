@@ -23,6 +23,7 @@ class SuspiciousTransactionReadControllerFilterValidationTest {
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new SuspiciousTransactionReadController(
                         mock(SuspiciousTransactionReadService.class),
+                        mock(SuspiciousTransactionLinkedAlertContextService.class),
                         mock(SensitiveReadAuditService.class),
                         mock(AlertServiceMetrics.class),
                         new SuspiciousTransactionQueryTelemetryClassifier(),
@@ -60,6 +61,7 @@ class SuspiciousTransactionReadControllerFilterValidationTest {
         MockMvc mvc = MockMvcBuilders
                 .standaloneSetup(new SuspiciousTransactionReadController(
                         service,
+                        mock(SuspiciousTransactionLinkedAlertContextService.class),
                         mock(SensitiveReadAuditService.class),
                         mock(AlertServiceMetrics.class),
                         new SuspiciousTransactionQueryTelemetryClassifier(),

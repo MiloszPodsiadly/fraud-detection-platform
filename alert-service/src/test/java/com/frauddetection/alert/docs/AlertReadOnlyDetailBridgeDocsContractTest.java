@@ -16,9 +16,9 @@ class AlertReadOnlyDetailBridgeDocsContractTest {
         String lower = docs.toLowerCase(Locale.ROOT);
 
         assertThat(lower).contains("read-only navigation");
-        assertThat(docs).contains("GET `/api/v1/alerts/{alertId}`");
-        assertThat(lower).contains("does not introduce a second alert read api");
-        assertThat(lower).contains("does not add a new backend endpoint");
+        assertThat(docs).contains("GET `/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`");
+        assertThat(lower).contains("backend relationship validation is authoritative");
+        assertThat(lower).contains("clients cannot pass `alertid`");
         assertThat(lower).contains("does not mutate");
         assertThat(lower).contains("alert_read");
         assertThat(lower).contains("suspicious_transaction_read");
@@ -37,8 +37,8 @@ class AlertReadOnlyDetailBridgeDocsContractTest {
         String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
 
         assertThat(lower).contains("linked alert context is opened from suspicioustransaction detail view");
-        assertThat(lower).contains("route/state must retain `suspicioustransactionid` and `linkedalertid`");
-        assertThat(lower).contains("requires source suspicioustransaction context");
+        assertThat(lower).contains("route/state may retain `suspicioustransactionid`");
+        assertThat(lower).contains("backend loads the source suspicioustransaction");
     }
 
     @Test
@@ -60,7 +60,7 @@ class AlertReadOnlyDetailBridgeDocsContractTest {
     void docsSayBackendAuthorizationRemainsAuthoritative() throws Exception {
         String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
 
-        assertThat(lower).contains("backend alert-read authorization remains authoritative");
+        assertThat(lower).contains("backend relationship validation and alert-read authorization remain authoritative");
         assertThat(lower).contains("`suspicious_transaction_read` does not imply `alert_read`");
     }
 
@@ -68,22 +68,24 @@ class AlertReadOnlyDetailBridgeDocsContractTest {
     void docsMentionNoAlertFetchBeforeSourceVerification() throws Exception {
         String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
 
-        assertThat(lower).contains("must not fetch alert detail until the source `linkedalertid` matches the selected `alertid`");
+        assertThat(lower).contains("clients cannot pass `alertid`");
+        assertThat(lower).contains("backend derives `linkedalertid`");
     }
 
     @Test
     void docsMentionSourceLinkedAlertMustMatchSelectedAlert() throws Exception {
         String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
 
-        assertThat(lower).contains("source `linkedalertid` matches the selected `alertid`");
+        assertThat(lower).contains("validates the relationship");
+        assertThat(lower).contains("relationship does not match");
     }
 
     @Test
     void docsMentionSourceMissingFailsClosed() throws Exception {
         String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
 
-        assertThat(lower).contains("without loaded source suspicioustransaction context is pending verification");
-        assertThat(lower).contains("bridge fails closed");
+        assertThat(lower).contains("loads the source suspicioustransaction");
+        assertThat(lower).contains("fails closed");
     }
 
     @Test
@@ -97,8 +99,7 @@ class AlertReadOnlyDetailBridgeDocsContractTest {
     void DocsMentionDedicatedAlertReadOnlyContextPageTest() throws Exception {
         String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
 
-        assertThat(lower).contains("fdp-68 extracts that read-only alert context into `alertreadonlycontextpage`");
-        assertThat(lower).contains("fdp-68 is architecture hardening, not product feature expansion");
+        assertThat(lower).contains("`alertreadonlycontextpage` remains the dedicated ui component");
         assertThat(lower).contains("dedicated read-only alert context page");
     }
 
@@ -116,15 +117,15 @@ class AlertReadOnlyDetailBridgeDocsContractTest {
         String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
 
         assertThat(lower).contains("`alertreadonlycontextpage` depends only on a getalert-only client");
-        assertThat(lower).contains("existing get `/api/v1/alerts/{alertid}` response remains the read source");
+        assertThat(lower).contains("internal linked-alert endpoint");
     }
 
     @Test
-    void DocsSayNoBackendEndpointTest() throws Exception {
+    void DocsSayBackendEndpointIsRelationshipValidatedTest() throws Exception {
         String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
 
-        assertThat(lower).contains("does not add a new backend endpoint");
-        assertThat(lower).contains("does not introduce a second alert read api");
+        assertThat(lower).contains("dedicated internal read endpoint");
+        assertThat(lower).contains("backend derives `linkedalertid`");
     }
 
     @Test
@@ -142,7 +143,7 @@ class AlertReadOnlyDetailBridgeDocsContractTest {
         String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
 
         assertThat(lower).contains("component boundary is scope control, not a frontend security boundary");
-        assertThat(lower).contains("backend `alert_read` authorization remains authoritative");
+        assertThat(lower).contains("backend relationship validation and alert-read authorization remain authoritative");
     }
 
     @Test
