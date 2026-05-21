@@ -10,6 +10,7 @@ import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQu
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import static org.mockito.ArgumentMatchers.eq;
@@ -68,6 +69,7 @@ class SuspiciousTransactionLinkedAlertContextControllerTest {
                 .andExpect(status().isBadRequest());
 
         verify(linkedAlertContextService, never()).resolveLinkedAlertContext(org.mockito.ArgumentMatchers.any());
+        verify(metrics).recordSuspiciousTransactionLinkedAlertRead("validation_error");
         verify(auditService).auditAttempt(
                 eq(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_LINKED_ALERT_CONTEXT),
                 eq(ReadAccessResourceType.SUSPICIOUS_TRANSACTION),
@@ -115,5 +117,59 @@ class SuspiciousTransactionLinkedAlertContextControllerTest {
                 .andExpect(jsonPath("$.customerId").doesNotExist());
 
         verify(metrics).recordSuspiciousTransactionLinkedAlertRead("error");
+        verify(auditService).auditAttempt(
+                eq(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_LINKED_ALERT_CONTEXT),
+                eq(ReadAccessResourceType.SUSPICIOUS_TRANSACTION),
+                eq("suspicious-1"),
+                eq(ReadAccessAuditOutcome.FAILED),
+                org.mockito.ArgumentMatchers.any()
+        );
+    }
+
+    @Test
+    void noLinkedAlertSerializesNoAlertFields() throws Exception {
+        when(linkedAlertContextService.resolveLinkedAlertContext("suspicious-1"))
+                .thenReturn(AlertLinkedContextResponse.noLinkedAlert());
+
+        assertNonAvailableResponseHasNoAlertFields("NO_LINKED_ALERT");
+    }
+
+    @Test
+    void linkedAlertNotFoundSerializesNoAlertFields() throws Exception {
+        when(linkedAlertContextService.resolveLinkedAlertContext("suspicious-1"))
+                .thenReturn(AlertLinkedContextResponse.linkedAlertNotFound());
+
+        assertNonAvailableResponseHasNoAlertFields("LINKED_ALERT_NOT_FOUND");
+    }
+
+    @Test
+    void relationshipMismatchSerializesNoAlertFields() throws Exception {
+        when(linkedAlertContextService.resolveLinkedAlertContext("suspicious-1"))
+                .thenReturn(AlertLinkedContextResponse.relationshipMismatch());
+
+        assertNonAvailableResponseHasNoAlertFields("LINKED_ALERT_RELATIONSHIP_MISMATCH");
+    }
+
+    @Test
+    void temporarilyUnavailableHasNoAlertFields() throws Exception {
+        when(linkedAlertContextService.resolveLinkedAlertContext("suspicious-1"))
+                .thenThrow(new IllegalStateException("store unavailable"));
+
+        assertNonAvailableResponseHasNoAlertFields("TEMPORARILY_UNAVAILABLE");
+    }
+
+    private void assertNonAvailableResponseHasNoAlertFields(String expectedState) throws Exception {
+        ResultActions result = mockMvc.perform(get("/internal/suspicious-transactions/suspicious-1/linked-alert"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value(expectedState));
+
+        result.andExpect(jsonPath("$.alertId").doesNotExist())
+                .andExpect(jsonPath("$.transactionId").doesNotExist())
+                .andExpect(jsonPath("$.customerId").doesNotExist())
+                .andExpect(jsonPath("$.accountId").doesNotExist())
+                .andExpect(jsonPath("$.correlationId").doesNotExist())
+                .andExpect(jsonPath("$.scoreDecisionId").doesNotExist())
+                .andExpect(jsonPath("$.reasonCodes").isArray())
+                .andExpect(jsonPath("$.reasonCodes").isEmpty());
     }
 }

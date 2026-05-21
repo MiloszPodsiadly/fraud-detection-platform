@@ -64,6 +64,41 @@ class SuspiciousTransactionLinkedAlertContextDocsContractTest {
     }
 
     @Test
+    void DocsAllowSourceResourceIdOnlyUnderSensitiveReadAuditPolicyTest() throws Exception {
+        assertThat(docs())
+                .contains("source SuspiciousTransaction resourceId")
+                .contains("existing sensitive-read audit target policy");
+        assertThat(docs().toLowerCase(Locale.ROOT))
+                .contains("metrics and ordinary logs must not contain raw identifiers");
+    }
+
+    @Test
+    void DocsForbidRawLinkedAlertIdentifiersInAuditMetadataTest() throws Exception {
+        assertThat(docs())
+                .contains("must not record raw alertId")
+                .contains("must not record raw linkedAlertId")
+                .contains("must not record raw customerId")
+                .contains("must not record raw correlationId")
+                .contains("must not record raw exception message");
+    }
+
+    @Test
+    void DocsExplainScoreDecisionIdLineageSourceTest() throws Exception {
+        assertThat(docs())
+                .contains("scoreDecisionId is sourced from SuspiciousTransaction")
+                .contains("not used for alert-side compatibility unless the alert read model exposes an equivalent field")
+                .contains("Relationship validation currently uses alertId, transactionId, customerId, and correlationId where available");
+    }
+
+    @Test
+    void DocsMentionClientsMustEvaluateStateTest() throws Exception {
+        assertThat(docs())
+                .contains("Clients must evaluate state")
+                .contains("HTTP 200 does not imply LINKED_ALERT_AVAILABLE")
+                .contains("TEMPORARILY_UNAVAILABLE is a degraded read state");
+    }
+
+    @Test
     void DocsDoNotClaimLegalProofOrConfirmedFraudTest() throws Exception {
         String lower = docs().toLowerCase(Locale.ROOT);
 

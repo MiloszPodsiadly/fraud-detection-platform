@@ -213,6 +213,7 @@ class SuspiciousTransactionReadMetricsTest {
 
         metrics.recordSuspiciousTransactionLinkedAlertRead("available");
         metrics.recordSuspiciousTransactionLinkedAlertRead("relationship_mismatch");
+        metrics.recordSuspiciousTransactionLinkedAlertRead("validation_error");
 
         assertThat(registry.get("fraud.suspicious_transaction.linked_alert.read")
                 .tag("outcome", "available")
@@ -222,12 +223,44 @@ class SuspiciousTransactionReadMetricsTest {
                 .tag("outcome", "relationship_mismatch")
                 .counter()
                 .count()).isEqualTo(1.0);
+        assertThat(registry.get("fraud.suspicious_transaction.linked_alert.read")
+                .tag("outcome", "validation_error")
+                .counter()
+                .count()).isEqualTo(1.0);
 
         registry.getMeters().stream()
                 .map(Meter::getId)
                 .filter(id -> id.getName().equals("fraud.suspicious_transaction.linked_alert.read"))
                 .forEach(id -> assertThat(id.getTags().stream().map(tag -> tag.getKey()).toList())
                         .containsOnly("outcome"));
+    }
+
+    @Test
+    void linkedAlertMetricNormalizesValidationError() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AlertServiceMetrics metrics = new AlertServiceMetrics(registry);
+
+        metrics.recordSuspiciousTransactionLinkedAlertRead("validation_error");
+
+        assertThat(registry.get("fraud.suspicious_transaction.linked_alert.read")
+                .tag("outcome", "validation_error")
+                .counter()
+                .count()).isEqualTo(1.0);
+    }
+
+    @Test
+    void linkedAlertMetricDoesNotExposeRejectedAlertIdValue() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AlertServiceMetrics metrics = new AlertServiceMetrics(registry);
+
+        metrics.recordSuspiciousTransactionLinkedAlertRead("alert-secret");
+
+        registry.getMeters().stream()
+                .map(Meter::getId)
+                .filter(id -> id.getName().equals("fraud.suspicious_transaction.linked_alert.read"))
+                .forEach(id -> assertThat(id.getTags().stream().map(tag -> tag.getValue()).toList())
+                        .containsExactly("error")
+                        .doesNotContain("alert-secret"));
     }
 
     @Test

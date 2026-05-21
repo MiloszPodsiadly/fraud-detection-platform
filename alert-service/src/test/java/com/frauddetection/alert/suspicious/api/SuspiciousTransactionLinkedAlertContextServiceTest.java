@@ -59,6 +59,21 @@ class SuspiciousTransactionLinkedAlertContextServiceTest {
     }
 
     @Test
+    void suspiciousTransactionPathIdMismatchFailsClosedWithoutAlertLookup() {
+        SuspiciousTransactionDocument suspiciousTransaction = suspiciousTransaction("suspicious-other", "alert-1");
+        when(suspiciousTransactionRepository.findById("suspicious-path")).thenReturn(Optional.of(suspiciousTransaction));
+
+        AlertLinkedContextResponse response = service.resolveLinkedAlertContext("suspicious-path");
+
+        assertThat(response.state()).isEqualTo(LinkedAlertContextState.LINKED_ALERT_RELATIONSHIP_MISMATCH);
+        assertThat(response.alertId()).isNull();
+        assertThat(response.transactionId()).isNull();
+        assertThat(response.customerId()).isNull();
+        assertThat(response.reasonCodes()).isEmpty();
+        verify(alertRepository, never()).findById(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
     void missingAlertReturnsNotFoundWithoutAlertFields() {
         SuspiciousTransactionDocument suspiciousTransaction = suspiciousTransaction("suspicious-1", "alert-1");
         when(suspiciousTransactionRepository.findById("suspicious-1")).thenReturn(Optional.of(suspiciousTransaction));
@@ -101,6 +116,41 @@ class SuspiciousTransactionLinkedAlertContextServiceTest {
     }
 
     @Test
+    void customerIdMismatchFailsClosedWithoutAlertFields() {
+        SuspiciousTransactionDocument suspiciousTransaction = suspiciousTransaction("suspicious-1", "alert-1");
+        AlertDocument alert = alert("alert-1");
+        alert.setCustomerId("customer-2");
+        when(suspiciousTransactionRepository.findById("suspicious-1")).thenReturn(Optional.of(suspiciousTransaction));
+        when(alertRepository.findById("alert-1")).thenReturn(Optional.of(alert));
+
+        AlertLinkedContextResponse response = service.resolveLinkedAlertContext("suspicious-1");
+
+        assertThat(response.state()).isEqualTo(LinkedAlertContextState.LINKED_ALERT_RELATIONSHIP_MISMATCH);
+        assertThat(response.alertId()).isNull();
+        assertThat(response.customerId()).isNull();
+        assertThat(response.transactionId()).isNull();
+        assertThat(response.reasonCodes()).isEmpty();
+    }
+
+    @Test
+    void correlationIdMismatchFailsClosedWithoutAlertFields() {
+        SuspiciousTransactionDocument suspiciousTransaction = suspiciousTransaction("suspicious-1", "alert-1");
+        AlertDocument alert = alert("alert-1");
+        alert.setCorrelationId("correlation-2");
+        when(suspiciousTransactionRepository.findById("suspicious-1")).thenReturn(Optional.of(suspiciousTransaction));
+        when(alertRepository.findById("alert-1")).thenReturn(Optional.of(alert));
+
+        AlertLinkedContextResponse response = service.resolveLinkedAlertContext("suspicious-1");
+
+        assertThat(response.state()).isEqualTo(LinkedAlertContextState.LINKED_ALERT_RELATIONSHIP_MISMATCH);
+        assertThat(response.alertId()).isNull();
+        assertThat(response.customerId()).isNull();
+        assertThat(response.transactionId()).isNull();
+        assertThat(response.correlationId()).isNull();
+        assertThat(response.reasonCodes()).isEmpty();
+    }
+
+    @Test
     void optionalBlankCompatibilityFieldsDoNotFailClosed() {
         SuspiciousTransactionDocument suspiciousTransaction = suspiciousTransaction("suspicious-1", "alert-1");
         suspiciousTransaction.setCustomerId(null);
@@ -112,6 +162,33 @@ class SuspiciousTransactionLinkedAlertContextServiceTest {
         AlertLinkedContextResponse response = service.resolveLinkedAlertContext("suspicious-1");
 
         assertThat(response.state()).isEqualTo(LinkedAlertContextState.LINKED_ALERT_AVAILABLE);
+    }
+
+    @Test
+    void optionalBlankCorrelationIdDoesNotFailClosed() {
+        SuspiciousTransactionDocument suspiciousTransaction = suspiciousTransaction("suspicious-1", "alert-1");
+        suspiciousTransaction.setCorrelationId(null);
+        AlertDocument alert = alert("alert-1");
+        alert.setCorrelationId("correlation-1");
+        when(suspiciousTransactionRepository.findById("suspicious-1")).thenReturn(Optional.of(suspiciousTransaction));
+        when(alertRepository.findById("alert-1")).thenReturn(Optional.of(alert));
+
+        AlertLinkedContextResponse response = service.resolveLinkedAlertContext("suspicious-1");
+
+        assertThat(response.state()).isEqualTo(LinkedAlertContextState.LINKED_ALERT_AVAILABLE);
+    }
+
+    @Test
+    void scoreDecisionIdReturnedFromSuspiciousTransactionContext() {
+        SuspiciousTransactionDocument suspiciousTransaction = suspiciousTransaction("suspicious-1", "alert-1");
+        suspiciousTransaction.setScoreDecisionId("source-score-decision-1");
+        when(suspiciousTransactionRepository.findById("suspicious-1")).thenReturn(Optional.of(suspiciousTransaction));
+        when(alertRepository.findById("alert-1")).thenReturn(Optional.of(alert("alert-1")));
+
+        AlertLinkedContextResponse response = service.resolveLinkedAlertContext("suspicious-1");
+
+        assertThat(response.state()).isEqualTo(LinkedAlertContextState.LINKED_ALERT_AVAILABLE);
+        assertThat(response.scoreDecisionId()).isEqualTo("source-score-decision-1");
     }
 
     @Test
