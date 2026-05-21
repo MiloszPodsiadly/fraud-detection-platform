@@ -17,9 +17,9 @@ The backend derives `linkedAlertId` from the SuspiciousTransaction read model an
 returning alert context. Clients cannot pass `alertId` in the path, query string, or request body.
 The loaded SuspiciousTransaction document must also match the path `suspiciousTransactionId`; a source identifier
 mismatch fails closed before any alert lookup.
-FDP-69 does not migrate the UI workflow. Until a dedicated UI migration uses this endpoint, the existing
-`AlertReadOnlyContextPage` remains a getAlert-only read component guarded by frontend source-context binding and backend
-`ALERT_READ` authorization.
+FDP-69 introduces the backend linked-alert context resolver and does not migrate the UI workflow. Until a later UI
+migration uses this endpoint, the existing `AlertReadOnlyContextPage` remains a getAlert-only read component guarded by
+frontend source-context binding and backend `ALERT_READ` authorization.
 
 ## Semantics
 
@@ -52,7 +52,7 @@ The linked alert context is opened from SuspiciousTransaction detail view.
 The route/state may retain `suspiciousTransactionId` and linked-alert context for UX continuity.
 An `alertId` alone in the suspicious workspace is invalid bridge context.
 
-FDP-67 is not a general-purpose alert lookup inside the SuspiciousTransaction workspace.
+This bridge is not a general-purpose alert lookup inside the SuspiciousTransaction workspace.
 The backend loads the source SuspiciousTransaction, derives `linkedAlertId`, loads the alert, and fails closed if the
 relationship does not match. Frontend context binding is scope control, not security boundary.
 Backend relationship validation and alert-read authorization remain authoritative.
@@ -64,11 +64,12 @@ FDP-68 fully removes SuspiciousTransaction read-only bridge mode from `AlertDeta
 `AlertDetailsPage` no longer accepts `readOnlyContext` for the SuspiciousTransaction bridge.
 `AlertDetailsPage` remains the workflow-capable normal alert detail page.
 `AlertReadOnlyContextPage` is the dedicated read-only alert context page and the only component for SuspiciousTransaction linked-alert read-only context.
-`AlertReadOnlyContextPage` is the only component for SuspiciousTransaction linked-alert read-only context.
 `AlertReadOnlyContextPage` depends only on a getAlert-only client.
 This removes the boolean-mode smell and makes the read-only path safe by construction instead of conditionals inside the workflow page.
 The internal linked-alert endpoint is the backend source for validated read-only alert context when the UI is migrated to
 the FDP-69 contract.
+FDP-70 may switch `AlertReadOnlyContextPage` to call
+GET `/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`.
 
 This component boundary is scope control, not a frontend security boundary.
 Backend `ALERT_READ` authorization remains authoritative.
@@ -98,10 +99,14 @@ Allowed read-only fields are limited to minimal alert read-model context:
 - alert status as operational read-model status
 - reasonCodes as metadata
 - createdAt
-- updatedAt when already present in the linked read model
+- updatedAt only when the alert read model exposes a reliable updated timestamp
 - scoreDecisionId when already present in the linked SuspiciousTransaction context
 
+updatedAt is nullable. Clients must not assume it is present. createdAt must not be treated as update time, and the
+endpoint must not synthesize fake updatedAt values.
+
 scoreDecisionId is sourced from SuspiciousTransaction lineage.
+scoreDecisionId is lineage metadata for the source suspicious signal.
 scoreDecisionId is not used for alert-side compatibility unless the alert read model exposes an equivalent field.
 
 The response must not expose analyst decisions, idempotency keys, case lifecycle state, assistant summaries, full
@@ -121,9 +126,12 @@ scoreDecisionId, must not record raw query strings, must not record raw request 
 message, and must not record response payloads. Query param `alertId` rejection must not audit the `alertId` value.
 Audit entries must not record raw exception message.
 
-Clients must evaluate state. HTTP 200 does not imply LINKED_ALERT_AVAILABLE.
+Clients must evaluate state. HTTP 200 does not imply linked alert context is available.
+HTTP 200 does not imply LINKED_ALERT_AVAILABLE.
 TEMPORARILY_UNAVAILABLE is a degraded read state and must not be rendered as linked alert context.
+UI/client must not render alert context fields for TEMPORARILY_UNAVAILABLE.
 TEMPORARILY_UNAVAILABLE returns no alert fields, records a bounded error metric, and records a failed sensitive-read audit attempt.
+Dashboards and alerts should monitor `fraud.suspicious_transaction.linked_alert.read{outcome="error"}`.
 
 ## UI States
 

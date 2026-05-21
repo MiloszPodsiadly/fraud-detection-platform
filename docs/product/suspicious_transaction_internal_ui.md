@@ -120,7 +120,10 @@ authority. FDP-69 adds the backend endpoint GET
 The backend derives `linkedAlertId` from the SuspiciousTransaction read model and validates the relationship before
 returning alert context. The loaded SuspiciousTransaction document must match the path `suspiciousTransactionId`.
 The client cannot pass `alertId`.
-FDP-69 does not migrate the UI workflow; a later UI migration can switch the bridge to this backend contract.
+FDP-69 introduces the backend linked-alert context resolver. FDP-69 does not migrate the UI workflow.
+AlertReadOnlyContextPage may continue using the existing read-only client until FDP-70.
+Future FDP-70 may switch AlertReadOnlyContextPage to call GET
+`/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`.
 
 Alert detail is investigation context. It is not confirmed fraud, not an analyst decision, not a final outcome,
 not a case lifecycle action, and not legal proof.
@@ -142,27 +145,30 @@ fails closed without alert fields. Relationship validation currently uses alertI
 correlationId where available.
 
 The linked-alert response is minimal read-only context: alertId, transactionId, customerId, accountId when already
-present, alert score, riskLevel, alertStatus, reasonCodes, createdAt, updatedAt when already present, correlationId, and
-scoreDecisionId when already present.
+present, alert score, riskLevel, alertStatus, reasonCodes, createdAt, updatedAt only when the alert read model exposes a
+reliable updated timestamp, correlationId, and scoreDecisionId when already present.
+updatedAt is nullable. Clients must not assume it is present. createdAt must not be treated as update time, and the
+endpoint must not synthesize fake updatedAt values.
 scoreDecisionId is sourced from SuspiciousTransaction.
+scoreDecisionId is lineage metadata for the source suspicious signal.
 scoreDecisionId is not used for alert-side compatibility unless the alert read model exposes an equivalent field.
-It must not expose analyst decisions,
-idempotency keys, case lifecycle state, assistant summaries, legal-proof material, full evidence snapshots, raw payloads,
-score details, or feature snapshots.
+It must not expose analyst decisions, idempotency keys, case lifecycle state, assistant summaries, legal-proof material,
+full evidence snapshots, raw payloads, score details, or feature snapshots.
 
 Sensitive read audit and metrics use bounded outcomes only. Metrics and ordinary logs must not contain raw identifiers,
 raw paths, raw query strings, raw exception messages, or idempotency keys.
 Linked-alert context read uses the existing sensitive-read audit target policy. The source SuspiciousTransaction
-resourceId may be used as the audited resource identifier. Audit entries must not record raw alertId, must not record raw
-linkedAlertId, must not record raw customerId, must not record raw correlationId, and must not record raw exception
-message.
-The source SuspiciousTransaction resourceId may be used as the audited resource identifier.
-Audit entries must not record raw exception message.
+resourceId may be used as the audited resource identifier. Audit metadata must not include raw alertId, raw
+linkedAlertId, raw customerId, raw accountId, raw transactionId, raw correlationId, raw scoreDecisionId, raw query
+string, raw request path, raw exception message, or response body.
 
-Clients must evaluate state. HTTP 200 does not imply LINKED_ALERT_AVAILABLE.
+Clients must evaluate state. HTTP 200 does not imply linked alert context is available.
+HTTP 200 does not imply LINKED_ALERT_AVAILABLE.
 TEMPORARILY_UNAVAILABLE is a degraded read state and must not be rendered as linked alert context.
-TEMPORARILY_UNAVAILABLE returns no alert fields. A rejected
-client-supplied `alertId` query parameter returns 400 and records a bounded validation error metric.
+UI/client must not render alert context fields for TEMPORARILY_UNAVAILABLE.
+TEMPORARILY_UNAVAILABLE returns no alert fields. Dashboards and alerts should monitor
+`fraud.suspicious_transaction.linked_alert.read{outcome="error"}`. A rejected client-supplied `alertId` query parameter
+returns 400 and records a bounded validation error metric.
 
 ## Out Of Scope
 
