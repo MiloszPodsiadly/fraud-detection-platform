@@ -36,6 +36,10 @@ public class SuspiciousTransactionLinkedAlertContextService {
                 .findById(normalizedSuspiciousTransactionId)
                 .orElseThrow(SuspiciousTransactionLinkedAlertContextNotFoundException::new);
 
+        if (!matches(normalizedSuspiciousTransactionId, suspiciousTransaction.getSuspiciousTransactionId())) {
+            return AlertLinkedContextResponse.relationshipMismatch();
+        }
+
         String linkedAlertId = normalize(suspiciousTransaction.getLinkedAlertId());
         if (linkedAlertId == null) {
             return AlertLinkedContextResponse.noLinkedAlert();

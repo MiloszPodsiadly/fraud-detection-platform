@@ -123,7 +123,7 @@ public class SuspiciousTransactionReadController {
             @PathVariable String suspiciousTransactionId,
             HttpServletRequest request
     ) {
-        recordLinkedAlertContextMetric("relationship_mismatch");
+        recordLinkedAlertContextMetric("validation_error");
         sensitiveReadAuditService.auditAttempt(
                 ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_LINKED_ALERT_CONTEXT,
                 ReadAccessResourceType.SUSPICIOUS_TRANSACTION,

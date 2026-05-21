@@ -1341,6 +1341,7 @@ public class AlertServiceMetrics {
                  "suspicious_transaction_not_found",
                  "linked_alert_not_found",
                  "relationship_mismatch",
+                 "validation_error",
                  "unavailable",
                  "error" -> outcome;
             default -> "error";
