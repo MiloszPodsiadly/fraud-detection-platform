@@ -404,6 +404,25 @@ describe("AlertReadOnlyContextPage", () => {
     }
   });
 
+  it("AlertReadOnlyContextPageDoesNotReferenceFullAlertDetailsFieldsTest", () => {
+    const source = pageSource();
+    const forbiddenFields = [
+      "analystDecision",
+      "finalOutcome",
+      "caseDecision",
+      "assistantSummary",
+      "featureSnapshot",
+      "scoreDetails",
+      "evidenceSnapshot",
+      "rawPayload",
+      "workflowActions"
+    ];
+
+    for (const field of forbiddenFields) {
+      expect(source).not.toContain(field);
+    }
+  });
+
   it("SuspiciousLinkedAlertPathSourceDoesNotUseGeneralAlertLookupTest", () => {
     const source = [
       pageSource(),

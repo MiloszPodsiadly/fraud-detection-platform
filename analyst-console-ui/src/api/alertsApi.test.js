@@ -789,6 +789,45 @@ describe("alertsApi auth headers", () => {
     expect(JSON.stringify(options)).not.toContain("correlation-secret");
   });
 
+  it("SuspiciousLinkedAlertClientDoesNotDisableAuthTest", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      state: "NO_LINKED_ALERT"
+    }));
+
+    await getSuspiciousTransactionLinkedAlertContext("suspicious-1", {
+      includeAuth: false
+    });
+
+    expect(fetchMock.mock.calls[0][1]).not.toHaveProperty("includeAuth");
+    expect(fetchMock.mock.calls[0][1]).not.toEqual(expect.objectContaining({ includeAuth: false }));
+  });
+
+  it("SuspiciousLinkedAlertClientOnlyForwardsAbortSignalTest", async () => {
+    const signal = new AbortController().signal;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      state: "NO_LINKED_ALERT"
+    }));
+
+    await getSuspiciousTransactionLinkedAlertContext("suspicious-1", {
+      signal,
+      includeAuth: false,
+      headers: { "X-Alert-Id": "alert-secret" },
+      body: JSON.stringify({ alertId: "alert-secret" }),
+      method: "POST"
+    });
+
+    const options = fetchMock.mock.calls[0][1];
+    expect(options).toEqual({
+      signal,
+      headers: { "Content-Type": "application/json" }
+    });
+    expect(JSON.stringify(options)).not.toContain("includeAuth");
+    expect(JSON.stringify(options)).not.toContain("alert-secret");
+    expect(options).not.toHaveProperty("body");
+    expect(options).not.toHaveProperty("method");
+    expect(options).not.toHaveProperty("includeAuth");
+  });
+
   it("SuspiciousLinkedAlertClientDoesNotForwardAlertSelectorHeadersTest", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
       state: "NO_LINKED_ALERT"
@@ -844,6 +883,7 @@ describe("alertsApi auth headers", () => {
     const linkedOptions = alertsApiSource().match(/function linkedAlertContextRequestOptions[\s\S]*?\n}/)?.[0] || "";
 
     expect(linkedOptions).not.toContain("headers");
+    expect(linkedOptions).not.toContain("includeAuth");
     expect(linkedOptions).not.toContain("...requestOptions");
     expect(linkedOptions).not.toContain("...options");
   });

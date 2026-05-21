@@ -30,6 +30,7 @@ export function AlertReadOnlyContextPage({
     sourceSuspiciousTransactionLoading,
     sourceSuspiciousTransactionError
   });
+  // Frontend source readiness is UX/scope control. Backend resolver remains authoritative for relationship validation.
   const effectiveClient = getLinkedAlertContextClient(linkedAlertContextClient);
   const canFetchContext = canReadAlert === true && sourceState.state === "verified" && Boolean(effectiveClient);
   const availableContext = detailState === "available" && context?.state === "LINKED_ALERT_AVAILABLE" ? context : null;
