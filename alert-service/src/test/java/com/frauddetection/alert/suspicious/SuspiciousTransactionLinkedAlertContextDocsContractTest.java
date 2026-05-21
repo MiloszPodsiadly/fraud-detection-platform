@@ -142,11 +142,20 @@ class SuspiciousTransactionLinkedAlertContextDocsContractTest {
     }
 
     @Test
-    void DocsMentionUiMigrationUsesBackendResolverTest() throws Exception {
+    void DocsMentionUiUsesBackendResolverTest() throws Exception {
         assertThat(docs())
-                .contains("FDP-70 migrates the SuspiciousTransaction linked-alert UI to the FDP-69 backend resolver")
-                .contains("FDP-70 migrates the SuspiciousTransaction linked-alert UI to the FDP-69 backend relationship resolver")
+                .contains("The SuspiciousTransaction linked-alert UI uses the backend linked-alert resolver")
+                .contains("The SuspiciousTransaction linked-alert UI uses the backend relationship resolver")
                 .contains("AlertReadOnlyContextPage calls GET `/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`");
+    }
+
+    @Test
+    void DocsMentionFdp71ContractOwnershipTest() throws Exception {
+        assertThat(docs())
+                .contains("WorkspaceDetailRouter` owns route/source readiness")
+                .contains("AlertReadOnlyContextPage` owns resolver state rendering")
+                .contains("The backend owns linked-alert relationship validation")
+                .contains("No frontend relationship validation is a source of truth");
     }
 
     @Test

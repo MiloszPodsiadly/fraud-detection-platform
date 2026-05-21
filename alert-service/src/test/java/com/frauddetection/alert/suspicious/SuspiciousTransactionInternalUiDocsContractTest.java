@@ -158,10 +158,42 @@ class SuspiciousTransactionInternalUiDocsContractTest {
         String docs = Files.readString(DOCS);
 
         assertThat(docs)
-                .contains("FDP-70 migrates the SuspiciousTransaction linked-alert UI to the FDP-69 backend relationship resolver")
+                .contains("The SuspiciousTransaction linked-alert UI uses the backend relationship resolver")
                 .contains("AlertReadOnlyContextPage calls GET `/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`")
                 .contains("The UI does not call GET `/api/v1/alerts/{alertId}` for SuspiciousTransaction linked-alert context")
                 .contains("The frontend sends `suspiciousTransactionId` only and does not send `alertId` or `linkedAlertId` to the resolver");
+    }
+
+    @Test
+    void DocsCurrentStateResolverContractTest() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs)
+                .contains("The SuspiciousTransaction linked-alert UI uses the backend relationship resolver")
+                .contains("The frontend sends `suspiciousTransactionId` only")
+                .contains("Backend relationship validation is authoritative")
+                .contains("HTTP 200 does not imply available context");
+    }
+
+    @Test
+    void DocsMentionRouterOwnsReadinessTest() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs).contains("WorkspaceDetailRouter owns route/source readiness");
+    }
+
+    @Test
+    void DocsMentionComponentOwnsResolverStateRenderingTest() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs).contains("AlertReadOnlyContextPage owns resolver state rendering");
+    }
+
+    @Test
+    void DocsMentionNoFrontendRelationshipValidationTest() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs).contains("No frontend relationship validation is a source of truth");
     }
 
     @Test

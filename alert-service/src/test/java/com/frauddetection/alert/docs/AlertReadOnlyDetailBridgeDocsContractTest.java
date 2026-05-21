@@ -52,7 +52,7 @@ class AlertReadOnlyDetailBridgeDocsContractTest {
     void docsSayContextBindingIsNotSecurityBoundary() throws Exception {
         String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
 
-        assertThat(lower).contains("frontend context binding is scope control, not security boundary");
+        assertThat(lower).contains("router source readiness is ux route readiness, not frontend relationship validation");
         assertThat(lower).contains("frontend guard is not a security boundary");
     }
 
@@ -92,7 +92,7 @@ class AlertReadOnlyDetailBridgeDocsContractTest {
     void docsMentionContextBindingIsNotSecurityBoundary() throws Exception {
         String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
 
-        assertThat(lower).contains("frontend context binding is scope control, not security boundary");
+        assertThat(lower).contains("router source readiness is ux route readiness, not frontend relationship validation");
     }
 
     @Test
@@ -107,9 +107,8 @@ class AlertReadOnlyDetailBridgeDocsContractTest {
     void DocsSaySuspiciousBridgeDoesNotUseAlertDetailsPageTest() throws Exception {
         String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
 
-        assertThat(lower).contains("fdp-68 fully removes suspicioustransaction read-only bridge mode from `alertdetailspage`");
-        assertThat(lower).contains("`alertdetailspage` no longer accepts `readonlycontext` for the suspicioustransaction bridge");
         assertThat(lower).contains("`alertdetailspage` remains the workflow-capable normal alert detail page");
+        assertThat(lower).contains("`alertreadonlycontextpage` is the dedicated read-only alert context page");
     }
 
     @Test
@@ -151,8 +150,8 @@ class AlertReadOnlyDetailBridgeDocsContractTest {
     void DocsSayAlertDetailsPageNoLongerHasReadOnlyContext() throws Exception {
         String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
 
-        assertThat(lower).contains("`alertdetailspage` no longer accepts `readonlycontext`");
-        assertThat(lower).contains("fully removes suspicioustransaction read-only bridge mode from `alertdetailspage`");
+        assertThat(lower).contains("`alertdetailspage` remains the workflow-capable normal alert detail page");
+        assertThat(lower).contains("`alertreadonlycontextpage` is the dedicated read-only alert context page");
     }
 
     @Test
@@ -168,8 +167,40 @@ class AlertReadOnlyDetailBridgeDocsContractTest {
         String docs = Files.readString(docPath());
 
         assertThat(docs)
-                .contains("FDP-70 migrates the SuspiciousTransaction linked-alert UI to the FDP-69 backend resolver")
+                .contains("The SuspiciousTransaction linked-alert UI uses the backend linked-alert resolver")
                 .contains("GET `/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`");
+    }
+
+    @Test
+    void DocsCurrentStateResolverContractTest() throws Exception {
+        String docs = Files.readString(docPath());
+
+        assertThat(docs)
+                .contains("The SuspiciousTransaction linked-alert UI uses the backend linked-alert resolver")
+                .contains("The frontend sends `suspiciousTransactionId` only")
+                .contains("Backend relationship validation is authoritative")
+                .contains("HTTP 200 does not imply available context");
+    }
+
+    @Test
+    void DocsMentionRouterOwnsReadinessTest() throws Exception {
+        String docs = Files.readString(docPath());
+
+        assertThat(docs).contains("WorkspaceDetailRouter` owns route/source readiness");
+    }
+
+    @Test
+    void DocsMentionComponentOwnsResolverStateRenderingTest() throws Exception {
+        String docs = Files.readString(docPath());
+
+        assertThat(docs).contains("AlertReadOnlyContextPage` owns resolver state rendering");
+    }
+
+    @Test
+    void DocsMentionNoFrontendRelationshipValidationTest() throws Exception {
+        String docs = Files.readString(docPath());
+
+        assertThat(docs).contains("No frontend relationship validation is a source of truth");
     }
 
     @Test
