@@ -339,7 +339,7 @@ function sourceVerificationState({
     return { state: "source-unavailable" };
   }
   if (!sourceSuspiciousTransaction) {
-    return { state: "verified" };
+    return { state: "verifying" };
   }
   return normalizeComparable(sourceSuspiciousTransaction.suspiciousTransactionId) === normalizeComparable(suspiciousTransactionId)
     ? { state: "verified" }

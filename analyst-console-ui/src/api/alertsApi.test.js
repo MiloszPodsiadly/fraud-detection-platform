@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   createAlertsApiClient,
   toUtcInstantParam,
@@ -763,6 +765,105 @@ describe("alertsApi auth headers", () => {
     );
   });
 
+  it("SuspiciousLinkedAlertClientDoesNotForwardCustomHeadersTest", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      state: "NO_LINKED_ALERT"
+    }));
+
+    await getSuspiciousTransactionLinkedAlertContext("suspicious-1", {
+      headers: {
+        "X-Alert-Id": "alert-secret",
+        "X-Linked-Alert-Id": "linked-alert-secret",
+        "X-Customer-Id": "customer-secret",
+        "X-Transaction-Id": "txn-secret",
+        "X-Correlation-Id": "correlation-secret"
+      }
+    });
+
+    const options = fetchMock.mock.calls[0][1];
+    expect(options.headers).toEqual({ "Content-Type": "application/json" });
+    expect(JSON.stringify(options)).not.toContain("alert-secret");
+    expect(JSON.stringify(options)).not.toContain("linked-alert-secret");
+    expect(JSON.stringify(options)).not.toContain("customer-secret");
+    expect(JSON.stringify(options)).not.toContain("txn-secret");
+    expect(JSON.stringify(options)).not.toContain("correlation-secret");
+  });
+
+  it("SuspiciousLinkedAlertClientDoesNotForwardAlertSelectorHeadersTest", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      state: "NO_LINKED_ALERT"
+    }));
+    const forbiddenHeaders = [
+      "X-Alert-Id",
+      "X-Linked-Alert-Id",
+      "X-Customer-Id",
+      "X-Account-Id",
+      "X-Transaction-Id",
+      "X-Correlation-Id",
+      "X-Score-Decision-Id"
+    ];
+
+    await getSuspiciousTransactionLinkedAlertContext("suspicious-1", {
+      headers: Object.fromEntries(forbiddenHeaders.map((header) => [header, `${header}-secret`]))
+    });
+
+    const headers = fetchMock.mock.calls[0][1].headers;
+    for (const header of forbiddenHeaders) {
+      expect(headers).not.toHaveProperty(header);
+    }
+  });
+
+  it("SuspiciousLinkedAlertClientStillSupportsAbortSignalTest", async () => {
+    const signal = new AbortController().signal;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      state: "NO_LINKED_ALERT"
+    }));
+
+    await getSuspiciousTransactionLinkedAlertContext("suspicious-1", { signal });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/internal/suspicious-transactions/suspicious-1/linked-alert",
+      expect.objectContaining({ signal })
+    );
+  });
+
+  it("SuspiciousLinkedAlertClientDoesNotSendRequestBodyTest", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      state: "NO_LINKED_ALERT"
+    }));
+
+    await getSuspiciousTransactionLinkedAlertContext("suspicious-1", {
+      body: JSON.stringify({ alertId: "alert-secret" })
+    });
+
+    expect(fetchMock.mock.calls[0][1]).not.toHaveProperty("body");
+    expect(JSON.stringify(fetchMock.mock.calls[0][1])).not.toContain("alert-secret");
+  });
+
+  it("SuspiciousLinkedAlertClientSourceDoesNotForwardHeadersTest", () => {
+    const linkedOptions = alertsApiSource().match(/function linkedAlertContextRequestOptions[\s\S]*?\n}/)?.[0] || "";
+
+    expect(linkedOptions).not.toContain("headers");
+    expect(linkedOptions).not.toContain("...requestOptions");
+    expect(linkedOptions).not.toContain("...options");
+  });
+
+  it("SuspiciousLinkedAlertClientSourceDoesNotMentionAlertSelectorHeadersTest", () => {
+    const source = alertsApiSource();
+    const forbiddenHeaders = [
+      "X-Alert-Id",
+      "X-Linked-Alert-Id",
+      "X-Customer-Id",
+      "X-Transaction-Id",
+      "X-Correlation-Id",
+      "X-Score-Decision-Id"
+    ];
+
+    for (const header of forbiddenHeaders) {
+      expect(source).not.toContain(header);
+    }
+  });
+
   it("SuspiciousLinkedAlertClientEncodesSuspiciousTransactionIdTest", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
       state: "NO_LINKED_ALERT"
@@ -803,7 +904,7 @@ describe("alertsApi auth headers", () => {
 
     await getSuspiciousTransactionLinkedAlertContext("suspicious-1");
 
-    expect(fetchMock.mock.calls[0][0]).not.toContain("/api/v1/alerts");
+    expect(fetchMock.mock.calls[0][0]).not.toContain(["", "api", "v1", "alerts"].join("/"));
   });
 
   it("surfaces work queue security and cursor errors without endpoint fallback", async () => {
@@ -897,4 +998,8 @@ function storageContains(storage, needle) {
     }
   }
   return false;
+}
+
+function alertsApiSource() {
+  return readFileSync(resolve(process.cwd(), "src/api/alertsApi.js"), "utf8");
 }

@@ -136,10 +136,10 @@ export default function App() {
   const runtimeSelectedLinkedAlertContext = detailSelectionPendingBoundaryReset ? false : selectedLinkedAlertContext;
   const workspaceTitle = WORKSPACE_PAGES[workspacePage]?.label || WORKSPACE_PAGES.analyst.label;
   const detailTitle = (() => {
-    if (selectedLinkedAlertContext || selectedAlertId) {
+    if (runtimeSelectedLinkedAlertContext || runtimeSelectedAlertId) {
       return "Alert Context";
     }
-    if (selectedSuspiciousTransactionId) {
+    if (runtimeSelectedSuspiciousTransactionId) {
       return "Suspicious Transaction";
     }
     return "Fraud Case";

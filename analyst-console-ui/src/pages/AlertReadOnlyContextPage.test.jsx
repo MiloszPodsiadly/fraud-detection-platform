@@ -228,6 +228,20 @@ describe("AlertReadOnlyContextPage", () => {
     expect(screen.getAllByText("Verifying linked alert context")).toHaveLength(3);
   });
 
+  it("AlertReadOnlyContextPageWithoutSourceDoesNotFetchResolverTest", () => {
+    const linkedAlertContextClient = resolverClient();
+    render(page({ sourceSuspiciousTransaction: null, linkedAlertContextClient }));
+
+    expect(linkedAlertContextClient.getSuspiciousTransactionLinkedAlertContext).not.toHaveBeenCalled();
+  });
+
+  it("AlertReadOnlyContextPageWithoutSourceRendersVerifyingStateTest", () => {
+    render(page({ sourceSuspiciousTransaction: null }));
+
+    expect(screen.getAllByText("Verifying linked alert context")).toHaveLength(3);
+    expect(screen.queryByRole("heading", { name: "Alert context" })).not.toBeInTheDocument();
+  });
+
   it("AlertReadOnlyContextPageDoesNotFetchWhenSourceLoadErrorTest", () => {
     const linkedAlertContextClient = resolverClient();
     render(page({
@@ -388,6 +402,18 @@ describe("AlertReadOnlyContextPage", () => {
     for (const term of forbiddenTerms) {
       expect(source).not.toContain(term);
     }
+  });
+
+  it("SuspiciousLinkedAlertPathSourceDoesNotUseGeneralAlertLookupTest", () => {
+    const source = [
+      pageSource(),
+      readFileSync(resolve(process.cwd(), "src/workspace/WorkspaceDetailRouter.jsx"), "utf8")
+    ].join("\n");
+
+    expect(source).not.toContain("getAlert(");
+    expect(source).not.toContain(["", "api", "v1", "alerts", ""].join("/"));
+    expect(source).not.toContain("createAlertReadOnlyBridgeApiClient");
+    expect(source).not.toContain("fallback to getAlert");
   });
 });
 

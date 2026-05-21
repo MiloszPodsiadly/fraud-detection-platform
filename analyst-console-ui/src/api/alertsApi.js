@@ -185,11 +185,10 @@ function listSuspiciousTransactionsWithRequest(request, {
   return request(`/internal/suspicious-transactions?${params.toString()}`, { signal });
 }
 
-function linkedAlertContextRequestOptions({ signal, includeAuth, headers } = {}) {
+function linkedAlertContextRequestOptions({ signal, includeAuth } = {}) {
   return {
     ...(signal ? { signal } : {}),
-    ...(includeAuth === false ? { includeAuth } : {}),
-    ...(headers ? { headers } : {})
+    ...(includeAuth === false ? { includeAuth } : {})
   };
 }
 
