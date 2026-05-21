@@ -95,9 +95,6 @@ export function WorkspaceDetailRouter({
     return (
       <AlertReadOnlyContextPage
         suspiciousTransactionId={selectedSuspiciousTransactionId}
-        sourceSuspiciousTransaction={sourceSuspiciousTransaction}
-        sourceSuspiciousTransactionLoading={sourceSuspiciousTransactionLoading}
-        sourceSuspiciousTransactionError={sourceSuspiciousTransactionError}
         linkedAlertContextClient={linkedAlertContextClient}
         canReadAlert={canReadAlerts}
         workspaceLabel={workspaceLabel || workspaceLabelFor(workspacePage)}

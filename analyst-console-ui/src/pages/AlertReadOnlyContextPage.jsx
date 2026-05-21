@@ -8,9 +8,6 @@ import { formatDateTime, formatScore } from "../utils/format.js";
 
 export function AlertReadOnlyContextPage({
   suspiciousTransactionId,
-  sourceSuspiciousTransaction,
-  sourceSuspiciousTransactionLoading = false,
-  sourceSuspiciousTransactionError = null,
   linkedAlertContextClient,
   canReadAlert = true,
   workspaceLabel = "Suspicious Transactions",
@@ -24,15 +21,9 @@ export function AlertReadOnlyContextPage({
   const requestSeqRef = useRef(0);
   const abortRef = useRef(null);
 
-  const sourceState = sourceVerificationState({
-    suspiciousTransactionId,
-    sourceSuspiciousTransaction,
-    sourceSuspiciousTransactionLoading,
-    sourceSuspiciousTransactionError
-  });
-  // Frontend source readiness is UX/scope control. Backend resolver remains authoritative for relationship validation.
   const effectiveClient = getLinkedAlertContextClient(linkedAlertContextClient);
-  const canFetchContext = canReadAlert === true && sourceState.state === "verified" && Boolean(effectiveClient);
+  const routeState = routeReadinessState({ suspiciousTransactionId });
+  const canFetchContext = canReadAlert === true && routeState.state === "ready" && Boolean(effectiveClient);
   const availableContext = detailState === "available" && context?.state === "LINKED_ALERT_AVAILABLE" ? context : null;
 
   useEffect(() => {
@@ -42,7 +33,7 @@ export function AlertReadOnlyContextPage({
       setIsLoading(false);
       setContext(null);
       setErrorMessage("");
-      setDetailState(sourceState.state);
+      setDetailState(routeState.state);
       return;
     }
 
@@ -87,7 +78,7 @@ export function AlertReadOnlyContextPage({
       abortController.abort();
       requestSeqRef.current += 1;
     };
-  }, [canFetchContext, effectiveClient, sourceState.state, suspiciousTransactionId]);
+  }, [canFetchContext, effectiveClient, routeState.state, suspiciousTransactionId]);
 
   useEffect(() => {
     if (!isLoading) {
@@ -107,31 +98,7 @@ export function AlertReadOnlyContextPage({
     );
   }
 
-  if (sourceState.state === "verifying") {
-    return (
-      <ReadOnlyState
-        title="Verifying linked alert context"
-        message="Verifying linked alert context"
-        workspaceLabel={workspaceLabel}
-        onBack={onBack}
-        headingRef={headingRef}
-      />
-    );
-  }
-
-  if (sourceState.state === "source-unavailable") {
-    return (
-      <ReadOnlyState
-        title="Linked alert context unavailable"
-        message="Linked alert context is unavailable."
-        workspaceLabel={workspaceLabel}
-        onBack={onBack}
-        headingRef={headingRef}
-      />
-    );
-  }
-
-  if (sourceState.state === "invalid") {
+  if (routeState.state === "invalid") {
     return (
       <ReadOnlyState
         title="Invalid linked alert context"
@@ -324,27 +291,11 @@ function Metric({ label, value }) {
   );
 }
 
-function sourceVerificationState({
-  suspiciousTransactionId,
-  sourceSuspiciousTransaction,
-  sourceSuspiciousTransactionLoading,
-  sourceSuspiciousTransactionError
-}) {
+function routeReadinessState({ suspiciousTransactionId }) {
   if (!normalizeComparable(suspiciousTransactionId)) {
     return { state: "invalid" };
   }
-  if (sourceSuspiciousTransactionLoading) {
-    return { state: "verifying" };
-  }
-  if (sourceSuspiciousTransactionError) {
-    return { state: "source-unavailable" };
-  }
-  if (!sourceSuspiciousTransaction) {
-    return { state: "verifying" };
-  }
-  return normalizeComparable(sourceSuspiciousTransaction.suspiciousTransactionId) === normalizeComparable(suspiciousTransactionId)
-    ? { state: "verified" }
-    : { state: "invalid" };
+  return { state: "ready" };
 }
 
 function getLinkedAlertContextClient(linkedAlertContextClient) {
