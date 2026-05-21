@@ -53,10 +53,10 @@ describe("AlertReadOnlyContextPage", () => {
     expect(await screen.findByRole("heading", { name: "Alert context" })).toBeInTheDocument();
   });
 
-  it("AlertReadOnlyContextPageDoesNotRequireLinkedAlertIdForFetchTest", async () => {
+  it("AlertReadOnlyContextPageDoesNotReceiveLinkedAlertIdTest", async () => {
     const linkedAlertContextClient = resolverClient();
     render(page({
-      sourceSuspiciousTransaction: sourceSuspiciousTransaction({ linkedAlertId: "" }),
+      linkedAlertId: "alert-secret",
       linkedAlertContextClient
     }));
 
@@ -99,6 +99,38 @@ describe("AlertReadOnlyContextPage", () => {
     expect(source).toContain("suspiciousTransactionId");
     expect(source).not.toContain("alertId,");
     expect(source).not.toContain("linkedAlertId");
+  });
+
+  it("AlertReadOnlyContextPagePropsAreMinimalTest", () => {
+    const source = pageSource();
+    const signature = source.match(/export function AlertReadOnlyContextPage\(\{[\s\S]*?\}\) \{/)?.[0] || "";
+
+    expect(signature).toContain("suspiciousTransactionId");
+    expect(signature).toContain("linkedAlertContextClient");
+    expect(signature).toContain("canReadAlert");
+    expect(signature).toContain("workspaceLabel");
+    expect(signature).toContain("onBack");
+    expect(signature).not.toContain("sourceSuspiciousTransaction");
+    expect(signature).not.toContain("alertId");
+    expect(signature).not.toContain("linkedAlertId");
+    expect(signature).not.toContain("apiClient");
+  });
+
+  it("AlertReadOnlyContextPageDoesNotReceiveSourceSuspiciousTransactionTest", () => {
+    expect(pageSource()).not.toContain("sourceSuspiciousTransaction");
+  });
+
+  it("AlertReadOnlyContextPageDoesNotReceiveSourceReadinessPropsTest", () => {
+    const source = pageSource();
+
+    expect(source).not.toContain("sourceSuspiciousTransactionLoading");
+    expect(source).not.toContain("sourceSuspiciousTransactionError");
+  });
+
+  it("AlertReadOnlyContextPageDoesNotReceiveAlertIdTest", () => {
+    const signature = pageSource().match(/export function AlertReadOnlyContextPage\(\{[\s\S]*?\}\) \{/)?.[0] || "";
+
+    expect(signature).not.toContain("alertId");
   });
 
   it("NoLinkedAlertRendersNoLinkedAlertStateTest", async () => {
@@ -218,41 +250,6 @@ describe("AlertReadOnlyContextPage", () => {
 
     expect(await screen.findByText("Alert detail requires alert read access.")).toBeInTheDocument();
     expectNoAlertFields();
-  });
-
-  it("AlertReadOnlyContextPageDoesNotFetchWhenSourceLoadingTest", () => {
-    const linkedAlertContextClient = resolverClient();
-    render(page({ sourceSuspiciousTransactionLoading: true, linkedAlertContextClient }));
-
-    expect(linkedAlertContextClient.getSuspiciousTransactionLinkedAlertContext).not.toHaveBeenCalled();
-    expect(screen.getAllByText("Verifying linked alert context")).toHaveLength(3);
-  });
-
-  it("AlertReadOnlyContextPageWithoutSourceDoesNotFetchResolverTest", () => {
-    const linkedAlertContextClient = resolverClient();
-    render(page({ sourceSuspiciousTransaction: null, linkedAlertContextClient }));
-
-    expect(linkedAlertContextClient.getSuspiciousTransactionLinkedAlertContext).not.toHaveBeenCalled();
-  });
-
-  it("AlertReadOnlyContextPageWithoutSourceRendersVerifyingStateTest", () => {
-    render(page({ sourceSuspiciousTransaction: null }));
-
-    expect(screen.getAllByText("Verifying linked alert context")).toHaveLength(3);
-    expect(screen.queryByRole("heading", { name: "Alert context" })).not.toBeInTheDocument();
-  });
-
-  it("AlertReadOnlyContextPageDoesNotFetchWhenSourceLoadErrorTest", () => {
-    const linkedAlertContextClient = resolverClient();
-    render(page({
-      sourceSuspiciousTransactionError: new Error("raw source alert-secret customer-secret"),
-      linkedAlertContextClient
-    }));
-
-    expect(linkedAlertContextClient.getSuspiciousTransactionLinkedAlertContext).not.toHaveBeenCalled();
-    expect(screen.getByText("Linked alert context is unavailable.")).toBeInTheDocument();
-    expect(screen.queryByText(/alert-secret/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/customer-secret/)).not.toBeInTheDocument();
   });
 
   it("AlertReadOnlyContextPageFailsClosedWhenSuspiciousTransactionIdMissingTest", () => {
@@ -423,6 +420,31 @@ describe("AlertReadOnlyContextPage", () => {
     }
   });
 
+  it("AlertReadOnlyContextPageDoesNotContainSourceVerificationStateTest", () => {
+    expect(pageSource()).not.toContain("sourceVerificationState");
+  });
+
+  it("AlertReadOnlyContextPageDoesNotCompareLinkedAlertIdsTest", () => {
+    expect(pageSource()).not.toContain("linkedAlertId");
+  });
+
+  it("AlertReadOnlyContextPageDoesNotCompareTransactionCustomerOrScoreDecisionTest", () => {
+    const source = pageSource();
+
+    expect(source).not.toContain("sourceSuspiciousTransaction");
+    expect(source).not.toContain("scoreDecisionId ===");
+    expect(source).not.toContain("transactionId ===");
+    expect(source).not.toContain("customerId ===");
+  });
+
+  it("AlertReadOnlyContextPageDoesNotPerformFrontendRelationshipValidationTest", () => {
+    const source = pageSource();
+
+    expect(source).not.toContain("relationship validation");
+    expect(source).not.toContain("relationship source");
+    expect(source).not.toContain("sourceVerificationState");
+  });
+
   it("SuspiciousLinkedAlertPathSourceDoesNotUseGeneralAlertLookupTest", () => {
     const source = [
       pageSource(),
@@ -440,7 +462,6 @@ function page(overrides = {}) {
   return (
     <AlertReadOnlyContextPage
       suspiciousTransactionId="suspicious-1"
-      sourceSuspiciousTransaction={sourceSuspiciousTransaction()}
       linkedAlertContextClient={resolverClient()}
       canReadAlert
       onBack={vi.fn()}
@@ -476,17 +497,6 @@ function linkedAlertAvailable(overrides = {}) {
     transactionId: "txn-1",
     scoreDecisionId: "score-1",
     reasonCodes: ["HIGH_AMOUNT_ACTIVITY"],
-    ...overrides
-  };
-}
-
-function sourceSuspiciousTransaction(overrides = {}) {
-  return {
-    suspiciousTransactionId: "suspicious-1",
-    linkedAlertId: "alert-1",
-    transactionId: "txn-1",
-    customerId: "customer-1",
-    scoreDecisionId: "score-1",
     ...overrides
   };
 }

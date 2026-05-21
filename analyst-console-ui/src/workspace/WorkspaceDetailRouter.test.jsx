@@ -1,4 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const alertDetailsPageMock = vi.hoisted(() => vi.fn(({ canReadAlert, workspaceLabel, alertSummaryRuntimeState, apiClient, onBack }) => (
@@ -320,6 +322,83 @@ describe("WorkspaceDetailRouter", () => {
     expect(props.suspiciousTransactionId).toBe("suspicious-1");
   });
 
+  it("WorkspaceDetailRouterPassesMinimalPropsToAlertReadOnlyContextPageTest", () => {
+    render(
+      <WorkspaceDetailRouter
+        selectedAlertId={null}
+        selectedFraudCaseId={null}
+        alertQueueState={undefined}
+        session={{ userId: "analyst-1", authorities: ["alert:read", "suspicious-transaction:read"] }}
+        apiClient={{ getAlert: vi.fn(), getSuspiciousTransactionLinkedAlertContext: vi.fn(), submitAnalystDecision: vi.fn(), getAssistantSummary: vi.fn() }}
+        canReadAlerts
+        canReadFraudCases={false}
+        workspacePage="suspiciousTransactions"
+        selectedLinkedAlertContext
+        selectedSuspiciousTransactionId="suspicious-1"
+        sourceSuspiciousTransaction={{ suspiciousTransactionId: "suspicious-1", linkedAlertId: "alert-secret" }}
+        onCloseSelection={vi.fn()}
+        onRefreshDashboard={vi.fn()}
+      />
+    );
+
+    expect(Object.keys(alertReadOnlyContextPageMock.mock.calls.at(-1)[0]).sort()).toEqual([
+      "canReadAlert",
+      "linkedAlertContextClient",
+      "onBack",
+      "suspiciousTransactionId",
+      "workspaceLabel"
+    ]);
+  });
+
+  it("WorkspaceDetailRouterDoesNotPassSourceSuspiciousTransactionToAlertReadOnlyContextPageTest", () => {
+    render(
+      <WorkspaceDetailRouter
+        selectedAlertId={null}
+        selectedFraudCaseId={null}
+        alertQueueState={undefined}
+        session={{ userId: "analyst-1", authorities: ["alert:read", "suspicious-transaction:read"] }}
+        apiClient={{ getAlert: vi.fn(), getSuspiciousTransactionLinkedAlertContext: vi.fn(), submitAnalystDecision: vi.fn(), getAssistantSummary: vi.fn() }}
+        canReadAlerts
+        canReadFraudCases={false}
+        workspacePage="suspiciousTransactions"
+        selectedLinkedAlertContext
+        selectedSuspiciousTransactionId="suspicious-1"
+        sourceSuspiciousTransaction={{ suspiciousTransactionId: "suspicious-1", linkedAlertId: "alert-secret" }}
+        onCloseSelection={vi.fn()}
+        onRefreshDashboard={vi.fn()}
+      />
+    );
+
+    const props = alertReadOnlyContextPageMock.mock.calls.at(-1)[0];
+    expect(props).not.toHaveProperty("sourceSuspiciousTransaction");
+    expect(props).not.toHaveProperty("sourceSuspiciousTransactionLoading");
+    expect(props).not.toHaveProperty("sourceSuspiciousTransactionError");
+  });
+
+  it("WorkspaceDetailRouterDoesNotPassAlertIdOrLinkedAlertIdToAlertReadOnlyContextPageTest", () => {
+    render(
+      <WorkspaceDetailRouter
+        selectedAlertId={null}
+        selectedFraudCaseId={null}
+        alertQueueState={undefined}
+        session={{ userId: "analyst-1", authorities: ["alert:read", "suspicious-transaction:read"] }}
+        apiClient={{ getAlert: vi.fn(), getSuspiciousTransactionLinkedAlertContext: vi.fn(), submitAnalystDecision: vi.fn(), getAssistantSummary: vi.fn() }}
+        canReadAlerts
+        canReadFraudCases={false}
+        workspacePage="suspiciousTransactions"
+        selectedLinkedAlertContext
+        selectedSuspiciousTransactionId="suspicious-1"
+        sourceSuspiciousTransaction={{ suspiciousTransactionId: "suspicious-1", linkedAlertId: "linked-alert-secret" }}
+        onCloseSelection={vi.fn()}
+        onRefreshDashboard={vi.fn()}
+      />
+    );
+
+    const props = alertReadOnlyContextPageMock.mock.calls.at(-1)[0];
+    expect(props).not.toHaveProperty("alertId");
+    expect(props).not.toHaveProperty("linkedAlertId");
+  });
+
   it("WorkspaceDetailRouterDoesNotCreateGetAlertOnlyClientForSuspiciousBridgeTest", () => {
     render(
       <WorkspaceDetailRouter
@@ -417,6 +496,131 @@ describe("WorkspaceDetailRouter", () => {
     expect(screen.getAllByText("Verifying linked alert context")).toHaveLength(2);
   });
 
+  it("WorkspaceDetailRouterRendersStaleSourceStateWhenSourceIdMismatchesRouteTest", () => {
+    const getAlert = vi.fn();
+    const getSuspiciousTransactionLinkedAlertContext = vi.fn();
+    render(
+      <WorkspaceDetailRouter
+        selectedAlertId={null}
+        selectedFraudCaseId={null}
+        alertQueueState={undefined}
+        session={{ userId: "analyst-1", authorities: ["alert:read", "suspicious-transaction:read"] }}
+        apiClient={{ getAlert, getSuspiciousTransactionLinkedAlertContext, submitAnalystDecision: vi.fn(), getAssistantSummary: vi.fn() }}
+        canReadAlerts
+        canReadFraudCases={false}
+        workspacePage="suspiciousTransactions"
+        selectedLinkedAlertContext
+        selectedSuspiciousTransactionId="suspicious-2"
+        sourceSuspiciousTransaction={{ suspiciousTransactionId: "suspicious-1" }}
+        sourceSuspiciousTransactionLoading={false}
+        sourceSuspiciousTransactionError={null}
+        onCloseSelection={vi.fn()}
+        onRefreshDashboard={vi.fn()}
+      />
+    );
+
+    expect(alertReadOnlyContextPageMock).not.toHaveBeenCalled();
+    expect(getSuspiciousTransactionLinkedAlertContext).not.toHaveBeenCalled();
+    expect(getAlert).not.toHaveBeenCalled();
+    expect(screen.queryByText("Verifying linked alert context")).not.toBeInTheDocument();
+    expect(screen.getByText("Linked alert context not ready")).toBeInTheDocument();
+    expect(screen.getByText("Linked alert context is not ready for the selected suspicious transaction.")).toBeInTheDocument();
+    expect(screen.queryByText(/suspicious-1/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/suspicious-2/)).not.toBeInTheDocument();
+  });
+
+  it("WorkspaceDetailRouterDoesNotTreatStaleSourceAsLoadingTest", () => {
+    const getSuspiciousTransactionLinkedAlertContext = vi.fn();
+    render(
+      <WorkspaceDetailRouter
+        selectedAlertId={null}
+        selectedFraudCaseId={null}
+        alertQueueState={undefined}
+        session={{ userId: "analyst-1", authorities: ["alert:read", "suspicious-transaction:read"] }}
+        apiClient={{ getAlert: vi.fn(), getSuspiciousTransactionLinkedAlertContext, submitAnalystDecision: vi.fn(), getAssistantSummary: vi.fn() }}
+        canReadAlerts
+        canReadFraudCases={false}
+        workspacePage="suspiciousTransactions"
+        selectedLinkedAlertContext
+        selectedSuspiciousTransactionId="suspicious-2"
+        sourceSuspiciousTransaction={{ suspiciousTransactionId: "suspicious-1" }}
+        sourceSuspiciousTransactionLoading={false}
+        sourceSuspiciousTransactionError={null}
+        onCloseSelection={vi.fn()}
+        onRefreshDashboard={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText("Verifying linked alert context")).not.toBeInTheDocument();
+    expect(screen.getByText("Linked alert context not ready")).toBeInTheDocument();
+    expect(getSuspiciousTransactionLinkedAlertContext).not.toHaveBeenCalled();
+    expect(screen.queryByRole("heading", { name: "Dedicated read-only alert context true" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Alert detail true" })).not.toBeInTheDocument();
+  });
+
+  it("WorkspaceDetailRouterStillShowsVerifyingWhenSourceIsMissingOrLoadingTest", () => {
+    const commonProps = {
+      selectedAlertId: null,
+      selectedFraudCaseId: null,
+      alertQueueState: undefined,
+      session: { userId: "analyst-1", authorities: ["alert:read", "suspicious-transaction:read"] },
+      apiClient: { getAlert: vi.fn(), getSuspiciousTransactionLinkedAlertContext: vi.fn(), submitAnalystDecision: vi.fn(), getAssistantSummary: vi.fn() },
+      canReadAlerts: true,
+      canReadFraudCases: false,
+      workspacePage: "suspiciousTransactions",
+      selectedLinkedAlertContext: true,
+      selectedSuspiciousTransactionId: "suspicious-1",
+      onCloseSelection: vi.fn(),
+      onRefreshDashboard: vi.fn()
+    };
+
+    const { rerender } = render(
+      <WorkspaceDetailRouter
+        {...commonProps}
+        sourceSuspiciousTransaction={null}
+      />
+    );
+    expect(screen.getAllByText("Verifying linked alert context")).toHaveLength(2);
+    expect(screen.queryByText("Linked alert context not ready")).not.toBeInTheDocument();
+
+    rerender(
+      <WorkspaceDetailRouter
+        {...commonProps}
+        sourceSuspiciousTransaction={null}
+        sourceSuspiciousTransactionLoading
+      />
+    );
+    expect(screen.getAllByText("Verifying linked alert context")).toHaveLength(2);
+    expect(screen.queryByText("Linked alert context not ready")).not.toBeInTheDocument();
+  });
+
+  it("WorkspaceDetailRouterMountsAlertReadOnlyContextWhenSourceIdMatchesRouteTest", () => {
+    render(
+      <WorkspaceDetailRouter
+        selectedAlertId={null}
+        selectedFraudCaseId={null}
+        alertQueueState={undefined}
+        session={{ userId: "analyst-1", authorities: ["alert:read", "suspicious-transaction:read"] }}
+        apiClient={{ getAlert: vi.fn(), getSuspiciousTransactionLinkedAlertContext: vi.fn(), submitAnalystDecision: vi.fn(), getAssistantSummary: vi.fn() }}
+        canReadAlerts
+        canReadFraudCases={false}
+        workspacePage="suspiciousTransactions"
+        selectedLinkedAlertContext
+        selectedSuspiciousTransactionId="suspicious-2"
+        sourceSuspiciousTransaction={{ suspiciousTransactionId: "suspicious-2", linkedAlertId: "alert-secret" }}
+        onCloseSelection={vi.fn()}
+        onRefreshDashboard={vi.fn()}
+      />
+    );
+
+    expect(alertReadOnlyContextPageMock).toHaveBeenCalledTimes(1);
+    const props = alertReadOnlyContextPageMock.mock.calls[0][0];
+    expect(props.suspiciousTransactionId).toBe("suspicious-2");
+    expect(props).not.toHaveProperty("sourceSuspiciousTransaction");
+    expect(props).not.toHaveProperty("alertId");
+    expect(props).not.toHaveProperty("linkedAlertId");
+  });
+
   it("suspiciousTransactionLinkedContextRouteWithSourceErrorDoesNotCallGetAlert", () => {
     const getAlert = vi.fn();
     render(
@@ -444,7 +648,7 @@ describe("WorkspaceDetailRouter", () => {
     expect(screen.queryByText(/suspicious-secret/)).not.toBeInTheDocument();
   });
 
-  it("suspiciousTransactionLinkedContextRouteWithSourceLinkedAlertMismatchDoesNotCallGetAlert", () => {
+  it("WorkspaceDetailRouterDoesNotUseLinkedAlertIdForRouteReadinessTest", () => {
     const getAlert = vi.fn();
     render(
       <WorkspaceDetailRouter
@@ -467,6 +671,28 @@ describe("WorkspaceDetailRouter", () => {
     expect(getAlert).not.toHaveBeenCalled();
     expect(screen.getByRole("heading", { name: "Dedicated read-only alert context true" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Alert detail true" })).not.toBeInTheDocument();
+  });
+
+  it("WorkspaceDetailRouterDoesNotPerformRelationshipValidationTest", () => {
+    const routerSource = readFileSync(resolve(process.cwd(), "src/workspace/WorkspaceDetailRouter.jsx"), "utf8");
+
+    // Architecture regression guard: runtime tests above prove behavior; this blocks relationship validation from returning.
+    expect(routerSource).toContain("sourceReadinessState");
+    expect(routerSource).toContain("sourceSuspiciousTransaction.suspiciousTransactionId");
+    expect(routerSource).toContain("loadedId !== selectedId");
+    expect(routerSource).toContain('"stale-source"');
+    expect(routerSource).not.toContain("sourceSuspiciousTransaction.linkedAlertId");
+    expect(routerSource).not.toContain("sourceSuspiciousTransaction.transactionId");
+    expect(routerSource).not.toContain("sourceSuspiciousTransaction.customerId");
+    expect(routerSource).not.toContain("sourceSuspiciousTransaction.accountId");
+    expect(routerSource).not.toContain("sourceSuspiciousTransaction.correlationId");
+    expect(routerSource).not.toContain("sourceSuspiciousTransaction.scoreDecisionId");
+    expect(routerSource).not.toContain("linkedAlertId");
+    expect(routerSource).not.toContain("transactionId ===");
+    expect(routerSource).not.toContain("customerId ===");
+    expect(routerSource).not.toContain("accountId ===");
+    expect(routerSource).not.toContain("correlationId ===");
+    expect(routerSource).not.toContain("scoreDecisionId ===");
   });
 
   it("suspiciousTransactionLinkedContextRouteWithMatchingSourceCallsReadOnlyBridge", () => {
@@ -708,7 +934,7 @@ describe("WorkspaceDetailRouter", () => {
     consoleInfo.mockRestore();
   });
 
-  it("sourceVerificationStateDoesNotLogRawRoute", () => {
+  it("sourceReadinessStateDoesNotLogRawRoute", () => {
     const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
     window.history.replaceState({}, "", "/?workspace=suspicious-transactions&suspiciousTransactionId=suspicious-secret&linkedAlertContext=1");
     render(

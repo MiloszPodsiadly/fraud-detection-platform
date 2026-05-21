@@ -19,7 +19,7 @@ Clients cannot pass `alertId`, `linkedAlertId`, alert, customer, account, transa
 identifiers through query parameters, request body, or custom headers for this context.
 The loaded SuspiciousTransaction document must also match the path `suspiciousTransactionId`; a source identifier
 mismatch fails closed before any alert lookup.
-FDP-70 migrates the SuspiciousTransaction linked-alert UI to the FDP-69 backend resolver.
+The SuspiciousTransaction linked-alert UI uses the backend linked-alert resolver.
 `AlertReadOnlyContextPage` calls GET `/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`.
 `/internal` in this API means non-public product API for the protected analyst console. It does not mean service-private
 or unauthenticated. The endpoint remains a protected HTTP API with backend authorization, state-driven response
@@ -45,6 +45,34 @@ Alert detail is not legal proof.
 
 The bridge must not rename an alert into a fraud verdict, analyst disposition, case outcome, or final decision.
 
+## Route Readiness vs Relationship Validation
+
+`WorkspaceDetailRouter` owns route/source readiness for this bridge.
+The router may check that the loaded source SuspiciousTransaction `suspiciousTransactionId` matches the selected route
+`suspiciousTransactionId` before mounting linked-alert context. This prevents stale route/source races.
+The source identifier mismatch fails closed before any linked-alert resolver fetch.
+Known source identifier mismatch is not treated as normal loading. It renders an explicit fail-closed
+stale-source/source-mismatch state.
+The stale-source/source-mismatch state is safe UI copy only and does not show raw identifiers.
+This allowed frontend check is UX route readiness, not linked-alert relationship validation.
+
+Allowed frontend route readiness check:
+
+- `sourceSuspiciousTransaction.suspiciousTransactionId === selectedSuspiciousTransactionId`
+
+Forbidden frontend relationship checks:
+
+- `sourceSuspiciousTransaction.linkedAlertId === alertId`
+- `alert.transactionId === sourceSuspiciousTransaction.transactionId`
+- `alert.customerId === sourceSuspiciousTransaction.customerId`
+- `alert.accountId === sourceSuspiciousTransaction.accountId`
+- `alert.correlationId === sourceSuspiciousTransaction.correlationId`
+- `alert.scoreDecisionId === sourceSuspiciousTransaction.scoreDecisionId`
+
+The backend derives `linkedAlertId`, loads the alert, validates the linked-alert relationship, and returns
+`response.state`.
+The frontend does not validate the linked-alert relationship.
+
 ## Authorization Boundary
 
 SuspiciousTransaction detail still requires `SUSPICIOUS_TRANSACTION_READ`.
@@ -67,23 +95,25 @@ An `alertId` alone in the suspicious workspace is invalid bridge context.
 
 This bridge is not a general-purpose alert lookup inside the SuspiciousTransaction workspace.
 The backend loads the source SuspiciousTransaction, derives `linkedAlertId`, loads the alert, and fails closed if the
-relationship does not match. Frontend context binding is scope control, not security boundary.
+relationship does not match. Router source readiness is UX route readiness, not frontend relationship validation.
+No frontend relationship validation is a source of truth.
 Backend relationship validation and alert-read authorization remain authoritative.
 Relationship validation currently uses alertId, transactionId, customerId, and correlationId where available.
 
 ## Dedicated Read-Only Component
 
-FDP-68 fully removes SuspiciousTransaction read-only bridge mode from `AlertDetailsPage`.
-`AlertDetailsPage` no longer accepts `readOnlyContext` for the SuspiciousTransaction bridge.
 `AlertDetailsPage` remains the workflow-capable normal alert detail page.
 `AlertReadOnlyContextPage` is the dedicated read-only alert context page.
 `AlertReadOnlyContextPage` is the only component for SuspiciousTransaction linked-alert read-only context.
+`WorkspaceDetailRouter` owns route/source readiness for this bridge.
+`AlertReadOnlyContextPage` owns resolver state rendering.
+The backend owns linked-alert relationship validation.
 `AlertReadOnlyContextPage` depends only on a linked-alert resolver client.
 `AlertReadOnlyContextPage` does not receive the full API client.
+`AlertReadOnlyContextPage` does not receive `sourceSuspiciousTransaction`, `alertId`, or `linkedAlertId`.
 This removes the boolean-mode smell and makes the read-only path safe by construction instead of conditionals inside the workflow page.
 The internal linked-alert endpoint is the backend source for validated read-only alert context.
-FDP-70 makes `AlertReadOnlyContextPage` call
-GET `/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`.
+`AlertReadOnlyContextPage` calls GET `/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`.
 Frontend state is not authoritative. Backend relationship validation is authoritative.
 HTTP 200 does not imply available context; the UI must evaluate response.state.
 Only response.state `LINKED_ALERT_AVAILABLE` may render alert fields.
@@ -91,7 +121,7 @@ Non-available states render no alert fields.
 
 ## Backend DTO Boundary
 
-FDP-70 relies on the FDP-69 resolver returning `AlertLinkedContextResponse`.
+The linked-alert UI relies on the backend resolver returning `AlertLinkedContextResponse`.
 The UI must not consume full `AlertDetailsResponse` for SuspiciousTransaction linked-alert context.
 The backend DTO must remain a minimal allowlisted DTO.
 `LINKED_ALERT_AVAILABLE` may render only fields returned by the minimal linked-alert context DTO.

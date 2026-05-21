@@ -115,12 +115,12 @@ or decoded cursor content.
 ## Linked Alert Context
 
 The linked alert bridge opens read-only alert context when `linkedAlertId` is present and the session has alert read
-authority. FDP-69 adds the backend endpoint GET
+authority. The backend linked-alert resolver endpoint is GET
 `/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert` for relationship-validated alert context.
 The backend derives `linkedAlertId` from the SuspiciousTransaction read model and validates the relationship before
 returning alert context. The loaded SuspiciousTransaction document must match the path `suspiciousTransactionId`.
 The client cannot pass `alertId`.
-FDP-70 migrates the SuspiciousTransaction linked-alert UI to the FDP-69 backend relationship resolver.
+The SuspiciousTransaction linked-alert UI uses the backend relationship resolver.
 AlertReadOnlyContextPage calls GET `/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`.
 `/internal` in this API means non-public product API for the protected analyst console. It does not mean service-private
 or unauthenticated. The endpoint remains a protected HTTP API with backend authorization, state-driven response
@@ -134,6 +134,19 @@ identifiers to the resolver through query parameters, request body, or custom he
 Backend relationship validation is authoritative.
 HTTP 200 does not imply available context; the UI evaluates response.state before rendering.
 Only state `LINKED_ALERT_AVAILABLE` renders alert fields. Non-available states render no alert fields.
+WorkspaceDetailRouter owns route/source readiness for linked-alert context.
+WorkspaceDetailRouter may check that `sourceSuspiciousTransaction.suspiciousTransactionId` matches the selected route
+`selectedSuspiciousTransactionId` before mounting linked-alert context. This prevents stale route/source races and is
+UX route readiness, not linked-alert relationship validation.
+A source identifier mismatch fails closed before any linked-alert resolver fetch.
+A known source identifier mismatch is not treated as normal loading. It renders an explicit fail-closed
+stale-source/source-mismatch state without raw identifiers.
+AlertReadOnlyContextPage owns resolver state rendering.
+The backend owns linked-alert relationship validation.
+No frontend relationship validation is a source of truth.
+The frontend does not compare `linkedAlertId`, alert transaction, customer, account, correlation, or score decision
+fields to validate the linked-alert relationship.
+AlertReadOnlyContextPage does not receive `sourceSuspiciousTransaction`, `alertId`, or `linkedAlertId`.
 
 Alert detail is investigation context. It is not confirmed fraud, not an analyst decision, not a final outcome,
 not a case lifecycle action, and not legal proof.
@@ -158,7 +171,7 @@ correlationId where available.
 
 ## Backend DTO Boundary
 
-FDP-70 relies on the FDP-69 resolver returning `AlertLinkedContextResponse`.
+The linked-alert UI relies on the backend resolver returning `AlertLinkedContextResponse`.
 The UI must not consume full `AlertDetailsResponse` for SuspiciousTransaction linked-alert context.
 The backend DTO must remain a minimal allowlisted DTO.
 `LINKED_ALERT_AVAILABLE` may render only fields returned by the minimal linked-alert context DTO.

@@ -158,10 +158,87 @@ class SuspiciousTransactionInternalUiDocsContractTest {
         String docs = Files.readString(DOCS);
 
         assertThat(docs)
-                .contains("FDP-70 migrates the SuspiciousTransaction linked-alert UI to the FDP-69 backend relationship resolver")
+                .contains("The SuspiciousTransaction linked-alert UI uses the backend relationship resolver")
                 .contains("AlertReadOnlyContextPage calls GET `/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`")
                 .contains("The UI does not call GET `/api/v1/alerts/{alertId}` for SuspiciousTransaction linked-alert context")
                 .contains("The frontend sends `suspiciousTransactionId` only and does not send `alertId` or `linkedAlertId` to the resolver");
+    }
+
+    @Test
+    void DocsCurrentStateResolverContractTest() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs)
+                .contains("The SuspiciousTransaction linked-alert UI uses the backend relationship resolver")
+                .contains("The frontend sends `suspiciousTransactionId` only")
+                .contains("Backend relationship validation is authoritative")
+                .contains("HTTP 200 does not imply available context");
+    }
+
+    @Test
+    void DocsMentionRouterOwnsReadinessTest() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs).contains("WorkspaceDetailRouter owns route/source readiness");
+    }
+
+    @Test
+    void DocsMentionComponentOwnsResolverStateRenderingTest() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs).contains("AlertReadOnlyContextPage owns resolver state rendering");
+    }
+
+    @Test
+    void DocsMentionNoFrontendRelationshipValidationTest() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs).contains("No frontend relationship validation is a source of truth");
+    }
+
+    @Test
+    void DocsMentionSourceIdMatchIsRouteReadinessTest() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs)
+                .contains("sourceSuspiciousTransaction.suspiciousTransactionId")
+                .contains("selected route")
+                .contains("UX route readiness, not linked-alert relationship validation");
+    }
+
+    @Test
+    void DocsMentionSourceIdMismatchFailsClosedBeforeFetchTest() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs).contains("A source identifier mismatch fails closed before any linked-alert resolver fetch");
+    }
+
+    @Test
+    void DocsMentionStaleSourceMismatchExplicitStateTest() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs)
+                .contains("A known source identifier mismatch is not treated as normal loading")
+                .contains("explicit fail-closed")
+                .contains("stale-source/source-mismatch state without raw identifiers");
+    }
+
+    @Test
+    void DocsMentionFrontendDoesNotValidateLinkedAlertRelationshipTest() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs)
+                .contains("The frontend does not compare `linkedAlertId`, alert transaction, customer, account, correlation, or score decision")
+                .contains("to validate the linked-alert relationship");
+    }
+
+    @Test
+    void DocsMentionBackendOwnsRelationshipValidationTest() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs)
+                .contains("The backend owns linked-alert relationship validation")
+                .contains("Backend relationship validation is authoritative");
     }
 
     @Test
