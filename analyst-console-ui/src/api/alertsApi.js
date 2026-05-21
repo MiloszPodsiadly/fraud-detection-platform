@@ -23,6 +23,10 @@ export function createAlertsApiClient({
     listSuspiciousTransactions: (requestParams, requestOptions) => listSuspiciousTransactionsWithRequest(request, requestParams, requestOptions),
     getSuspiciousTransactionSummary: (requestOptions) => request("/internal/suspicious-transactions/summary", requestOptions),
     getSuspiciousTransaction: (suspiciousTransactionId, requestOptions) => request(`/internal/suspicious-transactions/${encodeURIComponent(suspiciousTransactionId)}`, requestOptions),
+    getSuspiciousTransactionLinkedAlertContext: (suspiciousTransactionId, requestOptions) => request(
+      `/internal/suspicious-transactions/${encodeURIComponent(suspiciousTransactionId)}/linked-alert`,
+      linkedAlertContextRequestOptions(requestOptions)
+    ),
     listGovernanceAdvisories: (requestParams, requestOptions) => listGovernanceAdvisoriesWithRequest(request, requestParams, requestOptions),
     getGovernanceAdvisoryAnalytics: (requestParams, requestOptions) => getGovernanceAdvisoryAnalyticsWithRequest(request, requestParams, requestOptions),
     getGovernanceAdvisoryAudit: (eventId, requestOptions) => request(`/governance/advisories/${encodeURIComponent(eventId)}/audit`, requestOptions),
@@ -179,6 +183,14 @@ function listSuspiciousTransactionsWithRequest(request, {
   appendOptionalParam(params, "detectedFrom", toUtcInstantParam(detectedFrom));
   appendOptionalParam(params, "detectedTo", toUtcInstantParam(detectedTo));
   return request(`/internal/suspicious-transactions?${params.toString()}`, { signal });
+}
+
+function linkedAlertContextRequestOptions({ signal, includeAuth, headers } = {}) {
+  return {
+    ...(signal ? { signal } : {}),
+    ...(includeAuth === false ? { includeAuth } : {}),
+    ...(headers ? { headers } : {})
+  };
 }
 
 function listGovernanceAdvisoriesWithRequest(request, { severity = "ALL", modelVersion = "", lifecycleStatus = "ALL", limit = 25 } = {}, { signal } = {}) {

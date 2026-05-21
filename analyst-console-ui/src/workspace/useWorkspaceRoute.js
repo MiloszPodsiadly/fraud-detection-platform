@@ -20,6 +20,7 @@ export function useWorkspaceRoute() {
     params.delete("alertId");
     params.delete("fraudCaseId");
     params.delete("suspiciousTransactionId");
+    params.delete("linkedAlertContext");
     if (nextPage === "analyst") {
       params.delete("workspace");
     } else {
@@ -31,18 +32,22 @@ export function useWorkspaceRoute() {
 
   const openAlert = useCallback((alertRoute) => {
     const alertId = typeof alertRoute === "object" && alertRoute !== null ? alertRoute.alertId : alertRoute;
-    const suspiciousTransactionId = typeof alertRoute === "object" && alertRoute !== null
-      ? alertRoute.suspiciousTransactionId
-      : null;
     const params = new URLSearchParams(window.location.search);
     params.delete("fraudCaseId");
-    if (suspiciousTransactionId) {
-      params.set("workspace", "suspicious-transactions");
-      params.set("suspiciousTransactionId", suspiciousTransactionId);
-    } else {
-      params.delete("suspiciousTransactionId");
-    }
+    params.delete("suspiciousTransactionId");
+    params.delete("linkedAlertContext");
     params.set("alertId", alertId);
+    pushRoute(params);
+    setRoute(readWorkspaceRoute());
+  }, []);
+
+  const openSuspiciousLinkedAlertContext = useCallback((suspiciousTransactionId) => {
+    const params = new URLSearchParams(window.location.search);
+    params.delete("alertId");
+    params.delete("fraudCaseId");
+    params.set("workspace", "suspicious-transactions");
+    params.set("suspiciousTransactionId", suspiciousTransactionId);
+    params.set("linkedAlertContext", "1");
     pushRoute(params);
     setRoute(readWorkspaceRoute());
   }, []);
@@ -50,6 +55,7 @@ export function useWorkspaceRoute() {
   const openFraudCase = useCallback((caseId) => {
     const params = new URLSearchParams(window.location.search);
     params.delete("alertId");
+    params.delete("linkedAlertContext");
     params.delete("suspiciousTransactionId");
     params.set("fraudCaseId", caseId);
     pushRoute(params);
@@ -60,6 +66,7 @@ export function useWorkspaceRoute() {
     const params = new URLSearchParams(window.location.search);
     params.delete("alertId");
     params.delete("fraudCaseId");
+    params.delete("linkedAlertContext");
     params.set("workspace", "suspicious-transactions");
     params.set("suspiciousTransactionId", suspiciousTransactionId);
     pushRoute(params);
@@ -71,6 +78,7 @@ export function useWorkspaceRoute() {
     params.delete("alertId");
     params.delete("fraudCaseId");
     params.delete("suspiciousTransactionId");
+    params.delete("linkedAlertContext");
     pushRoute(params);
     setRoute(readWorkspaceRoute());
   }, []);
@@ -79,6 +87,7 @@ export function useWorkspaceRoute() {
     ...route,
     navigateWorkspace,
     openAlert,
+    openSuspiciousLinkedAlertContext,
     openFraudCase,
     openSuspiciousTransaction,
     clearSelection,
@@ -90,6 +99,9 @@ export function readWorkspaceRoute() {
   const params = new URLSearchParams(window.location.search);
   const workspace = params.get("workspace");
   const selectedSuspiciousTransactionId = params.get("suspiciousTransactionId");
+  const selectedLinkedAlertContext = selectedSuspiciousTransactionId
+    ? params.get("linkedAlertContext") === "1"
+    : false;
   const matchedWorkspace = Object.entries(WORKSPACE_PAGES)
     .find(([, page]) => page.path === workspace)?.[0] || null;
   return {
@@ -97,7 +109,8 @@ export function readWorkspaceRoute() {
     invalidWorkspaceRoute: workspace && !matchedWorkspace ? workspace : null,
     selectedAlertId: params.get("alertId"),
     selectedFraudCaseId: params.get("fraudCaseId"),
-    selectedSuspiciousTransactionId
+    selectedSuspiciousTransactionId,
+    selectedLinkedAlertContext
   };
 }
 

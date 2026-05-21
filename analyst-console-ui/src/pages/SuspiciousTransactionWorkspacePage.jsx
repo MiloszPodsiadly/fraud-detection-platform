@@ -11,7 +11,7 @@ export function SuspiciousTransactionWorkspacePage({
   canReadAlerts,
   selectedSuspiciousTransactionId,
   onOpenSuspiciousTransaction,
-  onOpenAlert,
+  onOpenSuspiciousLinkedAlertContext,
   onCloseSuspiciousTransaction,
   workspaceHeadingProps = {}
 }) {
@@ -24,7 +24,7 @@ export function SuspiciousTransactionWorkspacePage({
       <SuspiciousTransactionDetailView
         readViewState={readViewState}
         canReadAlerts={canReadAlerts}
-        onOpenAlert={onOpenAlert}
+        onOpenSuspiciousLinkedAlertContext={onOpenSuspiciousLinkedAlertContext}
         onBack={onCloseSuspiciousTransaction}
       />
     );
@@ -160,7 +160,7 @@ function SuspiciousTransactionTable({ items, onOpenSuspiciousTransaction }) {
   );
 }
 
-function SuspiciousTransactionDetailView({ readViewState, canReadAlerts, onOpenAlert, onBack }) {
+function SuspiciousTransactionDetailView({ readViewState, canReadAlerts, onOpenSuspiciousLinkedAlertContext, onBack }) {
   const {
     detail,
     isLoadingDetail,
@@ -219,7 +219,7 @@ function SuspiciousTransactionDetailView({ readViewState, canReadAlerts, onOpenA
                 linkedAlertId={detail.linkedAlertId}
                 suspiciousTransactionId={detail.suspiciousTransactionId}
                 canReadAlerts={canReadAlerts}
-                onOpenAlert={onOpenAlert}
+                onOpenSuspiciousLinkedAlertContext={onOpenSuspiciousLinkedAlertContext}
               />
             </FieldGroup>
             <FieldGroup title="Scoring metadata">
@@ -246,7 +246,7 @@ function SuspiciousTransactionDetailView({ readViewState, canReadAlerts, onOpenA
   );
 }
 
-function LinkedAlertContext({ linkedAlertId, suspiciousTransactionId, canReadAlerts, onOpenAlert }) {
+function LinkedAlertContext({ linkedAlertId, suspiciousTransactionId, canReadAlerts, onOpenSuspiciousLinkedAlertContext }) {
   const normalizedLinkedAlertId = typeof linkedAlertId === "string" ? linkedAlertId.trim() : "";
   const normalizedSuspiciousTransactionId = typeof suspiciousTransactionId === "string" ? suspiciousTransactionId.trim() : "";
   if (!normalizedLinkedAlertId) {
@@ -280,10 +280,7 @@ function LinkedAlertContext({ linkedAlertId, suspiciousTransactionId, canReadAle
         <button
           className="secondaryButton compactButton"
           type="button"
-          onClick={() => onOpenAlert?.({
-            alertId: normalizedLinkedAlertId,
-            suspiciousTransactionId: normalizedSuspiciousTransactionId
-          })}
+          onClick={() => onOpenSuspiciousLinkedAlertContext?.(normalizedSuspiciousTransactionId)}
         >
           View alert context
         </button>

@@ -7,7 +7,7 @@ export function SuspiciousTransactionWorkspaceRuntime({
   route,
   sharedWorkspaceReadsEnabled,
   selectedSuspiciousTransactionId,
-  onOpenAlert,
+  onOpenSuspiciousLinkedAlertContext,
   onOpenSuspiciousTransaction,
   onCloseSuspiciousTransaction,
   children
@@ -34,7 +34,7 @@ export function SuspiciousTransactionWorkspaceRuntime({
         canReadAlerts={canReadAlerts}
         selectedSuspiciousTransactionId={selectedSuspiciousTransactionId}
         onOpenSuspiciousTransaction={onOpenSuspiciousTransaction}
-        onOpenAlert={onOpenAlert}
+        onOpenSuspiciousLinkedAlertContext={onOpenSuspiciousLinkedAlertContext}
         onCloseSuspiciousTransaction={onCloseSuspiciousTransaction}
       />
     ),
