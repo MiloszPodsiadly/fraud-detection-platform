@@ -15,6 +15,8 @@ source SuspiciousTransaction identifier:
 
 The backend derives `linkedAlertId` from the SuspiciousTransaction read model and validates the relationship before
 returning alert context. Clients cannot pass `alertId` in the path, query string, or request body.
+The loaded SuspiciousTransaction document must also match the path `suspiciousTransactionId`; a source identifier
+mismatch fails closed before any alert lookup.
 FDP-69 does not migrate the UI workflow. Until a dedicated UI migration uses this endpoint, the existing
 `AlertReadOnlyContextPage` remains a getAlert-only read component guarded by frontend source-context binding and backend
 `ALERT_READ` authorization.
@@ -54,6 +56,7 @@ FDP-67 is not a general-purpose alert lookup inside the SuspiciousTransaction wo
 The backend loads the source SuspiciousTransaction, derives `linkedAlertId`, loads the alert, and fails closed if the
 relationship does not match. Frontend context binding is scope control, not security boundary.
 Backend relationship validation and alert-read authorization remain authoritative.
+Relationship validation currently uses alertId, transactionId, customerId, and correlationId where available.
 
 ## Dedicated Read-Only Component
 
@@ -98,13 +101,29 @@ Allowed read-only fields are limited to minimal alert read-model context:
 - updatedAt when already present in the linked read model
 - scoreDecisionId when already present in the linked SuspiciousTransaction context
 
+scoreDecisionId is sourced from SuspiciousTransaction lineage.
+scoreDecisionId is not used for alert-side compatibility unless the alert read model exposes an equivalent field.
+
 The response must not expose analyst decisions, idempotency keys, case lifecycle state, assistant summaries, full
 evidence snapshots, legal-proof material, raw payloads, score details, or feature snapshots.
 
 Sensitive read audit and metrics use bounded outcome labels only: available, no linked alert, suspicious transaction not
-found, linked alert not found, relationship mismatch, unavailable, or error. Logs, metrics, and audit metadata must not
-record raw alert IDs, customer/account identifiers, correlation IDs, raw paths, raw query strings, exception messages,
-or idempotency keys.
+found, linked alert not found, relationship mismatch, validation_error, unavailable, or error. Metrics and ordinary logs
+must not contain raw identifiers and must not log raw identifiers.
+
+Audit and identifier policy:
+Linked-alert context read uses the existing sensitive-read audit target policy.
+The source SuspiciousTransaction resourceId may be used as the audited resource identifier.
+Metrics and ordinary logs must not contain raw identifiers.
+Audit entries must not record raw alertId, must not record raw linkedAlertId, must not record raw customerId, must not
+record raw accountId, must not record raw transactionId, must not record raw correlationId, must not record raw
+scoreDecisionId, must not record raw query strings, must not record raw request paths, must not record raw exception
+message, and must not record response payloads. Query param `alertId` rejection must not audit the `alertId` value.
+Audit entries must not record raw exception message.
+
+Clients must evaluate state. HTTP 200 does not imply LINKED_ALERT_AVAILABLE.
+TEMPORARILY_UNAVAILABLE is a degraded read state and must not be rendered as linked alert context.
+TEMPORARILY_UNAVAILABLE returns no alert fields, records a bounded error metric, and records a failed sensitive-read audit attempt.
 
 ## UI States
 
@@ -114,6 +133,7 @@ Backend 401 and 403 responses render an access-denied state.
 Missing SuspiciousTransaction renders a safe not-found state.
 Missing linked alert renders a bounded linked-alert-not-found state without alert fields.
 Relationship mismatch renders a bounded mismatch state without alert fields.
+Rejected client-supplied `alertId` query parameters return 400 before service lookup.
 Other backend failures render a safe unavailable state and must not display raw backend payloads.
 
 ## Non-Claims

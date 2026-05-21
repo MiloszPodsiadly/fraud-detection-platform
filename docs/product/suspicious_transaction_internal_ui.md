@@ -118,7 +118,8 @@ The linked alert bridge opens read-only alert context when `linkedAlertId` is pr
 authority. FDP-69 adds the backend endpoint GET
 `/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert` for relationship-validated alert context.
 The backend derives `linkedAlertId` from the SuspiciousTransaction read model and validates the relationship before
-returning alert context. The client cannot pass `alertId`.
+returning alert context. The loaded SuspiciousTransaction document must match the path `suspiciousTransactionId`.
+The client cannot pass `alertId`.
 FDP-69 does not migrate the UI workflow; a later UI migration can switch the bridge to this backend contract.
 
 Alert detail is investigation context. It is not confirmed fraud, not an analyst decision, not a final outcome,
@@ -137,15 +138,31 @@ Linked alert context is opened from SuspiciousTransaction detail view and route/
 `suspiciousTransactionId` and the linked `alertId`. An `alertId` alone in the SuspiciousTransaction workspace is invalid
 bridge context. Frontend source-context binding is scope control, not security enforcement.
 The backend must not accept `alertId` in the path, query string, or request body for this context. Relationship mismatch
-fails closed without alert fields.
+fails closed without alert fields. Relationship validation currently uses alertId, transactionId, customerId, and
+correlationId where available.
 
 The linked-alert response is minimal read-only context: alertId, transactionId, customerId, accountId when already
 present, alert score, riskLevel, alertStatus, reasonCodes, createdAt, updatedAt when already present, correlationId, and
-scoreDecisionId when already present. It must not expose analyst decisions, idempotency keys, case lifecycle state,
-assistant summaries, legal-proof material, full evidence snapshots, raw payloads, score details, or feature snapshots.
+scoreDecisionId when already present.
+scoreDecisionId is sourced from SuspiciousTransaction.
+scoreDecisionId is not used for alert-side compatibility unless the alert read model exposes an equivalent field.
+It must not expose analyst decisions,
+idempotency keys, case lifecycle state, assistant summaries, legal-proof material, full evidence snapshots, raw payloads,
+score details, or feature snapshots.
 
-Sensitive read audit and metrics use bounded outcomes only and must not log raw identifiers, raw paths, raw query
-strings, raw exception messages, or idempotency keys.
+Sensitive read audit and metrics use bounded outcomes only. Metrics and ordinary logs must not contain raw identifiers,
+raw paths, raw query strings, raw exception messages, or idempotency keys.
+Linked-alert context read uses the existing sensitive-read audit target policy. The source SuspiciousTransaction
+resourceId may be used as the audited resource identifier. Audit entries must not record raw alertId, must not record raw
+linkedAlertId, must not record raw customerId, must not record raw correlationId, and must not record raw exception
+message.
+The source SuspiciousTransaction resourceId may be used as the audited resource identifier.
+Audit entries must not record raw exception message.
+
+Clients must evaluate state. HTTP 200 does not imply LINKED_ALERT_AVAILABLE.
+TEMPORARILY_UNAVAILABLE is a degraded read state and must not be rendered as linked alert context.
+TEMPORARILY_UNAVAILABLE returns no alert fields. A rejected
+client-supplied `alertId` query parameter returns 400 and records a bounded validation error metric.
 
 ## Out Of Scope
 
