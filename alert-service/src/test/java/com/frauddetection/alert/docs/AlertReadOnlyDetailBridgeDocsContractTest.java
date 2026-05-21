@@ -191,6 +191,34 @@ class AlertReadOnlyDetailBridgeDocsContractTest {
     }
 
     @Test
+    void DocsMentionNoAlertIdInHeadersQueryOrBodyTest() throws Exception {
+        String docs = Files.readString(docPath());
+
+        assertThat(docs)
+                .contains("does not send `alertId` or `linkedAlertId` to the resolver through URL, query, body, or custom headers")
+                .contains("does not send customerId, accountId, transactionId, correlationId, or scoreDecisionId to the resolver")
+                .contains("through URL, query, body, or custom headers");
+    }
+
+    @Test
+    void DocsMentionNoFallbackToGeneralAlertLookupTest() throws Exception {
+        String docs = Files.readString(docPath());
+
+        assertThat(docs)
+                .contains("does not call GET `/api/v1/alerts/{alertId}`")
+                .contains("does not fallback to the general alert lookup");
+    }
+
+    @Test
+    void DocsMentionBackendRelationshipValidationAuthoritativeTest() throws Exception {
+        String docs = Files.readString(docPath());
+
+        assertThat(docs)
+                .contains("Frontend state is not authoritative")
+                .contains("Backend relationship validation is authoritative");
+    }
+
+    @Test
     void DocsMentionStateDrivenRenderingTest() throws Exception {
         String docs = Files.readString(docPath());
 

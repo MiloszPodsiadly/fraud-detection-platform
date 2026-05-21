@@ -15,12 +15,18 @@ source SuspiciousTransaction identifier:
 
 The backend derives `linkedAlertId` from the SuspiciousTransaction read model and validates the relationship before
 returning alert context. Clients cannot pass `alertId` in the path, query string, or request body.
+Clients cannot pass `alertId`, `linkedAlertId`, alert, customer, account, transaction, correlation, or scoreDecision
+identifiers through query parameters, request body, or custom headers for this context.
 The loaded SuspiciousTransaction document must also match the path `suspiciousTransactionId`; a source identifier
 mismatch fails closed before any alert lookup.
 FDP-70 migrates the SuspiciousTransaction linked-alert UI to the FDP-69 backend resolver.
 `AlertReadOnlyContextPage` calls GET `/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`.
 The frontend sends `suspiciousTransactionId` only.
-The frontend does not send `alertId` or `linkedAlertId` to the resolver.
+The frontend does not send `alertId` or `linkedAlertId` to the resolver through URL, query, body, or custom headers.
+The frontend does not send customerId, accountId, transactionId, correlationId, or scoreDecisionId to the resolver
+through URL, query, body, or custom headers.
+`linkedAlertId` may be displayed as a reference-only field in SuspiciousTransaction detail, but it does not drive the
+linked-alert context fetch.
 The SuspiciousTransaction linked-alert UI does not call GET `/api/v1/alerts/{alertId}` for linked-alert context.
 The SuspiciousTransaction linked-alert UI does not fallback to the general alert lookup for linked-alert context.
 

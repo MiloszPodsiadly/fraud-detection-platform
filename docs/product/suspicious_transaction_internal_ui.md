@@ -124,6 +124,9 @@ FDP-70 migrates the SuspiciousTransaction linked-alert UI to the FDP-69 backend 
 AlertReadOnlyContextPage calls GET `/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`.
 The UI does not call GET `/api/v1/alerts/{alertId}` for SuspiciousTransaction linked-alert context.
 The frontend sends `suspiciousTransactionId` only and does not send `alertId` or `linkedAlertId` to the resolver.
+The frontend does not send alert, linked-alert, customer, account, transaction, correlation, or scoreDecision
+identifiers to the resolver through query parameters, request body, or custom headers.
+`linkedAlertId` may be displayed as reference-only SuspiciousTransaction detail context, but it does not drive the linked-alert context fetch.
 Backend relationship validation is authoritative.
 HTTP 200 does not imply available context; the UI evaluates response.state before rendering.
 Only state `LINKED_ALERT_AVAILABLE` renders alert fields. Non-available states render no alert fields.
@@ -143,8 +146,10 @@ The endpoint requires both `SUSPICIOUS_TRANSACTION_READ` and `ALERT_READ`.
 Linked alert context is opened from SuspiciousTransaction detail view and route/state must retain the source
 `suspiciousTransactionId`. An `alertId` alone in the SuspiciousTransaction workspace is invalid bridge context.
 Frontend source-context binding is scope control, not security enforcement.
-The backend must not accept `alertId` in the path, query string, or request body for this context. Relationship mismatch
-fails closed without alert fields. Relationship validation currently uses alertId, transactionId, customerId, and
+The backend must not accept `alertId` in the path, query string, request body, or custom headers for this context.
+The client must not send `linkedAlertId`, customerId, accountId, transactionId, correlationId, or scoreDecisionId in
+query parameters, request body, or custom headers for this context. Relationship mismatch fails closed without alert
+fields. Relationship validation currently uses alertId, transactionId, customerId, and
 correlationId where available.
 
 The linked-alert response is minimal read-only context: alertId, transactionId, customerId, accountId when already

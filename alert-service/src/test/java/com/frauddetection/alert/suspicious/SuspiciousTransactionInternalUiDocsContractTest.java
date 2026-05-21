@@ -165,6 +165,40 @@ class SuspiciousTransactionInternalUiDocsContractTest {
     }
 
     @Test
+    void DocsMentionSuspiciousTransactionIdOnlyTest() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs)
+                .contains("The frontend sends `suspiciousTransactionId` only")
+                .contains("`linkedAlertId` may be displayed as reference-only SuspiciousTransaction detail context")
+                .contains("but it does not drive the linked-alert context fetch");
+    }
+
+    @Test
+    void DocsMentionNoAlertIdInHeadersQueryOrBodyTest() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs)
+                .contains("The backend must not accept `alertId` in the path, query string, request body, or custom headers")
+                .contains("must not send `linkedAlertId`, customerId, accountId, transactionId, correlationId, or scoreDecisionId")
+                .contains("query parameters, request body, or custom headers");
+    }
+
+    @Test
+    void DocsMentionNoFallbackToGeneralAlertLookupTest() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs).contains("The UI does not call GET `/api/v1/alerts/{alertId}` for SuspiciousTransaction linked-alert context");
+    }
+
+    @Test
+    void DocsMentionBackendRelationshipValidationAuthoritativeTest() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs).contains("Backend relationship validation is authoritative");
+    }
+
+    @Test
     void docsMentionStateDrivenLinkedAlertRendering() throws IOException {
         String docs = Files.readString(DOCS);
 
