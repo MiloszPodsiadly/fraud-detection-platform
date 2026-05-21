@@ -63,7 +63,8 @@ Relationship validation currently uses alertId, transactionId, customerId, and c
 FDP-68 fully removes SuspiciousTransaction read-only bridge mode from `AlertDetailsPage`.
 `AlertDetailsPage` no longer accepts `readOnlyContext` for the SuspiciousTransaction bridge.
 `AlertDetailsPage` remains the workflow-capable normal alert detail page.
-`AlertReadOnlyContextPage` is the dedicated read-only alert context page and the only component for SuspiciousTransaction linked-alert read-only context.
+`AlertReadOnlyContextPage` is the dedicated read-only alert context page.
+`AlertReadOnlyContextPage` is the only component for SuspiciousTransaction linked-alert read-only context.
 `AlertReadOnlyContextPage` depends only on a getAlert-only client.
 This removes the boolean-mode smell and makes the read-only path safe by construction instead of conditionals inside the workflow page.
 The internal linked-alert endpoint is the backend source for validated read-only alert context when the UI is migrated to
