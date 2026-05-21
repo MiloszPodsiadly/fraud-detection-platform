@@ -135,9 +135,15 @@ Backend relationship validation is authoritative.
 HTTP 200 does not imply available context; the UI evaluates response.state before rendering.
 Only state `LINKED_ALERT_AVAILABLE` renders alert fields. Non-available states render no alert fields.
 WorkspaceDetailRouter owns route/source readiness for linked-alert context.
+WorkspaceDetailRouter may check that `sourceSuspiciousTransaction.suspiciousTransactionId` matches the selected route
+`selectedSuspiciousTransactionId` before mounting linked-alert context. This prevents stale route/source races and is
+UX route readiness, not linked-alert relationship validation.
+A source identifier mismatch fails closed before any linked-alert resolver fetch.
 AlertReadOnlyContextPage owns resolver state rendering.
 The backend owns linked-alert relationship validation.
 No frontend relationship validation is a source of truth.
+The frontend does not compare `linkedAlertId`, alert transaction, customer, account, correlation, or score decision
+fields to validate the linked-alert relationship.
 AlertReadOnlyContextPage does not receive `sourceSuspiciousTransaction`, `alertId`, or `linkedAlertId`.
 
 Alert detail is investigation context. It is not confirmed fraud, not an analyst decision, not a final outcome,

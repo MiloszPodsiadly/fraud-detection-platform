@@ -204,6 +204,40 @@ class AlertReadOnlyDetailBridgeDocsContractTest {
     }
 
     @Test
+    void DocsMentionSourceIdMatchIsRouteReadinessTest() throws Exception {
+        String docs = Files.readString(docPath());
+
+        assertThat(docs)
+                .contains("sourceSuspiciousTransaction.suspiciousTransactionId === selectedSuspiciousTransactionId")
+                .contains("This allowed frontend check is UX route readiness, not linked-alert relationship validation");
+    }
+
+    @Test
+    void DocsMentionSourceIdMismatchFailsClosedBeforeFetchTest() throws Exception {
+        String docs = Files.readString(docPath());
+
+        assertThat(docs).contains("The source identifier mismatch fails closed before any linked-alert resolver fetch");
+    }
+
+    @Test
+    void DocsMentionFrontendDoesNotValidateLinkedAlertRelationshipTest() throws Exception {
+        String docs = Files.readString(docPath());
+
+        assertThat(docs)
+                .contains("The frontend does not validate the linked-alert relationship")
+                .contains("Forbidden frontend relationship checks");
+    }
+
+    @Test
+    void DocsMentionBackendOwnsRelationshipValidationTest() throws Exception {
+        String docs = Files.readString(docPath());
+
+        assertThat(docs)
+                .contains("The backend derives `linkedAlertId`, loads the alert, validates the linked-alert relationship")
+                .contains("The backend owns linked-alert relationship validation");
+    }
+
+    @Test
     void DocsMentionNoGeneralAlertLookupTest() throws Exception {
         String docs = Files.readString(docPath());
 

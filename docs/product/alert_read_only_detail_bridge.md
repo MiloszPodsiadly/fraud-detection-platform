@@ -45,6 +45,31 @@ Alert detail is not legal proof.
 
 The bridge must not rename an alert into a fraud verdict, analyst disposition, case outcome, or final decision.
 
+## Route Readiness vs Relationship Validation
+
+`WorkspaceDetailRouter` owns route/source readiness for this bridge.
+The router may check that the loaded source SuspiciousTransaction `suspiciousTransactionId` matches the selected route
+`suspiciousTransactionId` before mounting linked-alert context. This prevents stale route/source races.
+The source identifier mismatch fails closed before any linked-alert resolver fetch.
+This allowed frontend check is UX route readiness, not linked-alert relationship validation.
+
+Allowed frontend route readiness check:
+
+- `sourceSuspiciousTransaction.suspiciousTransactionId === selectedSuspiciousTransactionId`
+
+Forbidden frontend relationship checks:
+
+- `sourceSuspiciousTransaction.linkedAlertId === alertId`
+- `alert.transactionId === sourceSuspiciousTransaction.transactionId`
+- `alert.customerId === sourceSuspiciousTransaction.customerId`
+- `alert.accountId === sourceSuspiciousTransaction.accountId`
+- `alert.correlationId === sourceSuspiciousTransaction.correlationId`
+- `alert.scoreDecisionId === sourceSuspiciousTransaction.scoreDecisionId`
+
+The backend derives `linkedAlertId`, loads the alert, validates the linked-alert relationship, and returns
+`response.state`.
+The frontend does not validate the linked-alert relationship.
+
 ## Authorization Boundary
 
 SuspiciousTransaction detail still requires `SUSPICIOUS_TRANSACTION_READ`.

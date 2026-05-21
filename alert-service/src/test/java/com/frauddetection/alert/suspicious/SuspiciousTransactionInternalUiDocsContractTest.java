@@ -197,6 +197,41 @@ class SuspiciousTransactionInternalUiDocsContractTest {
     }
 
     @Test
+    void DocsMentionSourceIdMatchIsRouteReadinessTest() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs)
+                .contains("sourceSuspiciousTransaction.suspiciousTransactionId")
+                .contains("selected route")
+                .contains("UX route readiness, not linked-alert relationship validation");
+    }
+
+    @Test
+    void DocsMentionSourceIdMismatchFailsClosedBeforeFetchTest() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs).contains("A source identifier mismatch fails closed before any linked-alert resolver fetch");
+    }
+
+    @Test
+    void DocsMentionFrontendDoesNotValidateLinkedAlertRelationshipTest() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs)
+                .contains("The frontend does not compare `linkedAlertId`, alert transaction, customer, account, correlation, or score decision")
+                .contains("to validate the linked-alert relationship");
+    }
+
+    @Test
+    void DocsMentionBackendOwnsRelationshipValidationTest() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs)
+                .contains("The backend owns linked-alert relationship validation")
+                .contains("Backend relationship validation is authoritative");
+    }
+
+    @Test
     void DocsMentionSuspiciousTransactionIdOnlyTest() throws IOException {
         String docs = Files.readString(DOCS);
 
