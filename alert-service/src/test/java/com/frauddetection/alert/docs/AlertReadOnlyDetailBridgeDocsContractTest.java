@@ -113,10 +113,11 @@ class AlertReadOnlyDetailBridgeDocsContractTest {
     }
 
     @Test
-    void DocsSayGetAlertOnlyClientTest() throws Exception {
+    void DocsSayLinkedAlertResolverClientTest() throws Exception {
         String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
 
-        assertThat(lower).contains("`alertreadonlycontextpage` depends only on a getalert-only client");
+        assertThat(lower).contains("`alertreadonlycontextpage` depends only on a linked-alert resolver client");
+        assertThat(lower).contains("`alertreadonlycontextpage` does not receive the full api client");
         assertThat(lower).contains("internal linked-alert endpoint");
     }
 
@@ -159,7 +160,115 @@ class AlertReadOnlyDetailBridgeDocsContractTest {
         String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
 
         assertThat(lower).contains("`alertreadonlycontextpage` is the only component for suspicioustransaction linked-alert read-only context");
-        assertThat(lower).contains("`alertreadonlycontextpage` depends only on a getalert-only client");
+        assertThat(lower).contains("`alertreadonlycontextpage` depends only on a linked-alert resolver client");
+    }
+
+    @Test
+    void DocsMentionUiUsesBackendRelationshipResolverTest() throws Exception {
+        String docs = Files.readString(docPath());
+
+        assertThat(docs)
+                .contains("FDP-70 migrates the SuspiciousTransaction linked-alert UI to the FDP-69 backend resolver")
+                .contains("GET `/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`");
+    }
+
+    @Test
+    void DocsMentionNoGeneralAlertLookupTest() throws Exception {
+        String docs = Files.readString(docPath());
+
+        assertThat(docs)
+                .contains("does not call GET `/api/v1/alerts/{alertId}`")
+                .contains("does not fallback to the general alert lookup");
+    }
+
+    @Test
+    void DocsMentionSuspiciousTransactionIdOnlyTest() throws Exception {
+        String docs = Files.readString(docPath());
+
+        assertThat(docs)
+                .contains("The frontend sends `suspiciousTransactionId` only")
+                .contains("does not send `alertId` or `linkedAlertId` to the resolver");
+    }
+
+    @Test
+    void DocsMentionNoAlertIdInHeadersQueryOrBodyTest() throws Exception {
+        String docs = Files.readString(docPath());
+
+        assertThat(docs)
+                .contains("does not send `alertId` or `linkedAlertId` to the resolver through URL, query, body, or custom headers")
+                .contains("does not send customerId, accountId, transactionId, correlationId, or scoreDecisionId to the resolver")
+                .contains("through URL, query, body, or custom headers");
+    }
+
+    @Test
+    void DocsMentionNoFallbackToGeneralAlertLookupTest() throws Exception {
+        String docs = Files.readString(docPath());
+
+        assertThat(docs)
+                .contains("does not call GET `/api/v1/alerts/{alertId}`")
+                .contains("does not fallback to the general alert lookup");
+    }
+
+    @Test
+    void DocsMentionBackendRelationshipValidationAuthoritativeTest() throws Exception {
+        String docs = Files.readString(docPath());
+
+        assertThat(docs)
+                .contains("Frontend state is not authoritative")
+                .contains("Backend relationship validation is authoritative");
+    }
+
+    @Test
+    void DocsClarifyInternalEndpointIsProtectedAnalystConsoleApiTest() throws Exception {
+        String docs = Files.readString(docPath());
+
+        assertThat(docs)
+                .contains("non-public product API for the protected analyst console")
+                .contains("does not mean service-private")
+                .contains("backend authorization")
+                .contains("HTTP 200 does not imply available context");
+    }
+
+    @Test
+    void DocsMentionLinkedAlertContextUsesMinimalBackendDtoTest() throws Exception {
+        String docs = Files.readString(docPath());
+
+        assertThat(docs)
+                .contains("AlertLinkedContextResponse")
+                .contains("not consume full `AlertDetailsResponse`")
+                .contains("minimal allowlisted DTO")
+                .contains("Non-available states render no alert fields");
+    }
+
+    @Test
+    void DocsMentionStateDrivenRenderingTest() throws Exception {
+        String docs = Files.readString(docPath());
+
+        assertThat(docs)
+                .contains("HTTP 200 does not imply available context")
+                .contains("the UI must evaluate response.state")
+                .contains("Only response.state `LINKED_ALERT_AVAILABLE` may render alert fields")
+                .contains("Non-available states render no alert fields");
+    }
+
+    @Test
+    void DocsMentionNoWorkflowNoVerdictTest() throws Exception {
+        String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
+
+        assertThat(lower)
+                .contains("does not submit analyst decisions")
+                .contains("does not add workflow")
+                .contains("not confirmed fraud")
+                .contains("not a final outcome");
+    }
+
+    @Test
+    void DocsMentionBackendAuthAuthoritativeTest() throws Exception {
+        String lower = Files.readString(docPath()).toLowerCase(Locale.ROOT);
+
+        assertThat(lower)
+                .contains("frontend guard is not a security boundary")
+                .contains("backend `alert_read` authorization remains authoritative");
     }
 
     @Test

@@ -15,11 +15,24 @@ source SuspiciousTransaction identifier:
 
 The backend derives `linkedAlertId` from the SuspiciousTransaction read model and validates the relationship before
 returning alert context. Clients cannot pass `alertId` in the path, query string, or request body.
+Clients cannot pass `alertId`, `linkedAlertId`, alert, customer, account, transaction, correlation, or scoreDecision
+identifiers through query parameters, request body, or custom headers for this context.
 The loaded SuspiciousTransaction document must also match the path `suspiciousTransactionId`; a source identifier
 mismatch fails closed before any alert lookup.
-FDP-69 introduces the backend linked-alert context resolver and does not migrate the UI workflow. Until a later UI
-migration uses this endpoint, the existing `AlertReadOnlyContextPage` remains a getAlert-only read component guarded by
-frontend source-context binding and backend `ALERT_READ` authorization.
+FDP-70 migrates the SuspiciousTransaction linked-alert UI to the FDP-69 backend resolver.
+`AlertReadOnlyContextPage` calls GET `/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`.
+`/internal` in this API means non-public product API for the protected analyst console. It does not mean service-private
+or unauthenticated. The endpoint remains a protected HTTP API with backend authorization, state-driven response
+semantics, audit/metrics expectations, and compatibility obligations for the analyst console.
+The endpoint is not public API, but it is also not backend-private when used by the analyst console.
+The frontend sends `suspiciousTransactionId` only.
+The frontend does not send `alertId` or `linkedAlertId` to the resolver through URL, query, body, or custom headers.
+The frontend does not send customerId, accountId, transactionId, correlationId, or scoreDecisionId to the resolver
+through URL, query, body, or custom headers.
+`linkedAlertId` may be displayed as a reference-only field in SuspiciousTransaction detail, but it does not drive the
+linked-alert context fetch.
+The SuspiciousTransaction linked-alert UI does not call GET `/api/v1/alerts/{alertId}` for linked-alert context.
+The SuspiciousTransaction linked-alert UI does not fallback to the general alert lookup for linked-alert context.
 
 ## Semantics
 
@@ -65,12 +78,26 @@ FDP-68 fully removes SuspiciousTransaction read-only bridge mode from `AlertDeta
 `AlertDetailsPage` remains the workflow-capable normal alert detail page.
 `AlertReadOnlyContextPage` is the dedicated read-only alert context page.
 `AlertReadOnlyContextPage` is the only component for SuspiciousTransaction linked-alert read-only context.
-`AlertReadOnlyContextPage` depends only on a getAlert-only client.
+`AlertReadOnlyContextPage` depends only on a linked-alert resolver client.
+`AlertReadOnlyContextPage` does not receive the full API client.
 This removes the boolean-mode smell and makes the read-only path safe by construction instead of conditionals inside the workflow page.
-The internal linked-alert endpoint is the backend source for validated read-only alert context when the UI is migrated to
-the FDP-69 contract.
-FDP-70 may switch `AlertReadOnlyContextPage` to call
+The internal linked-alert endpoint is the backend source for validated read-only alert context.
+FDP-70 makes `AlertReadOnlyContextPage` call
 GET `/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`.
+Frontend state is not authoritative. Backend relationship validation is authoritative.
+HTTP 200 does not imply available context; the UI must evaluate response.state.
+Only response.state `LINKED_ALERT_AVAILABLE` may render alert fields.
+Non-available states render no alert fields.
+
+## Backend DTO Boundary
+
+FDP-70 relies on the FDP-69 resolver returning `AlertLinkedContextResponse`.
+The UI must not consume full `AlertDetailsResponse` for SuspiciousTransaction linked-alert context.
+The backend DTO must remain a minimal allowlisted DTO.
+`LINKED_ALERT_AVAILABLE` may render only fields returned by the minimal linked-alert context DTO.
+Non-available states render no alert fields.
+If the backend DTO expands, UI review must verify no workflow, analyst decision, final outcome, assistant summary,
+evidence snapshot, raw payload, or case lifecycle fields are displayed.
 
 This component boundary is scope control, not a frontend security boundary.
 Backend `ALERT_READ` authorization remains authoritative.
@@ -144,6 +171,7 @@ Missing linked alert renders a bounded linked-alert-not-found state without aler
 Relationship mismatch renders a bounded mismatch state without alert fields.
 Rejected client-supplied `alertId` query parameters return 400 before service lookup.
 Other backend failures render a safe unavailable state and must not display raw backend payloads.
+Unknown linked-alert resolver state fails closed and renders no alert fields.
 
 ## Non-Claims
 

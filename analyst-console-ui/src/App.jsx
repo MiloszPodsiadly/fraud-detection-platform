@@ -15,8 +15,10 @@ export default function App() {
     selectedAlertId,
     selectedFraudCaseId,
     selectedSuspiciousTransactionId,
+    selectedLinkedAlertContext,
     navigateWorkspace,
     openAlert,
+    openSuspiciousLinkedAlertContext,
     openFraudCase,
     openSuspiciousTransaction,
     clearSelection,
@@ -131,12 +133,17 @@ export default function App() {
   const runtimeSelectedAlertId = detailSelectionPendingBoundaryReset ? null : selectedAlertId;
   const runtimeSelectedFraudCaseId = detailSelectionPendingBoundaryReset ? null : selectedFraudCaseId;
   const runtimeSelectedSuspiciousTransactionId = detailSelectionPendingBoundaryReset ? null : selectedSuspiciousTransactionId;
+  const runtimeSelectedLinkedAlertContext = detailSelectionPendingBoundaryReset ? false : selectedLinkedAlertContext;
   const workspaceTitle = WORKSPACE_PAGES[workspacePage]?.label || WORKSPACE_PAGES.analyst.label;
-  const detailTitle = selectedSuspiciousTransactionId
-    ? "Suspicious Transaction"
-    : selectedAlertId
-      ? "Alert Context"
-      : "Fraud Case";
+  const detailTitle = (() => {
+    if (runtimeSelectedLinkedAlertContext || runtimeSelectedAlertId) {
+      return "Alert Context";
+    }
+    if (runtimeSelectedSuspiciousTransactionId) {
+      return "Suspicious Transaction";
+    }
+    return "Fraud Case";
+  })();
 
   if (handlingOidcCallback) {
     return (
@@ -223,9 +230,11 @@ export default function App() {
             selectedAlertId={runtimeSelectedAlertId}
             selectedFraudCaseId={runtimeSelectedFraudCaseId}
             selectedSuspiciousTransactionId={runtimeSelectedSuspiciousTransactionId}
+            selectedLinkedAlertContext={runtimeSelectedLinkedAlertContext}
             clearSelection={clearSelection}
             navigateWorkspace={navigateWorkspace}
             openAlert={openAlert}
+            openSuspiciousLinkedAlertContext={openSuspiciousLinkedAlertContext}
             openFraudCase={openFraudCase}
             openSuspiciousTransaction={openSuspiciousTransaction}
             invalidWorkspaceRoute={invalidWorkspaceRoute}

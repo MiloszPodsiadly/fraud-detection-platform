@@ -12,9 +12,11 @@ export function WorkspaceDashboardShell({
   selectedAlertId,
   selectedFraudCaseId,
   selectedSuspiciousTransactionId,
+  selectedLinkedAlertContext,
   clearSelection,
   navigateWorkspace,
   openAlert,
+  openSuspiciousLinkedAlertContext,
   openFraudCase,
   openSuspiciousTransaction,
   invalidWorkspaceRoute,
@@ -56,6 +58,7 @@ export function WorkspaceDashboardShell({
       setCounterValue={setCounterValue}
       setSessionState={setSessionState}
       onOpenAlert={openAlert}
+      onOpenSuspiciousLinkedAlertContext={openSuspiciousLinkedAlertContext}
       onOpenFraudCase={openFraudCase}
       selectedSuspiciousTransactionId={selectedSuspiciousTransactionId}
       onOpenSuspiciousTransaction={openSuspiciousTransaction}
@@ -82,11 +85,12 @@ export function WorkspaceDashboardShell({
           resolvedRoute
         });
 
-        if ((selectedAlertId || selectedFraudCaseId) && apiClient) {
+        if ((selectedAlertId || selectedFraudCaseId || selectedLinkedAlertContext) && apiClient) {
           return (
             <WorkspaceDetailRouter
               selectedAlertId={selectedAlertId}
               selectedFraudCaseId={selectedFraudCaseId}
+              selectedLinkedAlertContext={selectedLinkedAlertContext}
               alertQueueState={detailRouterState.alertQueueState}
               alertSummaryRuntimeState={detailRouterState.alertQueueState
                 ? WORKSPACE_DETAIL_RUNTIME_STATE.AVAILABLE

@@ -1,5 +1,4 @@
 import { useEffect, useMemo } from "react";
-import { createAlertReadOnlyBridgeApiClient } from "../api/alertReadOnlyBridgeApi.js";
 import { EmptyState } from "../components/EmptyState.jsx";
 import { AlertDetailsPage } from "../pages/AlertDetailsPage.jsx";
 import { AlertReadOnlyContextPage } from "../pages/AlertReadOnlyContextPage.jsx";
@@ -9,6 +8,7 @@ import { WORKSPACE_DETAIL_RUNTIME_STATE } from "./workspaceRuntimeStates.js";
 export function WorkspaceDetailRouter({
   selectedAlertId,
   selectedFraudCaseId,
+  selectedLinkedAlertContext = false,
   alertQueueState,
   alertSummaryRuntimeState,
   session,
@@ -29,26 +29,24 @@ export function WorkspaceDetailRouter({
     [alertQueueState?.page?.content, selectedAlertId]
   );
   const hasSuspiciousBridgeRoute = workspacePage === "suspiciousTransactions"
-    && Boolean(selectedAlertId)
+    && selectedLinkedAlertContext === true
     && Boolean(selectedSuspiciousTransactionId);
-  const sourceLinkedAlertMatches = normalizeBridgeId(sourceSuspiciousTransaction?.linkedAlertId) === normalizeBridgeId(selectedAlertId);
-  const readOnlyAlertContext = hasSuspiciousBridgeRoute
-    && Boolean(sourceSuspiciousTransaction)
-    && sourceLinkedAlertMatches;
-  const alertReadClient = useMemo(
-    () => readOnlyAlertContext ? createAlertReadOnlyBridgeApiClient(apiClient) : null,
-    [apiClient, readOnlyAlertContext]
+  const linkedAlertContextClient = useMemo(
+    () => hasSuspiciousBridgeRoute ? createLinkedAlertContextClient(apiClient) : null,
+    [apiClient, hasSuspiciousBridgeRoute]
   );
 
   useEffect(() => {
-    if (!selectedAlertId && !selectedFraudCaseId) {
+    if (!selectedAlertId && !selectedFraudCaseId && !hasSuspiciousBridgeRoute) {
       return;
     }
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
-  }, [selectedAlertId, selectedFraudCaseId]);
+  }, [hasSuspiciousBridgeRoute, selectedAlertId, selectedFraudCaseId]);
 
   function closeAndRestoreFocus() {
-    const originKey = selectedAlertId
+    const originKey = selectedLinkedAlertContext && selectedSuspiciousTransactionId
+      ? `suspicious-${selectedSuspiciousTransactionId}`
+      : selectedAlertId
       ? `alert-${selectedAlertId}`
       : selectedFraudCaseId
         ? `fraud-case-${selectedFraudCaseId}`
@@ -61,7 +59,15 @@ export function WorkspaceDetailRouter({
     }, 0);
   }
 
-  if (workspacePage === "suspiciousTransactions" && selectedAlertId && !selectedSuspiciousTransactionId) {
+  if (workspacePage === "suspiciousTransactions" && selectedAlertId) {
+    return renderBridgeState({
+      title: "Invalid linked alert context",
+      message: "Linked alert context must be resolved by source suspicious transaction.",
+      onBack: closeAndRestoreFocus
+    });
+  }
+
+  if (workspacePage === "suspiciousTransactions" && selectedLinkedAlertContext === true && !selectedSuspiciousTransactionId) {
     return renderBridgeState({
       title: "Invalid linked alert context",
       message: "Linked alert context requires a source suspicious transaction.",
@@ -85,20 +91,14 @@ export function WorkspaceDetailRouter({
     });
   }
 
-  if (hasSuspiciousBridgeRoute && !sourceLinkedAlertMatches) {
-    return renderBridgeState({
-      title: "Invalid linked alert context",
-      message: "Linked alert context could not be verified.",
-      onBack: closeAndRestoreFocus
-    });
-  }
-
-  if (readOnlyAlertContext) {
+  if (hasSuspiciousBridgeRoute) {
     return (
       <AlertReadOnlyContextPage
-        alertId={selectedAlertId}
+        suspiciousTransactionId={selectedSuspiciousTransactionId}
         sourceSuspiciousTransaction={sourceSuspiciousTransaction}
-        alertReadClient={alertReadClient}
+        sourceSuspiciousTransactionLoading={sourceSuspiciousTransactionLoading}
+        sourceSuspiciousTransactionError={sourceSuspiciousTransactionError}
+        linkedAlertContextClient={linkedAlertContextClient}
         canReadAlert={canReadAlerts}
         workspaceLabel={workspaceLabel || workspaceLabelFor(workspacePage)}
         onBack={closeAndRestoreFocus}
@@ -154,10 +154,6 @@ function renderBridgeState({ title, message, onBack }) {
   );
 }
 
-function normalizeBridgeId(value) {
-  return value === null || value === undefined ? "" : String(value).trim();
-}
-
 function workspaceLabelFor(workspacePage) {
   return {
     analyst: "Fraud Case",
@@ -166,6 +162,17 @@ function workspaceLabelFor(workspacePage) {
     compliance: "Compliance",
     reports: "Reports"
   }[workspacePage] || "Workspace";
+}
+
+function createLinkedAlertContextClient(apiClient) {
+  if (!apiClient || typeof apiClient.getSuspiciousTransactionLinkedAlertContext !== "function") {
+    return null;
+  }
+
+  return Object.freeze({
+    getSuspiciousTransactionLinkedAlertContext: (suspiciousTransactionId, requestOptions) =>
+      apiClient.getSuspiciousTransactionLinkedAlertContext(suspiciousTransactionId, requestOptions)
+  });
 }
 
 function findDetailOrigin(originKey) {

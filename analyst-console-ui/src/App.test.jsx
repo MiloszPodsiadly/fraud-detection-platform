@@ -1,4 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
@@ -19,6 +21,7 @@ const {
   listSuspiciousTransactions,
   getSuspiciousTransactionSummary,
   getSuspiciousTransaction,
+  getSuspiciousTransactionLinkedAlertContext,
   createAlertsApiClient
 } = vi.hoisted(() => {
   const listAlerts = vi.fn();
@@ -33,6 +36,7 @@ const {
   const listSuspiciousTransactions = vi.fn();
   const getSuspiciousTransactionSummary = vi.fn();
   const getSuspiciousTransaction = vi.fn();
+  const getSuspiciousTransactionLinkedAlertContext = vi.fn();
   return {
     callbackPath: { value: true },
     completeLoginCallback: vi.fn(),
@@ -69,6 +73,7 @@ const {
     listSuspiciousTransactions,
     getSuspiciousTransactionSummary,
     getSuspiciousTransaction,
+    getSuspiciousTransactionLinkedAlertContext,
     createAlertsApiClient: vi.fn(() => ({
       listAlerts,
       listFraudCaseWorkQueue,
@@ -79,6 +84,7 @@ const {
       listSuspiciousTransactions,
       getSuspiciousTransactionSummary,
       getSuspiciousTransaction,
+      getSuspiciousTransactionLinkedAlertContext,
       getGovernanceAdvisoryAudit: vi.fn(),
       getAlert,
       getAssistantSummary,
@@ -104,6 +110,7 @@ vi.mock("./api/alertsApi.js", () => ({
   listSuspiciousTransactions,
   getSuspiciousTransactionSummary,
   getSuspiciousTransaction,
+  getSuspiciousTransactionLinkedAlertContext,
   getGovernanceAdvisoryAudit: vi.fn(),
   getAssistantSummary,
   getFraudCase,
@@ -142,6 +149,7 @@ describe("App", () => {
     listSuspiciousTransactions.mockResolvedValue({ content: [], size: 20, hasNext: false, nextCursor: null });
     getSuspiciousTransactionSummary.mockResolvedValue({ totalSuspiciousTransactions: 0 });
     getSuspiciousTransaction.mockResolvedValue(suspiciousTransactionDetails("suspicious-stable"));
+    getSuspiciousTransactionLinkedAlertContext.mockResolvedValue(linkedAlertContext());
     listGovernanceAdvisories.mockResolvedValue({ status: "AVAILABLE", count: 0, retention_limit: 200, advisory_events: [] });
     getGovernanceAdvisoryAnalytics.mockResolvedValue({
       status: "AVAILABLE",
@@ -494,6 +502,72 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: "Access denied" })).toBeInTheDocument();
   });
 
+  it("AppLinkedAlertContextTitleUsesRuntimeRouteValuesTest", async () => {
+    callbackPath.value = false;
+    window.history.replaceState({}, "", "/?workspace=suspicious-transactions&suspiciousTransactionId=suspicious-1&linkedAlertContext=1");
+    const session = {
+      userId: "subject-1",
+      roles: ["READ_ONLY_ANALYST"],
+      extraAuthorities: ["suspicious-transaction:read"],
+      authorities: ["alert:read", "assistant-summary:read", "fraud-case:read", "transaction-monitor:read", "suspicious-transaction:read"]
+    };
+    providerState.value = {
+      kind: "demo",
+      label: "Local demo session",
+      supportsSessionEditing: true,
+      authenticatedModeLabel: "local/dev only",
+      unauthenticatedModeLabel: "headers off",
+      unauthenticatedDescription: "Demo auth headers are disabled",
+      getInitialSession: () => session,
+      getSessionState: () => ({ status: "authenticated" }),
+      persistSession: vi.fn(),
+      beginLogin: vi.fn(),
+      beginLogout: vi.fn(),
+      hasLoginConfiguration: () => false,
+      getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
+    };
+    getSuspiciousTransaction.mockResolvedValue(suspiciousTransactionDetails("suspicious-1"));
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Alert Context" })).toBeInTheDocument();
+    await waitFor(() => expect(getSuspiciousTransactionLinkedAlertContext).toHaveBeenCalledWith("suspicious-1", expect.objectContaining({
+      signal: expect.any(AbortSignal)
+    })));
+  });
+
+  it("AppLinkedAlertContextTitleDoesNotShowStaleLinkedAlertTitleAfterBoundaryResetTest", async () => {
+    callbackPath.value = false;
+    window.history.replaceState({}, "", "/?workspace=suspicious-transactions&suspiciousTransactionId=suspicious-stale&linkedAlertContext=1");
+    const initialSession = authenticatedSessionWithSuspiciousRead();
+    const refreshedSession = authenticatedSession({
+      authorities: ["fraud-case:read", "transaction-monitor:read"]
+    });
+    refreshSession.mockResolvedValue(refreshedSession);
+    providerState.value = {
+      ...providerState.value,
+      getInitialSession: () => initialSession,
+      getSessionState: () => ({ status: "authenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
+    };
+
+    render(<App />);
+
+    await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(window.location.search).not.toContain("linkedAlertContext"));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Alert Context" })).not.toBeInTheDocument());
+  });
+
+  it("AppLinkedAlertContextTitleSourceUsesRuntimeValuesTest", () => {
+    const appSource = readFileSync(resolve(process.cwd(), "src/App.jsx"), "utf8");
+    const detailTitleBlock = appSource.match(/const detailTitle = \(\(\) => \{[\s\S]*?\}\)\(\);/)?.[0] || "";
+
+    expect(detailTitleBlock).toContain("runtimeSelectedLinkedAlertContext");
+    expect(detailTitleBlock).toContain("runtimeSelectedSuspiciousTransactionId");
+    expect(detailTitleBlock).toContain("runtimeSelectedAlertId");
+    expect(detailTitleBlock).not.toContain("selectedLinkedAlertContext || selectedAlertId");
+  });
+
   it("keeps transaction scoring usable when the fraud case global summary fails", async () => {
     callbackPath.value = false;
     refreshSession.mockResolvedValue(authenticatedSession());
@@ -734,6 +808,24 @@ function suspiciousTransactionDetails(suspiciousTransactionId) {
     evidenceStatus: "AVAILABLE",
     evidenceSnapshotItemCount: 1,
     evidenceProjectionState: "PROJECTED"
+  };
+}
+
+function linkedAlertContext() {
+  return {
+    state: "LINKED_ALERT_AVAILABLE",
+    alertId: "alert-1",
+    createdAt: "2026-05-10T10:00:00Z",
+    updatedAt: "2026-05-10T10:10:00Z",
+    correlationId: "corr-1",
+    riskLevel: "HIGH",
+    alertScore: 0.91,
+    alertStatus: "OPEN",
+    customerId: "customer-1",
+    accountId: "account-1",
+    transactionId: "txn-1",
+    scoreDecisionId: "score-1",
+    reasonCodes: ["HIGH_AMOUNT_ACTIVITY"]
   };
 }
 

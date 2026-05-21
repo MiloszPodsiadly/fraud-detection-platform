@@ -7,75 +7,78 @@ import { LoadingPanel } from "../components/LoadingPanel.jsx";
 import { formatDateTime, formatScore } from "../utils/format.js";
 
 export function AlertReadOnlyContextPage({
-  alertId,
+  suspiciousTransactionId,
   sourceSuspiciousTransaction,
   sourceSuspiciousTransactionLoading = false,
   sourceSuspiciousTransactionError = null,
-  alertReadClient,
+  linkedAlertContextClient,
   canReadAlert = true,
   workspaceLabel = "Suspicious Transactions",
   onBack
 }) {
-  const [alert, setAlert] = useState(null);
+  const [context, setContext] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [detailState, setDetailState] = useState("idle");
   const [errorMessage, setErrorMessage] = useState("");
   const headingRef = useRef(null);
   const requestSeqRef = useRef(0);
-  const alertAbortRef = useRef(null);
+  const abortRef = useRef(null);
 
   const sourceState = sourceVerificationState({
-    alertId,
+    suspiciousTransactionId,
     sourceSuspiciousTransaction,
     sourceSuspiciousTransactionLoading,
     sourceSuspiciousTransactionError
   });
-  const effectiveAlertReadClient = getAlertOnlyClient(alertReadClient);
-  const canFetchAlert = canReadAlert === true && sourceState.state === "verified" && Boolean(effectiveAlertReadClient);
-  const linkedAlertContextMismatch = alert && !linkedAlertContextMatches(alert, sourceSuspiciousTransaction);
+  // Frontend source readiness is UX/scope control. Backend resolver remains authoritative for relationship validation.
+  const effectiveClient = getLinkedAlertContextClient(linkedAlertContextClient);
+  const canFetchContext = canReadAlert === true && sourceState.state === "verified" && Boolean(effectiveClient);
+  const availableContext = detailState === "available" && context?.state === "LINKED_ALERT_AVAILABLE" ? context : null;
 
   useEffect(() => {
-    if (!canFetchAlert) {
-      alertAbortRef.current?.abort();
+    if (!canFetchContext) {
+      abortRef.current?.abort();
       requestSeqRef.current += 1;
       setIsLoading(false);
-      setAlert(null);
+      setContext(null);
       setErrorMessage("");
       setDetailState(sourceState.state);
       return;
     }
 
-    alertAbortRef.current?.abort();
+    abortRef.current?.abort();
     const abortController = new AbortController();
-    alertAbortRef.current = abortController;
+    abortRef.current = abortController;
     const requestSeq = requestSeqRef.current + 1;
     requestSeqRef.current = requestSeq;
-    setAlert(null);
+    setContext(null);
     setIsLoading(true);
     setErrorMessage("");
     setDetailState("loading");
 
-    effectiveAlertReadClient.getAlert(alertId, { signal: abortController.signal })
-      .then((nextAlert) => {
+    effectiveClient.getSuspiciousTransactionLinkedAlertContext(suspiciousTransactionId, { signal: abortController.signal })
+      .then((nextContext) => {
         if (requestSeqRef.current !== requestSeq || abortController.signal.aborted) {
           return;
         }
-        setAlert(nextAlert);
-        setDetailState("loaded");
+        const state = stateForLinkedAlertContext(nextContext);
+        setContext(state === "available" ? nextContext : null);
+        setDetailState(state);
       })
       .catch((apiError) => {
         if (requestSeqRef.current !== requestSeq || isAbortError(apiError)) {
           return;
         }
         const safeState = readOnlyFailureState(apiError);
+        setContext(null);
         setErrorMessage(safeState.message);
         setDetailState(safeState.state);
       })
       .finally(() => {
         if (requestSeqRef.current === requestSeq) {
           setIsLoading(false);
-          if (alertAbortRef.current === abortController) {
-            alertAbortRef.current = null;
+          if (abortRef.current === abortController) {
+            abortRef.current = null;
           }
         }
       });
@@ -84,7 +87,7 @@ export function AlertReadOnlyContextPage({
       abortController.abort();
       requestSeqRef.current += 1;
     };
-  }, [alertId, canFetchAlert, effectiveAlertReadClient, sourceState.state]);
+  }, [canFetchContext, effectiveClient, sourceState.state, suspiciousTransactionId]);
 
   useEffect(() => {
     if (!isLoading) {
@@ -140,7 +143,7 @@ export function AlertReadOnlyContextPage({
     );
   }
 
-  if (!effectiveAlertReadClient) {
+  if (!effectiveClient) {
     return (
       <ReadOnlyState
         title="Alert context unavailable"
@@ -165,50 +168,83 @@ export function AlertReadOnlyContextPage({
             headingRef={headingRef}
           />
         )}
-        {!isLoading && detailState === "not-found" && (
+        {!isLoading && detailState === "no-linked-alert" && (
           <ReadOnlyStateContent
-            title="Alert not found"
-            message="Alert not found"
+            title="No linked alert"
+            message="No linked alert."
             workspaceLabel={workspaceLabel}
             onBack={onBack}
             headingRef={headingRef}
           />
         )}
-        {!isLoading && errorMessage && detailState !== "access-denied" && detailState !== "not-found" && (
+        {!isLoading && detailState === "linked-alert-not-found" && (
+          <ReadOnlyStateContent
+            title="Linked alert unavailable"
+            message="Linked alert is not available."
+            workspaceLabel={workspaceLabel}
+            onBack={onBack}
+            headingRef={headingRef}
+          />
+        )}
+        {!isLoading && detailState === "relationship-mismatch" && (
+          <ReadOnlyStateContent
+            title="Invalid linked alert context"
+            message="Linked alert context could not be verified."
+            workspaceLabel={workspaceLabel}
+            onBack={onBack}
+            headingRef={headingRef}
+          />
+        )}
+        {!isLoading && detailState === "temporarily-unavailable" && (
+          <ReadOnlyStateContent
+            title="Linked alert context unavailable"
+            message="Linked alert context is temporarily unavailable."
+            workspaceLabel={workspaceLabel}
+            onBack={onBack}
+            headingRef={headingRef}
+          />
+        )}
+        {!isLoading && detailState === "unknown-state" && (
+          <ReadOnlyStateContent
+            title="Linked alert context unavailable"
+            message="Linked alert context is unavailable."
+            workspaceLabel={workspaceLabel}
+            onBack={onBack}
+            headingRef={headingRef}
+          />
+        )}
+        {!isLoading && errorMessage && detailState !== "access-denied" && (
           <ErrorState message={errorMessage} />
         )}
-        {!isLoading && linkedAlertContextMismatch && (
-          <ErrorState message="Linked alert context could not be verified." />
-        )}
-        {!isLoading && alert && !linkedAlertContextMismatch && (
+        {!isLoading && availableContext && (
           <>
             <DetailHeader
               title="Alert context"
               entityType="Alert"
-              entityId={alert.alertId}
+              entityId={availableContext.alertId}
               workspaceLabel={workspaceLabel}
-              status={alert.alertStatus}
-              riskLevel={alert.riskLevel}
+              status={availableContext.alertStatus}
+              riskLevel={availableContext.riskLevel}
               actionState="Read-only alert context"
               onBack={onBack}
               headingRef={headingRef}
-              headingId={`read-only-alert-context-${safeDomId(alert.alertId)}`}
+              headingId={`read-only-alert-context-${safeDomId(availableContext.alertId)}`}
             />
             <ReadOnlyAlertContextBanner />
             <div className="metricGrid">
-              <Metric label="Alert score" value={formatScore(alert.fraudScore)} />
-              <Metric label="Operational status" value={alert.alertStatus} />
-              <Metric label="Risk level" value={alert.riskLevel} />
-              <Metric label="Customer" value={alert.customerId} />
+              <Metric label="Alert score" value={formatScore(availableContext.alertScore)} />
+              <Metric label="Operational status" value={availableContext.alertStatus} />
+              <Metric label="Risk level" value={availableContext.riskLevel} />
+              <Metric label="Customer" value={availableContext.customerId} />
             </div>
             <div className="splitGrid">
               <section className="subPanel">
                 <h3>Reason codes</h3>
                 <div className="tagList">
-                  {(alert.reasonCodes || []).map((reason) => (
+                  {(availableContext.reasonCodes || []).map((reason) => (
                     <span className="tag" key={reason}>{reason}</span>
                   ))}
-                  {(!alert.reasonCodes || alert.reasonCodes.length === 0) && (
+                  {(!availableContext.reasonCodes || availableContext.reasonCodes.length === 0) && (
                     <span className="muted">No reason codes supplied.</span>
                   )}
                 </div>
@@ -216,19 +252,14 @@ export function AlertReadOnlyContextPage({
               <section className="subPanel">
                 <h3>Read-only alert metadata</h3>
                 <dl className="kvList">
-                  <div><dt>Transaction</dt><dd>{valueOrUnknown(alert.transactionId)}</dd></div>
-                  <div><dt>Customer</dt><dd>{valueOrUnknown(alert.customerId)}</dd></div>
-                  <div><dt>Correlation ID</dt><dd>{valueOrUnknown(alert.correlationId)}</dd></div>
-                  <div><dt>Score decision ID</dt><dd>{valueOrUnknown(alert.scoreDecisionId)}</dd></div>
-                  <div><dt>Created at</dt><dd>{formatDateTime(alert.createdAt)}</dd></div>
-                  <div><dt>Updated at</dt><dd>{formatDateTime(alert.updatedAt)}</dd></div>
-                </dl>
-              </section>
-              <section className="subPanel">
-                <h3>Linked suspicious transaction</h3>
-                <dl className="kvList">
-                  <div><dt>Suspicious transaction</dt><dd>{valueOrUnknown(sourceSuspiciousTransaction.suspiciousTransactionId)}</dd></div>
-                  <div><dt>Linked alert</dt><dd>{valueOrUnknown(sourceSuspiciousTransaction.linkedAlertId)}</dd></div>
+                  <div><dt>Alert</dt><dd>{valueOrUnknown(availableContext.alertId)}</dd></div>
+                  <div><dt>Transaction</dt><dd>{valueOrUnknown(availableContext.transactionId)}</dd></div>
+                  <div><dt>Customer</dt><dd>{valueOrUnknown(availableContext.customerId)}</dd></div>
+                  <div><dt>Account</dt><dd>{valueOrUnknown(availableContext.accountId)}</dd></div>
+                  <div><dt>Correlation ID</dt><dd>{valueOrUnknown(availableContext.correlationId)}</dd></div>
+                  <div><dt>Score decision ID</dt><dd>{valueOrUnknown(availableContext.scoreDecisionId)}</dd></div>
+                  <div><dt>Created at</dt><dd>{formatDateTime(availableContext.createdAt)}</dd></div>
+                  <div><dt>Updated at</dt><dd>{formatDateTime(availableContext.updatedAt)}</dd></div>
                 </dl>
               </section>
             </div>
@@ -294,34 +325,52 @@ function Metric({ label, value }) {
 }
 
 function sourceVerificationState({
-  alertId,
+  suspiciousTransactionId,
   sourceSuspiciousTransaction,
   sourceSuspiciousTransactionLoading,
   sourceSuspiciousTransactionError
 }) {
-  if (sourceSuspiciousTransactionLoading || !sourceSuspiciousTransaction) {
-    return sourceSuspiciousTransactionError ? { state: "source-unavailable" } : { state: "verifying" };
+  if (!normalizeComparable(suspiciousTransactionId)) {
+    return { state: "invalid" };
+  }
+  if (sourceSuspiciousTransactionLoading) {
+    return { state: "verifying" };
   }
   if (sourceSuspiciousTransactionError) {
     return { state: "source-unavailable" };
   }
-  return normalizeComparable(sourceSuspiciousTransaction.linkedAlertId) === normalizeComparable(alertId)
+  if (!sourceSuspiciousTransaction) {
+    return { state: "verifying" };
+  }
+  return normalizeComparable(sourceSuspiciousTransaction.suspiciousTransactionId) === normalizeComparable(suspiciousTransactionId)
     ? { state: "verified" }
     : { state: "invalid" };
 }
 
-function linkedAlertContextMatches(alert, suspiciousTransaction) {
-  return stringMatch(alert.alertId, suspiciousTransaction.linkedAlertId)
-    && optionalStringMatch(alert.transactionId, suspiciousTransaction.transactionId)
-    && optionalStringMatch(alert.customerId, suspiciousTransaction.customerId)
-    && optionalStringMatch(alert.scoreDecisionId, suspiciousTransaction.scoreDecisionId);
-}
-
-function getAlertOnlyClient(alertReadClient) {
-  if (!alertReadClient || typeof alertReadClient.getAlert !== "function") {
+function getLinkedAlertContextClient(linkedAlertContextClient) {
+  if (!linkedAlertContextClient || typeof linkedAlertContextClient.getSuspiciousTransactionLinkedAlertContext !== "function") {
     return null;
   }
-  return Object.keys(alertReadClient).length === 1 ? alertReadClient : null;
+  return Object.keys(linkedAlertContextClient).length === 1 ? linkedAlertContextClient : null;
+}
+
+function stateForLinkedAlertContext(context) {
+  if (context?.state === "LINKED_ALERT_AVAILABLE") {
+    return "available";
+  }
+  if (context?.state === "NO_LINKED_ALERT") {
+    return "no-linked-alert";
+  }
+  if (context?.state === "LINKED_ALERT_NOT_FOUND") {
+    return "linked-alert-not-found";
+  }
+  if (context?.state === "LINKED_ALERT_RELATIONSHIP_MISMATCH") {
+    return "relationship-mismatch";
+  }
+  if (context?.state === "TEMPORARILY_UNAVAILABLE") {
+    return "temporarily-unavailable";
+  }
+  return "unknown-state";
 }
 
 function readOnlyFailureState(error) {
@@ -331,26 +380,10 @@ function readOnlyFailureState(error) {
       message: "Alert detail requires alert read access."
     };
   }
-  if (error?.status === 404) {
-    return {
-      state: "not-found",
-      message: "Alert not found"
-    };
-  }
   return {
-    state: "unavailable",
+    state: "temporarily-unavailable",
     message: "Alert context is temporarily unavailable."
   };
-}
-
-function stringMatch(left, right) {
-  return normalizeComparable(left) !== "" && normalizeComparable(left) === normalizeComparable(right);
-}
-
-function optionalStringMatch(left, right) {
-  const normalizedLeft = normalizeComparable(left);
-  const normalizedRight = normalizeComparable(right);
-  return normalizedLeft === "" || normalizedRight === "" || normalizedLeft === normalizedRight;
 }
 
 function normalizeComparable(value) {

@@ -11,7 +11,8 @@ describe("useWorkspaceRoute", () => {
       invalidWorkspaceRoute: null,
       selectedAlertId: "alert-1",
       selectedFraudCaseId: null,
-      selectedSuspiciousTransactionId: null
+      selectedSuspiciousTransactionId: null,
+      selectedLinkedAlertContext: false
     });
   });
 
@@ -32,6 +33,7 @@ describe("useWorkspaceRoute", () => {
     expect(result.current.invalidWorkspaceRoute).toBeNull();
     expect(result.current.selectedAlertId).toBeNull();
     expect(result.current.selectedSuspiciousTransactionId).toBeNull();
+    expect(result.current.selectedLinkedAlertContext).toBe(false);
     expect(window.location.search).toBe("?workspace=transaction-scoring");
   });
 
@@ -43,19 +45,21 @@ describe("useWorkspaceRoute", () => {
 
     expect(result.current.workspacePage).toBe("suspiciousTransactions");
     expect(result.current.selectedSuspiciousTransactionId).toBe("suspicious-1");
+    expect(result.current.selectedLinkedAlertContext).toBe(false);
     expect(window.location.search).toBe("?workspace=suspicious-transactions&suspiciousTransactionId=suspicious-1");
   });
 
-  it("clickingViewAlertContextPreservesSuspiciousTransactionIdInRoute", () => {
+  it("clickingViewAlertContextUsesSuspiciousTransactionIdOnlyInRoute", () => {
     window.history.replaceState({}, "", "/?workspace=suspicious-transactions&suspiciousTransactionId=suspicious-1");
     const { result } = renderHook(() => useWorkspaceRoute());
 
-    act(() => result.current.openAlert({ alertId: "alert-1", suspiciousTransactionId: "suspicious-1" }));
+    act(() => result.current.openSuspiciousLinkedAlertContext("suspicious-1"));
 
     expect(result.current.workspacePage).toBe("suspiciousTransactions");
     expect(result.current.selectedSuspiciousTransactionId).toBe("suspicious-1");
-    expect(result.current.selectedAlertId).toBe("alert-1");
-    expect(window.location.search).toBe("?workspace=suspicious-transactions&suspiciousTransactionId=suspicious-1&alertId=alert-1");
+    expect(result.current.selectedLinkedAlertContext).toBe(true);
+    expect(result.current.selectedAlertId).toBeNull();
+    expect(window.location.search).toBe("?workspace=suspicious-transactions&suspiciousTransactionId=suspicious-1&linkedAlertContext=1");
   });
 
   it("opens fraud case detail and responds to popstate", () => {
