@@ -100,6 +100,14 @@ export function WorkspaceDetailRouter({
     });
   }
 
+  if (hasSuspiciousBridgeRoute && suspiciousBridgeSourceReadiness === "stale-source") {
+    return renderBridgeState({
+      title: "Linked alert context not ready",
+      message: "Linked alert context is not ready for the selected suspicious transaction.",
+      onBack: closeAndRestoreFocus
+    });
+  }
+
   if (hasSuspiciousBridgeRoute && suspiciousBridgeSourceReadiness === "unavailable") {
     return renderBridgeState({
       title: "Linked alert context unavailable",
@@ -216,7 +224,7 @@ function sourceReadinessState({
   const loadedId = normalizeComparable(sourceSuspiciousTransaction.suspiciousTransactionId);
 
   if (loadedId !== selectedId) {
-    return "verifying";
+    return "stale-source";
   }
 
   return "ready";

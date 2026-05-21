@@ -496,7 +496,7 @@ describe("WorkspaceDetailRouter", () => {
     expect(screen.getAllByText("Verifying linked alert context")).toHaveLength(2);
   });
 
-  it("WorkspaceDetailRouterDoesNotMountAlertReadOnlyContextWhenSourceIdMismatchesRouteTest", () => {
+  it("WorkspaceDetailRouterRendersStaleSourceStateWhenSourceIdMismatchesRouteTest", () => {
     const getAlert = vi.fn();
     const getSuspiciousTransactionLinkedAlertContext = vi.fn();
     render(
@@ -522,10 +522,14 @@ describe("WorkspaceDetailRouter", () => {
     expect(alertReadOnlyContextPageMock).not.toHaveBeenCalled();
     expect(getSuspiciousTransactionLinkedAlertContext).not.toHaveBeenCalled();
     expect(getAlert).not.toHaveBeenCalled();
-    expect(screen.getAllByText("Verifying linked alert context")).toHaveLength(2);
+    expect(screen.queryByText("Verifying linked alert context")).not.toBeInTheDocument();
+    expect(screen.getByText("Linked alert context not ready")).toBeInTheDocument();
+    expect(screen.getByText("Linked alert context is not ready for the selected suspicious transaction.")).toBeInTheDocument();
+    expect(screen.queryByText(/suspicious-1/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/suspicious-2/)).not.toBeInTheDocument();
   });
 
-  it("WorkspaceDetailRouterDoesNotFetchResolverWhenSourceIdIsStaleTest", () => {
+  it("WorkspaceDetailRouterDoesNotTreatStaleSourceAsLoadingTest", () => {
     const getSuspiciousTransactionLinkedAlertContext = vi.fn();
     render(
       <WorkspaceDetailRouter
@@ -547,9 +551,47 @@ describe("WorkspaceDetailRouter", () => {
       />
     );
 
+    expect(screen.queryByText("Verifying linked alert context")).not.toBeInTheDocument();
+    expect(screen.getByText("Linked alert context not ready")).toBeInTheDocument();
     expect(getSuspiciousTransactionLinkedAlertContext).not.toHaveBeenCalled();
     expect(screen.queryByRole("heading", { name: "Dedicated read-only alert context true" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Alert detail true" })).not.toBeInTheDocument();
+  });
+
+  it("WorkspaceDetailRouterStillShowsVerifyingWhenSourceIsMissingOrLoadingTest", () => {
+    const commonProps = {
+      selectedAlertId: null,
+      selectedFraudCaseId: null,
+      alertQueueState: undefined,
+      session: { userId: "analyst-1", authorities: ["alert:read", "suspicious-transaction:read"] },
+      apiClient: { getAlert: vi.fn(), getSuspiciousTransactionLinkedAlertContext: vi.fn(), submitAnalystDecision: vi.fn(), getAssistantSummary: vi.fn() },
+      canReadAlerts: true,
+      canReadFraudCases: false,
+      workspacePage: "suspiciousTransactions",
+      selectedLinkedAlertContext: true,
+      selectedSuspiciousTransactionId: "suspicious-1",
+      onCloseSelection: vi.fn(),
+      onRefreshDashboard: vi.fn()
+    };
+
+    const { rerender } = render(
+      <WorkspaceDetailRouter
+        {...commonProps}
+        sourceSuspiciousTransaction={null}
+      />
+    );
+    expect(screen.getAllByText("Verifying linked alert context")).toHaveLength(2);
+    expect(screen.queryByText("Linked alert context not ready")).not.toBeInTheDocument();
+
+    rerender(
+      <WorkspaceDetailRouter
+        {...commonProps}
+        sourceSuspiciousTransaction={null}
+        sourceSuspiciousTransactionLoading
+      />
+    );
+    expect(screen.getAllByText("Verifying linked alert context")).toHaveLength(2);
+    expect(screen.queryByText("Linked alert context not ready")).not.toBeInTheDocument();
   });
 
   it("WorkspaceDetailRouterMountsAlertReadOnlyContextWhenSourceIdMatchesRouteTest", () => {
@@ -606,7 +648,7 @@ describe("WorkspaceDetailRouter", () => {
     expect(screen.queryByText(/suspicious-secret/)).not.toBeInTheDocument();
   });
 
-  it("suspiciousTransactionLinkedContextRouteWithSourceLinkedAlertMismatchDoesNotCallGetAlert", () => {
+  it("WorkspaceDetailRouterDoesNotUseLinkedAlertIdForRouteReadinessTest", () => {
     const getAlert = vi.fn();
     render(
       <WorkspaceDetailRouter
@@ -634,9 +676,11 @@ describe("WorkspaceDetailRouter", () => {
   it("WorkspaceDetailRouterDoesNotPerformRelationshipValidationTest", () => {
     const routerSource = readFileSync(resolve(process.cwd(), "src/workspace/WorkspaceDetailRouter.jsx"), "utf8");
 
+    // Architecture regression guard: runtime tests above prove behavior; this blocks relationship validation from returning.
     expect(routerSource).toContain("sourceReadinessState");
     expect(routerSource).toContain("sourceSuspiciousTransaction.suspiciousTransactionId");
     expect(routerSource).toContain("loadedId !== selectedId");
+    expect(routerSource).toContain('"stale-source"');
     expect(routerSource).not.toContain("sourceSuspiciousTransaction.linkedAlertId");
     expect(routerSource).not.toContain("sourceSuspiciousTransaction.transactionId");
     expect(routerSource).not.toContain("sourceSuspiciousTransaction.customerId");
@@ -890,7 +934,7 @@ describe("WorkspaceDetailRouter", () => {
     consoleInfo.mockRestore();
   });
 
-  it("sourceVerificationStateDoesNotLogRawRoute", () => {
+  it("sourceReadinessStateDoesNotLogRawRoute", () => {
     const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
     window.history.replaceState({}, "", "/?workspace=suspicious-transactions&suspiciousTransactionId=suspicious-secret&linkedAlertContext=1");
     render(
