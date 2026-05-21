@@ -75,7 +75,24 @@ export function WorkspaceDetailRouter({
     });
   }
 
-  if (hasSuspiciousBridgeRoute && (sourceSuspiciousTransactionLoading || !sourceSuspiciousTransaction) && !sourceSuspiciousTransactionError) {
+  const suspiciousBridgeSourceReadiness = hasSuspiciousBridgeRoute
+    ? sourceReadinessState({
+      selectedSuspiciousTransactionId,
+      sourceSuspiciousTransaction,
+      sourceSuspiciousTransactionLoading,
+      sourceSuspiciousTransactionError
+    })
+    : "not-applicable";
+
+  if (hasSuspiciousBridgeRoute && suspiciousBridgeSourceReadiness === "invalid") {
+    return renderBridgeState({
+      title: "Invalid linked alert context",
+      message: "Linked alert context requires a source suspicious transaction.",
+      onBack: closeAndRestoreFocus
+    });
+  }
+
+  if (hasSuspiciousBridgeRoute && suspiciousBridgeSourceReadiness === "verifying") {
     return renderBridgeState({
       title: "Verifying linked alert context",
       message: "Verifying linked alert context",
@@ -83,7 +100,7 @@ export function WorkspaceDetailRouter({
     });
   }
 
-  if (hasSuspiciousBridgeRoute && sourceSuspiciousTransactionError) {
+  if (hasSuspiciousBridgeRoute && suspiciousBridgeSourceReadiness === "unavailable") {
     return renderBridgeState({
       title: "Linked alert context unavailable",
       message: "Linked alert context is unavailable.",
@@ -170,6 +187,43 @@ function createLinkedAlertContextClient(apiClient) {
     getSuspiciousTransactionLinkedAlertContext: (suspiciousTransactionId, requestOptions) =>
       apiClient.getSuspiciousTransactionLinkedAlertContext(suspiciousTransactionId, requestOptions)
   });
+}
+
+function sourceReadinessState({
+  selectedSuspiciousTransactionId,
+  sourceSuspiciousTransaction,
+  sourceSuspiciousTransactionLoading,
+  sourceSuspiciousTransactionError
+}) {
+  const selectedId = normalizeComparable(selectedSuspiciousTransactionId);
+
+  if (!selectedId) {
+    return "invalid";
+  }
+
+  if (sourceSuspiciousTransactionLoading) {
+    return "verifying";
+  }
+
+  if (sourceSuspiciousTransactionError) {
+    return "unavailable";
+  }
+
+  if (!sourceSuspiciousTransaction) {
+    return "verifying";
+  }
+
+  const loadedId = normalizeComparable(sourceSuspiciousTransaction.suspiciousTransactionId);
+
+  if (loadedId !== selectedId) {
+    return "verifying";
+  }
+
+  return "ready";
+}
+
+function normalizeComparable(value) {
+  return value === null || value === undefined ? "" : String(value).trim();
 }
 
 function findDetailOrigin(originKey) {
