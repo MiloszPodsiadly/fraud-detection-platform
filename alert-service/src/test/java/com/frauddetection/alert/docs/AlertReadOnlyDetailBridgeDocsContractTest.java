@@ -219,6 +219,28 @@ class AlertReadOnlyDetailBridgeDocsContractTest {
     }
 
     @Test
+    void DocsClarifyInternalEndpointIsProtectedAnalystConsoleApiTest() throws Exception {
+        String docs = Files.readString(docPath());
+
+        assertThat(docs)
+                .contains("non-public product API for the protected analyst console")
+                .contains("does not mean service-private")
+                .contains("backend authorization")
+                .contains("HTTP 200 does not imply available context");
+    }
+
+    @Test
+    void DocsMentionLinkedAlertContextUsesMinimalBackendDtoTest() throws Exception {
+        String docs = Files.readString(docPath());
+
+        assertThat(docs)
+                .contains("AlertLinkedContextResponse")
+                .contains("not consume full `AlertDetailsResponse`")
+                .contains("minimal allowlisted DTO")
+                .contains("Non-available states render no alert fields");
+    }
+
+    @Test
     void DocsMentionStateDrivenRenderingTest() throws Exception {
         String docs = Files.readString(docPath());
 

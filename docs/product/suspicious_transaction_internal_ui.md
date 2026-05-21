@@ -122,6 +122,10 @@ returning alert context. The loaded SuspiciousTransaction document must match th
 The client cannot pass `alertId`.
 FDP-70 migrates the SuspiciousTransaction linked-alert UI to the FDP-69 backend relationship resolver.
 AlertReadOnlyContextPage calls GET `/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`.
+`/internal` in this API means non-public product API for the protected analyst console. It does not mean service-private
+or unauthenticated. The endpoint remains a protected HTTP API with backend authorization, state-driven response
+semantics, audit/metrics expectations, and compatibility obligations for the analyst console.
+The endpoint is not public API, but it is also not backend-private when used by the analyst console.
 The UI does not call GET `/api/v1/alerts/{alertId}` for SuspiciousTransaction linked-alert context.
 The frontend sends `suspiciousTransactionId` only and does not send `alertId` or `linkedAlertId` to the resolver.
 The frontend does not send alert, linked-alert, customer, account, transaction, correlation, or scoreDecision
@@ -151,6 +155,16 @@ The client must not send `linkedAlertId`, customerId, accountId, transactionId, 
 query parameters, request body, or custom headers for this context. Relationship mismatch fails closed without alert
 fields. Relationship validation currently uses alertId, transactionId, customerId, and
 correlationId where available.
+
+## Backend DTO Boundary
+
+FDP-70 relies on the FDP-69 resolver returning `AlertLinkedContextResponse`.
+The UI must not consume full `AlertDetailsResponse` for SuspiciousTransaction linked-alert context.
+The backend DTO must remain a minimal allowlisted DTO.
+`LINKED_ALERT_AVAILABLE` may render only fields returned by the minimal linked-alert context DTO.
+Non-available states render no alert fields.
+If the backend DTO expands, UI review must verify no workflow, analyst decision, final outcome, assistant summary,
+evidence snapshot, raw payload, or case lifecycle fields are displayed.
 
 The linked-alert response is minimal read-only context: alertId, transactionId, customerId, accountId when already
 present, alert score, riskLevel, alertStatus, reasonCodes, createdAt, updatedAt only when the alert read model exposes a

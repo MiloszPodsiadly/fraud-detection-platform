@@ -21,6 +21,10 @@ The loaded SuspiciousTransaction document must also match the path `suspiciousTr
 mismatch fails closed before any alert lookup.
 FDP-70 migrates the SuspiciousTransaction linked-alert UI to the FDP-69 backend resolver.
 `AlertReadOnlyContextPage` calls GET `/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`.
+`/internal` in this API means non-public product API for the protected analyst console. It does not mean service-private
+or unauthenticated. The endpoint remains a protected HTTP API with backend authorization, state-driven response
+semantics, audit/metrics expectations, and compatibility obligations for the analyst console.
+The endpoint is not public API, but it is also not backend-private when used by the analyst console.
 The frontend sends `suspiciousTransactionId` only.
 The frontend does not send `alertId` or `linkedAlertId` to the resolver through URL, query, body, or custom headers.
 The frontend does not send customerId, accountId, transactionId, correlationId, or scoreDecisionId to the resolver
@@ -84,6 +88,16 @@ Frontend state is not authoritative. Backend relationship validation is authorit
 HTTP 200 does not imply available context; the UI must evaluate response.state.
 Only response.state `LINKED_ALERT_AVAILABLE` may render alert fields.
 Non-available states render no alert fields.
+
+## Backend DTO Boundary
+
+FDP-70 relies on the FDP-69 resolver returning `AlertLinkedContextResponse`.
+The UI must not consume full `AlertDetailsResponse` for SuspiciousTransaction linked-alert context.
+The backend DTO must remain a minimal allowlisted DTO.
+`LINKED_ALERT_AVAILABLE` may render only fields returned by the minimal linked-alert context DTO.
+Non-available states render no alert fields.
+If the backend DTO expands, UI review must verify no workflow, analyst decision, final outcome, assistant summary,
+evidence snapshot, raw payload, or case lifecycle fields are displayed.
 
 This component boundary is scope control, not a frontend security boundary.
 Backend `ALERT_READ` authorization remains authoritative.
