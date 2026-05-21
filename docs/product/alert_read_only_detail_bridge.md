@@ -17,9 +17,12 @@ The backend derives `linkedAlertId` from the SuspiciousTransaction read model an
 returning alert context. Clients cannot pass `alertId` in the path, query string, or request body.
 The loaded SuspiciousTransaction document must also match the path `suspiciousTransactionId`; a source identifier
 mismatch fails closed before any alert lookup.
-FDP-69 introduces the backend linked-alert context resolver and does not migrate the UI workflow. Until a later UI
-migration uses this endpoint, the existing `AlertReadOnlyContextPage` remains a getAlert-only read component guarded by
-frontend source-context binding and backend `ALERT_READ` authorization.
+FDP-70 migrates the SuspiciousTransaction linked-alert UI to the FDP-69 backend resolver.
+`AlertReadOnlyContextPage` calls GET `/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`.
+The frontend sends `suspiciousTransactionId` only.
+The frontend does not send `alertId` or `linkedAlertId` to the resolver.
+The SuspiciousTransaction linked-alert UI does not call GET `/api/v1/alerts/{alertId}` for linked-alert context.
+The SuspiciousTransaction linked-alert UI does not fallback to the general alert lookup for linked-alert context.
 
 ## Semantics
 
@@ -65,12 +68,16 @@ FDP-68 fully removes SuspiciousTransaction read-only bridge mode from `AlertDeta
 `AlertDetailsPage` remains the workflow-capable normal alert detail page.
 `AlertReadOnlyContextPage` is the dedicated read-only alert context page.
 `AlertReadOnlyContextPage` is the only component for SuspiciousTransaction linked-alert read-only context.
-`AlertReadOnlyContextPage` depends only on a getAlert-only client.
+`AlertReadOnlyContextPage` depends only on a linked-alert resolver client.
+`AlertReadOnlyContextPage` does not receive the full API client.
 This removes the boolean-mode smell and makes the read-only path safe by construction instead of conditionals inside the workflow page.
-The internal linked-alert endpoint is the backend source for validated read-only alert context when the UI is migrated to
-the FDP-69 contract.
-FDP-70 may switch `AlertReadOnlyContextPage` to call
+The internal linked-alert endpoint is the backend source for validated read-only alert context.
+FDP-70 makes `AlertReadOnlyContextPage` call
 GET `/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`.
+Frontend state is not authoritative. Backend relationship validation is authoritative.
+HTTP 200 does not imply available context; the UI must evaluate response.state.
+Only response.state `LINKED_ALERT_AVAILABLE` may render alert fields.
+Non-available states render no alert fields.
 
 This component boundary is scope control, not a frontend security boundary.
 Backend `ALERT_READ` authorization remains authoritative.
@@ -144,6 +151,7 @@ Missing linked alert renders a bounded linked-alert-not-found state without aler
 Relationship mismatch renders a bounded mismatch state without alert fields.
 Rejected client-supplied `alertId` query parameters return 400 before service lookup.
 Other backend failures render a safe unavailable state and must not display raw backend payloads.
+Unknown linked-alert resolver state fails closed and renders no alert fields.
 
 ## Non-Claims
 

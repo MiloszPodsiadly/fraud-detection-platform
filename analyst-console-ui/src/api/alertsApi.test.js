@@ -24,6 +24,7 @@ describe("alertsApi auth headers", () => {
   const listSuspiciousTransactions = (...args) => apiClient.listSuspiciousTransactions(...args);
   const getSuspiciousTransactionSummary = (...args) => apiClient.getSuspiciousTransactionSummary(...args);
   const getSuspiciousTransaction = (...args) => apiClient.getSuspiciousTransaction(...args);
+  const getSuspiciousTransactionLinkedAlertContext = (...args) => apiClient.getSuspiciousTransactionLinkedAlertContext(...args);
   const listGovernanceAdvisories = (...args) => apiClient.listGovernanceAdvisories(...args);
   const getGovernanceAdvisoryAnalytics = (...args) => apiClient.getGovernanceAdvisoryAnalytics(...args);
   const getGovernanceAdvisoryAudit = (...args) => apiClient.getGovernanceAdvisoryAudit(...args);
@@ -742,6 +743,67 @@ describe("alertsApi auth headers", () => {
       })
     );
     expect(fetchMock.mock.calls[0][1]).not.toEqual(expect.objectContaining({ method: expect.any(String) }));
+  });
+
+  it("SuspiciousLinkedAlertClientCallsInternalResolverTest", async () => {
+    const signal = new AbortController().signal;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      state: "LINKED_ALERT_AVAILABLE",
+      alertId: "alert-1"
+    }));
+
+    await getSuspiciousTransactionLinkedAlertContext("suspicious-1", { signal });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/internal/suspicious-transactions/suspicious-1/linked-alert",
+      expect.objectContaining({
+        signal,
+        headers: expect.objectContaining({ "Content-Type": "application/json" })
+      })
+    );
+  });
+
+  it("SuspiciousLinkedAlertClientEncodesSuspiciousTransactionIdTest", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      state: "NO_LINKED_ALERT"
+    }));
+
+    await getSuspiciousTransactionLinkedAlertContext("suspicious/with spaces");
+
+    expect(fetchMock.mock.calls[0][0]).toBe("/internal/suspicious-transactions/suspicious%2Fwith%20spaces/linked-alert");
+  });
+
+  it("SuspiciousLinkedAlertClientDoesNotAcceptAlertIdArgumentTest", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      state: "NO_LINKED_ALERT"
+    }));
+
+    await getSuspiciousTransactionLinkedAlertContext("suspicious-1", { alertId: "alert-secret" });
+
+    expect(fetchMock.mock.calls[0][0]).not.toContain("alert-secret");
+    expect(fetchMock.mock.calls[0][1]).not.toHaveProperty("alertId");
+    expect(fetchMock.mock.calls[0][1]).not.toHaveProperty("body");
+  });
+
+  it("SuspiciousLinkedAlertClientDoesNotAppendAlertIdQueryParamTest", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      state: "NO_LINKED_ALERT"
+    }));
+
+    await getSuspiciousTransactionLinkedAlertContext("suspicious-1");
+
+    expect(fetchMock.mock.calls[0][0]).not.toContain("alertId=");
+    expect(fetchMock.mock.calls[0][0]).not.toContain("linkedAlertId=");
+  });
+
+  it("SuspiciousLinkedAlertClientDoesNotCallGeneralAlertEndpointTest", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      state: "NO_LINKED_ALERT"
+    }));
+
+    await getSuspiciousTransactionLinkedAlertContext("suspicious-1");
+
+    expect(fetchMock.mock.calls[0][0]).not.toContain("/api/v1/alerts");
   });
 
   it("surfaces work queue security and cursor errors without endpoint fallback", async () => {

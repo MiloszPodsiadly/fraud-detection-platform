@@ -56,9 +56,9 @@ function sensitiveSinkLines(sinkPattern, terms) {
 
 function bridgeSources() {
   return [
-    resolve(srcDir, "api", "alertReadOnlyBridgeApi.js"),
     resolve(srcDir, "workspace", "WorkspaceDetailRouter.jsx"),
     resolve(srcDir, "workspace", "SuspiciousTransactionWorkspaceRuntime.jsx"),
+    resolve(srcDir, "pages", "AlertReadOnlyContextPage.jsx"),
     resolve(srcDir, "pages", "AlertDetailsPage.jsx"),
     resolve(srcDir, "pages", "SuspiciousTransactionWorkspacePage.jsx")
   ].map((file) => readFileSync(file, "utf8")).join("\n");

@@ -120,10 +120,13 @@ authority. FDP-69 adds the backend endpoint GET
 The backend derives `linkedAlertId` from the SuspiciousTransaction read model and validates the relationship before
 returning alert context. The loaded SuspiciousTransaction document must match the path `suspiciousTransactionId`.
 The client cannot pass `alertId`.
-FDP-69 introduces the backend linked-alert context resolver. FDP-69 does not migrate the UI workflow.
-AlertReadOnlyContextPage may continue using the existing read-only client until FDP-70.
-Future FDP-70 may switch AlertReadOnlyContextPage to call GET
-`/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`.
+FDP-70 migrates the SuspiciousTransaction linked-alert UI to the FDP-69 backend relationship resolver.
+AlertReadOnlyContextPage calls GET `/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`.
+The UI does not call GET `/api/v1/alerts/{alertId}` for SuspiciousTransaction linked-alert context.
+The frontend sends `suspiciousTransactionId` only and does not send `alertId` or `linkedAlertId` to the resolver.
+Backend relationship validation is authoritative.
+HTTP 200 does not imply available context; the UI evaluates response.state before rendering.
+Only state `LINKED_ALERT_AVAILABLE` renders alert fields. Non-available states render no alert fields.
 
 Alert detail is investigation context. It is not confirmed fraud, not an analyst decision, not a final outcome,
 not a case lifecycle action, and not legal proof.
@@ -137,9 +140,9 @@ The frontend guard is not a security boundary. Backend authorization and relatio
 Missing alert read authority shows no actionable alert link or an access-denied state.
 The endpoint requires both `SUSPICIOUS_TRANSACTION_READ` and `ALERT_READ`.
 
-Linked alert context is opened from SuspiciousTransaction detail view and route/state must retain both the source
-`suspiciousTransactionId` and the linked `alertId`. An `alertId` alone in the SuspiciousTransaction workspace is invalid
-bridge context. Frontend source-context binding is scope control, not security enforcement.
+Linked alert context is opened from SuspiciousTransaction detail view and route/state must retain the source
+`suspiciousTransactionId`. An `alertId` alone in the SuspiciousTransaction workspace is invalid bridge context.
+Frontend source-context binding is scope control, not security enforcement.
 The backend must not accept `alertId` in the path, query string, or request body for this context. Relationship mismatch
 fails closed without alert fields. Relationship validation currently uses alertId, transactionId, customerId, and
 correlationId where available.

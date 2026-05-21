@@ -152,4 +152,26 @@ class SuspiciousTransactionInternalUiDocsContractTest {
                 .doesNotContain("adds backend behavior")
                 .doesNotContain("write endpoint is available");
     }
+
+    @Test
+    void docsMentionFdp70LinkedAlertResolverMigration() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs)
+                .contains("FDP-70 migrates the SuspiciousTransaction linked-alert UI to the FDP-69 backend relationship resolver")
+                .contains("AlertReadOnlyContextPage calls GET `/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`")
+                .contains("The UI does not call GET `/api/v1/alerts/{alertId}` for SuspiciousTransaction linked-alert context")
+                .contains("The frontend sends `suspiciousTransactionId` only and does not send `alertId` or `linkedAlertId` to the resolver");
+    }
+
+    @Test
+    void docsMentionStateDrivenLinkedAlertRendering() throws IOException {
+        String docs = Files.readString(DOCS);
+
+        assertThat(docs)
+                .contains("HTTP 200 does not imply available context")
+                .contains("the UI evaluates response.state before rendering")
+                .contains("Only state `LINKED_ALERT_AVAILABLE` renders alert fields")
+                .contains("Non-available states render no alert fields");
+    }
 }

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -16,11 +16,245 @@ describe("AlertReadOnlyContextPage", () => {
     expect(screen.getByText(/Not a case lifecycle action/)).toBeInTheDocument();
   });
 
-  it("AlertReadOnlyContextPageUsesAlertScoreNotFraudScoreTest", async () => {
+  it("LinkedAlertAvailableRendersReadOnlyContextTest", async () => {
     render(page());
 
-    expect(await screen.findByText("Alert score")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Alert context" })).toBeInTheDocument();
+    expect(screen.getByText("Alert score")).toBeInTheDocument();
+    expect(screen.getByText("0.91")).toBeInTheDocument();
+    expect(screen.getByText("Read-only alert metadata")).toBeInTheDocument();
+    expect(screen.getByText("HIGH_AMOUNT_ACTIVITY")).toBeInTheDocument();
     expect(screen.queryByText("Fraud score")).not.toBeInTheDocument();
+  });
+
+  it("AlertReadOnlyContextPageAcceptsLinkedAlertResolverClientOnlyTest", async () => {
+    const linkedAlertContextClient = resolverClient();
+    render(page({ linkedAlertContextClient }));
+
+    await waitFor(() => expect(linkedAlertContextClient.getSuspiciousTransactionLinkedAlertContext).toHaveBeenCalledTimes(1));
+    expect(Object.keys(linkedAlertContextClient)).toEqual(["getSuspiciousTransactionLinkedAlertContext"]);
+  });
+
+  it("AlertReadOnlyContextPageDoesNotReceiveFullApiClientTest", () => {
+    const linkedAlertContextClient = {
+      getSuspiciousTransactionLinkedAlertContext: vi.fn(),
+      getAlert: vi.fn(),
+      submitAnalystDecision: vi.fn()
+    };
+    render(page({ linkedAlertContextClient }));
+
+    expect(linkedAlertContextClient.getSuspiciousTransactionLinkedAlertContext).not.toHaveBeenCalled();
+    expect(screen.getByText("Alert context is temporarily unavailable.")).toBeInTheDocument();
+  });
+
+  it("AlertReadOnlyContextPageDoesNotRequireAlertIdPropTest", async () => {
+    render(page({ alertId: undefined }));
+
+    expect(await screen.findByRole("heading", { name: "Alert context" })).toBeInTheDocument();
+  });
+
+  it("AlertReadOnlyContextPageDoesNotRequireLinkedAlertIdForFetchTest", async () => {
+    const linkedAlertContextClient = resolverClient();
+    render(page({
+      sourceSuspiciousTransaction: sourceSuspiciousTransaction({ linkedAlertId: "" }),
+      linkedAlertContextClient
+    }));
+
+    await waitFor(() => expect(linkedAlertContextClient.getSuspiciousTransactionLinkedAlertContext).toHaveBeenCalledWith("suspicious-1", expect.objectContaining({
+      signal: expect.any(AbortSignal)
+    })));
+  });
+
+  it("AlertReadOnlyContextPageCallsResolverWithSuspiciousTransactionIdOnlyTest", async () => {
+    const linkedAlertContextClient = resolverClient();
+    render(page({ linkedAlertContextClient }));
+
+    await waitFor(() => expect(linkedAlertContextClient.getSuspiciousTransactionLinkedAlertContext).toHaveBeenCalledTimes(1));
+    expect(linkedAlertContextClient.getSuspiciousTransactionLinkedAlertContext.mock.calls[0][0]).toBe("suspicious-1");
+    expect(linkedAlertContextClient.getSuspiciousTransactionLinkedAlertContext.mock.calls[0][0]).not.toBe("alert-1");
+  });
+
+  it("AlertReadOnlyContextPageDoesNotCallGetAlertByAlertIdTest", async () => {
+    const linkedAlertContextClient = resolverClient();
+    render(page({ linkedAlertContextClient }));
+
+    await screen.findByRole("heading", { name: "Alert context" });
+    expect(linkedAlertContextClient.getAlert).toBeUndefined();
+  });
+
+  it("AlertReadOnlyContextPageDoesNotFallbackToGetAlertWhenResolverFailsTest", async () => {
+    const getAlert = vi.fn();
+    const linkedAlertContextClient = {
+      getSuspiciousTransactionLinkedAlertContext: vi.fn().mockRejectedValue(new ApiError({ status: 500, message: "raw alert-secret" }))
+    };
+    render(page({ linkedAlertContextClient, getAlert }));
+
+    expect(await screen.findByText("Alert context is temporarily unavailable.")).toBeInTheDocument();
+    expect(getAlert).not.toHaveBeenCalled();
+  });
+
+  it("AlertReadOnlyContextPageQueryKeyUsesSuspiciousTransactionIdOnlyTest", () => {
+    const source = pageSource();
+
+    expect(source).toContain("suspiciousTransactionId");
+    expect(source).not.toContain("alertId,");
+    expect(source).not.toContain("linkedAlertId");
+  });
+
+  it("NoLinkedAlertRendersNoLinkedAlertStateTest", async () => {
+    render(page({ linkedAlertContextClient: resolverClient({ state: "NO_LINKED_ALERT" }) }));
+
+    expect(await screen.findByText("No linked alert.")).toBeInTheDocument();
+    expectNoAlertFields();
+  });
+
+  it("LinkedAlertNotFoundRendersSafeUnavailableStateTest", async () => {
+    render(page({ linkedAlertContextClient: resolverClient({
+      state: "LINKED_ALERT_NOT_FOUND",
+      alertId: "alert-secret"
+    }) }));
+
+    expect(await screen.findByText("Linked alert is not available.")).toBeInTheDocument();
+    expect(screen.queryByText("alert-secret")).not.toBeInTheDocument();
+    expectNoAlertFields();
+  });
+
+  it("RelationshipMismatchRendersInvalidContextStateTest", async () => {
+    render(page({ linkedAlertContextClient: resolverClient({
+      state: "LINKED_ALERT_RELATIONSHIP_MISMATCH",
+      alertId: "alert-secret",
+      customerId: "customer-secret"
+    }) }));
+
+    expect(await screen.findByText("Linked alert context could not be verified.")).toBeInTheDocument();
+    expect(screen.queryByText("alert-secret")).not.toBeInTheDocument();
+    expect(screen.queryByText("customer-secret")).not.toBeInTheDocument();
+    expectNoAlertFields();
+  });
+
+  it("TemporarilyUnavailableDoesNotRenderAlertFieldsTest", async () => {
+    render(page({ linkedAlertContextClient: resolverClient({
+      state: "TEMPORARILY_UNAVAILABLE",
+      alertId: "alert-secret",
+      customerId: "customer-secret"
+    }) }));
+
+    expect(await screen.findByText("Linked alert context is temporarily unavailable.")).toBeInTheDocument();
+    expect(screen.queryByText("alert-secret")).not.toBeInTheDocument();
+    expect(screen.queryByText("customer-secret")).not.toBeInTheDocument();
+    expectNoAlertFields();
+  });
+
+  it("Http200WithTemporarilyUnavailableDoesNotRenderAvailableContextTest", async () => {
+    render(page({ linkedAlertContextClient: resolverClient({ state: "TEMPORARILY_UNAVAILABLE" }) }));
+
+    expect(await screen.findByText("Linked alert context is temporarily unavailable.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Alert context" })).not.toBeInTheDocument();
+  });
+
+  it("AlertReadOnlyContextPageUnknownStateFailsClosedTest", async () => {
+    render(page({ linkedAlertContextClient: resolverClient({
+      state: "FUTURE_STATE",
+      alertId: "alert-secret"
+    }) }));
+
+    expect(await screen.findByText("Linked alert context is unavailable.")).toBeInTheDocument();
+    expect(screen.queryByText("alert-secret")).not.toBeInTheDocument();
+    expectNoAlertFields();
+  });
+
+  it("NonAvailableStateWithAccidentalAlertPayloadDoesNotRenderAlertFieldsTest", async () => {
+    render(page({ linkedAlertContextClient: resolverClient({
+      state: "NO_LINKED_ALERT",
+      alertId: "alert-secret",
+      transactionId: "txn-secret",
+      customerId: "customer-secret"
+    }) }));
+
+    expect(await screen.findByText("No linked alert.")).toBeInTheDocument();
+    expect(screen.queryByText("txn-secret")).not.toBeInTheDocument();
+    expect(screen.queryByText("customer-secret")).not.toBeInTheDocument();
+    expectNoAlertFields();
+  });
+
+  it("RelationshipMismatchWithAccidentalAlertPayloadDoesNotRenderAlertFieldsTest", async () => {
+    render(page({ linkedAlertContextClient: resolverClient({
+      state: "LINKED_ALERT_RELATIONSHIP_MISMATCH",
+      alertId: "alert-secret",
+      transactionId: "txn-secret",
+      customerId: "customer-secret"
+    }) }));
+
+    expect(await screen.findByText("Linked alert context could not be verified.")).toBeInTheDocument();
+    expect(screen.queryByText("txn-secret")).not.toBeInTheDocument();
+    expect(screen.queryByText("customer-secret")).not.toBeInTheDocument();
+    expectNoAlertFields();
+  });
+
+  it("AlertReadOnlyContextPageHandlesAccessDeniedTest", async () => {
+    render(page({
+      linkedAlertContextClient: resolverClientError(new ApiError({ status: 403, message: "raw forbidden alert-secret" }))
+    }));
+
+    expect(await screen.findByText("Alert detail requires alert read access.")).toBeInTheDocument();
+    expect(screen.queryByText(/alert-secret/)).not.toBeInTheDocument();
+  });
+
+  it("AlertReadOnlyContextPageDoesNotFallbackAfterForbiddenTest", async () => {
+    const getAlert = vi.fn();
+    render(page({
+      linkedAlertContextClient: resolverClientError(new ApiError({ status: 403, message: "raw forbidden alert-secret" })),
+      getAlert
+    }));
+
+    expect(await screen.findByText("Alert detail requires alert read access.")).toBeInTheDocument();
+    expect(getAlert).not.toHaveBeenCalled();
+  });
+
+  it("AlertReadOnlyContextPageDoesNotRenderAlertFieldsAfterForbiddenTest", async () => {
+    render(page({
+      linkedAlertContextClient: resolverClientError(new ApiError({ status: 401, message: "raw forbidden alert-secret" }))
+    }));
+
+    expect(await screen.findByText("Alert detail requires alert read access.")).toBeInTheDocument();
+    expectNoAlertFields();
+  });
+
+  it("AlertReadOnlyContextPageDoesNotFetchWhenSourceLoadingTest", () => {
+    const linkedAlertContextClient = resolverClient();
+    render(page({ sourceSuspiciousTransactionLoading: true, linkedAlertContextClient }));
+
+    expect(linkedAlertContextClient.getSuspiciousTransactionLinkedAlertContext).not.toHaveBeenCalled();
+    expect(screen.getAllByText("Verifying linked alert context")).toHaveLength(3);
+  });
+
+  it("AlertReadOnlyContextPageDoesNotFetchWhenSourceLoadErrorTest", () => {
+    const linkedAlertContextClient = resolverClient();
+    render(page({
+      sourceSuspiciousTransactionError: new Error("raw source alert-secret customer-secret"),
+      linkedAlertContextClient
+    }));
+
+    expect(linkedAlertContextClient.getSuspiciousTransactionLinkedAlertContext).not.toHaveBeenCalled();
+    expect(screen.getByText("Linked alert context is unavailable.")).toBeInTheDocument();
+    expect(screen.queryByText(/alert-secret/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/customer-secret/)).not.toBeInTheDocument();
+  });
+
+  it("AlertReadOnlyContextPageFailsClosedWhenSuspiciousTransactionIdMissingTest", () => {
+    const linkedAlertContextClient = resolverClient();
+    render(page({ suspiciousTransactionId: "", linkedAlertContextClient }));
+
+    expect(linkedAlertContextClient.getSuspiciousTransactionLinkedAlertContext).not.toHaveBeenCalled();
+    expect(screen.getByText("Linked alert context could not be verified.")).toBeInTheDocument();
+  });
+
+  it("AlertReadOnlyContextPageHandlesLoadingTest", () => {
+    render(page({ linkedAlertContextClient: {
+      getSuspiciousTransactionLinkedAlertContext: vi.fn(() => new Promise(() => {}))
+    } }));
+
+    expect(screen.getByText("Loading alert context...")).toBeInTheDocument();
   });
 
   it("AlertReadOnlyContextPageDoesNotRenderMutationControlsTest", async () => {
@@ -39,21 +273,14 @@ describe("AlertReadOnlyContextPage", () => {
     ]);
   });
 
-  it("AlertReadOnlyContextPageDoesNotRenderCaseLifecycleControlsTest", async () => {
+  it("AlertReadOnlyContextPageDoesNotRenderWorkflowControlsTest", async () => {
     render(page());
 
     await screen.findByRole("heading", { name: "Alert context" });
     expectAbsentVisibleText(["create case", "link case", "ass" + "ign", "cla" + "im", "close", "reopen"]);
   });
 
-  it("AlertReadOnlyContextPageDoesNotRenderEvidenceProofPanelTest", async () => {
-    render(page());
-
-    await screen.findByRole("heading", { name: "Alert context" });
-    expectAbsentVisibleText(["assistant summary", "feature snapshot", "score details", "transaction summary", "evidence proof"]);
-  });
-
-  it("AlertReadOnlyContextPageDoesNotUseFraudVerdictWordingTest", async () => {
+  it("AlertReadOnlyContextPageDoesNotRenderFraudVerdictWordingTest", async () => {
     render(page());
 
     await screen.findByRole("heading", { name: "Alert context" });
@@ -62,155 +289,25 @@ describe("AlertReadOnlyContextPage", () => {
     expect(bodyText).not.toContain("confirmed fraud");
   });
 
-  it("AlertReadOnlyContextPageDoesNotUseFinalOutcomeWordingTest", async () => {
+  it("AlertReadOnlyContextPageDoesNotRenderAssistantSummaryTest", async () => {
     render(page());
 
     await screen.findByRole("heading", { name: "Alert context" });
-    const bodyText = document.body.textContent.replace(/Not a final outcome\./g, "").toLowerCase();
-    expect(bodyText).not.toContain("final outcome");
-    expect(bodyText).not.toContain("case decision");
-    expect(bodyText).not.toContain("legal proof");
+    expect(screen.queryByText(/assistant summary/i)).not.toBeInTheDocument();
   });
 
-  it("AlertReadOnlyContextPageDoesNotFetchWhenSourceMissingTest", () => {
-    const alertReadClient = readClient();
-    render(page({ sourceSuspiciousTransaction: null, alertReadClient }));
+  it("AlertReadOnlyContextPageDoesNotRenderEvidenceProofPanelTest", async () => {
+    render(page());
 
-    expect(alertReadClient.getAlert).not.toHaveBeenCalled();
-    expect(screen.getAllByText("Verifying linked alert context")).toHaveLength(3);
+    await screen.findByRole("heading", { name: "Alert context" });
+    expectAbsentVisibleText(["feature snapshot", "score details", "transaction summary", "evidence proof"]);
   });
 
-  it("AlertReadOnlyContextPageDoesNotFetchWhenSourceLoadingTest", () => {
-    const alertReadClient = readClient();
-    render(page({ sourceSuspiciousTransaction: null, sourceSuspiciousTransactionLoading: true, alertReadClient }));
+  it("AlertReadOnlyContextPageUsesAlertScoreWordingTest", async () => {
+    render(page());
 
-    expect(alertReadClient.getAlert).not.toHaveBeenCalled();
-    expect(screen.getAllByText("Verifying linked alert context")).toHaveLength(3);
-  });
-
-  it("AlertReadOnlyContextPageDoesNotFetchWhenSourceLoadErrorTest", () => {
-    const alertReadClient = readClient();
-    render(page({
-      sourceSuspiciousTransaction: null,
-      sourceSuspiciousTransactionError: new Error("raw source alert-secret customer-secret"),
-      alertReadClient
-    }));
-
-    expect(alertReadClient.getAlert).not.toHaveBeenCalled();
-    expect(screen.getByText("Linked alert context is unavailable.")).toBeInTheDocument();
-    expect(screen.queryByText(/alert-secret/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/customer-secret/)).not.toBeInTheDocument();
-  });
-
-  it("AlertReadOnlyContextPageDoesNotFetchWhenSourceLinkedAlertMismatchTest", () => {
-    const alertReadClient = readClient();
-    render(page({
-      sourceSuspiciousTransaction: sourceSuspiciousTransaction({ linkedAlertId: "alert-other" }),
-      alertReadClient
-    }));
-
-    expect(alertReadClient.getAlert).not.toHaveBeenCalled();
-    expect(screen.getByText("Linked alert context could not be verified.")).toBeInTheDocument();
-  });
-
-  it("AlertReadOnlyContextPageFetchesOnlyWhenSourceLinkedAlertMatchesTest", async () => {
-    const alertReadClient = readClient();
-    render(page({ alertReadClient }));
-
-    await waitFor(() => expect(alertReadClient.getAlert).toHaveBeenCalledWith("alert-1", expect.objectContaining({
-      signal: expect.any(AbortSignal)
-    })));
-  });
-
-  it("AlertReadOnlyContextPageVerifiesLoadedAlertMatchesSourceTest", async () => {
-    render(page({
-      alertReadClient: readClient(alertDetails({ transactionId: "txn-other" }))
-    }));
-
-    expect(await screen.findByText("Linked alert context could not be verified.")).toBeInTheDocument();
-    expect(screen.queryByText("Read-only alert metadata")).not.toBeInTheDocument();
-  });
-
-  it("AlertReadOnlyContextPageMismatchDoesNotLogRawIdsTest", async () => {
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    render(page({
-      alertReadClient: readClient(alertDetails({ customerId: "customer-secret" }))
-    }));
-
-    expect(await screen.findByText("Linked alert context could not be verified.")).toBeInTheDocument();
-    expect(JSON.stringify([...consoleError.mock.calls, ...consoleWarn.mock.calls])).not.toContain("customer-secret");
-    consoleError.mockRestore();
-    consoleWarn.mockRestore();
-  });
-
-  it("AlertReadOnlyContextPageHandlesLoadingTest", () => {
-    render(page({ alertReadClient: { getAlert: vi.fn(() => new Promise(() => {})) } }));
-
-    expect(screen.getByText("Loading alert context...")).toBeInTheDocument();
-  });
-
-  it("AlertReadOnlyContextPageHandlesSourceVerificationTest", () => {
-    render(page({ sourceSuspiciousTransaction: null }));
-
-    expect(screen.getAllByText("Verifying linked alert context")).toHaveLength(3);
-  });
-
-  it("AlertReadOnlyContextPageHandlesInvalidContextTest", () => {
-    render(page({ sourceSuspiciousTransaction: sourceSuspiciousTransaction({ linkedAlertId: "alert-other" }) }));
-
-    expect(screen.getByText("Linked alert context could not be verified.")).toBeInTheDocument();
-  });
-
-  it("AlertReadOnlyContextPageHandlesSourceUnavailableTest", () => {
-    render(page({ sourceSuspiciousTransaction: null, sourceSuspiciousTransactionError: new Error("raw source") }));
-
-    expect(screen.getByText("Linked alert context is unavailable.")).toBeInTheDocument();
-  });
-
-  it("AlertReadOnlyContextPageHandlesAccessDeniedTest", () => {
-    const alertReadClient = readClient();
-    render(page({ canReadAlert: false, alertReadClient }));
-
-    expect(alertReadClient.getAlert).not.toHaveBeenCalled();
-    expect(screen.getByText("Alert detail requires alert read access.")).toBeInTheDocument();
-  });
-
-  it("AlertReadOnlyContextPageHandlesNotFoundTest", async () => {
-    render(page({
-      alertReadClient: readClientError(new ApiError({ status: 404, message: "raw missing alert-secret" }))
-    }));
-
-    expect(await screen.findAllByText("Alert not found")).toHaveLength(3);
-    expect(screen.queryByText(/alert-secret/)).not.toBeInTheDocument();
-  });
-
-  it("AlertReadOnlyContextPageHandlesGenericErrorWithoutRawPayloadTest", async () => {
-    render(page({
-      alertReadClient: readClientError(new ApiError({ status: 500, message: "MongoTimeout customer-secret alert-secret" }))
-    }));
-
-    expect(await screen.findByText("Alert context is temporarily unavailable.")).toBeInTheDocument();
-    expect(screen.queryByText(/customer-secret/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/alert-secret/)).not.toBeInTheDocument();
-  });
-
-  it("AlertReadOnlyContextPageDoesNotReceiveFullApiClientTest", () => {
-    const alertReadClient = {
-      getAlert: vi.fn(),
-      submitAnalystDecision: vi.fn()
-    };
-    render(page({ alertReadClient }));
-
-    expect(alertReadClient.getAlert).not.toHaveBeenCalled();
-    expect(screen.getByText("Alert context is temporarily unavailable.")).toBeInTheDocument();
-  });
-
-  it("AlertReadOnlyContextPageUsesGetAlertOnlyTest", async () => {
-    const alertReadClient = readClient();
-    render(page({ alertReadClient }));
-
-    await waitFor(() => expect(alertReadClient.getAlert).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("Alert score")).toBeInTheDocument();
+    expect(screen.queryByText("Fraud score")).not.toBeInTheDocument();
   });
 
   it("AlertReadOnlyContextPageDoesNotLogRawIdentifiersTest", async () => {
@@ -224,7 +321,7 @@ describe("AlertReadOnlyContextPage", () => {
     consoleLog.mockRestore();
   });
 
-  it("AlertReadOnlyContextPageDoesNotStoreIdentifiersTest", async () => {
+  it("AlertReadOnlyContextPageDoesNotPersistAlertIdInBrowserStorageTest", async () => {
     const setLocal = vi.spyOn(Storage.prototype, "setItem");
     render(page());
 
@@ -234,18 +331,19 @@ describe("AlertReadOnlyContextPage", () => {
     setLocal.mockRestore();
   });
 
-  it("AlertReadOnlyContextPageDoesNotEmitAnalyticsIdentifiersTest", async () => {
-    const originalSendBeacon = navigator.sendBeacon;
-    const sendBeacon = vi.fn(() => true);
-    Object.defineProperty(navigator, "sendBeacon", { configurable: true, value: sendBeacon });
-    render(page());
+  it("LinkedAlertContextErrorBoundaryDoesNotLogRawIdentifiersTest", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(page({
+      linkedAlertContextClient: resolverClientError(new ApiError({ status: 500, message: "MongoTimeout customer-secret alert-secret" }))
+    }));
 
-    await screen.findByRole("heading", { name: "Alert context" });
-    expect(JSON.stringify(sendBeacon.mock.calls)).not.toContain("alert-1");
-    Object.defineProperty(navigator, "sendBeacon", { configurable: true, value: originalSendBeacon });
+    expect(await screen.findByText("Alert context is temporarily unavailable.")).toBeInTheDocument();
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain("customer-secret");
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain("alert-secret");
+    consoleError.mockRestore();
   });
 
-  it("AlertReadOnlyBridgeNoTelemetryGuardStillPassesTest", () => {
+  it("SourceDoesNotUseForbiddenTelemetryOrStorageSinksTest", () => {
     const source = pageSource();
     expect(source).not.toContain("console.");
     expect(source).not.toContain("trackEvent");
@@ -259,18 +357,6 @@ describe("AlertReadOnlyContextPage", () => {
 
   it("AlertReadOnlyContextPageDoesNotImportAlertDetailsPageTest", () => {
     expect(pageSource()).not.toContain("AlertDetailsPage");
-  });
-
-  it("AlertReadOnlyContextPageDoesNotImportDecisionFormTest", () => {
-    expect(pageSource()).not.toContain("AnalystDecisionForm");
-  });
-
-  it("AlertReadOnlyContextPageDoesNotImportAssistantSummaryTest", () => {
-    expect(pageSource()).not.toContain("AssistantSummaryPanel");
-  });
-
-  it("AlertReadOnlyContextPageDoesNotImportJsonInspectorTest", () => {
-    expect(pageSource()).not.toContain("JsonInspector");
   });
 
   it("AlertReadOnlyContextPageDoesNotReferenceMutationMethodsTest", () => {
@@ -308,9 +394,9 @@ describe("AlertReadOnlyContextPage", () => {
 function page(overrides = {}) {
   return (
     <AlertReadOnlyContextPage
-      alertId="alert-1"
+      suspiciousTransactionId="suspicious-1"
       sourceSuspiciousTransaction={sourceSuspiciousTransaction()}
-      alertReadClient={readClient()}
+      linkedAlertContextClient={resolverClient()}
       canReadAlert
       onBack={vi.fn()}
       {...overrides}
@@ -318,30 +404,30 @@ function page(overrides = {}) {
   );
 }
 
-function readClient(nextAlert = alertDetails()) {
+function resolverClient(nextContext = linkedAlertAvailable()) {
   return {
-    getAlert: vi.fn().mockResolvedValue(nextAlert)
+    getSuspiciousTransactionLinkedAlertContext: vi.fn().mockResolvedValue(nextContext)
   };
 }
 
-function readClientError(error) {
+function resolverClientError(error) {
   return {
-    getAlert: vi.fn().mockRejectedValue(error)
+    getSuspiciousTransactionLinkedAlertContext: vi.fn().mockRejectedValue(error)
   };
 }
 
-function alertDetails(overrides = {}) {
+function linkedAlertAvailable(overrides = {}) {
   return {
+    state: "LINKED_ALERT_AVAILABLE",
     alertId: "alert-1",
-    alertReason: "High-risk transaction",
     createdAt: "2026-05-14T10:00:00Z",
     updatedAt: "2026-05-14T10:10:00Z",
-    alertTimestamp: "2026-05-14T10:00:00Z",
     correlationId: "corr-1",
     riskLevel: "HIGH",
-    fraudScore: 0.91,
+    alertScore: 0.91,
     alertStatus: "OPEN",
     customerId: "customer-1",
+    accountId: "account-1",
     transactionId: "txn-1",
     scoreDecisionId: "score-1",
     reasonCodes: ["HIGH_AMOUNT_ACTIVITY"],
@@ -358,6 +444,12 @@ function sourceSuspiciousTransaction(overrides = {}) {
     scoreDecisionId: "score-1",
     ...overrides
   };
+}
+
+function expectNoAlertFields() {
+  expect(screen.queryByText("Read-only alert metadata")).not.toBeInTheDocument();
+  expect(screen.queryByText("Reason codes")).not.toBeInTheDocument();
+  expect(screen.queryByText("Alert score")).not.toBeInTheDocument();
 }
 
 function expectAbsentVisibleText(labels) {

@@ -142,18 +142,19 @@ class SuspiciousTransactionLinkedAlertContextDocsContractTest {
     }
 
     @Test
-    void DocsMentionUiMigrationIsOutOfScopeForFdp69Test() throws Exception {
+    void DocsMentionUiMigrationUsesBackendResolverTest() throws Exception {
         assertThat(docs())
-                .contains("FDP-69 introduces the backend linked-alert context resolver")
-                .contains("FDP-69 does not migrate the UI workflow")
-                .contains("AlertReadOnlyContextPage may continue using the existing read-only client until FDP-70");
+                .contains("FDP-70 migrates the SuspiciousTransaction linked-alert UI to the FDP-69 backend resolver")
+                .contains("FDP-70 migrates the SuspiciousTransaction linked-alert UI to the FDP-69 backend relationship resolver")
+                .contains("AlertReadOnlyContextPage calls GET `/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`");
     }
 
     @Test
-    void DocsMentionFutureUiMigrationCanUseBackendResolverTest() throws Exception {
+    void DocsMentionUiNoLongerUsesGeneralAlertLookupTest() throws Exception {
         assertThat(docs())
-                .contains("Future FDP-70 may switch AlertReadOnlyContextPage to call GET")
-                .contains("/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert");
+                .contains("does not call GET `/api/v1/alerts/{alertId}`")
+                .contains("The frontend sends `suspiciousTransactionId` only")
+                .contains("does not send `alertId` or `linkedAlertId` to the resolver");
     }
 
     @Test

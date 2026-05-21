@@ -105,25 +105,22 @@ describe("SuspiciousTransactionWorkspacePage", () => {
     expect(screen.getByText("Reference view")).toBeInTheDocument();
   });
 
-  it("viewAlertContextPassesAlertIdAndSuspiciousTransactionId", () => {
-    const onOpenAlert = vi.fn();
+  it("viewAlertContextPassesSuspiciousTransactionIdOnly", () => {
+    const onOpenSuspiciousLinkedAlertContext = vi.fn();
     render(
       <SuspiciousTransactionWorkspacePage
         readViewState={readViewState({ detail: suspiciousTransaction({ linkedAlertId: "alert-reference-1" }) })}
         canReadSuspiciousTransactions
         canReadAlerts
         selectedSuspiciousTransactionId="suspicious-1"
-        onOpenAlert={onOpenAlert}
+        onOpenSuspiciousLinkedAlertContext={onOpenSuspiciousLinkedAlertContext}
         onCloseSuspiciousTransaction={vi.fn()}
       />
     );
 
     fireEvent.click(screen.getByRole("button", { name: "View alert context" }));
 
-    expect(onOpenAlert).toHaveBeenCalledWith({
-      alertId: "alert-reference-1",
-      suspiciousTransactionId: "suspicious-1"
-    });
+    expect(onOpenSuspiciousLinkedAlertContext).toHaveBeenCalledWith("suspicious-1");
   });
 
   it("missingSuspiciousTransactionIdDoesNotRenderViewAlertContext", () => {
@@ -135,7 +132,7 @@ describe("SuspiciousTransactionWorkspacePage", () => {
         canReadSuspiciousTransactions
         canReadAlerts
         selectedSuspiciousTransactionId="suspicious-1"
-        onOpenAlert={vi.fn()}
+        onOpenSuspiciousLinkedAlertContext={vi.fn()}
         onCloseSuspiciousTransaction={vi.fn()}
       />
     );
@@ -151,7 +148,7 @@ describe("SuspiciousTransactionWorkspacePage", () => {
         canReadSuspiciousTransactions
         canReadAlerts
         selectedSuspiciousTransactionId="suspicious-1"
-        onOpenAlert={vi.fn()}
+        onOpenSuspiciousLinkedAlertContext={vi.fn()}
         onCloseSuspiciousTransaction={vi.fn()}
       />
     );
@@ -167,7 +164,7 @@ describe("SuspiciousTransactionWorkspacePage", () => {
         canReadSuspiciousTransactions
         canReadAlerts={false}
         selectedSuspiciousTransactionId="suspicious-1"
-        onOpenAlert={vi.fn()}
+        onOpenSuspiciousLinkedAlertContext={vi.fn()}
         onCloseSuspiciousTransaction={vi.fn()}
       />
     );
@@ -183,7 +180,7 @@ describe("SuspiciousTransactionWorkspacePage", () => {
         canReadSuspiciousTransactions
         canReadAlerts={false}
         selectedSuspiciousTransactionId="suspicious-1"
-        onOpenAlert={vi.fn()}
+        onOpenSuspiciousLinkedAlertContext={vi.fn()}
         onCloseSuspiciousTransaction={vi.fn()}
       />
     );
@@ -255,7 +252,7 @@ describe("SuspiciousTransactionWorkspacePage", () => {
         canReadSuspiciousTransactions
         canReadAlerts
         selectedSuspiciousTransactionId="suspicious-1"
-        onOpenAlert={vi.fn()}
+        onOpenSuspiciousLinkedAlertContext={vi.fn()}
         onCloseSuspiciousTransaction={vi.fn()}
       />
     );
