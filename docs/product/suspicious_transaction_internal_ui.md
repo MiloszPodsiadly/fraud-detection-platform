@@ -196,6 +196,8 @@ The metric name is `fraud.suspicious_transaction.linked_alert.read`.
 Allowed metric labels are `endpoint=linked_alert_context` and the allowlisted `outcome` values: `available`,
 `no_linked_alert`, `linked_alert_not_found`, `relationship_mismatch`, `temporarily_unavailable`, `validation_error`,
 `suspicious_transaction_not_found`, and `error`.
+`validation_error` means the client supplied an unsupported selector such as `alertId`; it is a bounded endpoint outcome, not raw validation detail.
+`suspicious_transaction_not_found` means the source SuspiciousTransaction was not found; it is a bounded endpoint outcome, not a raw identifier.
 Metrics observe resolver state, not entities.
 Metrics must never contain raw identifiers, raw paths, raw query strings, raw exception messages, request bodies,
 response bodies, or idempotency keys. Metrics and ordinary logs must not log raw identifiers.

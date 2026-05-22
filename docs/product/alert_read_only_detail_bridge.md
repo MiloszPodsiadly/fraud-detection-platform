@@ -186,6 +186,8 @@ Allowed metric labels are:
 - `outcome=suspicious_transaction_not_found`
 - `outcome=error`
 
+`validation_error` means the client supplied an unsupported selector such as `alertId`. It is a bounded endpoint outcome, not raw validation detail.
+`suspicious_transaction_not_found` means the source SuspiciousTransaction was not found. It is a bounded endpoint outcome, not a raw identifier.
 Metrics observe resolver state, not entities.
 Metrics must never contain raw identifiers.
 Metrics and ordinary logs must not log raw identifiers.
