@@ -49,6 +49,29 @@ evidenceType, severity, source, and status.
 
 Malformed enum-like values should render as `UNKNOWN` or a safe fallback.
 
+## FDP-75 Contract Hardening
+
+FDP-75 keeps the FDP-74 product surface unchanged and hardens the UI contract around rendering, copy, and test fixtures.
+
+Display helpers are intentionally narrow:
+
+- `safeArray`
+- `normalizeEvidenceCode`
+- `safeTruncationReason`
+- `formatCount`
+- `toCountItem`
+
+The component must use bounded copy for evidence items. It must not render response `title`, response `description`,
+raw payloads, raw attributes, raw identifiers, raw backend error payloads, or generic sanitized backend text. Unknown
+or malformed enum-like values render as `UNKNOWN` or a documented fallback.
+
+The evidence summary section accepts only the fraud case id, the evidence summary fetch function, and presentation
+props. It must not accept API clients, write handlers, linked-alert identifiers, suspicious transaction identifiers,
+raw evidence payloads, or workflow callbacks.
+
+Source-level tests guard that the section does not import alert detail clients, suspicious transaction clients, workflow
+helpers, mutation helpers, raw payload renderers, JSON inspectors, drilldowns, or alternate API fallbacks.
+
 ## Rendered Fields
 
 Allowed fields:
@@ -123,3 +146,8 @@ remain elsewhere on the page and are not added, removed, or redefined by FDP-74.
 - Does not render raw payloads, raw identifiers, JSON inspector, drilldowns, or mutation controls.
 - Does not expose raw backend errors.
 - Evidence summary failure does not break the rest of FraudCase detail.
+- FDP-75 does not expand the product surface beyond FDP-74.
+- Display and copy helpers remain explicit and evidence-summary-specific.
+- Shared fixtures cover available, partial, legacy, truncated, unavailable, malformed, and raw-payload response shapes.
+- Source-level guards prevent fallback clients, raw renderers, workflow helpers, mutation helpers, and raw response field
+  rendering.
