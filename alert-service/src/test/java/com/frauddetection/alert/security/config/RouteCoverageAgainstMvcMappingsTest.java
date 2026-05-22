@@ -22,6 +22,7 @@ import com.frauddetection.alert.audit.read.ReadAccessAuditService;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.controller.AlertController;
 import com.frauddetection.alert.controller.FraudCaseController;
+import com.frauddetection.alert.controller.FraudCaseEvidenceSummaryController;
 import com.frauddetection.alert.controller.FraudCaseWorkQueueSummaryController;
 import com.frauddetection.alert.controller.ScoredTransactionController;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
@@ -44,6 +45,7 @@ import com.frauddetection.alert.security.session.AnalystSessionController;
 import com.frauddetection.alert.service.AlertManagementUseCase;
 import com.frauddetection.alert.service.DecisionOutboxReconciliationController;
 import com.frauddetection.alert.service.DecisionOutboxReconciliationService;
+import com.frauddetection.alert.service.FraudCaseEvidenceSummaryService;
 import com.frauddetection.alert.service.FraudCaseManagementService;
 import com.frauddetection.alert.service.FraudCaseQueryService;
 import com.frauddetection.alert.service.ScoredTransactionSearchPolicy;
@@ -84,6 +86,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @WebMvcTest({
         AlertController.class,
         FraudCaseController.class,
+        FraudCaseEvidenceSummaryController.class,
         FraudCaseWorkQueueSummaryController.class,
         ScoredTransactionController.class,
         AuditEventController.class,
@@ -124,6 +127,9 @@ class RouteCoverageAgainstMvcMappingsTest {
 
     @MockBean
     private FraudCaseManagementService fraudCaseManagementService;
+
+    @MockBean
+    private FraudCaseEvidenceSummaryService fraudCaseEvidenceSummaryService;
 
     @MockBean
     private FraudCaseQueryService fraudCaseQueryService;

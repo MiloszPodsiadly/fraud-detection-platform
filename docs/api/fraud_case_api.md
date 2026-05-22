@@ -19,6 +19,7 @@ exactly-once execution, and not external finality.
 | --- | --- | --- |
 | `POST` | `/api/v1/fraud-cases` | Create a fraud case from alert ids. |
 | `GET` | `/api/v1/fraud-cases/{caseId}` | Read case details. |
+| `GET` | `/api/v1/fraud-cases/{caseId}/evidence-summary` | Read bounded evidence-summary context from linked alert evidence snapshots. |
 | `GET` | `/api/v1/fraud-cases` | Search cases. |
 | `POST` | `/api/v1/fraud-cases/{caseId}/assign` | Assign or reassign investigator. |
 | `POST` | `/api/v1/fraud-cases/{caseId}/notes` | Append investigator note. |
@@ -30,9 +31,34 @@ exactly-once execution, and not external finality.
 
 Authorities:
 
-- `GET /fraud-cases` and `GET /fraud-cases/{caseId}` require `fraud-case:read`.
+- `GET /fraud-cases`, `GET /fraud-cases/{caseId}`, and
+  `GET /fraud-cases/{caseId}/evidence-summary` require `fraud-case:read`.
 - Lifecycle `POST` endpoints require `fraud-case:update`.
 - `GET /fraud-cases/{caseId}/audit` requires `fraud-case:audit:read` and intentionally returns audit `actorId`.
+
+Evidence-summary semantics:
+
+- The evidence summary is a read-only projection over `FraudCaseDocument.linkedAlertIds` and linked
+  `AlertDocument.evidenceSnapshot` entries.
+- Direct SuspiciousTransaction aggregation is intentionally out of scope for FDP-73 v1. SuspiciousTransaction-derived
+  context may appear only if already materialized into a linked alert evidence snapshot.
+- It returns bounded reason-code, evidence type, severity, source, status, and enum-derived product copy for title
+  and description context only.
+- It does not expose raw alert ids, customer or account identifiers, transaction ids, correlation ids, source event
+  ids, feature snapshots, model payloads, score details, or raw evidence attributes.
+- It does not create or edit evidence, mutate fraud-case lifecycle state, create analyst decisions, publish Kafka
+  events, or claim a final outcome.
+- Because this endpoint is under `/api/v1`, response fields are treated as an internal product API contract. Future
+  changes should preserve non-claims and avoid changing the meaning of `aggregateEvidenceStatus`, `partial`,
+  `legacy`, `truncated`, and `truncationReason` without a documented migration.
+- `linkedAlertCount` is the total normalized linked alert count on the FraudCase, not the number of alerts processed.
+  If the linked-alert limit is exceeded, the projection processes a bounded window, sets `truncated=true`,
+  `truncationReason=LINKED_ALERT_LIMIT_EXCEEDED`, `partial=true`, and prevents `AVAILABLE` unless `ERROR` dominates.
+- FDP-73 does not expose `missingLinkedAlertCount`; missing linked alert coverage is represented by `partial=true`
+  and aggregate `PARTIAL`.
+- `AVAILABLE` means every included evidence item is available, at least one evidence item exists, and linked-alert
+  source coverage is complete. Empty, legacy, unavailable, stale, partial, not-applicable, missing-source, or
+  truncated-source states do not become `AVAILABLE`; `ERROR` dominates.
 
 List semantics:
 
