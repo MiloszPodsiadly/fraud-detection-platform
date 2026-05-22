@@ -14,6 +14,7 @@ class FraudCaseAuthorizationRules implements EndpointAuthorizationRuleGroup {
                 .requestMatchers(HttpMethod.GET, "/api/v1/fraud-cases/work-queue").hasAuthority(AnalystAuthority.FRAUD_CASE_READ)
                 .requestMatchers(HttpMethod.GET, "/api/v1/fraud-cases/work-queue/summary").hasAuthority(AnalystAuthority.FRAUD_CASE_READ)
                 .requestMatchers(HttpMethod.GET, "/api/v1/fraud-cases/{caseId}").hasAuthority(AnalystAuthority.FRAUD_CASE_READ)
+                .requestMatchers(HttpMethod.GET, "/api/v1/fraud-cases/{caseId}/evidence-summary").hasAuthority(AnalystAuthority.FRAUD_CASE_READ)
                 .requestMatchers(HttpMethod.GET, "/api/v1/fraud-cases/{caseId}/audit").hasAuthority(AnalystAuthority.FRAUD_CASE_AUDIT_READ)
                 .requestMatchers(HttpMethod.POST, "/api/v1/fraud-cases").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)
                 .requestMatchers(HttpMethod.POST, "/api/v1/fraud-cases/{caseId}/assign").hasAuthority(AnalystAuthority.FRAUD_CASE_UPDATE)

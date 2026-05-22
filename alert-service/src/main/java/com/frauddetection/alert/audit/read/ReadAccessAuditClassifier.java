@@ -38,6 +38,9 @@ public class ReadAccessAuditClassifier {
         if ("/api/v1/fraud-cases/{caseId}".equals(pattern)) {
             return Optional.of(target(ReadAccessEndpointCategory.FRAUD_CASE_DETAIL, ReadAccessResourceType.FRAUD_CASE, variables.get("caseId"), request));
         }
+        if ("/api/v1/fraud-cases/{caseId}/evidence-summary".equals(pattern)) {
+            return Optional.of(target(ReadAccessEndpointCategory.FRAUD_CASE_EVIDENCE_SUMMARY, ReadAccessResourceType.FRAUD_CASE, variables.get("caseId"), request));
+        }
         if ("/api/v1/transactions/scored".equals(pattern)) {
             return Optional.of(target(ReadAccessEndpointCategory.SCORED_TRANSACTION_SEARCH, ReadAccessResourceType.SCORED_TRANSACTION, null, request));
         }
