@@ -171,6 +171,10 @@ The response must not expose analyst decisions, idempotency keys, case lifecycle
 evidence snapshots, legal-proof material, raw payloads, score details, or feature snapshots.
 
 Sensitive read audit remains the existing audit policy. Metrics are separate diagnostic signals and do not replace audit.
+FDP-72 forbids raw identifiers in metrics and ordinary logs. It does not change existing sensitive-read audit policy.
+The source SuspiciousTransaction resourceId may remain the audited resource identifier.
+Audit is a controlled security/audit channel and is not the same as metrics or ordinary logs.
+Audit access, storage, and retention must be governed by the existing audit policy.
 FDP-72 records bounded backend resolver outcome metrics for linked-alert context reads.
 The metric name is `fraud.suspicious_transaction.linked_alert.read`.
 The linked-alert resolver metrics use bounded outcome labels only.
@@ -188,11 +192,20 @@ Allowed metric labels are:
 
 `validation_error` means the client supplied an unsupported selector such as `alertId`. It is a bounded endpoint outcome, not raw validation detail.
 `suspicious_transaction_not_found` means the source SuspiciousTransaction was not found. It is a bounded endpoint outcome, not a raw identifier.
+FDP-72 replaces the previous linked-alert metric outcome label `unavailable` with `temporarily_unavailable` to align
+with the resolver response state. Existing dashboards or ad-hoc queries using `outcome=unavailable` must migrate to
+`outcome=temporarily_unavailable`.
+The endpoint label `endpoint=linked_alert_context` is a constant label introduced with the bounded recorder contract.
+FDP-72 does not dual-emit the legacy `unavailable` label and does not add a compatibility metric unless explicitly required by operations.
 Metrics observe resolver state, not entities.
 Metrics must never contain raw identifiers.
 Metrics and ordinary logs must not log raw identifiers.
 Metrics must never contain request path, query string, request body, response body, or raw exception message.
 Metrics failure must not alter the linked-alert read response.
+Custom recorder implementations must not log raw identifiers or exception messages, even when rethrowing.
+Resolver outcome metrics are bounded and do not contain raw identifiers, but metrics dashboards and metric query access
+should remain access-controlled.
+Aggregated outcomes such as suspicious_transaction_not_found may still be operationally sensitive in small environments.
 401 and 403 observability remains owned by the security layer. FDP-72 does not add an `authState` metric label.
 FDP-72 does not add dashboards, alerting thresholds, tracing rollout, frontend behavior, DTO fields, endpoint behavior,
 authorization behavior, or workflow behavior.
