@@ -19,6 +19,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.IntStream;
 
@@ -237,6 +238,130 @@ class FraudCaseEvidenceSummaryServiceTest {
     }
 
     @Test
+    void FraudCaseEvidenceSummaryDoesNotExposeRawIdentifiersInTitleTest() throws Exception {
+        String json = jsonResponseWithDangerousTitleDescription();
+
+        assertThat(json)
+                .doesNotContain("customer-1")
+                .doesNotContain("account-1")
+                .doesNotContain("txn-1")
+                .doesNotContain("correlation-1")
+                .doesNotContain("alert-secret")
+                .doesNotContain("source-event-1");
+    }
+
+    @Test
+    void FraudCaseEvidenceSummaryDoesNotExposeRawIdentifiersInDescriptionTest() throws Exception {
+        String json = jsonResponseWithDangerousTitleDescription();
+
+        assertThat(json)
+                .doesNotContain("customer-1")
+                .doesNotContain("account-1")
+                .doesNotContain("txn-1")
+                .doesNotContain("correlation-1")
+                .doesNotContain("source-event-1");
+    }
+
+    @Test
+    void FraudCaseEvidenceSummaryDoesNotExposeRawModelPayloadInTitleOrDescriptionTest() throws Exception {
+        assertThat(jsonResponseWithDangerousTitleDescription())
+                .doesNotContain("raw-model-payload")
+                .doesNotContain("raw-baseline")
+                .doesNotContain("scoreDetails")
+                .doesNotContain("featureSnapshot");
+    }
+
+    @Test
+    void FraudCaseEvidenceSummaryDoesNotExposeRawEventPayloadInTitleOrDescriptionTest() throws Exception {
+        assertThat(jsonResponseWithDangerousTitleDescription())
+                .doesNotContain("payload")
+                .doesNotContain("secret:true")
+                .doesNotContain("{secret:true}");
+    }
+
+    @Test
+    void FraudCaseEvidenceSummaryTitleDescriptionAreBoundedProductCopyTest() {
+        FraudCaseEvidenceSummaryService service = service();
+        EvidenceSnapshotItem source = dangerousTextEvidence();
+        when(fraudCaseRepository.findById("case-sensitive")).thenReturn(Optional.of(caseWithAlerts("case-sensitive", "alert-1")));
+        when(alertRepository.findAllById(List.of("alert-1"))).thenReturn(List.of(alert("alert-1", source)));
+
+        var item = service.summary("case-sensitive").highestSeverityEvidence().getFirst();
+
+        assertThat(item.title()).isNotBlank();
+        assertThat(item.description()).isNotBlank();
+        assertThat(item.title()).isNotEqualTo(source.title());
+        assertThat(item.description()).isNotEqualTo(source.description());
+        assertThat(item.title()).isEqualTo("Rule evidence");
+        assertThat(item.description()).isEqualTo("Bounded evidence metadata derived from the linked alert evidence snapshot.");
+    }
+
+    @Test
+    void FraudCaseEvidenceSummaryMissingLinkedAlertDoesNotOverclaimAvailableTest() {
+        FraudCaseEvidenceSummaryService service = service();
+        when(fraudCaseRepository.findById("case-1")).thenReturn(Optional.of(caseWithAlerts("case-1", "alert-1", "alert-2")));
+        when(alertRepository.findAllById(List.of("alert-1", "alert-2"))).thenReturn(List.of(
+                alert("alert-1", evidence("HIGH_AMOUNT_ACTIVITY", EvidenceStatus.AVAILABLE, EvidenceSeverity.HIGH))
+        ));
+
+        var response = service.summary("case-1");
+
+        assertThat(response.aggregateEvidenceStatus()).isEqualTo(EvidenceStatus.PARTIAL);
+        assertThat(response.partial()).isTrue();
+        assertThat(response.linkedAlertCount()).isEqualTo(2);
+        assertThat(response.evidenceItemCount()).isEqualTo(1);
+        assertThat(response.truncated()).isFalse();
+    }
+
+    @Test
+    void FraudCaseEvidenceSummaryTruncatedDoesNotOverclaimAvailableTest() {
+        FraudCaseEvidenceSummaryService service = service();
+        List<String> alertIds = IntStream.rangeClosed(1, 101).mapToObj(index -> "alert-" + index).toList();
+        when(fraudCaseRepository.findById("case-1")).thenReturn(Optional.of(caseWithAlerts("case-1", alertIds.toArray(String[]::new))));
+        List<AlertDocument> firstHundred = IntStream.rangeClosed(1, 100)
+                .mapToObj(index -> alert("alert-" + index, evidence("REASON_" + index, EvidenceStatus.AVAILABLE, EvidenceSeverity.LOW)))
+                .toList();
+        when(alertRepository.findAllById(alertIds.subList(0, 100))).thenReturn(firstHundred);
+
+        var response = service.summary("case-1");
+
+        assertThat(response.aggregateEvidenceStatus()).isEqualTo(EvidenceStatus.PARTIAL);
+        assertThat(response.partial()).isTrue();
+        assertThat(response.truncated()).isTrue();
+        assertThat(response.truncationReason()).isEqualTo("LINKED_ALERT_LIMIT_EXCEEDED");
+        assertThat(response.linkedAlertCount()).isEqualTo(101);
+        assertThat(response.evidenceItemCount()).isEqualTo(100);
+    }
+
+    @Test
+    void FraudCaseEvidenceSummaryErrorStillDominatesWhenMissingLinkedAlertTest() {
+        FraudCaseEvidenceSummaryService service = service();
+        when(fraudCaseRepository.findById("case-1")).thenReturn(Optional.of(caseWithAlerts("case-1", "alert-1", "alert-2")));
+        when(alertRepository.findAllById(List.of("alert-1", "alert-2"))).thenReturn(List.of(
+                alert("alert-1", evidence("HIGH_AMOUNT_ACTIVITY", EvidenceStatus.ERROR, EvidenceSeverity.HIGH))
+        ));
+
+        var response = service.summary("case-1");
+
+        assertThat(response.aggregateEvidenceStatus()).isEqualTo(EvidenceStatus.ERROR);
+        assertThat(response.partial()).isTrue();
+    }
+
+    @Test
+    void FraudCaseEvidenceSummaryNullEvidenceSnapshotDoesNotFailTest() {
+        FraudCaseEvidenceSummaryService service = service();
+        when(fraudCaseRepository.findById("case-1")).thenReturn(Optional.of(caseWithAlerts("case-1", "alert-1")));
+        when(alertRepository.findAllById(List.of("alert-1"))).thenReturn(List.of(alertWithoutEvidenceSnapshot("alert-1")));
+
+        var response = service.summary("case-1");
+
+        assertThat(response.aggregateEvidenceStatus()).isEqualTo(EvidenceStatus.UNAVAILABLE);
+        assertThat(response.evidenceItemCount()).isZero();
+        assertThat(response.partial()).isFalse();
+        assertThat(response.legacy()).isFalse();
+    }
+
+    @Test
     void FraudCaseEvidenceSummaryDoesNotReuseFullAlertEvidenceSnapshotDtoTest() {
         assertThat(com.frauddetection.alert.api.EvidenceSummaryItemResponse.class.getRecordComponents())
                 .extracting(java.lang.reflect.RecordComponent::getName)
@@ -322,6 +447,14 @@ class FraudCaseEvidenceSummaryServiceTest {
         return objectMapper.writeValueAsString(service.summary("case-sensitive"));
     }
 
+    private String jsonResponseWithDangerousTitleDescription() throws Exception {
+        FraudCaseEvidenceSummaryService service = service();
+        when(fraudCaseRepository.findById("case-sensitive")).thenReturn(Optional.of(caseWithAlerts("case-sensitive", "alert-1")));
+        when(alertRepository.findAllById(List.of("alert-1"))).thenReturn(List.of(alert("alert-1", dangerousTextEvidence())));
+
+        return objectMapper.writeValueAsString(service.summary("case-sensitive"));
+    }
+
     private FraudCaseEvidenceSummaryService service() {
         return new FraudCaseEvidenceSummaryService(
                 fraudCaseRepository,
@@ -341,6 +474,12 @@ class FraudCaseEvidenceSummaryServiceTest {
         AlertDocument document = new AlertDocument();
         document.setAlertId(alertId);
         document.setEvidenceSnapshot(List.of(evidence));
+        return document;
+    }
+
+    private AlertDocument alertWithoutEvidenceSnapshot(String alertId) {
+        AlertDocument document = new AlertDocument();
+        document.setAlertId(alertId);
         return document;
     }
 
@@ -375,6 +514,31 @@ class FraudCaseEvidenceSummaryServiceTest {
                 "raw-model-payload",
                 "account-1",
                 java.util.Map.of("safeSignal", "raw-sensitive-attribute"),
+                Instant.parse("2026-05-21T10:00:00Z"),
+                Instant.parse("2026-05-21T10:01:00Z"),
+                "strategy",
+                "model",
+                "version",
+                Instant.parse("2026-05-21T10:02:00Z")
+        );
+    }
+
+    private EvidenceSnapshotItem dangerousTextEvidence() {
+        return new EvidenceSnapshotItem(
+                "evidence-1",
+                "source-event-1",
+                "txn-1",
+                "correlation-1",
+                "HIGH_AMOUNT_ACTIVITY",
+                EvidenceType.RULE_MATCH,
+                EvidenceSource.ALERT_SERVICE,
+                EvidenceStatus.AVAILABLE,
+                EvidenceSeverity.CRITICAL,
+                "customer-1 account-1 txn-1 correlation-1 alert-secret raw-model-payload scoreDetails featureSnapshot",
+                "source-event-1 customer customer-1 account account-1 transaction txn-1 correlation correlation-1 model payload {secret:true}",
+                "raw-model-payload",
+                "raw-baseline",
+                Map.of("safeSignal", "customer-1 account-1"),
                 Instant.parse("2026-05-21T10:00:00Z"),
                 Instant.parse("2026-05-21T10:01:00Z"),
                 "strategy",

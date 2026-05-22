@@ -1,6 +1,7 @@
 package com.frauddetection.alert.controller;
 
 import com.frauddetection.alert.api.FraudCaseEvidenceSummaryResponse;
+import com.frauddetection.alert.audit.read.ReadAccessAuditOutcome;
 import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
 import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
@@ -86,6 +87,38 @@ class FraudCaseEvidenceSummaryControllerTest {
                 eq(ReadAccessResourceType.FRAUD_CASE),
                 eq("case-1"),
                 eq(1),
+                any()
+        );
+    }
+
+    @Test
+    void FraudCaseEvidenceSummaryMissingCaseAuditedAsRejectedTest() throws Exception {
+        when(service.summary("missing-case")).thenThrow(new FraudCaseNotFoundException("missing-case"));
+
+        mockMvc.perform(get("/api/v1/fraud-cases/missing-case/evidence-summary"))
+                .andExpect(status().isNotFound());
+
+        verify(sensitiveReadAuditService).auditAttempt(
+                eq(ReadAccessEndpointCategory.FRAUD_CASE_EVIDENCE_SUMMARY),
+                eq(ReadAccessResourceType.FRAUD_CASE),
+                eq("missing-case"),
+                eq(ReadAccessAuditOutcome.REJECTED),
+                any()
+        );
+    }
+
+    @Test
+    void FraudCaseEvidenceSummaryUnexpectedExceptionAuditedAsFailedTest() throws Exception {
+        when(service.summary("case-1")).thenThrow(new IllegalStateException("database unavailable"));
+
+        mockMvc.perform(get("/api/v1/fraud-cases/case-1/evidence-summary"))
+                .andExpect(status().isInternalServerError());
+
+        verify(sensitiveReadAuditService).auditAttempt(
+                eq(ReadAccessEndpointCategory.FRAUD_CASE_EVIDENCE_SUMMARY),
+                eq(ReadAccessResourceType.FRAUD_CASE),
+                eq("case-1"),
+                eq(ReadAccessAuditOutcome.FAILED),
                 any()
         );
     }
