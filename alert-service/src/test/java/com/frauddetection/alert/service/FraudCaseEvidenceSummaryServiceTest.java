@@ -128,6 +128,22 @@ class FraudCaseEvidenceSummaryServiceTest {
     }
 
     @Test
+    void FraudCaseEvidenceSummaryNotApplicableDoesNotClaimAvailableTest() {
+        FraudCaseEvidenceSummaryService service = service();
+        when(fraudCaseRepository.findById("case-1")).thenReturn(Optional.of(caseWithAlerts("case-1", "alert-1")));
+        when(alertRepository.findAllById(List.of("alert-1"))).thenReturn(List.of(alert(
+                "alert-1",
+                evidence("HIGH_AMOUNT_ACTIVITY", EvidenceStatus.AVAILABLE, EvidenceSeverity.LOW),
+                evidence("RAPID_TRANSFER_FRAUD_CASE", EvidenceStatus.NOT_APPLICABLE, EvidenceSeverity.HIGH)
+        )));
+
+        var response = service.summary("case-1");
+
+        assertThat(response.aggregateEvidenceStatus()).isEqualTo(EvidenceStatus.PARTIAL);
+        assertThat(response.partial()).isTrue();
+    }
+
+    @Test
     void FraudCaseEvidenceSummaryErrorDominatesTest() {
         FraudCaseEvidenceSummaryService service = service();
         when(fraudCaseRepository.findById("case-1")).thenReturn(Optional.of(caseWithAlerts("case-1", "alert-1")));
