@@ -38,6 +38,10 @@ export function createAlertsApiClient({
     getAlert: (alertId, requestOptions) => request(`/api/v1/alerts/${encodeURIComponent(alertId)}`, requestOptions),
     getAssistantSummary: (alertId, requestOptions) => request(`/api/v1/alerts/${encodeURIComponent(alertId)}/assistant-summary`, requestOptions),
     getFraudCase: (caseId, requestOptions) => request(`/api/v1/fraud-cases/${encodeURIComponent(caseId)}`, requestOptions),
+    getFraudCaseEvidenceSummary: (caseId, requestOptions) => request(
+      `/api/v1/fraud-cases/${encodeURIComponent(caseId)}/evidence-summary`,
+      evidenceSummaryRequestOptions(requestOptions)
+    ),
     updateFraudCase: (caseId, decision, { idempotencyKey, signal } = {}) => request(`/api/v1/fraud-cases/${encodeURIComponent(caseId)}`, {
       method: "PATCH",
       signal,
@@ -186,6 +190,12 @@ function listSuspiciousTransactionsWithRequest(request, {
 }
 
 function linkedAlertContextRequestOptions({ signal } = {}) {
+  return {
+    ...(signal ? { signal } : {})
+  };
+}
+
+function evidenceSummaryRequestOptions({ signal } = {}) {
   return {
     ...(signal ? { signal } : {})
   };

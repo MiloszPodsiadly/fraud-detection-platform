@@ -34,6 +34,7 @@ describe("alertsApi auth headers", () => {
   const getAlert = (...args) => apiClient.getAlert(...args);
   const getAssistantSummary = (...args) => apiClient.getAssistantSummary(...args);
   const getFraudCase = (...args) => apiClient.getFraudCase(...args);
+  const getFraudCaseEvidenceSummary = (...args) => apiClient.getFraudCaseEvidenceSummary(...args);
   const updateFraudCase = (...args) => apiClient.updateFraudCase(...args);
   const submitAnalystDecision = (...args) => apiClient.submitAnalystDecision(...args);
 
@@ -293,15 +294,100 @@ describe("alertsApi auth headers", () => {
     const alertSignal = new AbortController().signal;
     const summarySignal = new AbortController().signal;
     const caseSignal = new AbortController().signal;
+    const evidenceSummarySignal = new AbortController().signal;
     resetApiClient(normalizeSession({ userId: "analyst-1", roles: ["ANALYST"] }));
 
     await getAlert("alert-1", { signal: alertSignal });
     await getAssistantSummary("alert-1", { signal: summarySignal });
     await getFraudCase("case-1", { signal: caseSignal });
+    await getFraudCaseEvidenceSummary("case-1", { signal: evidenceSummarySignal });
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/v1/alerts/alert-1", expect.objectContaining({ signal: alertSignal }));
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/v1/alerts/alert-1/assistant-summary", expect.objectContaining({ signal: summarySignal }));
     expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/v1/fraud-cases/case-1", expect.objectContaining({ signal: caseSignal }));
+    expect(fetchMock).toHaveBeenNthCalledWith(4, fraudCaseEvidenceSummaryPath("case-1"), expect.objectContaining({ signal: evidenceSummarySignal }));
+  });
+
+  it("FraudCaseEvidenceSummaryApiClientUsesFdp73EndpointTest", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(evidenceSummary()));
+
+    await getFraudCaseEvidenceSummary("case-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      fraudCaseEvidenceSummaryPath("case-1"),
+      expect.objectContaining({ headers: expect.objectContaining({ "Content-Type": "application/json" }) })
+    );
+  });
+
+  it("FraudCaseEvidenceSummaryApiClientEncodesCaseIdTest", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(evidenceSummary()));
+
+    await getFraudCaseEvidenceSummary("case/with spaces");
+
+    expect(fetchMock.mock.calls[0][0]).toBe(fraudCaseEvidenceSummaryPath("case%2Fwith%20spaces"));
+  });
+
+  it("FraudCaseEvidenceSummaryApiClientUsesCaseIdOnlyTest", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(evidenceSummary()));
+
+    await getFraudCaseEvidenceSummary("case-1", {
+      alertId: "alert-secret",
+      linkedAlertId: "linked-secret",
+      suspiciousTransactionId: "suspicious-secret",
+      transactionId: "txn-secret",
+      customerId: "customer-secret",
+      accountId: "account-secret",
+      evidenceId: "evidence-secret"
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(fraudCaseEvidenceSummaryPath("case-1"));
+    expect(JSON.stringify(fetchMock.mock.calls[0])).not.toContain("alert-secret");
+    expect(JSON.stringify(fetchMock.mock.calls[0])).not.toContain("suspicious-secret");
+    expect(JSON.stringify(fetchMock.mock.calls[0])).not.toContain("customer-secret");
+  });
+
+  it("FraudCaseEvidenceSummaryApiClientDoesNotSendQuerySelectorsTest", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(evidenceSummary()));
+
+    await getFraudCaseEvidenceSummary("case-1", {
+      query: "customer-secret",
+      params: { transactionId: "txn-secret" },
+      headers: { "X-Transaction-Id": "txn-secret" }
+    });
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe(fraudCaseEvidenceSummaryPath("case-1"));
+    expect(url).not.toContain("?");
+    expect(options.headers).toEqual({ "Content-Type": "application/json" });
+  });
+
+  it("FraudCaseEvidenceSummaryApiClientDoesNotSendRequestBodyTest", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(evidenceSummary()));
+
+    await getFraudCaseEvidenceSummary("case-1", {
+      method: "POST",
+      body: JSON.stringify({ customerId: "customer-secret" })
+    });
+
+    expect(fetchMock.mock.calls[0][1]).not.toHaveProperty("body");
+    expect(fetchMock.mock.calls[0][1]).not.toHaveProperty("method");
+    expect(JSON.stringify(fetchMock.mock.calls[0][1])).not.toContain("customer-secret");
+  });
+
+  it("FraudCaseEvidenceSummaryApiClientDoesNotCallAlertDetailsEndpointTest", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(evidenceSummary()));
+
+    await getFraudCaseEvidenceSummary("case-1");
+
+    expect(fetchMock.mock.calls[0][0]).not.toBe(apiPath("api", "v1", "alerts", "case-1"));
+  });
+
+  it("FraudCaseEvidenceSummaryApiClientDoesNotCallSuspiciousTransactionEndpointTest", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(evidenceSummary()));
+
+    await getFraudCaseEvidenceSummary("case-1");
+
+    expect(fetchMock.mock.calls[0][0]).not.toContain(apiPath("internal", "suspicious-transactions"));
   });
 
   it("preserves AbortError from fetch", async () => {
@@ -1028,6 +1114,31 @@ function jsonResponse(body, status = 200) {
     status,
     headers: { "Content-Type": "application/json" }
   });
+}
+
+function evidenceSummary() {
+  return {
+    caseId: "case-1",
+    aggregateEvidenceStatus: "AVAILABLE",
+    topReasonCodes: [],
+    highestSeverityEvidence: [],
+    evidenceBySource: [],
+    evidenceByStatus: [],
+    linkedAlertCount: 0,
+    evidenceItemCount: 0,
+    partial: false,
+    legacy: false,
+    truncated: false,
+    truncationReason: null
+  };
+}
+
+function fraudCaseEvidenceSummaryPath(caseId) {
+  return apiPath("api", "v1", "fraud-cases", caseId, "evidence-summary");
+}
+
+function apiPath(...segments) {
+  return `/${segments.join("/")}`;
 }
 
 function storageContains(storage, needle) {
