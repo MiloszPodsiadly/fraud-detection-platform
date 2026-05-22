@@ -6,6 +6,7 @@ import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
 import com.frauddetection.alert.audit.read.ReadAccessAuditOutcome;
 import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
+import com.frauddetection.alert.fraudcase.FraudCaseNotFoundException;
 import com.frauddetection.alert.service.FraudCaseEvidenceSummaryService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -41,6 +42,15 @@ public class FraudCaseEvidenceSummaryController {
                     request
             );
             return response;
+        } catch (FraudCaseNotFoundException exception) {
+            sensitiveReadAuditService.auditAttempt(
+                    ReadAccessEndpointCategory.FRAUD_CASE_EVIDENCE_SUMMARY,
+                    ReadAccessResourceType.FRAUD_CASE,
+                    caseId,
+                    ReadAccessAuditOutcome.REJECTED,
+                    request
+            );
+            throw exception;
         } catch (RuntimeException exception) {
             sensitiveReadAuditService.auditAttempt(
                     ReadAccessEndpointCategory.FRAUD_CASE_EVIDENCE_SUMMARY,

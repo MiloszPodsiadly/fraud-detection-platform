@@ -64,8 +64,9 @@ public class FraudCaseEvidenceSummaryService {
         EvidenceReadResult readResult = evidenceItems(includedAlertIds);
         List<EvidenceSnapshotItem> evidenceItems = readResult.items();
         boolean missingLinkedAlerts = includedAlertIds.size() > readResult.alertCount();
-        boolean partial = truncated || missingLinkedAlerts || containsPartialStatus(evidenceItems);
-        EvidenceStatus aggregateStatus = aggregateStatus(evidenceItems, legacy);
+        boolean incompleteSourceCoverage = truncated || missingLinkedAlerts;
+        boolean partial = incompleteSourceCoverage || containsPartialStatus(evidenceItems);
+        EvidenceStatus aggregateStatus = aggregateStatus(evidenceItems, legacy, incompleteSourceCoverage);
         if (aggregateStatus == EvidenceStatus.PARTIAL) {
             partial = true;
         }
@@ -92,7 +93,10 @@ public class FraudCaseEvidenceSummaryService {
         for (String alertId : alertIds) {
             AlertDocument alert = alertsById.get(alertId);
             if (alert != null) {
-                items.addAll(alert.getEvidenceSnapshot());
+                List<EvidenceSnapshotItem> snapshot = alert.getEvidenceSnapshot();
+                if (snapshot != null) {
+                    items.addAll(snapshot);
+                }
             }
         }
         return new EvidenceReadResult(List.copyOf(items), alertsById.size());
@@ -118,14 +122,21 @@ public class FraudCaseEvidenceSummaryService {
                 .toList();
     }
 
-    private EvidenceStatus aggregateStatus(List<EvidenceSnapshotItem> evidenceItems, boolean legacy) {
+    private EvidenceStatus aggregateStatus(
+            List<EvidenceSnapshotItem> evidenceItems,
+            boolean legacy,
+            boolean incompleteSourceCoverage
+    ) {
         if (evidenceItems.isEmpty()) {
-            return legacy ? EvidenceStatus.LEGACY : EvidenceStatus.UNAVAILABLE;
+            if (legacy) {
+                return EvidenceStatus.LEGACY;
+            }
+            return incompleteSourceCoverage ? EvidenceStatus.PARTIAL : EvidenceStatus.UNAVAILABLE;
         }
         if (evidenceItems.stream().anyMatch(item -> item.status() == EvidenceStatus.ERROR)) {
             return EvidenceStatus.ERROR;
         }
-        if (containsPartialStatus(evidenceItems)) {
+        if (incompleteSourceCoverage || containsPartialStatus(evidenceItems)) {
             return EvidenceStatus.PARTIAL;
         }
         boolean allAvailable = evidenceItems.stream().allMatch(item -> item.status() == EvidenceStatus.AVAILABLE);
@@ -162,10 +173,32 @@ public class FraudCaseEvidenceSummaryService {
                         item.severity(),
                         item.source(),
                         item.status(),
-                        item.title(),
-                        item.description()
+                        boundedTitle(item),
+                        boundedDescription()
                 ))
                 .toList();
+    }
+
+    private String boundedTitle(EvidenceSnapshotItem item) {
+        if (item == null || item.evidenceType() == null) {
+            return "Evidence summary item";
+        }
+        return switch (item.evidenceType()) {
+            case TRANSACTION_FEATURE -> "Transaction feature evidence";
+            case CUSTOMER_BEHAVIOR -> "Customer behavior evidence";
+            case DEVICE_SIGNAL -> "Device evidence";
+            case GEO_SIGNAL -> "Location evidence";
+            case VELOCITY_SIGNAL -> "Velocity evidence";
+            case MERCHANT_SIGNAL -> "Merchant evidence";
+            case RULE_MATCH -> "Rule evidence";
+            case MODEL_EXPLANATION -> "Model explanation evidence";
+            case SCORING_SNAPSHOT -> "Scoring snapshot evidence";
+            case DIAGNOSTIC -> "Diagnostic evidence";
+        };
+    }
+
+    private String boundedDescription() {
+        return "Bounded evidence metadata derived from the linked alert evidence snapshot.";
     }
 
     private List<EvidenceSourceCountResponse> evidenceBySource(List<EvidenceSnapshotItem> evidenceItems) {
@@ -193,8 +226,8 @@ public class FraudCaseEvidenceSummaryService {
                 .thenComparing(item -> item.evidenceType().name())
                 .thenComparing(item -> item.source().name())
                 .thenComparing(item -> item.status().name())
-                .thenComparing(item -> item.title() == null ? "" : item.title())
-                .thenComparing(item -> item.description() == null ? "" : item.description());
+                .thenComparing(this::boundedTitle)
+                .thenComparing(item -> boundedDescription());
     }
 
     private int severityRank(EvidenceSeverity severity) {
