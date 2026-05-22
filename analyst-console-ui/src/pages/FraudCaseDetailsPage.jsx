@@ -4,6 +4,7 @@ import { AUTHORITIES, hasAuthority } from "../auth/session.js";
 import { DetailHeader } from "../components/DetailHeader.jsx";
 import { DetailStateBanner } from "../components/DetailStateBanner.jsx";
 import { ErrorState } from "../components/ErrorState.jsx";
+import { FraudCaseEvidenceSummarySection } from "../components/FraudCaseEvidenceSummarySection.jsx";
 import { LoadingPanel } from "../components/LoadingPanel.jsx";
 import { RiskBadge } from "../components/RiskBadge.jsx";
 import { PermissionNotice } from "../components/SecurityStatePanels.jsx";
@@ -286,6 +287,13 @@ export function FraudCaseDetailsPage({
               <span>Threshold</span>
             </div>
           </div>
+
+          {caseId && (
+            <FraudCaseEvidenceSummarySection
+              caseId={caseId}
+              getFraudCaseEvidenceSummary={apiClient.getFraudCaseEvidenceSummary}
+            />
+          )}
 
           <section className="subPanel">
             <div className="panelHeader">
