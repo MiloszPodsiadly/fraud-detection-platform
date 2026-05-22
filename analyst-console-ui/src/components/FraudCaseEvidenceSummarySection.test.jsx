@@ -220,6 +220,36 @@ describe("FraudCaseEvidenceSummarySection", () => {
     expectNoRawEvidencePayloadText(section);
   });
 
+  it("FraudCaseEvidenceSummarySectionHandlesNullEmptyDuplicateReasonCodesTest", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      renderSection({
+        summary: {
+          ...availableEvidenceSummary(),
+          topReasonCodes: [
+            null,
+            undefined,
+            "",
+            " ",
+            "HIGH_AMOUNT_ACTIVITY",
+            "HIGH_AMOUNT_ACTIVITY",
+            "customer-secret account-secret txn-secret",
+            "raw-model-payload scoreDetails featureSnapshot"
+          ]
+        }
+      });
+
+      const section = await findSection();
+      expect(within(section).getAllByText("HIGH_AMOUNT_ACTIVITY").length).toBeGreaterThan(0);
+      expect(within(section).getAllByText("UNKNOWN").length).toBeGreaterThan(0);
+      expectNoRawEvidencePayloadText(section);
+      expect(consoleError.mock.calls.some((call) => String(call[0]).includes("same key"))).toBe(false);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it("FraudCaseEvidenceSummarySectionDoesNotRenderRawSourceOrStatusTextTest", async () => {
     renderSection({ summary: malformedEnumEvidenceSummary() });
 
@@ -284,6 +314,9 @@ describe("FraudCaseEvidenceSummarySection", () => {
   it("FraudCaseEvidenceSummarySectionImportBoundaryTest", () => {
     const source = componentSource();
 
+    // This source-level guard is an intentional FDP-75 governance tripwire. It complements runtime tests
+    // and helper unit tests; it is not a replacement for them. Keep it scoped to this component so
+    // existing workflow controls elsewhere on FraudCaseDetailsPage do not fail this test.
     for (const forbidden of [
       "createAlertsApiClient",
       "apiClient",
