@@ -35,6 +35,20 @@ id, customer id, account id, or evidence id.
 
 The UI must not fall back to alert detail APIs or suspicious transaction APIs when this read fails.
 
+## Text Rendering Boundary
+
+The UI renders enum-like and bounded product-copy fields only.
+
+Even though FDP-73 backend owns the evidence-summary DTO contract, FDP-74 does not treat arbitrary response text as
+safe raw display text. The section must not render raw evidence title or description, raw backend error messages, raw
+identifiers, raw payload fragments, scoreDetails, featureSnapshot, sourceEventId, transactionId, customerId, accountId,
+correlationId, alertId, final outcome, or analyst decision fields.
+
+The UI may render generated bounded evidence item title and description copy and enum-like labels such as reasonCode,
+evidenceType, severity, source, and status.
+
+Malformed enum-like values should render as `UNKNOWN` or a safe fallback.
+
 ## Rendered Fields
 
 Allowed fields:
@@ -46,7 +60,8 @@ Allowed fields:
 - linked alert count
 - evidence item count
 - truncation reason
-- highest severity evidence fields: title, description, reason code, evidence type, severity, source, status
+- highest severity evidence fields: generated title, generated description, reason code, evidence type, severity,
+  source, status
 
 Excluded fields:
 
@@ -55,6 +70,7 @@ Excluded fields:
 - raw model details
 - feature snapshots
 - source event ids
+- raw title or description from the response
 - raw alert, customer, account, transaction, correlation, score decision, or evidence identifiers
 - final outcome fields
 - analyst decision fields
@@ -67,7 +83,7 @@ case workflow handlers.
 
 The section renders bounded user-facing states:
 
-- `Loading evidence summary…`
+- `Loading evidence summary...`
 - `Legacy context. This case may not have structured evidence summary data.`
 - `Evidence summary unavailable.`
 - `Partial summary. Some linked evidence context is incomplete or unavailable.`
@@ -90,6 +106,9 @@ legal proof, and not a complete investigation view.
 It is not a workflow surface, not a write path, not an evidence editor, not an export surface, and not a replacement for
 full case review.
 
+Read-only applies to the Evidence Summary section introduced by FDP-74. Existing FraudCase detail workflow controls may
+remain elsewhere on the page and are not added, removed, or redefined by FDP-74.
+
 ## Merge Gate
 
 - Frontend only; no backend endpoint, DTO, authority, or service changes.
@@ -97,6 +116,10 @@ full case review.
 - Encodes `caseId` and does not send body, query selectors, raw selector headers, or alternate identifiers.
 - Does not call alert detail or suspicious transaction APIs as fallback.
 - Renders only bounded read-only investigation context.
+- Raw title or description from the response are not displayed.
+- Malformed count items do not break section rendering.
+- Malformed enum-like labels render a safe fallback.
+- Forbidden proof, verdict, or workflow wording is absent from the section.
 - Does not render raw payloads, raw identifiers, JSON inspector, drilldowns, or mutation controls.
 - Does not expose raw backend errors.
 - Evidence summary failure does not break the rest of FraudCase detail.

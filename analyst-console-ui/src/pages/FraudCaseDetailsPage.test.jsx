@@ -302,6 +302,31 @@ describe("FraudCaseDetailsPage", () => {
     expect(screen.queryByTestId("fraud-case-evidence-summary-section")).not.toBeInTheDocument();
     expect(apiClient.getFraudCaseEvidenceSummary).not.toHaveBeenCalled();
   });
+
+  it("FraudCaseDetailEvidenceSummaryUsesOnlyEvidenceSummaryClientTest", async () => {
+    const apiClient = {
+      getFraudCase: vi.fn().mockResolvedValue(fraudCase("case-1", "Open case")),
+      getFraudCaseEvidenceSummary: vi.fn().mockResolvedValue(evidenceSummary()),
+      updateFraudCase: vi.fn(),
+      getAlert: vi.fn(),
+      getAssistantSummary: vi.fn(),
+      submitAnalystDecision: vi.fn(),
+      listSuspiciousTransactions: vi.fn(),
+      getSuspiciousTransactionLinkedAlertContext: vi.fn()
+    };
+
+    render(page({ caseId: "case-1", apiClient }));
+
+    expect(await screen.findByText("Evidence summary")).toBeInTheDocument();
+    expect(apiClient.getFraudCaseEvidenceSummary).toHaveBeenCalledTimes(1);
+    expect(apiClient.getFraudCaseEvidenceSummary).toHaveBeenCalledWith("case-1", expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(apiClient.getAlert).not.toHaveBeenCalled();
+    expect(apiClient.getAssistantSummary).not.toHaveBeenCalled();
+    expect(apiClient.submitAnalystDecision).not.toHaveBeenCalled();
+    expect(apiClient.updateFraudCase).not.toHaveBeenCalled();
+    expect(apiClient.listSuspiciousTransactions).not.toHaveBeenCalled();
+    expect(apiClient.getSuspiciousTransactionLinkedAlertContext).not.toHaveBeenCalled();
+  });
 });
 
 function page({ caseId, apiClient, onCaseUpdated = vi.fn(), canReadFraudCase = true }) {
