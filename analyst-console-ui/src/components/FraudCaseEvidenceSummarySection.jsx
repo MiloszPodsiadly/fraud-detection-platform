@@ -63,7 +63,7 @@ export function FraudCaseEvidenceSummarySection({
         </div>
       </div>
 
-      {state.isLoading && <LoadingPanel label="Loading evidence summary…" />}
+      {state.isLoading && <LoadingPanel label="Loading evidence summary..." />}
       {!state.isLoading && state.error && <EvidenceSummaryNotice message={UNAVAILABLE_MESSAGE} />}
       {!state.isLoading && !state.error && state.summary && <EvidenceSummaryContent summary={state.summary} />}
     </section>
@@ -71,8 +71,8 @@ export function FraudCaseEvidenceSummarySection({
 }
 
 function EvidenceSummaryContent({ summary }) {
-  const status = normalizeText(summary.aggregateEvidenceStatus);
-  const reasonCodes = safeArray(summary.topReasonCodes).map(normalizeText).filter(Boolean);
+  const status = normalizeEvidenceCode(summary.aggregateEvidenceStatus);
+  const reasonCodes = safeArray(summary.topReasonCodes).map(normalizeEvidenceCode).filter(Boolean);
   const sourceCounts = safeArray(summary.evidenceBySource);
   const statusCounts = safeArray(summary.evidenceByStatus);
   const evidenceItems = safeArray(summary.highestSeverityEvidence).map(toEvidenceItem);
@@ -113,7 +113,7 @@ function EvidenceSummaryContent({ summary }) {
         {isTruncated && summary.truncationReason && (
           <div>
             <dt>Truncation reason</dt>
-            <dd>{boundedText(summary.truncationReason)}</dd>
+            <dd>{safeTruncationReason(summary.truncationReason)}</dd>
           </div>
         )}
       </dl>
@@ -184,15 +184,17 @@ function SummaryList({ title, items, emptyLabel }) {
 }
 
 function CountList({ title, items, labelKey }) {
+  const normalizedItems = safeArray(items).map((item) => toCountItem(item, labelKey));
+
   return (
     <section className="evidenceSummaryList">
       <h3>{title}</h3>
-      {items.length === 0 ? <p>No evidence context</p> : (
+      {normalizedItems.length === 0 ? <p>No evidence context</p> : (
         <ul>
-          {items.map((item, index) => (
-            <li key={`${item[labelKey]}-${index}`}>
-              <span>{normalizeText(item[labelKey]) || "UNKNOWN"}</span>
-              <strong>{formatCount(item.count)}</strong>
+          {normalizedItems.map((item, index) => (
+            <li key={`${item.label}-${index}`}>
+              <span>{item.label}</span>
+              <strong>{item.count}</strong>
             </li>
           ))}
         </ul>
@@ -203,13 +205,24 @@ function CountList({ title, items, labelKey }) {
 
 function toEvidenceItem(item) {
   return {
-    title: boundedText(item?.title),
-    description: boundedText(item?.description),
-    reasonCode: normalizeText(item?.reasonCode),
-    evidenceType: normalizeText(item?.evidenceType),
-    severity: normalizeText(item?.severity),
-    source: normalizeText(item?.source),
-    status: normalizeText(item?.status)
+    title: boundedEvidenceTitle(item),
+    description: boundedEvidenceDescription(),
+    reasonCode: normalizeEvidenceCode(item?.reasonCode),
+    evidenceType: normalizeEvidenceCode(item?.evidenceType),
+    severity: normalizeEvidenceCode(item?.severity),
+    source: normalizeEvidenceCode(item?.source),
+    status: normalizeEvidenceCode(item?.status)
+  };
+}
+
+function toCountItem(item, labelKey) {
+  if (!item || typeof item !== "object") {
+    return { label: "UNKNOWN", count: "0" };
+  }
+
+  return {
+    label: normalizeEvidenceCode(item[labelKey]) || "UNKNOWN",
+    count: formatCount(item.count)
   };
 }
 
@@ -221,9 +234,48 @@ function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function boundedText(value) {
+function normalizeEvidenceCode(value) {
   const normalized = normalizeText(value);
-  return normalized.length > 180 ? `${normalized.slice(0, 177)}...` : normalized;
+  if (!normalized) {
+    return "";
+  }
+
+  return /^[A-Z0-9_:-]{1,80}$/.test(normalized) ? normalized : "UNKNOWN";
+}
+
+function safeTruncationReason(value) {
+  return normalizeEvidenceCode(value) === "LINKED_ALERT_LIMIT_EXCEEDED"
+    ? "LINKED_ALERT_LIMIT_EXCEEDED"
+    : "Bounded summary limit reached";
+}
+
+function boundedEvidenceTitle(item) {
+  switch (normalizeEvidenceCode(item?.evidenceType)) {
+    case "MODEL_SIGNAL":
+      return "Model signal";
+    case "RULE_MATCH":
+      return "Rule evidence";
+    case "PROFILE_DEVIATION":
+      return "Profile deviation evidence";
+    case "VELOCITY_CHECK":
+      return "Velocity evidence";
+    case "LINK_ANALYSIS":
+      return "Linked-entity evidence";
+    case "DEVICE_SIGNAL":
+      return "Device evidence";
+    case "LOCATION_SIGNAL":
+      return "Location evidence";
+    case "MERCHANT_SIGNAL":
+      return "Merchant evidence";
+    case "DIAGNOSTIC":
+      return "Diagnostic evidence";
+    default:
+      return "Evidence item";
+  }
+}
+
+function boundedEvidenceDescription() {
+  return "Bounded evidence metadata derived from the fraud-case evidence summary.";
 }
 
 function formatCount(value) {
