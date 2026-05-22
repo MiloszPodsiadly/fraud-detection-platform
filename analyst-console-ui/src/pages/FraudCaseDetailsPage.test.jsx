@@ -243,14 +243,78 @@ describe("FraudCaseDetailsPage", () => {
     expect(screen.queryByText("Case decision saved.")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save case decision" })).toBeEnabled();
   });
+
+  it("FraudCaseDetailIncludesEvidenceSummaryReadOnlySectionTest", async () => {
+    const apiClient = {
+      getFraudCase: vi.fn().mockResolvedValue(fraudCase("case-1", "Open case")),
+      getFraudCaseEvidenceSummary: vi.fn().mockResolvedValue(evidenceSummary()),
+      updateFraudCase: vi.fn()
+    };
+
+    render(page({ caseId: "case-1", apiClient }));
+
+    expect(await screen.findByText("Open case")).toBeInTheDocument();
+    expect(await screen.findByText("Evidence summary")).toBeInTheDocument();
+    expect(screen.getByText("Evidence status")).toBeInTheDocument();
+    expect(screen.getAllByText("AVAILABLE").length).toBeGreaterThan(0);
+    expect(apiClient.getFraudCaseEvidenceSummary).toHaveBeenCalledWith("case-1", expect.objectContaining({ signal: expect.any(AbortSignal) }));
+  });
+
+  it("FraudCaseDetailEvidenceSummaryFailureDoesNotBreakCaseDetailTest", async () => {
+    const apiClient = {
+      getFraudCase: vi.fn().mockResolvedValue(fraudCase("case-1", "Open case")),
+      getFraudCaseEvidenceSummary: vi.fn().mockRejectedValue(new Error("backend raw failure")),
+      updateFraudCase: vi.fn()
+    };
+
+    render(page({ caseId: "case-1", apiClient }));
+
+    expect(await screen.findByText("Open case")).toBeInTheDocument();
+    expect(await screen.findByText("Evidence summary unavailable.")).toBeInTheDocument();
+    expect(screen.queryByText("backend raw failure")).not.toBeInTheDocument();
+  });
+
+  it("FraudCaseDetailEvidenceSummaryDoesNotReceiveMutationHandlersTest", async () => {
+    const apiClient = {
+      getFraudCase: vi.fn().mockResolvedValue(fraudCase("case-1", "Open case")),
+      getFraudCaseEvidenceSummary: vi.fn().mockResolvedValue(evidenceSummary()),
+      updateFraudCase: vi.fn()
+    };
+
+    render(page({ caseId: "case-1", apiClient }));
+
+    expect(await screen.findByText("Evidence summary")).toBeInTheDocument();
+    expect(apiClient.updateFraudCase).not.toHaveBeenCalled();
+    expect(apiClient.getFraudCaseEvidenceSummary.mock.calls[0][1]).not.toHaveProperty("onCaseUpdated");
+    expect(apiClient.getFraudCaseEvidenceSummary.mock.calls[0][1]).not.toHaveProperty("submitDecision");
+  });
+
+  it("FraudCaseDetailEvidenceSummaryIsNotMountedWithoutCaseIdTest", async () => {
+    const apiClient = {
+      getFraudCase: vi.fn(),
+      getFraudCaseEvidenceSummary: vi.fn(),
+      updateFraudCase: vi.fn()
+    };
+
+    render(page({ caseId: "", apiClient, canReadFraudCase: false }));
+
+    await screen.findByText("This session does not include fraud case read authority.");
+    expect(screen.queryByTestId("fraud-case-evidence-summary-section")).not.toBeInTheDocument();
+    expect(apiClient.getFraudCaseEvidenceSummary).not.toHaveBeenCalled();
+  });
 });
 
-function page({ caseId, apiClient, onCaseUpdated = vi.fn() }) {
+function page({ caseId, apiClient, onCaseUpdated = vi.fn(), canReadFraudCase = true }) {
+  const client = {
+    getFraudCaseEvidenceSummary: vi.fn().mockResolvedValue(evidenceSummary()),
+    ...apiClient
+  };
   return (
     <FraudCaseDetailsPage
       caseId={caseId}
       session={session()}
-      apiClient={apiClient}
+      apiClient={client}
+      canReadFraudCase={canReadFraudCase}
       onBack={vi.fn()}
       onCaseUpdated={onCaseUpdated}
     />
@@ -277,6 +341,31 @@ function fraudCase(caseId, reason) {
     thresholdPln: 500,
     decisionReason: "",
     decisionTags: ["rapid-transfer"]
+  };
+}
+
+function evidenceSummary() {
+  return {
+    caseId: "case-1",
+    aggregateEvidenceStatus: "AVAILABLE",
+    topReasonCodes: ["HIGH_AMOUNT_ACTIVITY"],
+    highestSeverityEvidence: [{
+      title: "Model signal",
+      description: "Bounded model evidence metadata.",
+      reasonCode: "HIGH_AMOUNT_ACTIVITY",
+      evidenceType: "MODEL_SIGNAL",
+      severity: "HIGH",
+      source: "ML_SCORING",
+      status: "AVAILABLE"
+    }],
+    evidenceBySource: [{ source: "ML_SCORING", count: 1 }],
+    evidenceByStatus: [{ status: "AVAILABLE", count: 1 }],
+    linkedAlertCount: 1,
+    evidenceItemCount: 1,
+    partial: false,
+    legacy: false,
+    truncated: false,
+    truncationReason: null
   };
 }
 
