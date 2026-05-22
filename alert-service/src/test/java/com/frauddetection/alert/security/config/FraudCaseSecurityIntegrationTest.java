@@ -2,15 +2,18 @@ package com.frauddetection.alert.security.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.api.FraudCaseAuditResponse;
+import com.frauddetection.alert.api.FraudCaseEvidenceSummaryResponse;
 import com.frauddetection.alert.api.FraudCaseSlaStatus;
 import com.frauddetection.alert.api.FraudCaseWorkQueueItemResponse;
 import com.frauddetection.alert.api.FraudCaseWorkQueueSummaryResponse;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.controller.FraudCaseController;
+import com.frauddetection.alert.controller.FraudCaseEvidenceSummaryController;
 import com.frauddetection.alert.controller.FraudCaseWorkQueueSummaryController;
 import com.frauddetection.alert.domain.FraudCaseAuditAction;
 import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.domain.FraudCaseStatus;
+import com.frauddetection.alert.evidence.EvidenceStatus;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
@@ -21,6 +24,7 @@ import com.frauddetection.alert.security.error.ApiAccessDeniedHandler;
 import com.frauddetection.alert.security.error.ApiAuthenticationEntryPoint;
 import com.frauddetection.alert.security.error.SecurityErrorResponseWriter;
 import com.frauddetection.alert.service.FraudCaseManagementService;
+import com.frauddetection.alert.service.FraudCaseEvidenceSummaryService;
 import com.frauddetection.alert.service.FraudCaseQueryService;
 import com.frauddetection.common.events.enums.RiskLevel;
 import org.junit.jupiter.api.Test;
@@ -51,7 +55,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest({FraudCaseController.class, FraudCaseWorkQueueSummaryController.class})
+@WebMvcTest({FraudCaseController.class, FraudCaseEvidenceSummaryController.class, FraudCaseWorkQueueSummaryController.class})
 @Import({
         AlertSecurityConfig.class,
         ApiAuthenticationEntryPoint.class,
@@ -77,6 +81,9 @@ class FraudCaseSecurityIntegrationTest {
     private FraudCaseManagementService fraudCaseManagementService;
 
     @MockBean
+    private FraudCaseEvidenceSummaryService fraudCaseEvidenceSummaryService;
+
+    @MockBean
     private FraudCaseQueryService fraudCaseQueryService;
 
     @MockBean
@@ -91,6 +98,9 @@ class FraudCaseSecurityIntegrationTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.details[0]").value("reason:missing_credentials"));
         mockMvc.perform(get("/api/v1/fraud-cases/work-queue/summary"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.details[0]").value("reason:missing_credentials"));
+        mockMvc.perform(get("/api/v1/fraud-cases/case-1/evidence-summary"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.details[0]").value("reason:missing_credentials"));
 
@@ -111,6 +121,10 @@ class FraudCaseSecurityIntegrationTest {
                         .with(userWith(AnalystAuthority.TRANSACTION_MONITOR_READ)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.details[0]").value("reason:insufficient_authority"));
+        mockMvc.perform(get("/api/v1/fraud-cases/case-1/evidence-summary")
+                        .with(userWith(AnalystAuthority.TRANSACTION_MONITOR_READ)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.details[0]").value("reason:insufficient_authority"));
     }
 
     @Test
@@ -121,6 +135,7 @@ class FraudCaseSecurityIntegrationTest {
         when(fraudCaseQueryService.globalFraudCaseSummary())
                 .thenReturn(new FraudCaseWorkQueueSummaryResponse(42, Instant.parse("2026-05-12T10:00:00Z")));
         when(fraudCaseManagementService.getCase("case-1")).thenReturn(caseDocument());
+        when(fraudCaseEvidenceSummaryService.summary("case-1")).thenReturn(evidenceSummary());
 
         mockMvc.perform(get("/api/v1/fraud-cases").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
                 .andExpect(status().isOk())
@@ -136,6 +151,24 @@ class FraudCaseSecurityIntegrationTest {
         mockMvc.perform(get("/api/v1/fraud-cases/case-1").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.caseId").value("case-1"));
+        mockMvc.perform(get("/api/v1/fraud-cases/case-1/evidence-summary").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.caseId").value("case-1"))
+                .andExpect(jsonPath("$.aggregateEvidenceStatus").value("AVAILABLE"));
+    }
+
+    @Test
+    void FraudCaseEvidenceSummaryDoesNotRequireSuspiciousTransactionReadAuthorityTest() throws Exception {
+        mockMvc.perform(get("/api/v1/fraud-cases/case-1/evidence-summary")
+                        .with(userWith(AnalystAuthority.SUSPICIOUS_TRANSACTION_READ)))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void FraudCaseEvidenceSummaryDoesNotUseAlertReadAuthorityAsSubstituteTest() throws Exception {
+        mockMvc.perform(get("/api/v1/fraud-cases/case-1/evidence-summary")
+                        .with(userWith(AnalystAuthority.ALERT_READ)))
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -280,6 +313,24 @@ class FraudCaseSecurityIntegrationTest {
         document.setCreatedAt(Instant.parse("2026-05-10T10:00:00Z"));
         document.setUpdatedAt(Instant.parse("2026-05-10T10:00:00Z"));
         return document;
+    }
+
+    private FraudCaseEvidenceSummaryResponse evidenceSummary() {
+        return new FraudCaseEvidenceSummaryResponse(
+                "case-1",
+                EvidenceStatus.AVAILABLE,
+                List.of("HIGH_AMOUNT_ACTIVITY"),
+                List.of(),
+                List.of(),
+                List.of(),
+                1,
+                1,
+                false,
+                false,
+                false,
+                null,
+                Instant.parse("2026-05-12T10:00:00Z")
+        );
     }
 
     private FraudCaseWorkQueueItemResponse workQueueItem() {
