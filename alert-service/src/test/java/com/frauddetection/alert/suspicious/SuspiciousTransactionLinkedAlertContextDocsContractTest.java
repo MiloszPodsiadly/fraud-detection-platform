@@ -144,6 +144,15 @@ class SuspiciousTransactionLinkedAlertContextDocsContractTest {
     }
 
     @Test
+    void DocsExplainValidationAndNotFoundMetricOutcomesAsBoundedEndpointOutcomesTest() throws Exception {
+        assertThat(docs())
+                .contains("`validation_error` means the client supplied an unsupported selector such as `alertId`")
+                .contains("bounded endpoint outcome, not raw validation detail")
+                .contains("`suspicious_transaction_not_found` means the source SuspiciousTransaction was not found")
+                .contains("bounded endpoint outcome, not a raw identifier");
+    }
+
+    @Test
     void DocsMentionTelemetryIsNotDataExtractionChannelTest() throws Exception {
         assertThat(docs())
                 .contains("Metrics observe resolver state, not entities")

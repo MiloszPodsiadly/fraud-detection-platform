@@ -9,7 +9,10 @@ import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.suspicious.api.observability.LinkedAlertContextMetricOutcome;
 import com.frauddetection.alert.suspicious.api.observability.LinkedAlertContextMetricsRecorder;
 import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetryClassifier;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
@@ -25,6 +28,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+@ExtendWith(OutputCaptureExtension.class)
 class SuspiciousTransactionLinkedAlertContextControllerTest {
 
     private final SuspiciousTransactionReadService readService = mock(SuspiciousTransactionReadService.class);
@@ -134,6 +138,21 @@ class SuspiciousTransactionLinkedAlertContextControllerTest {
     }
 
     @Test
+    void unexpectedResolverExceptionDoesNotLogRawExceptionMessageOrIdentifiers(CapturedOutput output) throws Exception {
+        when(linkedAlertContextService.resolveLinkedAlertContext("suspicious-secret-123"))
+                .thenThrow(new IllegalStateException("mongo down for alert-secret-456 customer-secret-789"));
+
+        mockMvc.perform(get("/internal/suspicious-transactions/suspicious-secret-123/linked-alert"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("TEMPORARILY_UNAVAILABLE"))
+                .andExpect(jsonPath("$.alertId").doesNotExist())
+                .andExpect(jsonPath("$.customerId").doesNotExist());
+
+        verify(linkedAlertContextMetricsRecorder).record(LinkedAlertContextMetricOutcome.ERROR);
+        assertNoRawResolverExceptionData(output);
+    }
+
+    @Test
     void noLinkedAlertSerializesNoAlertFields() throws Exception {
         when(linkedAlertContextService.resolveLinkedAlertContext("suspicious-1"))
                 .thenReturn(AlertLinkedContextResponse.noLinkedAlert());
@@ -233,5 +252,18 @@ class SuspiciousTransactionLinkedAlertContextControllerTest {
                 .andExpect(jsonPath("$.scoreDecisionId").doesNotExist())
                 .andExpect(jsonPath("$.reasonCodes").isArray())
                 .andExpect(jsonPath("$.reasonCodes").isEmpty());
+    }
+
+    private void assertNoRawResolverExceptionData(CapturedOutput output) {
+        org.assertj.core.api.Assertions.assertThat(output)
+                .doesNotContain(
+                        "mongo down",
+                        "alert-secret-456",
+                        "customer-secret-789",
+                        "suspicious-secret-123",
+                        "/internal/suspicious-transactions",
+                        "linked-alert",
+                        "IllegalStateException"
+                );
     }
 }

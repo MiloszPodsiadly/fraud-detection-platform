@@ -79,6 +79,19 @@ class LinkedAlertContextMetricsRecorderTest {
     }
 
     @Test
+    void validationAndNotFoundOutcomesAreDocumentedAsBoundedEndpointOutcomes() throws Exception {
+        String source = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/suspicious/api/observability/LinkedAlertContextMetricOutcome.java"
+        ));
+
+        assertThat(source)
+                .contains("unsupported selector such as alertId")
+                .contains("bounded endpoint outcome, not raw validation detail")
+                .contains("Source SuspiciousTransaction was not found")
+                .contains("bounded endpoint outcome, not a raw identifier");
+    }
+
+    @Test
     void linkedAlertContextMetricsRecorderAcceptsBoundedOutcomeOnly() {
         Method record = Arrays.stream(LinkedAlertContextMetricsRecorder.class.getDeclaredMethods())
                 .filter(method -> method.getName().equals("record"))

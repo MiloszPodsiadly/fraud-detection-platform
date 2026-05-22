@@ -7,6 +7,8 @@ import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
 import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.suspicious.api.observability.LinkedAlertContextMetricOutcome;
+import com.frauddetection.alert.suspicious.api.observability.LinkedAlertContextMetricsRecorder;
 import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetryClassifier;
 import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetrySink;
 import org.junit.jupiter.api.Test;
@@ -30,16 +32,19 @@ import static org.mockito.Mockito.doThrow;
 class SuspiciousTransactionReadAuditTest {
 
     private final SuspiciousTransactionReadService service = mock(SuspiciousTransactionReadService.class);
+    private final SuspiciousTransactionLinkedAlertContextService linkedAlertContextService =
+            mock(SuspiciousTransactionLinkedAlertContextService.class);
     private final SensitiveReadAuditService auditService = mock(SensitiveReadAuditService.class);
     private final AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+    private final LinkedAlertContextMetricsRecorder linkedAlertContextMetricsRecorder =
+            mock(LinkedAlertContextMetricsRecorder.class);
     private final SuspiciousTransactionReadController controller =
             new SuspiciousTransactionReadController(
                     service,
-                    mock(SuspiciousTransactionLinkedAlertContextService.class),
+                    linkedAlertContextService,
                     auditService,
                     metrics,
-                    outcome -> {
-                    },
+                    linkedAlertContextMetricsRecorder,
                     new SuspiciousTransactionQueryTelemetryClassifier(),
                     testTelemetrySink()
             );
@@ -246,21 +251,110 @@ class SuspiciousTransactionReadAuditTest {
 
     @Test
     void linkedAlertContextReadAuditedAsSensitiveRead() {
-        SuspiciousTransactionLinkedAlertContextService linkedService = mock(SuspiciousTransactionLinkedAlertContextService.class);
-        SuspiciousTransactionReadController linkedController = new SuspiciousTransactionReadController(
-                service,
-                linkedService,
-                auditService,
-                metrics,
-                outcome -> {
-                },
-                new SuspiciousTransactionQueryTelemetryClassifier(),
-                testTelemetrySink()
-        );
-        when(linkedService.resolveLinkedAlertContext("suspicious-1"))
+        when(linkedAlertContextService.resolveLinkedAlertContext("suspicious-1"))
                 .thenReturn(AlertLinkedContextResponse.noLinkedAlert());
 
-        linkedController.linkedAlertContext("suspicious-1", new MockHttpServletRequest());
+        controller.linkedAlertContext("suspicious-1", new MockHttpServletRequest());
+
+        verify(auditService).audit(
+                eq(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_LINKED_ALERT_CONTEXT),
+                eq(ReadAccessResourceType.SUSPICIOUS_TRANSACTION),
+                eq("suspicious-1"),
+                eq(0),
+                org.mockito.ArgumentMatchers.any()
+        );
+    }
+
+    @Test
+    void LinkedAlertContextMetricsDoNotAlterNoLinkedAlertAuditTest() {
+        when(linkedAlertContextService.resolveLinkedAlertContext("suspicious-1"))
+                .thenReturn(AlertLinkedContextResponse.noLinkedAlert());
+
+        controller.linkedAlertContext("suspicious-1", new MockHttpServletRequest());
+
+        verify(linkedAlertContextMetricsRecorder).record(LinkedAlertContextMetricOutcome.NO_LINKED_ALERT);
+        verify(auditService).audit(
+                eq(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_LINKED_ALERT_CONTEXT),
+                eq(ReadAccessResourceType.SUSPICIOUS_TRANSACTION),
+                eq("suspicious-1"),
+                eq(0),
+                org.mockito.ArgumentMatchers.any()
+        );
+    }
+
+    @Test
+    void LinkedAlertContextMetricsDoNotAlterSuccessfulAuditTest() {
+        when(linkedAlertContextService.resolveLinkedAlertContext("suspicious-1"))
+                .thenReturn(AlertLinkedContextResponse.available(
+                        "alert-1",
+                        "txn-1",
+                        "customer-1",
+                        "account-1",
+                        0.91,
+                        com.frauddetection.common.events.enums.RiskLevel.HIGH,
+                        com.frauddetection.common.events.enums.AlertStatus.OPEN,
+                        List.of("HIGH_AMOUNT"),
+                        java.time.Instant.parse("2026-05-19T10:00:00Z"),
+                        null,
+                        "corr-1",
+                        "score-1"
+                ));
+
+        controller.linkedAlertContext("suspicious-1", new MockHttpServletRequest());
+
+        verify(linkedAlertContextMetricsRecorder).record(LinkedAlertContextMetricOutcome.AVAILABLE);
+        verify(auditService).audit(
+                eq(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_LINKED_ALERT_CONTEXT),
+                eq(ReadAccessResourceType.SUSPICIOUS_TRANSACTION),
+                eq("suspicious-1"),
+                eq(1),
+                org.mockito.ArgumentMatchers.any()
+        );
+    }
+
+    @Test
+    void LinkedAlertContextMetricsDoNotAlterRejectedAuditTest() {
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                        controller.rejectClientSelectedAlertId("suspicious-1", new MockHttpServletRequest()))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+
+        verify(linkedAlertContextMetricsRecorder).record(LinkedAlertContextMetricOutcome.VALIDATION_ERROR);
+        verify(linkedAlertContextService, never()).resolveLinkedAlertContext(org.mockito.ArgumentMatchers.any());
+        verify(auditService).auditAttempt(
+                eq(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_LINKED_ALERT_CONTEXT),
+                eq(ReadAccessResourceType.SUSPICIOUS_TRANSACTION),
+                eq("suspicious-1"),
+                eq(ReadAccessAuditOutcome.REJECTED),
+                org.mockito.ArgumentMatchers.any()
+        );
+    }
+
+    @Test
+    void LinkedAlertContextMetricsDoNotAlterFailedAuditTest() {
+        when(linkedAlertContextService.resolveLinkedAlertContext("suspicious-1"))
+                .thenThrow(new IllegalStateException("store unavailable"));
+
+        controller.linkedAlertContext("suspicious-1", new MockHttpServletRequest());
+
+        verify(linkedAlertContextMetricsRecorder).record(LinkedAlertContextMetricOutcome.ERROR);
+        verify(auditService).auditAttempt(
+                eq(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_LINKED_ALERT_CONTEXT),
+                eq(ReadAccessResourceType.SUSPICIOUS_TRANSACTION),
+                eq("suspicious-1"),
+                eq(ReadAccessAuditOutcome.FAILED),
+                org.mockito.ArgumentMatchers.any()
+        );
+    }
+
+    @Test
+    void LinkedAlertContextMetricsFailureDoesNotSuppressAuditTest() {
+        when(linkedAlertContextService.resolveLinkedAlertContext("suspicious-1"))
+                .thenReturn(AlertLinkedContextResponse.noLinkedAlert());
+        doThrow(new IllegalStateException("metric sink unavailable"))
+                .when(linkedAlertContextMetricsRecorder)
+                .record(LinkedAlertContextMetricOutcome.NO_LINKED_ALERT);
+
+        controller.linkedAlertContext("suspicious-1", new MockHttpServletRequest());
 
         verify(auditService).audit(
                 eq(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_LINKED_ALERT_CONTEXT),
