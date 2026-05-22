@@ -123,7 +123,53 @@ class SuspiciousTransactionLinkedAlertContextDocsContractTest {
     @Test
     void DocsMentionErrorMetricForTemporaryUnavailableTest() throws Exception {
         assertThat(docs())
-                .contains("fraud.suspicious_transaction.linked_alert.read{outcome=\"error\"}");
+                .contains("outcome=temporarily_unavailable")
+                .contains("Unexpected resolver failures record the bounded `error` metric outcome");
+    }
+
+    @Test
+    void DocsMentionBoundedLinkedAlertResolverMetricsTest() throws Exception {
+        assertThat(docs())
+                .contains("FDP-72 records bounded backend resolver outcome metrics")
+                .contains("`fraud.suspicious_transaction.linked_alert.read`")
+                .contains("`endpoint=linked_alert_context`")
+                .contains("`outcome=available`")
+                .contains("`outcome=no_linked_alert`")
+                .contains("`outcome=linked_alert_not_found`")
+                .contains("`outcome=relationship_mismatch`")
+                .contains("`outcome=temporarily_unavailable`")
+                .contains("`outcome=validation_error`")
+                .contains("`outcome=suspicious_transaction_not_found`")
+                .contains("`outcome=error`");
+    }
+
+    @Test
+    void DocsMentionTelemetryIsNotDataExtractionChannelTest() throws Exception {
+        assertThat(docs())
+                .contains("Metrics observe resolver state, not entities")
+                .contains("Metrics must never contain raw identifiers")
+                .contains("Metrics must never contain request path, query string, request body, response body, or raw exception message");
+    }
+
+    @Test
+    void DocsMentionMetricsFailureDoesNotAlterApiResponseTest() throws Exception {
+        assertThat(docs())
+                .contains("Metrics failure must not alter the linked-alert read response");
+    }
+
+    @Test
+    void DocsMentionAuditPolicyUnchangedTest() throws Exception {
+        assertThat(docs())
+                .contains("Sensitive read audit remains the existing audit policy")
+                .contains("Metrics are separate diagnostic signals and do not replace audit")
+                .contains("existing sensitive-read audit target policy");
+    }
+
+    @Test
+    void DocsMentionNoFrontendOrApiContractChangeTest() throws Exception {
+        assertThat(docs())
+                .contains("FDP-72 does not add dashboards, alerting thresholds, tracing rollout, frontend behavior, DTO fields, endpoint behavior,")
+                .contains("authorization behavior, or workflow behavior");
     }
 
     @Test

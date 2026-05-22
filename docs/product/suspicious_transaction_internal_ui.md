@@ -190,8 +190,18 @@ scoreDecisionId is not used for alert-side compatibility unless the alert read m
 It must not expose analyst decisions, idempotency keys, case lifecycle state, assistant summaries, legal-proof material,
 full evidence snapshots, raw payloads, score details, or feature snapshots.
 
-Sensitive read audit and metrics use bounded outcomes only. Metrics and ordinary logs must not contain raw identifiers,
-raw paths, raw query strings, raw exception messages, or idempotency keys.
+Sensitive read audit remains the existing audit policy. Metrics are separate diagnostic signals and do not replace audit.
+FDP-72 records bounded backend resolver outcome metrics for linked-alert context reads.
+The metric name is `fraud.suspicious_transaction.linked_alert.read`.
+Allowed metric labels are `endpoint=linked_alert_context` and the allowlisted `outcome` values: `available`,
+`no_linked_alert`, `linked_alert_not_found`, `relationship_mismatch`, `temporarily_unavailable`, `validation_error`,
+`suspicious_transaction_not_found`, and `error`.
+Metrics observe resolver state, not entities.
+Metrics must never contain raw identifiers, raw paths, raw query strings, raw exception messages, request bodies,
+response bodies, or idempotency keys. Metrics and ordinary logs must not log raw identifiers.
+Metrics failure must not alter the linked-alert read response.
+FDP-72 does not add frontend behavior, DTO fields, endpoint behavior, authorization behavior, workflow behavior,
+dashboards, alerting thresholds, or tracing rollout.
 Linked-alert context read uses the existing sensitive-read audit target policy. The source SuspiciousTransaction
 resourceId may be used as the audited resource identifier. Audit metadata must not include raw alertId, raw
 linkedAlertId, raw customerId, raw accountId, raw transactionId, raw correlationId, raw scoreDecisionId, raw query
@@ -201,9 +211,9 @@ Clients must evaluate state. HTTP 200 does not imply linked alert context is ava
 HTTP 200 does not imply LINKED_ALERT_AVAILABLE.
 TEMPORARILY_UNAVAILABLE is a degraded read state and must not be rendered as linked alert context.
 UI/client must not render alert context fields for TEMPORARILY_UNAVAILABLE.
-TEMPORARILY_UNAVAILABLE returns no alert fields. Dashboards and alerts should monitor
-`fraud.suspicious_transaction.linked_alert.read{outcome="error"}`. A rejected client-supplied `alertId` query parameter
-returns 400 and records a bounded validation error metric.
+TEMPORARILY_UNAVAILABLE returns no alert fields and records the bounded `temporarily_unavailable` resolver outcome
+when that state is returned. Unexpected resolver failures record the bounded `error` metric outcome. A rejected
+client-supplied `alertId` query parameter returns 400 and records a bounded validation error metric.
 
 ## Out Of Scope
 
