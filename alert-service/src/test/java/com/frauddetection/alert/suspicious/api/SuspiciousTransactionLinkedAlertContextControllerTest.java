@@ -11,12 +11,17 @@ import com.frauddetection.alert.suspicious.api.observability.LinkedAlertContextM
 import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetryClassifier;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+import java.util.stream.Stream;
 
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -184,59 +189,58 @@ class SuspiciousTransactionLinkedAlertContextControllerTest {
         assertNonAvailableResponseHasNoAlertFields("TEMPORARILY_UNAVAILABLE");
     }
 
-    @Test
-    void linkedAlertContextMetricsFailureDoesNotAlterNoLinkedAlertResponse() throws Exception {
+    @ParameterizedTest
+    @MethodSource("linkedAlertContextMetricFailureBranches")
+    void linkedAlertContextMetricsFailureDoesNotAlterResolverResponseBranches(
+            AlertLinkedContextResponse serviceResponse,
+            LinkedAlertContextMetricOutcome metricOutcome,
+            String expectedState,
+            boolean expectAlertFields
+    ) throws Exception {
         when(linkedAlertContextService.resolveLinkedAlertContext("suspicious-1"))
-                .thenReturn(AlertLinkedContextResponse.noLinkedAlert());
+                .thenReturn(serviceResponse);
         doThrow(new IllegalStateException("metric sink unavailable for alert-secret"))
                 .when(linkedAlertContextMetricsRecorder)
-                .record(LinkedAlertContextMetricOutcome.NO_LINKED_ALERT);
+                .record(metricOutcome);
 
-        mockMvc.perform(get("/internal/suspicious-transactions/suspicious-1/linked-alert"))
+        ResultActions result = mockMvc.perform(get("/internal/suspicious-transactions/suspicious-1/linked-alert"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.state").value("NO_LINKED_ALERT"))
-                .andExpect(jsonPath("$.alertId").doesNotExist());
+                .andExpect(jsonPath("$.state").value(expectedState));
+
+        if (expectAlertFields) {
+            result.andExpect(jsonPath("$.alertId").value("alert-1"))
+                    .andExpect(jsonPath("$.customerId").value("customer-1"));
+        } else {
+            assertNoAlertFields(result);
+        }
     }
 
     @Test
-    void linkedAlertContextMetricsFailureDoesNotAlterAvailableResponse() throws Exception {
-        when(linkedAlertContextService.resolveLinkedAlertContext("suspicious-1"))
-                .thenReturn(AlertLinkedContextResponse.available(
-                        "alert-1",
-                        "txn-1",
-                        "customer-1",
-                        "account-1",
-                        0.93,
-                        com.frauddetection.common.events.enums.RiskLevel.HIGH,
-                        com.frauddetection.common.events.enums.AlertStatus.OPEN,
-                        java.util.List.of("HIGH_AMOUNT"),
-                        java.time.Instant.parse("2026-05-19T10:00:00Z"),
-                        null,
-                        "corr-1",
-                        "score-1"
-                ));
+    void linkedAlertContextMetricsFailureDoesNotAlterValidationErrorResponse() throws Exception {
         doThrow(new IllegalStateException("metric sink unavailable for alert-secret"))
                 .when(linkedAlertContextMetricsRecorder)
-                .record(LinkedAlertContextMetricOutcome.AVAILABLE);
+                .record(LinkedAlertContextMetricOutcome.VALIDATION_ERROR);
 
-        mockMvc.perform(get("/internal/suspicious-transactions/suspicious-1/linked-alert"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.state").value("LINKED_ALERT_AVAILABLE"))
-                .andExpect(jsonPath("$.alertId").value("alert-1"));
+        mockMvc.perform(get("/internal/suspicious-transactions/suspicious-1/linked-alert")
+                        .queryParam("alertId", "alert-secret"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.alertId").doesNotExist());
+
+        verify(linkedAlertContextService, never()).resolveLinkedAlertContext(org.mockito.ArgumentMatchers.any());
     }
 
     @Test
-    void linkedAlertContextMetricsFailureDoesNotAlterRelationshipMismatchResponse() throws Exception {
-        when(linkedAlertContextService.resolveLinkedAlertContext("suspicious-1"))
-                .thenReturn(AlertLinkedContextResponse.relationshipMismatch());
+    void linkedAlertContextMetricsFailureDoesNotAlterSuspiciousTransactionNotFoundResponse() throws Exception {
+        when(linkedAlertContextService.resolveLinkedAlertContext("missing"))
+                .thenThrow(new SuspiciousTransactionLinkedAlertContextNotFoundException());
         doThrow(new IllegalStateException("metric sink unavailable for alert-secret"))
                 .when(linkedAlertContextMetricsRecorder)
-                .record(LinkedAlertContextMetricOutcome.RELATIONSHIP_MISMATCH);
+                .record(LinkedAlertContextMetricOutcome.SUSPICIOUS_TRANSACTION_NOT_FOUND);
 
-        mockMvc.perform(get("/internal/suspicious-transactions/suspicious-1/linked-alert"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.state").value("LINKED_ALERT_RELATIONSHIP_MISMATCH"))
-                .andExpect(jsonPath("$.alertId").doesNotExist());
+        mockMvc.perform(get("/internal/suspicious-transactions/missing/linked-alert"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.alertId").doesNotExist())
+                .andExpect(jsonPath("$.customerId").doesNotExist());
     }
 
     private void assertNonAvailableResponseHasNoAlertFields(String expectedState) throws Exception {
@@ -252,6 +256,63 @@ class SuspiciousTransactionLinkedAlertContextControllerTest {
                 .andExpect(jsonPath("$.scoreDecisionId").doesNotExist())
                 .andExpect(jsonPath("$.reasonCodes").isArray())
                 .andExpect(jsonPath("$.reasonCodes").isEmpty());
+    }
+
+    private void assertNoAlertFields(ResultActions result) throws Exception {
+        result.andExpect(jsonPath("$.alertId").doesNotExist())
+                .andExpect(jsonPath("$.transactionId").doesNotExist())
+                .andExpect(jsonPath("$.customerId").doesNotExist())
+                .andExpect(jsonPath("$.accountId").doesNotExist())
+                .andExpect(jsonPath("$.correlationId").doesNotExist())
+                .andExpect(jsonPath("$.scoreDecisionId").doesNotExist());
+    }
+
+    private static Stream<Arguments> linkedAlertContextMetricFailureBranches() {
+        return Stream.of(
+                Arguments.of(
+                        AlertLinkedContextResponse.available(
+                                "alert-1",
+                                "txn-1",
+                                "customer-1",
+                                "account-1",
+                                0.93,
+                                com.frauddetection.common.events.enums.RiskLevel.HIGH,
+                                com.frauddetection.common.events.enums.AlertStatus.OPEN,
+                                java.util.List.of("HIGH_AMOUNT"),
+                                java.time.Instant.parse("2026-05-19T10:00:00Z"),
+                                null,
+                                "corr-1",
+                                "score-1"
+                        ),
+                        LinkedAlertContextMetricOutcome.AVAILABLE,
+                        "LINKED_ALERT_AVAILABLE",
+                        true
+                ),
+                Arguments.of(
+                        AlertLinkedContextResponse.noLinkedAlert(),
+                        LinkedAlertContextMetricOutcome.NO_LINKED_ALERT,
+                        "NO_LINKED_ALERT",
+                        false
+                ),
+                Arguments.of(
+                        AlertLinkedContextResponse.linkedAlertNotFound(),
+                        LinkedAlertContextMetricOutcome.LINKED_ALERT_NOT_FOUND,
+                        "LINKED_ALERT_NOT_FOUND",
+                        false
+                ),
+                Arguments.of(
+                        AlertLinkedContextResponse.relationshipMismatch(),
+                        LinkedAlertContextMetricOutcome.RELATIONSHIP_MISMATCH,
+                        "LINKED_ALERT_RELATIONSHIP_MISMATCH",
+                        false
+                ),
+                Arguments.of(
+                        AlertLinkedContextResponse.temporarilyUnavailable(),
+                        LinkedAlertContextMetricOutcome.TEMPORARILY_UNAVAILABLE,
+                        "TEMPORARILY_UNAVAILABLE",
+                        false
+                )
+        );
     }
 
     private void assertNoRawResolverExceptionData(CapturedOutput output) {

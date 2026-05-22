@@ -68,6 +68,7 @@ class LinkedAlertContextMetricsRecorderTest {
 
     @Test
     void linkedAlertContextMetricOutcomeDoesNotUseDynamicStrings() throws Exception {
+        // These source checks are architecture regression guardrails. Runtime tests and the bounded recorder interface are the primary contract.
         String source = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/suspicious/api/observability/LinkedAlertContextMetricOutcome.java"
         ));
@@ -92,6 +93,17 @@ class LinkedAlertContextMetricsRecorderTest {
     }
 
     @Test
+    void sourceScanningTestsAreDocumentedAsGuardrailsNotProof() throws Exception {
+        String source = Files.readString(Path.of(
+                "src/test/java/com/frauddetection/alert/suspicious/api/observability/LinkedAlertContextMetricsRecorderTest.java"
+        ));
+
+        assertThat(source)
+                .contains("architecture regression guardrails")
+                .contains("Runtime tests and the bounded recorder interface are the primary contract");
+    }
+
+    @Test
     void linkedAlertContextMetricsRecorderAcceptsBoundedOutcomeOnly() {
         Method record = Arrays.stream(LinkedAlertContextMetricsRecorder.class.getDeclaredMethods())
                 .filter(method -> method.getName().equals("record"))
@@ -103,6 +115,7 @@ class LinkedAlertContextMetricsRecorderTest {
 
     @Test
     void linkedAlertContextMetricsRecorderDoesNotAcceptRequestEntityResponseOrException() throws Exception {
+        // These source checks are architecture regression guardrails. Runtime tests and the bounded recorder interface are the primary contract.
         String source = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/suspicious/api/observability/LinkedAlertContextMetricsRecorder.java"
         ));
@@ -118,6 +131,7 @@ class LinkedAlertContextMetricsRecorderTest {
 
     @Test
     void linkedAlertContextMetricsRecorderDoesNotAcceptRawIdentifiers() throws Exception {
+        // These source checks are architecture regression guardrails. Runtime tests and the bounded recorder interface are the primary contract.
         String source = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/suspicious/api/observability/LinkedAlertContextMetricsRecorder.java"
         ));
@@ -188,6 +202,7 @@ class LinkedAlertContextMetricsRecorderTest {
 
     @Test
     void linkedAlertContextMetricSourceDoesNotUseRawRequestOrExceptionData() throws Exception {
+        // These source checks are architecture regression guardrails. Runtime tests and the bounded recorder interface are the primary contract.
         String recorder = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/suspicious/api/observability/MicrometerLinkedAlertContextMetricsRecorder.java"
         ));
