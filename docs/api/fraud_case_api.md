@@ -19,6 +19,7 @@ exactly-once execution, and not external finality.
 | --- | --- | --- |
 | `POST` | `/api/v1/fraud-cases` | Create a fraud case from alert ids. |
 | `GET` | `/api/v1/fraud-cases/{caseId}` | Read case details. |
+| `GET` | `/api/v1/fraud-cases/{caseId}/evidence-summary` | Read bounded evidence-summary context from linked alert evidence snapshots. |
 | `GET` | `/api/v1/fraud-cases` | Search cases. |
 | `POST` | `/api/v1/fraud-cases/{caseId}/assign` | Assign or reassign investigator. |
 | `POST` | `/api/v1/fraud-cases/{caseId}/notes` | Append investigator note. |
@@ -30,9 +31,22 @@ exactly-once execution, and not external finality.
 
 Authorities:
 
-- `GET /fraud-cases` and `GET /fraud-cases/{caseId}` require `fraud-case:read`.
+- `GET /fraud-cases`, `GET /fraud-cases/{caseId}`, and
+  `GET /fraud-cases/{caseId}/evidence-summary` require `fraud-case:read`.
 - Lifecycle `POST` endpoints require `fraud-case:update`.
 - `GET /fraud-cases/{caseId}/audit` requires `fraud-case:audit:read` and intentionally returns audit `actorId`.
+
+Evidence-summary semantics:
+
+- The evidence summary is a read-only projection over `FraudCaseDocument.linkedAlertIds` and linked
+  `AlertDocument.evidenceSnapshot` entries.
+- It returns bounded reason-code, evidence type, severity, source, status, title, and description context only.
+- It does not expose raw alert ids, customer or account identifiers, transaction ids, correlation ids, source event
+  ids, feature snapshots, model payloads, score details, or raw evidence attributes.
+- It does not create or edit evidence, mutate fraud-case lifecycle state, create analyst decisions, publish Kafka
+  events, or claim a final outcome.
+- `AVAILABLE` means every included evidence item is available and at least one evidence item exists. Empty, legacy,
+  unavailable, stale, partial, or not-applicable evidence states do not become `AVAILABLE`; `ERROR` dominates.
 
 List semantics:
 
