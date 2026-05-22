@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { isAbortError } from "../api/alertsApi.js";
+import { isAbortError } from "../api/apiErrors.js";
 import { LoadingPanel } from "./LoadingPanel.jsx";
 import { boundedEvidenceDescription, boundedEvidenceTitleForType } from "./evidenceSummaryCopy.js";
 import { formatCount, normalizeEvidenceCode, safeArray, safeTruncationReason, toCountItem } from "./evidenceSummaryDisplay.js";
