@@ -26,6 +26,8 @@ class SuspiciousTransactionReadControllerFilterValidationTest {
                         mock(SuspiciousTransactionLinkedAlertContextService.class),
                         mock(SensitiveReadAuditService.class),
                         mock(AlertServiceMetrics.class),
+                        outcome -> {
+                        },
                         new SuspiciousTransactionQueryTelemetryClassifier(),
                         testTelemetrySink()
                 ))
@@ -64,6 +66,8 @@ class SuspiciousTransactionReadControllerFilterValidationTest {
                         mock(SuspiciousTransactionLinkedAlertContextService.class),
                         mock(SensitiveReadAuditService.class),
                         mock(AlertServiceMetrics.class),
+                        outcome -> {
+                        },
                         new SuspiciousTransactionQueryTelemetryClassifier(),
                         testTelemetrySink()
                 ))

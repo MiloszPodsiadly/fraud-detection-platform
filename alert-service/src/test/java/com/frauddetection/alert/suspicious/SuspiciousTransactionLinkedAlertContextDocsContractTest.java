@@ -123,7 +123,95 @@ class SuspiciousTransactionLinkedAlertContextDocsContractTest {
     @Test
     void DocsMentionErrorMetricForTemporaryUnavailableTest() throws Exception {
         assertThat(docs())
-                .contains("fraud.suspicious_transaction.linked_alert.read{outcome=\"error\"}");
+                .contains("outcome=temporarily_unavailable")
+                .contains("Unexpected resolver failures record the bounded `error` metric outcome");
+    }
+
+    @Test
+    void DocsMentionBoundedLinkedAlertResolverMetricsTest() throws Exception {
+        assertThat(docs())
+                .contains("FDP-72 records bounded backend resolver outcome metrics")
+                .contains("`fraud.suspicious_transaction.linked_alert.read`")
+                .contains("`endpoint=linked_alert_context`")
+                .contains("`outcome=available`")
+                .contains("`outcome=no_linked_alert`")
+                .contains("`outcome=linked_alert_not_found`")
+                .contains("`outcome=relationship_mismatch`")
+                .contains("`outcome=temporarily_unavailable`")
+                .contains("`outcome=validation_error`")
+                .contains("`outcome=suspicious_transaction_not_found`")
+                .contains("`outcome=error`");
+    }
+
+    @Test
+    void DocsExplainValidationAndNotFoundMetricOutcomesAsBoundedEndpointOutcomesTest() throws Exception {
+        assertThat(docs())
+                .contains("`validation_error` means the client supplied an unsupported selector such as `alertId`")
+                .contains("bounded endpoint outcome, not raw validation detail")
+                .contains("`suspicious_transaction_not_found` means the source SuspiciousTransaction was not found")
+                .contains("bounded endpoint outcome, not a raw identifier");
+    }
+
+    @Test
+    void DocsMentionTelemetryIsNotDataExtractionChannelTest() throws Exception {
+        assertThat(docs())
+                .contains("Metrics observe resolver state, not entities")
+                .contains("Metrics must never contain raw identifiers")
+                .contains("Metrics must never contain request path, query string, request body, response body, or raw exception message");
+    }
+
+    @Test
+    void DocsMentionMetricsFailureDoesNotAlterApiResponseTest() throws Exception {
+        assertThat(docs())
+                .contains("Metrics failure must not alter the linked-alert read response");
+    }
+
+    @Test
+    void DocsMentionAuditPolicyUnchangedTest() throws Exception {
+        assertThat(docs())
+                .contains("Sensitive read audit remains the existing audit policy")
+                .contains("Metrics are separate diagnostic signals and do not replace audit")
+                .contains("existing sensitive-read audit target policy")
+                .contains("FDP-72 forbids raw identifiers in metrics and ordinary logs")
+                .contains("It does not change existing sensitive-read audit policy")
+                .contains("Audit is a controlled security/audit channel and is not the same as metrics or ordinary logs")
+                .contains("Audit access, storage, and retention must be governed by the existing audit policy");
+    }
+
+    @Test
+    void DocsMentionUnavailableOutcomeMigrationTest() throws Exception {
+        assertThat(docs())
+                .contains("replaces the previous linked-alert metric outcome label `unavailable` with `temporarily_unavailable`")
+                .contains("Existing dashboards or ad-hoc queries using `outcome=unavailable` must migrate to")
+                .contains("`outcome=temporarily_unavailable`")
+                .contains("does not dual-emit the legacy `unavailable` label")
+                .contains("does not add a compatibility metric unless explicitly required by operations");
+    }
+
+    @Test
+    void DocsMentionEndpointOutcomeMetricContractTest() throws Exception {
+        assertThat(docs())
+                .contains("The metric name is `fraud.suspicious_transaction.linked_alert.read`")
+                .contains("Allowed metric labels are")
+                .contains("`endpoint=linked_alert_context`")
+                .contains("constant label introduced with the bounded recorder contract")
+                .contains("Metrics must never contain raw identifiers");
+    }
+
+    @Test
+    void DocsMentionCustomRecorderAndMetricsAccessControlsTest() throws Exception {
+        assertThat(docs())
+                .contains("Custom recorder implementations must not log raw identifiers or exception messages, even when rethrowing")
+                .contains("metrics dashboards and metric query access")
+                .contains("should remain access-controlled")
+                .contains("Aggregated outcomes such as suspicious_transaction_not_found may still be operationally sensitive in small environments");
+    }
+
+    @Test
+    void DocsMentionNoFrontendOrApiContractChangeTest() throws Exception {
+        assertThat(docs())
+                .contains("FDP-72 does not add dashboards, alerting thresholds, tracing rollout, frontend behavior, DTO fields, endpoint behavior,")
+                .contains("authorization behavior, or workflow behavior");
     }
 
     @Test

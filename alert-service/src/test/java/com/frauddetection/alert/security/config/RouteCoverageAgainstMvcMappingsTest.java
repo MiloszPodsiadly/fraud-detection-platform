@@ -51,6 +51,7 @@ import com.frauddetection.alert.service.TransactionMonitoringUseCase;
 import com.frauddetection.alert.suspicious.api.SuspiciousTransactionReadController;
 import com.frauddetection.alert.suspicious.api.SuspiciousTransactionReadService;
 import com.frauddetection.alert.suspicious.api.SuspiciousTransactionLinkedAlertContextService;
+import com.frauddetection.alert.suspicious.api.observability.LinkedAlertContextMetricsRecorder;
 import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetryClassifier;
 import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetrySink;
 import com.frauddetection.alert.system.SystemTrustLevelController;
@@ -207,6 +208,9 @@ class RouteCoverageAgainstMvcMappingsTest {
 
     @MockBean
     private SuspiciousTransactionLinkedAlertContextService suspiciousTransactionLinkedAlertContextService;
+
+    @MockBean
+    private LinkedAlertContextMetricsRecorder linkedAlertContextMetricsRecorder;
 
     @MockBean
     private SuspiciousTransactionQueryTelemetryClassifier suspiciousTransactionQueryTelemetryClassifier;

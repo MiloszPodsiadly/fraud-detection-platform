@@ -190,8 +190,33 @@ scoreDecisionId is not used for alert-side compatibility unless the alert read m
 It must not expose analyst decisions, idempotency keys, case lifecycle state, assistant summaries, legal-proof material,
 full evidence snapshots, raw payloads, score details, or feature snapshots.
 
-Sensitive read audit and metrics use bounded outcomes only. Metrics and ordinary logs must not contain raw identifiers,
-raw paths, raw query strings, raw exception messages, or idempotency keys.
+Sensitive read audit remains the existing audit policy. Metrics are separate diagnostic signals and do not replace audit.
+FDP-72 forbids raw identifiers in metrics and ordinary logs. It does not change existing sensitive-read audit policy.
+The source SuspiciousTransaction resourceId may remain the audited resource identifier.
+Audit is a controlled security/audit channel and is not the same as metrics or ordinary logs.
+Audit access, storage, and retention must be governed by the existing audit policy.
+FDP-72 records bounded backend resolver outcome metrics for linked-alert context reads.
+The metric name is `fraud.suspicious_transaction.linked_alert.read`.
+Allowed metric labels are `endpoint=linked_alert_context` and the allowlisted `outcome` values: `available`,
+`no_linked_alert`, `linked_alert_not_found`, `relationship_mismatch`, `temporarily_unavailable`, `validation_error`,
+`suspicious_transaction_not_found`, and `error`.
+`validation_error` means the client supplied an unsupported selector such as `alertId`; it is a bounded endpoint outcome, not raw validation detail.
+`suspicious_transaction_not_found` means the source SuspiciousTransaction was not found; it is a bounded endpoint outcome, not a raw identifier.
+FDP-72 replaces the previous linked-alert metric outcome label `unavailable` with `temporarily_unavailable` to align
+with the resolver response state. Existing dashboards or ad-hoc queries using `outcome=unavailable` must migrate to
+`outcome=temporarily_unavailable`.
+The endpoint label `endpoint=linked_alert_context` is a constant label introduced with the bounded recorder contract.
+FDP-72 does not dual-emit the legacy `unavailable` label and does not add a compatibility metric unless explicitly required by operations.
+Metrics observe resolver state, not entities.
+Metrics must never contain raw identifiers, raw paths, raw query strings, raw exception messages, request bodies,
+response bodies, or idempotency keys. Metrics and ordinary logs must not log raw identifiers.
+Metrics failure must not alter the linked-alert read response.
+Custom recorder implementations must not log raw identifiers or exception messages, even when rethrowing.
+Resolver outcome metrics are bounded and do not contain raw identifiers, but metrics dashboards and metric query access
+should remain access-controlled.
+Aggregated outcomes such as suspicious_transaction_not_found may still be operationally sensitive in small environments.
+FDP-72 does not add frontend behavior, DTO fields, endpoint behavior, authorization behavior, workflow behavior,
+dashboards, alerting thresholds, or tracing rollout.
 Linked-alert context read uses the existing sensitive-read audit target policy. The source SuspiciousTransaction
 resourceId may be used as the audited resource identifier. Audit metadata must not include raw alertId, raw
 linkedAlertId, raw customerId, raw accountId, raw transactionId, raw correlationId, raw scoreDecisionId, raw query
@@ -201,9 +226,9 @@ Clients must evaluate state. HTTP 200 does not imply linked alert context is ava
 HTTP 200 does not imply LINKED_ALERT_AVAILABLE.
 TEMPORARILY_UNAVAILABLE is a degraded read state and must not be rendered as linked alert context.
 UI/client must not render alert context fields for TEMPORARILY_UNAVAILABLE.
-TEMPORARILY_UNAVAILABLE returns no alert fields. Dashboards and alerts should monitor
-`fraud.suspicious_transaction.linked_alert.read{outcome="error"}`. A rejected client-supplied `alertId` query parameter
-returns 400 and records a bounded validation error metric.
+TEMPORARILY_UNAVAILABLE returns no alert fields and records the bounded `temporarily_unavailable` resolver outcome
+when that state is returned. Unexpected resolver failures record the bounded `error` metric outcome. A rejected
+client-supplied `alertId` query parameter returns 400 and records a bounded validation error metric.
 
 ## Out Of Scope
 

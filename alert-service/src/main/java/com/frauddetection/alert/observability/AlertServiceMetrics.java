@@ -165,13 +165,6 @@ public class AlertServiceMetrics {
         ).increment();
     }
 
-    public void recordSuspiciousTransactionLinkedAlertRead(String outcome) {
-        counter(
-                "fraud.suspicious_transaction.linked_alert.read",
-                "outcome", normalizeSuspiciousTransactionLinkedAlertOutcome(outcome)
-        ).increment();
-    }
-
     public void recordPostCommitAuditDegraded(String operation) {
         counter(
                 "fraud_platform_post_commit_audit_degraded_total",
@@ -1328,23 +1321,6 @@ public class AlertServiceMetrics {
             case "STALE" -> "stale";
             case "UNAVAILABLE" -> "unavailable";
             default -> "unavailable";
-        };
-    }
-
-    private String normalizeSuspiciousTransactionLinkedAlertOutcome(String outcome) {
-        if (!StringUtils.hasText(outcome)) {
-            return "error";
-        }
-        return switch (outcome) {
-            case "available",
-                 "no_linked_alert",
-                 "suspicious_transaction_not_found",
-                 "linked_alert_not_found",
-                 "relationship_mismatch",
-                 "validation_error",
-                 "unavailable",
-                 "error" -> outcome;
-            default -> "error";
         };
     }
 

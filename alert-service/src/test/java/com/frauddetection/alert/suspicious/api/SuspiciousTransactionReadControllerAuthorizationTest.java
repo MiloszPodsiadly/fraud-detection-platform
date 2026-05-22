@@ -12,6 +12,7 @@ import com.frauddetection.alert.security.config.SecurityDeniedAccessTelemetrySli
 import com.frauddetection.alert.security.error.ApiAccessDeniedHandler;
 import com.frauddetection.alert.security.error.ApiAuthenticationEntryPoint;
 import com.frauddetection.alert.security.error.SecurityErrorResponseWriter;
+import com.frauddetection.alert.suspicious.api.observability.LinkedAlertContextMetricsRecorder;
 import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetryClassifier;
 import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetrySink;
 import org.junit.jupiter.api.Test;
@@ -65,6 +66,9 @@ class SuspiciousTransactionReadControllerAuthorizationTest {
 
     @MockBean
     private AlertServiceMetrics metrics;
+
+    @MockBean
+    private LinkedAlertContextMetricsRecorder linkedAlertContextMetricsRecorder;
 
     @MockBean
     private SuspiciousTransactionQueryTelemetryClassifier queryTelemetryClassifier;

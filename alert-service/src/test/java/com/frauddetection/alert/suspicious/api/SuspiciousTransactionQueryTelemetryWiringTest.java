@@ -25,6 +25,8 @@ class SuspiciousTransactionQueryTelemetryWiringTest {
                         mock(SuspiciousTransactionLinkedAlertContextService.class),
                         mock(SensitiveReadAuditService.class),
                         mock(AlertServiceMetrics.class),
+                        outcome -> {
+                        },
                         null,
                         snapshot -> {
                         }
@@ -39,6 +41,8 @@ class SuspiciousTransactionQueryTelemetryWiringTest {
                         mock(SuspiciousTransactionLinkedAlertContextService.class),
                         mock(SensitiveReadAuditService.class),
                         mock(AlertServiceMetrics.class),
+                        outcome -> {
+                        },
                         new SuspiciousTransactionQueryTelemetryClassifier(),
                         null
                 ))
