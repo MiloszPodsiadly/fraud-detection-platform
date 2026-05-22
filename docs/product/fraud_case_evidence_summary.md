@@ -28,6 +28,16 @@ evidence snapshot.
 Future branches may add direct SuspiciousTransaction evidence aggregation only after FraudCase has a stable,
 authorized, audited relationship to suspicious transactions.
 
+## Direct SuspiciousTransaction Aggregation
+
+FDP-73 does not directly query or aggregate SuspiciousTransaction documents.
+
+SuspiciousTransaction-derived context may appear only if it has already been materialized into the linked alert
+evidence snapshot.
+
+Future branches may add direct SuspiciousTransaction evidence aggregation only after FraudCase has a stable,
+authorized, audited relationship to suspicious transactions.
+
 ## Data Sources
 
 - `FraudCaseDocument.linkedAlertIds` is the only relationship source.
@@ -42,6 +52,10 @@ authorized, audited relationship to suspicious transactions.
 
 `GET /api/v1/fraud-cases/{caseId}/evidence-summary`
 
+Because this endpoint is under `/api/v1`, response fields are treated as an internal product API contract. Future
+changes should preserve non-claims and avoid changing the meaning of `aggregateEvidenceStatus`, `partial`, `legacy`,
+`truncated`, and `truncationReason` without a documented migration.
+
 The endpoint requires `fraud-case:read`. Alert read authority and SuspiciousTransaction read authority are not
 substitutes. Missing authentication returns `401`; missing authority returns `403`; a missing case returns the current
 fraud-case not-found response.
@@ -54,8 +68,14 @@ transaction ids, correlation ids, query payloads, raw evidence attributes, or ra
 ## Aggregation Semantics
 
 - At most 100 linked alerts are included in one projection.
+- `linkedAlertCount` is the total normalized linked alert count on the FraudCase, not the number of alerts processed.
 - If the linked-alert limit is exceeded, the response sets `truncated=true`,
-  `truncationReason=LINKED_ALERT_LIMIT_EXCEEDED`, and `partial=true`.
+  `truncationReason=LINKED_ALERT_LIMIT_EXCEEDED`, `partial=true`, and the aggregate evidence status is `PARTIAL`
+  unless an `ERROR` evidence status dominates. Truncated source coverage prevents `AVAILABLE`. The projection
+  processes only the bounded linked-alert window.
+- FDP-73 does not expose `missingLinkedAlertCount`. Missing linked alert coverage is represented through
+  `partial=true` and `aggregateEvidenceStatus=PARTIAL`. This avoids adding more linked-entity counters in the first
+  read model slice. A future hardening branch may add explicit `missingLinkedAlertCount` if operationally needed.
 - If any linked alert in the included source window is missing, or the source window is truncated, the aggregate
   evidence status is `PARTIAL` unless an `ERROR` evidence status dominates.
 - Empty linked-alert context is treated as legacy case context and returns aggregate status `LEGACY`.
@@ -63,6 +83,8 @@ transaction ids, correlation ids, query payloads, raw evidence attributes, or ra
 - `ERROR` evidence status dominates the aggregate status.
 - Any `PARTIAL`, `LEGACY`, `STALE`, `UNAVAILABLE`, or `NOT_APPLICABLE` evidence status makes the aggregate status
   `PARTIAL` unless an `ERROR` is present.
+- `NOT_APPLICABLE` is treated conservatively as preventing aggregate `AVAILABLE`. It contributes to `PARTIAL` because
+  the summary cannot claim all evidence is available and applicable.
 - `AVAILABLE` is returned only when at least one evidence item exists and every included evidence item is
   `AVAILABLE` and source coverage is complete.
 - Top reason codes are derived from existing canonical reason-code strings. The projection does not invent an
