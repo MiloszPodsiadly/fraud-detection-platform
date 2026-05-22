@@ -299,7 +299,7 @@ public class SuspiciousTransactionReadController {
                 ? LinkedAlertContextMetricOutcome.ERROR
                 : outcome;
         try {
-            // Recorder implementations are expected to be fail-safe, but the controller keeps this guard so a custom recorder cannot alter the read API response path.
+            // Recorder implementations should be fail-safe. This controller guard is defense-in-depth for custom recorder implementations and must keep the read API response independent from telemetry failures. Warnings must remain bounded and must not include request path, identifiers, or exception messages.
             linkedAlertContextMetricsRecorder.record(boundedOutcome);
         } catch (RuntimeException exception) {
             log.warn("Linked alert context metric recording failed outcome={}", boundedOutcome.label());
