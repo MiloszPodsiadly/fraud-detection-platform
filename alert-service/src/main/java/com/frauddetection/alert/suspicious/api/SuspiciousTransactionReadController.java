@@ -6,6 +6,8 @@ import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
 import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.suspicious.api.observability.LinkedAlertContextMetricOutcome;
+import com.frauddetection.alert.suspicious.api.observability.LinkedAlertContextMetricsRecorder;
 import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetryClassifier;
 import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetrySink;
 import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetrySnapshot;
@@ -36,6 +38,7 @@ public class SuspiciousTransactionReadController {
     private final SuspiciousTransactionLinkedAlertContextService linkedAlertContextService;
     private final SensitiveReadAuditService sensitiveReadAuditService;
     private final AlertServiceMetrics metrics;
+    private final LinkedAlertContextMetricsRecorder linkedAlertContextMetricsRecorder;
     private final SuspiciousTransactionQueryTelemetryClassifier queryTelemetryClassifier;
     private final SuspiciousTransactionQueryTelemetrySink queryTelemetrySink;
 
@@ -44,6 +47,7 @@ public class SuspiciousTransactionReadController {
             SuspiciousTransactionLinkedAlertContextService linkedAlertContextService,
             SensitiveReadAuditService sensitiveReadAuditService,
             AlertServiceMetrics metrics,
+            LinkedAlertContextMetricsRecorder linkedAlertContextMetricsRecorder,
             SuspiciousTransactionQueryTelemetryClassifier queryTelemetryClassifier,
             SuspiciousTransactionQueryTelemetrySink queryTelemetrySink
     ) {
@@ -51,6 +55,10 @@ public class SuspiciousTransactionReadController {
         this.linkedAlertContextService = Objects.requireNonNull(linkedAlertContextService, "linkedAlertContextService is required");
         this.sensitiveReadAuditService = Objects.requireNonNull(sensitiveReadAuditService, "sensitiveReadAuditService is required");
         this.metrics = Objects.requireNonNull(metrics, "metrics is required");
+        this.linkedAlertContextMetricsRecorder = Objects.requireNonNull(
+                linkedAlertContextMetricsRecorder,
+                "linkedAlertContextMetricsRecorder is required"
+        );
         this.queryTelemetryClassifier = Objects.requireNonNull(queryTelemetryClassifier, "queryTelemetryClassifier is required");
         this.queryTelemetrySink = Objects.requireNonNull(queryTelemetrySink, "queryTelemetrySink is required");
     }
@@ -123,7 +131,7 @@ public class SuspiciousTransactionReadController {
             @PathVariable String suspiciousTransactionId,
             HttpServletRequest request
     ) {
-        recordLinkedAlertContextMetric("validation_error");
+        recordLinkedAlertContextMetric(LinkedAlertContextMetricOutcome.VALIDATION_ERROR);
         sensitiveReadAuditService.auditAttempt(
                 ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_LINKED_ALERT_CONTEXT,
                 ReadAccessResourceType.SUSPICIOUS_TRANSACTION,
@@ -144,7 +152,7 @@ public class SuspiciousTransactionReadController {
         try {
             response = linkedAlertContextService.resolveLinkedAlertContext(suspiciousTransactionId);
         } catch (SuspiciousTransactionLinkedAlertContextNotFoundException exception) {
-            recordLinkedAlertContextMetric("suspicious_transaction_not_found");
+            recordLinkedAlertContextMetric(LinkedAlertContextMetricOutcome.SUSPICIOUS_TRANSACTION_NOT_FOUND);
             sensitiveReadAuditService.auditAttempt(
                     ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_LINKED_ALERT_CONTEXT,
                     ReadAccessResourceType.SUSPICIOUS_TRANSACTION,
@@ -154,7 +162,7 @@ public class SuspiciousTransactionReadController {
             );
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Suspicious transaction not found.");
         } catch (RuntimeException exception) {
-            recordLinkedAlertContextMetric("error");
+            recordLinkedAlertContextMetric(LinkedAlertContextMetricOutcome.ERROR);
             sensitiveReadAuditService.auditAttempt(
                     ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_LINKED_ALERT_CONTEXT,
                     ReadAccessResourceType.SUSPICIOUS_TRANSACTION,
@@ -164,8 +172,7 @@ public class SuspiciousTransactionReadController {
             );
             return AlertLinkedContextResponse.temporarilyUnavailable();
         }
-        String outcome = linkedAlertOutcome(response.state());
-        recordLinkedAlertContextMetric(outcome);
+        recordLinkedAlertContextMetric(linkedAlertOutcome(response.state()));
         sensitiveReadAuditService.audit(
                 ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_LINKED_ALERT_CONTEXT,
                 ReadAccessResourceType.SUSPICIOUS_TRANSACTION,
@@ -274,24 +281,27 @@ public class SuspiciousTransactionReadController {
         }
     }
 
-    private String linkedAlertOutcome(LinkedAlertContextState state) {
+    private LinkedAlertContextMetricOutcome linkedAlertOutcome(LinkedAlertContextState state) {
         if (state == null) {
-            return "unavailable";
+            return LinkedAlertContextMetricOutcome.TEMPORARILY_UNAVAILABLE;
         }
         return switch (state) {
-            case LINKED_ALERT_AVAILABLE -> "available";
-            case NO_LINKED_ALERT -> "no_linked_alert";
-            case LINKED_ALERT_NOT_FOUND -> "linked_alert_not_found";
-            case LINKED_ALERT_RELATIONSHIP_MISMATCH -> "relationship_mismatch";
-            case TEMPORARILY_UNAVAILABLE -> "unavailable";
+            case LINKED_ALERT_AVAILABLE -> LinkedAlertContextMetricOutcome.AVAILABLE;
+            case NO_LINKED_ALERT -> LinkedAlertContextMetricOutcome.NO_LINKED_ALERT;
+            case LINKED_ALERT_NOT_FOUND -> LinkedAlertContextMetricOutcome.LINKED_ALERT_NOT_FOUND;
+            case LINKED_ALERT_RELATIONSHIP_MISMATCH -> LinkedAlertContextMetricOutcome.RELATIONSHIP_MISMATCH;
+            case TEMPORARILY_UNAVAILABLE -> LinkedAlertContextMetricOutcome.TEMPORARILY_UNAVAILABLE;
         };
     }
 
-    private void recordLinkedAlertContextMetric(String outcome) {
+    private void recordLinkedAlertContextMetric(LinkedAlertContextMetricOutcome outcome) {
+        LinkedAlertContextMetricOutcome boundedOutcome = outcome == null
+                ? LinkedAlertContextMetricOutcome.ERROR
+                : outcome;
         try {
-            metrics.recordSuspiciousTransactionLinkedAlertRead(outcome);
+            linkedAlertContextMetricsRecorder.record(boundedOutcome);
         } catch (RuntimeException exception) {
-            log.warn("SuspiciousTransaction linked alert context metric recording failed outcome={}", outcome);
+            log.warn("Linked alert context metric recording failed outcome={}", boundedOutcome.label());
         }
     }
 }
