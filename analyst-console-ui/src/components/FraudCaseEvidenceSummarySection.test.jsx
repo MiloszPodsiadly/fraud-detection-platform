@@ -1,17 +1,35 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
-  EVIDENCE_SUMMARY_HELPER_TEXT,
   FraudCaseEvidenceSummarySection
 } from "./FraudCaseEvidenceSummarySection.jsx";
+import {
+  availableEvidenceSummary,
+  legacyEvidenceSummary,
+  maliciousTextEvidenceSummary,
+  malformedCountsEvidenceSummary,
+  malformedEnumEvidenceSummary,
+  partialEvidenceSummary,
+  rawPayloadEvidenceSummary,
+  truncatedEvidenceSummary,
+  unavailableEvidenceSummary
+} from "../test-utils/evidenceSummaryFixtures.js";
+import {
+  expectEvidenceSummaryNonClaimHelperVisible,
+  expectNoForbiddenEvidenceSummaryWording,
+  expectNoMutationControls,
+  expectNoRawEvidencePayloadText
+} from "../test-utils/evidenceSummaryUiAssertions.js";
 
 describe("FraudCaseEvidenceSummarySection", () => {
   it("FraudCaseEvidenceSummarySectionRendersAvailableSummaryTest", async () => {
-    renderSection({ summary: availableSummary() });
+    renderSection({ summary: availableEvidenceSummary() });
 
     const section = await findSection();
     expect(within(section).getByText("Evidence summary")).toBeInTheDocument();
-    expect(within(section).getByText(EVIDENCE_SUMMARY_HELPER_TEXT)).toBeInTheDocument();
+    expectEvidenceSummaryNonClaimHelperVisible(section);
     expect(within(section).getByText("Evidence status")).toBeInTheDocument();
     expect(within(section).getAllByText("AVAILABLE").length).toBeGreaterThan(0);
     expect(within(section).getAllByText("HIGH_AMOUNT_ACTIVITY").length).toBeGreaterThan(0);
@@ -19,26 +37,20 @@ describe("FraudCaseEvidenceSummarySection", () => {
   });
 
   it("FraudCaseEvidenceSummarySectionRendersPartialSummaryTest", async () => {
-    renderSection({ summary: { ...availableSummary(), aggregateEvidenceStatus: "PARTIAL", partial: true } });
+    renderSection({ summary: partialEvidenceSummary() });
 
     expect(await screen.findByText("Partial summary. Some linked evidence context is incomplete or unavailable.")).toBeInTheDocument();
   });
 
   it("FraudCaseEvidenceSummarySectionRendersLegacyContextTest", async () => {
-    renderSection({ summary: { ...emptySummary(), aggregateEvidenceStatus: "LEGACY", legacy: true } });
+    renderSection({ summary: legacyEvidenceSummary() });
 
     expect(await screen.findByText("Legacy context. This case may not have structured evidence summary data.")).toBeInTheDocument();
   });
 
   it("FraudCaseEvidenceSummarySectionRendersTruncatedSummaryTest", async () => {
     renderSection({
-      summary: {
-        ...availableSummary(),
-        aggregateEvidenceStatus: "PARTIAL",
-        partial: true,
-        truncated: true,
-        truncationReason: "LINKED_ALERT_LIMIT_EXCEEDED"
-      }
+      summary: truncatedEvidenceSummary()
     });
 
     expect(await screen.findByText("Truncated summary. Only the first bounded set of linked alert evidence was included.")).toBeInTheDocument();
@@ -46,7 +58,7 @@ describe("FraudCaseEvidenceSummarySection", () => {
   });
 
   it("FraudCaseEvidenceSummarySectionRendersUnavailableStateTest", async () => {
-    renderSection({ summary: { ...emptySummary(), aggregateEvidenceStatus: "UNAVAILABLE" } });
+    renderSection({ summary: unavailableEvidenceSummary() });
 
     expect(await screen.findByText("Evidence summary unavailable.")).toBeInTheDocument();
   });
@@ -87,32 +99,29 @@ describe("FraudCaseEvidenceSummarySection", () => {
   it("FraudCaseEvidenceSummarySectionDoesNotRenderRawPayloadFieldsTest", async () => {
     renderSection({
       summary: {
-        ...availableSummary(),
+        ...rawPayloadEvidenceSummary(),
         highestSeverityEvidence: [{
-          ...availableSummary().highestSeverityEvidence[0],
-          rawPayload: "raw-secret",
-          attributes: { customerId: "customer-secret" },
-          scoreDetails: { model: "model-secret" },
-          featureSnapshot: { amount: 1 }
+          ...rawPayloadEvidenceSummary().highestSeverityEvidence[0],
+          rawPayload: "raw-secret"
         }]
       }
     });
 
-    await findSection();
+    const section = await findSection();
+    expectNoRawEvidencePayloadText(section);
     expect(screen.queryByText("raw-secret")).not.toBeInTheDocument();
-    expect(screen.queryByText("customer-secret")).not.toBeInTheDocument();
-    expect(screen.queryByText("model-secret")).not.toBeInTheDocument();
   });
 
   it("FraudCaseEvidenceSummarySectionDoesNotRenderRawTitleOrDescriptionTest", async () => {
-    renderSection({ summary: maliciousTextSummary() });
+    renderSection({ summary: maliciousTextEvidenceSummary() });
 
-    await findSection();
-    expectUnsafeTextNotRendered();
+    const section = await findSection();
+    expectNoRawEvidencePayloadText(section);
+    expectNoForbiddenEvidenceSummaryWording(section);
   });
 
   it("FraudCaseEvidenceSummarySectionTitleDescriptionAreGeneratedBoundedCopyTest", async () => {
-    renderSection({ summary: maliciousTextSummary() });
+    renderSection({ summary: maliciousTextEvidenceSummary() });
 
     const section = await findSection();
     expect(within(section).getByText("Model signal")).toBeInTheDocument();
@@ -127,9 +136,9 @@ describe("FraudCaseEvidenceSummarySection", () => {
   it("FraudCaseEvidenceSummarySectionDoesNotRenderUnexpectedExtraFieldsTest", async () => {
     renderSection({
       summary: {
-        ...availableSummary(),
+        ...availableEvidenceSummary(),
         unexpectedField: "unexpected-secret",
-        highestSeverityEvidence: [{ ...availableSummary().highestSeverityEvidence[0], extraField: "extra-secret" }]
+        highestSeverityEvidence: [{ ...availableEvidenceSummary().highestSeverityEvidence[0], extraField: "extra-secret" }]
       }
     });
 
@@ -141,13 +150,13 @@ describe("FraudCaseEvidenceSummarySection", () => {
   it("FraudCaseEvidenceSummarySectionDoesNotRenderRawIdentifiersTest", async () => {
     renderSection({
       summary: {
-        ...availableSummary(),
+        ...availableEvidenceSummary(),
         alertId: "alert-secret",
         transactionId: "txn-secret",
         customerId: "customer-secret",
         accountId: "account-secret",
         highestSeverityEvidence: [{
-          ...availableSummary().highestSeverityEvidence[0],
+          ...availableEvidenceSummary().highestSeverityEvidence[0],
           sourceEventId: "event-secret",
           correlationId: "correlation-secret"
         }]
@@ -164,7 +173,7 @@ describe("FraudCaseEvidenceSummarySection", () => {
   });
 
   it("FraudCaseEvidenceSummarySectionHandlesMalformedSourceCountsTest", async () => {
-    renderSection({ summary: malformedCountsSummary() });
+    renderSection({ summary: malformedCountsEvidenceSummary() });
 
     const section = await findSection();
     expect(within(section).getAllByText("UNKNOWN").length).toBeGreaterThan(0);
@@ -176,7 +185,7 @@ describe("FraudCaseEvidenceSummarySection", () => {
   });
 
   it("FraudCaseEvidenceSummarySectionHandlesMalformedStatusCountsTest", async () => {
-    renderSection({ summary: malformedCountsSummary() });
+    renderSection({ summary: malformedCountsEvidenceSummary() });
 
     const section = await findSection();
     expect(within(section).getAllByText("UNKNOWN").length).toBeGreaterThan(0);
@@ -192,7 +201,7 @@ describe("FraudCaseEvidenceSummarySection", () => {
         <h1>Case detail remains visible</h1>
         <FraudCaseEvidenceSummarySection
           caseId="case-1"
-          getFraudCaseEvidenceSummary={vi.fn().mockResolvedValue(malformedCountsSummary())}
+          getFraudCaseEvidenceSummary={vi.fn().mockResolvedValue(malformedCountsEvidenceSummary())}
         />
       </div>
     );
@@ -203,25 +212,55 @@ describe("FraudCaseEvidenceSummarySection", () => {
   });
 
   it("FraudCaseEvidenceSummarySectionDoesNotRenderRawReasonCodeTextTest", async () => {
-    renderSection({ summary: malformedEnumSummary() });
+    renderSection({ summary: malformedEnumEvidenceSummary() });
 
     const section = await findSection();
     expect(within(section).getAllByText("HIGH_AMOUNT_ACTIVITY").length).toBeGreaterThan(0);
     expect(within(section).getAllByText("UNKNOWN").length).toBeGreaterThan(0);
-    expectUnsafeEnumTextNotRendered();
+    expectNoRawEvidencePayloadText(section);
+  });
+
+  it("FraudCaseEvidenceSummarySectionHandlesNullEmptyDuplicateReasonCodesTest", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      renderSection({
+        summary: {
+          ...availableEvidenceSummary(),
+          topReasonCodes: [
+            null,
+            undefined,
+            "",
+            " ",
+            "HIGH_AMOUNT_ACTIVITY",
+            "HIGH_AMOUNT_ACTIVITY",
+            "customer-secret account-secret txn-secret",
+            "raw-model-payload scoreDetails featureSnapshot"
+          ]
+        }
+      });
+
+      const section = await findSection();
+      expect(within(section).getAllByText("HIGH_AMOUNT_ACTIVITY").length).toBeGreaterThan(0);
+      expect(within(section).getAllByText("UNKNOWN").length).toBeGreaterThan(0);
+      expectNoRawEvidencePayloadText(section);
+      expect(consoleError.mock.calls.some((call) => String(call[0]).includes("same key"))).toBe(false);
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it("FraudCaseEvidenceSummarySectionDoesNotRenderRawSourceOrStatusTextTest", async () => {
-    renderSection({ summary: malformedEnumSummary() });
+    renderSection({ summary: malformedEnumEvidenceSummary() });
 
     const section = await findSection();
     expect(within(section).getAllByText("ML_SCORING").length).toBeGreaterThan(0);
     expect(within(section).getAllByText("AVAILABLE").length).toBeGreaterThan(0);
-    expectUnsafeEnumTextNotRendered();
+    expectNoRawEvidencePayloadText(section);
   });
 
   it("FraudCaseEvidenceSummarySectionDoesNotRenderMalformedTruncationReasonTest", async () => {
-    renderSection({ summary: malformedEnumSummary() });
+    renderSection({ summary: malformedEnumEvidenceSummary() });
 
     const section = await findSection();
     expect(within(section).getByText("Bounded summary limit reached")).toBeInTheDocument();
@@ -229,7 +268,7 @@ describe("FraudCaseEvidenceSummarySection", () => {
   });
 
   it("FraudCaseEvidenceSummarySectionDoesNotRenderJsonInspectorTest", async () => {
-    renderSection({ summary: availableSummary() });
+    renderSection({ summary: availableEvidenceSummary() });
 
     await findSection();
     expect(screen.queryByText("JsonInspector")).not.toBeInTheDocument();
@@ -237,7 +276,7 @@ describe("FraudCaseEvidenceSummarySection", () => {
   });
 
   it("FraudCaseEvidenceSummarySectionDoesNotRenderEvidenceDrilldownLinksTest", async () => {
-    renderSection({ summary: availableSummary() });
+    renderSection({ summary: availableEvidenceSummary() });
 
     await findSection();
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
@@ -258,31 +297,103 @@ describe("FraudCaseEvidenceSummarySection", () => {
   });
 
   it("FraudCaseEvidenceSummarySectionDoesNotAddMutationControlsTest", async () => {
-    renderSection({ summary: availableSummary() });
+    renderSection({ summary: availableEvidenceSummary() });
 
     const section = await findSection();
-    expect(within(section).queryByRole("button")).not.toBeInTheDocument();
-    expect(within(section).queryByRole("textbox")).not.toBeInTheDocument();
+    expectNoMutationControls(section);
   });
 
   it("FraudCaseEvidenceSummarySectionDoesNotContainForbiddenWorkflowOrVerdictWordingTest", async () => {
-    renderSection({ summary: availableSummary() });
+    renderSection({ summary: availableEvidenceSummary() });
 
     const section = await findSection();
-    let sectionText = section.textContent.toLowerCase();
-    for (const allowedPhrase of [
-      "not confirmed fraud",
-      "not an analyst decision",
-      "not a final outcome",
-      "not legal proof"
-    ]) {
-      sectionText = sectionText.replaceAll(allowedPhrase, "");
-    }
+    expectNoForbiddenEvidenceSummaryWording(section);
+    expectEvidenceSummaryNonClaimHelperVisible(section);
+  });
 
-    for (const term of forbiddenSectionTerms()) {
-      expect(sectionText).not.toContain(term);
+  it("FraudCaseEvidenceSummarySectionImportBoundaryTest", () => {
+    const source = componentSource();
+
+    // This source-level guard is an intentional FDP-75 governance tripwire. It complements runtime tests
+    // and helper unit tests; it is not a replacement for them. Keep it scoped to this component so
+    // existing workflow controls elsewhere on FraudCaseDetailsPage do not fail this test.
+    for (const forbidden of [
+      "createAlertsApiClient",
+      "apiClient",
+      "getAlert",
+      "AlertDetailsPage",
+      "AlertReadOnlyContextPage",
+      "getSuspiciousTransaction",
+      "SuspiciousTransactionDetail",
+      "getSuspiciousTransactionLinkedAlertContext",
+      "updateFraudCase",
+      "submitAnalystDecision",
+      "createDecision",
+      "closeCase",
+      "reopenCase",
+      "as" + "signCase",
+      "cl" + "aimCase",
+      "confirmFraud",
+      "resolveCase",
+      "dismissCase",
+      "onCaseUpdated",
+      "onDecisionSubmitted",
+      "JsonInspector",
+      "RawPayload",
+      "EvidenceDrilldown",
+      "EvidenceDetails",
+      "JSON.stringify",
+      "item.title",
+      "item.description",
+      "rawPayload",
+      "attributes",
+      "scoreDetails",
+      "featureSnapshot",
+      "sourceEventId",
+      "transactionId",
+      "customerId",
+      "accountId",
+      "correlationId",
+      "alertId"
+    ]) {
+      expect(source).not.toContain(forbidden);
     }
-    expect(within(section).getByText(EVIDENCE_SUMMARY_HELPER_TEXT)).toBeInTheDocument();
+  });
+
+  it("FraudCaseEvidenceSummarySectionPropContractTest", async () => {
+    const forbiddenApi = {
+      getFraudCaseEvidenceSummary: vi.fn().mockResolvedValue(availableEvidenceSummary()),
+      apiClient: vi.fn(),
+      updateFraudCase: vi.fn(),
+      submitDecision: vi.fn(),
+      onCaseUpdated: vi.fn(),
+      onDecisionSubmitted: vi.fn(),
+      alertId: "alert-secret",
+      linkedAlertId: "linked-alert-secret",
+      suspiciousTransactionId: "suspicious-secret",
+      customerId: "customer-secret",
+      accountId: "account-secret",
+      transactionId: "txn-secret",
+      rawEvidence: { rawPayload: "raw-model-payload" },
+      alertDetails: { alertId: "alert-secret" },
+      fullAlertDetailsResponse: { rawPayload: "raw-model-payload" }
+    };
+
+    render(
+      <FraudCaseEvidenceSummarySection
+        caseId="case-1"
+        getFraudCaseEvidenceSummary={forbiddenApi.getFraudCaseEvidenceSummary}
+      />
+    );
+
+    const section = await findSection();
+    expect(forbiddenApi.getFraudCaseEvidenceSummary).toHaveBeenCalledWith("case-1", expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    for (const key of Object.keys(forbiddenApi).filter((entry) => entry !== "getFraudCaseEvidenceSummary")) {
+      if (typeof forbiddenApi[key] === "function") {
+        expect(forbiddenApi[key]).not.toHaveBeenCalled();
+      }
+    }
+    expectNoRawEvidencePayloadText(section);
   });
 });
 
@@ -303,185 +414,6 @@ function findSection() {
   return screen.findByTestId("fraud-case-evidence-summary-section");
 }
 
-function emptySummary() {
-  return {
-    caseId: "case-1",
-    aggregateEvidenceStatus: "UNAVAILABLE",
-    topReasonCodes: [],
-    highestSeverityEvidence: [],
-    evidenceBySource: [],
-    evidenceByStatus: [],
-    linkedAlertCount: 0,
-    evidenceItemCount: 0,
-    partial: false,
-    legacy: false,
-    truncated: false,
-    truncationReason: null
-  };
-}
-
-function availableSummary() {
-  return {
-    caseId: "case-1",
-    aggregateEvidenceStatus: "AVAILABLE",
-    topReasonCodes: ["HIGH_AMOUNT_ACTIVITY"],
-    highestSeverityEvidence: [{
-      title: "Model signal",
-      description: "Bounded model evidence metadata.",
-      reasonCode: "HIGH_AMOUNT_ACTIVITY",
-      evidenceType: "MODEL_SIGNAL",
-      severity: "HIGH",
-      source: "ML_SCORING",
-      status: "AVAILABLE"
-    }],
-    evidenceBySource: [{ source: "ML_SCORING", count: 1 }],
-    evidenceByStatus: [{ status: "AVAILABLE", count: 1 }],
-    linkedAlertCount: 1,
-    evidenceItemCount: 1,
-    partial: false,
-    legacy: false,
-    truncated: false,
-    truncationReason: null
-  };
-}
-
-function maliciousTextSummary() {
-  return {
-    ...availableSummary(),
-    highestSeverityEvidence: [{
-      title: "customer-secret account-secret txn-secret correlation-secret alert-secret raw-model-payload scoreDetails featureSnapshot CONFIRMED_FRAUD",
-      description: "source-event-secret raw-event-payload legal proof final outcome analyst decision proof of fraud",
-      reasonCode: "HIGH_AMOUNT_ACTIVITY",
-      evidenceType: "MODEL_SIGNAL",
-      severity: "HIGH",
-      source: "ML_SCORING",
-      status: "AVAILABLE"
-    }]
-  };
-}
-
-function malformedCountsSummary() {
-  return {
-    ...availableSummary(),
-    evidenceBySource: [
-      null,
-      "raw-source-secret",
-      {},
-      { source: "ML_SCORING", count: 1 },
-      { source: "ALERT_SERVICE", count: "2" },
-      { source: "raw-customer-secret", count: "not-a-number" }
-    ],
-    evidenceByStatus: [
-      null,
-      "raw-status-secret",
-      {},
-      { status: "AVAILABLE", count: 1 },
-      { status: "PARTIAL", count: "2" },
-      { status: "raw-status-with-customer-secret", count: "not-a-number" }
-    ]
-  };
-}
-
-function malformedEnumSummary() {
-  return {
-    ...availableSummary(),
-    topReasonCodes: [
-      "HIGH_AMOUNT_ACTIVITY",
-      "customer-secret account-secret txn-secret",
-      "raw-model-payload-scoreDetails-featureSnapshot-too-long-too-long-too-long-too-long"
-    ],
-    highestSeverityEvidence: [{
-      reasonCode: "customer-secret reason",
-      evidenceType: "MODEL_SIGNAL",
-      severity: "HIGH",
-      source: "ML_SCORING",
-      status: "AVAILABLE",
-      title: "unsafe title should not render",
-      description: "unsafe description should not render"
-    }],
-    evidenceBySource: [
-      { source: "ML_SCORING", count: 1 },
-      { source: "customer-secret source", count: 1 }
-    ],
-    evidenceByStatus: [
-      { status: "AVAILABLE", count: 1 },
-      { status: "raw status with customer-secret", count: 1 }
-    ],
-    truncated: true,
-    truncationReason: "customer-secret raw truncation reason"
-  };
-}
-
-function expectUnsafeTextNotRendered() {
-  let safeSectionText = screen.getByTestId("fraud-case-evidence-summary-section").textContent.toLowerCase();
-  for (const allowedPhrase of [
-    "not confirmed fraud",
-    "not an analyst decision",
-    "not a final outcome",
-    "not legal proof"
-  ]) {
-    safeSectionText = safeSectionText.replaceAll(allowedPhrase, "");
-  }
-
-  for (const unsafeText of [
-    "customer-secret",
-    "account-secret",
-    "txn-secret",
-    "correlation-secret",
-    "alert-secret",
-    "raw-model-payload",
-    "raw-event-payload",
-    "scoreDetails",
-    "featureSnapshot",
-    "source-event-secret",
-    "CONFIRMED_FRAUD",
-    "legal proof",
-    "final outcome",
-    "analyst decision",
-    "proof of fraud"
-  ]) {
-    expect(safeSectionText).not.toContain(unsafeText.toLowerCase());
-  }
-}
-
-function expectUnsafeEnumTextNotRendered() {
-  for (const unsafeText of [
-    "customer-secret",
-    "account-secret",
-    "txn-secret",
-    "raw-model-payload",
-    "scoreDetails",
-    "featureSnapshot",
-    "unsafe title should not render",
-    "unsafe description should not render",
-    "raw truncation reason"
-  ]) {
-    expect(screen.queryByText(unsafeText, { exact: false })).not.toBeInTheDocument();
-  }
-}
-
-function forbiddenSectionTerms() {
-  return [
-    "proof of fraud",
-    "fraud confirmed",
-    "confirmed fraud",
-    "fraud verdict",
-    "final decision",
-    "final outcome",
-    "analyst decision",
-    "legal proof",
-    "case decision",
-    "resolve",
-    "confirm",
-    "dismiss",
-    "close",
-    "reopen",
-    "as" + "sign",
-    "cl" + "aim",
-    "submit",
-    "take action",
-    "approve",
-    "reject",
-    "escalate"
-  ];
+function componentSource() {
+  return readFileSync(resolve(process.cwd(), "src/components/FraudCaseEvidenceSummarySection.jsx"), "utf8");
 }

@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { availableEvidenceSummary } from "../test-utils/evidenceSummaryFixtures.js";
 import { FraudCaseDetailsPage } from "./FraudCaseDetailsPage.jsx";
 
 describe("FraudCaseDetailsPage", () => {
@@ -247,7 +248,7 @@ describe("FraudCaseDetailsPage", () => {
   it("FraudCaseDetailIncludesEvidenceSummaryReadOnlySectionTest", async () => {
     const apiClient = {
       getFraudCase: vi.fn().mockResolvedValue(fraudCase("case-1", "Open case")),
-      getFraudCaseEvidenceSummary: vi.fn().mockResolvedValue(evidenceSummary()),
+      getFraudCaseEvidenceSummary: vi.fn().mockResolvedValue(availableEvidenceSummary()),
       updateFraudCase: vi.fn()
     };
 
@@ -277,7 +278,7 @@ describe("FraudCaseDetailsPage", () => {
   it("FraudCaseDetailEvidenceSummaryDoesNotReceiveMutationHandlersTest", async () => {
     const apiClient = {
       getFraudCase: vi.fn().mockResolvedValue(fraudCase("case-1", "Open case")),
-      getFraudCaseEvidenceSummary: vi.fn().mockResolvedValue(evidenceSummary()),
+      getFraudCaseEvidenceSummary: vi.fn().mockResolvedValue(availableEvidenceSummary()),
       updateFraudCase: vi.fn()
     };
 
@@ -306,7 +307,7 @@ describe("FraudCaseDetailsPage", () => {
   it("FraudCaseDetailEvidenceSummaryUsesOnlyEvidenceSummaryClientTest", async () => {
     const apiClient = {
       getFraudCase: vi.fn().mockResolvedValue(fraudCase("case-1", "Open case")),
-      getFraudCaseEvidenceSummary: vi.fn().mockResolvedValue(evidenceSummary()),
+      getFraudCaseEvidenceSummary: vi.fn().mockResolvedValue(availableEvidenceSummary()),
       updateFraudCase: vi.fn(),
       getAlert: vi.fn(),
       getAssistantSummary: vi.fn(),
@@ -331,7 +332,7 @@ describe("FraudCaseDetailsPage", () => {
 
 function page({ caseId, apiClient, onCaseUpdated = vi.fn(), canReadFraudCase = true }) {
   const client = {
-    getFraudCaseEvidenceSummary: vi.fn().mockResolvedValue(evidenceSummary()),
+    getFraudCaseEvidenceSummary: vi.fn().mockResolvedValue(availableEvidenceSummary()),
     ...apiClient
   };
   return (
@@ -366,31 +367,6 @@ function fraudCase(caseId, reason) {
     thresholdPln: 500,
     decisionReason: "",
     decisionTags: ["rapid-transfer"]
-  };
-}
-
-function evidenceSummary() {
-  return {
-    caseId: "case-1",
-    aggregateEvidenceStatus: "AVAILABLE",
-    topReasonCodes: ["HIGH_AMOUNT_ACTIVITY"],
-    highestSeverityEvidence: [{
-      title: "Model signal",
-      description: "Bounded model evidence metadata.",
-      reasonCode: "HIGH_AMOUNT_ACTIVITY",
-      evidenceType: "MODEL_SIGNAL",
-      severity: "HIGH",
-      source: "ML_SCORING",
-      status: "AVAILABLE"
-    }],
-    evidenceBySource: [{ source: "ML_SCORING", count: 1 }],
-    evidenceByStatus: [{ status: "AVAILABLE", count: 1 }],
-    linkedAlertCount: 1,
-    evidenceItemCount: 1,
-    partial: false,
-    legacy: false,
-    truncated: false,
-    truncationReason: null
   };
 }
 

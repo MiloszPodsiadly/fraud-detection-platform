@@ -49,6 +49,43 @@ evidenceType, severity, source, and status.
 
 Malformed enum-like values should render as `UNKNOWN` or a safe fallback.
 
+## FDP-75 Contract Hardening
+
+FDP-75 keeps the FDP-74 product surface unchanged and hardens the UI contract around rendering, copy, and test fixtures.
+
+Display helpers are intentionally narrow:
+
+- `safeArray`
+- `normalizeEvidenceCode`
+- `safeTruncationReason`
+- `formatCount`
+- `toCountItem`
+
+The component must use bounded copy for evidence items. It must not render response `title`, response `description`,
+raw payloads, raw attributes, raw identifiers, raw backend error payloads, or generic sanitized backend text. Unknown
+or malformed enum-like values render as `UNKNOWN` or a documented fallback.
+
+`UNKNOWN` is intentional fail-closed display behavior in FDP-75. It is display-only, is not a backend status, is not
+evidence status inference, and must not be treated as a case decision, fraud verdict, or final outcome. Blank or
+malformed enum-like display values may render as `UNKNOWN` so malformed DTO values are visible without leaking raw
+identifiers, raw payloads, or free text.
+
+Evidence summary counts are display-only UI values. Invalid, negative, missing, or malformed count values render as
+`0`. The frontend does not recompute counts, does not mutate backend state from count values, and does not infer fraud
+status, evidence completeness, or case outcome from malformed counts. Raw malformed count text is never displayed.
+
+The evidence summary section accepts only the fraud case id, the evidence summary fetch function, and presentation
+props. It must not accept API clients, write handlers, linked-alert identifiers, suspicious transaction identifiers,
+raw evidence payloads, or workflow callbacks.
+
+Source-level tests guard that the section does not import alert detail clients, suspicious transaction clients, workflow
+helpers, mutation helpers, raw payload renderers, JSON inspectors, drilldowns, or alternate API fallbacks.
+These source-level guard tests are intentional governance tripwires. They are not formal static analysis and are not the
+only safety proof. Runtime tests, pure helper unit tests, malicious fixtures, and minimal component props remain the
+primary safety contract. The guards may be strict and occasionally require maintenance; false positives are acceptable
+for this boundary. Keep them scoped to `FraudCaseEvidenceSummarySection.jsx` so existing workflow controls elsewhere on
+`FraudCaseDetailsPage` do not fail this evidence-summary section test.
+
 ## Rendered Fields
 
 Allowed fields:
@@ -118,8 +155,15 @@ remain elsewhere on the page and are not added, removed, or redefined by FDP-74.
 - Renders only bounded read-only investigation context.
 - Raw title or description from the response are not displayed.
 - Malformed count items do not break section rendering.
+- Invalid or malformed count values render as display-only `0`.
 - Malformed enum-like labels render a safe fallback.
+- `UNKNOWN` fallback is intentional display-only hardening, not backend status or evidence inference.
 - Forbidden proof, verdict, or workflow wording is absent from the section.
 - Does not render raw payloads, raw identifiers, JSON inspector, drilldowns, or mutation controls.
 - Does not expose raw backend errors.
 - Evidence summary failure does not break the rest of FraudCase detail.
+- FDP-75 does not expand the product surface beyond FDP-74.
+- Display and copy helpers remain explicit and evidence-summary-specific.
+- Shared fixtures cover available, partial, legacy, truncated, unavailable, malformed, and raw-payload response shapes.
+- Source-level guards prevent fallback clients, raw renderers, workflow helpers, mutation helpers, and raw response field
+  rendering.

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { isAbortError } from "../api/alertsApi.js";
+import { isAbortError } from "../api/apiErrors.js";
 import { LoadingPanel } from "./LoadingPanel.jsx";
+import { boundedEvidenceDescription, boundedEvidenceTitleForType } from "./evidenceSummaryCopy.js";
+import { formatCount, normalizeEvidenceCode, safeArray, safeTruncationReason, toCountItem } from "./evidenceSummaryDisplay.js";
 
 export const EVIDENCE_SUMMARY_HELPER_TEXT = "Evidence summary is read-only investigation context. It is not confirmed fraud, not an analyst decision, not a final outcome, and not legal proof.";
 
@@ -131,10 +133,10 @@ function EvidenceSummaryContent({ summary }) {
             {evidenceItems.map((item, index) => (
               <article className="evidenceSummaryCard" key={`${item.reasonCode}-${item.evidenceType}-${index}`}>
                 <div className="evidenceSummaryCardHeader">
-                  <strong>{item.title || item.reasonCode || "Evidence item"}</strong>
+                  <strong>{item.displayTitle || item.reasonCode || "Evidence item"}</strong>
                   <span>{item.severity || "UNKNOWN"}</span>
                 </div>
-                {item.description && <p>{item.description}</p>}
+                {item.displayDescription && <p>{item.displayDescription}</p>}
                 <dl>
                   <div>
                     <dt>Reason code</dt>
@@ -176,7 +178,7 @@ function SummaryList({ title, items, emptyLabel }) {
       <h3>{title}</h3>
       {items.length === 0 ? <p>{emptyLabel}</p> : (
         <ul>
-          {items.map((item) => <li key={item}>{item}</li>)}
+          {items.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}
         </ul>
       )}
     </section>
@@ -205,80 +207,12 @@ function CountList({ title, items, labelKey }) {
 
 function toEvidenceItem(item) {
   return {
-    title: boundedEvidenceTitle(item),
-    description: boundedEvidenceDescription(),
+    displayTitle: boundedEvidenceTitleForType(item?.evidenceType),
+    displayDescription: boundedEvidenceDescription(),
     reasonCode: normalizeEvidenceCode(item?.reasonCode),
     evidenceType: normalizeEvidenceCode(item?.evidenceType),
     severity: normalizeEvidenceCode(item?.severity),
     source: normalizeEvidenceCode(item?.source),
     status: normalizeEvidenceCode(item?.status)
   };
-}
-
-function toCountItem(item, labelKey) {
-  if (!item || typeof item !== "object") {
-    return { label: "UNKNOWN", count: "0" };
-  }
-
-  return {
-    label: normalizeEvidenceCode(item[labelKey]) || "UNKNOWN",
-    count: formatCount(item.count)
-  };
-}
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function normalizeText(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function normalizeEvidenceCode(value) {
-  const normalized = normalizeText(value);
-  if (!normalized) {
-    return "";
-  }
-
-  return /^[A-Z0-9_:-]{1,80}$/.test(normalized) ? normalized : "UNKNOWN";
-}
-
-function safeTruncationReason(value) {
-  return normalizeEvidenceCode(value) === "LINKED_ALERT_LIMIT_EXCEEDED"
-    ? "LINKED_ALERT_LIMIT_EXCEEDED"
-    : "Bounded summary limit reached";
-}
-
-function boundedEvidenceTitle(item) {
-  switch (normalizeEvidenceCode(item?.evidenceType)) {
-    case "MODEL_SIGNAL":
-      return "Model signal";
-    case "RULE_MATCH":
-      return "Rule evidence";
-    case "PROFILE_DEVIATION":
-      return "Profile deviation evidence";
-    case "VELOCITY_CHECK":
-      return "Velocity evidence";
-    case "LINK_ANALYSIS":
-      return "Linked-entity evidence";
-    case "DEVICE_SIGNAL":
-      return "Device evidence";
-    case "LOCATION_SIGNAL":
-      return "Location evidence";
-    case "MERCHANT_SIGNAL":
-      return "Merchant evidence";
-    case "DIAGNOSTIC":
-      return "Diagnostic evidence";
-    default:
-      return "Evidence item";
-  }
-}
-
-function boundedEvidenceDescription() {
-  return "Bounded evidence metadata derived from the fraud-case evidence summary.";
-}
-
-function formatCount(value) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? String(numeric) : "0";
 }

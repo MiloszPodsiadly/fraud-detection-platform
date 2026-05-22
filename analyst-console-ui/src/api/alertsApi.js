@@ -2,6 +2,8 @@ import { ApiError } from "./apiError.js";
 import { authHeadersForSession } from "../auth/authHeaders.js";
 import { getConfiguredAuthProvider } from "../auth/authProvider.js";
 
+export { isAbortError } from "./apiErrors.js";
+
 const API_BASE_URL = import.meta.env.VITE_ALERT_API_BASE_URL ?? "";
 
 export function createAlertsApiClient({
@@ -109,10 +111,6 @@ async function requestWithContext(path, options = {}, context = {}) {
   }
 
   return response.json();
-}
-
-export function isAbortError(error) {
-  return error?.name === "AbortError";
 }
 
 function listAlertsWithRequest(request, { page = 0, size = 10 } = {}, { signal } = {}) {
