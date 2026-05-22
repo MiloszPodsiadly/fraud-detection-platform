@@ -38,6 +38,8 @@ class SuspiciousTransactionReadAuditTest {
                     mock(SuspiciousTransactionLinkedAlertContextService.class),
                     auditService,
                     metrics,
+                    outcome -> {
+                    },
                     new SuspiciousTransactionQueryTelemetryClassifier(),
                     testTelemetrySink()
             );
@@ -250,6 +252,8 @@ class SuspiciousTransactionReadAuditTest {
                 linkedService,
                 auditService,
                 metrics,
+                outcome -> {
+                },
                 new SuspiciousTransactionQueryTelemetryClassifier(),
                 testTelemetrySink()
         );

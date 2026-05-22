@@ -1,6 +1,8 @@
 package com.frauddetection.alert.suspicious.api;
 
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.suspicious.api.observability.LinkedAlertContextMetricOutcome;
+import com.frauddetection.alert.suspicious.api.observability.MicrometerLinkedAlertContextMetricsRecorder;
 import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
@@ -209,40 +211,44 @@ class SuspiciousTransactionReadMetricsTest {
     @Test
     void linkedAlertContextMetricUsesOnlyOutcomeLabel() {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
-        AlertServiceMetrics metrics = new AlertServiceMetrics(registry);
+        MicrometerLinkedAlertContextMetricsRecorder recorder = new MicrometerLinkedAlertContextMetricsRecorder(registry);
 
-        metrics.recordSuspiciousTransactionLinkedAlertRead("available");
-        metrics.recordSuspiciousTransactionLinkedAlertRead("relationship_mismatch");
-        metrics.recordSuspiciousTransactionLinkedAlertRead("validation_error");
+        recorder.record(LinkedAlertContextMetricOutcome.AVAILABLE);
+        recorder.record(LinkedAlertContextMetricOutcome.RELATIONSHIP_MISMATCH);
+        recorder.record(LinkedAlertContextMetricOutcome.VALIDATION_ERROR);
 
-        assertThat(registry.get("fraud.suspicious_transaction.linked_alert.read")
+        assertThat(registry.get(MicrometerLinkedAlertContextMetricsRecorder.METRIC_NAME)
+                .tag("endpoint", MicrometerLinkedAlertContextMetricsRecorder.ENDPOINT_LABEL)
                 .tag("outcome", "available")
                 .counter()
                 .count()).isEqualTo(1.0);
-        assertThat(registry.get("fraud.suspicious_transaction.linked_alert.read")
+        assertThat(registry.get(MicrometerLinkedAlertContextMetricsRecorder.METRIC_NAME)
+                .tag("endpoint", MicrometerLinkedAlertContextMetricsRecorder.ENDPOINT_LABEL)
                 .tag("outcome", "relationship_mismatch")
                 .counter()
                 .count()).isEqualTo(1.0);
-        assertThat(registry.get("fraud.suspicious_transaction.linked_alert.read")
+        assertThat(registry.get(MicrometerLinkedAlertContextMetricsRecorder.METRIC_NAME)
+                .tag("endpoint", MicrometerLinkedAlertContextMetricsRecorder.ENDPOINT_LABEL)
                 .tag("outcome", "validation_error")
                 .counter()
                 .count()).isEqualTo(1.0);
 
         registry.getMeters().stream()
                 .map(Meter::getId)
-                .filter(id -> id.getName().equals("fraud.suspicious_transaction.linked_alert.read"))
+                .filter(id -> id.getName().equals(MicrometerLinkedAlertContextMetricsRecorder.METRIC_NAME))
                 .forEach(id -> assertThat(id.getTags().stream().map(tag -> tag.getKey()).toList())
-                        .containsOnly("outcome"));
+                        .containsExactlyInAnyOrder("endpoint", "outcome"));
     }
 
     @Test
     void linkedAlertMetricNormalizesValidationError() {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
-        AlertServiceMetrics metrics = new AlertServiceMetrics(registry);
+        MicrometerLinkedAlertContextMetricsRecorder recorder = new MicrometerLinkedAlertContextMetricsRecorder(registry);
 
-        metrics.recordSuspiciousTransactionLinkedAlertRead("validation_error");
+        recorder.record(LinkedAlertContextMetricOutcome.VALIDATION_ERROR);
 
-        assertThat(registry.get("fraud.suspicious_transaction.linked_alert.read")
+        assertThat(registry.get(MicrometerLinkedAlertContextMetricsRecorder.METRIC_NAME)
+                .tag("endpoint", MicrometerLinkedAlertContextMetricsRecorder.ENDPOINT_LABEL)
                 .tag("outcome", "validation_error")
                 .counter()
                 .count()).isEqualTo(1.0);
@@ -251,30 +257,30 @@ class SuspiciousTransactionReadMetricsTest {
     @Test
     void linkedAlertMetricDoesNotExposeRejectedAlertIdValue() {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
-        AlertServiceMetrics metrics = new AlertServiceMetrics(registry);
+        MicrometerLinkedAlertContextMetricsRecorder recorder = new MicrometerLinkedAlertContextMetricsRecorder(registry);
 
-        metrics.recordSuspiciousTransactionLinkedAlertRead("alert-secret");
+        recorder.record(null);
 
         registry.getMeters().stream()
                 .map(Meter::getId)
-                .filter(id -> id.getName().equals("fraud.suspicious_transaction.linked_alert.read"))
+                .filter(id -> id.getName().equals(MicrometerLinkedAlertContextMetricsRecorder.METRIC_NAME))
                 .forEach(id -> assertThat(id.getTags().stream().map(tag -> tag.getValue()).toList())
-                        .containsExactly("error")
+                        .containsExactlyInAnyOrder(MicrometerLinkedAlertContextMetricsRecorder.ENDPOINT_LABEL, "error")
                         .doesNotContain("alert-secret"));
     }
 
     @Test
     void linkedAlertContextMetricDoesNotUseRawIdentifiersOrExceptionMessages() {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
-        AlertServiceMetrics metrics = new AlertServiceMetrics(registry);
+        MicrometerLinkedAlertContextMetricsRecorder recorder = new MicrometerLinkedAlertContextMetricsRecorder(registry);
 
-        metrics.recordSuspiciousTransactionLinkedAlertRead("alert-secret customer-secret stacktrace");
+        recorder.record(LinkedAlertContextMetricOutcome.ERROR);
 
         registry.getMeters().stream()
                 .map(Meter::getId)
-                .filter(id -> id.getName().equals("fraud.suspicious_transaction.linked_alert.read"))
+                .filter(id -> id.getName().equals(MicrometerLinkedAlertContextMetricsRecorder.METRIC_NAME))
                 .forEach(id -> assertThat(id.getTags().stream().map(tag -> tag.getValue()).toList())
-                        .containsExactly("error")
+                        .containsExactlyInAnyOrder(MicrometerLinkedAlertContextMetricsRecorder.ENDPOINT_LABEL, "error")
                         .doesNotContain("alert-secret", "customer-secret", "stacktrace"));
     }
 }

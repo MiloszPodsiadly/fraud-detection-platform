@@ -35,6 +35,8 @@ class SuspiciousTransactionReadControllerPaginationTest {
                         mock(SuspiciousTransactionLinkedAlertContextService.class),
                         auditService,
                         metrics,
+                        outcome -> {
+                        },
                         new SuspiciousTransactionQueryTelemetryClassifier(),
                         testTelemetrySink()
                 ))
