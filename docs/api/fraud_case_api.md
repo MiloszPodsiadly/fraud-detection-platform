@@ -40,13 +40,15 @@ Evidence-summary semantics:
 
 - The evidence summary is a read-only projection over `FraudCaseDocument.linkedAlertIds` and linked
   `AlertDocument.evidenceSnapshot` entries.
-- It returns bounded reason-code, evidence type, severity, source, status, title, and description context only.
+- It returns bounded reason-code, evidence type, severity, source, status, and enum-derived product copy for title
+  and description context only.
 - It does not expose raw alert ids, customer or account identifiers, transaction ids, correlation ids, source event
   ids, feature snapshots, model payloads, score details, or raw evidence attributes.
 - It does not create or edit evidence, mutate fraud-case lifecycle state, create analyst decisions, publish Kafka
   events, or claim a final outcome.
-- `AVAILABLE` means every included evidence item is available and at least one evidence item exists. Empty, legacy,
-  unavailable, stale, partial, or not-applicable evidence states do not become `AVAILABLE`; `ERROR` dominates.
+- `AVAILABLE` means every included evidence item is available, at least one evidence item exists, and linked-alert
+  source coverage is complete. Empty, legacy, unavailable, stale, partial, not-applicable, missing-source, or
+  truncated-source states do not become `AVAILABLE`; `ERROR` dominates.
 
 List semantics:
 
