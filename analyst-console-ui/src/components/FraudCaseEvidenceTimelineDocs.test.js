@@ -39,6 +39,30 @@ describe("Fraud Case Evidence Timeline UI docs", () => {
     expect(docs).toContain("no evidence drilldown");
     expect(docs).toContain("No JSON inspector.");
   });
+
+  it("DocsMentionTimelineUiUsesBehaviorContractLanguageTest", () => {
+    const docs = timelineDocs();
+
+    expect(docs).toContain("Status: current FDP-77 UI behavior contract.");
+    expect(docs).not.toContain("Status: current product UI source of truth.");
+  });
+
+  it("DocsMentionTimelineUiFieldSpecificAllowlistsTest", () => {
+    const docs = timelineDocs();
+
+    expect(docs).toContain("field-specific allowlists");
+    expect(docs).toContain("event-type allowlist matches the FDP-76 backend enum");
+    expect(docs).toContain("LINKED_ALERT_CONTEXT");
+    expect(docs).toContain("Uppercase raw-ID-shaped values");
+  });
+
+  it("DocsMentionTimelineUiEmptyStateFlagsAndRenderCapTest", () => {
+    const docs = timelineDocs();
+
+    expect(docs).toContain("Empty timelines still display any backend state");
+    expect(docs).toContain("defensive render cap of 100 events");
+    expect(docs).toContain("Timeline display capped. Only the bounded timeline window is shown.");
+  });
 });
 
 function timelineDocs() {
