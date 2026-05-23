@@ -2,6 +2,7 @@ package com.frauddetection.alert.audit.read;
 
 import com.frauddetection.alert.api.PagedResponse;
 import com.frauddetection.alert.api.FraudCaseEvidenceSummaryResponse;
+import com.frauddetection.alert.api.FraudCaseEvidenceTimelineResponse;
 import com.frauddetection.alert.api.FraudCaseWorkQueueSliceResponse;
 import com.frauddetection.alert.api.FraudCaseWorkQueueSummaryResponse;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryAnalyticsResponse;
@@ -28,6 +29,9 @@ public class ReadAccessResultCountExtractor {
         }
         if (body instanceof FraudCaseEvidenceSummaryResponse response) {
             return Math.max(0, response.evidenceItemCount());
+        }
+        if (body instanceof FraudCaseEvidenceTimelineResponse response) {
+            return size(response.events());
         }
         if (body instanceof SuspiciousTransactionSliceResponse sliceResponse) {
             return size(sliceResponse.content());
@@ -57,6 +61,7 @@ public class ReadAccessResultCountExtractor {
                     SUSPICIOUS_TRANSACTION_READ,
                     SUSPICIOUS_TRANSACTION_LINKED_ALERT_CONTEXT,
                     SUSPICIOUS_TRANSACTION_SUMMARY,
+                    FRAUD_CASE_EVIDENCE_TIMELINE,
                     FRAUD_CASE_WORK_QUEUE,
                     FRAUD_CASE_WORK_QUEUE_SUMMARY,
                     GOVERNANCE_ADVISORY_LIST,
