@@ -44,6 +44,10 @@ export function createAlertsApiClient({
       `/api/v1/fraud-cases/${encodeURIComponent(caseId)}/evidence-summary`,
       evidenceSummaryRequestOptions(requestOptions)
     ),
+    getFraudCaseEvidenceTimeline: (caseId, requestOptions) => request(
+      `/api/v1/fraud-cases/${encodeURIComponent(caseId)}/evidence-timeline`,
+      evidenceTimelineRequestOptions(requestOptions)
+    ),
     updateFraudCase: (caseId, decision, { idempotencyKey, signal } = {}) => request(`/api/v1/fraud-cases/${encodeURIComponent(caseId)}`, {
       method: "PATCH",
       signal,
@@ -194,6 +198,12 @@ function linkedAlertContextRequestOptions({ signal } = {}) {
 }
 
 function evidenceSummaryRequestOptions({ signal } = {}) {
+  return {
+    ...(signal ? { signal } : {})
+  };
+}
+
+function evidenceTimelineRequestOptions({ signal } = {}) {
   return {
     ...(signal ? { signal } : {})
   };
