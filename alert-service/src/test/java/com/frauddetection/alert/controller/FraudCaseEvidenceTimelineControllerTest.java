@@ -30,6 +30,7 @@ import java.util.List;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -118,7 +119,32 @@ class FraudCaseEvidenceTimelineControllerTest {
         when(service.timeline("case-1")).thenThrow(new IllegalStateException("database unavailable"));
 
         mockMvc.perform(get("/api/v1/fraud-cases/case-1/evidence-timeline"))
-                .andExpect(status().isInternalServerError());
+                .andExpect(status().isInternalServerError())
+                .andExpect(content().string(not(containsString("database unavailable"))));
+
+        verify(sensitiveReadAuditService).auditAttempt(
+                eq(ReadAccessEndpointCategory.FRAUD_CASE_EVIDENCE_TIMELINE),
+                eq(ReadAccessResourceType.FRAUD_CASE),
+                eq("case-1"),
+                eq(ReadAccessAuditOutcome.FAILED),
+                any()
+        );
+    }
+
+    @Test
+    void FraudCaseEvidenceTimelineAuditFailureFollowsExistingSensitiveReadPolicyTest() throws Exception {
+        when(service.timeline("case-1")).thenReturn(response());
+        doThrow(new IllegalStateException("audit backend unavailable")).when(sensitiveReadAuditService).audit(
+                eq(ReadAccessEndpointCategory.FRAUD_CASE_EVIDENCE_TIMELINE),
+                eq(ReadAccessResourceType.FRAUD_CASE),
+                eq("case-1"),
+                eq(1),
+                any()
+        );
+
+        mockMvc.perform(get("/api/v1/fraud-cases/case-1/evidence-timeline"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(content().string(not(containsString("audit backend unavailable"))));
 
         verify(sensitiveReadAuditService).auditAttempt(
                 eq(ReadAccessEndpointCategory.FRAUD_CASE_EVIDENCE_TIMELINE),

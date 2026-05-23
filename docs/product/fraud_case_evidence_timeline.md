@@ -76,7 +76,7 @@ It is a derived read projection. It must not be used as source-of-truth history 
 ## Event Types v1
 
 - `FRAUD_CASE_CREATED`
-- `FRAUD_ALERT_LINKED`
+- `LINKED_ALERT_CONTEXT`
 - `ALERT_EVIDENCE_SNAPSHOT_AVAILABLE`
 - `ALERT_EVIDENCE_SNAPSHOT_PARTIAL`
 - `ALERT_EVIDENCE_SNAPSHOT_UNAVAILABLE`
@@ -95,6 +95,10 @@ history in FDP-76.
 
 - `eventKey` is synthetic and bounded.
 - `eventKey` is not a domain identifier.
+- `eventKey` is not an audit event ID.
+- `eventKey` is not stable across source-data changes.
+- `eventKey` must not be used as a persistent bookmark, external reference, or deep-link key.
+- `eventKey` may be used by clients as a display/render key for the current response only.
 - No linked entity id is returned.
 - No alert IDs are returned.
 - No transaction IDs are returned.
@@ -120,6 +124,10 @@ Titles and descriptions are generated bounded product copy derived from event ty
 ## Boundedness
 
 `MAX_TIMELINE_EVENTS` is 100.
+`MAX_LINKED_ALERTS_FOR_TIMELINE` is 50.
+
+Linked alert input is limited before repository lookup. The service never calls linked-alert repository reads with more
+than `MAX_LINKED_ALERTS_FOR_TIMELINE` normalized alert IDs. This keeps both the response and source read bounded.
 
 If the derived timeline exceeds the limit:
 
@@ -129,7 +137,15 @@ If the derived timeline exceeds the limit:
 - `events.size() <= MAX_TIMELINE_EVENTS`
 
 Missing linked alerts set `partial=true`, do not create fake events, and do not expose missing alert identifiers.
+Missing linked alerts are represented through `partial=true` only. FDP-76 v1 does not return missing alert IDs or a
+missing alert count; consumers must treat `partial=true` as the bounded signal that source coverage is incomplete.
 Legacy cases return bounded legacy context when no structured linked-alert evidence timeline data exists.
+
+`LINKED_ALERT_CONTEXT` uses the best available linked alert read timestamp as context time. It is not proof of the time when the alert was linked to the fraud case. Do not add `linkedAt` semantics unless a real timestamped link source exists.
+
+FDP-76 v1 does not add a separate `ALERT_EVIDENCE_SNAPSHOT_ERROR` event type. Error evidence remains explicit through
+`evidenceStatus=ERROR` on an `ALERT_EVIDENCE_SNAPSHOT_PARTIAL` event. This does not create proof, verdict, final
+outcome, or fraud confirmation wording.
 
 ## Sensitive-Read Audit
 
@@ -141,6 +157,11 @@ Successful reads are audited as:
 - result count: `events.size()`
 
 Missing fraud cases are audited as `REJECTED`. Unexpected runtime failures are audited as `FAILED`.
+Sensitive-read audit failures follow the existing sensitive-read endpoint policy and fail the read instead of being silently swallowed.
+
+FDP-76 does not add a dedicated Micrometer metric. Audit category, audit outcome, and result count are the observability
+surface for this branch. A bounded operational metric can be added later in a separate observability branch if needed;
+future metrics must not use raw IDs in labels.
 
 Linked alert IDs, transaction IDs, customer IDs, account IDs, correlation IDs, source event IDs, evidence IDs, score
 decision IDs, raw payloads, and raw exception messages are not used as audit resource IDs.
@@ -171,6 +192,7 @@ decision IDs, raw payloads, and raw exception messages are not used as audit res
 - No event invented without source data.
 - `eventKey` is synthetic and bounded.
 - `eventKey` does not expose raw domain IDs.
+- `eventKey` is response-local and not stable across source-data changes.
 - No `linkedEntityId`, `alertId`, `transactionId`, `customerId`, `accountId`, `correlationId`, `sourceEventId`,
   `evidenceId`, `scoreDecisionId`, raw payload, raw evidence title or description, final outcome, analyst decision,
   proof, or verdict fields.
@@ -180,6 +202,7 @@ decision IDs, raw payloads, and raw exception messages are not used as audit res
 - Missing timestamps mark `approximateTime=true` and `partial=true`.
 - `generatedAt` is not used as `occurredAt`.
 - `MAX_TIMELINE_EVENTS` enforced.
+- `MAX_LINKED_ALERTS_FOR_TIMELINE` enforced before linked-alert repository reads.
 - Truncation sets `truncated=true`, `partial=true`, and `truncationReason=TIMELINE_EVENT_LIMIT_EXCEEDED`.
 - Missing linked alerts set `partial=true`.
 - Missing linked alerts do not create fake events.

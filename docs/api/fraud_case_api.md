@@ -68,14 +68,24 @@ Evidence-timeline semantics:
   `AlertDocument.evidenceSnapshot` entries.
 - It returns bounded synthetic event keys, event types, timestamps, source, evidence status, linked entity type, and
   generated product copy only.
+- Event keys are response-local display keys. They are not stable identifiers, audit event IDs, bookmarks, external
+  references, or deep-link keys.
 - It does not expose alert ids, transaction ids, customer or account identifiers, correlation ids, source event ids,
   evidence ids, score decision ids, raw payloads, raw evidence titles, or raw evidence descriptions.
 - It does not create case status history, analyst decision history, fraud confirmation, legal proof, final outcome,
   audit trail, event store history, workflow history, or lifecycle reconstruction.
+- `LINKED_ALERT_CONTEXT` timestamps are derived from linked alert read data and are not proof of when the alert was
+  linked to the fraud case.
 - Missing timestamps mark `approximateTime=true` and `partial=true`; `generatedAt` is response generation time and is
   not used as an event occurrence time.
+- Missing linked alerts are represented by `partial=true` only. FDP-76 v1 does not return missing alert IDs or a
+  missing alert count.
+- Error evidence is represented as `evidenceStatus=ERROR` on `ALERT_EVIDENCE_SNAPSHOT_PARTIAL`; FDP-76 v1 does not add
+  a separate error event type.
+- Linked-alert input is capped at 50 normalized alert IDs before repository lookup.
 - More than 100 derived events sets `truncated=true`, `partial=true`, and
   `truncationReason=TIMELINE_EVENT_LIMIT_EXCEEDED`.
+- FDP-76 adds sensitive-read audit observability, not a dedicated Micrometer metric.
 
 List semantics:
 

@@ -14,6 +14,7 @@ import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.persistence.FraudCaseRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -65,7 +66,7 @@ class FraudCaseEvidenceTimelineServiceTest {
         assertThat(response.caseId()).isEqualTo("case-1");
         assertThat(response.events()).extracting("eventType").containsExactly(
                 FraudCaseTimelineEventType.FRAUD_CASE_CREATED,
-                FraudCaseTimelineEventType.FRAUD_ALERT_LINKED,
+                FraudCaseTimelineEventType.LINKED_ALERT_CONTEXT,
                 FraudCaseTimelineEventType.ALERT_EVIDENCE_SNAPSHOT_AVAILABLE
         );
         assertThat(response.partial()).isFalse();
@@ -79,7 +80,7 @@ class FraudCaseEvidenceTimelineServiceTest {
         String json = jsonResponseWithSensitiveSourceFields();
 
         assertThat(json).doesNotContain("alert-secret");
-        assertThat(json).contains("FRAUD_ALERT_LINKED").contains("FRAUD_ALERT_LINKED_");
+        assertThat(json).contains("LINKED_ALERT_CONTEXT").contains("LINKED_ALERT_CONTEXT_");
     }
 
     @Test
@@ -178,8 +179,8 @@ class FraudCaseEvidenceTimelineServiceTest {
 
         assertThat(first.events()).extracting("eventType").containsExactly(
                 FraudCaseTimelineEventType.FRAUD_CASE_CREATED,
-                FraudCaseTimelineEventType.FRAUD_ALERT_LINKED,
-                FraudCaseTimelineEventType.FRAUD_ALERT_LINKED,
+                FraudCaseTimelineEventType.LINKED_ALERT_CONTEXT,
+                FraudCaseTimelineEventType.LINKED_ALERT_CONTEXT,
                 FraudCaseTimelineEventType.ALERT_EVIDENCE_SNAPSHOT_AVAILABLE,
                 FraudCaseTimelineEventType.ALERT_EVIDENCE_SNAPSHOT_AVAILABLE
         );
@@ -207,10 +208,38 @@ class FraudCaseEvidenceTimelineServiceTest {
 
         assertThat(response.events()).extracting("eventType").containsExactly(
                 FraudCaseTimelineEventType.FRAUD_CASE_CREATED,
-                FraudCaseTimelineEventType.FRAUD_ALERT_LINKED,
+                FraudCaseTimelineEventType.LINKED_ALERT_CONTEXT,
                 FraudCaseTimelineEventType.ALERT_EVIDENCE_SNAPSHOT_AVAILABLE
         );
         assertThat(json).doesNotContain("alert-secret");
+    }
+
+    @Test
+    void FraudCaseEvidenceTimelineDoesNotClaimAlertLinkTimeWhenOnlyAlertTimestampExistsTest() throws Exception {
+        FraudCaseEvidenceTimelineService service = service();
+        when(fraudCaseRepository.findById("case-1")).thenReturn(Optional.of(caseWithAlerts(
+                "case-1",
+                Instant.parse("2026-05-20T10:00:00Z"),
+                "alert-1"
+        )));
+        when(alertRepository.findAllById(List.of("alert-1"))).thenReturn(List.of(alert(
+                "alert-1",
+                Instant.parse("2026-05-20T10:05:00Z")
+        )));
+
+        var response = service.timeline("case-1");
+        String json = objectMapper.writeValueAsString(response);
+
+        assertThat(response.events())
+                .filteredOn(event -> event.eventType() == FraudCaseTimelineEventType.LINKED_ALERT_CONTEXT)
+                .singleElement()
+                .satisfies(event -> {
+                    assertThat(event.title()).isEqualTo("Linked alert context");
+                    assertThat(event.description()).isEqualTo("Read-only linked alert context derived from existing alert read data.");
+                });
+        assertThat(json)
+                .doesNotContain("FRAUD_ALERT_LINKED")
+                .doesNotContain("linked at");
     }
 
     @Test
@@ -226,7 +255,7 @@ class FraudCaseEvidenceTimelineServiceTest {
         var response = service.timeline("case-1");
 
         assertThat(response.partial()).isTrue();
-        assertThat(response.events()).filteredOn(event -> event.eventType() == FraudCaseTimelineEventType.FRAUD_ALERT_LINKED)
+        assertThat(response.events()).filteredOn(event -> event.eventType() == FraudCaseTimelineEventType.LINKED_ALERT_CONTEXT)
                 .allSatisfy(event -> {
                     assertThat(event.approximateTime()).isTrue();
                     assertThat(event.occurredAt()).isNull();
@@ -285,7 +314,7 @@ class FraudCaseEvidenceTimelineServiceTest {
 
         assertThat(response.events()).extracting("eventType").containsExactly(
                 FraudCaseTimelineEventType.FRAUD_CASE_CREATED,
-                FraudCaseTimelineEventType.FRAUD_ALERT_LINKED,
+                FraudCaseTimelineEventType.LINKED_ALERT_CONTEXT,
                 FraudCaseTimelineEventType.ALERT_EVIDENCE_SNAPSHOT_UNAVAILABLE
         );
     }
@@ -308,12 +337,13 @@ class FraudCaseEvidenceTimelineServiceTest {
     void FraudCaseEvidenceTimelineTruncationTest() {
         FraudCaseEvidenceTimelineService service = service();
         List<String> alertIds = IntStream.rangeClosed(1, 60).mapToObj(index -> "alert-" + index).toList();
+        List<String> boundedAlertIds = alertIds.subList(0, FraudCaseEvidenceTimelineService.MAX_LINKED_ALERTS_FOR_TIMELINE);
         when(fraudCaseRepository.findById("case-1")).thenReturn(Optional.of(caseWithAlerts(
                 "case-1",
                 Instant.parse("2026-05-20T10:00:00Z"),
                 alertIds.toArray(String[]::new)
         )));
-        when(alertRepository.findAllById(alertIds)).thenReturn(alertIds.stream()
+        when(alertRepository.findAllById(boundedAlertIds)).thenReturn(boundedAlertIds.stream()
                 .map(alertId -> alert(alertId, Instant.parse("2026-05-20T10:05:00Z")))
                 .toList());
 
@@ -323,6 +353,69 @@ class FraudCaseEvidenceTimelineServiceTest {
         assertThat(response.partial()).isTrue();
         assertThat(response.truncationReason()).isEqualTo("TIMELINE_EVENT_LIMIT_EXCEEDED");
         assertThat(response.events()).hasSizeLessThanOrEqualTo(100);
+    }
+
+    @Test
+    void FraudCaseEvidenceTimelineDoesNotFetchAllLinkedAlertsWhenInputExceedsLimitTest() throws Exception {
+        FraudCaseEvidenceTimelineService service = service();
+        List<String> alertIds = IntStream.rangeClosed(1, 10_000).mapToObj(index -> "alert-" + index).toList();
+        when(fraudCaseRepository.findById("case-huge")).thenReturn(Optional.of(caseWithAlerts(
+                "case-huge",
+                Instant.parse("2026-05-20T10:00:00Z"),
+                alertIds.toArray(String[]::new)
+        )));
+        when(alertRepository.findAllById(any())).thenAnswer(invocation -> {
+            Iterable<String> ids = invocation.getArgument(0);
+            return toList(ids).stream()
+                    .map(alertId -> alert(alertId, Instant.parse("2026-05-20T10:05:00Z")))
+                    .toList();
+        });
+
+        var response = service.timeline("case-huge");
+        ArgumentCaptor<Iterable<String>> captor = ArgumentCaptor.forClass(Iterable.class);
+        verify(alertRepository).findAllById(captor.capture());
+        List<String> fetchedIds = toList(captor.getValue());
+        String json = objectMapper.writeValueAsString(response);
+
+        assertThat(fetchedIds).hasSizeLessThanOrEqualTo(FraudCaseEvidenceTimelineService.MAX_LINKED_ALERTS_FOR_TIMELINE);
+        assertThat(fetchedIds).doesNotContain("alert-9999");
+        assertThat(response.partial()).isTrue();
+        assertThat(response.truncated()).isTrue();
+        assertThat(response.truncationReason()).isEqualTo("TIMELINE_EVENT_LIMIT_EXCEEDED");
+        assertThat(response.events()).hasSizeLessThanOrEqualTo(FraudCaseEvidenceTimelineService.MAX_TIMELINE_EVENTS);
+        assertThat(json).doesNotContain("alert-9999");
+    }
+
+    @Test
+    void FraudCaseEvidenceTimelineErrorEvidenceUsesPartialTimelineEventWithErrorStatusTest() throws Exception {
+        FraudCaseEvidenceTimelineService service = service();
+        when(fraudCaseRepository.findById("case-error")).thenReturn(Optional.of(caseWithAlerts(
+                "case-error",
+                Instant.parse("2026-05-20T10:00:00Z"),
+                "alert-1"
+        )));
+        when(alertRepository.findAllById(List.of("alert-1"))).thenReturn(List.of(alert(
+                "alert-1",
+                Instant.parse("2026-05-20T10:05:00Z"),
+                evidence("RAW_REASON", EvidenceStatus.ERROR, EvidenceSeverity.HIGH, Instant.parse("2026-05-20T10:06:00Z"))
+        )));
+
+        var response = service.timeline("case-error");
+        String json = objectMapper.writeValueAsString(response);
+
+        assertThat(response.partial()).isTrue();
+        assertThat(response.events())
+                .filteredOn(event -> event.eventType() == FraudCaseTimelineEventType.ALERT_EVIDENCE_SNAPSHOT_PARTIAL)
+                .singleElement()
+                .satisfies(event -> {
+                    assertThat(event.evidenceStatus()).isEqualTo(EvidenceStatus.ERROR);
+                    assertThat(event.title()).isEqualTo("Alert evidence snapshot partial");
+                    assertThat(event.description()).doesNotContain("fraud proof", "final outcome");
+                });
+        assertThat(json)
+                .doesNotContain("RAW_REASON")
+                .doesNotContain("Evidence title")
+                .doesNotContain("Evidence description");
     }
 
     @Test
@@ -391,6 +484,12 @@ class FraudCaseEvidenceTimelineServiceTest {
         document.setCreatedAt(createdAt);
         document.setLinkedAlertIds(List.of(alertIds));
         return document;
+    }
+
+    private List<String> toList(Iterable<String> values) {
+        List<String> result = new java.util.ArrayList<>();
+        values.forEach(result::add);
+        return result;
     }
 
     private AlertDocument alert(String alertId, Instant alertTimestamp, EvidenceSnapshotItem... evidence) {
