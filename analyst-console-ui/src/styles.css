@@ -2271,6 +2271,99 @@ button:focus-visible,
   margin: 0;
 }
 
+.evidenceTimelineSection {
+  display: grid;
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+.evidenceTimelineBody,
+.evidenceTimelineNotices {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.evidenceTimelineNotice {
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  border-radius: 0.65rem;
+  background: rgba(37, 99, 235, 0.07);
+  color: var(--muted);
+  font-weight: 800;
+  padding: 0.85rem 1rem;
+}
+
+.evidenceTimelineNoticeCompact {
+  padding: 0.65rem 0.8rem;
+}
+
+.evidenceTimelineList {
+  display: grid;
+  gap: 0.75rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.evidenceTimelineItem {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 0.75rem;
+  background: rgba(248, 250, 252, 0.74);
+  padding: 0.85rem;
+}
+
+.evidenceTimelineItem article {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.evidenceTimelineItemHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.evidenceTimelineItemHeader strong,
+.evidenceTimelineItem p,
+.evidenceTimelineItem dd {
+  overflow-wrap: anywhere;
+}
+
+.evidenceTimelineItemHeader span,
+.evidenceTimelineQualifier {
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.1);
+  color: var(--navy);
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 900;
+  padding: 0.25rem 0.55rem;
+}
+
+.evidenceTimelineItem p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.evidenceTimelineItem dl {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin: 0;
+}
+
+.evidenceTimelineItem dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.evidenceTimelineItem dd {
+  margin: 0.25rem 0 0;
+  font-weight: 900;
+}
+
 .breadcrumbList {
   display: flex;
   flex-wrap: wrap;
@@ -2474,6 +2567,7 @@ button:focus-visible,
   .evidenceSummaryStats,
   .evidenceSummaryGrid,
   .evidenceSummaryCards,
+  .evidenceTimelineItem dl,
   .fraudCaseGrid,
   .fraudCaseFacts,
   .governanceAuditPanel,
@@ -2536,6 +2630,7 @@ button:focus-visible,
   .evidenceSummaryGrid,
   .evidenceSummaryCards,
   .evidenceSummaryCard dl,
+  .evidenceTimelineItem dl,
   .fraudCaseGrid,
   .fraudCaseFacts,
   .governanceAuditPanel,
