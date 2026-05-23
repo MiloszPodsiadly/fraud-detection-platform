@@ -1,0 +1,10 @@
+package com.frauddetection.alert.api;
+
+public enum FraudCaseTimelineEventType {
+    FRAUD_CASE_CREATED,
+    LINKED_ALERT_CONTEXT,
+    ALERT_EVIDENCE_SNAPSHOT_AVAILABLE,
+    ALERT_EVIDENCE_SNAPSHOT_PARTIAL,
+    ALERT_EVIDENCE_SNAPSHOT_UNAVAILABLE,
+    LEGACY_CONTEXT
+}

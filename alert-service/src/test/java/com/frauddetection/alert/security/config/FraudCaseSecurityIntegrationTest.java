@@ -3,12 +3,17 @@ package com.frauddetection.alert.security.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.api.FraudCaseAuditResponse;
 import com.frauddetection.alert.api.FraudCaseEvidenceSummaryResponse;
+import com.frauddetection.alert.api.FraudCaseEvidenceTimelineResponse;
+import com.frauddetection.alert.api.FraudCaseTimelineEventResponse;
+import com.frauddetection.alert.api.FraudCaseTimelineEventType;
+import com.frauddetection.alert.api.FraudCaseTimelineLinkedEntityType;
 import com.frauddetection.alert.api.FraudCaseSlaStatus;
 import com.frauddetection.alert.api.FraudCaseWorkQueueItemResponse;
 import com.frauddetection.alert.api.FraudCaseWorkQueueSummaryResponse;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.controller.FraudCaseController;
 import com.frauddetection.alert.controller.FraudCaseEvidenceSummaryController;
+import com.frauddetection.alert.controller.FraudCaseEvidenceTimelineController;
 import com.frauddetection.alert.controller.FraudCaseWorkQueueSummaryController;
 import com.frauddetection.alert.domain.FraudCaseAuditAction;
 import com.frauddetection.alert.domain.FraudCasePriority;
@@ -25,6 +30,7 @@ import com.frauddetection.alert.security.error.ApiAuthenticationEntryPoint;
 import com.frauddetection.alert.security.error.SecurityErrorResponseWriter;
 import com.frauddetection.alert.service.FraudCaseManagementService;
 import com.frauddetection.alert.service.FraudCaseEvidenceSummaryService;
+import com.frauddetection.alert.service.FraudCaseEvidenceTimelineService;
 import com.frauddetection.alert.service.FraudCaseQueryService;
 import com.frauddetection.common.events.enums.RiskLevel;
 import org.junit.jupiter.api.Test;
@@ -55,7 +61,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest({FraudCaseController.class, FraudCaseEvidenceSummaryController.class, FraudCaseWorkQueueSummaryController.class})
+@WebMvcTest({FraudCaseController.class, FraudCaseEvidenceSummaryController.class, FraudCaseEvidenceTimelineController.class, FraudCaseWorkQueueSummaryController.class})
 @Import({
         AlertSecurityConfig.class,
         ApiAuthenticationEntryPoint.class,
@@ -84,6 +90,9 @@ class FraudCaseSecurityIntegrationTest {
     private FraudCaseEvidenceSummaryService fraudCaseEvidenceSummaryService;
 
     @MockBean
+    private FraudCaseEvidenceTimelineService fraudCaseEvidenceTimelineService;
+
+    @MockBean
     private FraudCaseQueryService fraudCaseQueryService;
 
     @MockBean
@@ -101,6 +110,9 @@ class FraudCaseSecurityIntegrationTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.details[0]").value("reason:missing_credentials"));
         mockMvc.perform(get("/api/v1/fraud-cases/case-1/evidence-summary"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.details[0]").value("reason:missing_credentials"));
+        mockMvc.perform(get("/api/v1/fraud-cases/case-1/evidence-timeline"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.details[0]").value("reason:missing_credentials"));
 
@@ -125,6 +137,10 @@ class FraudCaseSecurityIntegrationTest {
                         .with(userWith(AnalystAuthority.TRANSACTION_MONITOR_READ)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.details[0]").value("reason:insufficient_authority"));
+        mockMvc.perform(get("/api/v1/fraud-cases/case-1/evidence-timeline")
+                        .with(userWith(AnalystAuthority.TRANSACTION_MONITOR_READ)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.details[0]").value("reason:insufficient_authority"));
     }
 
     @Test
@@ -136,6 +152,7 @@ class FraudCaseSecurityIntegrationTest {
                 .thenReturn(new FraudCaseWorkQueueSummaryResponse(42, Instant.parse("2026-05-12T10:00:00Z")));
         when(fraudCaseManagementService.getCase("case-1")).thenReturn(caseDocument());
         when(fraudCaseEvidenceSummaryService.summary("case-1")).thenReturn(evidenceSummary());
+        when(fraudCaseEvidenceTimelineService.timeline("case-1")).thenReturn(evidenceTimeline());
 
         mockMvc.perform(get("/api/v1/fraud-cases").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
                 .andExpect(status().isOk())
@@ -155,6 +172,46 @@ class FraudCaseSecurityIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.caseId").value("case-1"))
                 .andExpect(jsonPath("$.aggregateEvidenceStatus").value("AVAILABLE"));
+        mockMvc.perform(get("/api/v1/fraud-cases/case-1/evidence-timeline").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.caseId").value("case-1"))
+                .andExpect(jsonPath("$.events[0].eventType").value("FRAUD_CASE_CREATED"));
+    }
+
+    @Test
+    void FraudCaseEvidenceTimelineRequiresFraudCaseReadTest() throws Exception {
+        when(fraudCaseEvidenceTimelineService.timeline("case-1")).thenReturn(evidenceTimeline());
+
+        mockMvc.perform(get("/api/v1/fraud-cases/case-1/evidence-timeline")
+                        .with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void FraudCaseEvidenceTimelineRejectsAnonymousTest() throws Exception {
+        mockMvc.perform(get("/api/v1/fraud-cases/case-1/evidence-timeline"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void FraudCaseEvidenceTimelineRejectsAlertReadOnlyTest() throws Exception {
+        mockMvc.perform(get("/api/v1/fraud-cases/case-1/evidence-timeline")
+                        .with(userWith(AnalystAuthority.ALERT_READ)))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void FraudCaseEvidenceTimelineRejectsSuspiciousTransactionReadOnlyTest() throws Exception {
+        mockMvc.perform(get("/api/v1/fraud-cases/case-1/evidence-timeline")
+                        .with(userWith(AnalystAuthority.SUSPICIOUS_TRANSACTION_READ)))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void FraudCaseEvidenceTimelineRejectsUnrelatedAuthorityTest() throws Exception {
+        mockMvc.perform(get("/api/v1/fraud-cases/case-1/evidence-timeline")
+                        .with(userWith(AnalystAuthority.TRANSACTION_MONITOR_READ)))
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -325,6 +382,28 @@ class FraudCaseSecurityIntegrationTest {
                 List.of(),
                 1,
                 1,
+                false,
+                false,
+                false,
+                null,
+                Instant.parse("2026-05-12T10:00:00Z")
+        );
+    }
+
+    private FraudCaseEvidenceTimelineResponse evidenceTimeline() {
+        return new FraudCaseEvidenceTimelineResponse(
+                "case-1",
+                List.of(new FraudCaseTimelineEventResponse(
+                        "FRAUD_CASE_CREATED_000001",
+                        FraudCaseTimelineEventType.FRAUD_CASE_CREATED,
+                        Instant.parse("2026-05-12T10:00:00Z"),
+                        com.frauddetection.alert.evidence.EvidenceSource.ALERT_SERVICE,
+                        EvidenceStatus.AVAILABLE,
+                        "Fraud case created",
+                        "Read-only timeline event derived from existing fraud-case read data.",
+                        FraudCaseTimelineLinkedEntityType.FRAUD_CASE,
+                        false
+                )),
                 false,
                 false,
                 false,
