@@ -86,6 +86,7 @@ final class SecurityRouteOwnershipRegistry {
         route(routes, "POST", base, "FraudCaseAuthorizationRules");
         route(routes, "GET", base + "/{caseId}", "FraudCaseAuthorizationRules");
         route(routes, "GET", base + "/{caseId}/evidence-summary", "FraudCaseAuthorizationRules");
+        route(routes, "GET", base + "/{caseId}/evidence-timeline", "FraudCaseAuthorizationRules");
         route(routes, "POST", base + "/{caseId}/assign", "FraudCaseAuthorizationRules");
         route(routes, "POST", base + "/{caseId}/notes", "FraudCaseAuthorizationRules");
         route(routes, "POST", base + "/{caseId}/decisions", "FraudCaseAuthorizationRules");

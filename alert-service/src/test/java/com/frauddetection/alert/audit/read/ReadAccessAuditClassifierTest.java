@@ -59,6 +59,19 @@ class ReadAccessAuditClassifierTest {
     }
 
     @Test
+    void shouldClassifyFraudCaseEvidenceTimelineRead() {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/fraud-cases/case-1/evidence-timeline");
+        request.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/api/v1/fraud-cases/{caseId}/evidence-timeline");
+        request.setAttribute(HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE, Map.of("caseId", "case-1"));
+
+        ReadAccessAuditTarget target = classifier.classify(request).orElseThrow();
+
+        assertThat(target.endpointCategory()).isEqualTo(ReadAccessEndpointCategory.FRAUD_CASE_EVIDENCE_TIMELINE);
+        assertThat(target.resourceType()).isEqualTo(ReadAccessResourceType.FRAUD_CASE);
+        assertThat(target.resourceId()).isEqualTo("case-1");
+    }
+
+    @Test
     void shouldClassifySuspiciousTransactionSummaryAsAggregateReadOnlyEndpoint() {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/internal/suspicious-transactions/summary");
         request.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/internal/suspicious-transactions/summary");

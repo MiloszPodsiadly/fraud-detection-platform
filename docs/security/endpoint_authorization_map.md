@@ -127,6 +127,7 @@ The FDP-49 route ownership docs represent these Spring MVC controllers:
 - `ExternalAuditIntegrityController`
 - `FraudCaseController`
 - `FraudCaseEvidenceSummaryController`
+- `FraudCaseEvidenceTimelineController`
 - `FraudCaseWorkQueueSummaryController`
 - `GovernanceAdvisoryController`
 - `GovernanceAuditController`

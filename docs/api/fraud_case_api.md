@@ -20,6 +20,7 @@ exactly-once execution, and not external finality.
 | `POST` | `/api/v1/fraud-cases` | Create a fraud case from alert ids. |
 | `GET` | `/api/v1/fraud-cases/{caseId}` | Read case details. |
 | `GET` | `/api/v1/fraud-cases/{caseId}/evidence-summary` | Read bounded evidence-summary context from linked alert evidence snapshots. |
+| `GET` | `/api/v1/fraud-cases/{caseId}/evidence-timeline` | Read bounded derived evidence chronology from linked alert evidence snapshots. |
 | `GET` | `/api/v1/fraud-cases` | Search cases. |
 | `POST` | `/api/v1/fraud-cases/{caseId}/assign` | Assign or reassign investigator. |
 | `POST` | `/api/v1/fraud-cases/{caseId}/notes` | Append investigator note. |
@@ -32,7 +33,8 @@ exactly-once execution, and not external finality.
 Authorities:
 
 - `GET /fraud-cases`, `GET /fraud-cases/{caseId}`, and
-  `GET /fraud-cases/{caseId}/evidence-summary` require `fraud-case:read`.
+  `GET /fraud-cases/{caseId}/evidence-summary`, and `GET /fraud-cases/{caseId}/evidence-timeline` require
+  `fraud-case:read`.
 - Lifecycle `POST` endpoints require `fraud-case:update`.
 - `GET /fraud-cases/{caseId}/audit` requires `fraud-case:audit:read` and intentionally returns audit `actorId`.
 
@@ -59,6 +61,21 @@ Evidence-summary semantics:
 - `AVAILABLE` means every included evidence item is available, at least one evidence item exists, and linked-alert
   source coverage is complete. Empty, legacy, unavailable, stale, partial, not-applicable, missing-source, or
   truncated-source states do not become `AVAILABLE`; `ERROR` dominates.
+
+Evidence-timeline semantics:
+
+- The evidence timeline is a read-only chronology projection over `FraudCaseDocument.linkedAlertIds` and linked
+  `AlertDocument.evidenceSnapshot` entries.
+- It returns bounded synthetic event keys, event types, timestamps, source, evidence status, linked entity type, and
+  generated product copy only.
+- It does not expose alert ids, transaction ids, customer or account identifiers, correlation ids, source event ids,
+  evidence ids, score decision ids, raw payloads, raw evidence titles, or raw evidence descriptions.
+- It does not create case status history, analyst decision history, fraud confirmation, legal proof, final outcome,
+  audit trail, event store history, workflow history, or lifecycle reconstruction.
+- Missing timestamps mark `approximateTime=true` and `partial=true`; `generatedAt` is response generation time and is
+  not used as an event occurrence time.
+- More than 100 derived events sets `truncated=true`, `partial=true`, and
+  `truncationReason=TIMELINE_EVENT_LIMIT_EXCEEDED`.
 
 List semantics:
 

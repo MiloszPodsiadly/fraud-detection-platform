@@ -61,6 +61,7 @@ Alert service:
 | `POST` | `/api/v1/alerts/{alertId}/decision` | Records analyst decision. |
 | `GET` | `/api/v1/fraud-cases` | Lists fraud cases. |
 | `GET` | `/api/v1/fraud-cases/{caseId}` | Returns one fraud case. |
+| `GET` | `/api/v1/fraud-cases/{caseId}/evidence-timeline` | Returns a bounded derived fraud-case evidence chronology projection. |
 | `PATCH` | `/api/v1/fraud-cases/{caseId}` | Updates fraud case status/assignment fields through a regulated mutation command. Non-terminal command states return operation metadata without target business fields. |
 | `GET` | `/api/v1/transactions/scored` | Lists scored transaction projections. |
 | `GET` | `/api/v1/audit/events` | Returns bounded newest-first durable platform audit events; requires `audit:read`. |
