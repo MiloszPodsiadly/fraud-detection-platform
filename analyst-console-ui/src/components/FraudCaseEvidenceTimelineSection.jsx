@@ -5,6 +5,8 @@ import { safeTimelineArray, safeTruncationReason, toTimelineEvent } from "./frau
 import { timelineStateNotice } from "./fraudCaseTimelineCopy.js";
 
 export const EVIDENCE_TIMELINE_HELPER_TEXT = "Evidence timeline is read-only investigation chronology. It is not an audit trail, not complete case history, not confirmed fraud, not an analyst decision, not a final outcome, and not legal proof.";
+const MAX_TIMELINE_EVENTS_RENDERED = 100;
+const CAP_NOTICE = "Timeline display capped. Only the bounded timeline window is shown.";
 
 export function FraudCaseEvidenceTimelineSection({
   caseId,
@@ -62,38 +64,45 @@ export function FraudCaseEvidenceTimelineSection({
 
       {state.isLoading && <LoadingPanel label="Loading evidence timeline..." />}
       {!state.isLoading && state.error && <TimelineNotice message={timelineStateNotice("unavailable")} />}
-      {!state.isLoading && !state.error && state.timeline && <EvidenceTimelineContent timeline={state.timeline} />}
+      {!state.isLoading && !state.error && <EvidenceTimelineContent timeline={state.timeline} />}
     </section>
   );
 }
 
 function EvidenceTimelineContent({ timeline }) {
   const events = safeTimelineArray(timeline?.events).map(toTimelineEvent);
+  const displayedEvents = events.slice(0, MAX_TIMELINE_EVENTS_RENDERED);
+  const isCapped = events.length > MAX_TIMELINE_EVENTS_RENDERED;
   const isLegacy = timeline?.legacy === true || events.some((event) => event.eventType === "LEGACY_CONTEXT");
   const isPartial = timeline?.partial === true;
   const isTruncated = timeline?.truncated === true;
 
-  if (isLegacy && events.length === 0) {
-    return <TimelineNotice message={timelineStateNotice("legacy")} />;
-  }
-
   if (events.length === 0) {
-    return <TimelineNotice message={timelineStateNotice("empty")} />;
+    return (
+      <div className="evidenceTimelineBody">
+        <TimelineStateNotices
+          isLegacy={isLegacy}
+          isPartial={isPartial}
+          isTruncated={isTruncated}
+          truncationReason={timeline?.truncationReason}
+        />
+        <TimelineNotice message={timelineStateNotice("empty")} />
+      </div>
+    );
   }
 
   return (
     <div className="evidenceTimelineBody">
-      <div className="evidenceTimelineNotices" aria-live="polite">
-        {isLegacy && <TimelineNotice message={timelineStateNotice("legacy")} compact />}
-        {isPartial && <TimelineNotice message={timelineStateNotice("partial")} compact />}
-        {isTruncated && <TimelineNotice message={timelineStateNotice("truncated")} compact />}
-        {isTruncated && timeline?.truncationReason && (
-          <TimelineNotice message={safeTruncationReason(timeline.truncationReason)} compact />
-        )}
-      </div>
+      <TimelineStateNotices
+        isLegacy={isLegacy}
+        isPartial={isPartial}
+        isTruncated={isTruncated}
+        truncationReason={timeline?.truncationReason}
+      />
+      {isCapped && <TimelineNotice message={CAP_NOTICE} compact />}
 
       <ol className="evidenceTimelineList">
-        {events.map((event, index) => (
+        {displayedEvents.map((event, index) => (
           <li className="evidenceTimelineItem" key={`${event.renderKey}-${index}`}>
             <article>
               <div className="evidenceTimelineItemHeader">
@@ -124,6 +133,19 @@ function EvidenceTimelineContent({ timeline }) {
           </li>
         ))}
       </ol>
+    </div>
+  );
+}
+
+function TimelineStateNotices({ isLegacy, isPartial, isTruncated, truncationReason }) {
+  return (
+    <div className="evidenceTimelineNotices" aria-live="polite">
+      {isLegacy && <TimelineNotice message={timelineStateNotice("legacy")} compact />}
+      {isPartial && <TimelineNotice message={timelineStateNotice("partial")} compact />}
+      {isTruncated && <TimelineNotice message={timelineStateNotice("truncated")} compact />}
+      {isTruncated && truncationReason && (
+        <TimelineNotice message={safeTruncationReason(truncationReason)} compact />
+      )}
     </div>
   );
 }

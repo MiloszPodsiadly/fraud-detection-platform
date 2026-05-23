@@ -1,5 +1,5 @@
 export function timelineEventTitle(eventType) {
-  switch (normalizeTimelineCode(eventType)) {
+  switch (normalizeTimelineEventType(eventType)) {
     case "FRAUD_CASE_CREATED":
       return "Fraud case created";
     case "LINKED_ALERT_CONTEXT":
@@ -18,7 +18,7 @@ export function timelineEventTitle(eventType) {
 }
 
 export function timelineEventDescription(eventType) {
-  switch (normalizeTimelineCode(eventType)) {
+  switch (normalizeTimelineEventType(eventType)) {
     case "FRAUD_CASE_CREATED":
       return "Read-only timeline event derived from existing fraud-case read data.";
     case "LINKED_ALERT_CONTEXT":
@@ -54,11 +54,14 @@ export function timelineStateNotice(state) {
   }
 }
 
-function normalizeTimelineCode(value) {
+function normalizeTimelineEventType(value) {
   const normalized = typeof value === "string" ? value.trim() : "";
-  if (!normalized) {
-    return "UNKNOWN";
-  }
-
-  return /^[A-Z0-9_:-]{1,80}$/.test(normalized) ? normalized : "UNKNOWN";
+  return [
+    "FRAUD_CASE_CREATED",
+    "LINKED_ALERT_CONTEXT",
+    "ALERT_EVIDENCE_SNAPSHOT_AVAILABLE",
+    "ALERT_EVIDENCE_SNAPSHOT_PARTIAL",
+    "ALERT_EVIDENCE_SNAPSHOT_UNAVAILABLE",
+    "LEGACY_CONTEXT"
+  ].includes(normalized) ? normalized : "UNKNOWN";
 }

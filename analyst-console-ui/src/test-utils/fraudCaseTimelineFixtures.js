@@ -24,7 +24,7 @@ export function availableTimeline() {
         eventKey: "snapshot-available",
         eventType: "ALERT_EVIDENCE_SNAPSHOT_AVAILABLE",
         occurredAt: "2026-05-23T09:55:00Z",
-        source: "EVIDENCE_SNAPSHOT",
+        source: "FRAUD_SCORING_SERVICE",
         evidenceStatus: "AVAILABLE",
         linkedEntityType: "EVIDENCE_SNAPSHOT"
       })
@@ -46,7 +46,7 @@ export function partialTimeline() {
         eventKey: "snapshot-partial",
         eventType: "ALERT_EVIDENCE_SNAPSHOT_PARTIAL",
         occurredAt: "2026-05-23T10:05:00Z",
-        source: "EVIDENCE_SNAPSHOT",
+        source: "FRAUD_SCORING_SERVICE",
         evidenceStatus: "ERROR",
         linkedEntityType: "EVIDENCE_SNAPSHOT"
       })
@@ -93,6 +93,30 @@ export function emptyTimeline() {
   };
 }
 
+export function emptyPartialTimeline() {
+  return {
+    ...emptyTimeline(),
+    partial: true
+  };
+}
+
+export function emptyTruncatedTimeline() {
+  return {
+    ...emptyTimeline(),
+    partial: true,
+    truncated: true,
+    truncationReason: "TIMELINE_EVENT_LIMIT_EXCEEDED"
+  };
+}
+
+export function emptyLegacyPartialTimeline() {
+  return {
+    ...emptyTimeline(),
+    partial: true,
+    legacy: true
+  };
+}
+
 export function nullTimestampTimeline() {
   return {
     ...availableTimeline(),
@@ -107,6 +131,40 @@ export function nullTimestampTimeline() {
         linkedEntityType: "FRAUD_ALERT"
       })
     ]
+  };
+}
+
+export function uppercaseRawIdTimeline() {
+  return {
+    ...emptyTimeline(),
+    events: [{
+      eventKey: "SAFE_KEY_SHOULD_NOT_RENDER",
+      eventType: "CORRELATION_ID_ABC123",
+      source: "SOURCE_EVENT_20260523_ABC",
+      evidenceStatus: "CUSTOMER_123456",
+      linkedEntityType: "FRAUD_ALERT:ALERT_123",
+      occurredAt: "2026-05-23T10:00:00Z",
+      approximateTime: true,
+      title: "raw title should not render",
+      description: "raw description should not render"
+    }]
+  };
+}
+
+export function largeTimeline(size = 5000) {
+  const events = Array.from({ length: size }, (_, index) => event({
+    eventKey: index < 100 ? `safe-render-key-${index}` : `OMITTED_EVENT_KEY_${index}`,
+    eventType: index === 0 ? "FRAUD_CASE_CREATED" : "ALERT_EVIDENCE_SNAPSHOT_AVAILABLE",
+    occurredAt: "2026-05-23T10:00:00Z",
+    source: "ALERT_SERVICE",
+    evidenceStatus: "AVAILABLE",
+    linkedEntityType: "EVIDENCE_SNAPSHOT",
+    title: index >= 100 ? `omitted raw title ${index}` : "Backend title must not render",
+    description: index >= 100 ? `omitted raw description ${index}` : "Backend description must not render"
+  }));
+  return {
+    ...emptyTimeline(),
+    events
   };
 }
 

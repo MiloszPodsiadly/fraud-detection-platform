@@ -1,19 +1,32 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { FraudCaseEvidenceTimelineSection } from "./FraudCaseEvidenceTimelineSection.jsx";
-import { formatTimelineTime, normalizeTimelineCode, safeTruncationReason, toTimelineEvent } from "./fraudCaseTimelineDisplay.js";
+import {
+  formatTimelineTime,
+  normalizeTimelineEventType,
+  normalizeTimelineEvidenceStatus,
+  normalizeTimelineLinkedEntityType,
+  normalizeTimelineSource,
+  safeTruncationReason,
+  toTimelineEvent
+} from "./fraudCaseTimelineDisplay.js";
 import { timelineEventDescription, timelineEventTitle, timelineStateNotice } from "./fraudCaseTimelineCopy.js";
 import {
   availableTimeline,
+  emptyLegacyPartialTimeline,
+  emptyPartialTimeline,
   emptyTimeline,
+  emptyTruncatedTimeline,
+  largeTimeline,
   legacyTimeline,
   maliciousTimeline,
   malformedTimeline,
   nullTimestampTimeline,
   partialTimeline,
-  truncatedTimeline
+  truncatedTimeline,
+  uppercaseRawIdTimeline
 } from "../test-utils/fraudCaseTimelineFixtures.js";
 import {
   expectNoRawTimelineIdentifiers,
@@ -119,6 +132,49 @@ describe("FraudCaseEvidenceTimelineSection", () => {
     expect(await screen.findByText("No evidence timeline events are available for this case.")).toBeInTheDocument();
   });
 
+  it("FraudCaseEvidenceTimelineSectionRendersPartialNoticeWhenEventsEmptyTest", async () => {
+    renderSection({ timeline: emptyPartialTimeline() });
+
+    const section = await findSection();
+
+    expect(within(section).getByText("Partial timeline. Some linked evidence context is incomplete or unavailable.")).toBeInTheDocument();
+    expect(within(section).getByText("No evidence timeline events are available for this case.")).toBeInTheDocument();
+  });
+
+  it("FraudCaseEvidenceTimelineSectionRendersTruncatedNoticeWhenEventsEmptyTest", async () => {
+    renderSection({ timeline: emptyTruncatedTimeline() });
+
+    const section = await findSection();
+
+    expect(within(section).getByText("Truncated timeline. Only the first bounded set of evidence timeline events was included.")).toBeInTheDocument();
+    expect(within(section).getByText("No evidence timeline events are available for this case.")).toBeInTheDocument();
+  });
+
+  it("FraudCaseEvidenceTimelineSectionRendersSafeTruncationReasonWhenEventsEmptyTest", async () => {
+    renderSection({ timeline: emptyTruncatedTimeline() });
+
+    expect(within(await findSection()).getByText("TIMELINE_EVENT_LIMIT_EXCEEDED")).toBeInTheDocument();
+  });
+
+  it("FraudCaseEvidenceTimelineSectionRendersLegacyAndPartialWhenEventsEmptyTest", async () => {
+    renderSection({ timeline: emptyLegacyPartialTimeline() });
+
+    const section = await findSection();
+
+    expect(within(section).getByText("Legacy context. This case may not have structured evidence timeline data.")).toBeInTheDocument();
+    expect(within(section).getByText("Partial timeline. Some linked evidence context is incomplete or unavailable.")).toBeInTheDocument();
+    expect(within(section).getByText("No evidence timeline events are available for this case.")).toBeInTheDocument();
+  });
+
+  it("FraudCaseEvidenceTimelineSectionRendersSafeStateForNullTimelineResponseTest", async () => {
+    renderSection({ timeline: null });
+
+    const section = await findSection();
+
+    expect(within(section).getByText("Evidence timeline")).toBeInTheDocument();
+    expect(within(section).getByText("No evidence timeline events are available for this case.")).toBeInTheDocument();
+  });
+
   it("FraudCaseEvidenceTimelineSectionRendersSafeUnavailableStateTest", async () => {
     renderSection({ timeline: null, error: true });
 
@@ -215,6 +271,78 @@ describe("FraudCaseEvidenceTimelineSection", () => {
     expectNoRawTimelineIdentifiers(section);
   });
 
+  it("FraudCaseEvidenceTimelineSectionDoesNotRenderUppercaseRawIdShapedEventTypeTest", async () => {
+    renderSection({ timeline: uppercaseRawIdTimeline() });
+
+    const section = await findSection();
+
+    expect(section.textContent).not.toContain("CORRELATION_ID_ABC123");
+    expect(section.innerHTML).not.toContain("CORRELATION_ID_ABC123");
+    expect(within(section).getByText("Timeline event")).toBeInTheDocument();
+  });
+
+  it("FraudCaseEvidenceTimelineSectionDoesNotRenderUppercaseRawIdShapedSourceTest", async () => {
+    renderSection({ timeline: uppercaseRawIdTimeline() });
+
+    const section = await findSection();
+
+    expect(section.textContent).not.toContain("SOURCE_EVENT_20260523_ABC");
+    expect(section.innerHTML).not.toContain("SOURCE_EVENT_20260523_ABC");
+    expect(within(section).getAllByText("UNKNOWN").length).toBeGreaterThan(0);
+  });
+
+  it("FraudCaseEvidenceTimelineSectionDoesNotRenderUppercaseRawIdShapedEvidenceStatusTest", async () => {
+    renderSection({ timeline: uppercaseRawIdTimeline() });
+
+    const section = await findSection();
+
+    expect(section.textContent).not.toContain("CUSTOMER_123456");
+    expect(section.innerHTML).not.toContain("CUSTOMER_123456");
+    expect(within(section).getAllByText("UNKNOWN").length).toBeGreaterThan(0);
+  });
+
+  it("FraudCaseEvidenceTimelineSectionDoesNotRenderUppercaseRawIdShapedLinkedEntityTypeTest", async () => {
+    renderSection({ timeline: uppercaseRawIdTimeline() });
+
+    const section = await findSection();
+
+    expect(section.textContent).not.toContain("FRAUD_ALERT:ALERT_123");
+    expect(section.innerHTML).not.toContain("FRAUD_ALERT:ALERT_123");
+    expect(section.textContent).not.toContain("SAFE_KEY_SHOULD_NOT_RENDER");
+    expect(section.textContent).not.toContain("raw title should not render");
+    expect(section.textContent).not.toContain("raw description should not render");
+    expect(within(section).getByText("Read-only timeline context derived from available read data.")).toBeInTheDocument();
+  });
+
+  it("FraudCaseEvidenceTimelineSectionCapsLargeEventArrayTest", async () => {
+    renderSection({ timeline: largeTimeline() });
+
+    const section = await findSection();
+
+    expect(within(section).getAllByRole("listitem")).toHaveLength(100);
+    expect(within(section).getByText("Timeline display capped. Only the bounded timeline window is shown.")).toBeInTheDocument();
+  });
+
+  it("FraudCaseEvidenceTimelineSectionLargeEventCapDoesNotExposeOmittedEventKeyTest", async () => {
+    renderSection({ timeline: largeTimeline() });
+
+    const section = await findSection();
+
+    expect(section.textContent).not.toContain("OMITTED_EVENT_KEY_101");
+    expect(section.innerHTML).not.toContain("OMITTED_EVENT_KEY_101");
+    expect(section.textContent).not.toContain("omitted raw title 101");
+  });
+
+  it("FraudCaseEvidenceTimelineSectionLargeEventCapDoesNotClaimCompletenessTest", async () => {
+    renderSection({ timeline: largeTimeline() });
+
+    const section = await findSection();
+    const text = section.textContent.toLowerCase().replaceAll("not complete case history", "");
+
+    expect(text).not.toContain("complete");
+    expect(within(section).getByText("Timeline display capped. Only the bounded timeline window is shown.")).toBeInTheDocument();
+  });
+
   it("FraudCaseEvidenceTimelineSectionImportBoundaryTest", () => {
     const source = sectionSource();
 
@@ -260,13 +388,38 @@ describe("FraudCaseEvidenceTimelineSection", () => {
       expect(source).not.toContain(forbidden);
     }
   });
+
+  it("FraudCaseEvidenceTimelineSectionDoesNotDirectlyRenderBackendTitleDescriptionSourceTest", () => {
+    const section = sectionSource();
+    const display = displaySource();
+
+    for (const forbidden of [
+      "item.title",
+      "item.description",
+      "title: item",
+      "description: item",
+      "title: event.title",
+      "description: event.description"
+    ]) {
+      expect(section).not.toContain(forbidden);
+      expect(display).not.toContain(forbidden);
+    }
+
+    expect(display).toContain("title: timelineEventTitle(eventType)");
+    expect(display).toContain("description: timelineEventDescription(eventType)");
+  });
 });
 
 describe("fraudCaseTimelineDisplay", () => {
-  it("normalizes only enum-like timeline codes", () => {
-    expect(normalizeTimelineCode("LINKED_ALERT_CONTEXT")).toBe("LINKED_ALERT_CONTEXT");
-    expect(normalizeTimelineCode("customer secret payload")).toBe("UNKNOWN");
-    expect(normalizeTimelineCode("")).toBe("UNKNOWN");
+  it("normalizes only backend allowlisted timeline codes", () => {
+    expect(normalizeTimelineEventType("LINKED_ALERT_CONTEXT")).toBe("LINKED_ALERT_CONTEXT");
+    expect(normalizeTimelineEventType("CORRELATION_ID_ABC123")).toBe("UNKNOWN");
+    expect(normalizeTimelineSource("FRAUD_SCORING_SERVICE")).toBe("FRAUD_SCORING_SERVICE");
+    expect(normalizeTimelineSource("SOURCE_EVENT_20260523_ABC")).toBe("UNKNOWN");
+    expect(normalizeTimelineEvidenceStatus("ERROR")).toBe("ERROR");
+    expect(normalizeTimelineEvidenceStatus("CUSTOMER_123456")).toBe("UNKNOWN");
+    expect(normalizeTimelineLinkedEntityType("FRAUD_ALERT")).toBe("FRAUD_ALERT");
+    expect(normalizeTimelineLinkedEntityType("FRAUD_ALERT:ALERT_123")).toBe("UNKNOWN");
   });
 
   it("formats timeline times safely", () => {
@@ -285,6 +438,8 @@ describe("fraudCaseTimelineDisplay", () => {
   });
 
   it("maps bounded copy for known and unknown timeline events", () => {
+    expect(timelineEventTitle("LINKED_ALERT_CONTEXT")).toBe("Linked alert context");
+    expect(timelineEventDescription("LINKED_ALERT_CONTEXT")).toBe("Read-only linked alert context derived from existing alert read data.");
     expect(timelineEventTitle("ALERT_EVIDENCE_SNAPSHOT_PARTIAL")).toBe("Alert evidence snapshot partial");
     expect(timelineEventDescription("ALERT_EVIDENCE_SNAPSHOT_UNAVAILABLE")).toBe("Structured evidence snapshot was unavailable for this linked alert.");
     expect(timelineEventTitle("customer secret")).toBe("Timeline event");
@@ -318,4 +473,8 @@ function findSection() {
 
 function sectionSource() {
   return readFileSync(resolve(process.cwd(), "src/components/FraudCaseEvidenceTimelineSection.jsx"), "utf8");
+}
+
+function displaySource() {
+  return readFileSync(resolve(process.cwd(), "src/components/fraudCaseTimelineDisplay.js"), "utf8");
 }
