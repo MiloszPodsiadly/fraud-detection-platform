@@ -29,6 +29,7 @@ import java.util.stream.Collectors;
 public class FraudCaseEvidenceTimelineService {
 
     static final int MAX_TIMELINE_EVENTS = 100;
+    static final int MAX_LINKED_ALERTS_FOR_TIMELINE = 50;
     static final String TIMELINE_EVENT_LIMIT_EXCEEDED = "TIMELINE_EVENT_LIMIT_EXCEEDED";
 
     private final FraudCaseRepository fraudCaseRepository;
@@ -49,8 +50,12 @@ public class FraudCaseEvidenceTimelineService {
     public FraudCaseEvidenceTimelineResponse timeline(String caseId) {
         FraudCaseDocument fraudCase = fraudCaseRepository.findById(caseId)
                 .orElseThrow(() -> new FraudCaseNotFoundException(caseId));
-        List<String> linkedAlertIds = normalizedLinkedAlertIds(fraudCase);
-        boolean legacy = linkedAlertIds.isEmpty();
+        List<String> allLinkedAlertIds = normalizedLinkedAlertIds(fraudCase);
+        boolean linkedAlertInputTruncated = allLinkedAlertIds.size() > MAX_LINKED_ALERTS_FOR_TIMELINE;
+        List<String> linkedAlertIds = allLinkedAlertIds.stream()
+                .limit(MAX_LINKED_ALERTS_FOR_TIMELINE)
+                .toList();
+        boolean legacy = allLinkedAlertIds.isEmpty();
         boolean partial = false;
         List<EventDraft> drafts = new ArrayList<>();
         int sequence = 0;
@@ -64,14 +69,14 @@ public class FraudCaseEvidenceTimelineService {
             partial = fraudCase.getCreatedAt() == null;
         } else {
             Map<String, AlertDocument> alertsById = alertsById(linkedAlertIds);
-            partial = alertsById.size() < linkedAlertIds.size();
+            partial = linkedAlertInputTruncated || alertsById.size() < linkedAlertIds.size();
             for (String alertId : linkedAlertIds) {
                 AlertDocument alert = alertsById.get(alertId);
                 if (alert == null) {
                     continue;
                 }
                 TimestampChoice alertTime = alertTime(alert);
-                drafts.add(EventDraft.alertLinked(++sequence, alertTime.occurredAt(), alertTime.approximate()));
+                drafts.add(EventDraft.linkedAlertContext(++sequence, alertTime.occurredAt(), alertTime.approximate()));
                 SnapshotEvent snapshot = snapshotEvent(alert, alertTime);
                 drafts.add(EventDraft.evidenceSnapshot(++sequence, snapshot));
                 partial = partial || alertTime.approximate() || snapshot.partial();
@@ -81,10 +86,12 @@ public class FraudCaseEvidenceTimelineService {
         List<EventDraft> sorted = drafts.stream()
                 .sorted(eventComparator())
                 .toList();
-        boolean truncated = sorted.size() > MAX_TIMELINE_EVENTS;
+        boolean truncated = linkedAlertInputTruncated || sorted.size() > MAX_TIMELINE_EVENTS;
         if (truncated) {
             partial = true;
-            sorted = sorted.subList(0, MAX_TIMELINE_EVENTS);
+            if (sorted.size() > MAX_TIMELINE_EVENTS) {
+                sorted = sorted.subList(0, MAX_TIMELINE_EVENTS);
+            }
         }
         List<FraudCaseTimelineEventResponse> events = toResponses(sorted);
 
@@ -208,7 +215,7 @@ public class FraudCaseEvidenceTimelineService {
     private int eventTypePriority(FraudCaseTimelineEventType eventType) {
         return switch (eventType) {
             case FRAUD_CASE_CREATED -> 0;
-            case FRAUD_ALERT_LINKED -> 10;
+            case LINKED_ALERT_CONTEXT -> 10;
             case ALERT_EVIDENCE_SNAPSHOT_AVAILABLE -> 20;
             case ALERT_EVIDENCE_SNAPSHOT_PARTIAL -> 21;
             case ALERT_EVIDENCE_SNAPSHOT_UNAVAILABLE -> 22;
@@ -242,7 +249,7 @@ public class FraudCaseEvidenceTimelineService {
     private static String title(FraudCaseTimelineEventType eventType) {
         return switch (eventType) {
             case FRAUD_CASE_CREATED -> "Fraud case created";
-            case FRAUD_ALERT_LINKED -> "Linked alert context";
+            case LINKED_ALERT_CONTEXT -> "Linked alert context";
             case ALERT_EVIDENCE_SNAPSHOT_AVAILABLE -> "Alert evidence snapshot available";
             case ALERT_EVIDENCE_SNAPSHOT_PARTIAL -> "Alert evidence snapshot partial";
             case ALERT_EVIDENCE_SNAPSHOT_UNAVAILABLE -> "Alert evidence snapshot unavailable";
@@ -253,7 +260,7 @@ public class FraudCaseEvidenceTimelineService {
     private static String description(FraudCaseTimelineEventType eventType) {
         return switch (eventType) {
             case FRAUD_CASE_CREATED -> "Read-only timeline event derived from existing fraud-case read data.";
-            case FRAUD_ALERT_LINKED -> "Read-only linked alert context derived from existing alert read data.";
+            case LINKED_ALERT_CONTEXT -> "Read-only linked alert context derived from existing alert read data.";
             case ALERT_EVIDENCE_SNAPSHOT_AVAILABLE, ALERT_EVIDENCE_SNAPSHOT_PARTIAL ->
                     "Bounded evidence snapshot context derived from linked alert data.";
             case ALERT_EVIDENCE_SNAPSHOT_UNAVAILABLE ->
@@ -303,15 +310,15 @@ public class FraudCaseEvidenceTimelineService {
             );
         }
 
-        static EventDraft alertLinked(int sequence, Instant occurredAt, boolean approximateTime) {
+        static EventDraft linkedAlertContext(int sequence, Instant occurredAt, boolean approximateTime) {
             return new EventDraft(
                     sequence,
-                    FraudCaseTimelineEventType.FRAUD_ALERT_LINKED,
+                    FraudCaseTimelineEventType.LINKED_ALERT_CONTEXT,
                     occurredAt,
                     EvidenceSource.ALERT_SERVICE,
                     EvidenceStatus.AVAILABLE,
-                    FraudCaseEvidenceTimelineService.title(FraudCaseTimelineEventType.FRAUD_ALERT_LINKED),
-                    FraudCaseEvidenceTimelineService.description(FraudCaseTimelineEventType.FRAUD_ALERT_LINKED),
+                    FraudCaseEvidenceTimelineService.title(FraudCaseTimelineEventType.LINKED_ALERT_CONTEXT),
+                    FraudCaseEvidenceTimelineService.description(FraudCaseTimelineEventType.LINKED_ALERT_CONTEXT),
                     FraudCaseTimelineLinkedEntityType.FRAUD_ALERT,
                     approximateTime
             );
