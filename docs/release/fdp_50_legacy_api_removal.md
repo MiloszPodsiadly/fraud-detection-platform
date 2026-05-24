@@ -1,5 +1,7 @@
 # FDP-50 Legacy Fraud-Case API Removal
 
+Historical release note: FDP-81 subsequently removes unused versioned list and lifecycle handlers as well.
+
 FDP-50 is a breaking API change for fraud-case clients.
 
 - `/api/fraud-cases/**` is removed. Clients must use `/api/v1/fraud-cases/**`.

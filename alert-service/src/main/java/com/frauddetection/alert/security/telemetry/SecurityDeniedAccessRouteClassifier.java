@@ -24,9 +24,7 @@ public class SecurityDeniedAccessRouteClassifier {
             return "fraud_alert";
         }
         if (normalized.equals("/api/v1/fraud-cases")
-                || normalized.startsWith("/api/v1/fraud-cases/")
-                || normalized.equals("/api/fraud-cases")
-                || normalized.startsWith("/api/fraud-cases/")) {
+                || normalized.startsWith("/api/v1/fraud-cases/")) {
             return "fraud_case";
         }
         if (normalized.equals("/system/trust-level")

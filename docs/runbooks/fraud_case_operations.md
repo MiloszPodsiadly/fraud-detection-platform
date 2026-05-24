@@ -4,15 +4,16 @@ Status: current operator runbook.
 
 ## Purpose
 
-This runbook covers fraud-case lifecycle idempotency, work queue cursor secret rotation, and work queue sensitive-read
-audit unavailability.
+This runbook covers retained internal fraud-case lifecycle idempotency state, current work queue cursor secret
+rotation, and work queue sensitive-read audit unavailability. FDP-81 does not expose the standalone lifecycle POST
+handlers over HTTP.
 
 ## Scope
 
 In scope:
 
-- local fraud-case lifecycle idempotency
-- `X-Idempotency-Key` behavior for lifecycle mutations
+- retained internal local fraud-case lifecycle idempotency state
+- `X-Idempotency-Key` behavior for retained lifecycle operations and current regulated `PATCH`
 - work queue cursor invalidation after cursor signing secret rotation
 - fail-closed work queue behavior when mandatory sensitive-read audit is unavailable
 
@@ -30,8 +31,10 @@ Unsupported claims:
 
 ## Fraud-Case Lifecycle Idempotency
 
-Fraud-case lifecycle mutations require `X-Idempotency-Key`. The implementation provides local fraud-case lifecycle
-idempotency inside the active retention window.
+The HTTP lifecycle handlers that originally exercised this mechanism are removed from the FDP-81 surface. Retained
+internal local fraud-case lifecycle idempotency requires `X-Idempotency-Key` for any invocation of that mechanism.
+The implementation provides local fraud-case lifecycle idempotency inside the active retention window; it does not
+describe a current public lifecycle API.
 
 Expected behavior:
 

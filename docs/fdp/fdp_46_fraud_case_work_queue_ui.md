@@ -2,13 +2,15 @@
 
 Status: branch evidence.
 
+Historical note: FDP-81 supersedes references in this evidence document to the general fraud-case list endpoint; the
+dedicated work queue and detail/update UI paths remain current.
 
 FDP-46 adds a read-only investigator work queue view to the analyst console. The source of truth is the FDP-45 backend read model exposed by `GET /api/v1/fraud-cases/work-queue`.
 
 ## Source Of Truth
 
 - The UI uses `listFraudCaseWorkQueue()` and the `/api/v1/fraud-cases/work-queue` endpoint only.
-- The existing `GET /api/v1/fraud-cases` list remains the fraud-case summary view and is not used for work queue semantics.
+- At FDP-46, `GET /api/v1/fraud-cases` was a separate summary view not used for work queue semantics; FDP-81 removes it.
 - Work queue filtering and sorting are backend-driven. The UI does not perform partial client-side work queue filtering.
 - Header and work queue counters show loaded client slices only. They are not global totals unless the backend explicitly returns an aggregate in a future scope.
 

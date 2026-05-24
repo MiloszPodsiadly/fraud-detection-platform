@@ -35,7 +35,6 @@ final class SecurityRouteOwnershipRegistry {
         route(routes, "GET", "/api/v1/alerts/{alertId}", "AlertAuthorizationRules");
         route(routes, "GET", "/api/v1/alerts/{alertId}/assistant-summary", "AlertAuthorizationRules");
         route(routes, "POST", "/api/v1/alerts/{alertId}/decision", "AlertAuthorizationRules");
-        retiredFraudCaseRoutes(routes);
         fraudCaseRoutes(routes, "/api/v1/fraud-cases");
         route(routes, "GET", "/api/v1/fraud-cases/work-queue/summary", "FraudCaseAuthorizationRules");
         route(routes, "GET", "/api/v1/transactions/scored", "TransactionAuthorizationRules");
@@ -81,35 +80,11 @@ final class SecurityRouteOwnershipRegistry {
     }
 
     private static void fraudCaseRoutes(List<RouteOwnership> routes, String base) {
-        route(routes, "GET", base, "FraudCaseAuthorizationRules");
         route(routes, "GET", base + "/work-queue", "FraudCaseAuthorizationRules");
-        route(routes, "POST", base, "FraudCaseAuthorizationRules");
         route(routes, "GET", base + "/{caseId}", "FraudCaseAuthorizationRules");
         route(routes, "GET", base + "/{caseId}/evidence-summary", "FraudCaseAuthorizationRules");
         route(routes, "GET", base + "/{caseId}/evidence-timeline", "FraudCaseAuthorizationRules");
-        route(routes, "POST", base + "/{caseId}/assign", "FraudCaseAuthorizationRules");
-        route(routes, "POST", base + "/{caseId}/notes", "FraudCaseAuthorizationRules");
-        route(routes, "POST", base + "/{caseId}/decisions", "FraudCaseAuthorizationRules");
-        route(routes, "POST", base + "/{caseId}/transition", "FraudCaseAuthorizationRules");
-        route(routes, "POST", base + "/{caseId}/close", "FraudCaseAuthorizationRules");
-        route(routes, "POST", base + "/{caseId}/reopen", "FraudCaseAuthorizationRules");
-        route(routes, "GET", base + "/{caseId}/audit", "FraudCaseAuthorizationRules");
         route(routes, "PATCH", base + "/{caseId}", "FraudCaseAuthorizationRules");
-    }
-
-    private static void retiredFraudCaseRoutes(List<RouteOwnership> routes) {
-        retiredFraudCaseRoute(routes, "GET");
-        retiredFraudCaseRoute(routes, "POST");
-        retiredFraudCaseRoute(routes, "PUT");
-        retiredFraudCaseRoute(routes, "PATCH");
-        retiredFraudCaseRoute(routes, "DELETE");
-        retiredFraudCaseRoute(routes, "HEAD");
-        retiredFraudCaseRoute(routes, "OPTIONS");
-    }
-
-    private static void retiredFraudCaseRoute(List<RouteOwnership> routes, String method) {
-        route(routes, method, "/api/fraud-cases", "FraudCaseAuthorizationRules");
-        route(routes, method, "/api/fraud-cases/**", "FraudCaseAuthorizationRules");
     }
 
     private static void route(List<RouteOwnership> routes, String method, String pattern, String owner) {

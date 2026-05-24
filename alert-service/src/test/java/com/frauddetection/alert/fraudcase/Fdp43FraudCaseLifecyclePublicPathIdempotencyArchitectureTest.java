@@ -12,28 +12,23 @@ import static org.assertj.core.api.Assertions.assertThat;
 class Fdp43FraudCaseLifecyclePublicPathIdempotencyArchitectureTest {
 
     @Test
-    void fraudCaseControllerPostEndpointsMustUseIdempotencyKeyOverloads() {
+    void fraudCaseControllerCurrentPatchEndpointMustUseIdempotencyKeyOverload() {
         String source = read(sourceRoot().resolve(Path.of("controller", "FraudCaseController.java")));
 
         assertThat(source)
-                .contains("fraudCaseManagementService.createCase(request, idempotencyKey)")
-                .contains("fraudCaseManagementService.assignCase(caseId, request, idempotencyKey)")
-                .contains("fraudCaseManagementService.addNote(caseId, request, idempotencyKey)")
-                .contains("fraudCaseManagementService.addDecision(caseId, request, idempotencyKey)")
-                .contains("fraudCaseManagementService.transitionCase(caseId, request, idempotencyKey)")
-                .contains("fraudCaseManagementService.closeCase(caseId, request, idempotencyKey)")
-                .contains("fraudCaseManagementService.reopenCase(caseId, request, idempotencyKey)")
-                .doesNotContain("fraudCaseManagementService.createCase(request)")
-                .doesNotContain("fraudCaseManagementService.assignCase(caseId, request)")
-                .doesNotContain("fraudCaseManagementService.addNote(caseId, request)")
-                .doesNotContain("fraudCaseManagementService.addDecision(caseId, request)")
-                .doesNotContain("fraudCaseManagementService.transitionCase(caseId, request)")
-                .doesNotContain("fraudCaseManagementService.closeCase(caseId, request)")
-                .doesNotContain("fraudCaseManagementService.reopenCase(caseId, request)");
+                .contains("fraudCaseManagementService.updateCase(caseId, request, idempotencyKey)")
+                .doesNotContain("fraudCaseManagementService.createCase(")
+                .doesNotContain("fraudCaseManagementService.assignCase(")
+                .doesNotContain("fraudCaseManagementService.addNote(")
+                .doesNotContain("fraudCaseManagementService.addDecision(")
+                .doesNotContain("fraudCaseManagementService.transitionCase(")
+                .doesNotContain("fraudCaseManagementService.closeCase(")
+                .doesNotContain("fraudCaseManagementService.reopenCase(")
+                .doesNotContain("fraudCaseManagementService.auditTrail(");
     }
 
     @Test
-    void fraudCaseControllerLifecycleHeadersMustBeRequired() {
+    void fraudCaseControllerCurrentMutationHeaderMustBeRequired() {
         String source = read(sourceRoot().resolve(Path.of("controller", "FraudCaseController.java")));
 
         assertThat(source).doesNotContain("@RequestHeader(name = \"X-Idempotency-Key\", required = false)");
@@ -41,7 +36,7 @@ class Fdp43FraudCaseLifecyclePublicPathIdempotencyArchitectureTest {
                 .matcher(source)
                 .results()
                 .count())
-                .isGreaterThanOrEqualTo(8);
+                .isEqualTo(1);
     }
 
     @Test
@@ -70,14 +65,13 @@ class Fdp43FraudCaseLifecyclePublicPathIdempotencyArchitectureTest {
     }
 
     @Test
-    void docsMustStatePublicLifecyclePostsRequireIdempotency() {
-        String docs = compact(read(repoRoot().resolve(Path.of("docs", "api", "fraud_case_api.md")))
-                + "\n"
-                + read(repoRoot().resolve(Path.of("docs", "fdp", "fdp_43_merge_gate.md"))));
+    void docsMustStateCurrentPatchRequiresIdempotency() {
+        String docs = compact(read(repoRoot().resolve(Path.of("docs", "api", "fraud_case_api.md"))));
 
         assertThat(docs)
-                .contains("every local lifecycle `post` requires `x-idempotency-key`")
-                .contains("all lifecycle post endpoints require `x-idempotency-key`");
+                .contains("`patch`")
+                .contains("`x-idempotency-key`")
+                .contains("intentional api surface cleanup");
     }
 
     private void assertNoPublicNoKeyLifecycleOverloads(String source) {

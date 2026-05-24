@@ -34,21 +34,15 @@ class Fdp42FraudCaseDocumentationNoOverclaimTest {
     }
 
     @Test
-    void fdp42AndFdp43DocsShouldDocumentAuditAuthorityAndLocalIdempotentPosts() throws IOException {
+    void currentDocsShouldDocumentFdp81SurfaceInsteadOfRetiredLifecycleHttpApi() throws IOException {
         String docs = readDocs().toLowerCase(java.util.Locale.ROOT);
 
-        assertThat(docs).contains("fraud-case:audit:read");
-        assertThat(docs).contains("actorid");
-        assertThat(docs).contains("every local lifecycle `post` requires `x-idempotency-key`");
-        assertThat(docs).contains("same key + same payload");
-        assertThat(docs).contains("replays the stored response");
-        assertThat(docs).contains("idempotency_key_conflict");
-        assertThat(docs).contains("raw idempotency keys and raw request payloads are not stored");
-        assertThat(docs).contains("linkedalertids");
-        assertThat(docs).contains("transactionids");
-        assertThat(docs).contains("system-generated case candidate ingestion");
-        assertThat(docs).contains("resolved");
-        assertThat(docs).contains("fdp42-fraud-case-management");
+        assertThat(docs)
+                .contains("intentional api surface cleanup")
+                .contains("the currently exposed fraudcase write path is regulated `patch`")
+                .contains("`patch` requires `fraud-case:update` and `x-idempotency-key`")
+                .contains("there is no currently exposed fraud-case lifecycle audit-history endpoint")
+                .contains("not exposed as current http lifecycle endpoints");
     }
 
     @Test
@@ -70,13 +64,13 @@ class Fdp42FraudCaseDocumentationNoOverclaimTest {
     void fdp42DocsShouldQualifyAuditScopeToAnalystLifecycleMutations() throws IOException {
         String docs = readDocs().toLowerCase(java.util.Locale.ROOT);
 
-        assertThat(docs).contains("every analyst lifecycle mutation writes");
-        assertThat(docs).contains("system event ingestion");
-        assertThat(docs).doesNotContain("every case mutation writes");
-        assertThat(docs).doesNotContain("every case mutation is audited");
-        assertThat(docs).contains("not worm storage");
-        assertThat(docs).contains("not an analyst lifecycle mutation");
-        assertThat(docs).contains("not analyst lifecycle mutation");
+        assertThat(docs)
+                .contains("system event ingestion")
+                .contains("not an analyst lifecycle mutation")
+                .contains("not exposed by the removed http lifecycle surface")
+                .contains("not worm storage")
+                .doesNotContain("every case mutation writes")
+                .doesNotContain("every case mutation is audited");
     }
 
     @Test

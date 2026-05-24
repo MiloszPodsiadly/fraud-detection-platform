@@ -60,4 +60,9 @@ class SecurityDeniedAccessRouteClassifierTest {
         assertThat(classifier.classify("/system/trust-level")).isEqualTo("trust");
         assertThat(classifier.classify("/api/v1/audit/trust/attestation")).isEqualTo("trust");
     }
+
+    @Test
+    void retiredUnversionedFraudCaseRouteIsNotAClassifiedRouteGroup() {
+        assertThat(classifier.classify("/api/fraud-cases/case-1")).isEqualTo("unknown");
+    }
 }

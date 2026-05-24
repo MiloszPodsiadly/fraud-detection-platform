@@ -11,20 +11,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 class Fdp45FraudCaseWorkQueueOpenApiContractTest {
 
     @Test
-    void oldListAndWorkQueueOpenApiContractsShouldMatchImplementedParamsAndSchemas() throws Exception {
+    void workQueueOpenApiContractShouldMatchImplementedParamsAndSchema() throws Exception {
         String openApi = Files.readString(projectRoot().resolve("docs/openapi/alert_service.openapi.yaml"));
-        String oldEndpoint = section(openApi, "  /api/v1/fraud-cases:", "    post:");
         String workQueueEndpoint = section(openApi, "  /api/v1/fraud-cases/work-queue:", "  /api/v1/fraud-cases/{caseId}:");
         String workQueueSchema = section(openApi, "    FraudCaseWorkQueueSlice:", "    FraudCaseSlaStatus:");
 
-        assertThat(parameterNames(oldEndpoint))
-                .containsExactly("page", "size", "status", "assignee", "priority", "riskLevel", "createdFrom", "createdTo", "linkedAlertId");
-        assertThat(oldEndpoint)
-                .contains("$ref: \"#/components/schemas/FraudCaseSummaryPage\"")
-                .doesNotContain("assignedInvestigatorId")
-                .doesNotContain("updatedFrom")
-                .doesNotContain("updatedTo")
-                .doesNotContain("name: sort");
+        assertThat(openApi).doesNotContain("  /api/v1/fraud-cases:");
         assertThat(parameterNames(workQueueEndpoint))
                 .containsExactly("page", "size", "sort", "cursor", "status", "assignee", "assignedInvestigatorId", "priority",
                         "riskLevel", "createdFrom", "createdTo", "updatedFrom", "updatedTo", "linkedAlertId");

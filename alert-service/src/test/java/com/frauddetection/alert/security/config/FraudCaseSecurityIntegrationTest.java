@@ -1,7 +1,6 @@
 package com.frauddetection.alert.security.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.frauddetection.alert.api.FraudCaseAuditResponse;
 import com.frauddetection.alert.api.FraudCaseEvidenceSummaryResponse;
 import com.frauddetection.alert.api.FraudCaseEvidenceTimelineResponse;
 import com.frauddetection.alert.api.FraudCaseTimelineEventResponse;
@@ -10,12 +9,13 @@ import com.frauddetection.alert.api.FraudCaseTimelineLinkedEntityType;
 import com.frauddetection.alert.api.FraudCaseSlaStatus;
 import com.frauddetection.alert.api.FraudCaseWorkQueueItemResponse;
 import com.frauddetection.alert.api.FraudCaseWorkQueueSummaryResponse;
+import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
+import com.frauddetection.alert.api.UpdateFraudCaseResponse;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.controller.FraudCaseController;
 import com.frauddetection.alert.controller.FraudCaseEvidenceSummaryController;
 import com.frauddetection.alert.controller.FraudCaseEvidenceTimelineController;
 import com.frauddetection.alert.controller.FraudCaseWorkQueueSummaryController;
-import com.frauddetection.alert.domain.FraudCaseAuditAction;
 import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.evidence.EvidenceStatus;
@@ -38,7 +38,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -56,7 +55,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -103,7 +102,7 @@ class FraudCaseSecurityIntegrationTest {
 
     @Test
     void shouldRequireAuthenticationForFraudCaseReadAndMutationEndpoints() throws Exception {
-        mockMvc.perform(get("/api/v1/fraud-cases"))
+        mockMvc.perform(get("/api/v1/fraud-cases/work-queue"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.details[0]").value("reason:missing_credentials"));
         mockMvc.perform(get("/api/v1/fraud-cases/work-queue/summary"))
@@ -116,16 +115,16 @@ class FraudCaseSecurityIntegrationTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.details[0]").value("reason:missing_credentials"));
 
-        mockMvc.perform(post("/api/v1/fraud-cases")
+        mockMvc.perform(patch("/api/v1/fraud-cases/case-1")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(createPayload()))
+                        .content(updatePayload()))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.details[0]").value("reason:missing_credentials"));
     }
 
     @Test
     void shouldReturnForbiddenWhenAuthorityIsMissing() throws Exception {
-        mockMvc.perform(get("/api/v1/fraud-cases")
+        mockMvc.perform(get("/api/v1/fraud-cases/work-queue")
                         .with(userWith(AnalystAuthority.TRANSACTION_MONITOR_READ)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.details[0]").value("reason:insufficient_authority"));
@@ -145,7 +144,6 @@ class FraudCaseSecurityIntegrationTest {
 
     @Test
     void shouldAllowReadAuthorityForCurrentReadPaths() throws Exception {
-        when(fraudCaseManagementService.listCases(any(Pageable.class))).thenReturn(new PageImpl<>(List.of(caseDocument())));
         when(fraudCaseManagementService.workQueue(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(Pageable.class)))
                 .thenReturn(new com.frauddetection.alert.api.FraudCaseWorkQueueSliceResponse(List.of(workQueueItem()), 0, 20, false, null));
         when(fraudCaseQueryService.globalFraudCaseSummary())
@@ -154,9 +152,6 @@ class FraudCaseSecurityIntegrationTest {
         when(fraudCaseEvidenceSummaryService.summary("case-1")).thenReturn(evidenceSummary());
         when(fraudCaseEvidenceTimelineService.timeline("case-1")).thenReturn(evidenceTimeline());
 
-        mockMvc.perform(get("/api/v1/fraud-cases").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content[0].caseId").value("case-1"));
         mockMvc.perform(get("/api/v1/fraud-cases/work-queue").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].linkedAlertCount").value(1));
@@ -230,103 +225,48 @@ class FraudCaseSecurityIntegrationTest {
 
     @Test
     void shouldDenyMutationsForReadOnlyAuthorityAndAllowUpdateAuthorityOnCurrentPath() throws Exception {
-        when(fraudCaseManagementService.createCase(any(), any())).thenReturn(responseMapper.toResponse(caseDocument()));
-        when(fraudCaseManagementService.assignCase(any(), any(), any())).thenReturn(responseMapper.toResponse(caseDocument()));
+        when(fraudCaseManagementService.updateCase(any(), any(), any()))
+                .thenReturn(new UpdateFraudCaseResponse(
+                        SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED,
+                        "command-1",
+                        "hash-1",
+                        "case-1",
+                        null,
+                        responseMapper.toResponse(caseDocument()),
+                        null
+                ));
 
-        mockMvc.perform(post("/api/v1/fraud-cases")
+        mockMvc.perform(patch("/api/v1/fraud-cases/case-1")
                         .with(userWith(AnalystAuthority.FRAUD_CASE_READ))
-                        .header("X-Idempotency-Key", "case-create-readonly")
+                        .header("X-Idempotency-Key", "case-update-readonly")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(createPayload()))
+                        .content(updatePayload()))
                 .andExpect(status().isForbidden());
 
-        mockMvc.perform(post("/api/v1/fraud-cases")
+        mockMvc.perform(patch("/api/v1/fraud-cases/case-1")
                         .with(userWith(AnalystAuthority.FRAUD_CASE_UPDATE))
-                        .header("X-Idempotency-Key", "case-create-update")
+                        .header("X-Idempotency-Key", "case-update")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(createPayload()))
+                        .content(updatePayload()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.caseId").value("case-1"));
-
-        mockMvc.perform(post("/api/v1/fraud-cases/case-1/assign")
-                        .with(userWith(AnalystAuthority.FRAUD_CASE_UPDATE))
-                        .header("X-Idempotency-Key", "case-assign-update")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"assignedInvestigatorId\":\"investigator-1\",\"actorId\":\"lead-1\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.caseId").value("case-1"));
-    }
-
-    @Test
-    void shouldReturnGoneForRemovedLegacyFraudCaseRoutes() throws Exception {
-        mockMvc.perform(get("/api/fraud-cases/case-1")
-                        .with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
-                .andExpect(status().isGone())
-                .andExpect(jsonPath("$.message").value("Legacy fraud-case API route is removed. Use /api/v1/fraud-cases."))
-                .andExpect(jsonPath("$.details[0]").value("code:LEGACY_FRAUD_CASE_ROUTE_REMOVED"))
-                .andExpect(content().string(not(containsString("insufficient_authority"))));
-
-        mockMvc.perform(post("/api/fraud-cases/case-1/assign")
-                        .with(userWith(AnalystAuthority.FRAUD_CASE_UPDATE))
-                        .header("X-Idempotency-Key", "case-assign-update")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"assignedInvestigatorId\":\"investigator-1\",\"actorId\":\"lead-1\"}"))
-                .andExpect(status().isGone())
-                .andExpect(jsonPath("$.details[0]").value("code:LEGACY_FRAUD_CASE_ROUTE_REMOVED"))
-                .andExpect(content().string(not(containsString("insufficient_authority"))));
-    }
-
-    @Test
-    void shouldRequireAuthenticationForRemovedLegacyFraudCaseRoutes() throws Exception {
-        mockMvc.perform(get("/api/fraud-cases/case-1"))
-                .andExpect(status().isUnauthorized())
-                .andExpect(content().string(not(containsString("LEGACY_FRAUD_CASE_ROUTE_REMOVED"))));
+                .andExpect(jsonPath("$.case_id").value("case-1"));
     }
 
     @Test
     void shouldValidateMissingIdempotencyAfterAuthorization() throws Exception {
-        mockMvc.perform(post("/api/v1/fraud-cases")
+        mockMvc.perform(patch("/api/v1/fraud-cases/case-1")
                         .with(userWith(AnalystAuthority.FRAUD_CASE_UPDATE))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(createPayload()))
+                        .content(updatePayload()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.details[0]").value("code:MISSING_IDEMPOTENCY_KEY"));
 
-        mockMvc.perform(post("/api/v1/fraud-cases")
+        mockMvc.perform(patch("/api/v1/fraud-cases/case-1")
                         .with(userWith(AnalystAuthority.FRAUD_CASE_READ))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(createPayload()))
+                        .content(updatePayload()))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.details[0]").value("reason:insufficient_authority"));
-    }
-
-    @Test
-    void shouldRequireDedicatedAuthorityForFraudCaseAuditTrail() throws Exception {
-        when(fraudCaseManagementService.auditTrail("case-1")).thenReturn(List.of(new FraudCaseAuditResponse(
-                "audit-1",
-                "case-1",
-                FraudCaseAuditAction.CASE_CREATED,
-                "analyst-1",
-                Instant.parse("2026-05-10T10:00:00Z"),
-                null,
-                FraudCaseStatus.OPEN,
-                java.util.Map.of()
-        )));
-
-        mockMvc.perform(get("/api/v1/fraud-cases/case-1/audit")
-                        .with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
-                .andExpect(status().isForbidden());
-
-        mockMvc.perform(get("/api/v1/fraud-cases/case-1/audit")
-                        .with(userWith(AnalystAuthority.FRAUD_CASE_AUDIT_READ)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].actorId").value("analyst-1"));
-
-        mockMvc.perform(get("/api/fraud-cases/case-1/audit")
-                .with(userWith(AnalystAuthority.FRAUD_CASE_AUDIT_READ)))
-                .andExpect(status().isGone())
-                .andExpect(jsonPath("$.details[0]").value("code:LEGACY_FRAUD_CASE_ROUTE_REMOVED"))
-                .andExpect(content().string(not(containsString("insufficient_authority"))));
     }
 
     @Test
@@ -348,13 +288,12 @@ class FraudCaseSecurityIntegrationTest {
         ));
     }
 
-    private String createPayload() throws Exception {
+    private String updatePayload() throws Exception {
         return objectMapper.writeValueAsString(java.util.Map.of(
-                "alertIds", List.of("alert-1"),
-                "priority", "HIGH",
-                "riskLevel", "CRITICAL",
-                "reason", "Manual investigation",
-                "actorId", "analyst-1"
+                "status", "IN_REVIEW",
+                "analystId", "analyst-1",
+                "decisionReason", "Manual investigation",
+                "tags", List.of()
         ));
     }
 

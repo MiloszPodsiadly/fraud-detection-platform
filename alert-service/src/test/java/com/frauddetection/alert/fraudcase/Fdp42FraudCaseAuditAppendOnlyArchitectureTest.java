@@ -132,13 +132,18 @@ class Fdp42FraudCaseAuditAppendOnlyArchitectureTest {
     }
 
     @Test
-    void fraudCaseControllerShouldUsePagedListOnly() {
+    void fraudCaseControllerShouldExposeCurrentBoundedQueueDetailAndUpdateOnly() {
         String source = read(sourceRoot().resolve(Path.of("controller", "FraudCaseController.java")));
 
         assertThat(source)
-                .contains("PageRequest.of(page, size")
+                .contains("FraudCaseReadQueryPolicy.boundedWorkQueuePageable(page, size, sortOrder)")
                 .contains("fraudCaseManagementService.workQueue(")
-                .doesNotContain("fraudCaseManagementService.listCases()");
+                .contains("fraudCaseManagementService.getCase(caseId)")
+                .contains("fraudCaseManagementService.updateCase(caseId, request, idempotencyKey)")
+                .doesNotContain("fraudCaseManagementService.listCases(")
+                .doesNotContain("fraudCaseManagementService.searchCases(")
+                .doesNotContain("fraudCaseManagementService.auditTrail(")
+                .doesNotContain("fraudCaseManagementService.assignCase(");
     }
 
     @Test

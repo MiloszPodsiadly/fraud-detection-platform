@@ -2,13 +2,16 @@
 
 Status: branch evidence.
 
+Historical note: this document records the FDP-45 state. FDP-81 later removes the general fraud-case list HTTP
+surface while retaining the dedicated work queue contract described below.
 
 FDP-45 hardens the fraud-case investigator work queue as a bounded read model on the existing fraud-case query path. The authoritative list and search semantics remain `FraudCaseQueryService` plus `FraudCaseSearchRepository`; FDP-45 does not add a second search subsystem.
 
-## Public list contract compatibility
+## Historical public list contract compatibility at FDP-45
 
-`GET /api/v1/fraud-cases` keeps returning `PagedResponse<FraudCaseSummaryResponse>`.
-FDP-45 does not change that existing public list/search contract.
+At FDP-45, `GET /api/v1/fraud-cases` returned `PagedResponse<FraudCaseSummaryResponse>`.
+FDP-45 did not change that then-existing public list/search contract; FDP-81 supersedes this statement by removing
+that HTTP handler.
 
 ## Dedicated work queue contract
 

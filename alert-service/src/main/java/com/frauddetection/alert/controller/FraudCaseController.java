@@ -1,20 +1,7 @@
 package com.frauddetection.alert.controller;
 
-import com.frauddetection.alert.api.AddFraudCaseDecisionRequest;
-import com.frauddetection.alert.api.AddFraudCaseNoteRequest;
-import com.frauddetection.alert.api.AssignFraudCaseRequest;
-import com.frauddetection.alert.api.CloseFraudCaseRequest;
-import com.frauddetection.alert.api.CreateFraudCaseRequest;
-import com.frauddetection.alert.api.FraudCaseAuditResponse;
-import com.frauddetection.alert.api.FraudCaseDecisionResponse;
-import com.frauddetection.alert.api.FraudCaseNoteResponse;
 import com.frauddetection.alert.api.FraudCaseResponse;
-import com.frauddetection.alert.api.FraudCaseSummaryResponse;
-import com.frauddetection.alert.api.FraudCaseWorkQueueItemResponse;
 import com.frauddetection.alert.api.FraudCaseWorkQueueSliceResponse;
-import com.frauddetection.alert.api.PagedResponse;
-import com.frauddetection.alert.api.ReopenFraudCaseRequest;
-import com.frauddetection.alert.api.TransitionFraudCaseRequest;
 import com.frauddetection.alert.api.UpdateFraudCaseRequest;
 import com.frauddetection.alert.api.UpdateFraudCaseResponse;
 import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
@@ -24,7 +11,6 @@ import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.domain.FraudCaseStatus;
-import com.frauddetection.alert.exception.ApiErrorResponse;
 import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueQueryException;
 import com.frauddetection.alert.fraudcase.FraudCaseReadQueryPolicy;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
@@ -33,35 +19,25 @@ import com.frauddetection.alert.service.FraudCaseManagementService;
 import com.frauddetection.common.events.enums.RiskLevel;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.util.MultiValueMap;
 import org.springframework.util.StringUtils;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
-import java.util.List;
 
 @RestController
 @Validated
 public class FraudCaseController {
 
     private static final String VERSIONED_BASE_PATH = "/api/v1/fraud-cases";
-    private static final String LEGACY_ROUTE_REMOVED_CODE = "code:LEGACY_FRAUD_CASE_ROUTE_REMOVED";
-    private static final String LEGACY_ROUTE_REMOVED_MESSAGE =
-            "Legacy fraud-case API route is removed. Use /api/v1/fraud-cases.";
 
     private final FraudCaseManagementService fraudCaseManagementService;
     private final FraudCaseResponseMapper responseMapper;
@@ -78,55 +54,6 @@ public class FraudCaseController {
         this.responseMapper = responseMapper;
         this.metrics = metrics;
         this.sensitiveReadAuditService = sensitiveReadAuditService;
-    }
-
-    @RequestMapping(
-            value = {"/api/fraud-cases", "/api/fraud-cases/**"},
-            method = {
-                    RequestMethod.GET,
-                    RequestMethod.POST,
-                    RequestMethod.PUT,
-                    RequestMethod.PATCH,
-                    RequestMethod.DELETE,
-                    RequestMethod.HEAD,
-                    RequestMethod.OPTIONS
-            }
-    )
-    public ResponseEntity<ApiErrorResponse> legacyFraudCaseRouteRemoved() {
-        return ResponseEntity.status(HttpStatus.GONE)
-                .body(new ApiErrorResponse(
-                        Instant.now(),
-                        HttpStatus.GONE.value(),
-                        HttpStatus.GONE.getReasonPhrase(),
-                        LEGACY_ROUTE_REMOVED_MESSAGE,
-                        List.of(LEGACY_ROUTE_REMOVED_CODE)
-                ));
-    }
-
-    @GetMapping(VERSIONED_BASE_PATH)
-    public PagedResponse<FraudCaseSummaryResponse> listCases(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
-            @RequestParam(required = false) FraudCaseStatus status,
-            @RequestParam(required = false) String assignee,
-            @RequestParam(required = false) FraudCasePriority priority,
-            @RequestParam(required = false) RiskLevel riskLevel,
-            @RequestParam(required = false) Instant createdFrom,
-            @RequestParam(required = false) Instant createdTo,
-            @RequestParam(required = false) String linkedAlertId
-    ) {
-        FraudCaseReadQueryPolicy.validateListPagination(page, size);
-        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
-        var result = hasSearchFilters(status, assignee, priority, riskLevel, createdFrom, createdTo, linkedAlertId)
-                ? fraudCaseManagementService.searchCases(status, assignee, priority, riskLevel, createdFrom, createdTo, linkedAlertId, pageable)
-                : fraudCaseManagementService.listCases(pageable).map(responseMapper::toSummary);
-        return new PagedResponse<>(
-                result.getContent(),
-                result.getTotalElements(),
-                result.getTotalPages(),
-                result.getNumber(),
-                result.getSize()
-        );
     }
 
     @AuditedSensitiveRead
@@ -210,76 +137,9 @@ public class FraudCaseController {
         }
     }
 
-    @PostMapping(VERSIONED_BASE_PATH)
-    public FraudCaseResponse createCase(
-            @RequestHeader(name = "X-Idempotency-Key", required = true) String idempotencyKey,
-            @Valid @RequestBody CreateFraudCaseRequest request
-    ) {
-        return fraudCaseManagementService.createCase(request, idempotencyKey);
-    }
-
     @GetMapping(VERSIONED_BASE_PATH + "/{caseId}")
     public FraudCaseResponse getCase(@PathVariable String caseId) {
         return responseMapper.toResponse(fraudCaseManagementService.getCase(caseId));
-    }
-
-    @PostMapping(VERSIONED_BASE_PATH + "/{caseId}/assign")
-    public FraudCaseResponse assign(
-            @PathVariable String caseId,
-            @RequestHeader(name = "X-Idempotency-Key", required = true) String idempotencyKey,
-            @Valid @RequestBody AssignFraudCaseRequest request
-    ) {
-        return fraudCaseManagementService.assignCase(caseId, request, idempotencyKey);
-    }
-
-    @PostMapping(VERSIONED_BASE_PATH + "/{caseId}/notes")
-    public FraudCaseNoteResponse addNote(
-            @PathVariable String caseId,
-            @RequestHeader(name = "X-Idempotency-Key", required = true) String idempotencyKey,
-            @Valid @RequestBody AddFraudCaseNoteRequest request
-    ) {
-        return fraudCaseManagementService.addNote(caseId, request, idempotencyKey);
-    }
-
-    @PostMapping(VERSIONED_BASE_PATH + "/{caseId}/decisions")
-    public FraudCaseDecisionResponse addDecision(
-            @PathVariable String caseId,
-            @RequestHeader(name = "X-Idempotency-Key", required = true) String idempotencyKey,
-            @Valid @RequestBody AddFraudCaseDecisionRequest request
-    ) {
-        return fraudCaseManagementService.addDecision(caseId, request, idempotencyKey);
-    }
-
-    @PostMapping(VERSIONED_BASE_PATH + "/{caseId}/transition")
-    public FraudCaseResponse transition(
-            @PathVariable String caseId,
-            @RequestHeader(name = "X-Idempotency-Key", required = true) String idempotencyKey,
-            @Valid @RequestBody TransitionFraudCaseRequest request
-    ) {
-        return fraudCaseManagementService.transitionCase(caseId, request, idempotencyKey);
-    }
-
-    @PostMapping(VERSIONED_BASE_PATH + "/{caseId}/close")
-    public FraudCaseResponse close(
-            @PathVariable String caseId,
-            @RequestHeader(name = "X-Idempotency-Key", required = true) String idempotencyKey,
-            @Valid @RequestBody CloseFraudCaseRequest request
-    ) {
-        return fraudCaseManagementService.closeCase(caseId, request, idempotencyKey);
-    }
-
-    @PostMapping(VERSIONED_BASE_PATH + "/{caseId}/reopen")
-    public FraudCaseResponse reopen(
-            @PathVariable String caseId,
-            @RequestHeader(name = "X-Idempotency-Key", required = true) String idempotencyKey,
-            @Valid @RequestBody ReopenFraudCaseRequest request
-    ) {
-        return fraudCaseManagementService.reopenCase(caseId, request, idempotencyKey);
-    }
-
-    @GetMapping(VERSIONED_BASE_PATH + "/{caseId}/audit")
-    public List<FraudCaseAuditResponse> audit(@PathVariable String caseId) {
-        return fraudCaseManagementService.auditTrail(caseId);
     }
 
     @PatchMapping(VERSIONED_BASE_PATH + "/{caseId}")
@@ -356,21 +216,4 @@ public class FraudCaseController {
         return requestParams == null ? null : requestParams.getFirst(key);
     }
 
-    private boolean hasSearchFilters(
-            FraudCaseStatus status,
-            String assignee,
-            FraudCasePriority priority,
-            RiskLevel riskLevel,
-            Instant createdFrom,
-            Instant createdTo,
-            String linkedAlertId
-    ) {
-        return status != null
-                || StringUtils.hasText(assignee)
-                || priority != null
-                || riskLevel != null
-                || createdFrom != null
-                || createdTo != null
-                || StringUtils.hasText(linkedAlertId);
-    }
 }

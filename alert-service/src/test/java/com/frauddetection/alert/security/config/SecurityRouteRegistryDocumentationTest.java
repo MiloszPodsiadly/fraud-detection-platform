@@ -87,7 +87,7 @@ class SecurityRouteRegistryDocumentationTest {
                 .contains("## Choosing the route owner for cross-domain endpoints")
                 .contains("Do not choose an owner based on URL prefix alone")
                 .contains("Choose owner by resource semantics and required authority")
-                .contains("FraudCaseAuthorizationRules` owns fraud-case lifecycle")
+                .contains("FraudCaseAuthorizationRules` owns the current fraud-case work queue, detail, evidence read and regulated update routes")
                 .contains("AuditAuthorizationRules` owns audit evidence")
                 .contains("GovernanceAuthorizationRules` owns governance advisory")
                 .contains("RecoveryAuthorizationRules` owns operational recovery routes")

@@ -33,15 +33,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 class Fdp44FraudCaseLifecycleApiSurfaceStructuralTest {
 
     @Test
-    void fraudCaseControllerLifecycleMutationsRequireIdempotencyHeader() {
+    void fraudCaseControllerCurrentMutationRequiresIdempotencyHeader() {
         List<String> lifecycleMethods = List.of(
-                "createCase",
-                "assign",
-                "addNote",
-                "addDecision",
-                "transition",
-                "close",
-                "reopen",
                 "updateCase"
         );
 
@@ -105,25 +98,18 @@ class Fdp44FraudCaseLifecycleApiSurfaceStructuralTest {
     }
 
     @Test
-    void controllerSourceCallsOnlyIdempotencyKeyLifecycleOverloads() throws Exception {
+    void controllerSourceCallsOnlyCurrentIdempotencyKeyUpdateOverload() throws Exception {
         String source = Files.readString(sourceRoot().resolve(Path.of("controller", "FraudCaseController.java")));
 
         assertThat(source)
-                .contains("fraudCaseManagementService.createCase(request, idempotencyKey)")
-                .contains("fraudCaseManagementService.assignCase(caseId, request, idempotencyKey)")
-                .contains("fraudCaseManagementService.addNote(caseId, request, idempotencyKey)")
-                .contains("fraudCaseManagementService.addDecision(caseId, request, idempotencyKey)")
-                .contains("fraudCaseManagementService.transitionCase(caseId, request, idempotencyKey)")
-                .contains("fraudCaseManagementService.closeCase(caseId, request, idempotencyKey)")
-                .contains("fraudCaseManagementService.reopenCase(caseId, request, idempotencyKey)")
                 .contains("fraudCaseManagementService.updateCase(caseId, request, idempotencyKey)")
-                .doesNotContain("fraudCaseManagementService.createCase(request)")
-                .doesNotContain("fraudCaseManagementService.assignCase(caseId, request)")
-                .doesNotContain("fraudCaseManagementService.addNote(caseId, request)")
-                .doesNotContain("fraudCaseManagementService.addDecision(caseId, request)")
-                .doesNotContain("fraudCaseManagementService.transitionCase(caseId, request)")
-                .doesNotContain("fraudCaseManagementService.closeCase(caseId, request)")
-                .doesNotContain("fraudCaseManagementService.reopenCase(caseId, request)")
+                .doesNotContain("fraudCaseManagementService.createCase(")
+                .doesNotContain("fraudCaseManagementService.assignCase(")
+                .doesNotContain("fraudCaseManagementService.addNote(")
+                .doesNotContain("fraudCaseManagementService.addDecision(")
+                .doesNotContain("fraudCaseManagementService.transitionCase(")
+                .doesNotContain("fraudCaseManagementService.closeCase(")
+                .doesNotContain("fraudCaseManagementService.reopenCase(")
                 .doesNotContain("fraudCaseManagementService.updateCase(caseId, request)");
     }
 

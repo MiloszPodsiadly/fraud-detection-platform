@@ -47,12 +47,10 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(
@@ -124,20 +122,6 @@ class Fdp45FraudCaseWorkQueueNoDuplicateAuditAdviceTest {
         assertThat(document.size()).isEqualTo(20);
         assertThat(document.queryHash()).hasSize(32);
         assertThat(document.toString()).doesNotContain("createdAt,desc", "sort=");
-    }
-
-    @Test
-    void shouldNotAuditRemovedLegacyWorkQueueRoute() throws Exception {
-        mockMvc.perform(get("/api/fraud-cases/work-queue")
-                        .queryParam("page", "0")
-                        .queryParam("size", "20"))
-                .andExpect(status().isGone())
-                .andExpect(jsonPath("$.message").value("Legacy fraud-case API route is removed. Use /api/v1/fraud-cases."))
-                .andExpect(jsonPath("$.details[0]").value("code:LEGACY_FRAUD_CASE_ROUTE_REMOVED"));
-
-        verify(fraudCaseManagementService, never())
-                .workQueue(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(Pageable.class));
-        verify(repository, never()).save(any());
     }
 
     private ReadAccessAuditEventDocument onlyAuditDocument() {

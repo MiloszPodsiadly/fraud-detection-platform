@@ -94,19 +94,19 @@ class Fdp43FraudCaseLifecycleIdempotencyArchitectureTest {
     }
 
     @Test
-    void openApiShouldDocumentFdp43LifecycleIdempotencyContract() {
+    void openApiShouldDocumentCurrentRegulatedPatchIdempotencyContract() {
         String openApi = compact(read(repoRoot().resolve(Path.of("docs", "openapi", "alert_service.openapi.yaml"))));
 
         assertThat(openApi)
                 .contains("x-idempotency-key")
-                .contains("same key with the same payload")
-                .contains("same key with a different claim returns 409")
-                .contains("not implemented through regulatedmutationcoordinator")
-                .contains("is not fdp-29")
-                .contains("is not lease fenced")
-                .contains("is not global exactly-once")
-                .contains("does not provide external finality")
-                .doesNotContain("this endpoint is not idempotent unless a future");
+                .contains("update fraud case through regulated mutation coordinator")
+                .contains("matching idempotency replay returns the stored snapshot")
+                .contains("conflicting key reuse returns 409")
+                .contains("updated_case is present only when the mutation has committed")
+                .contains("no raw fraud-case payloads")
+                .doesNotContain(" /api/v1/fraud-cases/{caseid}/assign:")
+                .doesNotContain(" /api/v1/fraud-cases/{caseid}/notes:")
+                .doesNotContain(" /api/v1/fraud-cases/{caseid}/decisions:");
     }
 
     @Test

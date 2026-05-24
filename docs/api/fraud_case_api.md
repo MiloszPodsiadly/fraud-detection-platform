@@ -2,187 +2,61 @@
 
 Status: current API summary.
 
-Base paths:
+## FDP-81 Surface Decision
 
-- `/api/v1/fraud-cases`
+FDP-81 is intentional API surface cleanup. The current React analyst console runtime is the source of truth for the
+supported FraudCase product surface. Old lifecycle, audit-trail, list/search, and unversioned compatibility handlers
+are no longer exposed as HTTP API routes.
 
-Only the versioned `/api/v1/fraud-cases` route family is supported. The old unversioned fraud-case alias is removed and is denied by default.
+This is not a no-behavior-change cleanup. It narrows the supported backend API while preserving the frontend-backed
+read and update flow.
 
-FDP-43 lifecycle endpoints are local audited lifecycle endpoints with local idempotency. They reuse shared
-idempotency primitives from the existing regulated mutation model, but they are not routed through
-`RegulatedMutationCoordinator`, not FDP-29 evidence-gated finalize endpoints, not lease-fenced commands, not global
-exactly-once execution, and not external finality.
-
-## Endpoints
+## Supported Endpoints
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `POST` | `/api/v1/fraud-cases` | Create a fraud case from alert ids. |
-| `GET` | `/api/v1/fraud-cases/{caseId}` | Read case details. |
+| `GET` | `/api/v1/fraud-cases/work-queue` | Read the bounded investigator work queue. |
+| `GET` | `/api/v1/fraud-cases/work-queue/summary` | Read the global work queue count summary. |
+| `GET` | `/api/v1/fraud-cases/{caseId}` | Read one fraud case detail. |
+| `PATCH` | `/api/v1/fraud-cases/{caseId}` | Update the current fraud-case status/assignment decision surface through a regulated mutation command. |
 | `GET` | `/api/v1/fraud-cases/{caseId}/evidence-summary` | Read bounded evidence-summary context from linked alert evidence snapshots. |
 | `GET` | `/api/v1/fraud-cases/{caseId}/evidence-timeline` | Read bounded derived evidence chronology from linked alert evidence snapshots. |
-| `GET` | `/api/v1/fraud-cases` | Search cases. |
-| `POST` | `/api/v1/fraud-cases/{caseId}/assign` | Assign or reassign investigator. |
-| `POST` | `/api/v1/fraud-cases/{caseId}/notes` | Append investigator note. |
-| `POST` | `/api/v1/fraud-cases/{caseId}/decisions` | Append investigator decision. |
-| `POST` | `/api/v1/fraud-cases/{caseId}/transition` | Change status through lifecycle policy. |
-| `POST` | `/api/v1/fraud-cases/{caseId}/close` | Close a resolved case. |
-| `POST` | `/api/v1/fraud-cases/{caseId}/reopen` | Reopen a closed case. |
-| `GET` | `/api/v1/fraud-cases/{caseId}/audit` | Read audit history. |
 
 Authorities:
 
-- `GET /fraud-cases`, `GET /fraud-cases/{caseId}`, and
-  `GET /fraud-cases/{caseId}/evidence-summary`, and `GET /fraud-cases/{caseId}/evidence-timeline` require
-  `fraud-case:read`.
-- Lifecycle `POST` endpoints require `fraud-case:update`.
-- `GET /fraud-cases/{caseId}/audit` requires `fraud-case:audit:read` and intentionally returns audit `actorId`.
+- Read endpoints require `fraud-case:read`.
+- `PATCH` requires `fraud-case:update` and `X-Idempotency-Key`.
+- There is no currently exposed fraud-case lifecycle audit-history endpoint.
 
-Evidence-summary semantics:
+## Patch Semantics
 
-- The evidence summary is a read-only projection over `FraudCaseDocument.linkedAlertIds` and linked
-  `AlertDocument.evidenceSnapshot` entries.
-- Direct SuspiciousTransaction aggregation is intentionally out of scope for FDP-73 v1. SuspiciousTransaction-derived
-  context may appear only if already materialized into a linked alert evidence snapshot.
-- It returns bounded reason-code, evidence type, severity, source, status, and enum-derived product copy for title
-  and description context only.
-- It does not expose raw alert ids, customer or account identifiers, transaction ids, correlation ids, source event
-  ids, feature snapshots, model payloads, score details, or raw evidence attributes.
-- It does not create or edit evidence, mutate fraud-case lifecycle state, create analyst decisions, publish Kafka
-  events, or claim a final outcome.
-- Because this endpoint is under `/api/v1`, response fields are treated as an internal product API contract. Future
-  changes should preserve non-claims and avoid changing the meaning of `aggregateEvidenceStatus`, `partial`,
-  `legacy`, `truncated`, and `truncationReason` without a documented migration.
-- `linkedAlertCount` is the total normalized linked alert count on the FraudCase, not the number of alerts processed.
-  If the linked-alert limit is exceeded, the projection processes a bounded window, sets `truncated=true`,
-  `truncationReason=LINKED_ALERT_LIMIT_EXCEEDED`, `partial=true`, and prevents `AVAILABLE` unless `ERROR` dominates.
-- FDP-73 does not expose `missingLinkedAlertCount`; missing linked alert coverage is represented by `partial=true`
-  and aggregate `PARTIAL`.
-- `AVAILABLE` means every included evidence item is available, at least one evidence item exists, and linked-alert
-  source coverage is complete. Empty, legacy, unavailable, stale, partial, not-applicable, missing-source, or
-  truncated-source states do not become `AVAILABLE`; `ERROR` dominates.
+The current `PATCH` route uses the regulated mutation contract documented in
+[API surface v1](api_surface_v1.md) and [Public API semantics](public_api_semantics.md). It requires
+`X-Idempotency-Key`, persists only bounded canonical intent fields, and returns `UpdateFraudCaseResponse`.
+Non-terminal operation states do not echo requested target business fields as committed values.
 
-Evidence-timeline semantics:
+## Evidence Summary Semantics
 
-- The evidence timeline is a read-only chronology projection over `FraudCaseDocument.linkedAlertIds` and linked
-  `AlertDocument.evidenceSnapshot` entries.
-- It returns bounded synthetic event keys, event types, timestamps, source, evidence status, linked entity type, and
-  generated product copy only.
-- Event keys are response-local display keys. They are not stable identifiers, audit event IDs, bookmarks, external
-  references, or deep-link keys.
-- It does not expose alert ids, transaction ids, customer or account identifiers, correlation ids, source event ids,
-  evidence ids, score decision ids, raw payloads, raw evidence titles, or raw evidence descriptions.
-- It does not create case status history, analyst decision history, fraud confirmation, legal proof, final outcome,
-  audit trail, event store history, workflow history, or lifecycle reconstruction.
-- `LINKED_ALERT_CONTEXT` timestamps are derived from linked alert read data and are not proof of when the alert was
-  linked to the fraud case.
-- Missing timestamps mark `approximateTime=true` and `partial=true`; `generatedAt` is response generation time and is
-  not used as an event occurrence time.
-- Missing linked alerts are represented by `partial=true` only. FDP-76 v1 does not return missing alert IDs or a
-  missing alert count.
-- Error evidence is represented as `evidenceStatus=ERROR` on `ALERT_EVIDENCE_SNAPSHOT_PARTIAL`; FDP-76 v1 does not add
-  a separate error event type.
-- Linked-alert input is capped at 50 normalized alert IDs before repository lookup.
-- More than 100 derived events sets `truncated=true`, `partial=true`, and
-  `truncationReason=TIMELINE_EVENT_LIMIT_EXCEEDED`.
-- FDP-76 adds sensitive-read audit observability, not a dedicated Micrometer metric.
+- The evidence summary is a read-only projection over linked alert evidence snapshots.
+- It returns bounded reason-code, evidence type, severity, source and status context only.
+- It does not expose raw alert ids, customer/account identifiers, transaction ids, feature snapshots or raw model
+  payloads.
+- It does not mutate fraud-case state, create analyst decisions, publish Kafka events or claim a final outcome.
+- Truncated or incomplete linked-alert coverage is represented as partial rather than available evidence.
 
-List semantics:
+## Evidence Timeline Semantics
 
-- `GET /fraud-cases` is paginated. The API accepts `page` and `size`; `size` is capped at 100.
+- The evidence timeline is read-only investigation chronology derived from linked alert read data.
+- It does not represent an audit trail, workflow history, confirmed fraud, legal proof or final outcome.
+- Response-local event keys are not persistent evidence identifiers.
+- Missing or bounded source data remains explicitly partial or truncated.
 
-## POST Endpoint Idempotency
+## Unchanged Adjacent Product Surface
 
-Every local lifecycle `POST` requires `X-Idempotency-Key`. Missing keys return `400` with
-`code:MISSING_IDEMPOTENCY_KEY`; invalid keys return `400` with `code:INVALID_IDEMPOTENCY_KEY`.
-
-FDP-43 local lifecycle idempotency reuses shared canonical hashing, key validation, and conflict semantics from the
-regulated mutation architecture. It does not route fraud-case lifecycle operations through
-`RegulatedMutationCoordinator`.
-
-- `X-Idempotency-Key` is globally unique within the fraud-case lifecycle idempotency domain. The stored record is
-  looked up by key hash; action, backend actor, scope, and request hash are conflict-checked claim fields.
-- Same key + same payload + same resolved backend actor/action/scope returns the stored response snapshot and does not
-  re-execute the lifecycle mutation or append another audit entry.
-- Same key + different payload, actor, action, or scope returns `409` with `code:IDEMPOTENCY_KEY_CONFLICT`.
-- An in-progress same-key operation returns `409` with `code:IDEMPOTENCY_KEY_IN_PROGRESS`.
-- Concurrent same-key requests do not duplicate lifecycle mutation, audit entry, or idempotency record.
-  Depending on timing, the competing request may receive a stable replay response or an idempotency-in-progress
-  conflict. Clients should retry later with the same idempotency key after an in-progress response.
-- FDP-43 guarantees side-effect idempotency for local lifecycle operations, not deterministic concurrent response
-  timing.
-- Idempotency key hashes and request hashes are stored; raw idempotency keys and raw request payloads are not stored
-  or exposed.
-- The idempotency record, lifecycle mutation, and audit append commit or roll back together when Mongo transactions
-  are enabled with `app.regulated-mutations.transaction-mode=REQUIRED`.
-- Idempotency records are retained for `app.fraud-cases.idempotency.retention` (`PT24H` by default). After the
-  retention window and eventual Mongo TTL deletion, the same key may execute as a new lifecycle operation.
-- Replay requires a valid authenticated/resolved actor context. If actor resolution fails before lookup, the request
-  fails before replay and does not mutate.
-- Response snapshots are bounded at runtime. If the safe replay snapshot exceeds the configured limit, the local
-  lifecycle operation fails closed with `code:IDEMPOTENCY_SNAPSHOT_TOO_LARGE` and the idempotency record, lifecycle
-  mutation, and audit append roll back together.
-- Public HTTP lifecycle POSTs use only idempotency-key service overloads. No missing `X-Idempotency-Key` request
-  reaches the lifecycle mutation path.
-
-## Sample Requests
-
-```json
-{
-  "alertIds": ["alert-1", "alert-2"],
-  "priority": "HIGH",
-  "riskLevel": "CRITICAL",
-  "reason": "Manual investigation required",
-  "actorId": "analyst-1"
-}
-```
-
-```json
-{
-  "assignedInvestigatorId": "investigator-1",
-  "actorId": "lead-1"
-}
-```
-
-```json
-{
-  "decisionType": "FRAUD_CONFIRMED",
-  "summary": "Confirmed after investigator review.",
-  "actorId": "investigator-1"
-}
-```
-
-## Error Semantics
-
-- Invalid request bodies return `400`.
-- Missing authentication or actor identity returns `401`.
-- Missing cases or referenced alerts return `404`.
-- Forbidden lifecycle mutations return `409`.
-- Unhandled internals return stable JSON `500` without raw stack traces.
-
-Stable error details include `reason:FRAUD_CASE_VALIDATION_FAILED`, `reason:FRAUD_CASE_NOT_FOUND`,
-`reason:FRAUD_CASE_LIFECYCLE_CONFLICT`, `code:MISSING_IDEMPOTENCY_KEY`, `code:INVALID_IDEMPOTENCY_KEY`,
-`code:IDEMPOTENCY_KEY_CONFLICT`, `code:IDEMPOTENCY_KEY_IN_PROGRESS`, and
-`code:IDEMPOTENCY_SNAPSHOT_TOO_LARGE`.
-
-## Duplicate Submit Semantics
-
-With the same `X-Idempotency-Key`, same resolved backend actor, same action/scope, and same payload, repeating `notes` or `decisions` replays the stored response and
-does not create another append-only record or audit entry. With a different idempotency key, each POST is a new local
-lifecycle command and follows normal lifecycle policy.
-
-`RESOLVED` cases remain mutable until `CLOSED`; notes, decisions, and assignment remain allowed while the case is
-resolved.
-
-## System-Generated Case Candidate Ingestion
-
-Transaction-scored event ingestion is separate from these analyst lifecycle endpoints. It may create or enrich
-system-generated case candidates, but it is not an investigator lifecycle action and does not claim FDP-42 analyst
-lifecycle audit semantics.
+FDP-81 does not change alerts, scored transactions, suspicious transactions, the linked-alert resolver or its
+client-selected `alertId` rejection guard, or governance endpoints used by Reports and Compliance workspaces.
 
 ## Non-Claims
 
-This API does not change Kafka/outbox semantics, does not replace the regulated mutation safety model, does not add
-ML behavior, and does not add release-governance controls. It also does not claim FDP-29 evidence-gated finalize,
-lease-fenced execution, global exactly-once delivery, distributed ACID, distributed locking, WORM storage, legal
-notarization, Kafka exactly-once, or external finality.
+This API does not claim evidence-gated finality, lease-fenced replay safety, distributed ACID, exactly-once delivery,
+WORM storage, legal notarization, bank certification or external finality.
