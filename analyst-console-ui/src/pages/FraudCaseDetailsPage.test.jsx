@@ -340,7 +340,7 @@ describe("FraudCaseDetailsPage", () => {
     render(page({ caseId: "case-1", apiClient }));
 
     expect(await screen.findByText("Evidence timeline")).toBeInTheDocument();
-    expect(apiClient.getFraudCaseEvidenceTimeline).toHaveBeenCalledWith("case-1", expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    await waitFor(() => expect(apiClient.getFraudCaseEvidenceTimeline).toHaveBeenCalledWith("case-1", expect.objectContaining({ signal: expect.any(AbortSignal) })));
     expect(JSON.stringify(apiClient.getFraudCaseEvidenceTimeline.mock.calls[0])).not.toContain("alert");
     expect(JSON.stringify(apiClient.getFraudCaseEvidenceTimeline.mock.calls[0])).not.toContain("customer");
     expect(JSON.stringify(apiClient.getFraudCaseEvidenceTimeline.mock.calls[0])).not.toContain("transaction");
@@ -361,6 +361,7 @@ describe("FraudCaseDetailsPage", () => {
     render(page({ caseId: "case-1", apiClient }));
 
     expect(await screen.findByText("Evidence timeline")).toBeInTheDocument();
+    await waitFor(() => expect(apiClient.getFraudCaseEvidenceTimeline).toHaveBeenCalledTimes(1));
     expect(apiClient.getFraudCaseEvidenceTimeline.mock.calls[0][1]).not.toHaveProperty("apiClient");
     expect(apiClient.getFraudCaseEvidenceTimeline.mock.calls[0][1]).not.toHaveProperty("getAlert");
     expect(apiClient.getFraudCaseEvidenceTimeline.mock.calls[0][1]).not.toHaveProperty("submitAnalystDecision");
@@ -416,7 +417,7 @@ describe("FraudCaseDetailsPage", () => {
     render(page({ caseId: "case-1", apiClient }));
 
     expect(await screen.findByText("Evidence timeline")).toBeInTheDocument();
-    expect(apiClient.getFraudCaseEvidenceTimeline).toHaveBeenCalledWith("case-1", expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    await waitFor(() => expect(apiClient.getFraudCaseEvidenceTimeline).toHaveBeenCalledWith("case-1", expect.objectContaining({ signal: expect.any(AbortSignal) })));
     expect(JSON.stringify(apiClient.getFraudCaseEvidenceTimeline.mock.calls[0])).not.toContain("alert-secret");
   });
 });
