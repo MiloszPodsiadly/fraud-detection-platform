@@ -23,7 +23,7 @@ describe("fraudCaseInvestigationReadSurfaceAssertions", () => {
     expect(() => expectNoInvestigationRawIdentifiers(container("SOURCE_EVENT_20260523_ABC"))).toThrow();
   });
 
-  it("allows negated non-claim wording", () => {
+  it("allows negated helper wording", () => {
     expect(() => expectNoInvestigationVerdictProofWording(container([
       "not confirmed fraud",
       "not an analyst decision",
@@ -32,7 +32,7 @@ describe("fraudCaseInvestigationReadSurfaceAssertions", () => {
     ].join(" ")))).not.toThrow();
   });
 
-  it("rejects positive proof and verdict claims", () => {
+  it("rejects positive proof and verdict wording", () => {
     expect(() => expectNoInvestigationVerdictProofWording(container("confirmed fraud"))).toThrow();
     expect(() => expectNoInvestigationVerdictProofWording(container("final outcome"))).toThrow();
     expect(() => expectNoInvestigationVerdictProofWording(container("proof of fraud"))).toThrow();

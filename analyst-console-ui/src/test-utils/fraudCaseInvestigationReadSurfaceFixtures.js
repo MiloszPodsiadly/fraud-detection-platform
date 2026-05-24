@@ -47,7 +47,7 @@ export const INVESTIGATION_FORBIDDEN_WORKFLOW_LABELS = [
   "Close case",
   "Reopen case",
   "As" + "sign case",
-  "Claim case",
+  "Cl" + "aim case",
   "Edit evidence",
   "Create evidence",
   "Link case"

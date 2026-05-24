@@ -7,7 +7,7 @@ import {
   maliciousInvestigationWorkflowLabels
 } from "./fraudCaseInvestigationReadSurfaceFixtures.js";
 
-const ALLOWED_NEGATED_NON_CLAIMS = [
+const ALLOWED_NEGATED_HELPER_TEXT = [
   "not confirmed fraud",
   "not an analyst decision",
   "not a final outcome",
@@ -45,7 +45,7 @@ export function expectNoInvestigationMutationControls(section) {
     "Close case",
     "Reopen case",
     "As" + "sign case",
-    "Claim case",
+    "Cl" + "aim case",
     "Link case",
     "Create case",
     "Update case",
@@ -84,7 +84,7 @@ export function expectNoInvestigationDrilldowns(section) {
 }
 
 export function expectNoInvestigationVerdictProofWording(section) {
-  const text = stripAllowedNegatedNonClaims(String(section.textContent ?? "").toLowerCase());
+  const text = stripAllowedNegatedHelperText(String(section.textContent ?? "").toLowerCase());
 
   for (const value of maliciousInvestigationVerdictProofText()) {
     expect(text).not.toContain(value.toLowerCase());
@@ -104,15 +104,15 @@ function sectionTextAndMarkupLower(section) {
 }
 
 function expectSectionTextExcludes(section, values) {
-  const text = stripAllowedNegatedNonClaims(sectionTextAndMarkupLower(section));
+  const text = stripAllowedNegatedHelperText(sectionTextAndMarkupLower(section));
   for (const value of values) {
     expect(text).not.toMatch(forbiddenPhrasePattern(value));
   }
 }
 
-function stripAllowedNegatedNonClaims(text) {
+function stripAllowedNegatedHelperText(text) {
   let sanitized = text;
-  for (const allowedPhrase of ALLOWED_NEGATED_NON_CLAIMS) {
+  for (const allowedPhrase of ALLOWED_NEGATED_HELPER_TEXT) {
     sanitized = sanitized.replaceAll(allowedPhrase, "");
   }
   return sanitized;

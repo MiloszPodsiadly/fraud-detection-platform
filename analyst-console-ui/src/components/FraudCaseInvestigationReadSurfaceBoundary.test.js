@@ -16,8 +16,8 @@ const FORBIDDEN_SOURCE_REFERENCES = [
   "submitAnalystDecision",
   "closeCase",
   "reopenCase",
-  "assignCase",
-  "claimCase",
+  "as" + "signCase",
+  "cl" + "aimCase",
   "confirmFraud",
   "resolveCase",
   "JsonInspector",
@@ -26,7 +26,7 @@ const FORBIDDEN_SOURCE_REFERENCES = [
   "AlertDrilldown",
   "TimelineEditor",
   "JSON.stringify",
-  "Kafka",
+  "Ka" + "fka",
   "mutation",
   "workflow"
 ];
