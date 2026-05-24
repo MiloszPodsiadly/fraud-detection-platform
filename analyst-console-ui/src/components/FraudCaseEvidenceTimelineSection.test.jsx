@@ -2,7 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { FraudCaseEvidenceTimelineSection } from "./FraudCaseEvidenceTimelineSection.jsx";
+import { EVIDENCE_TIMELINE_HELPER_TEXT, FraudCaseEvidenceTimelineSection } from "./FraudCaseEvidenceTimelineSection.jsx";
 import {
   formatTimelineTime,
   normalizeTimelineEventType,
@@ -35,6 +35,21 @@ import {
   expectNoTimelineMutationControls,
   expectTimelineNonClaimHelperVisible
 } from "../test-utils/fraudCaseTimelineUiAssertions.js";
+import {
+  expectNoInvestigationDrilldowns,
+  expectNoInvestigationMutationControls,
+  expectNoInvestigationRawIdentifiers,
+  expectNoInvestigationRawPayloads,
+  expectNoInvestigationVerdictProofWording,
+  expectNoInvestigationWorkflowControls,
+  expectReadOnlyInvestigationHelperVisible
+} from "../test-utils/fraudCaseInvestigationReadSurfaceAssertions.js";
+import {
+  maliciousInvestigationRawIdentifiers,
+  maliciousInvestigationRawPayloadFields,
+  maliciousInvestigationVerdictProofText,
+  maliciousInvestigationWorkflowLabels
+} from "../test-utils/fraudCaseInvestigationReadSurfaceFixtures.js";
 
 describe("FraudCaseEvidenceTimelineSection", () => {
   it("FraudCaseEvidenceTimelineSectionRendersRequiredNonClaimHelperTextTest", async () => {
@@ -256,6 +271,47 @@ describe("FraudCaseEvidenceTimelineSection", () => {
     renderSection({ timeline: maliciousTimeline() });
 
     expectNoRawTimelinePayloads(await findSection());
+  });
+
+  it("FraudCaseEvidenceTimelineSectionUsesSharedReadSurfaceSafetyAssertionsTest", async () => {
+    const rawIdentifiers = maliciousInvestigationRawIdentifiers();
+    const rawPayloads = maliciousInvestigationRawPayloadFields();
+    const workflowLabels = maliciousInvestigationWorkflowLabels();
+    const verdictProofText = maliciousInvestigationVerdictProofText();
+    renderSection({
+      timeline: {
+        ...emptyTimeline(),
+        events: [{
+          eventKey: "shared-secret-event-key",
+          eventType: "LINKED_ALERT_CONTEXT",
+          occurredAt: "2026-05-23T10:00:00Z",
+          approximateTime: true,
+          source: "ALERT_SERVICE",
+          evidenceStatus: "AVAILABLE",
+          linkedEntityType: "FRAUD_ALERT",
+          rawIdentifiers: rawIdentifiers.join(" "),
+          rawPayloads: rawPayloads.join(" "),
+          workflowLabels: workflowLabels.join(" "),
+          verdictProofText: verdictProofText.join(" "),
+          title: "raw backend title raw evidence title raw model explanation",
+          description: "raw backend description raw evidence description raw decision reason",
+          rawPayload: "raw-payload-secret",
+          modelPayload: "model-payload-secret",
+          eventPayload: "event-payload-secret",
+          scoreDetails: "scoreDetails-secret",
+          featureSnapshot: "featureSnapshot-secret"
+        }]
+      }
+    });
+
+    const section = await findSection();
+    expectNoInvestigationRawIdentifiers(section);
+    expectNoInvestigationRawPayloads(section);
+    expectNoInvestigationMutationControls(section);
+    expectNoInvestigationWorkflowControls(section);
+    expectNoInvestigationDrilldowns(section);
+    expectNoInvestigationVerdictProofWording(section);
+    expectReadOnlyInvestigationHelperVisible(section, EVIDENCE_TIMELINE_HELPER_TEXT);
   });
 
   it("FraudCaseEvidenceTimelineSectionDoesNotRenderRawTitleOrDescriptionTest", async () => {

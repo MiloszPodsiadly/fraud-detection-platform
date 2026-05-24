@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
+  EVIDENCE_SUMMARY_HELPER_TEXT,
   FraudCaseEvidenceSummarySection
 } from "./FraudCaseEvidenceSummarySection.jsx";
 import {
@@ -22,6 +23,21 @@ import {
   expectNoMutationControls,
   expectNoRawEvidencePayloadText
 } from "../test-utils/evidenceSummaryUiAssertions.js";
+import {
+  expectNoInvestigationDrilldowns,
+  expectNoInvestigationMutationControls,
+  expectNoInvestigationRawIdentifiers,
+  expectNoInvestigationRawPayloads,
+  expectNoInvestigationVerdictProofWording,
+  expectNoInvestigationWorkflowControls,
+  expectReadOnlyInvestigationHelperVisible
+} from "../test-utils/fraudCaseInvestigationReadSurfaceAssertions.js";
+import {
+  maliciousInvestigationRawIdentifiers,
+  maliciousInvestigationRawPayloadFields,
+  maliciousInvestigationVerdictProofText,
+  maliciousInvestigationWorkflowLabels
+} from "../test-utils/fraudCaseInvestigationReadSurfaceFixtures.js";
 
 describe("FraudCaseEvidenceSummarySection", () => {
   it("FraudCaseEvidenceSummarySectionRendersAvailableSummaryTest", async () => {
@@ -170,6 +186,45 @@ describe("FraudCaseEvidenceSummarySection", () => {
     expect(screen.queryByText("account-secret")).not.toBeInTheDocument();
     expect(screen.queryByText("event-secret")).not.toBeInTheDocument();
     expect(screen.queryByText("correlation-secret")).not.toBeInTheDocument();
+  });
+
+  it("FraudCaseEvidenceSummarySectionUsesSharedReadSurfaceSafetyAssertionsTest", async () => {
+    const rawIdentifiers = maliciousInvestigationRawIdentifiers();
+    const rawPayloads = maliciousInvestigationRawPayloadFields();
+    const workflowLabels = maliciousInvestigationWorkflowLabels();
+    const verdictProofText = maliciousInvestigationVerdictProofText();
+    renderSection({
+      summary: {
+        ...rawPayloadEvidenceSummary(),
+        caseId: "case-secret",
+        linkedAlertId: "linked-alert-secret",
+        evidenceId: "evidence-secret",
+        scoreDecisionId: "score-decision-secret",
+        unexpectedIdentifiers: rawIdentifiers.join(" "),
+        unexpectedPayloads: rawPayloads.join(" "),
+        unexpectedWorkflow: workflowLabels.join(" "),
+        unexpectedVerdict: verdictProofText.join(" "),
+        highestSeverityEvidence: [{
+          ...rawPayloadEvidenceSummary().highestSeverityEvidence[0],
+          title: "raw evidence title raw backend title raw model explanation",
+          description: "raw evidence description raw backend description raw decision reason",
+          rawPayload: "raw-payload-secret",
+          modelPayload: "model-payload-secret",
+          eventPayload: "event-payload-secret",
+          scoreDetails: "scoreDetails-secret",
+          featureSnapshot: "featureSnapshot-secret"
+        }]
+      }
+    });
+
+    const section = await findSection();
+    expectNoInvestigationRawIdentifiers(section);
+    expectNoInvestigationRawPayloads(section);
+    expectNoInvestigationMutationControls(section);
+    expectNoInvestigationWorkflowControls(section);
+    expectNoInvestigationDrilldowns(section);
+    expectNoInvestigationVerdictProofWording(section);
+    expectReadOnlyInvestigationHelperVisible(section, EVIDENCE_SUMMARY_HELPER_TEXT);
   });
 
   it("FraudCaseEvidenceSummarySectionHandlesMalformedSourceCountsTest", async () => {
