@@ -23,6 +23,8 @@ class FraudCaseEvidenceSummaryDocsContractTest {
                 .contains("Direct SuspiciousTransaction aggregation is intentionally out of scope")
                 .contains("enum-derived product copy for title and description")
                 .contains("Missing fraud cases are audited as `REJECTED`")
+                .contains("endpoint=evidence_summary")
+                .contains("Fraud Case Read Model Observability Contract")
                 .contains("LINKED_ALERT_LIMIT_EXCEEDED")
                 .contains("source coverage is complete")
                 .contains("not fraud confirmation")

@@ -65,6 +65,11 @@ count. Missing fraud cases are audited as `REJECTED` controlled not-found attemp
 audited as `FAILED`. Ordinary logs and metrics must not include linked alert ids, customer or account identifiers,
 transaction ids, correlation ids, query payloads, raw evidence attributes, or raw backend exception payloads.
 
+FDP-79 adds a bounded operational read metric for this endpoint. The metric records only
+`endpoint=evidence_summary` and a bounded `outcome` label. It does not include raw identifiers, request data,
+result counts, reason codes, evidence statuses, principal data, or exception details. See
+[Fraud Case Read Model Observability Contract](fraud_case_read_model_observability_contract.md).
+
 ## Aggregation Semantics
 
 - At most 100 linked alerts are included in one projection.

@@ -8,6 +8,7 @@ Status: current product documentation index.
 | --- | --- |
 | [Fraud Case Management](fraud_case_management.md) | Current product-domain source of truth for fraud-case triage, lifecycle, local idempotency, audit, and non-claims. |
 | [Fraud Case Evidence Summary](fraud_case_evidence_summary.md) | Current product-domain source of truth for the read-only fraud-case evidence summary projection and non-claims. |
+| [Fraud Case Read Model Observability Contract](fraud_case_read_model_observability_contract.md) | Current FDP-79 backend observability contract for bounded fraud-case evidence summary and timeline read metrics. |
 | [Fraud Case Investigation Read Surface Contract](fraud_case_investigation_read_surface_contract.md) | Current FDP-78 frontend hardening contract for shared read-only FraudCase investigation section guardrails. |
 | [Fraud Case Evidence Timeline UI](fraud_case_evidence_timeline_ui.md) | Current FDP-77 UI behavior contract for the frontend read-only fraud-case evidence timeline view and non-claims. |
 | [Evidence Model](evidence_model.md) | Current product-domain semantics for typed evidence signals, status meanings, non-claims, and relationship to reason codes. |
