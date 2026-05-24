@@ -31,6 +31,10 @@ surfaces.
 - no workflow changes
 - no combined smart InvestigationPanel
 
+FDP-78 does not introduce a new runtime security layer. It hardens the frontend contract through shared tests,
+malicious fixtures, source/import boundary guards, and documentation. Runtime rendering behavior of Evidence Summary
+and Evidence Timeline remains unchanged.
+
 ## Read-only section contract
 
 Each read-only investigation section must:
@@ -55,6 +59,19 @@ Reason:
 FraudCaseDetailsPage may legally contain existing workflow controls outside Evidence Summary and Evidence Timeline.
 FDP-78 does not redefine the whole page as read-only.
 
+## Source/import boundary guards
+
+Source/import boundary guards are governance tripwires. They intentionally use strict source-level checks to catch
+common regressions such as full apiClient usage, workflow imports, drilldown imports, raw field rendering, and raw
+backend title/description access.
+
+They are not a formal semantic static analysis system. They may produce false positives on harmless comments or helper
+names, and future maintainers should treat such failures as a prompt for a conscious review rather than silently
+weakening the guard.
+
+The guards are section-scoped and must not inspect the whole FraudCaseDetailsPage, because workflow controls may
+legally exist outside Evidence Summary and Evidence Timeline.
+
 ## Non-claims
 
 Read surfaces are not:
@@ -77,6 +94,7 @@ Read surfaces are not:
 - No new authority.
 - No new API client methods.
 - No new rendered fields.
+- No runtime behavior change.
 - Evidence Summary behavior unchanged.
 - Evidence Timeline behavior unchanged.
 - Existing FDP-75/FDP-77 tests are not weakened.

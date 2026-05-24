@@ -52,6 +52,27 @@ describe("FraudCaseInvestigationReadSurfaceDocsContractTest", () => {
     expect(docs).toContain("no combined smart InvestigationPanel");
   });
 
+  it("DocsMentionSourceGuardsAreGovernanceTripwiresTest", () => {
+    const docs = contractDocs();
+
+    expect(docs).toContain("governance tripwires");
+    expect(docs).toContain("not a formal semantic static analysis");
+    expect(docs).toContain("false positives");
+    expect(docs).toContain("section-scoped");
+    expect(docs).toContain("must not inspect the whole FraudCaseDetailsPage");
+  });
+
+  it("DocsMentionNoRuntimeSecurityLayerTest", () => {
+    const docs = contractDocs();
+
+    expect(docs).toContain("does not introduce a new runtime security layer");
+    expect(docs).toContain("shared tests");
+    expect(docs).toContain("source/import boundary guards");
+    expect(docs).toContain("Runtime rendering behavior of Evidence Summary");
+    expect(docs).toContain("and Evidence Timeline remains unchanged.");
+    expect(docs).toContain("No runtime behavior change.");
+  });
+
   it("DocsDoNotDriftIntoPositiveProofClaimsTest", () => {
     let docs = contractDocs().toLowerCase();
     for (const allowed of [

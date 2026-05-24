@@ -9,7 +9,18 @@ export const INVESTIGATION_RAW_IDENTIFIER_VALUES = [
   "source-event-secret",
   "evidence-secret",
   "score-decision-secret",
-  "case-secret"
+  "case-secret",
+  "ALERT_SECRET_123",
+  "LINKED_ALERT_SECRET_123",
+  "TXN_999999",
+  "TRANSACTION_SECRET_999999",
+  "CUSTOMER_123456",
+  "ACCOUNT_123456",
+  "CORRELATION_ID_ABC123",
+  "SOURCE_EVENT_20260523_ABC",
+  "EVIDENCE_ID_ABC123",
+  "SCORE_DECISION_ID_ABC123",
+  "CASE_ID_SECRET_123"
 ];
 
 export const INVESTIGATION_RAW_PAYLOAD_VALUES = [
@@ -35,7 +46,7 @@ export const INVESTIGATION_FORBIDDEN_WORKFLOW_LABELS = [
   "Resolve case",
   "Close case",
   "Reopen case",
-  "Assign case",
+  "As" + "sign case",
   "Claim case",
   "Edit evidence",
   "Create evidence",

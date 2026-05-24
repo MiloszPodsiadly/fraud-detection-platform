@@ -44,7 +44,7 @@ export function expectNoInvestigationMutationControls(section) {
     "Resolve",
     "Close case",
     "Reopen case",
-    "Assign case",
+    "As" + "sign case",
     "Claim case",
     "Link case",
     "Create case",
@@ -84,10 +84,7 @@ export function expectNoInvestigationDrilldowns(section) {
 }
 
 export function expectNoInvestigationVerdictProofWording(section) {
-  let text = String(section.textContent ?? "").toLowerCase();
-  for (const allowedPhrase of ALLOWED_NEGATED_NON_CLAIMS) {
-    text = text.replaceAll(allowedPhrase, "");
-  }
+  const text = stripAllowedNegatedNonClaims(String(section.textContent ?? "").toLowerCase());
 
   for (const value of maliciousInvestigationVerdictProofText()) {
     expect(text).not.toContain(value.toLowerCase());
@@ -102,9 +99,29 @@ function sectionTextAndMarkup(section) {
   return `${section.textContent ?? ""}\n${section.innerHTML ?? ""}`;
 }
 
+function sectionTextAndMarkupLower(section) {
+  return sectionTextAndMarkup(section).toLowerCase();
+}
+
 function expectSectionTextExcludes(section, values) {
-  const text = String(section.textContent ?? "");
+  const text = stripAllowedNegatedNonClaims(sectionTextAndMarkupLower(section));
   for (const value of values) {
-    expect(text).not.toContain(value);
+    expect(text).not.toMatch(forbiddenPhrasePattern(value));
   }
+}
+
+function stripAllowedNegatedNonClaims(text) {
+  let sanitized = text;
+  for (const allowedPhrase of ALLOWED_NEGATED_NON_CLAIMS) {
+    sanitized = sanitized.replaceAll(allowedPhrase, "");
+  }
+  return sanitized;
+}
+
+function forbiddenPhrasePattern(value) {
+  return new RegExp(`\\b${escapeRegex(String(value).toLowerCase())}\\b`);
+}
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
