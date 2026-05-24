@@ -24,7 +24,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 @Component
-public class AlertServiceMetrics {
+public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
 
     private final MeterRegistry meterRegistry;
     private final AtomicInteger governanceAnalyticsWindowDays = new AtomicInteger(0);
@@ -239,6 +239,16 @@ public class AlertServiceMetrics {
         Timer.builder("fraud_case_work_queue_summary_latency_seconds")
                 .register(meterRegistry)
                 .record(latency == null || latency.isNegative() ? Duration.ZERO : latency);
+    }
+
+    @Override
+    public void recordEvidenceSummary(FraudCaseReadModelOutcome outcome) {
+        recordFraudCaseReadModel("evidence_summary", outcome);
+    }
+
+    @Override
+    public void recordEvidenceTimeline(FraudCaseReadModelOutcome outcome) {
+        recordFraudCaseReadModel("evidence_timeline", outcome);
     }
 
     public void recordScoredTransactionSearchRequest(String outcome, String filterBucket) {
@@ -951,6 +961,14 @@ public class AlertServiceMetrics {
         return Counter.builder(name)
                 .tags(tags)
                 .register(meterRegistry);
+    }
+
+    private void recordFraudCaseReadModel(String endpoint, FraudCaseReadModelOutcome outcome) {
+        counter(
+                "fraud.fraud_case.read_model.read",
+                "endpoint", endpoint,
+                "outcome", outcome.label()
+        ).increment();
     }
 
     private String endpoint(HttpServletRequest request) {

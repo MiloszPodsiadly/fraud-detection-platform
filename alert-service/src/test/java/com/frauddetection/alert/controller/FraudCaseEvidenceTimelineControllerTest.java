@@ -12,6 +12,8 @@ import com.frauddetection.alert.evidence.EvidenceSource;
 import com.frauddetection.alert.evidence.EvidenceStatus;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.alert.fraudcase.FraudCaseNotFoundException;
+import com.frauddetection.alert.observability.FraudCaseReadModelMetrics;
+import com.frauddetection.alert.observability.FraudCaseReadModelOutcome;
 import com.frauddetection.alert.service.FraudCaseEvidenceTimelineService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -60,6 +62,9 @@ class FraudCaseEvidenceTimelineControllerTest {
     @MockBean
     private SensitiveReadAuditService sensitiveReadAuditService;
 
+    @MockBean
+    private FraudCaseReadModelMetrics metrics;
+
     @Test
     void FraudCaseEvidenceTimelineEndpointReturnsReadOnlyProjectionTest() throws Exception {
         when(service.timeline("case-1")).thenReturn(response());
@@ -96,6 +101,7 @@ class FraudCaseEvidenceTimelineControllerTest {
                 eq(1),
                 any()
         );
+        verify(metrics).recordEvidenceTimeline(FraudCaseReadModelOutcome.AVAILABLE);
     }
 
     @Test
@@ -112,6 +118,7 @@ class FraudCaseEvidenceTimelineControllerTest {
                 eq(ReadAccessAuditOutcome.REJECTED),
                 any()
         );
+        verify(metrics).recordEvidenceTimeline(FraudCaseReadModelOutcome.NOT_FOUND);
     }
 
     @Test
@@ -129,6 +136,7 @@ class FraudCaseEvidenceTimelineControllerTest {
                 eq(ReadAccessAuditOutcome.FAILED),
                 any()
         );
+        verify(metrics).recordEvidenceTimeline(FraudCaseReadModelOutcome.ERROR);
     }
 
     @Test
@@ -151,6 +159,28 @@ class FraudCaseEvidenceTimelineControllerTest {
                 eq(ReadAccessResourceType.FRAUD_CASE),
                 eq("case-1"),
                 eq(ReadAccessAuditOutcome.FAILED),
+                any()
+        );
+        verify(metrics).recordEvidenceTimeline(FraudCaseReadModelOutcome.ERROR);
+    }
+
+    @Test
+    void FraudCaseEvidenceTimelineMetricFailureDoesNotChangeReadOrAuditBehaviorTest() throws Exception {
+        when(service.timeline("case-1")).thenReturn(response());
+        doThrow(new IllegalStateException("metrics backend unavailable"))
+                .when(metrics)
+                .recordEvidenceTimeline(FraudCaseReadModelOutcome.AVAILABLE);
+
+        mockMvc.perform(get("/api/v1/fraud-cases/case-1/evidence-timeline"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.caseId").value("case-1"))
+                .andExpect(content().string(not(containsString("metrics backend unavailable"))));
+
+        verify(sensitiveReadAuditService).audit(
+                eq(ReadAccessEndpointCategory.FRAUD_CASE_EVIDENCE_TIMELINE),
+                eq(ReadAccessResourceType.FRAUD_CASE),
+                eq("case-1"),
+                eq(1),
                 any()
         );
     }

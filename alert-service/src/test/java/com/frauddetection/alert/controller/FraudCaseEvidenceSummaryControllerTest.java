@@ -8,6 +8,8 @@ import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.evidence.EvidenceStatus;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.alert.fraudcase.FraudCaseNotFoundException;
+import com.frauddetection.alert.observability.FraudCaseReadModelMetrics;
+import com.frauddetection.alert.observability.FraudCaseReadModelOutcome;
 import com.frauddetection.alert.service.FraudCaseEvidenceSummaryService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,6 +27,7 @@ import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -52,6 +55,9 @@ class FraudCaseEvidenceSummaryControllerTest {
 
     @MockBean
     private SensitiveReadAuditService sensitiveReadAuditService;
+
+    @MockBean
+    private FraudCaseReadModelMetrics metrics;
 
     @Test
     void FraudCaseEvidenceSummaryEndpointReturnsReadOnlyProjectionTest() throws Exception {
@@ -89,6 +95,7 @@ class FraudCaseEvidenceSummaryControllerTest {
                 eq(1),
                 any()
         );
+        verify(metrics).recordEvidenceSummary(FraudCaseReadModelOutcome.AVAILABLE);
     }
 
     @Test
@@ -105,6 +112,7 @@ class FraudCaseEvidenceSummaryControllerTest {
                 eq(ReadAccessAuditOutcome.REJECTED),
                 any()
         );
+        verify(metrics).recordEvidenceSummary(FraudCaseReadModelOutcome.NOT_FOUND);
     }
 
     @Test
@@ -119,6 +127,28 @@ class FraudCaseEvidenceSummaryControllerTest {
                 eq(ReadAccessResourceType.FRAUD_CASE),
                 eq("case-1"),
                 eq(ReadAccessAuditOutcome.FAILED),
+                any()
+        );
+        verify(metrics).recordEvidenceSummary(FraudCaseReadModelOutcome.ERROR);
+    }
+
+    @Test
+    void FraudCaseEvidenceSummaryMetricFailureDoesNotChangeReadOrAuditBehaviorTest() throws Exception {
+        when(service.summary("case-1")).thenReturn(response());
+        doThrow(new IllegalStateException("metrics backend unavailable"))
+                .when(metrics)
+                .recordEvidenceSummary(FraudCaseReadModelOutcome.AVAILABLE);
+
+        mockMvc.perform(get("/api/v1/fraud-cases/case-1/evidence-summary"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.caseId").value("case-1"))
+                .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("metrics backend unavailable"))));
+
+        verify(sensitiveReadAuditService).audit(
+                eq(ReadAccessEndpointCategory.FRAUD_CASE_EVIDENCE_SUMMARY),
+                eq(ReadAccessResourceType.FRAUD_CASE),
+                eq("case-1"),
+                eq(1),
                 any()
         );
     }
