@@ -6,6 +6,7 @@ import { DetailStateBanner } from "../components/DetailStateBanner.jsx";
 import { ErrorState } from "../components/ErrorState.jsx";
 import { FraudCaseEvidenceSummarySection } from "../components/FraudCaseEvidenceSummarySection.jsx";
 import { FraudCaseEvidenceTimelineSection } from "../components/FraudCaseEvidenceTimelineSection.jsx";
+import { FraudCaseReadSurfaceLayout } from "../components/FraudCaseReadSurfaceLayout.jsx";
 import { LoadingPanel } from "../components/LoadingPanel.jsx";
 import { RiskBadge } from "../components/RiskBadge.jsx";
 import { PermissionNotice } from "../components/SecurityStatePanels.jsx";
@@ -290,17 +291,16 @@ export function FraudCaseDetailsPage({
           </div>
 
           {caseId && (
-            <FraudCaseEvidenceSummarySection
-              caseId={caseId}
-              getFraudCaseEvidenceSummary={apiClient.getFraudCaseEvidenceSummary}
-            />
-          )}
-
-          {caseId && (
-            <FraudCaseEvidenceTimelineSection
-              caseId={caseId}
-              getFraudCaseEvidenceTimeline={apiClient.getFraudCaseEvidenceTimeline}
-            />
+            <FraudCaseReadSurfaceLayout>
+              <FraudCaseEvidenceSummarySection
+                caseId={caseId}
+                getFraudCaseEvidenceSummary={apiClient.getFraudCaseEvidenceSummary}
+              />
+              <FraudCaseEvidenceTimelineSection
+                caseId={caseId}
+                getFraudCaseEvidenceTimeline={apiClient.getFraudCaseEvidenceTimeline}
+              />
+            </FraudCaseReadSurfaceLayout>
           )}
 
           <section className="subPanel">
