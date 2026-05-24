@@ -7,6 +7,8 @@ Status: current product documentation index.
 | Document | Scope |
 | --- | --- |
 | [Fraud Case Management](fraud_case_management.md) | Current product-domain source of truth for fraud-case triage, lifecycle, local idempotency, audit, and non-claims. |
+| [Investigation Evidence Platform Roadmap Reconciliation](investigation_evidence_platform_roadmap.md) | Current FDP-81 roadmap reconciliation for the completed investigation evidence platform milestone and cleanup scope. |
+| [Investigation Evidence Platform Cleanup Inventory](investigation_evidence_platform_cleanup_inventory.md) | Current FDP-81 cleanup inventory and proof-first deletion governance for investigation evidence platform artifacts. |
 | [Fraud Case Evidence Summary](fraud_case_evidence_summary.md) | Current product-domain source of truth for the read-only fraud-case evidence summary projection and non-claims. |
 | [Fraud Case Read Model Observability Contract](fraud_case_read_model_observability_contract.md) | Current FDP-79 backend observability contract for bounded fraud-case evidence summary and timeline read metrics. |
 | [Fraud Case Read Surface Composition](fraud_case_read_surface_composition.md) | Current FDP-80 frontend composition contract for grouping read-only FraudCase investigation sections without behavior changes. |
