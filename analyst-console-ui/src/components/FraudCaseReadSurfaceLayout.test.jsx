@@ -20,6 +20,24 @@ describe("FraudCaseReadSurfaceLayout", () => {
     expect(within(layout).getByTestId("summary-child")).not.toBe(within(layout).getByTestId("timeline-child"));
   });
 
+  it("FraudCaseReadSurfaceLayoutAccessibilityLabelIsBoundedAndNotVisibleProductContentTest", () => {
+    render(
+      <FraudCaseReadSurfaceLayout>
+        <section><h2>Evidence summary</h2></section>
+      </FraudCaseReadSurfaceLayout>
+    );
+
+    const layout = screen.getByLabelText("Read-only investigation context");
+
+    expect(layout).toBe(screen.getByTestId("fraud-case-read-surface-layout"));
+    expect(layout.getAttribute("aria-label")).toBe("Read-only investigation context");
+    expect(layout.textContent).not.toContain("Read-only investigation context");
+    expect(within(layout).queryByRole("button")).not.toBeInTheDocument();
+    expect(within(layout).queryByRole("link")).not.toBeInTheDocument();
+    expect(within(layout).queryByRole("form")).not.toBeInTheDocument();
+    expect(within(layout).queryByRole("tab")).not.toBeInTheDocument();
+  });
+
   it("FraudCaseReadSurfaceLayoutDoesNotFetchTest", () => {
     const source = readLayoutSource();
 

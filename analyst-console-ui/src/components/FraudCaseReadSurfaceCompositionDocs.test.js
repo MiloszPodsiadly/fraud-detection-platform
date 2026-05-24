@@ -44,6 +44,33 @@ describe("FraudCaseReadSurfaceCompositionDocsContractTest", () => {
     expect(docs).toContain("no accordion/collapse behavior");
     expect(docs).toContain("no redesign");
   });
+
+  it("DocsMentionSourceGuardsAreTripwiresTest", () => {
+    const docs = compositionDocs();
+
+    expect(docs).toContain("governance tripwires");
+    expect(docs).toContain("not formal semantic static analysis");
+    expect(docs).toContain("false positives");
+    expect(docs).toContain("Runtime behavior tests");
+    expect(docs).toContain("composition-level behavior");
+  });
+
+  it("DocsMentionStateConsistencyIsSectionOwnedTest", () => {
+    const docs = compositionDocs();
+
+    expect(docs).toContain("state rendering");
+    expect(docs).toContain("remains owned by the individual section contracts");
+    expect(docs).toContain("FDP-80 only verifies composition-level behavior");
+    expect(docs).toContain("failure in one section does not hide the other");
+  });
+
+  it("DocsMentionAccessibilityLabelIsNotVisibleProductFieldTest", () => {
+    const docs = compositionDocs();
+
+    expect(docs).toContain("accessibility label");
+    expect(docs).toContain("not a visible product field");
+    expect(docs).toContain("does not add investigation data");
+  });
 });
 
 function compositionDocs() {
