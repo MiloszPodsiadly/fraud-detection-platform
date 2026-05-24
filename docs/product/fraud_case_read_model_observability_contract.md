@@ -33,6 +33,9 @@ Metric name:
 
 `fraud.fraud_case.read_model.read`
 
+FDP-79 uses one shared read-model metric name with a bounded endpoint label instead of separate metric names per
+endpoint. This keeps the contract consistent across FraudCase read models while preserving low cardinality.
+
 Allowed labels:
 
 | Label | Values |
@@ -41,6 +44,17 @@ Allowed labels:
 | `outcome` | `available`, `partial`, `legacy`, `truncated`, `empty`, `not_found`, `error` |
 
 No other labels are part of the FDP-79 contract.
+
+The active FDP-79 metric contract is the shared metric above. `fraud.fraud_case.evidence_summary.read` and
+`fraud.fraud_case.evidence_timeline.read` are not active metric names for this branch.
+
+## Authorization / forbidden outcomes
+
+FDP-79 does not record `forbidden` in the fraud-case read-model controller metric.
+
+Authorization failures are rejected before these controller methods execute. FDP-79 observes controller-level read-model outcomes only.
+
+Forbidden and security rejections remain owned by existing security and sensitive-read audit instrumentation. A future branch may add bounded security-denial telemetry, but it must not use caseId, path, principal, authority names, exception messages, or raw identifiers as labels.
 
 ## Outcome Semantics
 
