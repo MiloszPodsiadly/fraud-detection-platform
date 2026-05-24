@@ -964,10 +964,11 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
     }
 
     private void recordFraudCaseReadModel(String endpoint, FraudCaseReadModelOutcome outcome) {
+        FraudCaseReadModelOutcome safeOutcome = outcome == null ? FraudCaseReadModelOutcome.ERROR : outcome;
         counter(
                 "fraud.fraud_case.read_model.read",
                 "endpoint", endpoint,
-                "outcome", outcome.label()
+                "outcome", safeOutcome.label()
         ).increment();
     }
 

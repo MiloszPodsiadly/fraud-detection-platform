@@ -9,6 +9,7 @@ import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -24,6 +25,46 @@ class FraudCaseReadModelMetricsContractTest {
             "empty",
             "not_found",
             "error"
+    );
+    private static final Set<String> FORBIDDEN_TAG_KEY_TOKENS = Set.of(
+            "caseid",
+            "case_id",
+            "fraudcaseid",
+            "fraud_case_id",
+            "alertid",
+            "alert_id",
+            "customerid",
+            "customer_id",
+            "accountid",
+            "account_id",
+            "transactionid",
+            "transaction_id",
+            "correlationid",
+            "correlation_id",
+            "evidenceid",
+            "evidence_id",
+            "sourceeventid",
+            "source_event_id",
+            "path",
+            "uri",
+            "url",
+            "query",
+            "exception",
+            "exceptionclass",
+            "exception_class",
+            "message",
+            "principal",
+            "username",
+            "email",
+            "authority",
+            "status",
+            "reason",
+            "resultcount",
+            "result_count",
+            "evidencestatus",
+            "evidence_status",
+            "reasoncode",
+            "reason_code"
     );
 
     @Test
@@ -73,6 +114,73 @@ class FraudCaseReadModelMetricsContractTest {
                     assertThat(meter.getId().getTag("outcome"))
                             .isIn(ALLOWED_OUTCOMES);
                 });
+    }
+
+    @Test
+    void FraudCaseReadModelMetricsNullSummaryOutcomeFallsBackToErrorTest() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AlertServiceMetrics metrics = new AlertServiceMetrics(registry);
+
+        metrics.recordEvidenceSummary(null);
+
+        Meter meter = registry.get("fraud.fraud_case.read_model.read")
+                .tag("endpoint", "evidence_summary")
+                .tag("outcome", "error")
+                .meter();
+
+        assertThat(meter.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactlyInAnyOrder("endpoint", "outcome");
+        assertThat(registry.get("fraud.fraud_case.read_model.read")
+                .tag("endpoint", "evidence_summary")
+                .tag("outcome", "error")
+                .counter()
+                .count()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void FraudCaseReadModelMetricsNullTimelineOutcomeFallsBackToErrorTest() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AlertServiceMetrics metrics = new AlertServiceMetrics(registry);
+
+        metrics.recordEvidenceTimeline(null);
+
+        Meter meter = registry.get("fraud.fraud_case.read_model.read")
+                .tag("endpoint", "evidence_timeline")
+                .tag("outcome", "error")
+                .meter();
+
+        assertThat(meter.getId().getTags())
+                .extracting(Tag::getKey)
+                .containsExactlyInAnyOrder("endpoint", "outcome");
+        assertThat(registry.get("fraud.fraud_case.read_model.read")
+                .tag("endpoint", "evidence_timeline")
+                .tag("outcome", "error")
+                .counter()
+                .count()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void fraudCaseReadModelMetricDoesNotExposeForbiddenTagKeysTest() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AlertServiceMetrics metrics = new AlertServiceMetrics(registry);
+
+        for (FraudCaseReadModelOutcome outcome : FraudCaseReadModelOutcome.values()) {
+            metrics.recordEvidenceSummary(outcome);
+            metrics.recordEvidenceTimeline(outcome);
+        }
+
+        List<String> forbiddenTagKeys = registry.getMeters().stream()
+                .filter(meter -> meter.getId().getName().equals("fraud.fraud_case.read_model.read"))
+                .flatMap(meter -> meter.getId().getTags().stream())
+                .map(Tag::getKey)
+                .filter(this::isForbiddenTagKey)
+                .distinct()
+                .toList();
+
+        assertThat(forbiddenTagKeys)
+                .as("FraudCase read-model metrics must expose only endpoint + outcome tag keys")
+                .isEmpty();
     }
 
     @Test
@@ -131,5 +239,10 @@ class FraudCaseReadModelMetricsContractTest {
                 .doesNotContain("getClass().getSimpleName")
                 .doesNotContain("statusCode")
                 .doesNotContain("principal");
+    }
+
+    private boolean isForbiddenTagKey(String tagKey) {
+        String normalized = tagKey.toLowerCase();
+        return FORBIDDEN_TAG_KEY_TOKENS.stream().anyMatch(normalized::contains);
     }
 }

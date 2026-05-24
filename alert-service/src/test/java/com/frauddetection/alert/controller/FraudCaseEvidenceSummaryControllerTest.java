@@ -28,6 +28,7 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -120,7 +121,8 @@ class FraudCaseEvidenceSummaryControllerTest {
         when(service.summary("case-1")).thenThrow(new IllegalStateException("database unavailable"));
 
         mockMvc.perform(get("/api/v1/fraud-cases/case-1/evidence-summary"))
-                .andExpect(status().isInternalServerError());
+                .andExpect(status().isInternalServerError())
+                .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("database unavailable"))));
 
         verify(sensitiveReadAuditService).auditAttempt(
                 eq(ReadAccessEndpointCategory.FRAUD_CASE_EVIDENCE_SUMMARY),
@@ -130,6 +132,32 @@ class FraudCaseEvidenceSummaryControllerTest {
                 any()
         );
         verify(metrics).recordEvidenceSummary(FraudCaseReadModelOutcome.ERROR);
+    }
+
+    @Test
+    void FraudCaseEvidenceSummaryAuditFailureFollowsExistingSensitiveReadPolicyTest() throws Exception {
+        when(service.summary("case-1")).thenReturn(response());
+        doThrow(new IllegalStateException("audit backend unavailable")).when(sensitiveReadAuditService).audit(
+                eq(ReadAccessEndpointCategory.FRAUD_CASE_EVIDENCE_SUMMARY),
+                eq(ReadAccessResourceType.FRAUD_CASE),
+                eq("case-1"),
+                eq(1),
+                any()
+        );
+
+        mockMvc.perform(get("/api/v1/fraud-cases/case-1/evidence-summary"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("audit backend unavailable"))));
+
+        verify(sensitiveReadAuditService).auditAttempt(
+                eq(ReadAccessEndpointCategory.FRAUD_CASE_EVIDENCE_SUMMARY),
+                eq(ReadAccessResourceType.FRAUD_CASE),
+                eq("case-1"),
+                eq(ReadAccessAuditOutcome.FAILED),
+                any()
+        );
+        verify(metrics).recordEvidenceSummary(FraudCaseReadModelOutcome.ERROR);
+        verify(metrics, never()).recordEvidenceSummary(FraudCaseReadModelOutcome.AVAILABLE);
     }
 
     @Test
@@ -149,6 +177,48 @@ class FraudCaseEvidenceSummaryControllerTest {
                 eq(ReadAccessResourceType.FRAUD_CASE),
                 eq("case-1"),
                 eq(1),
+                any()
+        );
+    }
+
+    @Test
+    void FraudCaseEvidenceSummaryMetricFailureDoesNotAlterNotFoundBehaviorTest() throws Exception {
+        when(service.summary("missing-case")).thenThrow(new FraudCaseNotFoundException("missing-case"));
+        doThrow(new IllegalStateException("metrics backend unavailable"))
+                .when(metrics)
+                .recordEvidenceSummary(FraudCaseReadModelOutcome.NOT_FOUND);
+
+        mockMvc.perform(get("/api/v1/fraud-cases/missing-case/evidence-summary"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.details[0]").value("reason:FRAUD_CASE_NOT_FOUND"))
+                .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("metrics backend unavailable"))));
+
+        verify(sensitiveReadAuditService).auditAttempt(
+                eq(ReadAccessEndpointCategory.FRAUD_CASE_EVIDENCE_SUMMARY),
+                eq(ReadAccessResourceType.FRAUD_CASE),
+                eq("missing-case"),
+                eq(ReadAccessAuditOutcome.REJECTED),
+                any()
+        );
+    }
+
+    @Test
+    void FraudCaseEvidenceSummaryMetricFailureDoesNotMaskUnexpectedFailureTest() throws Exception {
+        when(service.summary("case-1")).thenThrow(new IllegalStateException("database unavailable"));
+        doThrow(new IllegalStateException("metrics backend unavailable"))
+                .when(metrics)
+                .recordEvidenceSummary(FraudCaseReadModelOutcome.ERROR);
+
+        mockMvc.perform(get("/api/v1/fraud-cases/case-1/evidence-summary"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("database unavailable"))))
+                .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("metrics backend unavailable"))));
+
+        verify(sensitiveReadAuditService).auditAttempt(
+                eq(ReadAccessEndpointCategory.FRAUD_CASE_EVIDENCE_SUMMARY),
+                eq(ReadAccessResourceType.FRAUD_CASE),
+                eq("case-1"),
+                eq(ReadAccessAuditOutcome.FAILED),
                 any()
         );
     }

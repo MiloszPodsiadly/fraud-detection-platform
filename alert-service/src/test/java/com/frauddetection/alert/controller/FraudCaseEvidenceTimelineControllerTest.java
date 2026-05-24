@@ -185,6 +185,48 @@ class FraudCaseEvidenceTimelineControllerTest {
         );
     }
 
+    @Test
+    void FraudCaseEvidenceTimelineMetricFailureDoesNotAlterNotFoundBehaviorTest() throws Exception {
+        when(service.timeline("missing-case")).thenThrow(new FraudCaseNotFoundException("missing-case"));
+        doThrow(new IllegalStateException("metrics backend unavailable"))
+                .when(metrics)
+                .recordEvidenceTimeline(FraudCaseReadModelOutcome.NOT_FOUND);
+
+        mockMvc.perform(get("/api/v1/fraud-cases/missing-case/evidence-timeline"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.details[0]").value("reason:FRAUD_CASE_NOT_FOUND"))
+                .andExpect(content().string(not(containsString("metrics backend unavailable"))));
+
+        verify(sensitiveReadAuditService).auditAttempt(
+                eq(ReadAccessEndpointCategory.FRAUD_CASE_EVIDENCE_TIMELINE),
+                eq(ReadAccessResourceType.FRAUD_CASE),
+                eq("missing-case"),
+                eq(ReadAccessAuditOutcome.REJECTED),
+                any()
+        );
+    }
+
+    @Test
+    void FraudCaseEvidenceTimelineMetricFailureDoesNotMaskUnexpectedFailureTest() throws Exception {
+        when(service.timeline("case-1")).thenThrow(new IllegalStateException("database unavailable"));
+        doThrow(new IllegalStateException("metrics backend unavailable"))
+                .when(metrics)
+                .recordEvidenceTimeline(FraudCaseReadModelOutcome.ERROR);
+
+        mockMvc.perform(get("/api/v1/fraud-cases/case-1/evidence-timeline"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(content().string(not(containsString("database unavailable"))))
+                .andExpect(content().string(not(containsString("metrics backend unavailable"))));
+
+        verify(sensitiveReadAuditService).auditAttempt(
+                eq(ReadAccessEndpointCategory.FRAUD_CASE_EVIDENCE_TIMELINE),
+                eq(ReadAccessResourceType.FRAUD_CASE),
+                eq("case-1"),
+                eq(ReadAccessAuditOutcome.FAILED),
+                any()
+        );
+    }
+
     private FraudCaseEvidenceTimelineResponse response() {
         return new FraudCaseEvidenceTimelineResponse(
                 "case-1",
