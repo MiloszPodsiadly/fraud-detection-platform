@@ -5,6 +5,7 @@ import { DetailHeader } from "../components/DetailHeader.jsx";
 import { DetailStateBanner } from "../components/DetailStateBanner.jsx";
 import { ErrorState } from "../components/ErrorState.jsx";
 import { FraudCaseEvidenceSummarySection } from "../components/FraudCaseEvidenceSummarySection.jsx";
+import { FraudCaseEvidenceTimelineSection } from "../components/FraudCaseEvidenceTimelineSection.jsx";
 import { LoadingPanel } from "../components/LoadingPanel.jsx";
 import { RiskBadge } from "../components/RiskBadge.jsx";
 import { PermissionNotice } from "../components/SecurityStatePanels.jsx";
@@ -292,6 +293,13 @@ export function FraudCaseDetailsPage({
             <FraudCaseEvidenceSummarySection
               caseId={caseId}
               getFraudCaseEvidenceSummary={apiClient.getFraudCaseEvidenceSummary}
+            />
+          )}
+
+          {caseId && (
+            <FraudCaseEvidenceTimelineSection
+              caseId={caseId}
+              getFraudCaseEvidenceTimeline={apiClient.getFraudCaseEvidenceTimeline}
             />
           )}
 

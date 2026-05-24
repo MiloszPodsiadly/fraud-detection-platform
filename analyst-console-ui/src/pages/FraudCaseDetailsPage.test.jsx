@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { availableEvidenceSummary } from "../test-utils/evidenceSummaryFixtures.js";
+import { availableTimeline } from "../test-utils/fraudCaseTimelineFixtures.js";
 import { FraudCaseDetailsPage } from "./FraudCaseDetailsPage.jsx";
 
 describe("FraudCaseDetailsPage", () => {
@@ -256,7 +257,7 @@ describe("FraudCaseDetailsPage", () => {
 
     expect(await screen.findByText("Open case")).toBeInTheDocument();
     expect(await screen.findByText("Evidence summary")).toBeInTheDocument();
-    expect(screen.getByText("Evidence status")).toBeInTheDocument();
+    expect(screen.getAllByText("Evidence status").length).toBeGreaterThan(0);
     expect(screen.getAllByText("AVAILABLE").length).toBeGreaterThan(0);
     expect(apiClient.getFraudCaseEvidenceSummary).toHaveBeenCalledWith("case-1", expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
@@ -328,11 +329,103 @@ describe("FraudCaseDetailsPage", () => {
     expect(apiClient.listSuspiciousTransactions).not.toHaveBeenCalled();
     expect(apiClient.getSuspiciousTransactionLinkedAlertContext).not.toHaveBeenCalled();
   });
+
+  it("FraudCaseDetailsPageFetchesEvidenceTimelineWithCaseIdOnlyTest", async () => {
+    const apiClient = {
+      getFraudCase: vi.fn().mockResolvedValue(fraudCase("case-1", "Open case")),
+      getFraudCaseEvidenceTimeline: vi.fn().mockResolvedValue(availableTimeline()),
+      updateFraudCase: vi.fn()
+    };
+
+    render(page({ caseId: "case-1", apiClient }));
+
+    expect(await screen.findByText("Evidence timeline")).toBeInTheDocument();
+    await waitFor(() => expect(apiClient.getFraudCaseEvidenceTimeline).toHaveBeenCalledWith("case-1", expect.objectContaining({ signal: expect.any(AbortSignal) })));
+    expect(JSON.stringify(apiClient.getFraudCaseEvidenceTimeline.mock.calls[0])).not.toContain("alert");
+    expect(JSON.stringify(apiClient.getFraudCaseEvidenceTimeline.mock.calls[0])).not.toContain("customer");
+    expect(JSON.stringify(apiClient.getFraudCaseEvidenceTimeline.mock.calls[0])).not.toContain("transaction");
+  });
+
+  it("FraudCaseDetailsPageDoesNotPassFullApiClientToTimelineSectionTest", async () => {
+    const apiClient = {
+      getFraudCase: vi.fn().mockResolvedValue(fraudCase("case-1", "Open case")),
+      getFraudCaseEvidenceTimeline: vi.fn().mockResolvedValue(availableTimeline()),
+      updateFraudCase: vi.fn(),
+      getAlert: vi.fn(),
+      getFraudCaseAudit: vi.fn(),
+      getFraudCaseEvidenceSummary: vi.fn().mockResolvedValue(availableEvidenceSummary()),
+      getSuspiciousTransaction: vi.fn(),
+      submitAnalystDecision: vi.fn()
+    };
+
+    render(page({ caseId: "case-1", apiClient }));
+
+    expect(await screen.findByText("Evidence timeline")).toBeInTheDocument();
+    await waitFor(() => expect(apiClient.getFraudCaseEvidenceTimeline).toHaveBeenCalledTimes(1));
+    expect(apiClient.getFraudCaseEvidenceTimeline.mock.calls[0][1]).not.toHaveProperty("apiClient");
+    expect(apiClient.getFraudCaseEvidenceTimeline.mock.calls[0][1]).not.toHaveProperty("getAlert");
+    expect(apiClient.getFraudCaseEvidenceTimeline.mock.calls[0][1]).not.toHaveProperty("submitAnalystDecision");
+  });
+
+  it("FraudCaseDetailsPageTimelineFailureDoesNotBreakCaseDetailTest", async () => {
+    const apiClient = {
+      getFraudCase: vi.fn().mockResolvedValue(fraudCase("case-1", "Open case")),
+      getFraudCaseEvidenceTimeline: vi.fn().mockRejectedValue(new Error("raw timeline failure")),
+      updateFraudCase: vi.fn()
+    };
+
+    render(page({ caseId: "case-1", apiClient }));
+
+    expect(await screen.findByText("Open case")).toBeInTheDocument();
+    expect(await screen.findByText("Evidence timeline unavailable.")).toBeInTheDocument();
+    expect(screen.queryByText("raw timeline failure")).not.toBeInTheDocument();
+  });
+
+  it("FraudCaseDetailsPageDoesNotCallAlertOrEvidenceDrilldownFromTimelineTest", async () => {
+    const apiClient = {
+      getFraudCase: vi.fn().mockResolvedValue(fraudCase("case-1", "Open case")),
+      getFraudCaseEvidenceTimeline: vi.fn().mockResolvedValue(availableTimeline()),
+      getFraudCaseEvidenceSummary: vi.fn().mockResolvedValue(availableEvidenceSummary()),
+      updateFraudCase: vi.fn(),
+      getAlert: vi.fn(),
+      getFraudCaseAudit: vi.fn(),
+      getSuspiciousTransaction: vi.fn(),
+      submitAnalystDecision: vi.fn()
+    };
+
+    render(page({ caseId: "case-1", apiClient }));
+
+    expect(await screen.findByText("Evidence timeline")).toBeInTheDocument();
+    expect(apiClient.getAlert).not.toHaveBeenCalled();
+    expect(apiClient.getFraudCaseAudit).not.toHaveBeenCalled();
+    expect(apiClient.getSuspiciousTransaction).not.toHaveBeenCalled();
+    expect(apiClient.updateFraudCase).not.toHaveBeenCalled();
+    expect(apiClient.submitAnalystDecision).not.toHaveBeenCalled();
+  });
+
+  it("FraudCaseDetailsPageDoesNotCallTimelineWithAlertIdTest", async () => {
+    const apiClient = {
+      getFraudCase: vi.fn().mockResolvedValue({
+        ...fraudCase("case-1", "Open case"),
+        linkedAlertId: "alert-secret",
+        alertId: "alert-secret"
+      }),
+      getFraudCaseEvidenceTimeline: vi.fn().mockResolvedValue(availableTimeline()),
+      updateFraudCase: vi.fn()
+    };
+
+    render(page({ caseId: "case-1", apiClient }));
+
+    expect(await screen.findByText("Evidence timeline")).toBeInTheDocument();
+    await waitFor(() => expect(apiClient.getFraudCaseEvidenceTimeline).toHaveBeenCalledWith("case-1", expect.objectContaining({ signal: expect.any(AbortSignal) })));
+    expect(JSON.stringify(apiClient.getFraudCaseEvidenceTimeline.mock.calls[0])).not.toContain("alert-secret");
+  });
 });
 
 function page({ caseId, apiClient, onCaseUpdated = vi.fn(), canReadFraudCase = true }) {
   const client = {
     getFraudCaseEvidenceSummary: vi.fn().mockResolvedValue(availableEvidenceSummary()),
+    getFraudCaseEvidenceTimeline: vi.fn().mockResolvedValue(availableTimeline()),
     ...apiClient
   };
   return (
