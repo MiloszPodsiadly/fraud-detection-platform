@@ -56,6 +56,42 @@ describe("FraudCaseEvidenceTimelineSection", () => {
     expect(within(section).getByText("Read-only linked alert context derived from existing alert read data.")).toBeInTheDocument();
   });
 
+  it("FraudCaseEvidenceTimelineSectionUsesBackendLinkedAlertContextEventTypeTest", async () => {
+    expect(normalizeTimelineEventType("LINKED_ALERT_CONTEXT")).toBe("LINKED_ALERT_CONTEXT");
+    expect(timelineEventTitle("LINKED_ALERT_CONTEXT")).toBe("Linked alert context");
+    expect(timelineEventDescription("LINKED_ALERT_CONTEXT")).toBe("Read-only linked alert context derived from existing alert read data.");
+    expect(normalizeTimelineEventType("FRAUD_ALERT_LINKED")).toBe("UNKNOWN");
+
+    renderSection({
+      timeline: {
+        ...emptyTimeline(),
+        events: [{
+          eventKey: "linked-alert-context",
+          eventType: "LINKED_ALERT_CONTEXT",
+          occurredAt: "2026-05-23T10:00:00Z",
+          approximateTime: true,
+          source: "ALERT_SERVICE",
+          evidenceStatus: "AVAILABLE",
+          linkedEntityType: "FRAUD_ALERT",
+          title: "raw backend title should not render",
+          description: "raw backend description should not render"
+        }]
+      }
+    });
+
+    const section = await findSection();
+    const text = section.textContent;
+
+    expect(within(section).getByText("Linked alert context")).toBeInTheDocument();
+    expect(within(section).getByText("Read-only linked alert context derived from existing alert read data.")).toBeInTheDocument();
+    expect(within(section).getByText("LINKED_ALERT_CONTEXT")).toBeInTheDocument();
+    expect(text).not.toContain("UNKNOWN");
+    expect(text).not.toContain("raw backend title should not render");
+    expect(text).not.toContain("raw backend description should not render");
+    expect(text).not.toContain("FRAUD_ALERT_LINKED");
+    expect(text.toLowerCase()).not.toContain("linked at");
+  });
+
   it("FraudCaseEvidenceTimelineSectionRendersEventsInBackendResponseOrderTest", async () => {
     renderSection({ timeline: availableTimeline() });
 
@@ -413,6 +449,7 @@ describe("FraudCaseEvidenceTimelineSection", () => {
 describe("fraudCaseTimelineDisplay", () => {
   it("normalizes only backend allowlisted timeline codes", () => {
     expect(normalizeTimelineEventType("LINKED_ALERT_CONTEXT")).toBe("LINKED_ALERT_CONTEXT");
+    expect(normalizeTimelineEventType("FRAUD_ALERT_LINKED")).toBe("UNKNOWN");
     expect(normalizeTimelineEventType("CORRELATION_ID_ABC123")).toBe("UNKNOWN");
     expect(normalizeTimelineSource("FRAUD_SCORING_SERVICE")).toBe("FRAUD_SCORING_SERVICE");
     expect(normalizeTimelineSource("SOURCE_EVENT_20260523_ABC")).toBe("UNKNOWN");

@@ -78,6 +78,11 @@ event-type allowlist matches the FDP-76 backend enum: `FRAUD_CASE_CREATED`, `LIN
 `ALERT_EVIDENCE_SNAPSHOT_AVAILABLE`, `ALERT_EVIDENCE_SNAPSHOT_PARTIAL`,
 `ALERT_EVIDENCE_SNAPSHOT_UNAVAILABLE`, and `LEGACY_CONTEXT`.
 
+FDP-77 follows the FDP-76 backend contract. The linked-alert timeline event type is `LINKED_ALERT_CONTEXT`.
+`FRAUD_ALERT_LINKED` is intentionally not used by the current backend contract and must remain unknown unless a future
+dedicated contract-change branch updates the backend enum, backend tests, frontend allowlist, fixtures, and docs
+together.
+
 Unknown, malformed, or ID-shaped values render as `UNKNOWN` or bounded fallback copy. Uppercase raw-ID-shaped values
 such as `CUSTOMER_123456`, `ALERT_SECRET_123`, `TXN_999999`, `CORRELATION_ID_ABC123`,
 `FRAUD_ALERT:ALERT_123`, and `SOURCE_EVENT_20260523_ABC` must not render. Invalid or missing `occurredAt` renders

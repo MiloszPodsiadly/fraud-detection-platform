@@ -56,6 +56,19 @@ describe("Fraud Case Evidence Timeline UI docs", () => {
     expect(docs).toContain("Uppercase raw-ID-shaped values");
   });
 
+  it("FraudCaseEvidenceTimelineEventTypeContractGuardTest", () => {
+    const docs = timelineDocs();
+    const fixtures = timelineFixtures();
+
+    expect(docs).toContain("FDP-77 follows the FDP-76 backend contract");
+    expect(docs).toContain("linked-alert timeline event type is `LINKED_ALERT_CONTEXT`");
+    expect(docs).toContain("`FRAUD_ALERT_LINKED` is intentionally not used by the current backend contract");
+    expect(docs).not.toContain("FRAUD_ALERT_LINKED is the backend event type");
+    expect(docs).not.toContain("FRAUD_ALERT_LINKED is rendered as");
+    expect(fixtures).toContain('eventType: "LINKED_ALERT_CONTEXT"');
+    expect(fixtures).not.toContain('eventType: "FRAUD_ALERT_LINKED"');
+  });
+
   it("DocsMentionTimelineUiEmptyStateFlagsAndRenderCapTest", () => {
     const docs = timelineDocs();
 
@@ -67,4 +80,8 @@ describe("Fraud Case Evidence Timeline UI docs", () => {
 
 function timelineDocs() {
   return readFileSync(join(process.cwd(), "../docs/product/fraud_case_evidence_timeline_ui.md"), "utf8");
+}
+
+function timelineFixtures() {
+  return readFileSync(join(process.cwd(), "src/test-utils/fraudCaseTimelineFixtures.js"), "utf8");
 }
