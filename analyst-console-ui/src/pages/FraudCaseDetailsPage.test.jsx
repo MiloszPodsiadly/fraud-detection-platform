@@ -1,4 +1,6 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { availableEvidenceSummary } from "../test-utils/evidenceSummaryFixtures.js";
 import { availableTimeline } from "../test-utils/fraudCaseTimelineFixtures.js";
@@ -420,10 +422,170 @@ describe("FraudCaseDetailsPage", () => {
     await waitFor(() => expect(apiClient.getFraudCaseEvidenceTimeline).toHaveBeenCalledWith("case-1", expect.objectContaining({ signal: expect.any(AbortSignal) })));
     expect(JSON.stringify(apiClient.getFraudCaseEvidenceTimeline.mock.calls[0])).not.toContain("alert-secret");
   });
+
+  it("FraudCaseReadSurfaceCompositionRendersSummaryAndTimelineAsSeparateSectionsTest", async () => {
+    render(page({ caseId: "case-1" }));
+
+    expect(await screen.findByText("Open case")).toBeInTheDocument();
+    const readSurface = screen.getByTestId("fraud-case-read-surface-layout");
+    const summary = within(readSurface).getByTestId("fraud-case-evidence-summary-section");
+    const timeline = within(readSurface).getByTestId("fraud-case-evidence-timeline-section");
+
+    expect(summary).not.toBe(timeline);
+    expect(within(summary).getByRole("heading", { name: "Evidence summary" })).toBeInTheDocument();
+    expect(within(timeline).getByRole("heading", { name: "Evidence timeline" })).toBeInTheDocument();
+  });
+
+  it("FraudCaseReadSurfaceCompositionKeepsDecisionRailOutsideReadSurfaceTest", async () => {
+    render(page({ caseId: "case-1" }));
+
+    expect(await screen.findByText("Open case")).toBeInTheDocument();
+    const readSurface = screen.getByTestId("fraud-case-read-surface-layout");
+
+    expect(screen.getByRole("heading", { name: "Update case" })).toBeInTheDocument();
+    expect(within(readSurface).queryByRole("heading", { name: "Update case" })).not.toBeInTheDocument();
+    expect(within(readSurface).queryByRole("button", { name: "Save case decision" })).not.toBeInTheDocument();
+  });
+
+  it("FraudCaseReadSurfaceCompositionDoesNotCreateCombinedInvestigationPanelTest", async () => {
+    render(page({ caseId: "case-1" }));
+
+    expect(await screen.findByText("Open case")).toBeInTheDocument();
+    expect(screen.queryByTestId("investigation-panel")).not.toBeInTheDocument();
+    expect(readPageSource()).not.toContain("InvestigationPanel");
+    expect(readPageSource()).not.toContain("EvidenceWorkspace");
+  });
+
+  it("FraudCaseReadSurfaceCompositionDoesNotMoveWorkflowControlsIntoReadSurfaceTest", async () => {
+    render(page({ caseId: "case-1" }));
+
+    expect(await screen.findByText("Open case")).toBeInTheDocument();
+    const readSurface = screen.getByTestId("fraud-case-read-surface-layout");
+
+    for (const label of ["Save case decision", "Analyst", "Reason", "Tags"]) {
+      expect(within(readSurface).queryByLabelText(label)).not.toBeInTheDocument();
+      expect(within(readSurface).queryByText(label)).not.toBeInTheDocument();
+    }
+  });
+
+  it("FraudCaseReadSurfaceCompositionPreservesSectionHelperTextsTest", async () => {
+    render(page({ caseId: "case-1" }));
+
+    expect(await screen.findByText("Open case")).toBeInTheDocument();
+    const readSurface = screen.getByTestId("fraud-case-read-surface-layout");
+
+    expect(within(readSurface).getByText("Evidence summary is read-only investigation context. It is not confirmed fraud, not an analyst decision, not a final outcome, and not legal proof.")).toBeInTheDocument();
+    expect(within(readSurface).getByText("Evidence timeline is read-only investigation chronology. It is not an audit trail, not complete case history, not confirmed fraud, not an analyst decision, not a final outcome, and not legal proof.")).toBeInTheDocument();
+  });
+
+  it("FraudCaseReadSurfaceCompositionDoesNotRenderNewFieldsTest", async () => {
+    render(page({ caseId: "case-1" }));
+
+    expect(await screen.findByText("Open case")).toBeInTheDocument();
+    const readSurface = screen.getByTestId("fraud-case-read-surface-layout");
+
+    expect(within(readSurface).queryByText("Read-only investigation context")).not.toBeInTheDocument();
+    expect(within(readSurface).queryByText("Investigation panel")).not.toBeInTheDocument();
+    expect(within(readSurface).queryByText("Case workflow")).not.toBeInTheDocument();
+  });
+
+  it("FraudCaseReadSurfaceCompositionPassesNarrowSummaryFetchFunctionOnlyTest", async () => {
+    const apiClient = {
+      getFraudCase: vi.fn().mockResolvedValue(fraudCase("case-1", "Open case")),
+      getFraudCaseEvidenceSummary: vi.fn().mockResolvedValue(availableEvidenceSummary()),
+      getFraudCaseEvidenceTimeline: vi.fn().mockResolvedValue(availableTimeline()),
+      updateFraudCase: vi.fn()
+    };
+
+    render(page({ caseId: "case-1", apiClient }));
+
+    expect(await screen.findByText("Evidence summary")).toBeInTheDocument();
+    expect(apiClient.getFraudCaseEvidenceSummary).toHaveBeenCalledWith("case-1", expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(apiClient.getFraudCaseEvidenceSummary.mock.calls[0][1]).not.toHaveProperty("apiClient");
+    expect(apiClient.getFraudCaseEvidenceSummary.mock.calls[0][1]).not.toHaveProperty("updateFraudCase");
+  });
+
+  it("FraudCaseReadSurfaceCompositionPassesNarrowTimelineFetchFunctionOnlyTest", async () => {
+    const apiClient = {
+      getFraudCase: vi.fn().mockResolvedValue(fraudCase("case-1", "Open case")),
+      getFraudCaseEvidenceSummary: vi.fn().mockResolvedValue(availableEvidenceSummary()),
+      getFraudCaseEvidenceTimeline: vi.fn().mockResolvedValue(availableTimeline()),
+      updateFraudCase: vi.fn()
+    };
+
+    render(page({ caseId: "case-1", apiClient }));
+
+    expect(await screen.findByText("Evidence timeline")).toBeInTheDocument();
+    expect(apiClient.getFraudCaseEvidenceTimeline).toHaveBeenCalledWith("case-1", expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(apiClient.getFraudCaseEvidenceTimeline.mock.calls[0][1]).not.toHaveProperty("apiClient");
+    expect(apiClient.getFraudCaseEvidenceTimeline.mock.calls[0][1]).not.toHaveProperty("updateFraudCase");
+  });
+
+  it("FraudCaseReadSurfaceCompositionDoesNotPassFullApiClientTest", () => {
+    const source = readPageSource();
+
+    expect(source).toContain("getFraudCaseEvidenceSummary={apiClient.getFraudCaseEvidenceSummary}");
+    expect(source).toContain("getFraudCaseEvidenceTimeline={apiClient.getFraudCaseEvidenceTimeline}");
+    expect(source).not.toContain("apiClient={apiClient}");
+  });
+
+  it("FraudCaseReadSurfaceCompositionDoesNotPassWorkflowHandlersTest", () => {
+    const readSurfaceSource = readPageSource().slice(
+      readPageSource().indexOf("<FraudCaseReadSurfaceLayout>"),
+      readPageSource().indexOf("</FraudCaseReadSurfaceLayout>")
+    );
+
+    for (const forbidden of [
+      "onCaseUpdated",
+      "submitDecision",
+      "updateFraudCase",
+      "closeCase",
+      "reopenCase",
+      "as" + "signCase",
+      "cl" + "aimCase"
+    ]) {
+      expect(readSurfaceSource).not.toContain(forbidden);
+    }
+  });
+
+  it("FraudCaseReadSurfaceCompositionSummaryFailureDoesNotHideTimelineTest", async () => {
+    const apiClient = {
+      getFraudCase: vi.fn().mockResolvedValue(fraudCase("case-1", "Open case")),
+      getFraudCaseEvidenceSummary: vi.fn().mockRejectedValue(new Error("summary raw failure")),
+      getFraudCaseEvidenceTimeline: vi.fn().mockResolvedValue(availableTimeline()),
+      updateFraudCase: vi.fn()
+    };
+
+    render(page({ caseId: "case-1", apiClient }));
+
+    expect(await screen.findByText("Evidence summary unavailable.")).toBeInTheDocument();
+    expect(await screen.findByText("Evidence timeline")).toBeInTheDocument();
+    expect(screen.getByText("Linked alert context")).toBeInTheDocument();
+    expect(screen.queryByText("summary raw failure")).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("fraud-case-read-surface-layout")).queryByRole("button", { name: "Save case decision" })).not.toBeInTheDocument();
+  });
+
+  it("FraudCaseReadSurfaceCompositionTimelineFailureDoesNotHideSummaryTest", async () => {
+    const apiClient = {
+      getFraudCase: vi.fn().mockResolvedValue(fraudCase("case-1", "Open case")),
+      getFraudCaseEvidenceSummary: vi.fn().mockResolvedValue(availableEvidenceSummary()),
+      getFraudCaseEvidenceTimeline: vi.fn().mockRejectedValue(new Error("timeline raw failure")),
+      updateFraudCase: vi.fn()
+    };
+
+    render(page({ caseId: "case-1", apiClient }));
+
+    expect(await screen.findByText("Evidence timeline unavailable.")).toBeInTheDocument();
+    expect(await screen.findByText("Evidence summary")).toBeInTheDocument();
+    expect(screen.getAllByText("Evidence status").length).toBeGreaterThan(0);
+    expect(screen.queryByText("timeline raw failure")).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("fraud-case-read-surface-layout")).queryByRole("button", { name: "Save case decision" })).not.toBeInTheDocument();
+  });
 });
 
 function page({ caseId, apiClient, onCaseUpdated = vi.fn(), canReadFraudCase = true }) {
   const client = {
+    getFraudCase: vi.fn().mockResolvedValue(fraudCase(caseId, "Open case")),
     getFraudCaseEvidenceSummary: vi.fn().mockResolvedValue(availableEvidenceSummary()),
     getFraudCaseEvidenceTimeline: vi.fn().mockResolvedValue(availableTimeline()),
     ...apiClient
@@ -471,4 +633,8 @@ function deferred() {
     reject = promiseReject;
   });
   return { promise, resolve, reject };
+}
+
+function readPageSource() {
+  return readFileSync(resolve(process.cwd(), "src/pages/FraudCaseDetailsPage.jsx"), "utf8");
 }
