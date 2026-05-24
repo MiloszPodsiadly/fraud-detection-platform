@@ -49,6 +49,65 @@ class InvestigationEvidencePlatformCleanupDocsTest {
     }
 
     @Test
+    void CleanupInventoryContainsCandidateReviewTableTest() throws Exception {
+        String docs = inventoryDocs();
+
+        assertThat(docs)
+                .contains("Candidate Review")
+                .contains("Path/Symbol")
+                .contains("Classification")
+                .contains("Search proof")
+                .contains("Import/reference proof")
+                .contains("Current owner/replacement")
+                .contains("Decision");
+    }
+
+    @Test
+    void CleanupInventoryCandidateReviewAllowsManualReviewRequiredTest() throws Exception {
+        String docs = inventoryDocs();
+
+        assertThat(docs)
+                .contains("Manual review required")
+                .contains("Weak proof")
+                .contains("active references")
+                .contains("stronger replacement");
+    }
+
+    @Test
+    void CleanupInventoryCandidateReviewProtectsActiveLegacyStatesTest() throws Exception {
+        String docs = inventoryDocs();
+
+        assertThat(docs)
+                .contains("Evidence Summary `LEGACY`")
+                .contains("Evidence Timeline `LEGACY_CONTEXT`")
+                .contains("Do not delete")
+                .contains("Domain compatibility")
+                .contains("Current compatibility state");
+    }
+
+    @Test
+    void CleanupInventoryCandidateReviewProtectsRegressionGuardsTest() throws Exception {
+        String docs = inventoryDocs();
+
+        assertThat(docs)
+                .contains("Negative regression guard")
+                .contains("source guards protecting raw payload")
+                .contains("source guards protecting raw identifier")
+                .contains("malicious fixtures used by safety tests")
+                .contains("stronger replacement test");
+    }
+
+    @Test
+    void CleanupInventoryCandidateReviewDoesNotApproveDeleteByNameTest() throws Exception {
+        String docs = inventoryDocs();
+
+        assertThat(docs)
+                .contains("No delete by name only")
+                .contains("Legacy does not mean unused")
+                .contains("name-based cleanup is not enough");
+    }
+
+    @Test
     void CleanupInventoryNoDeleteWithoutProofTest() throws Exception {
         String docs = inventoryDocs();
 
@@ -110,7 +169,7 @@ class InvestigationEvidencePlatformCleanupDocsTest {
         assertThat(docs)
                 .contains("| Path | Type | Why unused | Search proof | Import/reference proof | Replacement/current owner | Risk | Tests proving no behavior change | Delete in FDP-81 |")
                 .contains("No deletions approved in FDP-81 initial cleanup pass")
-                .contains("There are no confirmed unused removal candidates in the FDP-81 initial cleanup pass");
+                .contains("There are no confirmed unused removal candidates in the FDP-81 Stage C discovery pass");
     }
 
     @Test
