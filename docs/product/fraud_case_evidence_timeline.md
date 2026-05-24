@@ -159,9 +159,10 @@ Successful reads are audited as:
 Missing fraud cases are audited as `REJECTED`. Unexpected runtime failures are audited as `FAILED`.
 Sensitive-read audit failures follow the existing sensitive-read endpoint policy and fail the read instead of being silently swallowed.
 
-FDP-76 does not add a dedicated Micrometer metric. Audit category, audit outcome, and result count are the observability
-surface for this branch. A bounded operational metric can be added later in a separate observability branch if needed;
-future metrics must not use raw IDs in labels.
+FDP-76 did not add a dedicated Micrometer metric. FDP-79 adds a bounded operational read metric for this endpoint.
+The metric records only `endpoint=evidence_timeline` and a bounded `outcome` label. It does not include raw identifiers,
+request data, result counts, event counts, reason codes, evidence statuses, principal data, or exception details. See
+[Fraud Case Read Model Observability Contract](fraud_case_read_model_observability_contract.md).
 
 Linked alert IDs, transaction IDs, customer IDs, account IDs, correlation IDs, source event IDs, evidence IDs, score
 decision IDs, raw payloads, and raw exception messages are not used as audit resource IDs.

@@ -101,7 +101,9 @@ class FraudCaseEvidenceTimelineDocsContractTest {
         assertThat(docs)
                 .contains("`evidenceStatus=ERROR`")
                 .contains("`ALERT_EVIDENCE_SNAPSHOT_PARTIAL`")
-                .contains("does not add a dedicated Micrometer metric")
+                .contains("FDP-76 did not add a dedicated Micrometer metric")
+                .contains("FDP-79 adds a bounded operational read metric")
+                .contains("endpoint=evidence_timeline")
                 .contains("sensitive-read audit");
     }
 
