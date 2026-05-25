@@ -8,8 +8,10 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.RecordComponent;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -90,18 +92,54 @@ class ScoringContextFactoryTest {
     }
 
     @Test
-    void doesNotMutateFeatureSnapshot() {
+    void rejectsRequestWithNullFeatureSnapshotValue() {
         TransactionEnrichedEvent event = TransactionFixtures.enrichedTransaction().build();
         Map<String, Object> snapshot = new HashMap<>();
-        snapshot.put("velocity", 3);
+        snapshot.put("velocity", null);
+
+        assertThatThrownBy(() -> factory.from(
+                new FraudScoringRequest(event, snapshot),
+                ScoringMode.RULE_BASED,
+                receivedAt
+        ))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("null values");
+    }
+
+    @Test
+    void rejectsRequestWithNullFeatureSnapshotKey() {
+        TransactionEnrichedEvent event = TransactionFixtures.enrichedTransaction().build();
+        Map<String, Object> snapshot = new HashMap<>();
+        snapshot.put(null, 3);
+
+        assertThatThrownBy(() -> factory.from(
+                new FraudScoringRequest(event, snapshot),
+                ScoringMode.RULE_BASED,
+                receivedAt
+        ))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("null keys");
+    }
+
+    @Test
+    void documentsTopLevelCopyOnly() {
+        TransactionEnrichedEvent event = TransactionFixtures.enrichedTransaction().build();
+        List<String> nestedSignals = new ArrayList<>(List.of("velocity"));
+        Map<String, Object> snapshot = new HashMap<>();
+        snapshot.put("signals", nestedSignals);
 
         ScoringContext context = factory.from(
                 new FraudScoringRequest(event, snapshot),
                 ScoringMode.RULE_BASED,
                 receivedAt
         );
-        snapshot.put("velocity", 99);
+        snapshot.put("lateAddition", "ignored");
+        nestedSignals.add("new-signal");
 
-        assertThat(context.featureSnapshot()).containsEntry("velocity", 3);
+        assertThat(context.featureSnapshot()).doesNotContainKey("lateAddition");
+        assertThatThrownBy(() -> context.featureSnapshot().put("score", 1))
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThat(context.featureSnapshot().get("signals")).isSameAs(nestedSignals);
+        assertThat(nestedSignals).contains("new-signal");
     }
 }
