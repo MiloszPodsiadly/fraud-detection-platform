@@ -48,7 +48,7 @@ class FraudCaseCleanupDocumentationTest {
                 .contains("returned `410 Gone` with `code:LEGACY_FRAUD_CASE_ROUTE_REMOVED`")
                 .contains("FDP-81 removes the unversioned compatibility handler")
                 .contains("must not rely on `410 Gone`")
-                .contains("normal\nunknown-route and security fallback behavior");
+                .contains("unknown-route and security fallback behavior");
         assertThat(releaseNote).doesNotContain("current `/api/fraud-cases/**` still returns `410 Gone`");
     }
 
