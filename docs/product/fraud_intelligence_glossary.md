@@ -12,8 +12,11 @@ runtime integration in this branch.
 | Engine | A bounded source of fraud-risk context that can produce an engine result. |
 | Engine result | A typed `FraudEngineResult` describing one engine's status, score context, reasons, and bounded evidence; it is not a final banking decision. |
 | Engine type | The stable category of an engine, such as rules, ML model, velocity, device risk, merchant risk, or graph risk. |
-| Engine status | Availability or fallback state reported by an engine, for example `AVAILABLE`, `UNAVAILABLE`, `DEGRADED`, or `TIMEOUT`. |
+| Engine status | A controlled availability or fallback state: `AVAILABLE`, `UNAVAILABLE`, `DEGRADED`, `TIMEOUT`, `FALLBACK_USED`, or `SKIPPED`; each state constrains score, risk level, confidence, and fallback reason. |
 | Engine confidence | Bounded context about an engine result: `LOW`, `MEDIUM`, `HIGH`, or `UNKNOWN`; it is not a payment verdict. |
+| Reason code | A bounded machine-readable identifier for investigation context; it is not human prose and never carries customer identifiers, payloads, exception text, account/card data, or secrets. |
+| Contribution | A bounded explanation entry with controlled direction (`INCREASES_RISK`, `DECREASES_RISK`, `NEUTRAL`, or `UNKNOWN`) and a safe summary value. |
+| Evidence | A bounded supporting entry with controlled type and status; its description is a safe summary, not a raw payload or diagnostic channel. |
 | Rule engine | A Java-based engine that evaluates explicit rules and reason codes. |
 | Python ML engine | A Python model-serving engine that supplies ML scoring context; ML is not final decision source in this phase. |
 | Velocity engine | An engine category for rate, frequency, and burst-style transaction patterns; it is not wired by FDP-82. |

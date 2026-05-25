@@ -31,20 +31,56 @@ current scoring selection, current alert projections, or any analyst UI.
 bounded engine identity, status, confidence, reason codes, contribution descriptions, evidence descriptions,
 latency, model identity, fallback reason code, and generation time.
 
-Contribution values use bounded string representations, not arbitrary objects or raw feature vectors.
-`fallbackReason` is a bounded reason code, not raw exception text. The contract does not contain tokens, secrets,
-customer payloads, raw ML payloads, or stack traces.
+The contract is bounded by both string length and collection size:
+
+| Field | Maximum items |
+| --- | ---: |
+| `reasonCodes` | 32 |
+| `contributions` | 32 |
+| `evidence` | 16 |
+
+Reason codes are stable machine-readable identifiers, not descriptions. Producers must not put customer
+identifiers, raw payloads, exception text, account or card data, or secrets in them. `fallbackReason` uses an even
+narrower uppercase reason-code form.
+
+`FraudEngineEvidence.description` and `FraudEngineContribution.value` are safe bounded summaries only. Producers
+must not put raw feature vectors, raw request or response payloads, customer, account, or card identifiers,
+exception text, stack traces, tokens, secrets, or internal hostnames in them. Validation rejects basic unsafe
+content; it is not a full data-loss-prevention control.
 
 An engine result is not a final banking decision, not automatic blocking, and not core banking authorization.
+
+## Status Semantics
+
+| Status | Score and risk level | Confidence | Fallback reason |
+| --- | --- | --- | --- |
+| `AVAILABLE` | Both required | `LOW`, `MEDIUM`, or `HIGH` | Not permitted |
+| `UNAVAILABLE` | Both absent | `UNKNOWN` | Required |
+| `TIMEOUT` | Both absent | `UNKNOWN` | Required |
+| `SKIPPED` | Both absent | `UNKNOWN` | Required |
+| `DEGRADED` | Both absent or both present | `LOW`, `MEDIUM`, or `UNKNOWN` | Required |
+| `FALLBACK_USED` | Both absent or both present | `LOW`, `MEDIUM`, or `UNKNOWN` | Required |
+
+`engineLanguage` is canonical lowercase: `java`, `python`, `go`, `kotlin`, `scala`, `javascript`, or `other`.
+Contribution direction and evidence type/status are closed contract enums rather than free-form labels.
+
+## Existing Scoring Evidence Boundary
+
+`FraudEngineEvidence` and its controlled vocabulary belong to the unintegrated engine-result contract. They do not
+replace, extend, or project the existing `ScoringEvidenceItem` carried by `TransactionScoredEvent`.
+
+Likewise, engine `reasonCodes` are safe machine-readable identifiers at this foundation boundary; they are not
+silently promoted into the existing platform `ReasonCode` taxonomy. Any event integration must define explicit
+mapping and compatibility policy before those concepts can cross the existing scoring-evidence boundary.
 
 ## Compatibility Policy
 
 This foundation does not add `engineResults[]` to `TransactionScoredEvent` or any other Kafka event.
 `FraudEngineResult` is not referenced by the current scoring service, alert projection, API, or UI.
 
-The contract tests retain the current strict JSON interpretation for this new model: unknown top-level fields are
-rejected rather than silently interpreted. Any contract extension must explicitly define additive compatibility
-before a producer emits new fields.
+Producers remain strict and emit only documented fields. Consumers tolerate unknown additive fields in the engine
+result, contribution, and evidence records while still validating all known fields. Unknown fields are ignored,
+not interpreted as decision signals. Breaking semantic changes require versioning.
 
 ## Out Of Scope
 
