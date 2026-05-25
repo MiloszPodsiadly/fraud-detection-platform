@@ -1,7 +1,6 @@
 package com.frauddetection.alert.mapper;
 
 import com.frauddetection.alert.api.FraudCaseResponse;
-import com.frauddetection.alert.api.FraudCaseSummaryResponse;
 import com.frauddetection.alert.api.FraudCaseTransactionResponse;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.persistence.FraudCaseTransactionDocument;
@@ -47,20 +46,6 @@ public class FraudCaseResponseMapper {
                 document.getTransactions() == null
                         ? java.util.List.of()
                         : document.getTransactions().stream().map(this::toTransactionResponse).toList()
-        );
-    }
-
-    public FraudCaseSummaryResponse toSummary(FraudCaseDocument document) {
-        return new FraudCaseSummaryResponse(
-                document.getCaseId(),
-                document.getCaseNumber(),
-                document.getStatus(),
-                document.getPriority(),
-                document.getRiskLevel(),
-                document.getAssignedInvestigatorId(),
-                safeList(document.getLinkedAlertIds()),
-                document.getCreatedAt(),
-                document.getUpdatedAt()
         );
     }
 

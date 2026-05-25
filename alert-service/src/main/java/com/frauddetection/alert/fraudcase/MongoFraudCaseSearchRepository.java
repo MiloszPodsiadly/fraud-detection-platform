@@ -1,8 +1,6 @@
 package com.frauddetection.alert.fraudcase;
 
 import com.frauddetection.alert.persistence.FraudCaseDocument;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Slice;
 import org.springframework.data.domain.SliceImpl;
@@ -24,18 +22,6 @@ public class MongoFraudCaseSearchRepository implements FraudCaseSearchRepository
 
     public MongoFraudCaseSearchRepository(MongoTemplate mongoTemplate) {
         this.mongoTemplate = mongoTemplate;
-    }
-
-    @Override
-    public Page<FraudCaseDocument> search(FraudCaseSearchCriteria criteria, Pageable pageable) {
-        Pageable guardedPageable = guardPageSize(pageable);
-        Query query = new Query();
-        criteria(criteria).forEach(query::addCriteria);
-        long total = mongoTemplate.count(query, FraudCaseDocument.class);
-        query.with(guardedPageable);
-        query.with(stableReadSort(guardedPageable.getSort()));
-        List<FraudCaseDocument> content = mongoTemplate.find(query, FraudCaseDocument.class);
-        return new PageImpl<>(content, guardedPageable, total);
     }
 
     @Override
@@ -111,10 +97,6 @@ public class MongoFraudCaseSearchRepository implements FraudCaseSearchRepository
             filters.add(updatedAt);
         }
         return filters;
-    }
-
-    private Sort stableReadSort(Sort requestedSort) {
-        return FraudCaseReadQueryPolicy.stableReadSort(requestedSort);
     }
 
     private Criteria keysetCriteria(Sort.Order sortOrder, FraudCaseWorkQueueCursor cursor) {
