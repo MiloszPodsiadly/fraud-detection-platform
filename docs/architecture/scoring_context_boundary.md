@@ -34,6 +34,17 @@ cross-service contract. It is not a new source of truth.
 internal foundation makes no runtime scoring behavior change.
 It introduces no final decisioning and no orchestrator.
 
+## Feature Snapshot Semantics
+
+`ScoringContext` defensively copies the top-level `featureSnapshot` map. Null `featureSnapshot` keys
+are not allowed, and null `featureSnapshot` values are not allowed. Nested mutable values are not
+deep-copied in FDP-83; future engine adapters must treat `featureSnapshot` values as read-only.
+
+A typed or bounded feature snapshot policy belongs to a later branch before real engine adapters
+consume it. `ScoringContext` does not compute features. `ScoringContext` does not enrich features.
+`ScoringContext` does not normalize features. `ScoringContext` does not validate the business
+meaning of features.
+
 ## Why The FDP-82 Isolation Guard Was Updated
 
 FDP-82 correctly blocked `ScoringContext` because it was outside FDP-82 scope. FDP-83 intentionally

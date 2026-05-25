@@ -37,7 +37,18 @@ class ScoringContextArchitectureDocsTest {
                 .contains("event extension")
                 .contains("api/ui")
                 .contains("isolation guard was updated")
-                .contains("narrowed only for internal `scoringcontext`");
+                .contains("narrowed only for internal `scoringcontext`")
+                .contains("feature snapshot semantics")
+                .contains("defensively copies the top-level `featuresnapshot` map")
+                .contains("null `featuresnapshot` keys are not allowed")
+                .contains("null `featuresnapshot` values are not allowed")
+                .contains("nested mutable values are not deep-copied")
+                .contains("future engine adapters must treat `featuresnapshot` values as read-only")
+                .contains("typed or bounded feature snapshot policy belongs to a later branch")
+                .contains("does not compute features")
+                .contains("does not enrich features")
+                .contains("does not normalize features")
+                .contains("does not validate the business meaning of features");
 
         assertThat(docs)
                 .doesNotContain("automatic approve")
