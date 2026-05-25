@@ -31,11 +31,11 @@ Candidate for consolidation:
 ## FDP-42 Fraud Case Management
 
 Purpose:
-- Prove fraud-case lifecycle, audit, controller, and security behavior introduced around FDP-42.
+- Prove the FDP-81-reduced FraudCase surface, current regulated update, controller and security behavior.
 
 Proves:
 - Named FDP-42 backend test classes execute and produce Surefire XML.
-- Fraud-case transition, mutation invariant, audit, controller, and security slices remain covered.
+- Removed-surface/current-surface guards, mutation invariant, controller and security slices remain covered.
 
 Does not prove:
 - FDP-50 through FDP-53 frontend architecture behavior or Docker image behavior.
@@ -44,7 +44,7 @@ Required for merge:
 - Yes
 
 Primary proof files:
-- `alert-service/src/test/java/**/Fdp42*Test.java`
+- `alert-service/src/test/java/**/FraudCase*SurfaceTest.java`
 - `alert-service/src/test/java/**/FraudCase*Test.java`
 - `.github/workflows/ci.yml`
 
@@ -53,15 +53,15 @@ Related FDP branches:
 
 Candidate for consolidation:
 - No
-- Rationale: Backend lifecycle proof has different ownership from frontend architecture gates.
+- Rationale: Backend surface-removal proof has different ownership from frontend architecture gates.
 
-## FDP-43 Fraud Case Idempotency
+## FDP-43 Retired Fraud Case Lifecycle Guard
 
 Purpose:
-- Prove fraud-case idempotency compatibility and failure behavior.
+- Prove removed local lifecycle/idempotency support is not restored and current regulated update remains covered.
 
 Proves:
-- Canonical hashing, lifecycle idempotency, concurrency, failure, and transaction integration tests execute.
+- Shared primitive compatibility, removed/current surface guards and regulated mutation invariant tests execute.
 
 Does not prove:
 - New frontend runtime boundaries, CI docs integrity, or production IAM hardening.
@@ -70,24 +70,25 @@ Required for merge:
 - Yes
 
 Primary proof files:
-- `alert-service/src/test/java/**/Fdp43*Test.java`
-- `alert-service/src/test/java/**/FraudCaseLifecycleIdempotency*Test.java`
+- `alert-service/src/test/java/**/FraudCaseRemovedApiSurfaceTest.java`
+- `alert-service/src/test/java/**/FraudCaseCurrentApiSurfaceTest.java`
+- `alert-service/src/test/java/**/FraudCaseMutationInvariantTest.java`
 
 Related FDP branches:
 - FDP-43
 
 Candidate for consolidation:
 - No
-- Rationale: It protects backend mutation semantics and should not be hidden in a frontend job.
+- Rationale: It blocks restoration of a retired backend subsystem.
 
-## FDP-44 Fraud Case Idempotency Hardening
+## FDP-44 Retired Fraud Case Lifecycle Guard
 
 Purpose:
-- Prove replay snapshot, retention, and operational idempotency hardening.
+- Prove FDP-44 lifecycle replay/retention implementation remains removed under FDP-81.
 
 Proves:
-- FDP-44 backend hardening tests and report verification execute.
-- Alert metrics coverage tied to FDP-44 still runs.
+- Removed/current surface guards and current mutation invariant tests execute.
+- Alert metrics coverage verifies the remaining metrics without the retired emitter.
 
 Does not prove:
 - UI stale-state behavior, BFF session lifecycle, or release governance.
@@ -96,7 +97,8 @@ Required for merge:
 - Yes
 
 Primary proof files:
-- `alert-service/src/test/java/**/Fdp44*Test.java`
+- `alert-service/src/test/java/**/FraudCaseRemovedApiSurfaceTest.java`
+- `alert-service/src/test/java/**/FraudCaseCurrentApiSurfaceTest.java`
 - `alert-service/src/test/java/**/AlertServiceMetricsTest.java`
 
 Related FDP branches:
@@ -104,7 +106,7 @@ Related FDP branches:
 
 Candidate for consolidation:
 - No
-- Rationale: Backend idempotency evidence has separate risk and failure output.
+- Rationale: The deletion guard remains independently diagnosable.
 
 ## FDP-45 Fraud Case Work Queue Read Model
 

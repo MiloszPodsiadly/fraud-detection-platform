@@ -3,7 +3,8 @@
 Status: branch evidence.
 
 Historical note: this document records the FDP-45 state. FDP-81 later removes the general fraud-case list HTTP
-surface while retaining the dedicated work queue contract described below.
+surface and its below-controller list/audit/lifecycle support while retaining the dedicated work queue contract
+described below.
 
 FDP-45 hardens the fraud-case investigator work queue as a bounded read model on the existing fraud-case query path. The authoritative list and search semantics remain `FraudCaseQueryService` plus `FraudCaseSearchRepository`; FDP-45 does not add a second search subsystem.
 

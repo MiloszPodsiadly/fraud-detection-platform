@@ -107,12 +107,9 @@ Start with [FDP branch evidence](fdp/index.md), then use [FDP branch index](fdp/
 The FDP-35 through FDP-40 documents are proof, readiness, or governance evidence. They are not production
 enablement and they are not bank certification.
 
-FDP-42 fraud case management is a local audited lifecycle workflow. It is not evidence-gated finalize, not a
-regulated mutation finality claim, not lease-fenced replay safety, and not external finality.
-
-FDP-43 adds shared idempotency primitives and local fraud-case lifecycle retry safety. It does not route lifecycle
-POSTs through `RegulatedMutationCoordinator` and does not claim FDP-29 finalize, lease fencing, global exactly-once,
-distributed ACID, or external finality.
+FDP-42 through FDP-44 fraud-case lifecycle and local-idempotency documents are historical branch evidence. FDP-81
+removes that lifecycle surface and implementation; the current FraudCase write route is regulated `PATCH` through
+`RegulatedMutationCoordinator`.
 
 FDP-38 fixture proof is test-fixture runtime evidence only. It is not production-image proof.
 

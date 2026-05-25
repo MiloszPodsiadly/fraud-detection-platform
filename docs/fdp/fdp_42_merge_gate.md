@@ -1,6 +1,7 @@
 # FDP-42 Merge Gate
 
-Status: branch merge gate.
+Status: historical branch merge gate; superseded for current runtime by FDP-81, which removes the standalone
+lifecycle HTTP surface and underlying lifecycle implementation.
 
 ## Required Checks
 
