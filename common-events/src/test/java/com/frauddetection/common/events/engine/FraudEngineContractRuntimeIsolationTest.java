@@ -42,14 +42,11 @@ class FraudEngineContractRuntimeIsolationTest {
     }
 
     @Test
-    void scoringRuntimeDoesNotUseEngineResultContractOrFutureOrchestrator() throws Exception {
+    void scoringRuntimeDoesNotContainFutureImplementationsOrOrchestration() throws Exception {
         String scoringRuntime = javaSources(repositoryRoot().resolve("fraud-scoring-service/src/main/java"));
 
         assertThat(scoringRuntime)
-                .doesNotContain("FraudEngineResult")
                 .doesNotContain("FraudScoringOrchestrator")
-                .doesNotContain("FraudSignalEngine")
-                .doesNotContain("FraudEngineDescriptor")
                 .doesNotContain("RuleBasedSignalEngine")
                 .doesNotContain("PythonMlSignalEngine")
                 .doesNotContain("FraudIntelligenceResult")
@@ -57,23 +54,51 @@ class FraudEngineContractRuntimeIsolationTest {
     }
 
     @Test
-    void contextFoundationRemainsInternalToFraudScoringService() throws Exception {
+    void existingScoringRuntimeDoesNotWireSignalEngineFoundation() throws Exception {
+        Path scoringRoot = repositoryRoot().resolve("fraud-scoring-service/src/main/java/com/frauddetection/scoring");
+        String existingScoringRuntime = javaSourcesExcept(scoringRoot, scoringRoot.resolve("engine"));
+        String compositeRuntime = Files.readString(scoringRoot.resolve("service/CompositeFraudScoringEngine.java"));
+
+        assertThat(existingScoringRuntime)
+                .doesNotContain("FraudSignalEngine")
+                .doesNotContain("FraudEngineDescriptor")
+                .doesNotContain("FraudEngineResult")
+                .doesNotContain("engineResults");
+        assertThat(compositeRuntime)
+                .doesNotContain("FraudSignalEngine")
+                .doesNotContain("FraudEngineDescriptor")
+                .doesNotContain("FraudScoringOrchestrator")
+                .doesNotContain("engineResults");
+    }
+
+    @Test
+    void interfaceAndContextFoundationsRemainInternalToFraudScoringService() throws Exception {
         String scoringRuntime = javaSources(repositoryRoot().resolve("fraud-scoring-service/src/main/java"));
         String commonEventsRuntime = javaSources(repositoryRoot().resolve("common-events/src/main/java"));
         String alertRuntime = javaSources(repositoryRoot().resolve("alert-service/src/main/java"));
         String uiRuntime = sourceFiles(repositoryRoot().resolve("analyst-console-ui/src"));
 
-        assertThat(scoringRuntime).contains("record ScoringContext");
+        assertThat(scoringRuntime)
+                .contains("record ScoringContext")
+                .contains("interface FraudSignalEngine")
+                .contains("record FraudEngineDescriptor");
         assertThat(commonEventsRuntime)
                 .doesNotContain("ScoringContext")
                 .doesNotContain("ScoringContextFactory")
-                .doesNotContain("ScoringContextValuePolicy");
+                .doesNotContain("ScoringContextValuePolicy")
+                .doesNotContain("FraudSignalEngine")
+                .doesNotContain("FraudEngineDescriptor")
+                .doesNotContain("FraudEngineDescriptorValuePolicy");
         assertThat(alertRuntime)
                 .doesNotContain("ScoringContext")
+                .doesNotContain("FraudSignalEngine")
+                .doesNotContain("FraudEngineDescriptor")
                 .doesNotContain("FraudEngineResult")
                 .doesNotContain("engineResults");
         assertThat(uiRuntime)
                 .doesNotContain("ScoringContext")
+                .doesNotContain("FraudSignalEngine")
+                .doesNotContain("FraudEngineDescriptor")
                 .doesNotContain("FraudEngineResult")
                 .doesNotContain("TransactionRiskIntelligence")
                 .doesNotContain("engineResults");
@@ -81,6 +106,19 @@ class FraudEngineContractRuntimeIsolationTest {
 
     private String javaSources(Path root) throws IOException {
         return sourceFiles(root, ".java");
+    }
+
+    private String javaSourcesExcept(Path root, Path excludedRoot) throws IOException {
+        try (Stream<Path> files = Files.walk(root)) {
+            StringBuilder content = new StringBuilder();
+            for (Path file : files.filter(Files::isRegularFile)
+                    .filter(path -> path.toString().endsWith(".java"))
+                    .filter(path -> !path.startsWith(excludedRoot))
+                    .toList()) {
+                content.append(Files.readString(file)).append('\n');
+            }
+            return content.toString();
+        }
     }
 
     private String sourceFiles(Path root, String... suffixes) throws IOException {
