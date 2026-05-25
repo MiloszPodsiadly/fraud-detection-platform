@@ -31,11 +31,17 @@ class FraudSignalEngineArchitectureDocsTest {
                 .contains("not a final banking decision source")
                 .contains("no runtime scoring behavior change")
                 .contains("canonical lowercase allowlisted implementation language")
+                .contains("allowed values in fdp-84 are: `java`, `python`, `go`, `kotlin`, `scala`, `javascript`, and `other`")
+                .contains("`fraudenginedescriptor.enginelanguage` must remain aligned with `fraudengineresult.enginelanguage`")
+                .contains("because `fraudsignalengine.evaluate()` returns `fraudengineresult`")
+                .contains("`enginelanguage` is metadata only")
+                .contains("does not imply runtime support")
+                .contains("does not imply deployment support")
+                .contains("does not imply execution sandboxing")
+                .contains("does not imply operational approval")
+                .contains("does not imply bank approval")
                 .contains("aliases are rejected instead of normalized")
-                .contains("`cpp` instead of `c++`")
-                .contains("`csharp` instead of `c#`")
-                .contains("`javascript` instead of `js`/`node`/`nodejs`")
-                .contains("`typescript` instead of `ts`")
+                .contains("unsupported implementation languages must use `other` until the shared `fraudengineresult` language policy is intentionally expanded")
                 .contains("`required` is descriptive only")
                 .contains("no runtime fallback semantics")
                 .contains("no routing semantics")
@@ -45,6 +51,7 @@ class FraudSignalEngineArchitectureDocsTest {
                 .contains("`pythonmlsignalengine`")
                 .contains("`fraudscoringorchestrator`")
                 .contains("no `engineresults[]`")
+                .contains("no engine wrappers")
                 .contains("no api/ui");
 
         assertThat(docs)
@@ -56,7 +63,11 @@ class FraudSignalEngineArchitectureDocsTest {
                 .doesNotContain("public api contract")
                 .doesNotContain("kafka event contract")
                 .doesNotContain("engine wrappers are included")
-                .doesNotContain("orchestrator is included");
+                .doesNotContain("orchestrator is included")
+                .doesNotContain("`cpp` instead of")
+                .doesNotContain("`csharp` instead of")
+                .doesNotContain("`typescript` instead of")
+                .doesNotContain("runtime support for every allowlisted language");
     }
 
     private Path docsRoot() {

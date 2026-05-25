@@ -15,9 +15,18 @@ banking decision source. This foundation makes no runtime scoring behavior chang
 ## Descriptor Semantics
 
 `FraudEngineDescriptor` describes static engine identity and static metadata. Its `engineLanguage`
-is a canonical lowercase allowlisted implementation language. Aliases are rejected instead of
-normalized: use `cpp` instead of `C++`, `csharp` instead of `C#`, `javascript` instead of
-`js`/`node`/`nodejs`, and `typescript` instead of `ts`.
+is a canonical lowercase allowlisted implementation language. Allowed values in FDP-84 are:
+`java`, `python`, `go`, `kotlin`, `scala`, `javascript`, and `other`.
+
+`FraudEngineDescriptor.engineLanguage` must remain aligned with
+`FraudEngineResult.engineLanguage` because `FraudSignalEngine.evaluate()` returns
+`FraudEngineResult`. Aliases are rejected instead of normalized. Unsupported implementation
+languages must use `other` until the shared `FraudEngineResult` language policy is intentionally
+expanded; `other` is not a preferred language value.
+
+`engineLanguage` is metadata only. An allowlisted language does not imply runtime support, does
+not imply deployment support, does not imply execution sandboxing, does not imply operational
+approval, and does not imply bank approval for that implementation language.
 
 `required` is descriptive only in FDP-84. It has no runtime fallback semantics, no failure
 semantics, no routing semantics, and no decisioning semantics. Orchestrator policy belongs to a
@@ -35,5 +44,5 @@ and nested structure policy.
 No `RuleBasedSignalEngine`, `PythonMlSignalEngine`, `FraudScoringOrchestrator`, or
 `FraudIntelligenceResult` is included. There is no `engineResults[]`, no
 `TransactionScoredEvent` change, no Kafka event change, no alert-service projection, no API/UI,
-no feedback loop, no scoring mode change, no fallback behavior change, no ML availability behavior
-change, no automated approval or decline, and no final payment decisioning.
+no engine wrappers, no feedback loop, no scoring mode change, no fallback behavior change, no ML
+availability behavior change, no automated approval or decline, and no final payment decisioning.
