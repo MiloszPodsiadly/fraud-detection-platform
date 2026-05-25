@@ -8,6 +8,7 @@ final class FraudEngineValuePolicy {
     static final int MAX_IDENTIFIER_LENGTH = 128;
 
     private static final Pattern REASON_CODE_PATTERN = Pattern.compile("[A-Za-z0-9_.:-]{1,128}");
+    private static final Pattern SOURCE_CODE_PATTERN = Pattern.compile("[A-Z][A-Z0-9_]{0,63}");
     private static final Set<String> FORBIDDEN_SUMMARY_TERMS = Set.of(
             "stacktrace",
             "stack trace",
@@ -18,7 +19,41 @@ final class FraudEngineValuePolicy {
             "rawpayload",
             "raw payload",
             "rawfeatures",
-            "raw features"
+            "raw features",
+            "customer",
+            "customer id",
+            "account",
+            "account number",
+            "card",
+            "pan",
+            "iban",
+            "email",
+            "phone",
+            "authorization",
+            "bearer",
+            "api key",
+            "access key",
+            "private key",
+            "hostname",
+            "host",
+            "internal host",
+            "request payload",
+            "response payload",
+            "raw request",
+            "raw response"
+    );
+    private static final Set<String> FORBIDDEN_SOURCE_TERMS = Set.of(
+            "HOST",
+            "INTERNAL",
+            "SERVER",
+            "ENDPOINT",
+            "URL",
+            "HTTP",
+            "EXCEPTION",
+            "TOKEN",
+            "SECRET",
+            "PASSWORD",
+            "SERVICE"
     );
 
     private FraudEngineValuePolicy() {
@@ -50,6 +85,14 @@ final class FraudEngineValuePolicy {
     static void validateOptionalReasonCode(String value, String fieldName) {
         if (value != null) {
             requireReasonCode(value, fieldName);
+        }
+    }
+
+    static void requireSourceCode(String value) {
+        if (value == null
+                || !SOURCE_CODE_PATTERN.matcher(value).matches()
+                || FORBIDDEN_SOURCE_TERMS.stream().anyMatch(value::contains)) {
+            throw new IllegalArgumentException("source must be a bounded machine-readable origin code");
         }
     }
 

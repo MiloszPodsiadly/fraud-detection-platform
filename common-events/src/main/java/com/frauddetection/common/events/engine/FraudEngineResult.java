@@ -24,14 +24,14 @@ public record FraudEngineResult(
         Long latencyMs,
         String modelName,
         String modelVersion,
-        String fallbackReason,
+        String statusReason,
         Instant generatedAt
 ) {
     public static final int MAX_REASON_CODES = 32;
     public static final int MAX_CONTRIBUTIONS = 32;
     public static final int MAX_EVIDENCE = 16;
 
-    private static final Pattern SAFE_FALLBACK_REASON = Pattern.compile("[A-Z0-9_]{1,64}");
+    private static final Pattern SAFE_STATUS_REASON = Pattern.compile("[A-Z0-9_]{1,64}");
     private static final Set<String> ENGINE_LANGUAGES = Set.of(
             "java",
             "python",
@@ -62,10 +62,10 @@ public record FraudEngineResult(
         evidence = copyBoundedList(evidence, MAX_EVIDENCE, "evidence");
         FraudEngineValuePolicy.validateOptionalText(modelName, "modelName", FraudEngineValuePolicy.MAX_IDENTIFIER_LENGTH);
         FraudEngineValuePolicy.validateOptionalText(modelVersion, "modelVersion", FraudEngineValuePolicy.MAX_IDENTIFIER_LENGTH);
-        if (fallbackReason != null && !SAFE_FALLBACK_REASON.matcher(fallbackReason).matches()) {
-            throw new IllegalArgumentException("fallbackReason must be a bounded reason code");
+        if (statusReason != null && !SAFE_STATUS_REASON.matcher(statusReason).matches()) {
+            throw new IllegalArgumentException("statusReason must be a bounded reason code");
         }
-        validateStatusSemantics(status, score, riskLevel, confidence, fallbackReason);
+        validateStatusSemantics(status, score, riskLevel, confidence, statusReason);
     }
 
     private static List<String> copyBoundedReasonCodes(List<String> source) {
@@ -104,7 +104,7 @@ public record FraudEngineResult(
             Double score,
             RiskLevel riskLevel,
             FraudEngineConfidence confidence,
-            String fallbackReason
+            String statusReason
     ) {
         switch (status) {
             case AVAILABLE -> {
@@ -112,8 +112,8 @@ public record FraudEngineResult(
                 if (confidence == FraudEngineConfidence.UNKNOWN) {
                     throw new IllegalArgumentException("AVAILABLE status must declare known confidence");
                 }
-                if (fallbackReason != null) {
-                    throw new IllegalArgumentException("AVAILABLE status must not declare fallbackReason");
+                if (statusReason != null) {
+                    throw new IllegalArgumentException("AVAILABLE status must not declare statusReason");
                 }
             }
             case UNAVAILABLE, TIMEOUT, SKIPPED -> {
@@ -121,21 +121,21 @@ public record FraudEngineResult(
                 if (confidence != FraudEngineConfidence.UNKNOWN) {
                     throw new IllegalArgumentException(status + " status must declare UNKNOWN confidence");
                 }
-                requireFallbackReason(fallbackReason, status);
+                requireStatusReason(statusReason, status);
             }
             case DEGRADED -> {
                 requirePairedScoreAndRiskLevel(score, riskLevel, status);
                 if (confidence == FraudEngineConfidence.HIGH) {
                     throw new IllegalArgumentException("DEGRADED status must not declare HIGH confidence");
                 }
-                requireFallbackReason(fallbackReason, status);
+                requireStatusReason(statusReason, status);
             }
             case FALLBACK_USED -> {
                 requirePairedScoreAndRiskLevel(score, riskLevel, status);
                 if (confidence == FraudEngineConfidence.HIGH) {
                     throw new IllegalArgumentException("FALLBACK_USED status must not declare HIGH confidence");
                 }
-                requireFallbackReason(fallbackReason, status);
+                requireStatusReason(statusReason, status);
             }
         }
     }
@@ -164,9 +164,9 @@ public record FraudEngineResult(
         }
     }
 
-    private static void requireFallbackReason(String fallbackReason, FraudEngineStatus status) {
-        if (fallbackReason == null) {
-            throw new IllegalArgumentException(status + " status requires fallbackReason");
+    private static void requireStatusReason(String statusReason, FraudEngineStatus status) {
+        if (statusReason == null) {
+            throw new IllegalArgumentException(status + " status requires statusReason");
         }
     }
 }

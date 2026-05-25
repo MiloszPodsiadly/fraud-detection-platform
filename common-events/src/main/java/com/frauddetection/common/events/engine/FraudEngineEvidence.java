@@ -20,7 +20,7 @@ public record FraudEngineEvidence(
         FraudEngineValuePolicy.validateOptionalReasonCode(reasonCode, "reasonCode");
         FraudEngineValuePolicy.requireSafeSummary(title, "title", MAX_TEXT_LENGTH);
         FraudEngineValuePolicy.validateOptionalSafeSummary(description, "description", MAX_TEXT_LENGTH);
-        FraudEngineValuePolicy.requireText(source, "source", MAX_TEXT_LENGTH);
+        FraudEngineValuePolicy.requireSourceCode(source);
         Objects.requireNonNull(status, "status is required");
     }
 }
