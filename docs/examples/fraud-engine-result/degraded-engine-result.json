@@ -1,0 +1,17 @@
+{
+  "engineId": "velocity-v1",
+  "engineType": "VELOCITY",
+  "engineLanguage": "java",
+  "status": "DEGRADED",
+  "score": null,
+  "riskLevel": null,
+  "confidence": "UNKNOWN",
+  "reasonCodes": [],
+  "contributions": [],
+  "evidence": [],
+  "latencyMs": 75,
+  "modelName": null,
+  "modelVersion": null,
+  "fallbackReason": "PARTIAL_WINDOW_CONTEXT",
+  "generatedAt": "2026-05-25T09:00:00Z"
+}
