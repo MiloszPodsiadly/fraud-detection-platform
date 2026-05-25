@@ -54,6 +54,25 @@ class FraudEngineContractRuntimeIsolationTest {
     }
 
     @Test
+    void scoringEnginePackageContainsOnlyFdp84FoundationTypes() throws Exception {
+        Path engineRoot = repositoryRoot().resolve(
+                "fraud-scoring-service/src/main/java/com/frauddetection/scoring/engine"
+        );
+
+        try (Stream<Path> files = Files.walk(engineRoot)) {
+            assertThat(files.filter(Files::isRegularFile)
+                    .filter(path -> path.toString().endsWith(".java"))
+                    .map(path -> engineRoot.relativize(path).toString().replace('\\', '/'))
+                    .toList())
+                    .containsExactlyInAnyOrder(
+                            "FraudSignalEngine.java",
+                            "FraudEngineDescriptor.java",
+                            "FraudEngineDescriptorValuePolicy.java"
+                    );
+        }
+    }
+
+    @Test
     void existingScoringRuntimeDoesNotWireSignalEngineFoundation() throws Exception {
         Path scoringRoot = repositoryRoot().resolve("fraud-scoring-service/src/main/java/com/frauddetection/scoring");
         String existingScoringRuntime = javaSourcesExcept(scoringRoot, scoringRoot.resolve("engine"));
