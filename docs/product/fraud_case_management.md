@@ -31,6 +31,23 @@ search/list handling, audit-trail reads and unversioned compatibility routing ar
 The current HTTP contract is documented in [Fraud Case API](../api/fraud_case_api.md). The update command requires
 `X-Idempotency-Key`; read surfaces do not mutate state.
 
+## Removed In FDP-81
+
+| Removed route | Replacement | Notes |
+| --- | --- | --- |
+| `GET /api/v1/fraud-cases` | `GET /api/v1/fraud-cases/work-queue` | List/search is replaced by the bounded work queue. |
+| `POST /api/v1/fraud-cases` | None | Standalone create is removed from the current product surface. |
+| `POST /api/v1/fraud-cases/{caseId}/assign` | `PATCH /api/v1/fraud-cases/{caseId}` where applicable | No standalone assign endpoint. |
+| `POST /api/v1/fraud-cases/{caseId}/notes` | None | Notes are not a current product API. |
+| `POST /api/v1/fraud-cases/{caseId}/decisions` | `PATCH /api/v1/fraud-cases/{caseId}` where applicable | Standalone decision route removed. |
+| `POST /api/v1/fraud-cases/{caseId}/transition` | `PATCH /api/v1/fraud-cases/{caseId}` where applicable | Lifecycle transition route removed. |
+| `POST /api/v1/fraud-cases/{caseId}/close` | `PATCH /api/v1/fraud-cases/{caseId}` where applicable | Close route removed. |
+| `POST /api/v1/fraud-cases/{caseId}/reopen` | `PATCH /api/v1/fraud-cases/{caseId}` where applicable | Reopen route removed. |
+| `GET /api/v1/fraud-cases/{caseId}/audit` | None | Standalone audit-trail read removed. |
+| `/api/fraud-cases/**` | Supported versioned routes only | Compatibility handler removed. |
+
+`GET /internal/suspicious-transactions/summary` remains supported and is not part of this removal.
+
 ## Read Surface Constraints
 
 - Evidence surfaces remain bounded and read-only.

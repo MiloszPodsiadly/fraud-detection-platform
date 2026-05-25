@@ -28,6 +28,23 @@ Authorities:
 - `PATCH` requires `fraud-case:update` and `X-Idempotency-Key`.
 - There is no currently exposed fraud-case lifecycle audit-history endpoint.
 
+## Removed In FDP-81
+
+| Removed route | Replacement | Notes |
+| --- | --- | --- |
+| `GET /api/v1/fraud-cases` | `GET /api/v1/fraud-cases/work-queue` | List/search is replaced by the bounded work queue. |
+| `POST /api/v1/fraud-cases` | None | Standalone create is removed from the current product surface. |
+| `POST /api/v1/fraud-cases/{caseId}/assign` | `PATCH /api/v1/fraud-cases/{caseId}` where applicable | No standalone assign endpoint. |
+| `POST /api/v1/fraud-cases/{caseId}/notes` | None | Notes are not a current product API. |
+| `POST /api/v1/fraud-cases/{caseId}/decisions` | `PATCH /api/v1/fraud-cases/{caseId}` where applicable | Standalone decision route removed. |
+| `POST /api/v1/fraud-cases/{caseId}/transition` | `PATCH /api/v1/fraud-cases/{caseId}` where applicable | Lifecycle transition route removed. |
+| `POST /api/v1/fraud-cases/{caseId}/close` | `PATCH /api/v1/fraud-cases/{caseId}` where applicable | Close route removed. |
+| `POST /api/v1/fraud-cases/{caseId}/reopen` | `PATCH /api/v1/fraud-cases/{caseId}` where applicable | Reopen route removed. |
+| `GET /api/v1/fraud-cases/{caseId}/audit` | None | Standalone audit-trail read removed. |
+| `/api/fraud-cases/**` | Supported versioned routes only | Compatibility handler removed. |
+
+`GET /internal/suspicious-transactions/summary` remains supported and is not part of this removal.
+
 ## Patch Semantics
 
 The current `PATCH` route uses the regulated mutation contract documented in

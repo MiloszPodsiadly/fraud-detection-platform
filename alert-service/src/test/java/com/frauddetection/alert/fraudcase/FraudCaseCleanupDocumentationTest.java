@@ -39,6 +39,51 @@ class FraudCaseCleanupDocumentationTest {
                 .contains("not a current operational source");
     }
 
+    @Test
+    void fdp50ReleaseNoteSeparatesHistoricalGoneResponseFromCurrentFdp81Behavior() throws IOException {
+        String releaseNote = Files.readString(resolve("docs/release/fdp_50_legacy_api_removal.md"));
+
+        assertThat(releaseNote)
+                .contains("Historical Behavior In FDP-50")
+                .contains("returned `410 Gone` with `code:LEGACY_FRAUD_CASE_ROUTE_REMOVED`")
+                .contains("FDP-81 removes the unversioned compatibility handler")
+                .contains("must not rely on `410 Gone`")
+                .contains("normal\nunknown-route and security fallback behavior");
+        assertThat(releaseNote).doesNotContain("current `/api/fraud-cases/**` still returns `410 Gone`");
+    }
+
+    @Test
+    void fdp81ReleaseNoteDocumentsBreakingCleanupAndUnaffectedSuspiciousSummary() throws IOException {
+        String releaseNote = Files.readString(resolve("docs/release/fdp_81_fraud_case_surface_cleanup.md"));
+
+        assertThat(releaseNote)
+                .contains("intentional breaking API surface cleanup")
+                .contains("## Removed Routes")
+                .contains("`POST /api/v1/fraud-cases/{caseId}/assign`")
+                .contains("`/api/fraud-cases/**`")
+                .contains("## Retained Routes")
+                .contains("`PATCH /api/v1/fraud-cases/{caseId}`")
+                .contains("`GET /internal/suspicious-transactions/summary`");
+    }
+
+    @Test
+    void currentFraudCaseDocsContainExplicitRemovedRouteTables() throws IOException {
+        for (String document : List.of(
+                "docs/api/fraud_case_api.md",
+                "docs/api/api_surface_v1.md",
+                "docs/product/fraud_case_management.md"
+        )) {
+            String content = Files.readString(resolve(document));
+            assertThat(content)
+                    .contains("## Removed In FDP-81")
+                    .contains("| Removed route | Replacement | Notes |")
+                    .contains("`GET /api/v1/fraud-cases`")
+                    .contains("`GET /api/v1/fraud-cases/{caseId}/audit`")
+                    .contains("`/api/fraud-cases/**`")
+                    .contains("`GET /internal/suspicious-transactions/summary` remains supported");
+        }
+    }
+
     private String read(List<String> documents) throws IOException {
         StringBuilder content = new StringBuilder();
         for (String document : documents) {
