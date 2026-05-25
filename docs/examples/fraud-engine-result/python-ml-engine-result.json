@@ -1,0 +1,42 @@
+{
+  "engineId": "python-ml-v1",
+  "engineType": "ML_MODEL",
+  "engineLanguage": "python",
+  "status": "AVAILABLE",
+  "score": 0.82,
+  "riskLevel": "HIGH",
+  "confidence": "MEDIUM",
+  "reasonCodes": [
+    "rapidTransferBurst",
+    "deviceNovelty"
+  ],
+  "contributions": [
+    {
+      "feature": "rapidTransferBurst",
+      "value": "high",
+      "weight": 0.44,
+      "direction": "INCREASES_RISK"
+    },
+    {
+      "feature": "deviceNovelty",
+      "value": "new-device",
+      "weight": 0.21,
+      "direction": "INCREASES_RISK"
+    }
+  ],
+  "evidence": [
+    {
+      "evidenceType": "MODEL_EXPLANATION",
+      "reasonCode": "deviceNovelty",
+      "title": "Novel device context",
+      "description": "Bounded model context indicates an unfamiliar device pattern.",
+      "source": "ML_MODEL",
+      "status": "AVAILABLE"
+    }
+  ],
+  "latencyMs": 28,
+  "modelName": "python-logistic-fraud-model",
+  "modelVersion": "v1",
+  "statusReason": null,
+  "generatedAt": "2026-05-25T09:00:00Z"
+}

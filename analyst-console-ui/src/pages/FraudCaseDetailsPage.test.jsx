@@ -259,7 +259,7 @@ describe("FraudCaseDetailsPage", () => {
 
     expect(await screen.findByText("Open case")).toBeInTheDocument();
     expect(await screen.findByText("Evidence summary")).toBeInTheDocument();
-    expect(screen.getAllByText("Evidence status").length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("Evidence status")).length).toBeGreaterThan(0);
     expect(screen.getAllByText("AVAILABLE").length).toBeGreaterThan(0);
     expect(apiClient.getFraudCaseEvidenceSummary).toHaveBeenCalledWith("case-1", expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
@@ -577,7 +577,7 @@ describe("FraudCaseDetailsPage", () => {
 
     expect(await screen.findByText("Evidence timeline unavailable.")).toBeInTheDocument();
     expect(await screen.findByText("Evidence summary")).toBeInTheDocument();
-    expect(screen.getAllByText("Evidence status").length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("Evidence status")).length).toBeGreaterThan(0);
     expect(screen.queryByText("timeline raw failure")).not.toBeInTheDocument();
     expect(within(screen.getByTestId("fraud-case-read-surface-layout")).queryByRole("button", { name: "Save case decision" })).not.toBeInTheDocument();
   });

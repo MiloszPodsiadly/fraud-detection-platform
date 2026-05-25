@@ -1,0 +1,36 @@
+{
+  "engineId": "rules-v1",
+  "engineType": "RULES",
+  "engineLanguage": "java",
+  "status": "AVAILABLE",
+  "score": 0.64,
+  "riskLevel": "MEDIUM",
+  "confidence": "HIGH",
+  "reasonCodes": [
+    "RAPID_TRANSFER_BURST",
+    "VELOCITY_WINDOW_ELEVATED"
+  ],
+  "contributions": [
+    {
+      "feature": "transferCountWindow",
+      "value": "elevated",
+      "weight": 0.31,
+      "direction": "INCREASES_RISK"
+    }
+  ],
+  "evidence": [
+    {
+      "evidenceType": "VELOCITY_SIGNAL",
+      "reasonCode": "RAPID_TRANSFER_BURST",
+      "title": "Rapid transfer activity",
+      "description": "Transfer frequency exceeded a configured review threshold.",
+      "source": "RULES",
+      "status": "AVAILABLE"
+    }
+  ],
+  "latencyMs": 4,
+  "modelName": null,
+  "modelVersion": null,
+  "statusReason": null,
+  "generatedAt": "2026-05-25T09:00:00Z"
+}

@@ -24,6 +24,7 @@ frontend authorization responsibility. The current diagrams remain valid as revi
 
 | Document | Status | Use for | Do not use for |
 | --- | --- | --- | --- |
+| [Multi-engine scoring contract boundary](multi_engine_scoring_architecture.md) | Contract foundation only | FDP-82 shared engine-result boundary | Claiming runtime orchestration or event integration |
 | [Current architecture](current_architecture.md) | Current source of truth | System boundaries, invariants, and areas not to change casually | Endpoint-level API details |
 | [Architecture diagrams](diagrams.md) | Current reviewer aid | High-level visual orientation and simplified lifecycle/release flows | Complete proof of every state transition |
 | [Alert service source of truth](alert_service_source_of_truth.md) | Current source of truth | Authoritative stores and projection boundaries | New persistence contracts without code review |

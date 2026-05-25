@@ -1,0 +1,17 @@
+{
+  "engineId": "python-ml-v1",
+  "engineType": "ML_MODEL",
+  "engineLanguage": "python",
+  "status": "UNAVAILABLE",
+  "score": null,
+  "riskLevel": null,
+  "confidence": "UNKNOWN",
+  "reasonCodes": [],
+  "contributions": [],
+  "evidence": [],
+  "latencyMs": 30,
+  "modelName": "python-logistic-fraud-model",
+  "modelVersion": "v1",
+  "statusReason": "MODEL_RUNTIME_UNAVAILABLE",
+  "generatedAt": "2026-05-25T09:00:00Z"
+}
