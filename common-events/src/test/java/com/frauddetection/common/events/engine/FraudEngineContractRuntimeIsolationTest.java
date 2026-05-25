@@ -27,6 +27,7 @@ class FraudEngineContractRuntimeIsolationTest {
                 .map(RecordComponent::getName))
                 .withFailMessage("FDP-82 is contract-only. Event integration belongs to a later branch with explicit compatibility tests.")
                 .doesNotContain(
+                        "scoringContext",
                         "engineResults",
                         "platformRiskScore",
                         "platformRiskLevel",
@@ -41,25 +42,41 @@ class FraudEngineContractRuntimeIsolationTest {
     }
 
     @Test
-    void scoringRuntimeDoesNotUseFoundationContractOrFutureOrchestrator() throws Exception {
+    void scoringRuntimeDoesNotUseEngineResultContractOrFutureOrchestrator() throws Exception {
         String scoringRuntime = javaSources(repositoryRoot().resolve("fraud-scoring-service/src/main/java"));
 
         assertThat(scoringRuntime)
                 .doesNotContain("FraudEngineResult")
                 .doesNotContain("FraudScoringOrchestrator")
                 .doesNotContain("FraudSignalEngine")
-                .doesNotContain("ScoringContext");
+                .doesNotContain("FraudEngineDescriptor")
+                .doesNotContain("RuleBasedSignalEngine")
+                .doesNotContain("PythonMlSignalEngine")
+                .doesNotContain("FraudIntelligenceResult")
+                .doesNotContain("engineResults");
     }
 
     @Test
-    void alertProjectionAndUiDoNotUseFoundationContract() throws Exception {
+    void contextFoundationRemainsInternalToFraudScoringService() throws Exception {
+        String scoringRuntime = javaSources(repositoryRoot().resolve("fraud-scoring-service/src/main/java"));
+        String commonEventsRuntime = javaSources(repositoryRoot().resolve("common-events/src/main/java"));
         String alertRuntime = javaSources(repositoryRoot().resolve("alert-service/src/main/java"));
         String uiRuntime = sourceFiles(repositoryRoot().resolve("analyst-console-ui/src"));
 
-        assertThat(alertRuntime).doesNotContain("FraudEngineResult");
-        assertThat(uiRuntime)
+        assertThat(scoringRuntime).contains("record ScoringContext");
+        assertThat(commonEventsRuntime)
+                .doesNotContain("ScoringContext")
+                .doesNotContain("ScoringContextFactory")
+                .doesNotContain("ScoringContextValuePolicy");
+        assertThat(alertRuntime)
+                .doesNotContain("ScoringContext")
                 .doesNotContain("FraudEngineResult")
-                .doesNotContain("TransactionRiskIntelligence");
+                .doesNotContain("engineResults");
+        assertThat(uiRuntime)
+                .doesNotContain("ScoringContext")
+                .doesNotContain("FraudEngineResult")
+                .doesNotContain("TransactionRiskIntelligence")
+                .doesNotContain("engineResults");
     }
 
     private String javaSources(Path root) throws IOException {
