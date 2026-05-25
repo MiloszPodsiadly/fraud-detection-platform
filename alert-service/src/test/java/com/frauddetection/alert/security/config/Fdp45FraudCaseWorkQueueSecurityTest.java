@@ -1,6 +1,5 @@
 package com.frauddetection.alert.security.config;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.controller.FraudCaseController;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.alert.api.FraudCaseWorkQueueSliceResponse;
@@ -31,7 +30,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -50,9 +49,6 @@ class Fdp45FraudCaseWorkQueueSecurityTest {
 
     @Autowired
     private MockMvc mockMvc;
-
-    @Autowired
-    private ObjectMapper objectMapper;
 
     @MockBean
     private FraudCaseManagementService fraudCaseManagementService;
@@ -75,16 +71,13 @@ class Fdp45FraudCaseWorkQueueSecurityTest {
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/fraud-cases/work-queue").with(userWith(AnalystAuthority.FRAUD_CASE_READ)))
                 .andExpect(status().isOk());
-        mockMvc.perform(post("/api/v1/fraud-cases")
+        mockMvc.perform(patch("/api/v1/fraud-cases/case-1")
                         .with(userWith(AnalystAuthority.FRAUD_CASE_READ))
-                        .header("X-Idempotency-Key", "case-create-readonly")
+                        .header("X-Idempotency-Key", "case-update-readonly")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(java.util.Map.of(
-                                "alertIds", List.of("alert-1"),
-                                "priority", "HIGH",
-                                "riskLevel", "CRITICAL",
-                                "actorId", "analyst-1"
-                        ))))
+                        .content("""
+                                {"status":"IN_REVIEW","analystId":"analyst-1","decisionReason":"review","tags":[]}
+                                """))
                 .andExpect(status().isForbidden());
     }
 

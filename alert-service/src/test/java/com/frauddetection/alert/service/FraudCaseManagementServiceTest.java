@@ -7,17 +7,12 @@ import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.domain.FraudCaseStatus;
-import com.frauddetection.alert.fraudcase.FraudCaseAuditService;
+import com.frauddetection.alert.fraudcase.FraudCaseNotFoundException;
 import com.frauddetection.alert.fraudcase.FraudCaseSearchRepository;
-import com.frauddetection.alert.fraudcase.FraudCaseTransitionPolicy;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
-import com.frauddetection.alert.persistence.AlertRepository;
-import com.frauddetection.alert.persistence.FraudCaseAuditRepository;
-import com.frauddetection.alert.persistence.FraudCaseDecisionRepository;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
-import com.frauddetection.alert.persistence.FraudCaseNoteRepository;
 import com.frauddetection.alert.persistence.FraudCaseRepository;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
@@ -26,7 +21,6 @@ import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
 import com.frauddetection.alert.regulated.RegulatedMutationExecutionContext;
 import com.frauddetection.alert.regulated.RegulatedMutationResult;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
-import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import com.frauddetection.alert.regulated.mutation.fraudcase.FraudCaseUpdateMutationHandler;
 import com.frauddetection.alert.security.principal.AnalystActorResolver;
 import com.frauddetection.common.events.enums.RiskLevel;
@@ -34,8 +28,6 @@ import com.frauddetection.common.events.model.Money;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.data.domain.PageImpl;
-import org.springframework.data.domain.PageRequest;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -133,129 +125,6 @@ class FraudCaseManagementServiceTest {
         assertThat(read.getLastTransactionAt()).isEqualTo(Instant.parse("2026-04-20T10:15:28Z"));
         verify(scoredTransactionRepository, never()).findAllById(any());
         verify(fraudCaseRepository, never()).save(any(FraudCaseDocument.class));
-    }
-
-    @Test
-    void shouldNotMutateCasesWhenListingOrSearching() {
-        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
-        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
-        FraudCaseSearchRepository searchRepository = mock(FraudCaseSearchRepository.class);
-        AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
-        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
-        FraudCaseManagementService service = service(
-                fraudCaseRepository,
-                scoredTransactionRepository,
-                analystActorResolver,
-                metrics,
-                mock(RegulatedMutationCoordinator.class),
-                mock(FraudCaseAuditRepository.class),
-                searchRepository
-        );
-        FraudCaseDocument storedCase = new FraudCaseDocument();
-        storedCase.setCaseId("case-1");
-        storedCase.setStatus(FraudCaseStatus.OPEN);
-        storedCase.setTransactionIds(List.of("rapid-txn-1"));
-        storedCase.setTransactions(List.of());
-        storedCase.setCreatedAt(Instant.parse("2026-04-20T10:15:28Z"));
-        storedCase.setUpdatedAt(Instant.parse("2026-04-20T10:15:28Z"));
-
-        when(fraudCaseRepository.findAll()).thenReturn(List.of(storedCase));
-        when(fraudCaseRepository.findAll(any(org.springframework.data.domain.Pageable.class)))
-                .thenReturn(new PageImpl<>(List.of(storedCase)));
-        when(searchRepository.search(any(), any())).thenReturn(new PageImpl<>(List.of(storedCase)));
-
-        service.listCases();
-        service.listCases(PageRequest.of(0, 10));
-        service.searchCases(FraudCaseStatus.OPEN, null, null, null, null, null, null, PageRequest.of(0, 10));
-
-        verify(scoredTransactionRepository, never()).findAllById(any());
-        verify(fraudCaseRepository, never()).save(any(FraudCaseDocument.class));
-    }
-
-    @Test
-    void shouldKeepSystemIngestionSeparateFromAnalystLifecycleAudit() {
-        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
-        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
-        FraudCaseAuditRepository auditRepository = mock(FraudCaseAuditRepository.class);
-        AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
-        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
-        FraudCaseManagementService service = service(
-                fraudCaseRepository,
-                scoredTransactionRepository,
-                analystActorResolver,
-                metrics,
-                mock(RegulatedMutationCoordinator.class),
-                auditRepository,
-                mock(FraudCaseSearchRepository.class)
-        );
-        var currentEvent = TransactionFixtures.scoredTransaction()
-                .withTransactionId("rapid-txn-1")
-                .withCustomerId("rapid-customer-1")
-                .withFeatureSnapshot(Map.of(
-                        "rapidTransferFraudCaseCandidate", true,
-                        "rapidTransferTransactionIds", List.of("rapid-txn-1"),
-                        "rapidTransferTotalPln", new BigDecimal("20000.00"),
-                        "rapidTransferThresholdPln", new BigDecimal("20000.00"),
-                        "rapidTransferWindow", "PT1M",
-                        "currentTransactionAmountPln", new BigDecimal("20000.00")
-                ))
-                .build();
-
-        when(fraudCaseRepository.findByCaseKey("rapid-customer-1:RAPID_TRANSFER_BURST_20K_PLN:rapid-txn-1"))
-                .thenReturn(Optional.empty());
-        when(scoredTransactionRepository.findAllById(List.of("rapid-txn-1"))).thenReturn(List.of());
-
-        service.handleScoredTransaction(currentEvent);
-
-        verify(fraudCaseRepository).save(any(FraudCaseDocument.class));
-        verify(auditRepository, never()).save(any());
-    }
-
-    @Test
-    void shouldDelegateLifecycleAndQueryCallsToInjectedServices() {
-        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
-        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
-        AnalystActorResolver analystActorResolver = mock(AnalystActorResolver.class);
-        FraudCaseLifecycleService lifecycleService = mock(FraudCaseLifecycleService.class);
-        FraudCaseQueryService queryService = mock(FraudCaseQueryService.class);
-        FraudCaseManagementService service = new FraudCaseManagementService(
-                fraudCaseRepository,
-                scoredTransactionRepository,
-                analystActorResolver,
-                new FraudCaseUpdateMutationHandler(fraudCaseRepository, mock(AlertServiceMetrics.class)),
-                mock(RegulatedMutationCoordinator.class),
-                new FraudCaseResponseMapper(new AlertResponseMapper()),
-                lifecycleService,
-                queryService
-        );
-
-        service.listCases();
-        service.listCases(PageRequest.of(0, 10));
-        service.getCase("case-1");
-        service.searchCases(FraudCaseStatus.OPEN, null, null, null, null, null, null, PageRequest.of(0, 10));
-        service.workQueue(FraudCaseStatus.OPEN, null, null, null, null, null, null, null, null, PageRequest.of(0, 10));
-        service.createCase(null, "create-key");
-        service.assignCase("case-1", null, "assign-key");
-        service.addNote("case-1", null, "note-key");
-        service.addDecision("case-1", null, "decision-key");
-        service.transitionCase("case-1", null, "transition-key");
-        service.closeCase("case-1", null, "close-key");
-        service.reopenCase("case-1", null, "reopen-key");
-        service.auditTrail("case-1");
-
-        verify(queryService).listCases();
-        verify(queryService).listCases(any(org.springframework.data.domain.Pageable.class));
-        verify(queryService).getCase("case-1");
-        verify(queryService).searchCases(FraudCaseStatus.OPEN, null, null, null, null, null, null, PageRequest.of(0, 10));
-        verify(queryService).workQueue(FraudCaseStatus.OPEN, null, null, null, null, null, null, null, null, PageRequest.of(0, 10));
-        verify(queryService).auditTrail("case-1");
-        verify(lifecycleService).createCase(null, "create-key");
-        verify(lifecycleService).assignCase("case-1", null, "assign-key");
-        verify(lifecycleService).addNote("case-1", null, "note-key");
-        verify(lifecycleService).addDecision("case-1", null, "decision-key");
-        verify(lifecycleService).transitionCase("case-1", null, "transition-key");
-        verify(lifecycleService).closeCase("case-1", null, "close-key");
-        verify(lifecycleService).reopenCase("case-1", null, "reopen-key");
     }
 
     @Test
@@ -393,6 +262,36 @@ class FraudCaseManagementServiceTest {
         verify(coordinator, org.mockito.Mockito.times(2)).commit(commandCaptor.capture());
         assertThat(commandCaptor.getAllValues().get(0).requestHash())
                 .isEqualTo(commandCaptor.getAllValues().get(1).requestHash());
+        assertThat(commandCaptor.getAllValues().get(0).actorId()).isEqualTo("principal-9");
+        assertThat(commandCaptor.getAllValues().get(0).intent().actorId()).isEqualTo("principal-9");
+        assertThat(commandCaptor.getAllValues().get(0).intent().resourceId()).isEqualTo("case-1");
+        assertThat(commandCaptor.getAllValues().get(0).intent().status()).isEqualTo("CONFIRMED_FRAUD");
+        assertThat(commandCaptor.getAllValues().get(0).intent().notesHash()).doesNotContain("Confirmed after review");
+        assertThat(commandCaptor.getAllValues().get(0).intent().payloadHash()).doesNotContain("fraud-case-update-1");
+    }
+
+    @Test
+    void shouldRejectMissingFraudCaseUpdateBeforeRegulatedCoordinator() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        RegulatedMutationCoordinator coordinator = mock(RegulatedMutationCoordinator.class);
+        FraudCaseManagementService service = service(
+                fraudCaseRepository,
+                mock(ScoredTransactionRepository.class),
+                mock(AnalystActorResolver.class),
+                mock(AlertServiceMetrics.class),
+                coordinator
+        );
+
+        when(fraudCaseRepository.findById("missing-case")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.updateCase("missing-case", new UpdateFraudCaseRequest(
+                FraudCaseStatus.IN_REVIEW,
+                "spoofed-actor",
+                "review",
+                List.of()
+        ), "update-key-1")).isInstanceOf(FraudCaseNotFoundException.class);
+
+        verify(coordinator, never()).commit(any());
     }
 
     @Test
@@ -433,9 +332,6 @@ class FraudCaseManagementServiceTest {
             AlertServiceMetrics metrics,
             RegulatedMutationCoordinator coordinator
     ) {
-        RegulatedMutationTransactionRunner transactionRunner = mock(RegulatedMutationTransactionRunner.class);
-        when(transactionRunner.runLocalCommit(any())).thenAnswer(invocation -> invocation.<java.util.function.Supplier<?>>getArgument(0).get());
-        FraudCaseAuditRepository auditRepository = mock(FraudCaseAuditRepository.class);
         FraudCaseResponseMapper responseMapper = new FraudCaseResponseMapper(new AlertResponseMapper());
         return new FraudCaseManagementService(
                 fraudCaseRepository,
@@ -444,67 +340,9 @@ class FraudCaseManagementServiceTest {
                 new FraudCaseUpdateMutationHandler(fraudCaseRepository, metrics),
                 coordinator,
                 responseMapper,
-                new FraudCaseLifecycleService(
-                        fraudCaseRepository,
-                        mock(AlertRepository.class),
-                        mock(FraudCaseNoteRepository.class),
-                        mock(FraudCaseDecisionRepository.class),
-                        analystActorResolver,
-                        transactionRunner,
-                        new FraudCaseTransitionPolicy(),
-                        new FraudCaseAuditService(auditRepository),
-                        mock(com.frauddetection.alert.fraudcase.FraudCaseLifecycleIdempotencyService.class),
-                        responseMapper
-                ),
                 new FraudCaseQueryService(
                         fraudCaseRepository,
-                        auditRepository,
                         mock(FraudCaseSearchRepository.class),
-                        responseMapper,
-                        new com.frauddetection.alert.fraudcase.FraudCaseWorkQueueProperties(
-                                java.time.Duration.ofHours(24),
-                                "test-work-queue-cursor-secret"
-                        )
-                )
-        );
-    }
-
-    private FraudCaseManagementService service(
-            FraudCaseRepository fraudCaseRepository,
-            ScoredTransactionRepository scoredTransactionRepository,
-            AnalystActorResolver analystActorResolver,
-            AlertServiceMetrics metrics,
-            RegulatedMutationCoordinator coordinator,
-            FraudCaseAuditRepository auditRepository,
-            FraudCaseSearchRepository searchRepository
-    ) {
-        RegulatedMutationTransactionRunner transactionRunner = mock(RegulatedMutationTransactionRunner.class);
-        when(transactionRunner.runLocalCommit(any())).thenAnswer(invocation -> invocation.<java.util.function.Supplier<?>>getArgument(0).get());
-        FraudCaseResponseMapper responseMapper = new FraudCaseResponseMapper(new AlertResponseMapper());
-        return new FraudCaseManagementService(
-                fraudCaseRepository,
-                scoredTransactionRepository,
-                analystActorResolver,
-                new FraudCaseUpdateMutationHandler(fraudCaseRepository, metrics),
-                coordinator,
-                responseMapper,
-                new FraudCaseLifecycleService(
-                        fraudCaseRepository,
-                        mock(AlertRepository.class),
-                        mock(FraudCaseNoteRepository.class),
-                        mock(FraudCaseDecisionRepository.class),
-                        analystActorResolver,
-                        transactionRunner,
-                        new FraudCaseTransitionPolicy(),
-                        new FraudCaseAuditService(auditRepository),
-                        mock(com.frauddetection.alert.fraudcase.FraudCaseLifecycleIdempotencyService.class),
-                        responseMapper
-                ),
-                new FraudCaseQueryService(
-                        fraudCaseRepository,
-                        auditRepository,
-                        searchRepository,
-                        responseMapper,
                         new com.frauddetection.alert.fraudcase.FraudCaseWorkQueueProperties(
                                 java.time.Duration.ofHours(24),
                                 "test-work-queue-cursor-secret"

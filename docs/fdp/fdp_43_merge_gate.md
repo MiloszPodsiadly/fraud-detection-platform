@@ -1,6 +1,7 @@
 # FDP-43 Merge Gate
 
-Status: branch merge gate.
+Status: historical branch merge gate; superseded for current runtime by FDP-81, which removes the local FraudCase
+lifecycle idempotency subsystem.
 
 ## Scope
 

@@ -59,8 +59,10 @@ Alert service:
 | `GET` | `/api/v1/alerts/{alertId}` | Returns one alert. |
 | `GET` | `/api/v1/alerts/{alertId}/assistant-summary` | Returns read-only analyst assistant summary. |
 | `POST` | `/api/v1/alerts/{alertId}/decision` | Records analyst decision. |
-| `GET` | `/api/v1/fraud-cases` | Lists fraud cases. |
+| `GET` | `/api/v1/fraud-cases/work-queue` | Lists the bounded investigator work queue used by the analyst console. |
+| `GET` | `/api/v1/fraud-cases/work-queue/summary` | Returns the global work queue summary count used by the analyst console. |
 | `GET` | `/api/v1/fraud-cases/{caseId}` | Returns one fraud case. |
+| `GET` | `/api/v1/fraud-cases/{caseId}/evidence-summary` | Returns bounded evidence-summary context derived from linked alert snapshots. |
 | `GET` | `/api/v1/fraud-cases/{caseId}/evidence-timeline` | Returns a bounded derived fraud-case evidence chronology projection. |
 | `PATCH` | `/api/v1/fraud-cases/{caseId}` | Updates fraud case status/assignment fields through a regulated mutation command. Non-terminal command states return operation metadata without target business fields. |
 | `GET` | `/api/v1/transactions/scored` | Lists scored transaction projections. |
@@ -86,6 +88,27 @@ Alert service:
 | `POST` | `/governance/advisories/{event_id}/audit` | Appends one authenticated human-review audit entry for a governance advisory event. |
 
 Governance advisory audit and lifecycle projection endpoints are owned by `alert-service`, not `ml-inference-service`, because lifecycle status is derived from authenticated human-review audit history. They do not mutate advisory events, scoring, model behavior, retraining, rollback, or fraud decisioning.
+
+FDP-81 intentionally removes obsolete FraudCase list and lifecycle HTTP handlers that are not used by the current
+React analyst console. The retained FraudCase rows above are the supported current product surface; this is API
+surface reduction, not a no-behavior-change cleanup.
+
+## Removed In FDP-81
+
+| Removed route | Replacement | Notes |
+| --- | --- | --- |
+| `GET /api/v1/fraud-cases` | `GET /api/v1/fraud-cases/work-queue` | List/search is replaced by the bounded work queue. |
+| `POST /api/v1/fraud-cases` | None | Standalone create is removed from the current product surface. |
+| `POST /api/v1/fraud-cases/{caseId}/assign` | `PATCH /api/v1/fraud-cases/{caseId}` where applicable | No standalone assign endpoint. |
+| `POST /api/v1/fraud-cases/{caseId}/notes` | None | Notes are not a current product API. |
+| `POST /api/v1/fraud-cases/{caseId}/decisions` | `PATCH /api/v1/fraud-cases/{caseId}` where applicable | Standalone decision route removed. |
+| `POST /api/v1/fraud-cases/{caseId}/transition` | `PATCH /api/v1/fraud-cases/{caseId}` where applicable | Lifecycle transition route removed. |
+| `POST /api/v1/fraud-cases/{caseId}/close` | `PATCH /api/v1/fraud-cases/{caseId}` where applicable | Close route removed. |
+| `POST /api/v1/fraud-cases/{caseId}/reopen` | `PATCH /api/v1/fraud-cases/{caseId}` where applicable | Reopen route removed. |
+| `GET /api/v1/fraud-cases/{caseId}/audit` | None | Standalone audit-trail read removed. |
+| `/api/fraud-cases/**` | Supported versioned routes only | Compatibility handler removed. |
+
+`GET /internal/suspicious-transactions/summary` remains supported and is not part of this removal.
 
 Platform Audit Read API:
 

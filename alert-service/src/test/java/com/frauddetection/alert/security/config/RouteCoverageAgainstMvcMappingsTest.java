@@ -249,6 +249,48 @@ class RouteCoverageAgainstMvcMappingsTest {
     }
 
     @Test
+    void currentFrontendBackedRoutesRemainMapped() {
+        assertThat(applicationRouteDescriptions())
+                .contains(
+                        "GET /api/v1/alerts",
+                        "GET /api/v1/alerts/{alertId}",
+                        "GET /api/v1/alerts/{alertId}/assistant-summary",
+                        "POST /api/v1/alerts/{alertId}/decision",
+                        "GET /api/v1/transactions/scored",
+                        "GET /internal/suspicious-transactions",
+                        "GET /internal/suspicious-transactions/summary",
+                        "GET /internal/suspicious-transactions/{suspiciousTransactionId}",
+                        "GET /internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert",
+                        "GET /api/v1/fraud-cases/work-queue",
+                        "GET /api/v1/fraud-cases/work-queue/summary",
+                        "GET /api/v1/fraud-cases/{caseId}",
+                        "PATCH /api/v1/fraud-cases/{caseId}",
+                        "GET /api/v1/fraud-cases/{caseId}/evidence-summary",
+                        "GET /api/v1/fraud-cases/{caseId}/evidence-timeline"
+                );
+    }
+
+    @Test
+    void removedFraudCaseLifecycleRoutesStayRemoved() {
+        assertThat(applicationRouteDescriptions())
+                .doesNotContain(
+                        "GET /api/v1/fraud-cases",
+                        "POST /api/v1/fraud-cases",
+                        "POST /api/v1/fraud-cases/{caseId}/assign",
+                        "POST /api/v1/fraud-cases/{caseId}/notes",
+                        "POST /api/v1/fraud-cases/{caseId}/decisions",
+                        "POST /api/v1/fraud-cases/{caseId}/transition",
+                        "POST /api/v1/fraud-cases/{caseId}/close",
+                        "POST /api/v1/fraud-cases/{caseId}/reopen",
+                        "GET /api/v1/fraud-cases/{caseId}/audit",
+                        "GET /api/fraud-cases",
+                        "GET /api/fraud-cases/**",
+                        "POST /api/fraud-cases",
+                        "POST /api/fraud-cases/**"
+                );
+    }
+
+    @Test
     void everyApplicationControllerIsIncludedInFdp49MvcCoverage() throws IOException {
         Set<String> coveredControllers = Arrays.stream(RouteCoverageAgainstMvcMappingsTest.class
                         .getAnnotation(WebMvcTest.class)
@@ -287,6 +329,15 @@ class RouteCoverageAgainstMvcMappingsTest {
                 .sorted(Comparator.naturalOrder())
                 .flatMap(pattern -> methods.stream()
                         .map(method -> new RouteDescriptor(method.name(), pattern)));
+    }
+
+    private List<String> applicationRouteDescriptions() {
+        return handlerMapping.getHandlerMethods().entrySet().stream()
+                .filter(entry -> entry.getValue().getBeanType().getName().startsWith("com.frauddetection.alert"))
+                .flatMap(this::routeDescriptors)
+                .map(route -> route.method() + " " + route.pattern())
+                .sorted()
+                .toList();
     }
 
     private List<String> methodlessMappingViolations(List<Map.Entry<RequestMappingInfo, HandlerMethod>> mappings) {

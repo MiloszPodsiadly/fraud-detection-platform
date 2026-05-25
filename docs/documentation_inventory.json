@@ -511,7 +511,7 @@
                       {
                           "path":  "docs/observability/fraud_case_lifecycle_idempotency_dashboard.md",
                           "type":  "observability",
-                          "status":  "current-source-of-truth"
+                          "status":  "branch-evidence-or-template"
                       },
                       {
                           "path":  "docs/observability/index.md",

@@ -6,15 +6,7 @@ import com.frauddetection.alert.audit.InvalidAuditEventQueryException;
 import com.frauddetection.alert.audit.PostCommitEvidenceIncompleteException;
 import com.frauddetection.alert.audit.external.AuditEvidenceExportRejectedException;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorPublicationRequiredException;
-import com.frauddetection.alert.fraudcase.FraudCaseActorUnavailableException;
-import com.frauddetection.alert.fraudcase.FraudCaseConflictException;
-import com.frauddetection.alert.fraudcase.FraudCaseIdempotencyConflictException;
-import com.frauddetection.alert.fraudcase.FraudCaseIdempotencyInProgressException;
-import com.frauddetection.alert.fraudcase.FraudCaseIdempotencySnapshotTooLargeException;
-import com.frauddetection.alert.fraudcase.FraudCaseInvalidIdempotencyKeyException;
-import com.frauddetection.alert.fraudcase.FraudCaseMissingIdempotencyKeyException;
 import com.frauddetection.alert.fraudcase.FraudCaseNotFoundException;
-import com.frauddetection.alert.fraudcase.FraudCaseValidationException;
 import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueQueryException;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryLookupUnavailableException;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryNotFoundException;
@@ -38,6 +30,8 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -217,31 +211,10 @@ public class AlertServiceExceptionHandler {
         );
     }
 
-    @ExceptionHandler(FraudCaseActorUnavailableException.class)
-    public ResponseEntity<ApiErrorResponse> handleFraudCaseActorUnavailable(FraudCaseActorUnavailableException exception) {
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(
-                new ApiErrorResponse(Instant.now(), 401, "Unauthorized", "Authentication is required.", List.of("reason:missing_credentials"))
-        );
-    }
-
     @ExceptionHandler(FraudCaseNotFoundException.class)
     public ResponseEntity<ApiErrorResponse> handleFraudCaseNotFound(FraudCaseNotFoundException exception) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(
-                new ApiErrorResponse(Instant.now(), 404, "Not Found", exception.getMessage(), List.of("reason:FRAUD_CASE_NOT_FOUND"))
-        );
-    }
-
-    @ExceptionHandler(FraudCaseConflictException.class)
-    public ResponseEntity<ApiErrorResponse> handleFraudCaseConflict(FraudCaseConflictException exception) {
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(
-                new ApiErrorResponse(Instant.now(), 409, "Conflict", exception.getMessage(), List.of("reason:FRAUD_CASE_LIFECYCLE_CONFLICT"))
-        );
-    }
-
-    @ExceptionHandler(FraudCaseValidationException.class)
-    public ResponseEntity<ApiErrorResponse> handleFraudCaseValidation(FraudCaseValidationException exception) {
-        return ResponseEntity.badRequest().body(
-                new ApiErrorResponse(Instant.now(), 400, "Bad Request", exception.getMessage(), List.of("reason:FRAUD_CASE_VALIDATION_FAILED"))
+                new ApiErrorResponse(Instant.now(), 404, "Not Found", "Fraud case not found.", List.of("reason:FRAUD_CASE_NOT_FOUND"))
         );
     }
 
@@ -266,47 +239,6 @@ public class AlertServiceExceptionHandler {
         );
     }
 
-    @ExceptionHandler(FraudCaseMissingIdempotencyKeyException.class)
-    public ResponseEntity<ApiErrorResponse> handleFraudCaseMissingIdempotencyKey(FraudCaseMissingIdempotencyKeyException exception) {
-        return ResponseEntity.badRequest().body(
-                new ApiErrorResponse(Instant.now(), 400, "Bad Request", exception.getMessage(), List.of("code:MISSING_IDEMPOTENCY_KEY"))
-        );
-    }
-
-    @ExceptionHandler(FraudCaseInvalidIdempotencyKeyException.class)
-    public ResponseEntity<ApiErrorResponse> handleFraudCaseInvalidIdempotencyKey(FraudCaseInvalidIdempotencyKeyException exception) {
-        return ResponseEntity.badRequest().body(
-                new ApiErrorResponse(Instant.now(), 400, "Bad Request", exception.getMessage(), List.of("code:INVALID_IDEMPOTENCY_KEY"))
-        );
-    }
-
-    @ExceptionHandler(FraudCaseIdempotencyConflictException.class)
-    public ResponseEntity<ApiErrorResponse> handleFraudCaseIdempotencyConflict(FraudCaseIdempotencyConflictException exception) {
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(
-                new ApiErrorResponse(Instant.now(), 409, "Conflict", exception.getMessage(), List.of("code:IDEMPOTENCY_KEY_CONFLICT"))
-        );
-    }
-
-    @ExceptionHandler(FraudCaseIdempotencyInProgressException.class)
-    public ResponseEntity<ApiErrorResponse> handleFraudCaseIdempotencyInProgress(FraudCaseIdempotencyInProgressException exception) {
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(
-                new ApiErrorResponse(Instant.now(), 409, "Conflict", exception.getMessage(), List.of("code:IDEMPOTENCY_KEY_IN_PROGRESS"))
-        );
-    }
-
-    @ExceptionHandler(FraudCaseIdempotencySnapshotTooLargeException.class)
-    public ResponseEntity<ApiErrorResponse> handleFraudCaseIdempotencySnapshotTooLarge(FraudCaseIdempotencySnapshotTooLargeException exception) {
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
-                new ApiErrorResponse(
-                        Instant.now(),
-                        500,
-                        "Internal Server Error",
-                        "Fraud case lifecycle idempotency response snapshot exceeded the configured size limit.",
-                        List.of("code:IDEMPOTENCY_SNAPSHOT_TOO_LARGE")
-                )
-        );
-    }
-
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiErrorResponse> handleIllegalArgument(IllegalArgumentException exception) {
         return ResponseEntity.badRequest().body(
@@ -327,7 +259,15 @@ public class AlertServiceExceptionHandler {
     @ExceptionHandler(MissingRequestHeaderException.class)
     public ResponseEntity<ApiErrorResponse> handleMissingRequestHeader(MissingRequestHeaderException exception) {
         if ("X-Idempotency-Key".equalsIgnoreCase(exception.getHeaderName())) {
-            return handleFraudCaseMissingIdempotencyKey(new FraudCaseMissingIdempotencyKeyException());
+            return ResponseEntity.badRequest().body(
+                    new ApiErrorResponse(
+                            Instant.now(),
+                            400,
+                            "Bad Request",
+                            "X-Idempotency-Key is required for regulated mutation commands.",
+                            List.of("code:MISSING_IDEMPOTENCY_KEY")
+                    )
+            );
         }
         return ResponseEntity.badRequest().body(
                 new ApiErrorResponse(
@@ -377,6 +317,13 @@ public class AlertServiceExceptionHandler {
         String reason = exception.getReason() == null ? error : exception.getReason();
         return ResponseEntity.status(exception.getStatusCode()).body(
                 new ApiErrorResponse(Instant.now(), status, error, reason, List.of())
+        );
+    }
+
+    @ExceptionHandler({NoHandlerFoundException.class, NoResourceFoundException.class})
+    public ResponseEntity<ApiErrorResponse> handleUnknownRoute(Exception exception) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(
+                new ApiErrorResponse(Instant.now(), 404, "Not Found", "Resource not found.", List.of())
         );
     }
 

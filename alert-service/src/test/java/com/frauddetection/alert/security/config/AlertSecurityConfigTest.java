@@ -313,7 +313,7 @@ class AlertSecurityConfigTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(submitDecisionRequest())))
                 .andExpect(status().isUnauthorized());
-        mockMvc.perform(get("/api/v1/fraud-cases"))
+        mockMvc.perform(get("/api/v1/fraud-cases/case-1"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/fraud-cases/case-1"))
                 .andExpect(status().isUnauthorized());
@@ -488,13 +488,13 @@ class AlertSecurityConfigTest {
     }
 
     @Test
-    void shouldAllowReadOnlyAnalystToListFraudCases() throws Exception {
-        when(fraudCaseManagementService.listCases(any(Pageable.class)))
-                .thenReturn(new PageImpl<>(List.of()));
+    void shouldAllowReadOnlyAnalystToReadFraudCaseDetail() throws Exception {
+        when(fraudCaseManagementService.getCase("case-1"))
+                .thenReturn(fraudCaseDocument());
 
-        mockMvc.perform(get("/api/v1/fraud-cases").with(demoUser("READ_ONLY_ANALYST")))
+        mockMvc.perform(get("/api/v1/fraud-cases/case-1").with(demoUser("READ_ONLY_ANALYST")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content").isArray());
+                .andExpect(jsonPath("$.caseId").value("case-1"));
     }
 
     @Test

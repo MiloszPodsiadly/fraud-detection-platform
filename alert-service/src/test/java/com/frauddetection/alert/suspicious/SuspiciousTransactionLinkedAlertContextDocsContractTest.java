@@ -12,6 +12,7 @@ class SuspiciousTransactionLinkedAlertContextDocsContractTest {
 
     private static final Path BRIDGE_DOCS = Path.of("../docs/product/alert_read_only_detail_bridge.md");
     private static final Path UI_DOCS = Path.of("../docs/product/suspicious_transaction_internal_ui.md");
+    private static final Path SECURITY_DOCS = Path.of("../docs/security/endpoint_authorization_map.md");
 
     @Test
     void DocsMentionBackendRelationshipValidationTest() throws Exception {
@@ -36,6 +37,15 @@ class SuspiciousTransactionLinkedAlertContextDocsContractTest {
         assertThat(docs())
                 .contains("requires both `SUSPICIOUS_TRANSACTION_READ` and `ALERT_READ`")
                 .contains("The endpoint requires both `SUSPICIOUS_TRANSACTION_READ` and `ALERT_READ`");
+    }
+
+    @Test
+    void EndpointAuthorizationMapDocumentsActiveLinkedAlertResolverTest() throws Exception {
+        assertThat(Files.readString(SECURITY_DOCS))
+                .contains("`GET /internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert`")
+                .contains("`SUSPICIOUS_TRANSACTION_READ` + `ALERT_READ`")
+                .contains("Protected internal backend-resolved linked-alert read context")
+                .contains("Client-selected `alertId` query parameter is rejected.");
     }
 
     @Test

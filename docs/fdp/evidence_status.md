@@ -30,8 +30,8 @@ For current behavior, start with `docs/index.md`, `docs/architecture/index.md`, 
 | FDP-38 | Implemented live fixture proof | Runtime-reached test-fixture claim | FDP-39 release governance separation | Production image live in-flight proof |
 | FDP-39 | Implemented release artifact separation | No-overclaim release governance | FDP-40 platform controls readiness | External platform enforcement |
 | FDP-40 | Implemented platform controls readiness | Single release owner and external controls | Current documentation cleanup | Actual production enablement |
-| FDP-42 | Implemented fraud-case lifecycle branch | Local audited lifecycle workflow | FDP-43/FDP-44 idempotency hardening and FDP-45 read model | Regulated mutation finality remains out of scope |
-| FDP-43/FDP-44 | Implemented idempotency hardening | Shared idempotency primitives and replay snapshot limits | FDP-45 through FDP-47 read/UI layers | Global exactly-once and lease fencing remain non-claims |
+| FDP-42 | Historical fraud-case lifecycle branch | Superseded by FDP-81 removal of lifecycle surface and implementation | Current regulated PATCH and bounded reads | Historical lifecycle proof is not current runtime |
+| FDP-43/FDP-44 | Historical idempotency hardening | Superseded by FDP-81 removal of local lifecycle idempotency and replay storage | Current deletion guards and regulated mutation proof | No local lifecycle retry contract remains |
 | FDP-45 | Implemented work queue read model | Bounded cursor, audit, OpenAPI, and read-model proof | FDP-46/FDP-47 analyst console UI layers | Lifecycle mutation UI remains out of scope |
 | FDP-46/FDP-47 | Implemented analyst console product proof | Read-only work queue UI, scored filtering, summary contract | FDP-54 CI consolidation into `Analyst Console Product Gate` | Export, bulk action, assignment, and snapshot consistency remain out of scope |
 | FDP-48/FDP-49 | Implemented auth and route boundary hardening | BFF lifecycle, route ownership, matcher order | FDP-50 through FDP-53 frontend runtime architecture | Enterprise IAM remains deployment scope |

@@ -105,7 +105,7 @@ Scope: repository documentation only. Excludes `documents/` prompt inputs, build
 | docs/observability/fdp_33_lease_renewal_dashboard.md | observability | branch-evidence-or-template |
 | docs/observability/fdp_35_regulated_mutation_alert_thresholds.md | observability | branch-evidence-or-template |
 | docs/observability/fdp_35_regulated_mutation_dashboard_spec.md | observability | branch-evidence-or-template |
-| docs/observability/fraud_case_lifecycle_idempotency_dashboard.md | observability | current-source-of-truth |
+| docs/observability/fraud_case_lifecycle_idempotency_dashboard.md | observability | branch-evidence-or-template |
 | docs/observability/index.md | observability | current-source-of-truth |
 | docs/observability/operations_observability_v2.md | observability | current-source-of-truth |
 | docs/openapi/alert_service.openapi.yaml | api | current-source-of-truth |

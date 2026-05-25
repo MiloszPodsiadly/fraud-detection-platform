@@ -11,7 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class Fdp45FraudCaseLegacyExactCountCompatibilityDocsTest {
 
     @Test
-    void docsAndSourceSeparateWorkQueueSliceFromListExactCountDebt() throws IOException {
+    void docsAndSourceConfirmLegacyListExactCountWasRemovedByFdp81() throws IOException {
         String docs = Files.readString(projectRoot().resolve("docs/fdp/fdp_45_work_queue_readiness.md"))
                 .toLowerCase()
                 .replaceAll("\\s+", " ");
@@ -19,26 +19,14 @@ class Fdp45FraudCaseLegacyExactCountCompatibilityDocsTest {
         String repository = Files.readString(sourceRoot().resolve("fraudcase/MongoFraudCaseSearchRepository.java"));
 
         assertThat(docs)
-                .contains("bounded slice")
-                .contains("does not perform an exact mongo count")
-                .contains("list exact count remains compatibility debt")
-                .contains("high-volume investigator queues should use the dedicated work queue slice endpoint")
-                .contains("future hardening item");
-        assertThat(docs)
-                .doesNotContain("all fraud-case read endpoints avoid exact count")
-                .doesNotContain("list avoids exact count");
+                .contains("fdp-81 later removes the general fraud-case list http")
+                .contains("retaining the dedicated work queue contract");
 
         assertThat(queryService)
                 .contains("searchRepository.searchSlice(")
-                .contains("searchRepository.search(");
-        assertThat(searchMethod(repository)).contains("mongoTemplate.count(");
+                .doesNotContain("searchRepository.search(");
+        assertThat(repository).doesNotContain("mongoTemplate.count(", "public Page<FraudCaseDocument> search");
         assertThat(searchSliceMethod(repository)).doesNotContain(".count(");
-    }
-
-    private String searchMethod(String source) {
-        int start = source.indexOf("public Page<FraudCaseDocument> search");
-        int end = source.indexOf("@Override", start + 1);
-        return source.substring(start, end);
     }
 
     private String searchSliceMethod(String source) {

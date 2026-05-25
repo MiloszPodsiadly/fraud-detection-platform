@@ -59,7 +59,7 @@ jobs:
         run: docker version
 
       - name: Run FDP-42 fraud case proof suite
-        run: mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=FraudCaseTransitionPolicyTest,Fdp42FraudCaseManagementServiceTest,FraudCaseControllerTest,FraudCaseManagementServiceTest,FraudCaseMutationInvariantTest,FraudCaseAuditServiceTest,Fdp42FraudCaseAuditAppendOnlyArchitectureTest,Fdp42FraudCaseDocumentationNoOverclaimTest,FraudCaseSecurityIntegrationTest,FraudCaseTransactionIntegrationTest,AlertSecurityConfigTest,AlertSecurityConfigJwtEnabledTest,DemoAuthSecurityConfigTest,AnalystRoleTest" test
+        run: mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=FraudCaseControllerTest,FraudCaseManagementServiceTest,FraudCaseMutationInvariantTest,FraudCasePatchRegulatedMutationProofTest,FraudCaseRemovedRouteRuntimeTest,FraudCaseRemovedApiSurfaceTest,FraudCaseCurrentApiSurfaceTest,FraudCaseCleanupDocumentationTest,FraudCaseSecurityIntegrationTest,AlertSecurityConfigTest,AlertSecurityConfigJwtEnabledTest,DemoAuthSecurityConfigTest,AnalystRoleTest" test
 
       - name: Verify FDP-42 proof suite reports
         run: node scripts/ci/verify-junit-reports.mjs --suite fdp42
@@ -74,8 +74,8 @@ jobs:
             alert-service/target/surefire-reports/
             alert-service/target/failsafe-reports/
 
-  fdp43-fraud-case-idempotency:
-    name: FDP-43 Fraud Case Idempotency
+  fdp43-fraud-case-cleanup-guard:
+    name: FDP-43 Retired Fraud Case Lifecycle Guard
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs:
@@ -102,8 +102,8 @@ jobs:
       - name: Verify Docker is available for Testcontainers
         run: docker version
 
-      - name: Run FDP-43 fraud case idempotency proof suite
-        run: mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=IdempotencyCanonicalHasherTest,SharedIdempotencyKeyPolicyTest,FraudCaseLifecycleIdempotencyConflictPolicyTest,Fdp43FraudCaseLifecycleIdempotencyArchitectureTest,Fdp43FraudCaseLifecyclePublicPathIdempotencyArchitectureTest,FraudCaseControllerTest,FraudCaseSecurityIntegrationTest,FraudCaseTransactionIntegrationTest,FraudCaseLifecycleIdempotencyGlobalKeyRegressionIntegrationTest,FraudCaseLifecycleIdempotencyConcurrencyIntegrationTest,FraudCaseLifecycleIdempotencyFailureIntegrationTest,FraudCaseLifecycleIdempotencyServiceRaceTest,RegulatedMutationIdempotencyPrimitiveCompatibilityTest" test
+      - name: Run FDP-43 retired lifecycle cleanup guard suite
+        run: mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=IdempotencyCanonicalHasherTest,SharedIdempotencyKeyPolicyTest,FraudCasePatchRegulatedMutationProofTest,FraudCaseRemovedRouteRuntimeTest,FraudCaseRemovedApiSurfaceTest,FraudCaseCurrentApiSurfaceTest,FraudCaseMutationInvariantTest,FraudCaseControllerTest,FraudCaseSecurityIntegrationTest,RegulatedMutationIdempotencyPrimitiveCompatibilityTest" test
 
       - name: Verify FDP-43 proof suite reports
         run: node scripts/ci/verify-junit-reports.mjs --suite fdp43
@@ -112,21 +112,21 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: fdp43-fraud-case-idempotency-test-reports
+          name: fdp43-retired-lifecycle-guard-test-reports
           if-no-files-found: error
           path: |
             alert-service/target/surefire-reports/
             alert-service/target/failsafe-reports/
 
-  fdp44-fraud-case-idempotency-hardening:
-    name: FDP-44 Fraud Case Idempotency Hardening
+  fdp44-fraud-case-cleanup-guard:
+    name: FDP-44 Retired Fraud Case Lifecycle Guard
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs:
       - backend
       - fdp42-fraud-case-management
       - regulated-mutation-regression
-      - fdp43-fraud-case-idempotency
+      - fdp43-fraud-case-cleanup-guard
 
     steps:
       - name: Checkout
@@ -147,8 +147,8 @@ jobs:
       - name: Verify Docker is available for Testcontainers
         run: docker version
 
-      - name: Run FDP-44 fraud case idempotency hardening suite
-        run: mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=Fdp44FraudCaseLifecycleApiSurfaceStructuralTest,Fdp44FraudCaseLifecycleReplaySnapshotTest,Fdp44FraudCaseLifecycleReplaySnapshotFailClosedTest,Fdp44FraudCaseLifecycleReplaySnapshotCoverageTest,Fdp44FraudCaseLifecycleReplaySnapshotMapperStructuralTest,Fdp44FraudCaseLifecycleReplayEquivalenceIntegrationTest,Fdp44FraudCaseIdempotencyRetentionOperationalTest,Fdp44FraudCaseIdempotencyOperationalDocsNoOverclaimTest,FraudCaseLifecycleIdempotencyServiceRaceTest,FraudCaseLifecycleIdempotencyGlobalKeyRegressionIntegrationTest,FraudCaseLifecycleIdempotencyConcurrencyIntegrationTest,FraudCaseLifecycleIdempotencyFailureIntegrationTest,AlertServiceMetricsTest" test
+      - name: Run FDP-44 retired lifecycle cleanup guard suite
+        run: mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=FraudCasePatchRegulatedMutationProofTest,FraudCaseRemovedRouteRuntimeTest,FraudCaseRemovedApiSurfaceTest,FraudCaseCurrentApiSurfaceTest,FraudCaseMutationInvariantTest,AlertServiceMetricsTest" test
 
       - name: Verify FDP-44 proof suite reports
         run: node scripts/ci/verify-junit-reports.mjs --suite fdp44
@@ -157,7 +157,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: fdp44-fraud-case-idempotency-hardening-test-reports
+          name: fdp44-retired-lifecycle-guard-test-reports
           if-no-files-found: error
           path: |
             alert-service/target/surefire-reports/
@@ -171,8 +171,8 @@ jobs:
       - backend
       - fdp42-fraud-case-management
       - regulated-mutation-regression
-      - fdp43-fraud-case-idempotency
-      - fdp44-fraud-case-idempotency-hardening
+      - fdp43-fraud-case-cleanup-guard
+      - fdp44-fraud-case-cleanup-guard
 
     steps:
       - name: Checkout
@@ -196,7 +196,7 @@ jobs:
       - name: Run FDP-45 fraud case work queue read model suite
         run: >-
           mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am
-          "-Dtest=Fdp45FraudCaseReadModelSingleSourceOfTruthTest,Fdp45FraudCaseWorkQueuePaginationTest,Fdp45FraudCaseWorkQueueSortingTest,Fdp45FraudCaseWorkQueueFilterTest,Fdp45FraudCaseWorkQueueDuplicateParamTest,Fdp45FraudCaseWorkQueueSlaConfigTest,Fdp45FraudCaseProdSlaConfigTest,Fdp45FraudCaseWorkQueueSlaAgeTest,Fdp45FraudCaseWorkQueueReadOnlySafetyTest,Fdp45FraudCaseWorkQueueSecurityTest,Fdp45FraudCaseWorkQueueObservabilityTest,Fdp45FraudCaseWorkQueueFailureMetricsTest,Fdp45FraudCaseWorkQueueReadAccessAuditTest,Fdp45FraudCaseWorkQueueMongoIntegrationTest,Fdp45FraudCaseWorkQueueContractCompatibilityTest,Fdp45FraudCaseWorkQueueDocsNoOverclaimTest,Fdp45FraudCaseLegacyListValidationTest,Fdp45FraudCaseLegacyDeepPaginationValidationTest,Fdp45FraudCaseWorkQueueDeepPaginationTest,Fdp45FraudCaseWorkQueueIndexReadinessTest,Fdp45FraudCaseCompoundIndexReadinessDocsTest,Fdp45FraudCaseWorkQueueOpenApiContractTest,Fdp45FraudCaseWorkQueueFailedReadAuditTest,Fdp45FraudCaseWorkQueueFilterLengthTest,Fdp45FraudCaseWorkQueueNoDuplicateAuditAdviceTest,Fdp45ReadAccessAuditResponseAdviceMarkerTest,Fdp45FraudCaseWorkQueueAuditPrecedenceTest,Fdp45SensitiveReadAuditUnavailableRunbookTest,Fdp45FraudCaseReadPolicyNamingBoundaryTest,Fdp45FraudCaseLegacyExactCountCompatibilityDocsTest,Fdp45FraudCaseLegacyPaginationReleaseNotesTest,Fdp45FraudCaseReadQueryPolicyContractTest,Fdp45FraudCaseWorkQueueCursorArchitectureTest,Fdp45FraudCaseWorkQueueCursorCodecTest,Fdp45FraudCaseWorkQueueCursorPaginationTest,Fdp45FraudCaseWorkQueueCursorQueryFingerprintTest,Fdp45FraudCaseWorkQueueCursorFilterBindingTest,Fdp45FraudCaseWorkQueueCursorPageCombinationTest,Fdp45FraudCaseWorkQueueCursorSecretProfileTest,Fdp45FraudCaseWorkQueueCursorObservabilityTest,Fdp45FraudCaseWorkQueueCursorDocsContractTest,Fdp45FraudCaseWorkQueueSortFieldCoverageTest,Fdp45FraudCaseWorkQueueCursorSizeChangeTest,SensitiveReadAuditServiceTest"
+          "-Dtest=Fdp45FraudCaseReadModelSingleSourceOfTruthTest,Fdp45FraudCaseWorkQueuePaginationTest,Fdp45FraudCaseWorkQueueSortingTest,Fdp45FraudCaseWorkQueueFilterTest,Fdp45FraudCaseWorkQueueDuplicateParamTest,Fdp45FraudCaseWorkQueueSlaConfigTest,Fdp45FraudCaseProdSlaConfigTest,Fdp45FraudCaseWorkQueueSlaAgeTest,Fdp45FraudCaseWorkQueueReadOnlySafetyTest,Fdp45FraudCaseWorkQueueSecurityTest,Fdp45FraudCaseWorkQueueObservabilityTest,Fdp45FraudCaseWorkQueueFailureMetricsTest,Fdp45FraudCaseWorkQueueReadAccessAuditTest,Fdp45FraudCaseWorkQueueMongoIntegrationTest,Fdp45FraudCaseWorkQueueDocsNoOverclaimTest,Fdp45FraudCaseWorkQueueDeepPaginationTest,Fdp45FraudCaseWorkQueueIndexReadinessTest,Fdp45FraudCaseCompoundIndexReadinessDocsTest,Fdp45FraudCaseWorkQueueOpenApiContractTest,Fdp45FraudCaseWorkQueueFailedReadAuditTest,Fdp45FraudCaseWorkQueueFilterLengthTest,Fdp45FraudCaseWorkQueueNoDuplicateAuditAdviceTest,Fdp45ReadAccessAuditResponseAdviceMarkerTest,Fdp45FraudCaseWorkQueueAuditPrecedenceTest,Fdp45SensitiveReadAuditUnavailableRunbookTest,Fdp45FraudCaseReadPolicyNamingBoundaryTest,Fdp45FraudCaseLegacyExactCountCompatibilityDocsTest,Fdp45FraudCaseReadQueryPolicyContractTest,Fdp45FraudCaseWorkQueueCursorArchitectureTest,Fdp45FraudCaseWorkQueueCursorCodecTest,Fdp45FraudCaseWorkQueueCursorPaginationTest,Fdp45FraudCaseWorkQueueCursorQueryFingerprintTest,Fdp45FraudCaseWorkQueueCursorFilterBindingTest,Fdp45FraudCaseWorkQueueCursorPageCombinationTest,Fdp45FraudCaseWorkQueueCursorSecretProfileTest,Fdp45FraudCaseWorkQueueCursorObservabilityTest,Fdp45FraudCaseWorkQueueCursorDocsContractTest,Fdp45FraudCaseWorkQueueSortFieldCoverageTest,Fdp45FraudCaseWorkQueueCursorSizeChangeTest,SensitiveReadAuditServiceTest"
           test
 
       - name: Verify FDP-45 proof suite reports

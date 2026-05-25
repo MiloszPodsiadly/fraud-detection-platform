@@ -49,7 +49,7 @@ SecurityRouteOwnershipRegistry is a CI guardrail that mirrors expected MVC owner
 
 Do not choose an owner based on URL prefix alone. Choose owner by resource semantics and required authority. Every ambiguous endpoint must include a one-line ownership rationale in this document.
 
-- `FraudCaseAuthorizationRules` owns fraud-case lifecycle, read, and audit routes only when the primary resource is a fraud case.
+- `FraudCaseAuthorizationRules` owns the current fraud-case work queue, detail, evidence read and regulated update routes only when the primary resource is a fraud case.
 - `AuditAuthorizationRules` owns audit evidence, audit integrity, audit export, audit degradations, and trust-attestation evidence routes.
 - `SuspiciousTransactionAuthorizationRules` owns protected internal SuspiciousTransaction read-model routes.
 - `GovernanceAuthorizationRules` owns governance advisory projection, analytics, and advisory audit routes.
@@ -99,9 +99,10 @@ Production BFF hardening remains deployment responsibility unless configured in 
 | `GET /api/v1/session` | `SessionAuthorizationRules` | Public bootstrap | Public, no-store, token-free | Safe method only | `BffSessionSecurityIntegrationTest` |
 | `GET /oauth2/**`, `GET /login/oauth2/**`, `GET /error` | `SessionAuthorizationRules` | OAuth/session bootstrap | Public auth lifecycle | Framework controlled safe method only | `SecurityMatcherOrderRegressionTest` |
 | `/api/v1/alerts/**` | `AlertAuthorizationRules` | `ALERT_READ`, `ASSISTANT_SUMMARY_READ`, `ALERT_DECISION_SUBMIT` | Protected | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |
-| `/api/v1/fraud-cases/**` | `FraudCaseAuthorizationRules` | `FRAUD_CASE_READ`, `FRAUD_CASE_AUDIT_READ`, `FRAUD_CASE_UPDATE` | Protected | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |
+| `GET /api/v1/fraud-cases/work-queue`, `GET /api/v1/fraud-cases/work-queue/summary`, `GET /api/v1/fraud-cases/{caseId}`, `GET /api/v1/fraud-cases/{caseId}/evidence-summary`, `GET /api/v1/fraud-cases/{caseId}/evidence-timeline`, `PATCH /api/v1/fraud-cases/{caseId}` | `FraudCaseAuthorizationRules` | `FRAUD_CASE_READ`, `FRAUD_CASE_UPDATE` | Protected current FDP-81 surface | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest`, `RouteCoverageAgainstMvcMappingsTest` |
 | `GET /api/v1/transactions/scored` | `TransactionAuthorizationRules` | `TRANSACTION_MONITOR_READ` | Protected | Safe method only | `AuthorizationRulesCoverageTest` |
 | `GET /internal/suspicious-transactions`, `GET /internal/suspicious-transactions/summary`, `GET /internal/suspicious-transactions/{suspiciousTransactionId}` | `SuspiciousTransactionAuthorizationRules` | `SUSPICIOUS_TRANSACTION_READ` | Protected internal read-only API | Safe method only | `AuthorizationRulesCoverageTest` |
+| `GET /internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert` | `SuspiciousTransactionAuthorizationRules` | `SUSPICIOUS_TRANSACTION_READ` + `ALERT_READ` | Protected internal backend-resolved linked-alert read context. Client-selected `alertId` query parameter is rejected. | Safe method only | `AuthorizationRulesCoverageTest`, `SuspiciousTransactionReadControllerAuthorizationTest`, `RouteCoverageAgainstMvcMappingsTest` |
 | `/governance/advisories/**` | `GovernanceAuthorizationRules` | `TRANSACTION_MONITOR_READ`, `GOVERNANCE_ADVISORY_AUDIT_WRITE` | Protected or denied | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |
 | `/api/v1/audit/**` | `AuditAuthorizationRules` | `AUDIT_READ`, `AUDIT_VERIFY`, `AUDIT_EXPORT`, `AUDIT_DEGRADATION_RESOLVE` | Protected | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |
 | `/system/trust-level`, `/api/v1/trust/incidents/**` | `TrustAuthorizationRules` | `AUDIT_VERIFY`, trust incident authorities | Protected | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |

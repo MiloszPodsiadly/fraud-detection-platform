@@ -13,7 +13,7 @@ It also completes the legacy fraud-case API cleanup that is required to keep the
 - The client instance closes over the session/auth provider chosen at the workspace boundary.
 - Logout, unauthenticated state, and session/user/provider switches must disable or clear sensitive workspace state and prevent stale responses from committing.
 - FDP-50 removes unused legacy wrappers from `alertsApi.js`; auth-sensitive workspace code must not reintroduce or import them.
-- FDP-50 removes the legacy unversioned fraud-case backend route family `/api/fraud-cases/**`.
+- FDP-50 removes the legacy unversioned fraud-case backend route family documented in the release note.
 - Backend security, read-audit classification, metrics, docs, tests, and the scope guard are aligned to `/api/v1/fraud-cases/**`.
 - FDP-50 intentionally keeps `App.jsx` as the composition root. A future frontend architecture branch may extract `WorkspaceRuntimeProvider` or `useWorkspaceRuntime`, but FDP-50 only hardens the API client boundary.
 
@@ -27,9 +27,9 @@ It also completes the legacy fraud-case API cleanup that is required to keep the
 
 ## Breaking API Change
 
-`/api/fraud-cases/**` is removed. Clients must use `/api/v1/fraud-cases/**`.
-Authenticated retired legacy requests return `410 Gone` with `code:LEGACY_FRAUD_CASE_ROUTE_REMOVED`.
-Unauthenticated legacy requests still fail at the authentication boundary.
+The unversioned compatibility family is removed. Clients must use the supported versioned FraudCase surface.
+Historical FDP-50 compatibility behavior and the current FDP-81 fallback behavior are recorded in
+[FDP-50 Legacy Fraud-Case API Removal](../release/fdp_50_legacy_api_removal.md).
 
 ## Auth Boundaries
 

@@ -48,12 +48,7 @@ class BffSessionSecurityConfigurer {
     }
 
     private boolean isCsrfIgnoredRequest(HttpServletRequest request) {
-        return isStatelessBearerRequest(request) || isRetiredLegacyFraudCaseRoute(request);
-    }
-
-    private boolean isRetiredLegacyFraudCaseRoute(HttpServletRequest request) {
-        String path = request.getRequestURI();
-        return "/api/fraud-cases".equals(path) || (path != null && path.startsWith("/api/fraud-cases/"));
+        return isStatelessBearerRequest(request);
     }
 
     private boolean hasSessionSignal(HttpServletRequest request) {

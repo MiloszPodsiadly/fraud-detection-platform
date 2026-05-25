@@ -4,9 +4,6 @@ import com.frauddetection.alert.api.FraudCaseSlaStatus;
 import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.fraudcase.FraudCaseSearchRepository;
-import com.frauddetection.alert.mapper.AlertResponseMapper;
-import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
-import com.frauddetection.alert.persistence.FraudCaseAuditRepository;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.persistence.FraudCaseRepository;
 import com.frauddetection.common.events.enums.RiskLevel;
@@ -37,9 +34,7 @@ class Fdp45FraudCaseWorkQueueSlaAgeTest {
         when(searchRepository.searchSlice(any(), any())).thenReturn(new SliceImpl<>(List.of(open, breached, closed, unknown)));
         FraudCaseQueryService service = new FraudCaseQueryService(
                 mock(FraudCaseRepository.class),
-                mock(FraudCaseAuditRepository.class),
                 searchRepository,
-                new FraudCaseResponseMapper(new AlertResponseMapper()),
                 Clock.fixed(Instant.parse("2026-05-11T10:00:00Z"), ZoneOffset.UTC),
                 Duration.ofHours(24)
         );

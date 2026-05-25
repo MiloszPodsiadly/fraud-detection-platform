@@ -12,6 +12,7 @@ Status: current release documentation index.
 | [FDP-40 proof artifact schema](fdp_40_proof_artifact_schema.md) | Expected generated proof-pack fields. |
 | [FDP-40 required checks matrix](fdp_40_required_checks_matrix.md) | Required CI checks that external branch protection must enforce before production enablement. |
 | [FDP-40 external platform controls](fdp_40_external_platform_controls_matrix.md) | External controls required before production enablement. |
+| [FDP-81 Fraud Case surface cleanup](fdp_81_fraud_case_surface_cleanup.md) | Breaking API cleanup, retained routes, removed routes, and replacement guidance. |
 
 ## Machine-Validated Templates
 

@@ -2,9 +2,6 @@ package com.frauddetection.alert.service;
 
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.fraudcase.FraudCaseSearchRepository;
-import com.frauddetection.alert.mapper.AlertResponseMapper;
-import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
-import com.frauddetection.alert.persistence.FraudCaseAuditRepository;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.persistence.FraudCaseRepository;
 import org.junit.jupiter.api.Test;
@@ -28,7 +25,6 @@ class Fdp45FraudCaseWorkQueueReadOnlySafetyTest {
     @Test
     void shouldNotMutateCaseAuditOrPersistDerivedSlaFieldsWhenReadingWorkQueue() {
         FraudCaseRepository repository = mock(FraudCaseRepository.class);
-        FraudCaseAuditRepository auditRepository = mock(FraudCaseAuditRepository.class);
         FraudCaseSearchRepository searchRepository = mock(FraudCaseSearchRepository.class);
         FraudCaseDocument document = new FraudCaseDocument();
         document.setCaseId("case-1");
@@ -38,9 +34,7 @@ class Fdp45FraudCaseWorkQueueReadOnlySafetyTest {
         when(searchRepository.searchSlice(any(), any())).thenReturn(new SliceImpl<>(List.of(document)));
         FraudCaseQueryService service = new FraudCaseQueryService(
                 repository,
-                auditRepository,
                 searchRepository,
-                new FraudCaseResponseMapper(new AlertResponseMapper()),
                 Clock.systemUTC(),
                 Duration.ofHours(24)
         );
@@ -52,21 +46,17 @@ class Fdp45FraudCaseWorkQueueReadOnlySafetyTest {
         assertThat(item.caseAgeSeconds()).isNotNull();
         assertThat(item.slaStatus()).isNotNull();
         verify(repository, never()).save(any(FraudCaseDocument.class));
-        verify(auditRepository, never()).save(any());
         verify(repository, never()).delete(any());
     }
 
     @Test
     void shouldExposeGlobalFraudCaseCountWithoutReadingLegacyListOrMutatingState() {
         FraudCaseRepository repository = mock(FraudCaseRepository.class);
-        FraudCaseAuditRepository auditRepository = mock(FraudCaseAuditRepository.class);
         FraudCaseSearchRepository searchRepository = mock(FraudCaseSearchRepository.class);
         when(repository.count()).thenReturn(46L);
         FraudCaseQueryService service = new FraudCaseQueryService(
                 repository,
-                auditRepository,
                 searchRepository,
-                new FraudCaseResponseMapper(new AlertResponseMapper()),
                 Clock.systemUTC(),
                 Duration.ofHours(24)
         );
@@ -77,9 +67,7 @@ class Fdp45FraudCaseWorkQueueReadOnlySafetyTest {
         assertThat(summary.scope()).isEqualTo("GLOBAL_FRAUD_CASES");
         assertThat(summary.snapshotConsistentWithWorkQueue()).isFalse();
         verify(repository).count();
-        verify(searchRepository, never()).search(any(), any());
         verify(searchRepository, never()).searchSlice(any(), any());
         verify(repository, never()).save(any(FraudCaseDocument.class));
-        verify(auditRepository, never()).save(any());
     }
 }

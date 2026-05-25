@@ -1,6 +1,7 @@
 # FDP-42 - Local Audited Fraud Case Lifecycle Management
 
-Status: branch proof summary.
+Status: historical branch proof summary; superseded for current runtime by FDP-81, which removes the standalone
+lifecycle HTTP surface and underlying lifecycle implementation.
 
 ## Scope
 

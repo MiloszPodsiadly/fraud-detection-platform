@@ -14,7 +14,6 @@ source-of-truth document says otherwise.
 | --- | --- |
 | [Alert service SLOs](alert_service_slo.md) | Current alert-service operational health signals and interpretation rules. |
 | [Operations and observability v2](operations_observability_v2.md) | Current ML, governance, audit, internal-auth, and platform observability reference. |
-| [Fraud-case lifecycle idempotency dashboard](fraud_case_lifecycle_idempotency_dashboard.md) | Current dashboard contract for local fraud-case lifecycle idempotency outcomes. |
 
 ## Branch Evidence
 
@@ -23,6 +22,7 @@ source-of-truth document says otherwise.
 | [FDP-33 lease renewal dashboard](fdp_33_lease_renewal_dashboard.md) | Lease renewal observability contract for FDP-33 branch evidence. |
 | [FDP-35 regulated mutation dashboard spec](fdp_35_regulated_mutation_dashboard_spec.md) | Dashboard contract for modeled restart/recovery proof. |
 | [FDP-35 regulated mutation alert thresholds](fdp_35_regulated_mutation_alert_thresholds.md) | Threshold contract for modeled restart/recovery proof. |
+| [Fraud-case lifecycle idempotency dashboard](fraud_case_lifecycle_idempotency_dashboard.md) | Historical FDP-44 artifact; its emitter was removed by FDP-81. |
 
 ## Interpretation Rules
 
