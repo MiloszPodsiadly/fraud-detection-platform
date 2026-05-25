@@ -1,22 +1,31 @@
 package com.frauddetection.scoring.engine;
 
+import com.frauddetection.common.events.engine.FraudEngineConfidence;
+import com.frauddetection.common.events.engine.FraudEngineResult;
+import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
+import com.frauddetection.common.events.enums.RiskLevel;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.RecordComponent;
+import java.lang.reflect.Modifier;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class FraudEngineDescriptorTest {
 
     private static final List<String> CANONICAL_LANGUAGES = List.of(
-            "java", "kotlin", "scala", "groovy", "python", "go", "rust", "c", "cpp", "csharp",
-            "fsharp", "javascript", "typescript", "ruby", "php", "swift", "objectivec", "dart",
-            "elixir", "erlang", "haskell", "clojure", "lua", "perl", "r", "julia", "sql", "bash",
-            "other"
+            "java", "python", "go", "kotlin", "scala", "javascript", "other"
+    );
+    private static final List<String> UNSUPPORTED_LANGUAGES = List.of(
+            "groovy", "rust", "c", "cpp", "csharp", "fsharp", "typescript", "ruby", "php", "swift",
+            "objectivec", "dart", "elixir", "erlang", "haskell", "clojure", "lua", "perl", "r",
+            "julia", "sql", "bash"
     );
 
     @Test
@@ -66,6 +75,15 @@ class FraudEngineDescriptorTest {
     }
 
     @Test
+    void descriptorLanguagePolicyMatchesFraudEngineResultLanguagePolicy() {
+        for (String language : CANONICAL_LANGUAGES) {
+            assertThatCode(() -> result(language))
+                    .as("FraudSignalEngine.evaluate() returns FraudEngineResult; descriptor and result language policies must stay aligned for %s", language)
+                    .doesNotThrowAnyException();
+        }
+    }
+
+    @Test
     void rejectsMissingAliasesCaseVariantsAndFreeTextLanguages() {
         assertThatThrownBy(() -> descriptor("rules.primary", null, "1.0.0", false))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -81,6 +99,13 @@ class FraudEngineDescriptorTest {
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("engineLanguage")
                     .hasMessageContaining("canonical lowercase allowlisted language");
+        }
+
+        for (String language : UNSUPPORTED_LANGUAGES) {
+            assertThatThrownBy(() -> descriptor("rules.primary", language, "1.0.0", false))
+                    .as("descriptor language must remain compatible with FraudEngineResult: %s", language)
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("engineLanguage");
         }
     }
 
@@ -112,7 +137,32 @@ class FraudEngineDescriptorTest {
                 );
     }
 
+    @Test
+    void keepsDescriptorValidationPolicyInternalToItsPackage() {
+        assertThat(Modifier.isPublic(FraudEngineDescriptorValuePolicy.class.getModifiers())).isFalse();
+    }
+
     private FraudEngineDescriptor descriptor(String engineId, String language, String version, boolean required) {
         return new FraudEngineDescriptor(engineId, FraudEngineType.RULES, language, version, required);
+    }
+
+    private FraudEngineResult result(String language) {
+        return new FraudEngineResult(
+                "rules.primary",
+                FraudEngineType.RULES,
+                language,
+                FraudEngineStatus.AVAILABLE,
+                0.1d,
+                RiskLevel.LOW,
+                FraudEngineConfidence.LOW,
+                List.of(),
+                List.of(),
+                List.of(),
+                1L,
+                null,
+                null,
+                null,
+                Instant.parse("2026-05-25T09:00:00Z")
+        );
     }
 }
