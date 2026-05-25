@@ -29,7 +29,7 @@ class Fdp45FraudCaseWorkQueueCursorArchitectureTest {
         String productionConstructor = method(
                 service,
                 "@Autowired",
-                "    FraudCaseQueryService(\n            FraudCaseRepository fraudCaseRepository,\n            FraudCaseAuditRepository auditRepository,\n            FraudCaseSearchRepository searchRepository,\n            FraudCaseResponseMapper responseMapper,\n            Clock clock,"
+                "    FraudCaseQueryService(\n            FraudCaseRepository fraudCaseRepository,\n            FraudCaseSearchRepository searchRepository,\n            Clock clock,"
         );
         String properties = Files.readString(sourceRoot().resolve("fraudcase/FraudCaseWorkQueueProperties.java"));
 

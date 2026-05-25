@@ -57,6 +57,10 @@ class SecurityDeniedAccessRouteClassifierTest {
     void classifiesKnownStableRouteGroups() {
         assertThat(classifier.classify("/api/v1/alerts/alert-1")).isEqualTo("fraud_alert");
         assertThat(classifier.classify("/api/v1/fraud-cases/case-1")).isEqualTo("fraud_case");
+        assertThat(classifier.classify("/api/v1/fraud-cases/work-queue")).isEqualTo("fraud_case");
+        assertThat(classifier.classify("/api/v1/fraud-cases/work-queue/summary")).isEqualTo("fraud_case");
+        assertThat(classifier.classify("/api/v1/fraud-cases/case-1/evidence-summary")).isEqualTo("fraud_case");
+        assertThat(classifier.classify("/api/v1/fraud-cases/case-1/evidence-timeline")).isEqualTo("fraud_case");
         assertThat(classifier.classify("/system/trust-level")).isEqualTo("trust");
         assertThat(classifier.classify("/api/v1/audit/trust/attestation")).isEqualTo("trust");
     }
@@ -64,5 +68,8 @@ class SecurityDeniedAccessRouteClassifierTest {
     @Test
     void retiredUnversionedFraudCaseRouteIsNotAClassifiedRouteGroup() {
         assertThat(classifier.classify("/api/fraud-cases/case-1")).isEqualTo("unknown");
+        assertThat(classifier.classify("/api/v1/fraud-cases")).isEqualTo("unknown");
+        assertThat(classifier.classify("/api/v1/fraud-cases/case-1/assign")).isEqualTo("unknown");
+        assertThat(classifier.classify("/api/v1/fraud-cases/case-1/audit")).isEqualTo("unknown");
     }
 }

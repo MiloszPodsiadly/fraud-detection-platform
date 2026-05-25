@@ -4,9 +4,6 @@ import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.fraudcase.FraudCaseSearchRepository;
 import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueProperties;
-import com.frauddetection.alert.mapper.AlertResponseMapper;
-import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
-import com.frauddetection.alert.persistence.FraudCaseAuditRepository;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.persistence.FraudCaseRepository;
 import com.frauddetection.common.events.enums.RiskLevel;
@@ -41,9 +38,7 @@ class Fdp45FraudCaseWorkQueueCursorPaginationTest {
                 .thenReturn(new SliceImpl<>(List.of(third), pageable, false));
         FraudCaseQueryService service = new FraudCaseQueryService(
                 mock(FraudCaseRepository.class),
-                mock(FraudCaseAuditRepository.class),
                 searchRepository,
-                new FraudCaseResponseMapper(new AlertResponseMapper()),
                 new FraudCaseWorkQueueProperties(Duration.ofHours(24), "test-work-queue-cursor-secret")
         );
 

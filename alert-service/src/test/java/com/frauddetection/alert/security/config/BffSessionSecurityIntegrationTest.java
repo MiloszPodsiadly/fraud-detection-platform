@@ -274,7 +274,7 @@ class BffSessionSecurityIntegrationTest {
                         .content("{\"assignedInvestigatorId\":\"investigator-1\",\"actorId\":\"lead-1\"}"))
                 .andExpect(status().isForbidden());
 
-        verify(fraudCaseManagementService, never()).assignCase(any(), any(), any());
+        verify(fraudCaseManagementService, never()).updateCase(any(), any(), any());
         verify(alertServiceMetrics).recordBffCsrfRejection(any());
     }
 
