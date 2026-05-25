@@ -313,16 +313,16 @@ class BffSessionSecurityIntegrationTest {
     @Test
     void publicSpaStaticAndSessionRoutesAreAllowedBySecurity() throws Exception {
         mockMvc.perform(get("/"))
-                .andExpect(status().isInternalServerError());
+                .andExpect(status().isNotFound());
 
         mockMvc.perform(get("/analyst-console"))
-                .andExpect(status().isInternalServerError());
+                .andExpect(status().isNotFound());
 
         mockMvc.perform(get("/assets/app.js"))
-                .andExpect(status().isInternalServerError());
+                .andExpect(status().isNotFound());
 
         mockMvc.perform(get("/actuator/health"))
-                .andExpect(status().isInternalServerError());
+                .andExpect(status().isNotFound());
 
         mockMvc.perform(get("/api/v1/session"))
                 .andExpect(status().isOk());
@@ -370,10 +370,10 @@ class BffSessionSecurityIntegrationTest {
     @Test
     void narrowSpaFallbackAllowsOnlyKnownGetRoutes() throws Exception {
         mockMvc.perform(get("/fraud-case"))
-                .andExpect(status().isInternalServerError());
+                .andExpect(status().isNotFound());
 
         mockMvc.perform(get("/reports"))
-                .andExpect(status().isInternalServerError());
+                .andExpect(status().isNotFound());
 
         mockMvc.perform(post("/reports").with(userWith(AnalystAuthority.FRAUD_CASE_READ)).with(csrf()))
                 .andExpect(status().isForbidden());

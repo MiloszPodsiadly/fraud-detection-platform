@@ -30,6 +30,8 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -315,6 +317,13 @@ public class AlertServiceExceptionHandler {
         String reason = exception.getReason() == null ? error : exception.getReason();
         return ResponseEntity.status(exception.getStatusCode()).body(
                 new ApiErrorResponse(Instant.now(), status, error, reason, List.of())
+        );
+    }
+
+    @ExceptionHandler({NoHandlerFoundException.class, NoResourceFoundException.class})
+    public ResponseEntity<ApiErrorResponse> handleUnknownRoute(Exception exception) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(
+                new ApiErrorResponse(Instant.now(), 404, "Not Found", "Resource not found.", List.of())
         );
     }
 
