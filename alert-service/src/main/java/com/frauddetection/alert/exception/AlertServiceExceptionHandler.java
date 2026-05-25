@@ -212,7 +212,7 @@ public class AlertServiceExceptionHandler {
     @ExceptionHandler(FraudCaseNotFoundException.class)
     public ResponseEntity<ApiErrorResponse> handleFraudCaseNotFound(FraudCaseNotFoundException exception) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(
-                new ApiErrorResponse(Instant.now(), 404, "Not Found", exception.getMessage(), List.of("reason:FRAUD_CASE_NOT_FOUND"))
+                new ApiErrorResponse(Instant.now(), 404, "Not Found", "Fraud case not found.", List.of("reason:FRAUD_CASE_NOT_FOUND"))
         );
     }
 

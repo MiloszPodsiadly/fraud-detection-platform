@@ -5,10 +5,14 @@ import com.frauddetection.alert.api.FraudCaseWorkQueueItemResponse;
 import com.frauddetection.alert.api.FraudCaseWorkQueueSliceResponse;
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.api.UpdateFraudCaseResponse;
+import com.frauddetection.alert.audit.read.ReadAccessAuditOutcome;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
+import com.frauddetection.alert.fraudcase.FraudCaseNotFoundException;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
@@ -31,11 +35,15 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.time.Instant;
 import java.util.List;
 
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -108,6 +116,48 @@ class FraudCaseControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.caseId").value("case-1"))
                 .andExpect(jsonPath("$.status").value("OPEN"));
+
+        verify(sensitiveReadAuditService).audit(
+                eq(ReadAccessEndpointCategory.FRAUD_CASE_DETAIL),
+                eq(ReadAccessResourceType.FRAUD_CASE),
+                eq("case-1"),
+                eq(1),
+                any()
+        );
+    }
+
+    @Test
+    void shouldAuditMissingFraudCaseDetailAsRejected() throws Exception {
+        when(fraudCaseManagementService.getCase("missing-case")).thenThrow(new FraudCaseNotFoundException("missing-case"));
+
+        mockMvc.perform(get("/api/v1/fraud-cases/missing-case"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.details[0]").value("reason:FRAUD_CASE_NOT_FOUND"));
+
+        verify(sensitiveReadAuditService).auditAttempt(
+                eq(ReadAccessEndpointCategory.FRAUD_CASE_DETAIL),
+                eq(ReadAccessResourceType.FRAUD_CASE),
+                eq("missing-case"),
+                eq(ReadAccessAuditOutcome.REJECTED),
+                any()
+        );
+    }
+
+    @Test
+    void shouldAuditUnexpectedFraudCaseDetailFailureAsFailedWithoutLeakingFailure() throws Exception {
+        when(fraudCaseManagementService.getCase("case-1")).thenThrow(new IllegalStateException("raw backend failure"));
+
+        mockMvc.perform(get("/api/v1/fraud-cases/case-1"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(content().string(not(containsString("raw backend failure"))));
+
+        verify(sensitiveReadAuditService).auditAttempt(
+                eq(ReadAccessEndpointCategory.FRAUD_CASE_DETAIL),
+                eq(ReadAccessResourceType.FRAUD_CASE),
+                eq("case-1"),
+                eq(ReadAccessAuditOutcome.FAILED),
+                any()
+        );
     }
 
     @Test
@@ -132,6 +182,24 @@ class FraudCaseControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.case_id").value("case-1"))
                 .andExpect(jsonPath("$.operation_status").value("COMMITTED_EVIDENCE_CONFIRMED"));
+    }
+
+    @Test
+    void fraudCasePatchMissingCaseReturnsFraudCaseNotFound() throws Exception {
+        when(fraudCaseManagementService.updateCase(eq("missing-case"), any(), eq("update-key-1")))
+                .thenThrow(new FraudCaseNotFoundException("missing-case"));
+
+        mockMvc.perform(patch("/api/v1/fraud-cases/missing-case")
+                        .header("X-Idempotency-Key", "update-key-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"status":"IN_REVIEW","analystId":"spoofed","decisionReason":"review","tags":[]}
+                                """))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.details[0]").value("reason:FRAUD_CASE_NOT_FOUND"))
+                .andExpect(content().string(not(containsString("ALERT_NOT_FOUND"))))
+                .andExpect(content().string(not(containsString("FraudCaseNotFoundException"))))
+                .andExpect(content().string(not(containsString("missing-case"))));
     }
 
     private FraudCaseDocument caseDocument() {

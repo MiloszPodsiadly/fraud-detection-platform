@@ -7,6 +7,7 @@ import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.domain.FraudCaseStatus;
+import com.frauddetection.alert.fraudcase.FraudCaseNotFoundException;
 import com.frauddetection.alert.fraudcase.FraudCaseSearchRepository;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
@@ -261,6 +262,36 @@ class FraudCaseManagementServiceTest {
         verify(coordinator, org.mockito.Mockito.times(2)).commit(commandCaptor.capture());
         assertThat(commandCaptor.getAllValues().get(0).requestHash())
                 .isEqualTo(commandCaptor.getAllValues().get(1).requestHash());
+        assertThat(commandCaptor.getAllValues().get(0).actorId()).isEqualTo("principal-9");
+        assertThat(commandCaptor.getAllValues().get(0).intent().actorId()).isEqualTo("principal-9");
+        assertThat(commandCaptor.getAllValues().get(0).intent().resourceId()).isEqualTo("case-1");
+        assertThat(commandCaptor.getAllValues().get(0).intent().status()).isEqualTo("CONFIRMED_FRAUD");
+        assertThat(commandCaptor.getAllValues().get(0).intent().notesHash()).doesNotContain("Confirmed after review");
+        assertThat(commandCaptor.getAllValues().get(0).intent().payloadHash()).doesNotContain("fraud-case-update-1");
+    }
+
+    @Test
+    void shouldRejectMissingFraudCaseUpdateBeforeRegulatedCoordinator() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        RegulatedMutationCoordinator coordinator = mock(RegulatedMutationCoordinator.class);
+        FraudCaseManagementService service = service(
+                fraudCaseRepository,
+                mock(ScoredTransactionRepository.class),
+                mock(AnalystActorResolver.class),
+                mock(AlertServiceMetrics.class),
+                coordinator
+        );
+
+        when(fraudCaseRepository.findById("missing-case")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.updateCase("missing-case", new UpdateFraudCaseRequest(
+                FraudCaseStatus.IN_REVIEW,
+                "spoofed-actor",
+                "review",
+                List.of()
+        ), "update-key-1")).isInstanceOf(FraudCaseNotFoundException.class);
+
+        verify(coordinator, never()).commit(any());
     }
 
     @Test

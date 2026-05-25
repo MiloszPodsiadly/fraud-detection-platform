@@ -4,6 +4,7 @@ import com.frauddetection.alert.api.FraudCaseResponse;
 import com.frauddetection.alert.api.FraudCaseWorkQueueSliceResponse;
 import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.domain.FraudCaseStatus;
+import com.frauddetection.alert.fraudcase.FraudCaseNotFoundException;
 import com.frauddetection.alert.api.UpdateFraudCaseRequest;
 import com.frauddetection.alert.api.UpdateFraudCaseResponse;
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
@@ -138,7 +139,7 @@ public class FraudCaseManagementService {
 
     public UpdateFraudCaseResponse updateCase(String caseId, UpdateFraudCaseRequest request, String idempotencyKey) {
         FraudCaseDocument document = fraudCaseRepository.findById(caseId)
-                .orElseThrow(() -> new com.frauddetection.alert.exception.AlertNotFoundException(caseId));
+                .orElseThrow(() -> new FraudCaseNotFoundException(caseId));
         String actorId = analystActorResolver.resolveActorId(request.analystId(), "UPDATE_FRAUD_CASE", caseId);
         String correlationId = correlationId(document);
         String requestHash = requestHash(request, actorId);

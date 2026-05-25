@@ -11,6 +11,7 @@ import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.domain.FraudCaseStatus;
+import com.frauddetection.alert.fraudcase.FraudCaseNotFoundException;
 import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueQueryException;
 import com.frauddetection.alert.fraudcase.FraudCaseReadQueryPolicy;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
@@ -137,9 +138,38 @@ public class FraudCaseController {
         }
     }
 
+    @AuditedSensitiveRead
     @GetMapping(VERSIONED_BASE_PATH + "/{caseId}")
-    public FraudCaseResponse getCase(@PathVariable String caseId) {
-        return responseMapper.toResponse(fraudCaseManagementService.getCase(caseId));
+    public FraudCaseResponse getCase(@PathVariable String caseId, HttpServletRequest request) {
+        try {
+            FraudCaseResponse response = responseMapper.toResponse(fraudCaseManagementService.getCase(caseId));
+            sensitiveReadAuditService.audit(
+                    ReadAccessEndpointCategory.FRAUD_CASE_DETAIL,
+                    ReadAccessResourceType.FRAUD_CASE,
+                    caseId,
+                    1,
+                    request
+            );
+            return response;
+        } catch (FraudCaseNotFoundException exception) {
+            sensitiveReadAuditService.auditAttempt(
+                    ReadAccessEndpointCategory.FRAUD_CASE_DETAIL,
+                    ReadAccessResourceType.FRAUD_CASE,
+                    caseId,
+                    ReadAccessAuditOutcome.REJECTED,
+                    request
+            );
+            throw exception;
+        } catch (RuntimeException exception) {
+            sensitiveReadAuditService.auditAttempt(
+                    ReadAccessEndpointCategory.FRAUD_CASE_DETAIL,
+                    ReadAccessResourceType.FRAUD_CASE,
+                    caseId,
+                    ReadAccessAuditOutcome.FAILED,
+                    request
+            );
+            throw exception;
+        }
     }
 
     @PatchMapping(VERSIONED_BASE_PATH + "/{caseId}")

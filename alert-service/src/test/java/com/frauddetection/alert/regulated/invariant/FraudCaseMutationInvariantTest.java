@@ -61,6 +61,31 @@ class FraudCaseMutationInvariantTest {
     }
 
     @Test
+    void shouldNotExposeTargetBusinessStateWhenFraudCaseUpdateNeedsRecovery() {
+        Fixture fixture = new Fixture();
+        FraudCaseDocument storedCase = fixture.openCase();
+        when(fixture.fraudCaseRepository.findById("case-1")).thenReturn(Optional.of(storedCase));
+        when(fixture.actorResolver.resolveActorId(eq("analyst-alias"), eq("UPDATE_FRAUD_CASE"), eq("case-1")))
+                .thenReturn("principal-9");
+        when(fixture.coordinator.commit(any())).thenAnswer(invocation -> {
+            RegulatedMutationCommand<FraudCaseDocument, UpdateFraudCaseResponse> command = invocation.getArgument(0);
+            return new RegulatedMutationResult<>(
+                    RegulatedMutationState.FAILED,
+                    command.statusResponseFactory().response(RegulatedMutationState.FAILED)
+            );
+        });
+
+        UpdateFraudCaseResponse response = fixture.service.updateCase("case-1", request(), "fraud-case-update-1");
+
+        assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.RECOVERY_REQUIRED);
+        assertThat(response.updatedCase()).isNull();
+        assertThat(response.currentCaseSnapshot()).isNotNull();
+        assertThat(response.currentCaseSnapshot().status()).isEqualTo(FraudCaseStatus.OPEN);
+        assertThat(response.recoveryRequiredReason()).isEqualTo("FAILED");
+        verify(fixture.fraudCaseRepository, never()).save(any(FraudCaseDocument.class));
+    }
+
+    @Test
     void shouldBindFraudCaseUpdateIntentToResolvedActorAndIdempotencyKey() {
         Fixture fixture = new Fixture();
         when(fixture.fraudCaseRepository.findById("case-1")).thenReturn(Optional.of(fixture.openCase()));
