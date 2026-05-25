@@ -83,7 +83,7 @@ class FraudEngineResultValidationTest {
         assertThatThrownBy(() -> statusResult(FraudEngineStatus.AVAILABLE, 0.40d, RiskLevel.MEDIUM,
                 FraudEngineConfidence.UNKNOWN, null)).hasMessageContaining("confidence");
         assertThatThrownBy(() -> statusResult(FraudEngineStatus.AVAILABLE, 0.40d, RiskLevel.MEDIUM,
-                FraudEngineConfidence.MEDIUM, "MODEL_FALLBACK")).hasMessageContaining("fallbackReason");
+                FraudEngineConfidence.MEDIUM, "MODEL_FALLBACK")).hasMessageContaining("statusReason");
     }
 
     @Test
@@ -97,7 +97,7 @@ class FraudEngineResultValidationTest {
             assertThatThrownBy(() -> statusResult(status, null, RiskLevel.LOW,
                     FraudEngineConfidence.UNKNOWN, "ENGINE_NOT_AVAILABLE")).hasMessageContaining("riskLevel");
             assertThatThrownBy(() -> statusResult(status, null, null,
-                    FraudEngineConfidence.UNKNOWN, null)).hasMessageContaining("fallbackReason");
+                    FraudEngineConfidence.UNKNOWN, null)).hasMessageContaining("statusReason");
         }
     }
 
@@ -115,13 +115,13 @@ class FraudEngineResultValidationTest {
         assertThatThrownBy(() -> statusResult(FraudEngineStatus.DEGRADED, null, null,
                 FraudEngineConfidence.HIGH, "PARTIAL_CONTEXT")).hasMessageContaining("HIGH");
         assertThatThrownBy(() -> statusResult(FraudEngineStatus.FALLBACK_USED, 0.40d, RiskLevel.MEDIUM,
-                FraudEngineConfidence.MEDIUM, null)).hasMessageContaining("fallbackReason");
+                FraudEngineConfidence.MEDIUM, null)).hasMessageContaining("statusReason");
         assertThatThrownBy(() -> statusResult(FraudEngineStatus.FALLBACK_USED, 0.40d, RiskLevel.MEDIUM,
                 FraudEngineConfidence.HIGH, "MODEL_FALLBACK")).hasMessageContaining("HIGH");
     }
 
     @Test
-    void reasonCodesAreMachineReadableAndFallbackCodeRemainsStrict() {
+    void reasonCodesAreMachineReadableAndStatusReasonRemainsStrict() {
         for (String valid : List.of("rapidTransferBurst", "DEVICE_NOVELTY", "model.reason.v1", "device-risk:v1")) {
             assertThat(resultWithLists(List.of(valid), List.of(), List.of()).reasonCodes()).containsExactly(valid);
         }
@@ -139,10 +139,10 @@ class FraudEngineResultValidationTest {
         }
         assertThatThrownBy(() -> statusResult(FraudEngineStatus.UNAVAILABLE, null, null,
                 FraudEngineConfidence.UNKNOWN, "connection refused at internal host"))
-                .hasMessageContaining("fallbackReason");
+                .hasMessageContaining("statusReason");
         assertThatThrownBy(() -> statusResult(FraudEngineStatus.UNAVAILABLE, null, null,
                 FraudEngineConfidence.UNKNOWN, " "))
-                .hasMessageContaining("fallbackReason");
+                .hasMessageContaining("statusReason");
         assertThatThrownBy(() -> new FraudEngineEvidence(FraudEngineEvidenceType.RULE_MATCH, "bad code",
                 "Title", null, "RULES", FraudEngineEvidenceStatus.AVAILABLE))
                 .hasMessageContaining("reasonCode");
@@ -183,10 +183,65 @@ class FraudEngineResultValidationTest {
     }
 
     @Test
+    void evidenceSourceIsABoundedMachineReadableCode() {
+        assertThat(new FraudEngineEvidence(FraudEngineEvidenceType.RULE_MATCH, null,
+                "Rule match", null, "RULES", FraudEngineEvidenceStatus.AVAILABLE).source()).isEqualTo("RULES");
+        assertThat(new FraudEngineEvidence(FraudEngineEvidenceType.MODEL_EXPLANATION, null,
+                "Model context", null, "ML_MODEL", FraudEngineEvidenceStatus.AVAILABLE).source()).isEqualTo("ML_MODEL");
+        for (String invalidSource : List.of(
+                "rules service",
+                "internal-host-01",
+                "INTERNAL_HOST_01",
+                "RULES_SERVICE",
+                "internal-host-01 connection refused",
+                "ml_model",
+                " ",
+                "RULES\nSERVICE",
+                "RULES\tSERVICE")) {
+            assertThatThrownBy(() -> new FraudEngineEvidence(FraudEngineEvidenceType.RULE_MATCH, null,
+                    "Rule match", null, invalidSource, FraudEngineEvidenceStatus.AVAILABLE))
+                    .as(invalidSource)
+                    .hasMessageContaining("source");
+        }
+    }
+
+    @Test
+    void obviousSensitiveSummaryMarkersAreRejectedWithoutClaimingFullProtection() {
+        for (String unsafeValue : List.of("customer id present", "account number supplied", "raw request data")) {
+            assertThatThrownBy(() -> new FraudEngineContribution("feature", unsafeValue, null, null))
+                    .as(unsafeValue)
+                    .hasMessageContaining("safe bounded summary");
+        }
+        for (String unsafeTitle : List.of("Authorization header received", "Card context", "Internal host")) {
+            assertThatThrownBy(() -> new FraudEngineEvidence(FraudEngineEvidenceType.MODEL_EXPLANATION, null,
+                    unsafeTitle, null, "ML_MODEL", FraudEngineEvidenceStatus.AVAILABLE))
+                    .as(unsafeTitle)
+                    .hasMessageContaining("safe bounded summary");
+        }
+        for (String unsafeDescription : List.of("bearer credential", "IBAN supplied", "Response payload captured")) {
+            assertThatThrownBy(() -> new FraudEngineEvidence(FraudEngineEvidenceType.MODEL_EXPLANATION, null,
+                    "Model context", unsafeDescription, "ML_MODEL", FraudEngineEvidenceStatus.AVAILABLE))
+                    .as(unsafeDescription)
+                    .hasMessageContaining("safe bounded summary");
+        }
+
+        assertThat(new FraudEngineEvidence(FraudEngineEvidenceType.MODEL_EXPLANATION, null,
+                "Model context", "Bounded model context indicates unfamiliar device pattern.",
+                "ML_MODEL", FraudEngineEvidenceStatus.AVAILABLE).description())
+                .isEqualTo("Bounded model context indicates unfamiliar device pattern.");
+        assertThat(new FraudEngineEvidence(FraudEngineEvidenceType.RULE_MATCH, null,
+                "Rapid transfer activity", "Transfer frequency exceeded configured review threshold.",
+                "RULES", FraudEngineEvidenceStatus.AVAILABLE).description())
+                .isEqualTo("Transfer frequency exceeded configured review threshold.");
+    }
+
+    @Test
     void resultDoesNotExposeRawSensitivePayloadFields() {
         assertThat(Arrays.stream(FraudEngineResult.class.getRecordComponents())
                 .map(RecordComponent::getName))
-                .doesNotContain("rawPayload", "rawFeatures", "customerPayload", "stackTrace", "exception", "token", "secret");
+                .contains("statusReason")
+                .doesNotContain("rawPayload", "rawFeatures", "customerPayload",
+                        "stackTrace", "exception", "token", "secret");
     }
 
     private FraudEngineResult validAvailable() {
@@ -207,10 +262,10 @@ class FraudEngineResultValidationTest {
             Double score,
             RiskLevel riskLevel,
             FraudEngineConfidence confidence,
-            String fallbackReason
+            String statusReason
     ) {
         return result(status, score, riskLevel, confidence, List.of(), List.of(), List.of(), 3L,
-                null, null, fallbackReason);
+                null, null, statusReason);
     }
 
     private FraudEngineResult result(
@@ -224,10 +279,10 @@ class FraudEngineResultValidationTest {
             Long latencyMs,
             String modelName,
             String modelVersion,
-            String fallbackReason
+            String statusReason
     ) {
         return result(status, score, riskLevel, confidence, reasonCodes, contributions, evidence, latencyMs,
-                modelName, modelVersion, fallbackReason, "python");
+                modelName, modelVersion, statusReason, "python");
     }
 
     private FraudEngineResult result(
@@ -241,12 +296,12 @@ class FraudEngineResultValidationTest {
             Long latencyMs,
             String modelName,
             String modelVersion,
-            String fallbackReason,
+            String statusReason,
             String engineLanguage
     ) {
         return new FraudEngineResult(
                 "engine-v1", FraudEngineType.ML_MODEL, engineLanguage, status, score, riskLevel, confidence,
-                reasonCodes, contributions, evidence, latencyMs, modelName, modelVersion, fallbackReason, now());
+                reasonCodes, contributions, evidence, latencyMs, modelName, modelVersion, statusReason, now());
     }
 
     private FraudEngineContribution contribution() {

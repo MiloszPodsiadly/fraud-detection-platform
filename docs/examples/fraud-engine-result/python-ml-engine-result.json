@@ -37,6 +37,6 @@
   "latencyMs": 28,
   "modelName": "python-logistic-fraud-model",
   "modelVersion": "v1",
-  "fallbackReason": null,
+  "statusReason": null,
   "generatedAt": "2026-05-25T09:00:00Z"
 }

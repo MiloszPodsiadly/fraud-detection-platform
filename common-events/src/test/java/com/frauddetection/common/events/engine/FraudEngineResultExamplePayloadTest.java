@@ -37,7 +37,8 @@ class FraudEngineResultExamplePayloadTest {
                             "\"exception\"",
                             "\"token\"",
                             "\"secret\"",
-                            "\"customerpayload\""
+                            "\"customerpayload\"",
+                            "\"fallbackreason\""
                     );
         }
     }
@@ -51,7 +52,7 @@ class FraudEngineResultExamplePayloadTest {
         assertThat(unavailable.status()).isEqualTo(FraudEngineStatus.UNAVAILABLE);
         assertThat(unavailable.score()).isNull();
         assertThat(unavailable.confidence()).isEqualTo(FraudEngineConfidence.UNKNOWN);
-        assertThat(unavailable.fallbackReason()).isEqualTo("MODEL_RUNTIME_UNAVAILABLE");
+        assertThat(unavailable.statusReason()).isEqualTo("MODEL_RUNTIME_UNAVAILABLE");
 
         assertThat(read("degraded-engine-result.json").status()).isEqualTo(FraudEngineStatus.DEGRADED);
     }
@@ -62,6 +63,7 @@ class FraudEngineResultExamplePayloadTest {
         String invalidReasonCode = rules.replace("RAPID_TRANSFER_BURST", "RAW CUSTOMER VALUE");
         String contradictoryStatus = rules.replace("\"status\": \"AVAILABLE\"", "\"status\": \"UNAVAILABLE\"");
         String invalidEvidenceType = rules.replace("\"evidenceType\": \"VELOCITY_SIGNAL\"", "\"evidenceType\": \"FREE_TEXT\"");
+        String invalidEvidenceSource = rules.replace("\"source\": \"RULES\"", "\"source\": \"rules service\"");
 
         assertThatThrownBy(() -> objectMapper().readValue(invalidReasonCode, FraudEngineResult.class))
                 .hasMessageContaining("reasonCode");
@@ -69,6 +71,8 @@ class FraudEngineResultExamplePayloadTest {
                 .hasMessageContaining("UNAVAILABLE");
         assertThatThrownBy(() -> objectMapper().readValue(invalidEvidenceType, FraudEngineResult.class))
                 .hasMessageContaining("FREE_TEXT");
+        assertThatThrownBy(() -> objectMapper().readValue(invalidEvidenceSource, FraudEngineResult.class))
+                .hasMessageContaining("source");
     }
 
     private FraudEngineResult read(String filename) throws Exception {

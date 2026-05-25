@@ -31,6 +31,6 @@
   "latencyMs": 4,
   "modelName": null,
   "modelVersion": null,
-  "fallbackReason": null,
+  "statusReason": null,
   "generatedAt": "2026-05-25T09:00:00Z"
 }

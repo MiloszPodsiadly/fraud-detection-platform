@@ -12,6 +12,6 @@
   "latencyMs": 75,
   "modelName": null,
   "modelVersion": null,
-  "fallbackReason": "PARTIAL_WINDOW_CONTEXT",
+  "statusReason": "PARTIAL_WINDOW_CONTEXT",
   "generatedAt": "2026-05-25T09:00:00Z"
 }

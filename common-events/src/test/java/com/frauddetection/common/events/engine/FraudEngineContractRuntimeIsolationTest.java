@@ -22,6 +22,25 @@ class FraudEngineContractRuntimeIsolationTest {
     }
 
     @Test
+    void currentScoredTransactionEventDoesNotExposeFutureFraudIntelligenceFields() {
+        assertThat(Arrays.stream(TransactionScoredEvent.class.getRecordComponents())
+                .map(RecordComponent::getName))
+                .withFailMessage("FDP-82 is contract-only. Event integration belongs to a later branch with explicit compatibility tests.")
+                .doesNotContain(
+                        "engineResults",
+                        "platformRiskScore",
+                        "platformRiskLevel",
+                        "primarySource",
+                        "finalDecisionSource",
+                        "engineAgreement",
+                        "engineDisagreementReason",
+                        "recommendedAnalystAction",
+                        "recommendedQueue",
+                        "strongestSignals"
+                );
+    }
+
+    @Test
     void scoringRuntimeDoesNotUseFoundationContractOrFutureOrchestrator() throws Exception {
         String scoringRuntime = javaSources(repositoryRoot().resolve("fraud-scoring-service/src/main/java"));
 

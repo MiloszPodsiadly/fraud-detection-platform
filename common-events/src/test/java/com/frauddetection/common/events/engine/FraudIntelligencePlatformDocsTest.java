@@ -63,7 +63,12 @@ class FraudIntelligencePlatformDocsTest {
                 .contains("safe bounded summaries only");
         assertThat(normalizedArchitecture)
                 .contains("They do not replace, extend, or project the existing `ScoringEvidenceItem`")
-                .contains("they are not silently promoted into the existing platform `ReasonCode` taxonomy");
+                .contains("they are not silently promoted into the existing platform `ReasonCode` taxonomy")
+                .contains("`FraudEngineEvidence.source` is a bounded uppercase machine-readable origin code")
+                .contains("Only `FALLBACK_USED` declares that an actual fallback occurred")
+                .contains("Validation in this contract blocks obvious unsafe content only. It is not DLP")
+                .contains("sanitize explanation summaries before constructing `FraudEngineResult`")
+                .contains("a `statusReason` mapping table");
         assertThat(nonGoals)
                 .contains("no bank-certified production decision claim")
                 .doesNotContain("auto-decline production");

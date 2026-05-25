@@ -81,7 +81,7 @@ class FraudEngineResultSerializationTest {
         assertThat(restored.evidence()).isEmpty();
         assertThat(restored.modelName()).isNull();
         assertThat(restored.modelVersion()).isNull();
-        assertThat(restored.fallbackReason()).isNull();
+        assertThat(restored.statusReason()).isNull();
     }
 
     private ObjectMapper objectMapper() {

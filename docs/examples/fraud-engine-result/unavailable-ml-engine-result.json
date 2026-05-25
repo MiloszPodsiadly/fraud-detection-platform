@@ -12,6 +12,6 @@
   "latencyMs": 30,
   "modelName": "python-logistic-fraud-model",
   "modelVersion": "v1",
-  "fallbackReason": "MODEL_RUNTIME_UNAVAILABLE",
+  "statusReason": "MODEL_RUNTIME_UNAVAILABLE",
   "generatedAt": "2026-05-25T09:00:00Z"
 }
