@@ -46,6 +46,7 @@ Required for merge:
 Primary proof files:
 - `alert-service/src/test/java/**/FraudCase*SurfaceTest.java`
 - `alert-service/src/test/java/**/FraudCasePatchRegulatedMutationProofTest.java`
+- `alert-service/src/test/java/**/FraudCaseRemovedRouteRuntimeTest.java`
 - `alert-service/src/test/java/**/FraudCase*Test.java`
 - `.github/workflows/ci.yml`
 
@@ -75,6 +76,7 @@ Primary proof files:
 - `alert-service/src/test/java/**/FraudCaseCurrentApiSurfaceTest.java`
 - `alert-service/src/test/java/**/FraudCaseMutationInvariantTest.java`
 - `alert-service/src/test/java/**/FraudCasePatchRegulatedMutationProofTest.java`
+- `alert-service/src/test/java/**/FraudCaseRemovedRouteRuntimeTest.java`
 
 Related FDP branches:
 - FDP-43
@@ -102,6 +104,7 @@ Primary proof files:
 - `alert-service/src/test/java/**/FraudCaseRemovedApiSurfaceTest.java`
 - `alert-service/src/test/java/**/FraudCaseCurrentApiSurfaceTest.java`
 - `alert-service/src/test/java/**/FraudCasePatchRegulatedMutationProofTest.java`
+- `alert-service/src/test/java/**/FraudCaseRemovedRouteRuntimeTest.java`
 - `alert-service/src/test/java/**/AlertServiceMetricsTest.java`
 
 Related FDP branches:

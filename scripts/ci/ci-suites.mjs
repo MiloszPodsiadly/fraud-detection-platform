@@ -7,6 +7,7 @@ export const ciSuites = {
       "FraudCaseManagementServiceTest",
       "FraudCaseMutationInvariantTest",
       "FraudCasePatchRegulatedMutationProofTest",
+      "FraudCaseRemovedRouteRuntimeTest",
       "FraudCaseRemovedApiSurfaceTest",
       "FraudCaseCurrentApiSurfaceTest",
       "FraudCaseCleanupDocumentationTest",
@@ -24,6 +25,7 @@ export const ciSuites = {
       "IdempotencyCanonicalHasherTest",
       "SharedIdempotencyKeyPolicyTest",
       "FraudCasePatchRegulatedMutationProofTest",
+      "FraudCaseRemovedRouteRuntimeTest",
       "FraudCaseRemovedApiSurfaceTest",
       "FraudCaseCurrentApiSurfaceTest",
       "FraudCaseMutationInvariantTest",
@@ -37,6 +39,7 @@ export const ciSuites = {
     reports: "alert-service/target/surefire-reports",
     junitRequired: [
       "FraudCasePatchRegulatedMutationProofTest",
+      "FraudCaseRemovedRouteRuntimeTest",
       "FraudCaseRemovedApiSurfaceTest",
       "FraudCaseCurrentApiSurfaceTest",
       "FraudCaseMutationInvariantTest",
