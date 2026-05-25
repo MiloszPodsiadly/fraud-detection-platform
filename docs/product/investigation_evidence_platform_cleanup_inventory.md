@@ -28,6 +28,17 @@ This is hard API surface cleanup; it is not no-behavior-change cleanup.
 - `GET /api/v1/fraud-cases/{caseId}/evidence-timeline`
 - Governance endpoints used by Reports and Compliance workspaces.
 
+## Retained After Suspicious Summary Ownership Proof
+
+- `GET /internal/suspicious-transactions/summary` has a current React runtime owner: `WorkspaceDashboardShell`
+  mounts `useWorkspaceCounters`, which calls `getSuspiciousTransactionSummary` when
+  `SUSPICIOUS_TRANSACTION_READ` is available, and `WorkspaceNavigation` renders the resulting suspicious signal total.
+- This endpoint is retained because of current product runtime usage, not because tests, documentation or security
+  rules mention it.
+- `GET /internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert` remains an active backend-resolved
+  security/read surface; it rejects a client-selected `alertId` and requires both `SUSPICIOUS_TRANSACTION_READ` and
+  `ALERT_READ`.
+
 ## Removed Old FraudCase Lifecycle Surface
 
 - `GET /api/v1/fraud-cases`
