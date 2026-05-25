@@ -14,7 +14,8 @@ This branch adds a multi-engine scoring contract foundation to the existing frau
 - `FraudEngineResult` contract.
 - `FraudEngineType`, `FraudEngineStatus`, and `FraudEngineConfidence`.
 - `FraudEngineContribution` and `FraudEngineEvidence`.
-- Bounded collection counts, controlled explanation vocabularies, and status consistency validation.
+- Bounded collection counts, controlled explanation vocabularies, machine-readable origins and status reasons,
+  and status consistency validation.
 - Tolerant additive JSON consumption with strict validation of documented fields.
 - JSON contract examples.
 - Serialization, compatibility, validation, documentation, and isolation tests.
