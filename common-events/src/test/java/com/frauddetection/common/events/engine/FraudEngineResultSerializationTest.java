@@ -23,7 +23,12 @@ class FraudEngineResultSerializationTest {
                 RiskLevel.MEDIUM,
                 FraudEngineConfidence.HIGH,
                 List.of("RAPID_TRANSFER_BURST"),
-                List.of(new FraudEngineContribution("transferCountWindow", "elevated", 0.31d, "INCREASES_RISK")),
+                List.of(new FraudEngineContribution(
+                        "transferCountWindow",
+                        "elevated",
+                        0.31d,
+                        FraudEngineContributionDirection.INCREASES_RISK
+                )),
                 List.of(),
                 4L,
                 null,
@@ -47,22 +52,22 @@ class FraudEngineResultSerializationTest {
     }
 
     @Test
-    void optionalFieldsMayBeNullOrEmpty() throws Exception {
+    void optionalFieldsUseNullForAbsence() throws Exception {
         FraudEngineResult result = new FraudEngineResult(
                 "velocity-v1",
                 FraudEngineType.VELOCITY,
                 "java",
-                FraudEngineStatus.SKIPPED,
+                FraudEngineStatus.AVAILABLE,
+                0.42d,
+                RiskLevel.LOW,
+                FraudEngineConfidence.LOW,
                 null,
                 null,
-                FraudEngineConfidence.UNKNOWN,
                 null,
                 null,
                 null,
                 null,
-                "",
-                "",
-                "",
+                null,
                 Instant.parse("2026-05-25T09:00:00Z")
         );
 
@@ -71,14 +76,12 @@ class FraudEngineResultSerializationTest {
                 FraudEngineResult.class
         );
 
-        assertThat(restored.score()).isNull();
-        assertThat(restored.riskLevel()).isNull();
         assertThat(restored.reasonCodes()).isEmpty();
         assertThat(restored.contributions()).isEmpty();
         assertThat(restored.evidence()).isEmpty();
-        assertThat(restored.modelName()).isEmpty();
-        assertThat(restored.modelVersion()).isEmpty();
-        assertThat(restored.fallbackReason()).isEmpty();
+        assertThat(restored.modelName()).isNull();
+        assertThat(restored.modelVersion()).isNull();
+        assertThat(restored.fallbackReason()).isNull();
     }
 
     private ObjectMapper objectMapper() {

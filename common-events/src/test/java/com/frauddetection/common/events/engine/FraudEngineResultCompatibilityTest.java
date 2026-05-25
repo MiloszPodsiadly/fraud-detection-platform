@@ -31,16 +31,39 @@ class FraudEngineResultCompatibilityTest {
     }
 
     @Test
-    void unknownJsonFieldIsRejectedUntilCompatibilityPolicyChanges() throws Exception {
+    void additiveUnknownTopLevelFieldsAreIgnored() throws Exception {
         String json = Files.readString(example("rules-engine-result.json"));
         int end = json.lastIndexOf('}');
         String withUnknownField = json.substring(0, end)
                 + ",\n  \"unknownField\": \"future-value\"\n"
                 + json.substring(end);
 
-        assertThatThrownBy(() -> objectMapper().readValue(withUnknownField, FraudEngineResult.class))
-                .isInstanceOf(Exception.class)
-                .hasMessageContaining("unknownField");
+        FraudEngineResult result = objectMapper().readValue(withUnknownField, FraudEngineResult.class);
+
+        assertThat(result.engineId()).isEqualTo("rules-v1");
+        assertThat(result.status()).isEqualTo(FraudEngineStatus.AVAILABLE);
+    }
+
+    @Test
+    void additiveUnknownNestedFieldsAreIgnored() throws Exception {
+        String json = Files.readString(example("rules-engine-result.json"))
+                .replace("\"direction\": \"INCREASES_RISK\"", "\"direction\": \"INCREASES_RISK\", \"unknownContribution\": true")
+                .replace("\"status\": \"AVAILABLE\"\n    }", "\"status\": \"AVAILABLE\", \"unknownEvidence\": true\n    }");
+
+        FraudEngineResult result = objectMapper().readValue(json, FraudEngineResult.class);
+
+        assertThat(result.contributions()).hasSize(1);
+        assertThat(result.evidence()).hasSize(1);
+    }
+
+    @Test
+    void additiveUnknownFieldsDoNotRelaxKnownFieldValidation() throws Exception {
+        String invalidJson = Files.readString(example("rules-engine-result.json"))
+                .replace("\"score\": 0.64", "\"score\": 1.64")
+                .replace("\"engineLanguage\": \"java\"", "\"engineLanguage\": \"java\", \"unknownField\": true");
+
+        assertThatThrownBy(() -> objectMapper().readValue(invalidJson, FraudEngineResult.class))
+                .hasMessageContaining("score");
     }
 
     private Path example(String filename) {

@@ -19,5 +19,11 @@ class FraudEngineEnumSerializationTest {
         assertThat(objectMapper.writeValueAsString(FraudEngineConfidence.MEDIUM)).isEqualTo("\"MEDIUM\"");
         assertThat(objectMapper.writeValueAsString(FraudEngineConfidence.HIGH)).isEqualTo("\"HIGH\"");
         assertThat(objectMapper.writeValueAsString(FraudEngineConfidence.UNKNOWN)).isEqualTo("\"UNKNOWN\"");
+        assertThat(objectMapper.writeValueAsString(FraudEngineContributionDirection.INCREASES_RISK))
+                .isEqualTo("\"INCREASES_RISK\"");
+        assertThat(objectMapper.writeValueAsString(FraudEngineEvidenceType.MODEL_EXPLANATION))
+                .isEqualTo("\"MODEL_EXPLANATION\"");
+        assertThat(objectMapper.writeValueAsString(FraudEngineEvidenceStatus.PARTIAL))
+                .isEqualTo("\"PARTIAL\"");
     }
 }

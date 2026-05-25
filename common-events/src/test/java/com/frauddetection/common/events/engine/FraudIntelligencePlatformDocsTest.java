@@ -48,6 +48,7 @@ class FraudIntelligencePlatformDocsTest {
         String product = Files.readString(docsRoot().resolve("product/fraud_intelligence_platform.md"));
         String architecture = Files.readString(docsRoot().resolve("architecture/multi_engine_scoring_architecture.md"));
         String nonGoals = Files.readString(docsRoot().resolve("product/fraud_intelligence_non_goals.md"));
+        String normalizedArchitecture = architecture.replaceAll("\\s+", " ");
 
         assertThat(product)
                 .contains("no runtime scoring behavior changes")
@@ -56,8 +57,13 @@ class FraudIntelligencePlatformDocsTest {
         assertThat(architecture)
                 .contains("adds only a shared engine-result contract")
                 .contains("does not add `engineResults[]` to `TransactionScoredEvent`")
-                .contains("unknown top-level fields are")
-                .contains("rejected");
+                .contains("Consumers tolerate unknown additive fields")
+                .contains("Breaking semantic changes require versioning")
+                .contains("Maximum items")
+                .contains("safe bounded summaries only");
+        assertThat(normalizedArchitecture)
+                .contains("They do not replace, extend, or project the existing `ScoringEvidenceItem`")
+                .contains("they are not silently promoted into the existing platform `ReasonCode` taxonomy");
         assertThat(nonGoals)
                 .contains("no bank-certified production decision claim")
                 .doesNotContain("auto-decline production");

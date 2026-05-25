@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class FraudEngineResultExamplePayloadTest {
 
@@ -53,6 +54,21 @@ class FraudEngineResultExamplePayloadTest {
         assertThat(unavailable.fallbackReason()).isEqualTo("MODEL_RUNTIME_UNAVAILABLE");
 
         assertThat(read("degraded-engine-result.json").status()).isEqualTo(FraudEngineStatus.DEGRADED);
+    }
+
+    @Test
+    void mutatedExamplesFailKnownFieldSafetyRules() throws Exception {
+        String rules = Files.readString(example("rules-engine-result.json"));
+        String invalidReasonCode = rules.replace("RAPID_TRANSFER_BURST", "RAW CUSTOMER VALUE");
+        String contradictoryStatus = rules.replace("\"status\": \"AVAILABLE\"", "\"status\": \"UNAVAILABLE\"");
+        String invalidEvidenceType = rules.replace("\"evidenceType\": \"VELOCITY_SIGNAL\"", "\"evidenceType\": \"FREE_TEXT\"");
+
+        assertThatThrownBy(() -> objectMapper().readValue(invalidReasonCode, FraudEngineResult.class))
+                .hasMessageContaining("reasonCode");
+        assertThatThrownBy(() -> objectMapper().readValue(contradictoryStatus, FraudEngineResult.class))
+                .hasMessageContaining("UNAVAILABLE");
+        assertThatThrownBy(() -> objectMapper().readValue(invalidEvidenceType, FraudEngineResult.class))
+                .hasMessageContaining("FREE_TEXT");
     }
 
     private FraudEngineResult read(String filename) throws Exception {
