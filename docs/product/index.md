@@ -6,6 +6,10 @@ Status: current product documentation index.
 
 | Document | Scope |
 | --- | --- |
+| [Fraud Intelligence Platform](fraud_intelligence_platform.md) | FDP-82 analyst-assisted multi-engine boundary; contract foundation only. |
+| [Fraud Intelligence Non-Goals](fraud_intelligence_non_goals.md) | Explicit exclusions for automatic decisioning, banking authorization, and runtime integration. |
+| [Fraud Intelligence Glossary](fraud_intelligence_glossary.md) | Shared multi-engine terminology and decision-boundary definitions. |
+| [FDP-82 Engine Contract Foundation](fdp_82_engine_contract_foundation.md) | Branch-scope summary for the contract-only foundation. |
 | [Fraud Case Management](fraud_case_management.md) | Current product-domain source of truth for the frontend-backed work queue/detail/update/read surface and FDP-81 API cleanup. |
 | [Investigation Evidence Platform Cleanup Inventory](investigation_evidence_platform_cleanup_inventory.md) | FDP-81 keep/remove inventory for the supported analyst-console API surface. |
 | [Fraud Case Evidence Summary](fraud_case_evidence_summary.md) | Current product-domain source of truth for the read-only fraud-case evidence summary projection and non-claims. |
