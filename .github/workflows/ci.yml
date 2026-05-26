@@ -31,6 +31,9 @@ jobs:
           java-version: "21"
           cache: maven
 
+      - name: Generate local identity fixtures for backend tests
+        run: bash scripts/bootstrap-local-fixtures.sh
+
       - name: Build and test backend modules
         run: mvn -B verify
 
@@ -228,6 +231,9 @@ jobs:
 
       - name: Install ML dependencies
         run: pip install -r ml-inference-service/requirements.txt
+
+      - name: Generate local identity fixtures for ML tests
+        run: bash scripts/bootstrap-local-fixtures.sh
 
       - name: Run ML unit tests
         run: python -m unittest discover -s ml-inference-service/tests
@@ -1057,6 +1063,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Generate local identity fixtures for Compose overlays
+        run: bash scripts/bootstrap-local-fixtures.sh
 
       - name: Validate compose file
         run: |

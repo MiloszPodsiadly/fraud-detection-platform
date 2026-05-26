@@ -44,6 +44,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Generate local identity fixtures for Compose overlays
+        run: bash scripts/bootstrap-local-fixtures.sh
+
       - name: Validate supported Compose combination
         run: docker compose --env-file deployment/.env.example ${{ matrix.files }} config --quiet
 
@@ -53,6 +56,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Reject committed private key material
+        run: bash scripts/ci/assert-no-committed-private-keys.sh
 
       - name: Verify committed local runtime fixture is explicitly scoped
         run: |
@@ -68,6 +74,9 @@ jobs:
 
       - name: Assert opt-in AI config
         run: docker compose --env-file deployment/.env.example -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.ai.yml config --format json | node scripts/check-compose-security-config.mjs ai
+
+      - name: Generate local identity fixtures for security overlays
+        run: bash scripts/bootstrap-local-fixtures.sh
 
       - name: Assert recommended local security demonstration and app hardening
         run: docker compose --env-file deployment/.env.example -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.oidc.yml -f deployment/docker-compose.service-identity-mtls.yml -f deployment/docker-compose.trust-authority-jwt.yml -f deployment/docker-compose.hardened.yml config --format json | node scripts/check-compose-security-config.mjs security-hardened
@@ -111,6 +120,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Generate local identity fixtures
+        run: bash scripts/bootstrap-local-fixtures.sh
+
       - name: Start official complete local security demonstration stack
         run: bash scripts/ci/compose-runtime-smoke.sh full-security-hardened
 
@@ -120,6 +132,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Generate local identity fixtures for fixture guard tests
+        run: bash scripts/bootstrap-local-fixtures.sh
 
       - name: Set up Java
         uses: actions/setup-java@v4

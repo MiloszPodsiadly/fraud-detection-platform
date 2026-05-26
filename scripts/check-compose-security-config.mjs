@@ -111,6 +111,15 @@ function assertHardening() {
   }
 }
 
+function assertGeneratedIdentityMount(serviceName, target, expectedSourceSuffix) {
+  const mounts = service(serviceName).volumes ?? [];
+  const mount = mounts.find((volume) => volume.target === target);
+  const source = String(mount?.source ?? "").replaceAll("\\", "/");
+  if (!mount || mount.type !== "bind" || !mount.read_only || !source.endsWith(expectedSourceSuffix)) {
+    fail(`${serviceName} must read ${target} from generated local fixture path ${expectedSourceSuffix}`);
+  }
+}
+
 assertNoContainerNames();
 
 if (variant === "base") {
@@ -147,6 +156,11 @@ if (variant === "security-hardened") {
   expectEqual("security audit-trust-authority TRUST_AUTHORITY_IDENTITY_MODE", env("audit-trust-authority", "TRUST_AUTHORITY_IDENTITY_MODE"), "jwt-service-identity");
   expectEqual("security alert-service ASSISTANT_MODE", env("alert-service", "ASSISTANT_MODE"), "DETERMINISTIC");
   expectEqual("security analyst-console-ui VITE_AUTH_PROVIDER", service("analyst-console-ui").build?.args?.VITE_AUTH_PROVIDER, "bff");
+  assertGeneratedIdentityMount("ml-inference-service", "/run/service-identity/mtls", "/deployment/.local/service-identity/mtls");
+  assertGeneratedIdentityMount("fraud-scoring-service", "/run/service-identity/mtls", "/deployment/.local/service-identity/mtls");
+  assertGeneratedIdentityMount("alert-service", "/run/service-identity/mtls", "/deployment/.local/service-identity/mtls");
+  assertGeneratedIdentityMount("alert-service", "/run/service-identity/alert-service-private.pem", "/deployment/.local/service-identity/alert-service-private.pem");
+  assertGeneratedIdentityMount("audit-trust-authority", "/run/service-identity/jwks.json", "/deployment/.local/service-identity/jwks.json");
   assertLocalBindings();
   assertUiLocalPort();
   assertHardening();

@@ -85,7 +85,7 @@ done
 curl -fsS http://127.0.0.1:4173/ >/dev/null
 curl -fsS http://127.0.0.1:8085/actuator/health/readiness >/dev/null
 if [[ "$variant" == "full-security-hardened" ]]; then
-  curl -fsS --cacert deployment/service-identity/mtls/local-dev-ca.pem https://localhost:8090/health >/dev/null
+  curl -fsS --cacert deployment/.local/service-identity/mtls/local-dev-ca.pem https://localhost:8090/health >/dev/null
 else
   curl -fsS http://127.0.0.1:8090/health >/dev/null
 fi
