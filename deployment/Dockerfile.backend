@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 FROM maven:3.9.9-eclipse-temurin-21 AS build
 
 ARG MODULE_NAME
@@ -14,6 +16,9 @@ COPY fraud-scoring-service/pom.xml fraud-scoring-service/pom.xml
 COPY alert-service/pom.xml alert-service/pom.xml
 COPY audit-trust-authority/pom.xml audit-trust-authority/pom.xml
 
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn -B -ntp -pl "${MODULE_NAME}" -am -Dmaven.test.skip=true dependency:go-offline
+
 COPY common-events/src common-events/src
 COPY common-test-support/src common-test-support/src
 COPY transaction-ingest-service/src transaction-ingest-service/src
@@ -23,11 +28,18 @@ COPY fraud-scoring-service/src fraud-scoring-service/src
 COPY alert-service/src alert-service/src
 COPY audit-trust-authority/src audit-trust-authority/src
 
-RUN mvn -q -pl ${MODULE_NAME} -am -Dmaven.test.skip=true package
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn -B -ntp -pl "${MODULE_NAME}" -am -Dmaven.test.skip=true package
 
 FROM eclipse-temurin:21-jre
 
 ARG MODULE_NAME
+
+ENV JAVA_OPTS="-XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError"
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -37,4 +49,4 @@ USER 10001:10001
 
 EXPOSE 8080
 
-ENTRYPOINT ["java", "-jar", "/app/app.jar"]
+ENTRYPOINT ["sh", "-c", "exec java ${JAVA_OPTS:-} -jar /app/app.jar"]

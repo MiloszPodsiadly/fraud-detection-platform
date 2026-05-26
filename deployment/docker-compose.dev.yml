@@ -1,0 +1,130 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  kafka:
+    ports:
+      - "127.0.0.1:9092:9092"
+
+  mongodb:
+    ports:
+      - "127.0.0.1:27017:27017"
+
+  redis:
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  ml-inference-service:
+    environment:
+      INTERNAL_AUTH_MODE: DISABLED_LOCAL_ONLY
+      INTERNAL_AUTH_ALLOWED_SERVICES: "fraud-scoring-service:${INTERNAL_AUTH_TOKEN:?Use --env-file deployment/.env}:ml-score,alert-service:${INTERNAL_AUTH_TOKEN:?Use --env-file deployment/.env}:governance-read"
+    ports:
+      - "127.0.0.1:8090:8090"
+
+  audit-trust-authority:
+    environment:
+      TRUST_AUTHORITY_HMAC_SECRET: ${TRUST_AUTHORITY_HMAC_SECRET:?Use --env-file deployment/.env}
+    ports:
+      - "127.0.0.1:8095:8080"
+
+  prometheus:
+    ports:
+      - "127.0.0.1:9090:9090"
+
+  grafana:
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:?Use --env-file deployment/.env}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Use --env-file deployment/.env}
+    ports:
+      - "127.0.0.1:3000:3000"
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    environment:
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-5m}
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+    logging: *default-logging
+    networks:
+      - backend
+      - edge
+
+  ollama-model-init:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
+    entrypoint:
+      - /bin/sh
+      - -c
+    command:
+      - ollama pull "$$OLLAMA_MODEL"
+    restart: "no"
+    logging: *default-logging
+    networks:
+      - backend
+      - edge
+
+  transaction-ingest-service:
+    ports:
+      - "127.0.0.1:8081:8080"
+
+  transaction-simulator-service:
+    environment:
+      AUTO_REPLAY_ENABLED: ${AUTO_REPLAY_ENABLED:-true}
+      AUTO_REPLAY_SOURCE_TYPE: ${AUTO_REPLAY_SOURCE_TYPE:-SYNTHETIC}
+      AUTO_REPLAY_MAX_EVENTS: ${AUTO_REPLAY_MAX_EVENTS:-50000}
+      AUTO_REPLAY_THROTTLE_MILLIS: ${AUTO_REPLAY_THROTTLE_MILLIS:-5}
+      AUTO_REPLAY_START_DELAY_MILLIS: ${AUTO_REPLAY_START_DELAY_MILLIS:-15000}
+    ports:
+      - "127.0.0.1:8082:8080"
+
+  feature-enricher-service:
+    ports:
+      - "127.0.0.1:8083:8080"
+
+  fraud-scoring-service:
+    environment:
+      INTERNAL_AUTH_CLIENT_ENABLED: "true"
+      INTERNAL_AUTH_SERVICE_NAME: fraud-scoring-service
+      INTERNAL_AUTH_TOKEN: ${INTERNAL_AUTH_TOKEN:?Use --env-file deployment/.env}
+    ports:
+      - "127.0.0.1:8084:8080"
+
+  alert-service:
+    depends_on:
+      ollama-model-init:
+        condition: service_completed_successfully
+    environment:
+      SPRING_PROFILES_ACTIVE: docker,docker-local
+      APP_SECURITY_DEMO_AUTH_ENABLED: "true"
+      INTERNAL_AUTH_CLIENT_ENABLED: "true"
+      INTERNAL_AUTH_SERVICE_NAME: alert-service
+      INTERNAL_AUTH_TOKEN: ${INTERNAL_AUTH_TOKEN:?Use --env-file deployment/.env}
+      AUDIT_TRUST_AUTHORITY_ENABLED: "true"
+      AUDIT_TRUST_AUTHORITY_HMAC_SECRET: ${TRUST_AUTHORITY_HMAC_SECRET:?Use --env-file deployment/.env}
+      AUDIT_TRUST_AUTHORITY_CALLER_ENVIRONMENT: docker-local
+      ASSISTANT_MODE: OLLAMA
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
+      ASSISTANT_READ_TIMEOUT: 45s
+    ports:
+      - "127.0.0.1:8085:8080"
+
+  analyst-console-ui:
+    ports:
+      - "127.0.0.1:4173:8080"
