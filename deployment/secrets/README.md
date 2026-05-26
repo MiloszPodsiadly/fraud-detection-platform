@@ -20,6 +20,7 @@ Production-like deployments must replace:
 
 The applications currently read these values from environment variables, so an
 orchestrator should inject them from its secret store rather than committing
-secret files. Existing RS256 and mTLS files under `deployment/service-identity/`
-are committed local verification fixtures only; use externally managed private
-keys and certificates outside local development.
+secret files. Private RS256 and mTLS material is generated locally by
+`scripts/bootstrap-local-fixtures.sh` under `deployment/.local/service-identity/`;
+that directory is Git-ignored and excluded from Docker build contexts. Use
+externally managed private keys and certificates outside local development.

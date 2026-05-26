@@ -79,6 +79,11 @@ Internal service identity protects calls into `ml-inference-service`:
 
 Supported modes are documented in [Internal service identity](internal_service_identity.md). Production-like profiles must fail closed when credentials, key material, certificate material, authority mappings, or expected server identity are incomplete.
 
+Local mTLS and JWT/JWKS material is generated on demand by `scripts/bootstrap-local-fixtures.sh` under
+`deployment/.local/service-identity/`; private PEM keys are not committed. This preserves simple local evaluation
+without treating fixture keys as production PKI, production secret management, production provenance, or an
+independent external trust anchor.
+
 ## Limitations
 
 The repository provides a security implementation foundation, not a complete bank operating model. Production IAM governance, provider tenancy, secret rotation, certificate automation, ingress hardening, network policy, SIEM integration, WORM retention, and regulatory certification remain deployment and operating-environment responsibilities unless implemented explicitly in this repository.

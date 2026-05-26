@@ -133,8 +133,11 @@ Manual rotation requires overlap:
 5. Verify certificate expiry and age metrics plus `/health` `mtlsCert`.
 6. Remove old certificate and old CA trust material only after all clients and servers have moved.
 
-Local fixtures under `deployment/service-identity/` are for development only and must never be used in production.
-`deployment/.env` intentionally remains committed as a local runtime fixture. The local application guards reject
+Private cryptographic key material is not committed. For local verification,
+`scripts/bootstrap-local-fixtures.sh` generates mTLS and JWT/JWKS fixtures under
+`deployment/.local/service-identity/`; that path is ignored by Git and excluded from Docker build contexts. These
+generated fixtures must never be used in production.
+`deployment/.env` intentionally remains committed as a local configuration fixture. The local application guards reject
 its demo token/HMAC/JWT-secret patterns outside `local`, `dev`, or `docker-local` profiles; `test` is accepted only
 with an explicit automated fixture marker, and generic `docker` alone is rejected. Third-party local containers,
 including Keycloak dev mode and Grafana, remain local evaluation components and are not a production secret
@@ -157,7 +160,16 @@ demonstration therefore resolves to:
 
 CI executes `scripts/check-compose-security-config.mjs` against rendered Compose JSON and boots the complete
 OIDC, mTLS, trust-authority JWT and application-hardening combination so an official command cannot silently
-resolve back to local-only internal authentication.
+resolve back to local-only internal authentication. CI also rejects committed private-key material and generates
+the local identity fixture set before fixture-dependent validation.
+
+Preferred local startup:
+
+```bash
+make app-up
+```
+
+The manual commands below require `bash scripts/bootstrap-local-fixtures.sh` first.
 
 JWT RS256 service identity local demonstration:
 

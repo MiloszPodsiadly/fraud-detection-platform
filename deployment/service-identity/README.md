@@ -1,22 +1,13 @@
 # Local Service Identity Material
 
-These RS256 keys and mTLS certificate fixtures are for local Docker verification only.
+Private cryptographic key material is not committed in this directory.
 
-The public JWKS is intentionally committed so the local RS256 Docker flow can
-validate service tokens without external IAM or key discovery.
+Run `bash scripts/bootstrap-local-fixtures.sh` from the repository root to generate local mTLS certificate/key
+pairs, JWT signing key pairs, and JWKS under `deployment/.local/service-identity/`. The Docker Compose
+service-identity overlays mount that generated directory only.
 
-`docker-compose.trust-authority-jwt.yml` mounts this JWKS into
-`audit-trust-authority` and mounts only `alert-service-private.pem` into
-`alert-service`, preserving the local client-private/server-public split used by
-the FDP-23 trust-authority JWT smoke flow.
+The generated material is ignored by Git and excluded from Docker build contexts. It exists for local Docker
+evaluation and fixture-dependent tests only; it is not production PKI, production secret management, production
+provenance, or an independent external trust anchor.
 
-They are committed intentionally for local development and verification only.
-
-They must NEVER be used in any production or shared environment.
-
-Production deployments must use externally managed private keys and JWKS
-material, plus externally managed CA and service certificate material for mTLS.
-
-The mTLS fixtures live under `deployment/service-identity/mtls/` and use SAN URI
-identity for local FDP-18 verification. They must never be reused outside local
-development.
+Production deployments must use externally managed private keys, JWKS, CA material, and service certificates.

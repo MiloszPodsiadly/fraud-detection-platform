@@ -101,11 +101,32 @@ Start with:
 
 Docker is the supported local runtime path for this README.
 
+### Quick Start
+
+Prerequisites are Docker with Compose, `make`, and OpenSSL. From a fresh clone:
+
+```bash
+make app-up
+```
+
+OpenSSL is used only to generate local identity fixture material. Private PEM keys are not committed to this
+repository.
+
 ### Most Complete Local Security Demonstration Stack
 
-This is the most complete local security demonstration stack currently provided by the repository. It combines OIDC browser
-login, mTLS internal calls to ML, JWT identity for the local trust authority, local observability, and the
-application container hardening overlay:
+`make app-up` starts the most complete local security demonstration stack currently provided by the repository. It:
+
+- creates `deployment/.env` from `deployment/.env.example` if it is missing;
+- runs `scripts/bootstrap-local-fixtures.sh` to generate local mTLS and JWT material under
+  `deployment/.local/service-identity/`;
+- starts OIDC browser login, mTLS internal calls to ML, JWT identity for the local trust authority, local
+  observability, and the application container hardening overlay.
+
+`deployment/.local/` is ignored by Git and excluded from Docker build contexts. Generated private keys stay on
+the local workstation and can be replaced by rerunning `make app-up`.
+
+For manual inspection, the equivalent Compose startup after running `bash scripts/bootstrap-local-fixtures.sh`
+is:
 
 ```bash
 docker compose --env-file deployment/.env \
@@ -118,8 +139,8 @@ docker compose --env-file deployment/.env \
   up --build -d
 ```
 
-`deployment/.env` is a committed local runtime fixture, alongside the existing local identity fixture material, so
-the project remains runnable for evaluation. Application startup guards reject committed demo internal-auth
+`deployment/.env` is a committed local demo/evaluation configuration fixture, so the project remains runnable for
+evaluation without claiming secret management. Application startup guards reject demo internal-auth
 patterns and local-HMAC trust-authority demo configuration outside `local`, `dev`, or `docker-local` profiles,
 or an automated `test` context with an explicit fixture marker such as `LOCAL_FIXTURE_TEST_ENABLED=true`.
 `deployment/.env.example` documents the expected variables.
@@ -167,6 +188,9 @@ covers application containers only; it does not harden all third-party infrastru
 external secret management, a production identity provider, an independent trust anchor, managed TLS termination,
 image provenance controls, and environment-specific deployment controls.
 
+Generated mTLS and JWT material in `deployment/.local/service-identity/` is local evaluation material only. It is
+not production PKI, production provenance, or independent external trust anchoring.
+
 CI includes repository filesystem scanning for critical known vulnerabilities as review visibility only. It is
 not production image provenance; follow-up controls include digest pinning, SBOM generation, SLSA/provenance
 evidence, signed images and automated dependency updates.
@@ -176,7 +200,7 @@ evidence, signed images and automated dependency updates.
 | Base | Full internal-only application stack and durable local dependencies, without host port publication. | Yes; the local trust authority has an HMAC fixture default. | No |
 | Dev | Local ports, demo auth and local service fixture wiring. | Yes | No |
 | OIDC local demo | Keycloak dev-mode browser login/BFF exercise. | Yes | No |
-| mTLS service identity local demo | Certificate-backed ML calls using committed local certificates. | Yes | No |
+| mTLS service identity local demo | Certificate-backed ML calls using generated local certificates. | Yes | No |
 | Trust-authority JWT local demo | JWT-authenticated calls to the local signing authority. | Yes | No |
 | Application container hardening overlay | Read-only Java, ML and UI containers with reduced application-container privileges for local verification. | Inherits selected stack. | No |
 
@@ -187,7 +211,7 @@ evidence, signed images and automated dependency updates.
 - Compromise of third-party infrastructure images outside the application hardening overlay.
 - Protection of real regulated data.
 - Production PKI or independent trust anchoring.
-- Legal notarization or WORM-compliant retention.
+- No legal notarization or WORM-compliant retention.
 
 ### Compose Overlay Order Matters
 
@@ -212,7 +236,7 @@ Open:
 
 - Analyst console: `http://localhost:4173`
 - Alert service: `http://localhost:8085`
-- ML inference service: `https://localhost:8090` (local demo CA from `deployment/service-identity/mtls`; Compose verifies it in-container)
+- ML inference service: `https://localhost:8090` (generated local demo CA from `deployment/.local/service-identity/mtls`; Compose verifies it in-container)
 - Prometheus: `http://localhost:9090`
 - Grafana: `http://localhost:3000` (initial local default: `admin` / `admin`; `grafana-data` retains password changes)
 - Keycloak: `http://localhost:8086`
@@ -231,6 +255,12 @@ Named volumes persist data between restarts:
 Stop the complete local security demonstration stack without deleting local data:
 
 ```bash
+make app-down
+```
+
+The equivalent manual command is:
+
+```bash
 docker compose --env-file deployment/.env \
   -f deployment/docker-compose.yml \
   -f deployment/docker-compose.dev.yml \
@@ -244,6 +274,12 @@ docker compose --env-file deployment/.env \
 Delete all named data volumes for the complete local security demonstration stack:
 
 ```bash
+make app-clean
+```
+
+The equivalent manual command is:
+
+```bash
 docker compose --env-file deployment/.env \
   -f deployment/docker-compose.yml \
   -f deployment/docker-compose.dev.yml \
@@ -253,6 +289,13 @@ docker compose --env-file deployment/.env \
   -f deployment/docker-compose.hardened.yml \
   down -v
 ```
+
+### Troubleshooting
+
+- Docker with Compose and OpenSSL are required for `make app-up`.
+- Delete `deployment/.local/` and rerun `make app-up` to regenerate local certificate/JWT fixture material.
+- `make app-clean` removes named local data volumes as well as stopping the demonstration stack.
+- Run `bash scripts/bootstrap-local-fixtures.sh` before local fixture-dependent backend or ML identity tests.
 
 ## Services And Ports
 
@@ -291,6 +334,7 @@ publish host ports.
 Backend:
 
 ```bash
+bash scripts/bootstrap-local-fixtures.sh
 mvn test
 ```
 

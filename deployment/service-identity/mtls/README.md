@@ -1,18 +1,16 @@
 ## Local mTLS Fixtures
 
-These certificate fixtures are for local Docker development and verification only.
+No private mTLS keys are committed here. Generate the local-only fixture set with:
 
-They must NEVER be used in production or shared environments. Production deployments must use externally managed CA, server certificate, client certificate, and private-key material.
-
-Regenerate the local fixtures with:
-
-```powershell
-python deployment\service-identity\mtls\generate-local-mtls-certs.py
+```bash
+bash scripts/bootstrap-local-fixtures.sh
 ```
 
-Identity mapping uses SAN URI values:
+Generated files are written to `deployment/.local/service-identity/mtls/`, which is ignored by Git and excluded
+from Docker build contexts. Identity mapping uses SAN URI values including:
 
 - `spiffe://fraud-platform/fraud-scoring-service`
 - `spiffe://fraud-platform/alert-service`
 
 CN-only identity is intentionally not accepted by FDP-18 mTLS service identity.
+These fixtures must never be used in production or shared environments.
