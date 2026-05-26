@@ -757,11 +757,12 @@ Primary proof files:
 - `deployment/docker-compose.hardened.yml`
 
 Supplementary Docker Compose workflow proof:
-- `Reject committed private key material` fails when tracked files contain private-key names or PEM private-key blocks; generated local fixture material is not scanned out of existence by suppression.
+- `Repository Secret Gate` fails when tracked files contain private-key names or PEM private-key blocks; generated local fixture material is not scanned out of existence by suppression.
 - `Resolved Compose Security Assertions` in `.github/workflows/docker-compose-ci.yml` verifies that overlay resolution keeps host publication localhost-only, leaves Ollama opt-in, and resolves the documented mTLS, OIDC/BFF, trust-authority JWT signing and application-container hardening controls.
-- `Runtime Smoke / default dev without AI`, `Runtime Smoke / app hardening` and `Runtime Smoke / full security hardened` boot their documented local paths without Ollama; the complete path bootstraps generated identity material and verifies UI, alert readiness and CA-validated ML HTTPS health under OIDC, mTLS, trust-authority JWT and application hardening overlays.
+- `Runtime Smoke / default dev without AI`, `Runtime Smoke / app hardening` and `Runtime Smoke / full security hardened` boot their documented local paths without Ollama; the complete path bootstraps generated identity material and verifies UI, alert readiness and CA-validated ML HTTPS health under OIDC, mTLS, trust-authority JWT and application hardening overlays. Failure output identifies service health transitions, bounded service log tails and the failed container inspection without printing private-key contents.
 - `Demo Fixture Guard Tests` proves generic `docker` and unmarked `test` profiles reject committed demo-secret patterns while explicitly marked fixture tests remain possible.
-- `Repository Critical Vulnerability Visibility` scans the repository filesystem for critical known vulnerabilities and uploads SARIF; it improves review visibility only and is not production image provenance.
+- `Repository High/Critical Vulnerability Gate` blocks merge on fixed, known `HIGH` or `CRITICAL` repository filesystem vulnerabilities.
+- `Repository Vulnerability SARIF Upload` records `LOW`, `MEDIUM`, `HIGH` and `CRITICAL` filesystem vulnerability visibility in Code Scanning without making `LOW` or `MEDIUM` findings merge-blocking by itself; it is not production image provenance.
 - Remaining supply-chain follow-ups are digest pinning, SBOM generation, SLSA/provenance evidence, signed images and automated dependency update policy.
 - The dependency remediation moves the backend to Spring Boot `3.5.14`, a public supported line used to pick up the fixed Spring Security generation required by the critical vulnerability scan; the normal test and runtime evidence remains required for compatibility.
 - These supplementary jobs do not prove production IAM, external secret management, production deployment hardening, or optional AI model runtime behavior.

@@ -57,9 +57,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Reject committed private key material
-        run: bash scripts/ci/assert-no-committed-private-keys.sh
-
       - name: Verify committed local runtime fixture is explicitly scoped
         run: |
           test -f deployment/.env
@@ -167,8 +164,44 @@ jobs:
         working-directory: ml-inference-service
         run: python -m unittest discover -s tests
 
-  repository-security-visibility:
-    name: Repository Critical Vulnerability Visibility
+  repository-secret-gate:
+    name: Repository Secret Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Reject committed private key material
+        run: bash scripts/ci/assert-no-committed-private-keys.sh
+      - name: Block repository secrets
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: secret
+          format: table
+          exit-code: '1'
+
+  repository-vulnerability-gate:
+    name: Repository High/Critical Vulnerability Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Block high or critical repository vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+  repository-vulnerability-sarif:
+    name: Repository Vulnerability SARIF Upload
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -177,16 +210,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Scan repository filesystem for critical vulnerabilities
+      - name: Scan repository filesystem for vulnerability visibility
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
+          scanners: vuln
           format: sarif
           output: trivy-fs.sarif
-          severity: CRITICAL
+          severity: LOW,MEDIUM,HIGH,CRITICAL
           ignore-unfixed: true
-          exit-code: '1'
+          exit-code: '0'
 
       - name: Upload Trivy SARIF
         if: always()
