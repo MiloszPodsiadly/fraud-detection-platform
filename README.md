@@ -103,18 +103,30 @@ Docker is the supported local runtime path for this README.
 
 ### Quick Start
 
-Prerequisites are Docker with Compose, `make`, and OpenSSL. From a fresh clone:
+Prerequisites are Docker with Compose and OpenSSL. On macOS or Linux with GNU Make installed, from a fresh clone:
 
 ```bash
 make app-up
 ```
+
+On Windows with Docker Desktop and Git for Windows installed, run the equivalent one-command startup from
+PowerShell:
+
+```powershell
+.\scripts\app.cmd up
+```
+
+The Windows launcher uses Git for Windows to run the existing OpenSSL-based fixture generator and starts the
+same Compose overlay combination as `make app-up`. From Git Bash on Windows without GNU Make, use
+`./scripts/app.cmd up`.
 
 OpenSSL is used only to generate local identity fixture material. Private PEM keys are not committed to this
 repository.
 
 ### Most Complete Local Security Demonstration Stack
 
-`make app-up` starts the most complete local security demonstration stack currently provided by the repository. It:
+`make app-up`, or `.\scripts\app.cmd up` on Windows, starts the most complete local security demonstration stack
+currently provided by the repository. It:
 
 - creates `deployment/.env` from `deployment/.env.example` if it is missing;
 - runs `scripts/bootstrap-local-fixtures.sh` to generate local mTLS and JWT material under
@@ -123,7 +135,7 @@ repository.
   observability, and the application container hardening overlay.
 
 `deployment/.local/` is ignored by Git and excluded from Docker build contexts. Generated private keys stay on
-the local workstation and can be replaced by rerunning `make app-up`.
+the local workstation and can be replaced by rerunning the selected startup command.
 
 For manual inspection, the equivalent Compose startup after running `bash scripts/bootstrap-local-fixtures.sh`
 is:
@@ -158,6 +170,12 @@ docker compose --env-file deployment/.env \
   -f deployment/docker-compose.trust-authority-jwt.yml \
   -f deployment/docker-compose.hardened.yml \
   ps
+```
+
+On Windows, the equivalent status command is:
+
+```powershell
+.\scripts\app.cmd ps
 ```
 
 Expected resolved security-relevant values for this exact command:
@@ -258,6 +276,12 @@ Stop the complete local security demonstration stack without deleting local data
 make app-down
 ```
 
+On Windows:
+
+```powershell
+.\scripts\app.cmd down
+```
+
 The equivalent manual command is:
 
 ```bash
@@ -277,6 +301,12 @@ Delete all named data volumes for the complete local security demonstration stac
 make app-clean
 ```
 
+On Windows:
+
+```powershell
+.\scripts\app.cmd clean
+```
+
 The equivalent manual command is:
 
 ```bash
@@ -292,9 +322,9 @@ docker compose --env-file deployment/.env \
 
 ### Troubleshooting
 
-- Docker with Compose and OpenSSL are required for `make app-up`.
-- Delete `deployment/.local/` and rerun `make app-up` to regenerate local certificate/JWT fixture material.
-- `make app-clean` removes named local data volumes as well as stopping the demonstration stack.
+- Docker with Compose and OpenSSL are required for `make app-up`; the Windows launcher obtains Bash and OpenSSL from Git for Windows.
+- Delete `deployment/.local/` and rerun the selected startup command to regenerate local certificate/JWT fixture material.
+- `make app-clean` or `.\scripts\app.cmd clean` removes named local data volumes as well as stopping the demonstration stack.
 - Run `bash scripts/bootstrap-local-fixtures.sh` before local fixture-dependent backend or ML identity tests.
 
 ## Services And Ports
