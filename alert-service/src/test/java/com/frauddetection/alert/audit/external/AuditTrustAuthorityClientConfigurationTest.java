@@ -67,6 +67,27 @@ class AuditTrustAuthorityClientConfigurationTest {
                 .doesNotThrowAnyException();
     }
 
+    @Test
+    void shouldRejectDemoHmacSecretOutsideLocalProfiles() {
+        AuditTrustAuthorityProperties properties = new AuditTrustAuthorityProperties();
+        properties.setEnabled(true);
+        properties.setHmacSecret("local-dev-trust-hmac-secret");
+
+        assertThatThrownBy(() -> configuration.auditTrustAuthorityProdGuard(properties, environment("qa")).run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Demo local secret detected outside local/dev/docker-local profile.");
+    }
+
+    @Test
+    void shouldAllowDemoHmacSecretInDockerLocalProfile() {
+        AuditTrustAuthorityProperties properties = new AuditTrustAuthorityProperties();
+        properties.setEnabled(true);
+        properties.setHmacSecret("local-dev-trust-hmac-secret");
+
+        assertThatCode(() -> configuration.auditTrustAuthorityProdGuard(properties, environment("docker-local")).run(null))
+                .doesNotThrowAnyException();
+    }
+
     private AuditTrustAuthorityProperties jwtProperties() {
         AuditTrustAuthorityProperties properties = new AuditTrustAuthorityProperties();
         properties.setEnabled(true);

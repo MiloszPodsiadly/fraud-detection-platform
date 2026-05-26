@@ -361,6 +361,37 @@ class MlMetricsEndpointTest(unittest.TestCase):
                 credentials={},
             )
 
+    def test_internal_auth_startup_rejects_demo_secret_outside_local_profiles(self):
+        previous = os.environ.get("INTERNAL_AUTH_ALLOWED_SERVICES")
+        try:
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICES"] = "alert-service:local-dev-internal-token:governance-read"
+            with self.assertRaisesRegex(RuntimeError, "Demo local secret detected outside local/dev/docker-local profile."):
+                server._validate_internal_auth_startup(
+                    mode="TOKEN_VALIDATOR",
+                    profile="qa",
+                    credentials={},
+                )
+        finally:
+            if previous is None:
+                os.environ.pop("INTERNAL_AUTH_ALLOWED_SERVICES", None)
+            else:
+                os.environ["INTERNAL_AUTH_ALLOWED_SERVICES"] = previous
+
+    def test_internal_auth_startup_allows_demo_secret_in_docker_local_profile(self):
+        previous = os.environ.get("INTERNAL_AUTH_ALLOWED_SERVICES")
+        try:
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICES"] = "alert-service:local-dev-internal-token:governance-read"
+            server._validate_internal_auth_startup(
+                mode="DISABLED_LOCAL_ONLY",
+                profile="docker-local",
+                credentials={},
+            )
+        finally:
+            if previous is None:
+                os.environ.pop("INTERNAL_AUTH_ALLOWED_SERVICES", None)
+            else:
+                os.environ["INTERNAL_AUTH_ALLOWED_SERVICES"] = previous
+
     def test_internal_auth_startup_requires_allowlist_in_prod_token_validator(self):
         previous_hash_mode = os.environ.get("INTERNAL_AUTH_TOKEN_HASH_MODE")
         previous_allow = os.environ.get("INTERNAL_AUTH_ALLOW_TOKEN_VALIDATOR_IN_PROD")

@@ -405,6 +405,19 @@ def _prod_like_profile(profile: str | None = None) -> bool:
     return bool(profiles & PROD_LIKE_PROFILES)
 
 
+def _local_fixture_profile(profile: str | None = None) -> bool:
+    value = (profile or _runtime_profile()).strip().lower()
+    profiles = {part.strip() for part in value.replace(";", ",").split(",") if part.strip()}
+    return bool(profiles & {"local", "dev", "docker-local", "test", "localdev"})
+
+
+def _demo_local_secret_configured() -> bool:
+    return any(
+        "local-dev-" in os.getenv(name, "")
+        for name in ("INTERNAL_AUTH_JWT_SECRET", "INTERNAL_AUTH_ALLOWED_SERVICES")
+    )
+
+
 def _token_hash_mode() -> bool:
     return os.getenv("INTERNAL_AUTH_TOKEN_HASH_MODE", "false").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -1024,6 +1037,8 @@ def _validate_internal_auth_startup(
 ) -> None:
     normalized_mode = _internal_auth_mode() if mode is None else _normalize_internal_auth_mode(mode)
     configured_credentials = INTERNAL_SERVICE_CREDENTIALS if credentials is None else credentials
+    if _demo_local_secret_configured() and not _local_fixture_profile(profile):
+        raise RuntimeError("Demo local secret detected outside local/dev/docker-local profile.")
     if normalized_mode == "DISABLED_LOCAL_ONLY" and _prod_like_profile(profile):
         raise RuntimeError("DISABLED_LOCAL_ONLY internal auth mode is forbidden in prod-like profiles.")
     if normalized_mode == "TOKEN_VALIDATOR" and _prod_like_profile(profile):

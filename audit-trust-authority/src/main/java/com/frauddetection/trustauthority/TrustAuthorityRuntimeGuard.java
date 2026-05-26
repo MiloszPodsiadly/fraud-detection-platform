@@ -19,6 +19,8 @@ import java.util.Set;
 public class TrustAuthorityRuntimeGuard implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(TrustAuthorityRuntimeGuard.class);
+    private static final Set<String> LOCAL_FIXTURE_PROFILES = Set.of("local", "dev", "docker-local", "test");
+    private static final String DEMO_SECRET_ERROR = "Demo local secret detected outside local/dev/docker-local profile.";
 
     private final TrustAuthorityProperties properties;
     private final Environment environment;
@@ -42,6 +44,11 @@ public class TrustAuthorityRuntimeGuard implements ApplicationRunner {
             throw new IllegalStateException("Trust authority identity mode " + identityMode.configValue() + " is not implemented and fails closed.");
         }
         enforceFdp23Scope();
+        if (identityMode == TrustAuthorityIdentityMode.HMAC_LOCAL
+                && demoSecret(properties.getHmacSecret())
+                && !localFixtureProfile()) {
+            throw new IllegalStateException(DEMO_SECRET_ERROR);
+        }
         if (!prodLike) {
             return;
         }
@@ -89,6 +96,17 @@ public class TrustAuthorityRuntimeGuard implements ApplicationRunner {
                 .anyMatch(profile -> profile.equals("prod")
                         || profile.equals("production")
                         || profile.equals("staging"));
+    }
+
+    private boolean localFixtureProfile() {
+        return Arrays.stream(environment.getActiveProfiles())
+                .map(String::trim)
+                .map(String::toLowerCase)
+                .anyMatch(LOCAL_FIXTURE_PROFILES::contains);
+    }
+
+    private boolean demoSecret(String value) {
+        return value != null && value.trim().startsWith("local-dev-");
     }
 
     private void requirePersistentPath(String path, String material) {

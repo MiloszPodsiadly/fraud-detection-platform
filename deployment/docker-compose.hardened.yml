@@ -1,4 +1,6 @@
-# Opt-in production-ish controls for local verification. This is not a production deployment definition.
+# Application container hardening overlay for local verification; not a production deployment.
+# Covers Java app services, ML inference and analyst-console-ui only.
+# Kafka, MongoDB, Redis, Prometheus, Grafana, Keycloak and optional Ollama are outside this overlay.
 x-java-hardening: &java-hardening
   read_only: true
   cap_drop:

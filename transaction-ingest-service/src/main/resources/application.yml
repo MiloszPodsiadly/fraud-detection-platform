@@ -14,7 +14,7 @@ management:
     health:
       probes:
         enabled: true
-      show-details: always
+      show-details: never
   health:
     livenessstate:
       enabled: true
@@ -23,4 +23,4 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health

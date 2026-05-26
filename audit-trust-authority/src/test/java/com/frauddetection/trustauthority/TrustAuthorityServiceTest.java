@@ -195,7 +195,16 @@ class TrustAuthorityServiceTest {
 
         assertThatThrownBy(() -> guard.run(null))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("HMAC local mode is not permitted");
+                .hasMessage("Demo local secret detected outside local/dev/docker-local profile.");
+    }
+
+    @Test
+    void shouldRejectDefaultDemoTokenOutsideLocalProfiles() {
+        TrustAuthorityProperties properties = new TrustAuthorityProperties();
+
+        assertThatThrownBy(() -> new TrustAuthorityRuntimeGuard(properties, environment("qa")).run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Demo local secret detected outside local/dev/docker-local profile.");
     }
 
     @Test

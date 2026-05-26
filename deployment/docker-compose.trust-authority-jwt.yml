@@ -16,6 +16,7 @@ services:
 
   alert-service:
     environment:
+      AUDIT_TRUST_AUTHORITY_SIGNING_REQUIRED: "true"
       AUDIT_TRUST_AUTHORITY_IDENTITY_MODE: jwt-service-identity
       AUDIT_TRUST_AUTHORITY_JWT_ISSUER: fraud-platform-local
       AUDIT_TRUST_AUTHORITY_JWT_AUDIENCE: audit-trust-authority

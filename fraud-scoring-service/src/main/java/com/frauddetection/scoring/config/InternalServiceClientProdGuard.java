@@ -12,6 +12,8 @@ import java.util.stream.Collectors;
 class InternalServiceClientProdGuard implements InitializingBean {
 
     private static final Set<String> PROD_LIKE_PROFILES = Set.of("prod", "production", "staging");
+    private static final Set<String> LOCAL_FIXTURE_PROFILES = Set.of("local", "dev", "docker-local", "test");
+    private static final String DEMO_SECRET_ERROR = "Demo local secret detected outside local/dev/docker-local profile.";
 
     private final InternalServiceClientProperties properties;
     private final Environment environment;
@@ -23,6 +25,9 @@ class InternalServiceClientProdGuard implements InitializingBean {
 
     @Override
     public void afterPropertiesSet() {
+        if (!localFixtureProfileActive() && configuredDemoSecret()) {
+            throw new IllegalStateException(DEMO_SECRET_ERROR);
+        }
         if (!prodLikeProfileActive()) {
             return;
         }
@@ -65,10 +70,25 @@ class InternalServiceClientProdGuard implements InitializingBean {
     }
 
     private boolean prodLikeProfileActive() {
-        Set<String> activeProfiles = Arrays.stream(environment.getActiveProfiles())
+        return activeProfiles().stream().anyMatch(PROD_LIKE_PROFILES::contains);
+    }
+
+    private boolean localFixtureProfileActive() {
+        return activeProfiles().stream().anyMatch(LOCAL_FIXTURE_PROFILES::contains);
+    }
+
+    private boolean configuredDemoSecret() {
+        return demoSecret(properties.normalizedToken()) || demoSecret(properties.jwt().secret());
+    }
+
+    private boolean demoSecret(String value) {
+        return value != null && value.trim().startsWith("local-dev-");
+    }
+
+    private Set<String> activeProfiles() {
+        return Arrays.stream(environment.getActiveProfiles())
                 .map(String::trim)
                 .map(String::toLowerCase)
                 .collect(Collectors.toSet());
-        return activeProfiles.stream().anyMatch(PROD_LIKE_PROFILES::contains);
     }
 }

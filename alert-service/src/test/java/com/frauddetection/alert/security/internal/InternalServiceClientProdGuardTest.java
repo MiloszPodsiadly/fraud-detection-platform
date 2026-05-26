@@ -177,6 +177,58 @@ class InternalServiceClientProdGuardTest {
     }
 
     @Test
+    void shouldRejectDemoTokenOutsideLocalProfiles() {
+        InternalServiceClientProdGuard guard = new InternalServiceClientProdGuard(
+                new InternalServiceClientProperties(true, "TOKEN_VALIDATOR", "alert-service", "local-dev-internal-token", false, InternalServiceClientProperties.Jwt.empty(), InternalServiceClientProperties.Mtls.empty()),
+                environment("qa")
+        );
+
+        assertThatThrownBy(guard::afterPropertiesSet)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Demo local secret detected outside local/dev/docker-local profile.");
+    }
+
+    @Test
+    void shouldAllowDemoTokenInDockerLocalProfile() {
+        InternalServiceClientProdGuard guard = new InternalServiceClientProdGuard(
+                new InternalServiceClientProperties(true, "TOKEN_VALIDATOR", "alert-service", "local-dev-internal-token", false, InternalServiceClientProperties.Jwt.empty(), InternalServiceClientProperties.Mtls.empty()),
+                environment("docker-local")
+        );
+
+        assertThatCode(guard::afterPropertiesSet).doesNotThrowAnyException();
+    }
+
+    @Test
+    void shouldRejectDemoJwtSecretOutsideLocalProfiles() {
+        InternalServiceClientProdGuard guard = new InternalServiceClientProdGuard(
+                new InternalServiceClientProperties(
+                        true,
+                        "JWT_SERVICE_IDENTITY",
+                        "alert-service",
+                        "",
+                        false,
+                        new InternalServiceClientProperties.Jwt("HS256", "fraud-platform-local", "ml-inference-service", "local-dev-jwt-service-secret-32bytes", "", "", "", Duration.ofMinutes(5), "governance-read"),
+                        InternalServiceClientProperties.Mtls.empty()
+                ),
+                environment("qa")
+        );
+
+        assertThatThrownBy(guard::afterPropertiesSet)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Demo local secret detected outside local/dev/docker-local profile.");
+    }
+
+    @Test
+    void shouldAllowCustomTokenOutsideLocalProfiles() {
+        InternalServiceClientProdGuard guard = new InternalServiceClientProdGuard(
+                new InternalServiceClientProperties(true, "TOKEN_VALIDATOR", "alert-service", "injected-non-demo-secret", false, InternalServiceClientProperties.Jwt.empty(), InternalServiceClientProperties.Mtls.empty()),
+                environment("qa")
+        );
+
+        assertThatCode(guard::afterPropertiesSet).doesNotThrowAnyException();
+    }
+
+    @Test
     void shouldAllowCompleteMtlsServiceIdentityConfigForProdProfile() {
         InternalServiceClientProdGuard guard = new InternalServiceClientProdGuard(
                 mtlsProperties(),
@@ -481,7 +533,7 @@ class InternalServiceClientProdGuardTest {
                         "RS256",
                         "fraud-platform-local",
                         "ml-inference-service",
-                        "local-dev-jwt-service-secret-32bytes",
+                        "",
                         "alert-key-1",
                         privateKeyPem(),
                         "",
@@ -525,7 +577,7 @@ class InternalServiceClientProdGuardTest {
                         "HS256",
                         "fraud-platform-local",
                         "ml-inference-service",
-                        "local-dev-jwt-service-secret-32bytes",
+                        "non-demo-hs256-compatibility-secret-123456",
                         "",
                         "",
                         "",
