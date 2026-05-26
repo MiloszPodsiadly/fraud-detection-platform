@@ -733,10 +733,10 @@ Candidate for consolidation:
 ## Docker Compose Build
 
 Purpose:
-- Prove the strongest compose stack config validates and images build.
+- Prove the recommended local security demonstration configuration validates and application images build.
 
 Proves:
-- Compose config with the local runtime fixture, dev exposure layer, OIDC, service identity mTLS, trust-authority JWT, and hardened runtime overlays is syntactically valid and images build.
+- Compose config with the local runtime fixture, dev exposure layer, OIDC, service identity mTLS, trust-authority JWT, and application container hardening overlays is syntactically valid and images build.
 
 Does not prove:
 - Runtime health, enterprise IAM, or every service-to-service request path.
@@ -752,6 +752,40 @@ Primary proof files:
 - `deployment/docker-compose.service-identity-mtls.yml`
 - `deployment/docker-compose.trust-authority-jwt.yml`
 - `deployment/docker-compose.hardened.yml`
+
+## Docker Compose Resolved Security Assertions
+
+Purpose:
+- Verify official overlay order produces the documented local security demonstration posture.
+
+Proves:
+- Base does not publish host ports and dev bindings remain localhost-only.
+- Default dev does not require Ollama and defaults to deterministic assistant mode.
+- The recommended security demonstration resolves mTLS, OIDC/BFF, trust-authority JWT signing and application hardening controls as documented.
+
+Does not prove:
+- Production IAM, external secrets management, or runtime request-path behavior.
+
+Primary proof files:
+- `.github/workflows/docker-compose-ci.yml`
+- `scripts/check-compose-security-config.mjs`
+- `deployment/docker-compose.ai.yml`
+
+## Docker Compose Runtime Smoke
+
+Purpose:
+- Prove the minimal local app path and application hardening overlay boot and expose health endpoints without starting Ollama.
+
+Proves:
+- ML, trust authority, transaction ingest, alert service and analyst UI reach healthy state in default-dev and app-hardening smoke runs.
+- UI, alert readiness and ML health respond through localhost development bindings.
+
+Does not prove:
+- Production deployment hardening or optional AI model runtime behavior.
+
+Primary proof files:
+- `.github/workflows/docker-compose-ci.yml`
+- `scripts/ci/compose-runtime-smoke.sh`
 
 Related FDP branches:
 - FDP-28

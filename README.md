@@ -101,9 +101,11 @@ Start with:
 
 Docker is the supported local runtime path for this README.
 
-Recommended showcase stack: OIDC browser login, mTLS internal calls to ML, JWT identity for audit trust
-authority, local observability, and opt-in container hardening. This is the strongest runnable local composition
-provided by the repository:
+### Strongest Runnable Local Demonstration Stack
+
+This is the strongest runnable local demonstration stack provided by the repository. It combines OIDC browser
+login, mTLS internal calls to ML, JWT identity for the local trust authority, local observability, and the
+application container hardening overlay:
 
 ```bash
 docker compose --env-file deployment/.env \
@@ -117,8 +119,11 @@ docker compose --env-file deployment/.env \
 ```
 
 `deployment/.env` is a committed local runtime fixture, alongside the existing local identity fixture material, so
-the project remains runnable for evaluation. Local demo secrets are not production secrets. Replace these values
-outside local development; `deployment/.env.example` documents the expected variables.
+the project remains runnable for evaluation. Application startup guards reject committed demo internal-auth
+patterns and local-HMAC trust-authority demo configuration outside `local`, `dev`, `test`, or `docker-local`
+profiles.
+`deployment/.env.example` documents the expected variables.
+The `test` profile allowance exists only for automated test fixtures; it is not a deployment mode.
 
 After startup, confirm container readiness:
 
@@ -133,37 +138,72 @@ docker compose --env-file deployment/.env \
   ps
 ```
 
+Expected resolved security-relevant values for this exact command:
+
+| Setting | Expected resolved value |
+| --- | --- |
+| `ml-inference-service.INTERNAL_AUTH_MODE` | `MTLS_SERVICE_IDENTITY` |
+| `fraud-scoring-service.INTERNAL_AUTH_CLIENT_ENABLED` | `true` |
+| `alert-service.INTERNAL_AUTH_CLIENT_ENABLED` | `true` |
+| `alert-service.APP_SECURITY_DEMO_AUTH_ENABLED` | `false` |
+| `alert-service.AUDIT_TRUST_AUTHORITY_ENABLED` | `true` |
+| `alert-service.AUDIT_TRUST_AUTHORITY_SIGNING_REQUIRED` | `true` |
+| `alert-service.ASSISTANT_MODE` | `DETERMINISTIC` |
+| `analyst-console-ui` build arg `VITE_AUTH_PROVIDER` | `bff` |
+
+CI renders this official strongest local combination and runs `scripts/check-compose-security-config.mjs`; a
+wrong official overlay order that leaves local-only internal auth enabled fails that resolved-config assertion.
+
+### Security Scope Of The Local Stack
+
+This is not a production deployment. `deployment/.env` is intentionally committed for local evaluation, and the
+documented stack publishes ports only on localhost. Startup guards reject committed demo internal-auth patterns
+and local-HMAC trust-authority demo configuration unless an allowed fixture profile is active: `local`, `dev`, or
+`docker-local`; `test` is reserved for automated test fixtures only. Other local evaluation credentials in the
+fixture are not a production secret-management mechanism. Keycloak runs in dev mode. The local signing authority
+is a local trust-authority simulation, not an independent external trust anchor. The application container hardening overlay
+covers application containers only; it does not harden all third-party infrastructure images. Production requires
+external secret management, a production identity provider, an independent trust anchor, managed TLS termination,
+image provenance controls, and environment-specific deployment controls.
+
+| Stack or overlay | Purpose | Uses demo secrets? | Production suitable? |
+| --- | --- | --- | --- |
+| Base | Full internal-only application stack and durable local dependencies, without host port publication. | Yes; the local trust authority has an HMAC fixture default. | No |
+| Dev | Local ports, demo auth and local service fixture wiring. | Yes | No |
+| OIDC local demo | Keycloak dev-mode browser login/BFF exercise. | Yes | No |
+| mTLS service identity local demo | Certificate-backed ML calls using committed local certificates. | Yes | No |
+| Trust-authority JWT local demo | JWT-authenticated calls to the local signing authority. | Yes | No |
+| Application container hardening overlay | Read-only Java/UI containers and selected ML privilege restrictions for local verification. | Inherits selected stack. | No |
+
+### Compose Overlay Order Matters
+
+Compose applies later overlay values over earlier values. `docker-compose.dev.yml` intentionally selects
+local-only ML authentication, while the mTLS overlay must come after it to produce
+`INTERNAL_AUTH_MODE=MTLS_SERVICE_IDENTITY` in the strongest local demonstration stack.
+The documented stack does not start Ollama or pull a model. Backend JVM tuning can be overridden using
+`JAVA_TOOL_OPTIONS`; application images use an exec-form Java entrypoint.
+
 Open:
 
 - Analyst console: `http://localhost:4173`
 - Alert service: `http://localhost:8085`
-- ML inference service: `http://localhost:8090`
+- ML inference service: `https://localhost:8090` (local demo CA from `deployment/service-identity/mtls`; Compose verifies it in-container)
 - Prometheus: `http://localhost:9090`
-- Grafana: `http://localhost:3000` (`admin` / `admin`)
-- Keycloak, when OIDC is enabled: `http://localhost:8086`
+- Grafana: `http://localhost:3000` (initial local default: `admin` / `admin`; `grafana-data` retains password changes)
+- Keycloak: `http://localhost:8086`
 
-Stop the stack:
+### Persistent Local Data And Cleanup
 
-```bash
-docker compose --env-file deployment/.env \
-  -f deployment/docker-compose.yml \
-  -f deployment/docker-compose.dev.yml \
-  down
-```
+Named volumes persist data between restarts:
 
-Stop the full local security stack:
+| Volume | Persisted local material |
+| --- | --- |
+| `mongodb-data` | MongoDB databases used by alerts, ML governance and the local trust authority. |
+| `redis-data` | Redis local state and Redis persistence files produced by the local container. |
+| `prometheus-data` | Local metrics history. |
+| `grafana-data` | Local Grafana state. |
 
-```bash
-docker compose --env-file deployment/.env \
-  -f deployment/docker-compose.yml \
-  -f deployment/docker-compose.dev.yml \
-  -f deployment/docker-compose.oidc.yml \
-  -f deployment/docker-compose.service-identity-mtls.yml \
-  -f deployment/docker-compose.trust-authority-jwt.yml \
-  down
-```
-
-Stop the recommended showcase stack:
+Stop the strongest local demonstration stack without deleting local data:
 
 ```bash
 docker compose --env-file deployment/.env \
@@ -174,6 +214,19 @@ docker compose --env-file deployment/.env \
   -f deployment/docker-compose.trust-authority-jwt.yml \
   -f deployment/docker-compose.hardened.yml \
   down
+```
+
+Delete all named data volumes for the strongest local demonstration stack:
+
+```bash
+docker compose --env-file deployment/.env \
+  -f deployment/docker-compose.yml \
+  -f deployment/docker-compose.dev.yml \
+  -f deployment/docker-compose.oidc.yml \
+  -f deployment/docker-compose.service-identity-mtls.yml \
+  -f deployment/docker-compose.trust-authority-jwt.yml \
+  -f deployment/docker-compose.hardened.yml \
+  down -v
 ```
 
 ## Services And Ports
@@ -189,24 +242,24 @@ publish host ports.
 | `feature-enricher-service` | `http://localhost:8083` | Feature windows and enrichment. |
 | `fraud-scoring-service` | `http://localhost:8084` | Rule and ML-assisted scoring. |
 | `alert-service` | `http://localhost:8085` | Alerts, cases, audit, RBAC, recovery APIs. |
-| `ml-inference-service` | `http://localhost:8090` | Python inference and governance API. |
+| `ml-inference-service` | `https://localhost:8090` | Python inference and governance API over the documented stack's local demo TLS certificate. |
 | `audit-trust-authority` | `http://localhost:8095` | Local audit-signing authority. |
-| `keycloak` | `http://localhost:8086` | Local OIDC override only. |
+| `keycloak` | `http://localhost:8086` | Keycloak dev-mode OIDC in the documented stack. |
 | `kafka` | `127.0.0.1:9092` | Local broker. |
 | `mongodb` | `127.0.0.1:27017` | Local persistence. |
 | `redis` | `127.0.0.1:6379` | Feature windows and local state. |
 | `prometheus` | `http://localhost:9090` | Metrics and alert rules. |
 | `grafana` | `http://localhost:3000` | Provisioned dashboards. |
-| `ollama` | `http://localhost:11434` | Optional local assistant model runtime. |
 
 ## Container Health
 
 | Service | Endpoint | Auth behavior | Compose check |
 | --- | --- | --- | --- |
-| Java application services | `/actuator/health/readiness` | Existing actuator readiness exposure; alert permits health only through its technical security rule. | `curl -fsS` from the container |
-| `ml-inference-service` | `/health` | Existing public technical health response; mTLS override checks the TLS endpoint with the local CA. | Python `urllib.request` |
-| `analyst-console-ui` | `/` | Static nginx response only. | `wget` from the container |
-| Kafka, MongoDB, Redis, Ollama | Native check | No application auth surface. | Broker/database/CLI command |
+| Java application services | `/actuator/health/readiness` | Actuator readiness exposure; alert permits this health route through its public technical security rule. | `curl -fsS` from the container |
+| `ml-inference-service` | `/health` | Public technical health response; the mTLS overlay changes transport to HTTPS and checks it with the local CA. | Python `urllib.request` over HTTPS from the container |
+| `analyst-console-ui` | `/` | Static nginx response only. | `wget` to `127.0.0.1:8080` from the container |
+| Kafka, MongoDB, Redis | Native check | No application auth surface. | Broker/database/CLI command |
+| Prometheus, Grafana, Keycloak | None configured | Supporting local services; Keycloak is started in dev mode. | Not health-gated by Compose |
 
 ## Testing
 

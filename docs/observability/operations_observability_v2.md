@@ -47,6 +47,9 @@ docker compose --env-file deployment/.env -f deployment/docker-compose.yml -f de
   prometheus grafana
 ```
 
+This default observability path uses deterministic assistant behavior and does not start Ollama or pull an AI
+model. Enable Ollama only by adding `-f deployment/docker-compose.ai.yml` to a deliberate local run.
+
 Full OIDC + observability startup:
 
 ```bash

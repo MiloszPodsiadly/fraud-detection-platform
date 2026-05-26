@@ -1,10 +1,14 @@
 # Local Secrets And Production Injection
 
-`deployment/.env` is a committed local-only runtime fixture so the repository
+`deployment/.env` is a committed local runtime fixture so the repository
 starts with one command. `deployment/.env.example` documents the same variable
 surface for replacement in environments that do not use the local fixture.
 
 Local demo secrets are not production secrets.
+Application startup guards reject the fixture token, JWT-HMAC and trust-authority
+HMAC patterns outside `local`, `dev`, `test`, or `docker-local` profiles.
+Keycloak and Grafana are third-party local evaluation containers; their fixture
+credentials are not a production authentication or secret-management control.
 
 Production-like deployments must replace:
 
