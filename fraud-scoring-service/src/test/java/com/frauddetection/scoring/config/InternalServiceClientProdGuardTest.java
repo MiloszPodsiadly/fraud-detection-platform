@@ -406,7 +406,7 @@ class InternalServiceClientProdGuardTest {
     void shouldExposeMtlsCertificateExpiryAndAgeMetrics() {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         InternalMtlsCertificateMonitor monitor = new InternalMtlsCertificateMonitor(
-                mtlsPropertiesWithCertificate("deployment/service-identity/mtls/fraud-scoring-service.pem"),
+                mtlsPropertiesWithCertificate("deployment/.local/service-identity/mtls/fraud-scoring-service.pem"),
                 registry
         );
 
@@ -428,7 +428,7 @@ class InternalServiceClientProdGuardTest {
     void shouldFailStartupWhenMtlsCertificateIsExpired() {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         InternalMtlsCertificateMonitor monitor = new InternalMtlsCertificateMonitor(
-                mtlsPropertiesWithCertificate("deployment/service-identity/mtls/expired-service.pem"),
+                mtlsPropertiesWithCertificate("deployment/.local/service-identity/mtls/expired-service.pem"),
                 registry
         );
 
@@ -442,7 +442,7 @@ class InternalServiceClientProdGuardTest {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         Instant now = Instant.parse("2026-04-27T12:00:00Z");
         InternalMtlsCertificateMonitor monitor = new InternalMtlsCertificateMonitor(
-                mtlsPropertiesWithCertificate("deployment/service-identity/mtls/fraud-scoring-service.pem"),
+                mtlsPropertiesWithCertificate("deployment/.local/service-identity/mtls/fraud-scoring-service.pem"),
                 registry,
                 Clock.fixed(now, ZoneOffset.UTC),
                 () -> new InternalMtlsCertificateMonitor.CertificateWindow(
@@ -461,7 +461,7 @@ class InternalServiceClientProdGuardTest {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         Instant now = Instant.parse("2026-04-27T12:00:00Z");
         InternalMtlsCertificateMonitor monitor = new InternalMtlsCertificateMonitor(
-                mtlsPropertiesWithCertificate("deployment/service-identity/mtls/fraud-scoring-service.pem"),
+                mtlsPropertiesWithCertificate("deployment/.local/service-identity/mtls/fraud-scoring-service.pem"),
                 registry,
                 Clock.fixed(now, ZoneOffset.UTC),
                 () -> new InternalMtlsCertificateMonitor.CertificateWindow(
@@ -483,7 +483,7 @@ class InternalServiceClientProdGuardTest {
     void shouldFailStartupWhenMtlsCertificateIsRemoved() {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         InternalMtlsCertificateMonitor monitor = new InternalMtlsCertificateMonitor(
-                mtlsPropertiesWithCertificate("deployment/service-identity/mtls/missing-service.pem"),
+                mtlsPropertiesWithCertificate("deployment/.local/service-identity/mtls/missing-service.pem"),
                 registry
         );
 
@@ -497,8 +497,8 @@ class InternalServiceClientProdGuardTest {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         InternalMtlsCertificateMonitor monitor = new InternalMtlsCertificateMonitor(
                 mtlsPropertiesWithCertificateAndCa(
-                        "deployment/service-identity/mtls/fraud-scoring-service.pem",
-                        "deployment/service-identity/mtls/unknown-service.pem"
+                        "deployment/.local/service-identity/mtls/fraud-scoring-service.pem",
+                        "deployment/.local/service-identity/mtls/unknown-service.pem"
                 ),
                 registry
         );
@@ -513,15 +513,15 @@ class InternalServiceClientProdGuardTest {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         InternalMtlsCertificateMonitor overlap = new InternalMtlsCertificateMonitor(
                 mtlsPropertiesWithCertificateAndCa(
-                        "deployment/service-identity/mtls/fraud-scoring-service.pem",
-                        "deployment/service-identity/mtls/unknown-service.pem,deployment/service-identity/mtls/local-dev-ca.pem"
+                        "deployment/.local/service-identity/mtls/fraud-scoring-service.pem",
+                        "deployment/.local/service-identity/mtls/unknown-service.pem,deployment/.local/service-identity/mtls/local-dev-ca.pem"
                 ),
                 registry
         );
         InternalMtlsCertificateMonitor oldTrustOnly = new InternalMtlsCertificateMonitor(
                 mtlsPropertiesWithCertificateAndCa(
-                        "deployment/service-identity/mtls/fraud-scoring-service.pem",
-                        "deployment/service-identity/mtls/unknown-service.pem"
+                        "deployment/.local/service-identity/mtls/fraud-scoring-service.pem",
+                        "deployment/.local/service-identity/mtls/unknown-service.pem"
                 ),
                 registry
         );
@@ -536,7 +536,7 @@ class InternalServiceClientProdGuardTest {
     void shouldRefreshLifecycleMetricsDuringPeriodicMonitor() {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         InternalMtlsCertificateMonitor monitor = new InternalMtlsCertificateMonitor(
-                mtlsPropertiesWithCertificate("deployment/service-identity/mtls/fraud-scoring-service.pem"),
+                mtlsPropertiesWithCertificate("deployment/.local/service-identity/mtls/fraud-scoring-service.pem"),
                 registry
         );
 
@@ -643,7 +643,7 @@ class InternalServiceClientProdGuardTest {
     }
 
     private InternalServiceClientProperties mtlsPropertiesWithCertificate(String certificatePath) {
-        return mtlsPropertiesWithCertificateAndCa(certificatePath, "deployment/service-identity/mtls/local-dev-ca.pem");
+        return mtlsPropertiesWithCertificateAndCa(certificatePath, "deployment/.local/service-identity/mtls/local-dev-ca.pem");
     }
 
     private InternalServiceClientProperties mtlsPropertiesWithCertificateAndCa(String certificatePath, String caCertificatePaths) {
@@ -675,7 +675,7 @@ class InternalServiceClientProdGuardTest {
 
     private String privateKeyPem() {
         try {
-            return Files.readString(repoPath("deployment/service-identity/fraud-scoring-service-private.pem"));
+            return Files.readString(repoPath("deployment/.local/service-identity/fraud-scoring-service-private.pem"));
         } catch (IOException exception) {
             throw new IllegalStateException("Test private key is unavailable.");
         }

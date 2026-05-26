@@ -18,7 +18,7 @@ os.environ.setdefault("INTERNAL_AUTH_MODE", "DISABLED_LOCAL_ONLY")
 from app import server
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-SERVICE_IDENTITY_DIR = os.path.join(REPO_ROOT, "deployment", "service-identity")
+SERVICE_IDENTITY_DIR = os.path.join(REPO_ROOT, "deployment", ".local", "service-identity")
 SCORING_PRIVATE_KEY = os.path.join(SERVICE_IDENTITY_DIR, "fraud-scoring-service-private.pem")
 ALERT_PRIVATE_KEY = os.path.join(SERVICE_IDENTITY_DIR, "alert-service-private.pem")
 JWKS_PATH = os.path.join(SERVICE_IDENTITY_DIR, "jwks.json")

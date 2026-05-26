@@ -18,3 +18,8 @@ documents
 **/target
 **/node_modules
 **/dist
+deployment/.local
+deployment/service-identity/**/*.pem
+deployment/service-identity/*private*.pem
+deployment/service-identity/**/*private*.pem
+deployment/service-identity/**/*-key.pem
