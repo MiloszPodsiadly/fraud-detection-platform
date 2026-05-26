@@ -101,45 +101,36 @@ Start with:
 
 Docker is the supported local runtime path for this README.
 
-Default demo stack:
+Recommended showcase stack: OIDC browser login, mTLS internal calls to ML, JWT identity for audit trust
+authority, local observability, and opt-in container hardening. This is the strongest runnable local composition
+provided by the repository:
 
 ```bash
-docker compose -f deployment/docker-compose.yml up --build -d
-```
-
-Local OIDC stack:
-
-```bash
-docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml up --build -d
-```
-
-JWT service-identity stack:
-
-```bash
-docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.service-identity-jwt.yml up --build -d
-```
-
-RS256 service-identity stack:
-
-```bash
-docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.service-identity-rs256.yml up --build -d
-```
-
-mTLS service-identity stack:
-
-```bash
-docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.service-identity-mtls.yml up --build -d
-```
-
-Full local security stack:
-
-```bash
-docker compose \
+docker compose --env-file deployment/.env \
   -f deployment/docker-compose.yml \
+  -f deployment/docker-compose.dev.yml \
   -f deployment/docker-compose.oidc.yml \
   -f deployment/docker-compose.service-identity-mtls.yml \
   -f deployment/docker-compose.trust-authority-jwt.yml \
+  -f deployment/docker-compose.hardened.yml \
   up --build -d
+```
+
+`deployment/.env` is a committed local runtime fixture, alongside the existing local identity fixture material, so
+the project remains runnable for evaluation. Local demo secrets are not production secrets. Replace these values
+outside local development; `deployment/.env.example` documents the expected variables.
+
+After startup, confirm container readiness:
+
+```bash
+docker compose --env-file deployment/.env \
+  -f deployment/docker-compose.yml \
+  -f deployment/docker-compose.dev.yml \
+  -f deployment/docker-compose.oidc.yml \
+  -f deployment/docker-compose.service-identity-mtls.yml \
+  -f deployment/docker-compose.trust-authority-jwt.yml \
+  -f deployment/docker-compose.hardened.yml \
+  ps
 ```
 
 Open:
@@ -154,21 +145,41 @@ Open:
 Stop the stack:
 
 ```bash
-docker compose -f deployment/docker-compose.yml down
+docker compose --env-file deployment/.env \
+  -f deployment/docker-compose.yml \
+  -f deployment/docker-compose.dev.yml \
+  down
 ```
 
 Stop the full local security stack:
 
 ```bash
-docker compose \
+docker compose --env-file deployment/.env \
   -f deployment/docker-compose.yml \
+  -f deployment/docker-compose.dev.yml \
   -f deployment/docker-compose.oidc.yml \
   -f deployment/docker-compose.service-identity-mtls.yml \
   -f deployment/docker-compose.trust-authority-jwt.yml \
   down
 ```
 
+Stop the recommended showcase stack:
+
+```bash
+docker compose --env-file deployment/.env \
+  -f deployment/docker-compose.yml \
+  -f deployment/docker-compose.dev.yml \
+  -f deployment/docker-compose.oidc.yml \
+  -f deployment/docker-compose.service-identity-mtls.yml \
+  -f deployment/docker-compose.trust-authority-jwt.yml \
+  -f deployment/docker-compose.hardened.yml \
+  down
+```
+
 ## Services And Ports
+
+These local bindings are supplied by `deployment/docker-compose.dev.yml`; core services in the base file do not
+publish host ports.
 
 | Service | Local URL | Notes |
 | --- | --- | --- |
@@ -187,6 +198,15 @@ docker compose \
 | `prometheus` | `http://localhost:9090` | Metrics and alert rules. |
 | `grafana` | `http://localhost:3000` | Provisioned dashboards. |
 | `ollama` | `http://localhost:11434` | Optional local assistant model runtime. |
+
+## Container Health
+
+| Service | Endpoint | Auth behavior | Compose check |
+| --- | --- | --- | --- |
+| Java application services | `/actuator/health/readiness` | Existing actuator readiness exposure; alert permits health only through its technical security rule. | `curl -fsS` from the container |
+| `ml-inference-service` | `/health` | Existing public technical health response; mTLS override checks the TLS endpoint with the local CA. | Python `urllib.request` |
+| `analyst-console-ui` | `/` | Static nginx response only. | `wget` from the container |
+| Kafka, MongoDB, Redis, Ollama | Native check | No application auth surface. | Broker/database/CLI command |
 
 ## Testing
 
