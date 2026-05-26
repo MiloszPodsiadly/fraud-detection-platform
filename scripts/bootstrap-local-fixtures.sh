@@ -134,7 +134,10 @@ cat > "$staging_dir/jwks.json" <<EOF
 EOF
 
 rm -f "$staging_dir"/*.cnf "$staging_dir"/*.csr "$staging_dir/modulus.bin" "$mtls_dir/local-dev-ca.srl"
-chmod 600 "$staging_dir"/*-private.pem "$mtls_dir"/*-key.pem
+# Linux bind mounts preserve host modes, while application containers run as
+# fixed non-root UIDs distinct from the user that generates these local fixtures.
+chmod 755 "$staging_dir" "$mtls_dir"
+chmod 444 "$staging_dir"/*.pem "$staging_dir/jwks.json" "$mtls_dir"/*.pem
 
 rm -rf "$output_dir"
 mv "$staging_dir" "$output_dir"

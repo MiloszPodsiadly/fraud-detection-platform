@@ -7,7 +7,9 @@ bash scripts/bootstrap-local-fixtures.sh
 ```
 
 Generated files are written to `deployment/.local/service-identity/mtls/`, which is ignored by Git and excluded
-from Docker build contexts. Identity mapping uses SAN URI values including:
+from Docker build contexts. Generated key files are read-only but readable by the non-root local Compose service
+users so Linux bind mounts work; this is only for local or ephemeral CI demonstration fixtures. Identity mapping
+uses SAN URI values including:
 
 - `spiffe://fraud-platform/fraud-scoring-service`
 - `spiffe://fraud-platform/alert-service`
