@@ -1060,18 +1060,22 @@ jobs:
 
       - name: Validate compose file
         run: |
-          docker compose \
+          docker compose --env-file deployment/.env.example \
             -f deployment/docker-compose.yml \
+            -f deployment/docker-compose.dev.yml \
             -f deployment/docker-compose.oidc.yml \
             -f deployment/docker-compose.service-identity-mtls.yml \
             -f deployment/docker-compose.trust-authority-jwt.yml \
+            -f deployment/docker-compose.hardened.yml \
             config --quiet
 
       - name: Build compose images
         run: |
-          docker compose \
+          docker compose --env-file deployment/.env.example \
             -f deployment/docker-compose.yml \
+            -f deployment/docker-compose.dev.yml \
             -f deployment/docker-compose.oidc.yml \
             -f deployment/docker-compose.service-identity-mtls.yml \
             -f deployment/docker-compose.trust-authority-jwt.yml \
+            -f deployment/docker-compose.hardened.yml \
             build

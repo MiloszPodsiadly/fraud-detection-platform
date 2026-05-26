@@ -736,7 +736,7 @@ Purpose:
 - Prove the strongest compose stack config validates and images build.
 
 Proves:
-- Compose config with OIDC, service identity mTLS, and trust-authority JWT overlays is syntactically valid and images build.
+- Compose config with the local runtime fixture, dev exposure layer, OIDC, service identity mTLS, trust-authority JWT, and hardened runtime overlays is syntactically valid and images build.
 
 Does not prove:
 - Runtime health, enterprise IAM, or every service-to-service request path.
@@ -745,10 +745,13 @@ Required for merge:
 - Yes
 
 Primary proof files:
+- `deployment/.env.example`
 - `deployment/docker-compose.yml`
+- `deployment/docker-compose.dev.yml`
 - `deployment/docker-compose.oidc.yml`
 - `deployment/docker-compose.service-identity-mtls.yml`
 - `deployment/docker-compose.trust-authority-jwt.yml`
+- `deployment/docker-compose.hardened.yml`
 
 Related FDP branches:
 - FDP-28

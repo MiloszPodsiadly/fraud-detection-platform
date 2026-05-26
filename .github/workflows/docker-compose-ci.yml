@@ -1,0 +1,106 @@
+name: Docker Compose CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-compose-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compose-config:
+    name: Compose config / ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: base
+            files: -f deployment/docker-compose.yml
+          - name: dev
+            files: -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml
+          - name: oidc
+            files: -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.oidc.yml
+          - name: jwt-service-identity
+            files: -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.service-identity-jwt.yml
+          - name: rs256-service-identity
+            files: -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.service-identity-rs256.yml
+          - name: mtls-service-identity
+            files: -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.service-identity-mtls.yml
+          - name: hardened
+            files: -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.hardened.yml
+          - name: full-local-security-hardened
+            files: -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.oidc.yml -f deployment/docker-compose.service-identity-mtls.yml -f deployment/docker-compose.trust-authority-jwt.yml -f deployment/docker-compose.hardened.yml
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate supported Compose combination
+        run: docker compose --env-file deployment/.env.example ${{ matrix.files }} config --quiet
+
+  backend-images:
+    name: Backend image / ${{ matrix.module }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - transaction-ingest-service
+          - transaction-simulator-service
+          - feature-enricher-service
+          - fraud-scoring-service
+          - alert-service
+          - audit-trust-authority
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend module image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deployment/Dockerfile.backend
+          push: false
+          tags: fdp-local/${{ matrix.module }}:${{ github.sha }}
+          build-args: |
+            MODULE_NAME=${{ matrix.module }}
+          cache-from: type=gha,scope=fdp-backend-${{ matrix.module }}
+          cache-to: type=gha,mode=max,scope=fdp-backend-${{ matrix.module }}
+
+  service-images:
+    name: Service image / ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ml-inference-service
+            dockerfile: deployment/Dockerfile.ml-inference
+          - name: analyst-console-ui
+            dockerfile: deployment/Dockerfile.frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build service image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: false
+          tags: fdp-local/${{ matrix.name }}:${{ github.sha }}
+          cache-from: type=gha,scope=fdp-${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=fdp-${{ matrix.name }}
