@@ -6,7 +6,9 @@ surface for replacement in environments that do not use the local fixture.
 
 Local demo secrets are not production secrets.
 Application startup guards reject the fixture token, JWT-HMAC and trust-authority
-HMAC patterns outside `local`, `dev`, `test`, or `docker-local` profiles.
+HMAC patterns outside `local`, `dev`, or `docker-local` profiles. Automated tests
+may use them with the `test` profile only when an explicit fixture marker such as
+`LOCAL_FIXTURE_TEST_ENABLED=true` is set; `docker` alone is not an allowlist.
 Keycloak and Grafana are third-party local evaluation containers; their fixture
 credentials are not a production authentication or secret-management control.
 

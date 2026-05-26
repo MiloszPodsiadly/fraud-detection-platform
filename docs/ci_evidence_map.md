@@ -755,7 +755,10 @@ Primary proof files:
 
 Supplementary Docker Compose workflow proof:
 - `Resolved Compose Security Assertions` in `.github/workflows/docker-compose-ci.yml` verifies that overlay resolution keeps host publication localhost-only, leaves Ollama opt-in, and resolves the documented mTLS, OIDC/BFF, trust-authority JWT signing and application-container hardening controls.
-- `Runtime Smoke / default dev without AI` and `Runtime Smoke / app hardening` in `.github/workflows/docker-compose-ci.yml` boot the minimal local application path without Ollama and verify UI, alert readiness and ML health responses.
+- `Runtime Smoke / default dev without AI`, `Runtime Smoke / app hardening` and `Runtime Smoke / full security hardened` boot their documented local paths without Ollama; the complete path verifies UI, alert readiness and CA-validated ML HTTPS health under OIDC, mTLS, trust-authority JWT and application hardening overlays.
+- `Demo Fixture Guard Tests` proves generic `docker` and unmarked `test` profiles reject committed demo-secret patterns while explicitly marked fixture tests remain possible.
+- `Repository Critical Vulnerability Visibility` scans the repository filesystem for critical known vulnerabilities and uploads SARIF; it improves review visibility only and is not production image provenance.
+- Remaining supply-chain follow-ups are digest pinning, SBOM generation, SLSA/provenance evidence, signed images and automated dependency update policy.
 - These supplementary jobs do not prove production IAM, external secret management, production deployment hardening, or optional AI model runtime behavior.
 
 Supplementary proof files:

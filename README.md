@@ -101,9 +101,9 @@ Start with:
 
 Docker is the supported local runtime path for this README.
 
-### Strongest Runnable Local Demonstration Stack
+### Most Complete Local Security Demonstration Stack
 
-This is the strongest runnable local demonstration stack provided by the repository. It combines OIDC browser
+This is the most complete local security demonstration stack currently provided by the repository. It combines OIDC browser
 login, mTLS internal calls to ML, JWT identity for the local trust authority, local observability, and the
 application container hardening overlay:
 
@@ -120,10 +120,11 @@ docker compose --env-file deployment/.env \
 
 `deployment/.env` is a committed local runtime fixture, alongside the existing local identity fixture material, so
 the project remains runnable for evaluation. Application startup guards reject committed demo internal-auth
-patterns and local-HMAC trust-authority demo configuration outside `local`, `dev`, `test`, or `docker-local`
-profiles.
+patterns and local-HMAC trust-authority demo configuration outside `local`, `dev`, or `docker-local` profiles,
+or an automated `test` context with an explicit fixture marker such as `LOCAL_FIXTURE_TEST_ENABLED=true`.
 `deployment/.env.example` documents the expected variables.
-The `test` profile allowance exists only for automated test fixtures; it is not a deployment mode.
+The generic `test` profile is not a deployment mode, and generic `docker` is not a local-secret allowlist by
+itself.
 
 After startup, confirm container readiness:
 
@@ -151,20 +152,24 @@ Expected resolved security-relevant values for this exact command:
 | `alert-service.ASSISTANT_MODE` | `DETERMINISTIC` |
 | `analyst-console-ui` build arg `VITE_AUTH_PROVIDER` | `bff` |
 
-CI renders this official strongest local combination and runs `scripts/check-compose-security-config.mjs`; a
+CI renders this official complete local security demonstration combination and runs `scripts/check-compose-security-config.mjs`; a
 wrong official overlay order that leaves local-only internal auth enabled fails that resolved-config assertion.
 
 ### Security Scope Of The Local Stack
 
-This is not a production deployment. `deployment/.env` is intentionally committed for local evaluation, and the
+This is not a production deployment or production security evidence. `deployment/.env` is intentionally committed for local evaluation, and the
 documented stack publishes ports only on localhost. Startup guards reject committed demo internal-auth patterns
 and local-HMAC trust-authority demo configuration unless an allowed fixture profile is active: `local`, `dev`, or
-`docker-local`; `test` is reserved for automated test fixtures only. Other local evaluation credentials in the
+`docker-local`; `test` requires an explicit automated-fixture marker. Other local evaluation credentials in the
 fixture are not a production secret-management mechanism. Keycloak runs in dev mode. The local signing authority
 is a local trust-authority simulation, not an independent external trust anchor. The application container hardening overlay
 covers application containers only; it does not harden all third-party infrastructure images. Production requires
 external secret management, a production identity provider, an independent trust anchor, managed TLS termination,
 image provenance controls, and environment-specific deployment controls.
+
+CI includes repository filesystem scanning for critical known vulnerabilities as review visibility only. It is
+not production image provenance; follow-up controls include digest pinning, SBOM generation, SLSA/provenance
+evidence, signed images and automated dependency updates.
 
 | Stack or overlay | Purpose | Uses demo secrets? | Production suitable? |
 | --- | --- | --- | --- |
@@ -173,15 +178,35 @@ image provenance controls, and environment-specific deployment controls.
 | OIDC local demo | Keycloak dev-mode browser login/BFF exercise. | Yes | No |
 | mTLS service identity local demo | Certificate-backed ML calls using committed local certificates. | Yes | No |
 | Trust-authority JWT local demo | JWT-authenticated calls to the local signing authority. | Yes | No |
-| Application container hardening overlay | Read-only Java/UI containers and selected ML privilege restrictions for local verification. | Inherits selected stack. | No |
+| Application container hardening overlay | Read-only Java, ML and UI containers with reduced application-container privileges for local verification. | Inherits selected stack. | No |
+
+#### What This Does Not Protect Against
+
+- Hostile users with access to the local workstation or committed fixture material.
+- Lateral movement from a compromised container inside the local Docker network.
+- Compromise of third-party infrastructure images outside the application hardening overlay.
+- Protection of real regulated data.
+- Production PKI or independent trust anchoring.
+- Legal notarization or WORM-compliant retention.
 
 ### Compose Overlay Order Matters
 
 Compose applies later overlay values over earlier values. `docker-compose.dev.yml` intentionally selects
 local-only ML authentication, while the mTLS overlay must come after it to produce
-`INTERNAL_AUTH_MODE=MTLS_SERVICE_IDENTITY` in the strongest local demonstration stack.
-The documented stack does not start Ollama or pull a model. Backend JVM tuning can be overridden using
+`INTERNAL_AUTH_MODE=MTLS_SERVICE_IDENTITY` in the complete local security demonstration stack.
+The documented stack does not start Ollama or pull a model, and CI intentionally never pulls a local LLM model.
+Backend JVM tuning can be overridden using
 `JAVA_TOOL_OPTIONS`; application images use an exec-form Java entrypoint.
+
+Ollama is available only as an explicit local opt-in:
+
+```bash
+docker compose --env-file deployment/.env \
+  -f deployment/docker-compose.yml \
+  -f deployment/docker-compose.dev.yml \
+  -f deployment/docker-compose.ai.yml \
+  up --build -d
+```
 
 Open:
 
@@ -203,7 +228,7 @@ Named volumes persist data between restarts:
 | `prometheus-data` | Local metrics history. |
 | `grafana-data` | Local Grafana state. |
 
-Stop the strongest local demonstration stack without deleting local data:
+Stop the complete local security demonstration stack without deleting local data:
 
 ```bash
 docker compose --env-file deployment/.env \
@@ -216,7 +241,7 @@ docker compose --env-file deployment/.env \
   down
 ```
 
-Delete all named data volumes for the strongest local demonstration stack:
+Delete all named data volumes for the complete local security demonstration stack:
 
 ```bash
 docker compose --env-file deployment/.env \

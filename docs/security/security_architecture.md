@@ -20,7 +20,7 @@ This document is the current security overview. Endpoint-level ownership lives i
 
 - BFF session/OIDC: browser session mode using provider-backed login, callback, session bootstrap, logout, and CSRF metadata.
 - JWT resource server: stateless bearer API mode with configurable claim-to-authority mapping.
-- Local demo auth: local/dev/test/docker-local only. It is disabled by default and must not be treated as a production identity provider.
+- Local demo auth: `local`, `dev` and `docker-local` only; automated `test` execution requires an explicit fixture marker. It is disabled by default and must not be treated as a production identity provider.
 
 Demo auth is ignored when JWT auth is active. Controllers and services depend on `AnalystPrincipal` and `CurrentAnalystUser`, not on demo headers or provider-specific claim names.
 

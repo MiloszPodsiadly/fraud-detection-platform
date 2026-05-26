@@ -15,7 +15,7 @@ Internal service identity protects service-to-service calls into `ml-inference-s
 
 | Mode | Purpose | Production-like behavior |
 | --- | --- | --- |
-| `DISABLED_LOCAL_ONLY` | Explicit local/dev/test/docker-local bypass. | Forbidden. |
+| `DISABLED_LOCAL_ONLY` | Explicit local/dev/docker-local bypass; tests require a fixture marker. | Forbidden. |
 | `TOKEN_VALIDATOR` | Compatibility shared-token mode for local migration/testing. | Requires opt-in, token hash mode, and an allowlist. |
 | `JWT_SERVICE_IDENTITY` | Signed JWT service identity; local demo supports HMAC, RS256 uses key pairs. | `RS256` is a production direction only when keys and environment controls are external; `HS256` is local compatibility only. |
 | `MTLS_READY` | Fail-closed compatibility boundary. | Does not trust traffic. |
@@ -135,7 +135,8 @@ Manual rotation requires overlap:
 
 Local fixtures under `deployment/service-identity/` are for development only and must never be used in production.
 `deployment/.env` intentionally remains committed as a local runtime fixture. The local application guards reject
-its demo token/HMAC/JWT-secret patterns outside local/dev/test/docker-local profiles. Third-party local containers,
+its demo token/HMAC/JWT-secret patterns outside `local`, `dev`, or `docker-local` profiles; `test` is accepted only
+with an explicit automated fixture marker, and generic `docker` alone is rejected. Third-party local containers,
 including Keycloak dev mode and Grafana, remain local evaluation components and are not a production secret
 management mechanism.
 
@@ -154,8 +155,9 @@ demonstration therefore resolves to:
 - `APP_SECURITY_BFF_ENABLED=true`
 - `AUDIT_TRUST_AUTHORITY_IDENTITY_MODE=jwt-service-identity`
 
-CI executes `scripts/check-compose-security-config.mjs` against rendered Compose JSON so an official command
-cannot silently resolve back to local-only internal authentication.
+CI executes `scripts/check-compose-security-config.mjs` against rendered Compose JSON and boots the complete
+OIDC, mTLS, trust-authority JWT and application-hardening combination so an official command cannot silently
+resolve back to local-only internal authentication.
 
 JWT RS256 service identity local demonstration:
 
