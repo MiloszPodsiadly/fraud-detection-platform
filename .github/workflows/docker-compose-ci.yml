@@ -80,6 +80,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Assert default dev services exclude AI
+        run: |
+          services="$(docker compose --env-file deployment/.env -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml config --services)"
+          printf '%s\n' "$services"
+          if printf '%s\n' "$services" | grep -Fxq -e ollama -e ollama-model-init; then
+            echo "Default dev services unexpectedly include AI." >&2
+            exit 1
+          fi
+
       - name: Start services and verify health endpoints
         run: bash scripts/ci/compose-runtime-smoke.sh dev
 
@@ -93,6 +102,82 @@ jobs:
 
       - name: Start services and verify read-only application runtime
         run: bash scripts/ci/compose-runtime-smoke.sh app-hardening
+
+  full-security-runtime-smoke:
+    name: Runtime Smoke / full security hardened
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Start official complete local security demonstration stack
+        run: bash scripts/ci/compose-runtime-smoke.sh full-security-hardened
+
+  demo-fixture-guard-tests:
+    name: Demo Fixture Guard Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Test alert-service fixture guards
+        run: mvn -B -pl alert-service -am -Dsurefire.failIfNoSpecifiedTests=false -Dtest=InternalServiceClientProdGuardTest,AuditTrustAuthorityClientConfigurationTest test
+
+      - name: Test fraud-scoring-service fixture guard
+        run: mvn -B -pl fraud-scoring-service -am -Dsurefire.failIfNoSpecifiedTests=false -Dtest=InternalServiceClientProdGuardTest test
+
+      - name: Test audit-trust-authority fixture guard
+        run: mvn -B -pl audit-trust-authority -am -Dsurefire.failIfNoSpecifiedTests=false -Dtest=TrustAuthorityServiceTest test
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: ml-inference-service/requirements.txt
+
+      - name: Install ML test dependencies
+        working-directory: ml-inference-service
+        run: python -m pip install -r requirements.txt
+
+      - name: Test ML fixture guard
+        working-directory: ml-inference-service
+        run: python -m unittest discover -s tests
+
+  repository-security-visibility:
+    name: Repository Critical Vulnerability Visibility
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Scan repository filesystem for critical vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-fs.sarif
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-fs.sarif
 
   backend-images:
     name: Backend image / ${{ matrix.module }}

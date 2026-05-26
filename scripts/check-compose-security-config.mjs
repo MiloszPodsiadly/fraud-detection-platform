@@ -90,9 +90,10 @@ function assertHardening() {
     "feature-enricher-service",
     "fraud-scoring-service",
     "alert-service",
+    "ml-inference-service",
     "analyst-console-ui",
   ];
-  const controlledApps = [...readOnlyApps, "ml-inference-service"];
+  const controlledApps = readOnlyApps;
   for (const name of readOnlyApps) {
     assertControl(name, "read_only", true);
   }
