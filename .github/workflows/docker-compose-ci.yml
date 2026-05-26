@@ -26,6 +26,8 @@ jobs:
             files: -f deployment/docker-compose.yml
           - name: dev
             files: -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml
+          - name: ai-opt-in
+            files: -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.ai.yml
           - name: oidc
             files: -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.oidc.yml
           - name: jwt-service-identity
@@ -44,6 +46,53 @@ jobs:
 
       - name: Validate supported Compose combination
         run: docker compose --env-file deployment/.env.example ${{ matrix.files }} config --quiet
+
+  resolved-security-config:
+    name: Resolved Compose Security Assertions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify committed local runtime fixture is explicitly scoped
+        run: |
+          test -f deployment/.env
+          grep -F "Committed local runtime fixture" deployment/.env
+          grep -F "intentionally committed for local evaluation" README.md
+
+      - name: Assert base does not publish host ports
+        run: docker compose --env-file deployment/.env.example -f deployment/docker-compose.yml config --format json | node scripts/check-compose-security-config.mjs base
+
+      - name: Assert default dev excludes AI and is localhost-only
+        run: docker compose --env-file deployment/.env.example -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml config --format json | node scripts/check-compose-security-config.mjs dev
+
+      - name: Assert opt-in AI config
+        run: docker compose --env-file deployment/.env.example -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.ai.yml config --format json | node scripts/check-compose-security-config.mjs ai
+
+      - name: Assert recommended local security demonstration and app hardening
+        run: docker compose --env-file deployment/.env.example -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.oidc.yml -f deployment/docker-compose.service-identity-mtls.yml -f deployment/docker-compose.trust-authority-jwt.yml -f deployment/docker-compose.hardened.yml config --format json | node scripts/check-compose-security-config.mjs security-hardened
+
+  runtime-smoke:
+    name: Runtime Smoke / default dev without AI
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Start services and verify health endpoints
+        run: bash scripts/ci/compose-runtime-smoke.sh dev
+
+  app-hardening-runtime-smoke:
+    name: Runtime Smoke / app hardening
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Start services and verify read-only application runtime
+        run: bash scripts/ci/compose-runtime-smoke.sh app-hardening
 
   backend-images:
     name: Backend image / ${{ matrix.module }}
