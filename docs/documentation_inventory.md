@@ -5,7 +5,6 @@ Scope: repository documentation only. Excludes `documents/` prompt inputs, build
 | Path | Type | Status |
 | --- | --- | --- |
 | .github/PULL_REQUEST_TEMPLATE/fdp_enablement_config_change.md | project | current-source-of-truth |
-| deployment/service-identity/jwks.json | project | current-source-of-truth |
 | deployment/service-identity/mtls/README.md | project | current-source-of-truth |
 | deployment/service-identity/README.md | project | current-source-of-truth |
 | docs/adr/fdp_29_evidence_gated_finalize.md | architecture | branch-evidence-or-template |

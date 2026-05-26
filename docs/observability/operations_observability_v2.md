@@ -41,22 +41,25 @@ FDP-5 now includes a local-only monitoring stack in `deployment`:
 Recommended startup for observability validation:
 
 ```bash
-docker compose -f deployment/docker-compose.yml up --build -d \
+docker compose --env-file deployment/.env -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml up --build -d \
   kafka kafka-topics-init mongodb redis \
   ml-inference-service feature-enricher-service transaction-simulator-service fraud-scoring-service \
   prometheus grafana
 ```
 
+This default observability path uses deterministic assistant behavior and does not start Ollama or pull an AI
+model. Enable Ollama only by adding `-f deployment/docker-compose.ai.yml` to a deliberate local run.
+
 Full OIDC + observability startup:
 
 ```bash
-docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml up --build -d
+docker compose --env-file deployment/.env -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.oidc.yml up --build -d
 ```
 
 Fast restart when images are already built locally:
 
 ```bash
-docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml up -d --no-build
+docker compose --env-file deployment/.env -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.oidc.yml up -d --no-build
 ```
 
 Prometheus scrape targets:
@@ -544,15 +547,15 @@ curl -H "X-Demo-User-Id: analyst-1" -H "X-Demo-Roles: ANALYST" \
 If `ml-inference-service` is `DOWN` in Prometheus and `/metrics` returns `404`, the running Docker image is older than the current repo code. Rebuild the ML image:
 
 ```bash
-docker compose -f deployment/docker-compose.yml build ml-inference-service
-docker compose -f deployment/docker-compose.yml up -d ml-inference-service prometheus grafana
+docker compose --env-file deployment/.env -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml build ml-inference-service
+docker compose --env-file deployment/.env -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml up -d ml-inference-service prometheus grafana
 ```
 
 If the OIDC frontend or callback behavior is stale after auth changes, rebuild the frontend image too:
 
 ```bash
-docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml build analyst-console-ui
-docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml up -d analyst-console-ui
+docker compose --env-file deployment/.env -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.oidc.yml build analyst-console-ui
+docker compose --env-file deployment/.env -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.oidc.yml up -d analyst-console-ui
 ```
 
 ## Incident Scenarios

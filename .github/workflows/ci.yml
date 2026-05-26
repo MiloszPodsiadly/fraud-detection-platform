@@ -31,6 +31,9 @@ jobs:
           java-version: "21"
           cache: maven
 
+      - name: Generate local identity fixtures for backend tests
+        run: bash scripts/bootstrap-local-fixtures.sh
+
       - name: Build and test backend modules
         run: mvn -B verify
 
@@ -228,6 +231,9 @@ jobs:
 
       - name: Install ML dependencies
         run: pip install -r ml-inference-service/requirements.txt
+
+      - name: Generate local identity fixtures for ML tests
+        run: bash scripts/bootstrap-local-fixtures.sh
 
       - name: Run ML unit tests
         run: python -m unittest discover -s ml-inference-service/tests
@@ -1058,20 +1064,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Generate local identity fixtures for Compose overlays
+        run: bash scripts/bootstrap-local-fixtures.sh
+
       - name: Validate compose file
         run: |
-          docker compose \
+          docker compose --env-file deployment/.env.example \
             -f deployment/docker-compose.yml \
+            -f deployment/docker-compose.dev.yml \
             -f deployment/docker-compose.oidc.yml \
             -f deployment/docker-compose.service-identity-mtls.yml \
             -f deployment/docker-compose.trust-authority-jwt.yml \
+            -f deployment/docker-compose.hardened.yml \
             config --quiet
 
       - name: Build compose images
         run: |
-          docker compose \
+          docker compose --env-file deployment/.env.example \
             -f deployment/docker-compose.yml \
+            -f deployment/docker-compose.dev.yml \
             -f deployment/docker-compose.oidc.yml \
             -f deployment/docker-compose.service-identity-mtls.yml \
             -f deployment/docker-compose.trust-authority-jwt.yml \
+            -f deployment/docker-compose.hardened.yml \
             build

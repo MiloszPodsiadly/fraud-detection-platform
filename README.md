@@ -101,44 +101,152 @@ Start with:
 
 Docker is the supported local runtime path for this README.
 
-Default demo stack:
+### Quick Start
+
+Prerequisites are Docker with Compose and OpenSSL. On macOS or Linux with GNU Make installed, from a fresh clone:
 
 ```bash
-docker compose -f deployment/docker-compose.yml up --build -d
+make app-up
 ```
 
-Local OIDC stack:
+On Windows with Docker Desktop and Git for Windows installed, run the equivalent one-command startup from
+PowerShell:
 
-```bash
-docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml up --build -d
+```powershell
+.\scripts\app.cmd up
 ```
 
-JWT service-identity stack:
+The Windows launcher uses Git for Windows to run the existing OpenSSL-based fixture generator and starts the
+same Compose overlay combination as `make app-up`. From Git Bash on Windows without GNU Make, use
+`./scripts/app.cmd up`.
+
+OpenSSL is used only to generate local identity fixture material. Private PEM keys are not committed to this
+repository.
+
+### Most Complete Local Security Demonstration Stack
+
+`make app-up`, or `.\scripts\app.cmd up` on Windows, starts the most complete local security demonstration stack
+currently provided by the repository. It:
+
+- creates `deployment/.env` from `deployment/.env.example` if it is missing;
+- runs `scripts/bootstrap-local-fixtures.sh` to generate local mTLS and JWT material under
+  `deployment/.local/service-identity/`;
+- starts OIDC browser login, mTLS internal calls to ML, JWT identity for the local trust authority, local
+  observability, and the application container hardening overlay.
+
+`deployment/.local/` is ignored by Git and excluded from Docker build contexts. Generated private keys stay on
+the local workstation and can be replaced by rerunning the selected startup command.
+
+For manual inspection, the equivalent Compose startup after running `bash scripts/bootstrap-local-fixtures.sh`
+is:
 
 ```bash
-docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.service-identity-jwt.yml up --build -d
-```
-
-RS256 service-identity stack:
-
-```bash
-docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.service-identity-rs256.yml up --build -d
-```
-
-mTLS service-identity stack:
-
-```bash
-docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.service-identity-mtls.yml up --build -d
-```
-
-Full local security stack:
-
-```bash
-docker compose \
+docker compose --env-file deployment/.env \
   -f deployment/docker-compose.yml \
+  -f deployment/docker-compose.dev.yml \
   -f deployment/docker-compose.oidc.yml \
   -f deployment/docker-compose.service-identity-mtls.yml \
   -f deployment/docker-compose.trust-authority-jwt.yml \
+  -f deployment/docker-compose.hardened.yml \
+  up --build -d
+```
+
+`deployment/.env` is a committed local demo/evaluation configuration fixture, so the project remains runnable for
+evaluation without claiming secret management. Application startup guards reject demo internal-auth
+patterns and local-HMAC trust-authority demo configuration outside `local`, `dev`, or `docker-local` profiles,
+or an automated `test` context with an explicit fixture marker such as `LOCAL_FIXTURE_TEST_ENABLED=true`.
+`deployment/.env.example` documents the expected variables.
+The generic `test` profile is not a deployment mode, and generic `docker` is not a local-secret allowlist by
+itself.
+
+After startup, confirm container readiness:
+
+```bash
+docker compose --env-file deployment/.env \
+  -f deployment/docker-compose.yml \
+  -f deployment/docker-compose.dev.yml \
+  -f deployment/docker-compose.oidc.yml \
+  -f deployment/docker-compose.service-identity-mtls.yml \
+  -f deployment/docker-compose.trust-authority-jwt.yml \
+  -f deployment/docker-compose.hardened.yml \
+  ps
+```
+
+On Windows, the equivalent status command is:
+
+```powershell
+.\scripts\app.cmd ps
+```
+
+Expected resolved security-relevant values for this exact command:
+
+| Setting | Expected resolved value |
+| --- | --- |
+| `ml-inference-service.INTERNAL_AUTH_MODE` | `MTLS_SERVICE_IDENTITY` |
+| `fraud-scoring-service.INTERNAL_AUTH_CLIENT_ENABLED` | `true` |
+| `alert-service.INTERNAL_AUTH_CLIENT_ENABLED` | `true` |
+| `alert-service.APP_SECURITY_DEMO_AUTH_ENABLED` | `false` |
+| `alert-service.AUDIT_TRUST_AUTHORITY_ENABLED` | `true` |
+| `alert-service.AUDIT_TRUST_AUTHORITY_SIGNING_REQUIRED` | `true` |
+| `alert-service.ASSISTANT_MODE` | `DETERMINISTIC` |
+| `analyst-console-ui` build arg `VITE_AUTH_PROVIDER` | `bff` |
+
+CI renders this official complete local security demonstration combination and runs `scripts/check-compose-security-config.mjs`; a
+wrong official overlay order that leaves local-only internal auth enabled fails that resolved-config assertion.
+
+### Security Scope Of The Local Stack
+
+This is not a production deployment or production security evidence. `deployment/.env` is intentionally committed for local evaluation, and the
+documented stack publishes ports only on localhost. Startup guards reject committed demo internal-auth patterns
+and local-HMAC trust-authority demo configuration unless an allowed fixture profile is active: `local`, `dev`, or
+`docker-local`; `test` requires an explicit automated-fixture marker. Other local evaluation credentials in the
+fixture are not a production secret-management mechanism. Keycloak runs in dev mode. The local signing authority
+is a local trust-authority simulation, not an independent external trust anchor. The application container hardening overlay
+covers application containers only; it does not harden all third-party infrastructure images. Production requires
+external secret management, a production identity provider, an independent trust anchor, managed TLS termination,
+image provenance controls, and environment-specific deployment controls.
+
+Generated mTLS and JWT material in `deployment/.local/service-identity/` is local evaluation material only. It is
+not production PKI, production provenance, or independent external trust anchoring.
+
+CI includes repository filesystem scanning for critical known vulnerabilities as review visibility only. It is
+not production image provenance; follow-up controls include digest pinning, SBOM generation, SLSA/provenance
+evidence, signed images and automated dependency updates.
+
+| Stack or overlay | Purpose | Uses demo secrets? | Production suitable? |
+| --- | --- | --- | --- |
+| Base | Full internal-only application stack and durable local dependencies, without host port publication. | Yes; the local trust authority has an HMAC fixture default. | No |
+| Dev | Local ports, demo auth and local service fixture wiring. | Yes | No |
+| OIDC local demo | Keycloak dev-mode browser login/BFF exercise. | Yes | No |
+| mTLS service identity local demo | Certificate-backed ML calls using generated local certificates. | Yes | No |
+| Trust-authority JWT local demo | JWT-authenticated calls to the local signing authority. | Yes | No |
+| Application container hardening overlay | Read-only Java, ML and UI containers with reduced application-container privileges for local verification. | Inherits selected stack. | No |
+
+#### What This Does Not Protect Against
+
+- Hostile users with access to the local workstation or committed fixture material.
+- Lateral movement from a compromised container inside the local Docker network.
+- Compromise of third-party infrastructure images outside the application hardening overlay.
+- Protection of real regulated data.
+- Production PKI or independent trust anchoring.
+- No legal notarization or WORM-compliant retention.
+
+### Compose Overlay Order Matters
+
+Compose applies later overlay values over earlier values. `docker-compose.dev.yml` intentionally selects
+local-only ML authentication, while the mTLS overlay must come after it to produce
+`INTERNAL_AUTH_MODE=MTLS_SERVICE_IDENTITY` in the complete local security demonstration stack.
+The documented stack does not start Ollama or pull a model, and CI intentionally never pulls a local LLM model.
+Backend JVM tuning can be overridden using
+`JAVA_TOOL_OPTIONS`; application images use an exec-form Java entrypoint.
+
+Ollama is available only as an explicit local opt-in:
+
+```bash
+docker compose --env-file deployment/.env \
+  -f deployment/docker-compose.yml \
+  -f deployment/docker-compose.dev.yml \
+  -f deployment/docker-compose.ai.yml \
   up --build -d
 ```
 
@@ -146,29 +254,83 @@ Open:
 
 - Analyst console: `http://localhost:4173`
 - Alert service: `http://localhost:8085`
-- ML inference service: `http://localhost:8090`
+- ML inference service: `https://localhost:8090` (generated local demo CA from `deployment/.local/service-identity/mtls`; Compose verifies it in-container)
 - Prometheus: `http://localhost:9090`
-- Grafana: `http://localhost:3000` (`admin` / `admin`)
-- Keycloak, when OIDC is enabled: `http://localhost:8086`
+- Grafana: `http://localhost:3000` (initial local default: `admin` / `admin`; `grafana-data` retains password changes)
+- Keycloak: `http://localhost:8086`
 
-Stop the stack:
+### Persistent Local Data And Cleanup
+
+Named volumes persist data between restarts:
+
+| Volume | Persisted local material |
+| --- | --- |
+| `mongodb-data` | MongoDB databases used by alerts, ML governance and the local trust authority. |
+| `redis-data` | Redis local state and Redis persistence files produced by the local container. |
+| `prometheus-data` | Local metrics history. |
+| `grafana-data` | Local Grafana state. |
+
+Stop the complete local security demonstration stack without deleting local data:
 
 ```bash
-docker compose -f deployment/docker-compose.yml down
+make app-down
 ```
 
-Stop the full local security stack:
+On Windows:
+
+```powershell
+.\scripts\app.cmd down
+```
+
+The equivalent manual command is:
 
 ```bash
-docker compose \
+docker compose --env-file deployment/.env \
   -f deployment/docker-compose.yml \
+  -f deployment/docker-compose.dev.yml \
   -f deployment/docker-compose.oidc.yml \
   -f deployment/docker-compose.service-identity-mtls.yml \
   -f deployment/docker-compose.trust-authority-jwt.yml \
+  -f deployment/docker-compose.hardened.yml \
   down
 ```
 
+Delete all named data volumes for the complete local security demonstration stack:
+
+```bash
+make app-clean
+```
+
+On Windows:
+
+```powershell
+.\scripts\app.cmd clean
+```
+
+The equivalent manual command is:
+
+```bash
+docker compose --env-file deployment/.env \
+  -f deployment/docker-compose.yml \
+  -f deployment/docker-compose.dev.yml \
+  -f deployment/docker-compose.oidc.yml \
+  -f deployment/docker-compose.service-identity-mtls.yml \
+  -f deployment/docker-compose.trust-authority-jwt.yml \
+  -f deployment/docker-compose.hardened.yml \
+  down -v
+```
+
+### Troubleshooting
+
+- Docker with Compose and OpenSSL are required for `make app-up`; the Windows launcher obtains Bash and OpenSSL from Git for Windows.
+- Delete `deployment/.local/` and rerun the selected startup command to regenerate local certificate/JWT fixture material.
+- `make app-clean` or `.\scripts\app.cmd clean` removes named local data volumes as well as stopping the demonstration stack.
+- Run `bash scripts/bootstrap-local-fixtures.sh` before local fixture-dependent backend or ML identity tests.
+
 ## Services And Ports
+
+These local bindings are supplied by `deployment/docker-compose.dev.yml`; core services in the base file do not
+publish host ports.
 
 | Service | Local URL | Notes |
 | --- | --- | --- |
@@ -178,21 +340,31 @@ docker compose \
 | `feature-enricher-service` | `http://localhost:8083` | Feature windows and enrichment. |
 | `fraud-scoring-service` | `http://localhost:8084` | Rule and ML-assisted scoring. |
 | `alert-service` | `http://localhost:8085` | Alerts, cases, audit, RBAC, recovery APIs. |
-| `ml-inference-service` | `http://localhost:8090` | Python inference and governance API. |
+| `ml-inference-service` | `https://localhost:8090` | Python inference and governance API over the documented stack's local demo TLS certificate. |
 | `audit-trust-authority` | `http://localhost:8095` | Local audit-signing authority. |
-| `keycloak` | `http://localhost:8086` | Local OIDC override only. |
+| `keycloak` | `http://localhost:8086` | Keycloak dev-mode OIDC in the documented stack. |
 | `kafka` | `127.0.0.1:9092` | Local broker. |
 | `mongodb` | `127.0.0.1:27017` | Local persistence. |
 | `redis` | `127.0.0.1:6379` | Feature windows and local state. |
 | `prometheus` | `http://localhost:9090` | Metrics and alert rules. |
 | `grafana` | `http://localhost:3000` | Provisioned dashboards. |
-| `ollama` | `http://localhost:11434` | Optional local assistant model runtime. |
+
+## Container Health
+
+| Service | Endpoint | Auth behavior | Compose check |
+| --- | --- | --- | --- |
+| Java application services | `/actuator/health/readiness` | Actuator readiness exposure; alert permits this health route through its public technical security rule. | `curl -fsS` from the container |
+| `ml-inference-service` | `/health` | Public technical health response; the mTLS overlay changes transport to HTTPS and checks it with the local CA. | Python `urllib.request` over HTTPS from the container |
+| `analyst-console-ui` | `/` | Static nginx response only. | `wget` to `127.0.0.1:8080` from the container |
+| Kafka, MongoDB, Redis | Native check | No application auth surface. | Broker/database/CLI command |
+| Prometheus, Grafana, Keycloak | None configured | Supporting local services; Keycloak is started in dev mode. | Not health-gated by Compose |
 
 ## Testing
 
 Backend:
 
 ```bash
+bash scripts/bootstrap-local-fixtures.sh
 mvn test
 ```
 

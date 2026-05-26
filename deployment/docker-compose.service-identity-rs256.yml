@@ -11,7 +11,7 @@ services:
       INTERNAL_AUTH_ALLOWED_SERVICE_AUTHORITIES: fraud-scoring-service:ml-score,alert-service:governance-read
       INTERNAL_AUTH_ALLOWED_SERVICE_KEYS: fraud-scoring-service:scoring-key-1,alert-service:alert-key-1
     volumes:
-      - ./service-identity/jwks.json:/run/service-identity/jwks.json:ro
+      - ./.local/service-identity/jwks.json:/run/service-identity/jwks.json:ro
 
   fraud-scoring-service:
     environment:
@@ -27,7 +27,7 @@ services:
       INTERNAL_AUTH_JWT_TTL: 5m
       INTERNAL_AUTH_JWT_AUTHORITIES: ml-score
     volumes:
-      - ./service-identity/fraud-scoring-service-private.pem:/run/service-identity/fraud-scoring-service-private.pem:ro
+      - ./.local/service-identity/fraud-scoring-service-private.pem:/run/service-identity/fraud-scoring-service-private.pem:ro
 
   alert-service:
     environment:
@@ -43,4 +43,4 @@ services:
       INTERNAL_AUTH_JWT_TTL: 5m
       INTERNAL_AUTH_JWT_AUTHORITIES: governance-read
     volumes:
-      - ./service-identity/alert-service-private.pem:/run/service-identity/alert-service-private.pem:ro
+      - ./.local/service-identity/alert-service-private.pem:/run/service-identity/alert-service-private.pem:ro

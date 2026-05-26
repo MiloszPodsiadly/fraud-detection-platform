@@ -18,7 +18,7 @@ os.environ.setdefault("INTERNAL_AUTH_MODE", "DISABLED_LOCAL_ONLY")
 from app import server
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-SERVICE_IDENTITY_DIR = os.path.join(REPO_ROOT, "deployment", "service-identity")
+SERVICE_IDENTITY_DIR = os.path.join(REPO_ROOT, "deployment", ".local", "service-identity")
 SCORING_PRIVATE_KEY = os.path.join(SERVICE_IDENTITY_DIR, "fraud-scoring-service-private.pem")
 ALERT_PRIVATE_KEY = os.path.join(SERVICE_IDENTITY_DIR, "alert-service-private.pem")
 JWKS_PATH = os.path.join(SERVICE_IDENTITY_DIR, "jwks.json")
@@ -360,6 +360,118 @@ class MlMetricsEndpointTest(unittest.TestCase):
                 profile="production",
                 credentials={},
             )
+
+    def test_internal_auth_startup_rejects_demo_secret_outside_local_profiles(self):
+        previous = os.environ.get("INTERNAL_AUTH_ALLOWED_SERVICES")
+        try:
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICES"] = "alert-service:local-dev-internal-token:governance-read"
+            with self.assertRaisesRegex(RuntimeError, "Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context."):
+                server._validate_internal_auth_startup(
+                    mode="TOKEN_VALIDATOR",
+                    profile="qa",
+                    credentials={},
+                )
+        finally:
+            if previous is None:
+                os.environ.pop("INTERNAL_AUTH_ALLOWED_SERVICES", None)
+            else:
+                os.environ["INTERNAL_AUTH_ALLOWED_SERVICES"] = previous
+
+    def test_internal_auth_startup_allows_demo_secret_in_docker_local_profile(self):
+        previous = os.environ.get("INTERNAL_AUTH_ALLOWED_SERVICES")
+        try:
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICES"] = "alert-service:local-dev-internal-token:governance-read"
+            server._validate_internal_auth_startup(
+                mode="DISABLED_LOCAL_ONLY",
+                profile="docker-local",
+                credentials={},
+            )
+        finally:
+            if previous is None:
+                os.environ.pop("INTERNAL_AUTH_ALLOWED_SERVICES", None)
+            else:
+                os.environ["INTERNAL_AUTH_ALLOWED_SERVICES"] = previous
+
+    def test_internal_auth_startup_rejects_demo_secret_in_prod_profile(self):
+        previous = os.environ.get("INTERNAL_AUTH_ALLOWED_SERVICES")
+        try:
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICES"] = "alert-service:local-dev-internal-token:governance-read"
+            with self.assertRaisesRegex(RuntimeError, "Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context."):
+                server._validate_internal_auth_startup(
+                    mode="TOKEN_VALIDATOR",
+                    profile="prod",
+                    credentials={},
+                )
+        finally:
+            if previous is None:
+                os.environ.pop("INTERNAL_AUTH_ALLOWED_SERVICES", None)
+            else:
+                os.environ["INTERNAL_AUTH_ALLOWED_SERVICES"] = previous
+
+    def test_internal_auth_startup_rejects_demo_secret_in_generic_docker_profile(self):
+        previous = os.environ.get("INTERNAL_AUTH_ALLOWED_SERVICES")
+        try:
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICES"] = "alert-service:local-dev-internal-token:governance-read"
+            with self.assertRaisesRegex(RuntimeError, "Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context."):
+                server._validate_internal_auth_startup(
+                    mode="TOKEN_VALIDATOR",
+                    profile="docker",
+                    credentials={},
+                )
+        finally:
+            if previous is None:
+                os.environ.pop("INTERNAL_AUTH_ALLOWED_SERVICES", None)
+            else:
+                os.environ["INTERNAL_AUTH_ALLOWED_SERVICES"] = previous
+
+    def test_internal_auth_startup_rejects_demo_secret_in_generic_test_profile(self):
+        previous_allowed = os.environ.get("INTERNAL_AUTH_ALLOWED_SERVICES")
+        previous_marker = os.environ.get("LOCAL_FIXTURE_TEST_ENABLED")
+        previous_app_marker = os.environ.get("APP_LOCAL_FIXTURE_TEST_ENABLED")
+        previous_ci = os.environ.get("CI")
+        try:
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICES"] = "alert-service:local-dev-internal-token:governance-read"
+            os.environ.pop("LOCAL_FIXTURE_TEST_ENABLED", None)
+            os.environ.pop("APP_LOCAL_FIXTURE_TEST_ENABLED", None)
+            os.environ.pop("CI", None)
+            with self.assertRaisesRegex(RuntimeError, "Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context."):
+                server._validate_internal_auth_startup(
+                    mode="TOKEN_VALIDATOR",
+                    profile="test",
+                    credentials={},
+                )
+        finally:
+            for name, value in (
+                ("INTERNAL_AUTH_ALLOWED_SERVICES", previous_allowed),
+                ("LOCAL_FIXTURE_TEST_ENABLED", previous_marker),
+                ("APP_LOCAL_FIXTURE_TEST_ENABLED", previous_app_marker),
+                ("CI", previous_ci),
+            ):
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+
+    def test_internal_auth_startup_allows_demo_secret_in_explicit_test_fixture_context(self):
+        previous_allowed = os.environ.get("INTERNAL_AUTH_ALLOWED_SERVICES")
+        previous_marker = os.environ.get("LOCAL_FIXTURE_TEST_ENABLED")
+        try:
+            os.environ["INTERNAL_AUTH_ALLOWED_SERVICES"] = "alert-service:local-dev-internal-token:governance-read"
+            os.environ["LOCAL_FIXTURE_TEST_ENABLED"] = "true"
+            server._validate_internal_auth_startup(
+                mode="DISABLED_LOCAL_ONLY",
+                profile="test",
+                credentials={},
+            )
+        finally:
+            for name, value in (
+                ("INTERNAL_AUTH_ALLOWED_SERVICES", previous_allowed),
+                ("LOCAL_FIXTURE_TEST_ENABLED", previous_marker),
+            ):
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
 
     def test_internal_auth_startup_requires_allowlist_in_prod_token_validator(self):
         previous_hash_mode = os.environ.get("INTERNAL_AUTH_TOKEN_HASH_MODE")

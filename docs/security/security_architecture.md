@@ -20,7 +20,7 @@ This document is the current security overview. Endpoint-level ownership lives i
 
 - BFF session/OIDC: browser session mode using provider-backed login, callback, session bootstrap, logout, and CSRF metadata.
 - JWT resource server: stateless bearer API mode with configurable claim-to-authority mapping.
-- Local demo auth: local/dev/test/docker-local only. It is disabled by default and must not be treated as a production identity provider.
+- Local demo auth: `local`, `dev` and `docker-local` only; automated `test` execution requires an explicit fixture marker. It is disabled by default and must not be treated as a production identity provider.
 
 Demo auth is ignored when JWT auth is active. Controllers and services depend on `AnalystPrincipal` and `CurrentAnalystUser`, not on demo headers or provider-specific claim names.
 
@@ -78,6 +78,11 @@ Internal service identity protects calls into `ml-inference-service`:
 - `alert-service` calls governance advisory endpoints with `governance-read`.
 
 Supported modes are documented in [Internal service identity](internal_service_identity.md). Production-like profiles must fail closed when credentials, key material, certificate material, authority mappings, or expected server identity are incomplete.
+
+Local mTLS and JWT/JWKS material is generated on demand by `scripts/bootstrap-local-fixtures.sh` under
+`deployment/.local/service-identity/`; private PEM keys are not committed. This preserves simple local evaluation
+without treating fixture keys as production PKI, production secret management, production provenance, or an
+independent external trust anchor.
 
 ## Limitations
 

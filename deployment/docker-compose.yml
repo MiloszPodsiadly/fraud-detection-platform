@@ -1,10 +1,26 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  logging: *default-logging
+  networks:
+    - backend
+
+x-java-healthcheck: &java-healthcheck
+  test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health/readiness >/dev/null || exit 1"]
+  interval: 15s
+  timeout: 5s
+  retries: 10
+  start_period: 45s
+
 services:
   kafka:
+    <<: *service-defaults
     image: apache/kafka:3.8.0
-    container_name: fraud-kafka
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:9092:9092"
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -22,10 +38,10 @@ services:
       interval: 15s
       timeout: 10s
       retries: 10
+      start_period: 20s
 
   kafka-topics-init:
     image: apache/kafka:3.8.0
-    container_name: fraud-kafka-topics-init
     depends_on:
       kafka:
         condition: service_healthy
@@ -37,76 +53,78 @@ services:
     command:
       - /bin/bash
       - /opt/init/init-kafka-topics.sh
+    logging: *default-logging
+    networks:
+      - backend
 
   mongodb:
+    <<: *service-defaults
     image: mongo:7.0
-    container_name: fraud-mongodb
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongodb-data:/data/db
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
       interval: 15s
       timeout: 10s
       retries: 10
+      start_period: 20s
 
   redis:
+    <<: *service-defaults
     image: redis:7.2-alpine
-    container_name: fraud-redis
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 15s
       timeout: 10s
       retries: 10
+      start_period: 10s
 
   ml-inference-service:
+    <<: *service-defaults
     build:
       context: ..
       dockerfile: deployment/Dockerfile.ml-inference
-    container_name: ml-inference-service
-    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
     environment:
       MONGODB_URI: mongodb://mongodb:27017/fraud_governance
       GOVERNANCE_SNAPSHOT_COLLECTION: ml_governance_snapshots
       GOVERNANCE_SNAPSHOT_RETENTION_LIMIT: "500"
       GOVERNANCE_SNAPSHOT_INTERVAL_REQUESTS: "50"
-      INTERNAL_AUTH_MODE: DISABLED_LOCAL_ONLY
-      INTERNAL_AUTH_ALLOWED_SERVICES: fraud-scoring-service:local-dev-internal-token:ml-score,alert-service:local-dev-internal-token:governance-read
-    ports:
-      - "127.0.0.1:8090:8090"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health', timeout=2).read()"]
       interval: 15s
       timeout: 10s
       retries: 10
+      start_period: 15s
 
   audit-trust-authority:
+    <<: *service-defaults
     build:
       context: ..
       dockerfile: deployment/Dockerfile.backend
       args:
         MODULE_NAME: audit-trust-authority
-    container_name: audit-trust-authority
-    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
     environment:
       SERVER_PORT: 8080
-      TRUST_AUTHORITY_NAME: local-trust-authority
-      TRUST_AUTHORITY_KEY_ID: local-ed25519-key-1
-      TRUST_AUTHORITY_HMAC_SECRET: local-dev-trust-hmac-secret
+      SPRING_PROFILES_ACTIVE: docker,docker-local
+      TRUST_AUTHORITY_NAME: ${TRUST_AUTHORITY_NAME:-local-trust-authority}
+      TRUST_AUTHORITY_KEY_ID: ${TRUST_AUTHORITY_KEY_ID:-local-ed25519-key-1}
       MONGODB_URI: mongodb://mongodb:27017/fraud_trust_authority?serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000
       TRUST_AUTHORITY_PRIVATE_KEY_PATH: /tmp/audit-trust-authority/ed25519-private.key
       TRUST_AUTHORITY_PUBLIC_KEY_PATH: /tmp/audit-trust-authority/ed25519-public.key
       TRUST_AUTHORITY_AUDIT_PATH: /tmp/audit-trust-authority/trust-authority-audit.jsonl
-    ports:
-      - "127.0.0.1:8095:8080"
+    healthcheck: *java-healthcheck
 
   prometheus:
+    <<: *service-defaults
     image: prom/prometheus:v3.3.0
-    container_name: fraud-prometheus
-    restart: unless-stopped
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.retention.time=2d
@@ -114,64 +132,28 @@ services:
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/alerts:/etc/prometheus/alerts:ro
-    ports:
-      - "127.0.0.1:9090:9090"
+      - prometheus-data:/prometheus
 
   grafana:
+    <<: *service-defaults
     image: grafana/grafana:11.6.1
-    container_name: fraud-grafana
-    restart: unless-stopped
     depends_on:
       prometheus:
         condition: service_started
     environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
-    ports:
-      - "127.0.0.1:3000:3000"
-
-  ollama:
-    image: ollama/ollama:latest
-    container_name: fraud-ollama
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:11434:11434"
-    volumes:
-      - ollama-data:/root/.ollama
-    healthcheck:
-      test: ["CMD", "ollama", "list"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-
-  ollama-model-init:
-    image: ollama/ollama:latest
-    container_name: fraud-ollama-model-init
-    depends_on:
-      ollama:
-        condition: service_healthy
-    environment:
-      OLLAMA_HOST: http://ollama:11434
-      OLLAMA_MODEL: llama3.2:3b
-    entrypoint:
-      - /bin/sh
-      - -c
-    command:
-      - ollama pull "$$OLLAMA_MODEL"
-    restart: "no"
+      - grafana-data:/var/lib/grafana
 
   transaction-ingest-service:
+    <<: *service-defaults
     build:
       context: ..
       dockerfile: deployment/Dockerfile.backend
       args:
         MODULE_NAME: transaction-ingest-service
-    container_name: transaction-ingest-service
-    restart: unless-stopped
     depends_on:
       kafka:
         condition: service_healthy
@@ -185,17 +167,15 @@ services:
       SERVER_PORT: 8080
       SPRING_PROFILES_ACTIVE: docker
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-    ports:
-      - "127.0.0.1:8081:8080"
+    healthcheck: *java-healthcheck
 
   transaction-simulator-service:
+    <<: *service-defaults
     build:
       context: ..
       dockerfile: deployment/Dockerfile.backend
       args:
         MODULE_NAME: transaction-simulator-service
-    container_name: transaction-simulator-service
-    restart: unless-stopped
     depends_on:
       kafka:
         condition: service_healthy
@@ -209,24 +189,17 @@ services:
       SERVER_PORT: 8080
       SPRING_PROFILES_ACTIVE: docker
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      AUTO_REPLAY_ENABLED: "true"
-      AUTO_REPLAY_SOURCE_TYPE: SYNTHETIC
-      AUTO_REPLAY_MAX_EVENTS: "50000"
-      AUTO_REPLAY_THROTTLE_MILLIS: "5"
-      AUTO_REPLAY_START_DELAY_MILLIS: "15000"
     volumes:
       - ../data/generated:/app/data/generated
-    ports:
-      - "127.0.0.1:8082:8080"
+    healthcheck: *java-healthcheck
 
   feature-enricher-service:
+    <<: *service-defaults
     build:
       context: ..
       dockerfile: deployment/Dockerfile.backend
       args:
         MODULE_NAME: feature-enricher-service
-    container_name: feature-enricher-service
-    restart: unless-stopped
     depends_on:
       kafka:
         condition: service_healthy
@@ -242,17 +215,15 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       REDIS_HOST: redis
       REDIS_PORT: 6379
-    ports:
-      - "127.0.0.1:8083:8080"
+    healthcheck: *java-healthcheck
 
   fraud-scoring-service:
+    <<: *service-defaults
     build:
       context: ..
       dockerfile: deployment/Dockerfile.backend
       args:
         MODULE_NAME: fraud-scoring-service
-    container_name: fraud-scoring-service
-    restart: unless-stopped
     depends_on:
       kafka:
         condition: service_healthy
@@ -270,20 +241,15 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       ML_MODEL_BASE_URL: http://ml-inference-service:8090
       SCORING_MODE: SHADOW
-      INTERNAL_AUTH_CLIENT_ENABLED: "true"
-      INTERNAL_AUTH_SERVICE_NAME: fraud-scoring-service
-      INTERNAL_AUTH_TOKEN: local-dev-internal-token
-    ports:
-      - "127.0.0.1:8084:8080"
+    healthcheck: *java-healthcheck
 
   alert-service:
+    <<: *service-defaults
     build:
       context: ..
       dockerfile: deployment/Dockerfile.backend
       args:
         MODULE_NAME: alert-service
-    container_name: alert-service
-    restart: unless-stopped
     depends_on:
       kafka:
         condition: service_healthy
@@ -294,50 +260,54 @@ services:
       redis:
         condition: service_healthy
       audit-trust-authority:
-        condition: service_started
-      ollama-model-init:
-        condition: service_completed_successfully
+        condition: service_healthy
+      ml-inference-service:
+        condition: service_healthy
     environment:
       SERVER_PORT: 8080
-      SPRING_PROFILES_ACTIVE: docker,docker-local
-      APP_SECURITY_DEMO_AUTH_ENABLED: "true"
+      SPRING_PROFILES_ACTIVE: docker
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       MONGODB_URI: mongodb://mongodb:27017/fraud_alerts?serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000
       REDIS_HOST: redis
       REDIS_PORT: 6379
       ML_GOVERNANCE_BASE_URL: http://ml-inference-service:8090
-      INTERNAL_AUTH_CLIENT_ENABLED: "true"
-      INTERNAL_AUTH_SERVICE_NAME: alert-service
-      INTERNAL_AUTH_TOKEN: local-dev-internal-token
-      AUDIT_EXTERNAL_ANCHORING_ENABLED: "false"
-      AUDIT_EXTERNAL_ANCHORING_SINK: local-file
-      AUDIT_EXTERNAL_ANCHORING_LOCAL_FILE_PATH: /tmp/audit-external-anchors.jsonl
-      AUDIT_EXTERNAL_ANCHORING_INITIAL_DELAY_MS: "5000"
-      AUDIT_EXTERNAL_ANCHORING_PUBLISH_DELAY_MS: "10000"
-      AUDIT_TRUST_AUTHORITY_ENABLED: "true"
+      AUDIT_EXTERNAL_ANCHORING_ENABLED: ${AUDIT_EXTERNAL_ANCHORING_ENABLED:-false}
+      AUDIT_EXTERNAL_ANCHORING_SINK: ${AUDIT_EXTERNAL_ANCHORING_SINK:-local-file}
+      AUDIT_EXTERNAL_ANCHORING_LOCAL_FILE_PATH: ${AUDIT_EXTERNAL_ANCHORING_LOCAL_FILE_PATH:-/tmp/audit-external-anchors.jsonl}
+      AUDIT_EXTERNAL_ANCHORING_INITIAL_DELAY_MS: ${AUDIT_EXTERNAL_ANCHORING_INITIAL_DELAY_MS:-5000}
+      AUDIT_EXTERNAL_ANCHORING_PUBLISH_DELAY_MS: ${AUDIT_EXTERNAL_ANCHORING_PUBLISH_DELAY_MS:-10000}
+      AUDIT_TRUST_AUTHORITY_ENABLED: ${AUDIT_TRUST_AUTHORITY_ENABLED:-false}
       AUDIT_TRUST_AUTHORITY_URL: http://audit-trust-authority:8080
-      AUDIT_TRUST_AUTHORITY_HMAC_SECRET: local-dev-trust-hmac-secret
-      AUDIT_TRUST_AUTHORITY_SIGNING_REQUIRED: "false"
+      AUDIT_TRUST_AUTHORITY_SIGNING_REQUIRED: ${AUDIT_TRUST_AUTHORITY_SIGNING_REQUIRED:-false}
       AUDIT_TRUST_AUTHORITY_CALLER_SERVICE_NAME: alert-service
-      AUDIT_TRUST_AUTHORITY_CALLER_ENVIRONMENT: docker-local
-      ASSISTANT_MODE: OLLAMA
-      OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_MODEL: llama3.2:3b
-      ASSISTANT_READ_TIMEOUT: 45s
-    ports:
-      - "127.0.0.1:8085:8080"
+      AUDIT_TRUST_AUTHORITY_CALLER_ENVIRONMENT: ${AUDIT_TRUST_AUTHORITY_CALLER_ENVIRONMENT:-docker-local}
+      ASSISTANT_MODE: ${ASSISTANT_MODE:-DETERMINISTIC}
+    healthcheck: *java-healthcheck
 
   analyst-console-ui:
+    <<: *service-defaults
     build:
       context: ..
       dockerfile: deployment/Dockerfile.frontend
-    container_name: analyst-console-ui
-    restart: unless-stopped
     depends_on:
       alert-service:
-        condition: service_started
-    ports:
-      - "127.0.0.1:4173:80"
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - backend
+      - edge
+
+networks:
+  backend:
+  edge:
 
 volumes:
-  ollama-data:
+  mongodb-data:
+  redis-data:
+  prometheus-data:
+  grafana-data:

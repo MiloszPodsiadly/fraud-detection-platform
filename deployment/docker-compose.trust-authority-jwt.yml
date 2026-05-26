@@ -12,10 +12,11 @@ services:
       APP_TRUST_AUTHORITY_CALLERS_0_ALLOWED_JWT_KEY_IDS_0: alert-key-1
       APP_TRUST_AUTHORITY_CALLERS_0_SIGN_RATE_LIMIT_PER_MINUTE: "1000"
     volumes:
-      - ./service-identity/jwks.json:/run/service-identity/jwks.json:ro
+      - ./.local/service-identity/jwks.json:/run/service-identity/jwks.json:ro
 
   alert-service:
     environment:
+      AUDIT_TRUST_AUTHORITY_SIGNING_REQUIRED: "true"
       AUDIT_TRUST_AUTHORITY_IDENTITY_MODE: jwt-service-identity
       AUDIT_TRUST_AUTHORITY_JWT_ISSUER: fraud-platform-local
       AUDIT_TRUST_AUTHORITY_JWT_AUDIENCE: audit-trust-authority
@@ -24,4 +25,4 @@ services:
       AUDIT_TRUST_AUTHORITY_JWT_AUTHORITIES: AUDIT_ANCHOR AUDIT_INTEGRITY
       AUDIT_TRUST_AUTHORITY_JWT_TTL: 5m
     volumes:
-      - ./service-identity/alert-service-private.pem:/run/service-identity/alert-service-private.pem:ro
+      - ./.local/service-identity/alert-service-private.pem:/run/service-identity/alert-service-private.pem:ro

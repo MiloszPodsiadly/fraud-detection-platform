@@ -12,10 +12,16 @@ import org.springframework.web.client.RestClient;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Configuration
 @EnableConfigurationProperties(AuditTrustAuthorityProperties.class)
 class AuditTrustAuthorityClientConfiguration {
+
+    private static final Set<String> LOCAL_FIXTURE_PROFILES = Set.of("local", "dev", "docker-local");
+    private static final Set<String> TRUTHY_VALUES = Set.of("true", "1", "yes", "on");
+    private static final String DEMO_SECRET_ERROR = "Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context.";
 
     @Bean
     AuditTrustAuthorityClient auditTrustAuthorityClient(
@@ -42,6 +48,11 @@ class AuditTrustAuthorityClientConfiguration {
         return new ApplicationRunner() {
             @Override
             public void run(ApplicationArguments args) {
+                if (properties.isEnabled()
+                        && demoSecret(properties.getHmacSecret())
+                        && !localFixtureProfile(environment)) {
+                    throw new IllegalStateException(DEMO_SECRET_ERROR);
+                }
                 if (properties.isEnabled() && prodLikeProfile(environment)) {
                     if (!properties.isSigningRequired()) {
                         throw new IllegalStateException("Prod-like alert-service requires audit trust authority signing-required=true when trust authority is enabled.");
@@ -84,5 +95,29 @@ class AuditTrustAuthorityClientConfiguration {
                 .anyMatch(profile -> profile.equals("prod")
                         || profile.equals("production")
                         || profile.equals("staging"));
+    }
+
+    private boolean localFixtureProfile(Environment environment) {
+        Set<String> profiles = Arrays.stream(environment.getActiveProfiles())
+                .map(String::trim)
+                .map(String::toLowerCase)
+                .collect(Collectors.toSet());
+        return profiles.stream().anyMatch(LOCAL_FIXTURE_PROFILES::contains)
+                || (profiles.contains("test") && explicitFixtureTestContext(environment));
+    }
+
+    private boolean explicitFixtureTestContext(Environment environment) {
+        return truthy(environment.getProperty("app.local-fixture-test.enabled"))
+                || truthy(environment.getProperty("APP_LOCAL_FIXTURE_TEST_ENABLED"))
+                || truthy(environment.getProperty("LOCAL_FIXTURE_TEST_ENABLED"))
+                || truthy(environment.getProperty("CI"));
+    }
+
+    private boolean truthy(String value) {
+        return value != null && TRUTHY_VALUES.contains(value.trim().toLowerCase());
+    }
+
+    private boolean demoSecret(String value) {
+        return value != null && value.trim().startsWith("local-dev-");
     }
 }

@@ -12,6 +12,9 @@ import java.util.stream.Collectors;
 class InternalServiceClientProdGuard implements InitializingBean {
 
     private static final Set<String> PROD_LIKE_PROFILES = Set.of("prod", "production", "staging");
+    private static final Set<String> LOCAL_FIXTURE_PROFILES = Set.of("local", "dev", "docker-local");
+    private static final Set<String> TRUTHY_VALUES = Set.of("true", "1", "yes", "on");
+    private static final String DEMO_SECRET_ERROR = "Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context.";
 
     private final InternalServiceClientProperties properties;
     private final Environment environment;
@@ -23,6 +26,9 @@ class InternalServiceClientProdGuard implements InitializingBean {
 
     @Override
     public void afterPropertiesSet() {
+        if (!localFixtureProfileActive() && configuredDemoSecret()) {
+            throw new IllegalStateException(DEMO_SECRET_ERROR);
+        }
         if (!prodLikeProfileActive()) {
             return;
         }
@@ -65,10 +71,38 @@ class InternalServiceClientProdGuard implements InitializingBean {
     }
 
     private boolean prodLikeProfileActive() {
-        Set<String> activeProfiles = Arrays.stream(environment.getActiveProfiles())
+        return activeProfiles().stream().anyMatch(PROD_LIKE_PROFILES::contains);
+    }
+
+    private boolean localFixtureProfileActive() {
+        Set<String> profiles = activeProfiles();
+        return profiles.stream().anyMatch(LOCAL_FIXTURE_PROFILES::contains)
+                || (profiles.contains("test") && explicitFixtureTestContext());
+    }
+
+    private boolean explicitFixtureTestContext() {
+        return truthy(environment.getProperty("app.local-fixture-test.enabled"))
+                || truthy(environment.getProperty("APP_LOCAL_FIXTURE_TEST_ENABLED"))
+                || truthy(environment.getProperty("LOCAL_FIXTURE_TEST_ENABLED"))
+                || truthy(environment.getProperty("CI"));
+    }
+
+    private boolean truthy(String value) {
+        return value != null && TRUTHY_VALUES.contains(value.trim().toLowerCase());
+    }
+
+    private boolean configuredDemoSecret() {
+        return demoSecret(properties.normalizedToken()) || demoSecret(properties.jwt().secret());
+    }
+
+    private boolean demoSecret(String value) {
+        return value != null && value.trim().startsWith("local-dev-");
+    }
+
+    private Set<String> activeProfiles() {
+        return Arrays.stream(environment.getActiveProfiles())
                 .map(String::trim)
                 .map(String::toLowerCase)
                 .collect(Collectors.toSet());
-        return activeProfiles.stream().anyMatch(PROD_LIKE_PROFILES::contains);
     }
 }

@@ -15,11 +15,11 @@ Internal service identity protects service-to-service calls into `ml-inference-s
 
 | Mode | Purpose | Production-like behavior |
 | --- | --- | --- |
-| `DISABLED_LOCAL_ONLY` | Explicit local/dev/test/docker-local bypass. | Forbidden. |
-| `TOKEN_VALIDATOR` | Compatibility shared-token mode. | Requires opt-in, token hash mode, and an allowlist. |
-| `JWT_SERVICE_IDENTITY` | Signed JWT service identity. | Production-target with `RS256`; `HS256` is local compatibility only. |
+| `DISABLED_LOCAL_ONLY` | Explicit local/dev/docker-local bypass; tests require a fixture marker. | Forbidden. |
+| `TOKEN_VALIDATOR` | Compatibility shared-token mode for local migration/testing. | Requires opt-in, token hash mode, and an allowlist. |
+| `JWT_SERVICE_IDENTITY` | Signed JWT service identity; local demo supports HMAC, RS256 uses key pairs. | `RS256` is a production direction only when keys and environment controls are external; `HS256` is local compatibility only. |
 | `MTLS_READY` | Fail-closed compatibility boundary. | Does not trust traffic. |
-| `MTLS_SERVICE_IDENTITY` | Certificate-backed service identity. | Production-target when certificate material and trust settings are complete. |
+| `MTLS_SERVICE_IDENTITY` | Certificate-backed service identity. | A production direction only with externally managed certificates and trust policy. |
 
 Unknown modes fail startup instead of downgrading.
 
@@ -133,20 +133,60 @@ Manual rotation requires overlap:
 5. Verify certificate expiry and age metrics plus `/health` `mtlsCert`.
 6. Remove old certificate and old CA trust material only after all clients and servers have moved.
 
-Local fixtures under `deployment/service-identity/` are for development only and must never be used in production.
+Private cryptographic key material is not committed. For local verification,
+`scripts/bootstrap-local-fixtures.sh` generates mTLS and JWT/JWKS fixtures under
+`deployment/.local/service-identity/`; that path is ignored by Git and excluded from Docker build contexts. These
+generated fixtures must never be used in production.
+`deployment/.env` intentionally remains committed as a local configuration fixture. The local application guards reject
+its demo token/HMAC/JWT-secret patterns outside `local`, `dev`, or `docker-local` profiles; `test` is accepted only
+with an explicit automated fixture marker, and generic `docker` alone is rejected. Third-party local containers,
+including Keycloak dev mode and Grafana, remain local evaluation components and are not a production secret
+management mechanism.
 
 ## Local Verification
 
-JWT service identity:
+### Compose Overlay Order Matters
+
+Later Compose overlays override earlier values. `deployment/docker-compose.dev.yml` selects
+`DISABLED_LOCAL_ONLY` for the local ML path; service-identity overlays must follow it. The recommended security
+demonstration therefore resolves to:
+
+- `INTERNAL_AUTH_MODE=MTLS_SERVICE_IDENTITY`
+- `ML_MODEL_BASE_URL=https://ml-inference-service:8090`
+- `ML_GOVERNANCE_BASE_URL=https://ml-inference-service:8090`
+- `APP_SECURITY_DEMO_AUTH_ENABLED=false`
+- `APP_SECURITY_BFF_ENABLED=true`
+- `AUDIT_TRUST_AUTHORITY_IDENTITY_MODE=jwt-service-identity`
+
+CI executes `scripts/check-compose-security-config.mjs` against rendered Compose JSON and boots the complete
+OIDC, mTLS, trust-authority JWT and application-hardening combination so an official command cannot silently
+resolve back to local-only internal authentication. CI also rejects committed private-key material and generates
+the local identity fixture set before fixture-dependent validation.
+
+Preferred local startup:
 
 ```bash
-docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml -f deployment/docker-compose.service-identity-rs256.yml up --build -d
+make app-up
 ```
 
-mTLS service identity:
+The manual commands below require `bash scripts/bootstrap-local-fixtures.sh` first.
+
+JWT RS256 service identity local demonstration:
 
 ```bash
-docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.oidc.yml -f deployment/docker-compose.service-identity-mtls.yml up --build -d
+docker compose --env-file deployment/.env -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.oidc.yml -f deployment/docker-compose.service-identity-rs256.yml up --build -d
+```
+
+mTLS service identity local demonstration:
+
+```bash
+docker compose --env-file deployment/.env -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.oidc.yml -f deployment/docker-compose.service-identity-mtls.yml up --build -d
+```
+
+Recommended local security demonstration with application container hardening:
+
+```bash
+docker compose --env-file deployment/.env -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.oidc.yml -f deployment/docker-compose.service-identity-mtls.yml -f deployment/docker-compose.trust-authority-jwt.yml -f deployment/docker-compose.hardened.yml up --build -d
 ```
 
 Expected checks:
@@ -165,4 +205,7 @@ Expected checks:
 
 ## Limitations
 
-This is an internal service-auth foundation. It is not enterprise IAM, not automated key rotation, not automated certificate lifecycle management, not cert-manager/Vault/KMS/HSM integration, not full zero-trust certification, not WORM storage, not SIEM integration, and not a compliance archive.
+This is an internal service-auth foundation and local security demonstration surface. It is not a production
+deployment, enterprise IAM, automated key rotation, automated certificate lifecycle management,
+cert-manager/Vault/KMS/HSM integration, full zero-trust certification, WORM storage, SIEM integration, an
+independent trust anchor, or a compliance archive.

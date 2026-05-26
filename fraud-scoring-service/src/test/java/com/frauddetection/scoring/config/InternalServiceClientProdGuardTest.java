@@ -177,6 +177,108 @@ class InternalServiceClientProdGuardTest {
     }
 
     @Test
+    void shouldRejectDemoTokenOutsideLocalProfiles() {
+        InternalServiceClientProdGuard guard = new InternalServiceClientProdGuard(
+                new InternalServiceClientProperties(true, "TOKEN_VALIDATOR", "fraud-scoring-service", "local-dev-internal-token", false, InternalServiceClientProperties.Jwt.empty(), InternalServiceClientProperties.Mtls.empty()),
+                environment("qa")
+        );
+
+        assertThatThrownBy(guard::afterPropertiesSet)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context.");
+    }
+
+    @Test
+    void shouldAllowDemoTokenInDockerLocalProfile() {
+        InternalServiceClientProdGuard guard = new InternalServiceClientProdGuard(
+                new InternalServiceClientProperties(true, "TOKEN_VALIDATOR", "fraud-scoring-service", "local-dev-internal-token", false, InternalServiceClientProperties.Jwt.empty(), InternalServiceClientProperties.Mtls.empty()),
+                environment("docker-local")
+        );
+
+        assertThatCode(guard::afterPropertiesSet).doesNotThrowAnyException();
+    }
+
+    @Test
+    void shouldRejectDemoTokenInProdProfile() {
+        InternalServiceClientProdGuard guard = new InternalServiceClientProdGuard(
+                new InternalServiceClientProperties(true, "TOKEN_VALIDATOR", "fraud-scoring-service", "local-dev-internal-token", false, InternalServiceClientProperties.Jwt.empty(), InternalServiceClientProperties.Mtls.empty()),
+                environment("prod")
+        );
+
+        assertThatThrownBy(guard::afterPropertiesSet)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context.");
+    }
+
+    @Test
+    void shouldRejectDemoTokenInGenericDockerProfile() {
+        InternalServiceClientProdGuard guard = new InternalServiceClientProdGuard(
+                new InternalServiceClientProperties(true, "TOKEN_VALIDATOR", "fraud-scoring-service", "local-dev-internal-token", false, InternalServiceClientProperties.Jwt.empty(), InternalServiceClientProperties.Mtls.empty()),
+                environment("docker")
+        );
+
+        assertThatThrownBy(guard::afterPropertiesSet)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context.");
+    }
+
+    @Test
+    void shouldRejectDemoTokenInGenericTestProfile() {
+        MockEnvironment environment = environment("test");
+        environment.setProperty("CI", "false");
+        InternalServiceClientProdGuard guard = new InternalServiceClientProdGuard(
+                new InternalServiceClientProperties(true, "TOKEN_VALIDATOR", "fraud-scoring-service", "local-dev-internal-token", false, InternalServiceClientProperties.Jwt.empty(), InternalServiceClientProperties.Mtls.empty()),
+                environment
+        );
+
+        assertThatThrownBy(guard::afterPropertiesSet)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context.");
+    }
+
+    @Test
+    void shouldAllowDemoTokenInExplicitTestFixtureContext() {
+        MockEnvironment environment = environment("test");
+        environment.setProperty("LOCAL_FIXTURE_TEST_ENABLED", "true");
+        InternalServiceClientProdGuard guard = new InternalServiceClientProdGuard(
+                new InternalServiceClientProperties(true, "TOKEN_VALIDATOR", "fraud-scoring-service", "local-dev-internal-token", false, InternalServiceClientProperties.Jwt.empty(), InternalServiceClientProperties.Mtls.empty()),
+                environment
+        );
+
+        assertThatCode(guard::afterPropertiesSet).doesNotThrowAnyException();
+    }
+
+    @Test
+    void shouldRejectDemoJwtSecretOutsideLocalProfiles() {
+        InternalServiceClientProdGuard guard = new InternalServiceClientProdGuard(
+                new InternalServiceClientProperties(
+                        true,
+                        "JWT_SERVICE_IDENTITY",
+                        "fraud-scoring-service",
+                        "",
+                        false,
+                        new InternalServiceClientProperties.Jwt("HS256", "fraud-platform-local", "ml-inference-service", "local-dev-jwt-service-secret-32bytes", "", "", "", Duration.ofMinutes(5), "ml-score"),
+                        InternalServiceClientProperties.Mtls.empty()
+                ),
+                environment("qa")
+        );
+
+        assertThatThrownBy(guard::afterPropertiesSet)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context.");
+    }
+
+    @Test
+    void shouldAllowCustomTokenOutsideLocalProfiles() {
+        InternalServiceClientProdGuard guard = new InternalServiceClientProdGuard(
+                new InternalServiceClientProperties(true, "TOKEN_VALIDATOR", "fraud-scoring-service", "injected-non-demo-secret", false, InternalServiceClientProperties.Jwt.empty(), InternalServiceClientProperties.Mtls.empty()),
+                environment("qa")
+        );
+
+        assertThatCode(guard::afterPropertiesSet).doesNotThrowAnyException();
+    }
+
+    @Test
     void shouldAllowCompleteMtlsServiceIdentityConfigForProdProfile() {
         InternalServiceClientProdGuard guard = new InternalServiceClientProdGuard(
                 mtlsProperties(),
@@ -304,7 +406,7 @@ class InternalServiceClientProdGuardTest {
     void shouldExposeMtlsCertificateExpiryAndAgeMetrics() {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         InternalMtlsCertificateMonitor monitor = new InternalMtlsCertificateMonitor(
-                mtlsPropertiesWithCertificate("deployment/service-identity/mtls/fraud-scoring-service.pem"),
+                mtlsPropertiesWithCertificate("deployment/.local/service-identity/mtls/fraud-scoring-service.pem"),
                 registry
         );
 
@@ -326,7 +428,7 @@ class InternalServiceClientProdGuardTest {
     void shouldFailStartupWhenMtlsCertificateIsExpired() {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         InternalMtlsCertificateMonitor monitor = new InternalMtlsCertificateMonitor(
-                mtlsPropertiesWithCertificate("deployment/service-identity/mtls/expired-service.pem"),
+                mtlsPropertiesWithCertificate("deployment/.local/service-identity/mtls/expired-service.pem"),
                 registry
         );
 
@@ -340,7 +442,7 @@ class InternalServiceClientProdGuardTest {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         Instant now = Instant.parse("2026-04-27T12:00:00Z");
         InternalMtlsCertificateMonitor monitor = new InternalMtlsCertificateMonitor(
-                mtlsPropertiesWithCertificate("deployment/service-identity/mtls/fraud-scoring-service.pem"),
+                mtlsPropertiesWithCertificate("deployment/.local/service-identity/mtls/fraud-scoring-service.pem"),
                 registry,
                 Clock.fixed(now, ZoneOffset.UTC),
                 () -> new InternalMtlsCertificateMonitor.CertificateWindow(
@@ -359,7 +461,7 @@ class InternalServiceClientProdGuardTest {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         Instant now = Instant.parse("2026-04-27T12:00:00Z");
         InternalMtlsCertificateMonitor monitor = new InternalMtlsCertificateMonitor(
-                mtlsPropertiesWithCertificate("deployment/service-identity/mtls/fraud-scoring-service.pem"),
+                mtlsPropertiesWithCertificate("deployment/.local/service-identity/mtls/fraud-scoring-service.pem"),
                 registry,
                 Clock.fixed(now, ZoneOffset.UTC),
                 () -> new InternalMtlsCertificateMonitor.CertificateWindow(
@@ -381,7 +483,7 @@ class InternalServiceClientProdGuardTest {
     void shouldFailStartupWhenMtlsCertificateIsRemoved() {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         InternalMtlsCertificateMonitor monitor = new InternalMtlsCertificateMonitor(
-                mtlsPropertiesWithCertificate("deployment/service-identity/mtls/missing-service.pem"),
+                mtlsPropertiesWithCertificate("deployment/.local/service-identity/mtls/missing-service.pem"),
                 registry
         );
 
@@ -395,8 +497,8 @@ class InternalServiceClientProdGuardTest {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         InternalMtlsCertificateMonitor monitor = new InternalMtlsCertificateMonitor(
                 mtlsPropertiesWithCertificateAndCa(
-                        "deployment/service-identity/mtls/fraud-scoring-service.pem",
-                        "deployment/service-identity/mtls/unknown-service.pem"
+                        "deployment/.local/service-identity/mtls/fraud-scoring-service.pem",
+                        "deployment/.local/service-identity/mtls/unknown-service.pem"
                 ),
                 registry
         );
@@ -411,15 +513,15 @@ class InternalServiceClientProdGuardTest {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         InternalMtlsCertificateMonitor overlap = new InternalMtlsCertificateMonitor(
                 mtlsPropertiesWithCertificateAndCa(
-                        "deployment/service-identity/mtls/fraud-scoring-service.pem",
-                        "deployment/service-identity/mtls/unknown-service.pem,deployment/service-identity/mtls/local-dev-ca.pem"
+                        "deployment/.local/service-identity/mtls/fraud-scoring-service.pem",
+                        "deployment/.local/service-identity/mtls/unknown-service.pem,deployment/.local/service-identity/mtls/local-dev-ca.pem"
                 ),
                 registry
         );
         InternalMtlsCertificateMonitor oldTrustOnly = new InternalMtlsCertificateMonitor(
                 mtlsPropertiesWithCertificateAndCa(
-                        "deployment/service-identity/mtls/fraud-scoring-service.pem",
-                        "deployment/service-identity/mtls/unknown-service.pem"
+                        "deployment/.local/service-identity/mtls/fraud-scoring-service.pem",
+                        "deployment/.local/service-identity/mtls/unknown-service.pem"
                 ),
                 registry
         );
@@ -434,7 +536,7 @@ class InternalServiceClientProdGuardTest {
     void shouldRefreshLifecycleMetricsDuringPeriodicMonitor() {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         InternalMtlsCertificateMonitor monitor = new InternalMtlsCertificateMonitor(
-                mtlsPropertiesWithCertificate("deployment/service-identity/mtls/fraud-scoring-service.pem"),
+                mtlsPropertiesWithCertificate("deployment/.local/service-identity/mtls/fraud-scoring-service.pem"),
                 registry
         );
 
@@ -481,7 +583,7 @@ class InternalServiceClientProdGuardTest {
                         "RS256",
                         "fraud-platform-local",
                         "ml-inference-service",
-                        "local-dev-jwt-service-secret-32bytes",
+                        "",
                         "scoring-key-1",
                         privateKeyPem(),
                         "",
@@ -525,7 +627,7 @@ class InternalServiceClientProdGuardTest {
                         "HS256",
                         "fraud-platform-local",
                         "ml-inference-service",
-                        "local-dev-jwt-service-secret-32bytes",
+                        "non-demo-hs256-compatibility-secret-123456",
                         "",
                         "",
                         "",
@@ -541,7 +643,7 @@ class InternalServiceClientProdGuardTest {
     }
 
     private InternalServiceClientProperties mtlsPropertiesWithCertificate(String certificatePath) {
-        return mtlsPropertiesWithCertificateAndCa(certificatePath, "deployment/service-identity/mtls/local-dev-ca.pem");
+        return mtlsPropertiesWithCertificateAndCa(certificatePath, "deployment/.local/service-identity/mtls/local-dev-ca.pem");
     }
 
     private InternalServiceClientProperties mtlsPropertiesWithCertificateAndCa(String certificatePath, String caCertificatePaths) {
@@ -573,7 +675,7 @@ class InternalServiceClientProdGuardTest {
 
     private String privateKeyPem() {
         try {
-            return Files.readString(repoPath("deployment/service-identity/fraud-scoring-service-private.pem"));
+            return Files.readString(repoPath("deployment/.local/service-identity/fraud-scoring-service-private.pem"));
         } catch (IOException exception) {
             throw new IllegalStateException("Test private key is unavailable.");
         }
