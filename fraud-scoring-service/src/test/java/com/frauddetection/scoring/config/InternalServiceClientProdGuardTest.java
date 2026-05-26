@@ -185,7 +185,7 @@ class InternalServiceClientProdGuardTest {
 
         assertThatThrownBy(guard::afterPropertiesSet)
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessage("Demo local secret detected outside local/dev/docker-local profile.");
+                .hasMessage("Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context.");
     }
 
     @Test
@@ -193,6 +193,56 @@ class InternalServiceClientProdGuardTest {
         InternalServiceClientProdGuard guard = new InternalServiceClientProdGuard(
                 new InternalServiceClientProperties(true, "TOKEN_VALIDATOR", "fraud-scoring-service", "local-dev-internal-token", false, InternalServiceClientProperties.Jwt.empty(), InternalServiceClientProperties.Mtls.empty()),
                 environment("docker-local")
+        );
+
+        assertThatCode(guard::afterPropertiesSet).doesNotThrowAnyException();
+    }
+
+    @Test
+    void shouldRejectDemoTokenInProdProfile() {
+        InternalServiceClientProdGuard guard = new InternalServiceClientProdGuard(
+                new InternalServiceClientProperties(true, "TOKEN_VALIDATOR", "fraud-scoring-service", "local-dev-internal-token", false, InternalServiceClientProperties.Jwt.empty(), InternalServiceClientProperties.Mtls.empty()),
+                environment("prod")
+        );
+
+        assertThatThrownBy(guard::afterPropertiesSet)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context.");
+    }
+
+    @Test
+    void shouldRejectDemoTokenInGenericDockerProfile() {
+        InternalServiceClientProdGuard guard = new InternalServiceClientProdGuard(
+                new InternalServiceClientProperties(true, "TOKEN_VALIDATOR", "fraud-scoring-service", "local-dev-internal-token", false, InternalServiceClientProperties.Jwt.empty(), InternalServiceClientProperties.Mtls.empty()),
+                environment("docker")
+        );
+
+        assertThatThrownBy(guard::afterPropertiesSet)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context.");
+    }
+
+    @Test
+    void shouldRejectDemoTokenInGenericTestProfile() {
+        MockEnvironment environment = environment("test");
+        environment.setProperty("CI", "false");
+        InternalServiceClientProdGuard guard = new InternalServiceClientProdGuard(
+                new InternalServiceClientProperties(true, "TOKEN_VALIDATOR", "fraud-scoring-service", "local-dev-internal-token", false, InternalServiceClientProperties.Jwt.empty(), InternalServiceClientProperties.Mtls.empty()),
+                environment
+        );
+
+        assertThatThrownBy(guard::afterPropertiesSet)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context.");
+    }
+
+    @Test
+    void shouldAllowDemoTokenInExplicitTestFixtureContext() {
+        MockEnvironment environment = environment("test");
+        environment.setProperty("LOCAL_FIXTURE_TEST_ENABLED", "true");
+        InternalServiceClientProdGuard guard = new InternalServiceClientProdGuard(
+                new InternalServiceClientProperties(true, "TOKEN_VALIDATOR", "fraud-scoring-service", "local-dev-internal-token", false, InternalServiceClientProperties.Jwt.empty(), InternalServiceClientProperties.Mtls.empty()),
+                environment
         );
 
         assertThatCode(guard::afterPropertiesSet).doesNotThrowAnyException();
@@ -215,7 +265,7 @@ class InternalServiceClientProdGuardTest {
 
         assertThatThrownBy(guard::afterPropertiesSet)
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessage("Demo local secret detected outside local/dev/docker-local profile.");
+                .hasMessage("Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context.");
     }
 
     @Test

@@ -195,7 +195,7 @@ class TrustAuthorityServiceTest {
 
         assertThatThrownBy(() -> guard.run(null))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessage("Demo local secret detected outside local/dev/docker-local profile.");
+                .hasMessage("Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context.");
     }
 
     @Test
@@ -204,7 +204,37 @@ class TrustAuthorityServiceTest {
 
         assertThatThrownBy(() -> new TrustAuthorityRuntimeGuard(properties, environment("qa")).run(null))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessage("Demo local secret detected outside local/dev/docker-local profile.");
+                .hasMessage("Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context.");
+    }
+
+    @Test
+    void shouldAllowDefaultDemoTokenInDockerLocalProfile() {
+        new TrustAuthorityRuntimeGuard(new TrustAuthorityProperties(), environment("docker-local")).run(null);
+    }
+
+    @Test
+    void shouldRejectDefaultDemoTokenInGenericDockerProfile() {
+        assertThatThrownBy(() -> new TrustAuthorityRuntimeGuard(new TrustAuthorityProperties(), environment("docker")).run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context.");
+    }
+
+    @Test
+    void shouldRejectDefaultDemoTokenInGenericTestProfile() {
+        MockEnvironment environment = environment("test");
+        environment.setProperty("CI", "false");
+
+        assertThatThrownBy(() -> new TrustAuthorityRuntimeGuard(new TrustAuthorityProperties(), environment).run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context.");
+    }
+
+    @Test
+    void shouldAllowDefaultDemoTokenInExplicitTestFixtureContext() {
+        MockEnvironment environment = environment("test");
+        environment.setProperty("LOCAL_FIXTURE_TEST_ENABLED", "true");
+
+        new TrustAuthorityRuntimeGuard(new TrustAuthorityProperties(), environment).run(null);
     }
 
     @Test

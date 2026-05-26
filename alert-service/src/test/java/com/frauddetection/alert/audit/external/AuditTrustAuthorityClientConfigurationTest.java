@@ -75,7 +75,7 @@ class AuditTrustAuthorityClientConfigurationTest {
 
         assertThatThrownBy(() -> configuration.auditTrustAuthorityProdGuard(properties, environment("qa")).run(null))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessage("Demo local secret detected outside local/dev/docker-local profile.");
+                .hasMessage("Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context.");
     }
 
     @Test
@@ -85,6 +85,34 @@ class AuditTrustAuthorityClientConfigurationTest {
         properties.setHmacSecret("local-dev-trust-hmac-secret");
 
         assertThatCode(() -> configuration.auditTrustAuthorityProdGuard(properties, environment("docker-local")).run(null))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void shouldRejectDemoHmacSecretInGenericDockerAndTestProfiles() {
+        AuditTrustAuthorityProperties properties = new AuditTrustAuthorityProperties();
+        properties.setEnabled(true);
+        properties.setHmacSecret("local-dev-trust-hmac-secret");
+        MockEnvironment testEnvironment = environment("test");
+        testEnvironment.setProperty("CI", "false");
+
+        assertThatThrownBy(() -> configuration.auditTrustAuthorityProdGuard(properties, environment("docker")).run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context.");
+        assertThatThrownBy(() -> configuration.auditTrustAuthorityProdGuard(properties, testEnvironment).run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context.");
+    }
+
+    @Test
+    void shouldAllowDemoHmacSecretInExplicitTestFixtureContext() {
+        AuditTrustAuthorityProperties properties = new AuditTrustAuthorityProperties();
+        properties.setEnabled(true);
+        properties.setHmacSecret("local-dev-trust-hmac-secret");
+        MockEnvironment environment = environment("test");
+        environment.setProperty("LOCAL_FIXTURE_TEST_ENABLED", "true");
+
+        assertThatCode(() -> configuration.auditTrustAuthorityProdGuard(properties, environment).run(null))
                 .doesNotThrowAnyException();
     }
 

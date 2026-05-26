@@ -12,8 +12,9 @@ import java.util.stream.Collectors;
 class InternalServiceClientProdGuard implements InitializingBean {
 
     private static final Set<String> PROD_LIKE_PROFILES = Set.of("prod", "production", "staging");
-    private static final Set<String> LOCAL_FIXTURE_PROFILES = Set.of("local", "dev", "docker-local", "test");
-    private static final String DEMO_SECRET_ERROR = "Demo local secret detected outside local/dev/docker-local profile.";
+    private static final Set<String> LOCAL_FIXTURE_PROFILES = Set.of("local", "dev", "docker-local");
+    private static final Set<String> TRUTHY_VALUES = Set.of("true", "1", "yes", "on");
+    private static final String DEMO_SECRET_ERROR = "Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context.";
 
     private final InternalServiceClientProperties properties;
     private final Environment environment;
@@ -74,7 +75,20 @@ class InternalServiceClientProdGuard implements InitializingBean {
     }
 
     private boolean localFixtureProfileActive() {
-        return activeProfiles().stream().anyMatch(LOCAL_FIXTURE_PROFILES::contains);
+        Set<String> profiles = activeProfiles();
+        return profiles.stream().anyMatch(LOCAL_FIXTURE_PROFILES::contains)
+                || (profiles.contains("test") && explicitFixtureTestContext());
+    }
+
+    private boolean explicitFixtureTestContext() {
+        return truthy(environment.getProperty("app.local-fixture-test.enabled"))
+                || truthy(environment.getProperty("APP_LOCAL_FIXTURE_TEST_ENABLED"))
+                || truthy(environment.getProperty("LOCAL_FIXTURE_TEST_ENABLED"))
+                || truthy(environment.getProperty("CI"));
+    }
+
+    private boolean truthy(String value) {
+        return value != null && TRUTHY_VALUES.contains(value.trim().toLowerCase());
     }
 
     private boolean configuredDemoSecret() {
