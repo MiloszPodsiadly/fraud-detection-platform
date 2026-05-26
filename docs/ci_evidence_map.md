@@ -753,39 +753,16 @@ Primary proof files:
 - `deployment/docker-compose.trust-authority-jwt.yml`
 - `deployment/docker-compose.hardened.yml`
 
-## Docker Compose Resolved Security Assertions
+Supplementary Docker Compose workflow proof:
+- `Resolved Compose Security Assertions` in `.github/workflows/docker-compose-ci.yml` verifies that overlay resolution keeps host publication localhost-only, leaves Ollama opt-in, and resolves the documented mTLS, OIDC/BFF, trust-authority JWT signing and application-container hardening controls.
+- `Runtime Smoke / default dev without AI` and `Runtime Smoke / app hardening` in `.github/workflows/docker-compose-ci.yml` boot the minimal local application path without Ollama and verify UI, alert readiness and ML health responses.
+- These supplementary jobs do not prove production IAM, external secret management, production deployment hardening, or optional AI model runtime behavior.
 
-Purpose:
-- Verify official overlay order produces the documented local security demonstration posture.
-
-Proves:
-- Base does not publish host ports and dev bindings remain localhost-only.
-- Default dev does not require Ollama and defaults to deterministic assistant mode.
-- The recommended security demonstration resolves mTLS, OIDC/BFF, trust-authority JWT signing and application hardening controls as documented.
-
-Does not prove:
-- Production IAM, external secrets management, or runtime request-path behavior.
-
-Primary proof files:
+Supplementary proof files:
 - `.github/workflows/docker-compose-ci.yml`
 - `scripts/check-compose-security-config.mjs`
-- `deployment/docker-compose.ai.yml`
-
-## Docker Compose Runtime Smoke
-
-Purpose:
-- Prove the minimal local app path and application hardening overlay boot and expose health endpoints without starting Ollama.
-
-Proves:
-- ML, trust authority, transaction ingest, alert service and analyst UI reach healthy state in default-dev and app-hardening smoke runs.
-- UI, alert readiness and ML health respond through localhost development bindings.
-
-Does not prove:
-- Production deployment hardening or optional AI model runtime behavior.
-
-Primary proof files:
-- `.github/workflows/docker-compose-ci.yml`
 - `scripts/ci/compose-runtime-smoke.sh`
+- `deployment/docker-compose.ai.yml`
 
 Related FDP branches:
 - FDP-28
