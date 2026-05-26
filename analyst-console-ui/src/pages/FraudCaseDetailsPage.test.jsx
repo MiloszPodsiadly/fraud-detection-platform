@@ -322,7 +322,7 @@ describe("FraudCaseDetailsPage", () => {
     render(page({ caseId: "case-1", apiClient }));
 
     expect(await screen.findByText("Evidence summary")).toBeInTheDocument();
-    expect(apiClient.getFraudCaseEvidenceSummary).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(apiClient.getFraudCaseEvidenceSummary).toHaveBeenCalledTimes(1));
     expect(apiClient.getFraudCaseEvidenceSummary).toHaveBeenCalledWith("case-1", expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(apiClient.getAlert).not.toHaveBeenCalled();
     expect(apiClient.getAssistantSummary).not.toHaveBeenCalled();
