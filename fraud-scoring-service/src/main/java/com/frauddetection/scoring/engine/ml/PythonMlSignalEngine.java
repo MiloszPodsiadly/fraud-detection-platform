@@ -9,6 +9,7 @@ import com.frauddetection.common.events.engine.FraudEngineEvidenceType;
 import com.frauddetection.common.events.engine.FraudEngineResult;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
+import com.frauddetection.common.events.reason.ReasonCode;
 import com.frauddetection.scoring.context.ScoringContext;
 import com.frauddetection.scoring.domain.FraudScoreResult;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
@@ -59,9 +60,6 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
         if (sourceResult == null) {
             return degradedResult(PythonMlSignalReasonCode.ML_MODEL_INVALID_RESPONSE, generatedAt);
         }
-        if (Boolean.FALSE.equals(modelAvailable(sourceResult))) {
-            return unavailableResult(FraudEngineStatus.UNAVAILABLE, PythonMlSignalReasonCode.ML_MODEL_UNAVAILABLE, generatedAt);
-        }
         if (sourceResult.fraudScore() == null) {
             return degradedResult(PythonMlSignalReasonCode.ML_SCORE_MISSING, generatedAt);
         }
@@ -74,15 +72,31 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
         if (missingModelMetadata(sourceResult)) {
             return degradedResult(PythonMlSignalReasonCode.ML_MODEL_METADATA_MISSING, generatedAt);
         }
+        ModelAvailabilityStatus availabilityStatus = modelAvailabilityStatus(sourceResult);
+        if (availabilityStatus == ModelAvailabilityStatus.UNAVAILABLE) {
+            return unavailableResult(FraudEngineStatus.UNAVAILABLE, PythonMlSignalReasonCode.ML_MODEL_UNAVAILABLE, generatedAt);
+        }
+        if (availabilityStatus == ModelAvailabilityStatus.MISSING) {
+            return degradedResult(PythonMlSignalReasonCode.ML_AVAILABILITY_METADATA_MISSING, generatedAt);
+        }
+        if (availabilityStatus == ModelAvailabilityStatus.INVALID) {
+            return degradedResult(PythonMlSignalReasonCode.ML_AVAILABILITY_METADATA_INVALID, generatedAt);
+        }
         return availableResult(sourceResult, generatedAt);
     }
 
-    private Boolean modelAvailable(FraudScoreResult sourceResult) {
+    private ModelAvailabilityStatus modelAvailabilityStatus(FraudScoreResult sourceResult) {
         if (sourceResult.explanationMetadata() == null) {
-            return null;
+            return ModelAvailabilityStatus.MISSING;
+        }
+        if (!sourceResult.explanationMetadata().containsKey("modelAvailable")) {
+            return ModelAvailabilityStatus.MISSING;
         }
         Object value = sourceResult.explanationMetadata().get("modelAvailable");
-        return value instanceof Boolean available ? available : null;
+        if (!(value instanceof Boolean available)) {
+            return ModelAvailabilityStatus.INVALID;
+        }
+        return available ? ModelAvailabilityStatus.AVAILABLE : ModelAvailabilityStatus.UNAVAILABLE;
     }
 
     private boolean missingModelMetadata(FraudScoreResult sourceResult) {
@@ -93,7 +107,7 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
     }
 
     private FraudEngineResult availableResult(FraudScoreResult sourceResult, Instant generatedAt) {
-        PythonMlSignalReasonCode reasonCode = PythonMlSignalReasonCode.ML_MODEL_SIGNAL;
+        List<String> reasonCodes = boundedReasonCodes(sourceResult);
         return new FraudEngineResult(
                 ENGINE_ID,
                 FraudEngineType.ML_MODEL,
@@ -102,15 +116,24 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
                 sourceResult.fraudScore(),
                 sourceResult.riskLevel(),
                 FraudEngineConfidence.MEDIUM,
-                List.of(reasonCode.wireValue()),
-                contributions(reasonCode),
-                evidence(reasonCode, FraudEngineEvidenceStatus.AVAILABLE),
+                reasonCodes,
+                contributions(reasonCodes),
+                evidence(reasonCodes, FraudEngineEvidenceStatus.AVAILABLE),
                 0L,
                 sourceResult.modelName(),
                 sourceResult.modelVersion(),
                 null,
                 generatedAt
         );
+    }
+
+    private List<String> boundedReasonCodes(FraudScoreResult sourceResult) {
+        List<String> reasonCodes = ReasonCode.supportedWireValues(
+                ReasonCode.parseLegacyList(sourceResult.reasonCodes())
+        );
+        return reasonCodes.isEmpty()
+                ? List.of(PythonMlSignalReasonCode.ML_MODEL_SIGNAL.wireValue())
+                : reasonCodes;
     }
 
     private FraudEngineResult unavailableResult(
@@ -157,27 +180,38 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
         );
     }
 
-    private List<FraudEngineContribution> contributions(PythonMlSignalReasonCode reasonCode) {
-        return List.of(new FraudEngineContribution(
-                reasonCode.wireValue(),
-                null,
-                null,
-                FraudEngineContributionDirection.UNKNOWN
-        ));
+    private List<FraudEngineContribution> contributions(List<String> reasonCodes) {
+        return reasonCodes.stream()
+                .map(reasonCode -> new FraudEngineContribution(
+                        reasonCode,
+                        null,
+                        null,
+                        FraudEngineContributionDirection.UNKNOWN
+                ))
+                .toList();
     }
 
     private List<FraudEngineEvidence> evidence(
             PythonMlSignalReasonCode reasonCode,
             FraudEngineEvidenceStatus status
     ) {
-        return List.of(new FraudEngineEvidence(
-                evidenceType(status),
-                reasonCode.wireValue(),
-                title(status),
-                "Bounded ML adapter signal.",
-                EVIDENCE_SOURCE,
-                status
-        ));
+        return evidence(List.of(reasonCode.wireValue()), status);
+    }
+
+    private List<FraudEngineEvidence> evidence(
+            List<String> reasonCodes,
+            FraudEngineEvidenceStatus status
+    ) {
+        return reasonCodes.stream()
+                .map(reasonCode -> new FraudEngineEvidence(
+                        evidenceType(status),
+                        reasonCode,
+                        title(status),
+                        "Bounded ML adapter signal.",
+                        EVIDENCE_SOURCE,
+                        status
+                ))
+                .toList();
     }
 
     private FraudEngineEvidenceType evidenceType(FraudEngineEvidenceStatus status) {
@@ -200,5 +234,12 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
             }
         }
         return false;
+    }
+
+    private enum ModelAvailabilityStatus {
+        AVAILABLE,
+        UNAVAILABLE,
+        MISSING,
+        INVALID
     }
 }
