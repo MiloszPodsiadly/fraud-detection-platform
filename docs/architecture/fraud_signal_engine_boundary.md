@@ -46,10 +46,14 @@ adapter documented in `docs/architecture/rule_based_signal_engine_adapter.md`; i
 component, is not wired into runtime scoring, and does not make `FraudSignalEngine` an orchestrated
 production scoring path.
 
+FDP-88 adds an isolated `PythonMlSignalEngine` adapter documented in
+`docs/architecture/python_ml_signal_engine_adapter.md`; it delegates to the existing ML scoring
+boundary, is not a Spring component, is not wired into runtime scoring, and does not make ML a
+final decision source.
+
 ## Out Of Scope
 
-No `PythonMlSignalEngine`, `FraudScoringOrchestrator`, or `FraudIntelligenceResult` is included.
-There is no `engineResults[]`, no `TransactionScoredEvent` change, no Kafka event change, no
-alert-service projection, no API/UI, no engine wrappers, no feedback loop, no scoring mode change,
-no fallback behavior change, no ML availability behavior change, no automated approval or decline,
-and no final payment decisioning.
+No `FraudScoringOrchestrator` or `FraudIntelligenceResult` is included. There is no
+`engineResults[]`, no `TransactionScoredEvent` change, no Kafka event change, no alert-service
+projection, no API/UI, no engine wrappers, no feedback loop, no scoring mode change, no fallback
+behavior change, no automated approval or decline, and no final payment decisioning.

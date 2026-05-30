@@ -34,6 +34,7 @@ public class MlFraudScoringEngine implements FraudScoringEngine {
         int unsupportedReasonCodeCount = unsupportedReasonCodeCount(parsedReasonCodes);
         Map<String, Object> scoreDetails = copyOf(output.scoreDetails());
         Map<String, Object> explanationMetadata = copyOf(output.explanationMetadata());
+        explanationMetadata.put("modelAvailable", output.available());
         if (unsupportedReasonCodeCount > 0) {
             scoreDetails.put("unsupportedReasonCodeCount", unsupportedReasonCodeCount);
             explanationMetadata.put("unsupportedReasonCodeCount", unsupportedReasonCodeCount);

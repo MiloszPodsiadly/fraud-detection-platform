@@ -114,6 +114,7 @@ class RegulatedMutationFencedCommandWriterTest {
         assertThat(queryJson).contains("_id=command-1");
         assertThat(queryJson).contains("state=FINALIZING");
         assertThat(queryJson).contains("execution_status=PROCESSING");
+        assertThat(queryJson).contains("lease_owner=owner-a");
         assertThat(queryJson).contains("lease_expires_at");
         Document set = setDocument();
         assertThat(set.get("state")).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);

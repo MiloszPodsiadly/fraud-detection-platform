@@ -44,11 +44,15 @@ class FraudEngineContractRuntimeIsolationTest {
 
     @Test
     void scoringRuntimeDoesNotContainFutureImplementationsOrOrchestration() throws Exception {
-        String scoringRuntime = javaSources(repositoryRoot().resolve("fraud-scoring-service/src/main/java"));
+        Path scoringRoot = repositoryRoot().resolve("fraud-scoring-service/src/main/java/com/frauddetection/scoring");
+        String scoringRuntime = javaSourcesExcept(
+                scoringRoot,
+                scoringRoot.resolve("engine/rules"),
+                scoringRoot.resolve("engine/ml")
+        );
 
         assertThat(scoringRuntime)
                 .doesNotContain("FraudScoringOrchestrator")
-                .doesNotContain("PythonMlSignalEngine")
                 .doesNotContain("VelocitySignalEngine")
                 .doesNotContain("DeviceSignalEngine")
                 .doesNotContain("MerchantSignalEngine")
@@ -72,6 +76,8 @@ class FraudEngineContractRuntimeIsolationTest {
                             "FraudSignalEngine.java",
                             "FraudEngineDescriptor.java",
                             "FraudEngineDescriptorValuePolicy.java",
+                            "ml/PythonMlSignalEngine.java",
+                            "ml/PythonMlSignalReasonCode.java",
                             "rules/RuleBasedSignalEngine.java",
                             "rules/RuleBasedSignalReasonCode.java"
                     );
@@ -136,7 +142,11 @@ class FraudEngineContractRuntimeIsolationTest {
         Path scoringRoot = repositoryRoot.resolve("fraud-scoring-service/src/main/java/com/frauddetection/scoring");
         Path adapterPath = scoringRoot.resolve("engine/rules/RuleBasedSignalEngine.java");
         String adapter = Files.readString(adapterPath);
-        String runtimeOutsideAdapterPackage = javaSourcesExcept(scoringRoot, scoringRoot.resolve("engine/rules"));
+        String runtimeOutsideAdapterPackage = javaSourcesExcept(
+                scoringRoot,
+                scoringRoot.resolve("engine/rules"),
+                scoringRoot.resolve("engine/ml")
+        );
         String compositeRuntime = Files.readString(scoringRoot.resolve("service/CompositeFraudScoringEngine.java"));
         String ruleRuntime = Files.readString(scoringRoot.resolve("service/RuleBasedFraudScoringEngine.java"));
         String mlRuntime = Files.readString(scoringRoot.resolve("service/MlFraudScoringEngine.java"));
@@ -176,6 +186,71 @@ class FraudEngineContractRuntimeIsolationTest {
                 .doesNotContain("FraudEngineResult")
                 .doesNotContain("engineResults");
         assertThat(uiRuntime)
+                .doesNotContain("RuleBasedSignalEngine")
+                .doesNotContain("FraudEngineResult")
+                .doesNotContain("engineResults")
+                .doesNotContain("TransactionRiskIntelligence");
+    }
+
+    @Test
+    void pythonMlSignalEngineRemainsInternalAdapterOnly() throws Exception {
+        Path repositoryRoot = repositoryRoot();
+        Path scoringRoot = repositoryRoot.resolve("fraud-scoring-service/src/main/java/com/frauddetection/scoring");
+        Path adapterPath = scoringRoot.resolve("engine/ml/PythonMlSignalEngine.java");
+        String adapter = Files.readString(adapterPath);
+        String runtimeOutsideAdapterPackage = javaSourcesExcept(
+                scoringRoot,
+                scoringRoot.resolve("engine/rules"),
+                scoringRoot.resolve("engine/ml")
+        );
+        String compositeRuntime = Files.readString(scoringRoot.resolve("service/CompositeFraudScoringEngine.java"));
+        String ruleRuntime = Files.readString(scoringRoot.resolve("service/RuleBasedFraudScoringEngine.java"));
+        String mlRuntime = Files.readString(scoringRoot.resolve("service/MlFraudScoringEngine.java"));
+        String alertRuntime = javaSources(repositoryRoot.resolve("alert-service/src/main/java"));
+        String uiRuntime = sourceFiles(repositoryRoot.resolve("analyst-console-ui/src"));
+
+        assertThat(adapterPath).exists();
+        assertThat(adapter)
+                .contains("public final class PythonMlSignalEngine implements FraudSignalEngine")
+                .contains("MlFraudScoringEngine")
+                .doesNotContain("@Component")
+                .doesNotContain("@Service")
+                .doesNotContain("@Bean")
+                .doesNotContain("@Configuration")
+                .doesNotContain("context.featureSnapshot().get(")
+                .doesNotContain("featureSnapshot().get(")
+                .doesNotContain("Map<String, Object>")
+                .doesNotContain("FeatureSnapshotKeyPolicy.isAllowedFeatureKey")
+                .doesNotContain("exception.getMessage()")
+                .doesNotContain("raw response body");
+
+        assertThat(runtimeOutsideAdapterPackage)
+                .doesNotContain("PythonMlSignalEngine")
+                .doesNotContain("RuleBasedSignalEngine")
+                .doesNotContain("FraudScoringOrchestrator")
+                .doesNotContain("FraudIntelligenceResult")
+                .doesNotContain("engineResults[]");
+        assertThat(compositeRuntime)
+                .doesNotContain("PythonMlSignalEngine")
+                .doesNotContain("RuleBasedSignalEngine")
+                .doesNotContain("FraudSignalEngine")
+                .doesNotContain("FraudScoringOrchestrator")
+                .doesNotContain("FraudIntelligenceResult")
+                .doesNotContain("engineResults");
+        assertThat(ruleRuntime)
+                .doesNotContain("PythonMlSignalEngine")
+                .doesNotContain("RuleBasedSignalEngine");
+        assertThat(mlRuntime)
+                .doesNotContain("PythonMlSignalEngine")
+                .doesNotContain("RuleBasedSignalEngine");
+        assertThat(alertRuntime)
+                .doesNotContain("PythonMlSignalEngine")
+                .doesNotContain("RuleBasedSignalEngine")
+                .doesNotContain("FraudSignalEngine")
+                .doesNotContain("FraudEngineResult")
+                .doesNotContain("engineResults");
+        assertThat(uiRuntime)
+                .doesNotContain("PythonMlSignalEngine")
                 .doesNotContain("RuleBasedSignalEngine")
                 .doesNotContain("FraudEngineResult")
                 .doesNotContain("engineResults")
