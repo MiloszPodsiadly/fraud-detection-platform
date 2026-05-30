@@ -2,6 +2,8 @@ package com.frauddetection.scoring.features;
 
 import com.frauddetection.common.events.features.FraudFeatureContract;
 
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -22,6 +24,36 @@ public final class FeatureSnapshotKeyPolicy {
                     FraudFeatureContract.ML_FEATURE_NAMES.stream()
             )
             .collect(Collectors.toUnmodifiableSet());
+    private static final Map<String, FeatureSnapshotScalarType> SCALAR_CONSUMABLE_TYPES = Map.ofEntries(
+            Map.entry(FraudFeatureContract.DEVICE_NOVELTY, FeatureSnapshotScalarType.BOOLEAN),
+            Map.entry(FraudFeatureContract.COUNTRY_MISMATCH, FeatureSnapshotScalarType.BOOLEAN),
+            Map.entry(FraudFeatureContract.PROXY_OR_VPN_DETECTED, FeatureSnapshotScalarType.BOOLEAN),
+            Map.entry(FraudFeatureContract.RAPID_TRANSFER_BURST, FeatureSnapshotScalarType.BOOLEAN),
+            Map.entry(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, FeatureSnapshotScalarType.BOOLEAN),
+            Map.entry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, FeatureSnapshotScalarType.INTEGER),
+            Map.entry(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, FeatureSnapshotScalarType.LONG),
+            Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, FeatureSnapshotScalarType.LONG),
+            Map.entry(FraudFeatureContract.RAPID_TRANSFER_WINDOW, FeatureSnapshotScalarType.LONG),
+            Map.entry(FraudFeatureContract.MERCHANT_FREQUENCY_7D, FeatureSnapshotScalarType.INTEGER),
+            Map.entry(FraudFeatureContract.HIGH_RISK_FLAG_COUNT, FeatureSnapshotScalarType.INTEGER),
+            Map.entry(FraudFeatureContract.RAPID_TRANSFER_COUNT, FeatureSnapshotScalarType.INTEGER),
+            Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM, FeatureSnapshotScalarType.DOUBLE),
+            Map.entry(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, FeatureSnapshotScalarType.DOUBLE),
+            Map.entry(FraudFeatureContract.TRANSACTION_VELOCITY_PER_HOUR, FeatureSnapshotScalarType.DOUBLE),
+            Map.entry(FraudFeatureContract.TRANSACTION_VELOCITY_PER_DAY, FeatureSnapshotScalarType.DOUBLE),
+            Map.entry(FraudFeatureContract.RECENT_AMOUNT_AVERAGE, FeatureSnapshotScalarType.DOUBLE),
+            Map.entry(FraudFeatureContract.RECENT_AMOUNT_STD_DEV, FeatureSnapshotScalarType.DOUBLE),
+            Map.entry(FraudFeatureContract.AMOUNT_DEVIATION_FROM_USER_MEAN, FeatureSnapshotScalarType.DOUBLE),
+            Map.entry(FraudFeatureContract.MERCHANT_ENTROPY, FeatureSnapshotScalarType.DOUBLE),
+            Map.entry(FraudFeatureContract.COUNTRY_ENTROPY, FeatureSnapshotScalarType.DOUBLE),
+            Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, FeatureSnapshotScalarType.DECIMAL),
+            Map.entry(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, FeatureSnapshotScalarType.DECIMAL),
+            Map.entry(FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN, FeatureSnapshotScalarType.DECIMAL),
+            Map.entry(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, FeatureSnapshotScalarType.DECIMAL),
+            Map.entry(FraudFeatureContract.CUSTOMER_SEGMENT, FeatureSnapshotScalarType.STRING),
+            Map.entry(FraudFeatureContract.MERCHANT_CATEGORY, FeatureSnapshotScalarType.STRING),
+            Map.entry(FraudFeatureContract.CURRENCY, FeatureSnapshotScalarType.STRING)
+    );
 
     private FeatureSnapshotKeyPolicy() {
     }
@@ -48,5 +80,12 @@ public final class FeatureSnapshotKeyPolicy {
             return false;
         }
         return ALLOWED_CONTRACT_KEYS.contains(key);
+    }
+
+    public static Optional<FeatureSnapshotScalarType> expectedTypeFor(String key) {
+        if (!isAllowedFeatureKey(key)) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(SCALAR_CONSUMABLE_TYPES.get(key));
     }
 }

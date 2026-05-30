@@ -8,6 +8,7 @@ public record FeatureSnapshotValue<T>(
         T value,
         String actualType
 ) {
+    public static final String NOT_ALLOWED_REDACTED_KEY = "[not-allowed]";
 
     public FeatureSnapshotValue {
         Objects.requireNonNull(key, "key is required");
@@ -40,6 +41,6 @@ public record FeatureSnapshotValue<T>(
     }
 
     public static <T> FeatureSnapshotValue<T> notAllowed(String key) {
-        return new FeatureSnapshotValue<>(key, FeatureSnapshotValueStatus.NOT_ALLOWED, null, null);
+        return new FeatureSnapshotValue<>(NOT_ALLOWED_REDACTED_KEY, FeatureSnapshotValueStatus.NOT_ALLOWED, null, null);
     }
 }

@@ -22,33 +22,40 @@ public final class FeatureSnapshotReader {
     }
 
     public FeatureSnapshotValue<Boolean> booleanValue(String key) {
-        return value(key, Boolean.class);
+        return value(key, FeatureSnapshotScalarType.BOOLEAN, Boolean.class);
     }
 
     public FeatureSnapshotValue<Integer> integerValue(String key) {
-        return value(key, Integer.class);
+        return value(key, FeatureSnapshotScalarType.INTEGER, Integer.class);
     }
 
     public FeatureSnapshotValue<Long> longValue(String key) {
-        return value(key, Long.class);
+        return value(key, FeatureSnapshotScalarType.LONG, Long.class);
     }
 
     public FeatureSnapshotValue<Double> doubleValue(String key) {
-        return value(key, Double.class);
+        return value(key, FeatureSnapshotScalarType.DOUBLE, Double.class);
     }
 
     public FeatureSnapshotValue<String> stringValue(String key) {
-        return value(key, String.class);
+        return value(key, FeatureSnapshotScalarType.STRING, String.class);
     }
 
     public FeatureSnapshotValue<BigDecimal> decimalValue(String key) {
-        return value(key, BigDecimal.class);
+        return value(key, FeatureSnapshotScalarType.DECIMAL, BigDecimal.class);
     }
 
-    private <T> FeatureSnapshotValue<T> value(String key, Class<T> expectedType) {
+    private <T> FeatureSnapshotValue<T> value(String key, FeatureSnapshotScalarType requestedType, Class<T> expectedType) {
         Objects.requireNonNull(key, "key is required");
         if (!FeatureSnapshotKeyPolicy.isAllowedFeatureKey(key)) {
             return FeatureSnapshotValue.notAllowed(key);
+        }
+        FeatureSnapshotScalarType policyType = FeatureSnapshotKeyPolicy.expectedTypeFor(key).orElse(null);
+        if (policyType == null) {
+            return FeatureSnapshotValue.notAllowed(key);
+        }
+        if (policyType != requestedType) {
+            return FeatureSnapshotValue.invalidType(key, requestedType);
         }
         if (!featureSnapshot.containsKey(key)) {
             return FeatureSnapshotValue.missing(key);
