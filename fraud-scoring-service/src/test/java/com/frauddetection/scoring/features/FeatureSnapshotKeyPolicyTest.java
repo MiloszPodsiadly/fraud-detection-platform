@@ -3,6 +3,7 @@ package com.frauddetection.scoring.features;
 import com.frauddetection.common.events.features.FraudFeatureContract;
 import org.junit.jupiter.api.Test;
 
+import java.util.Optional;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -50,5 +51,29 @@ class FeatureSnapshotKeyPolicyTest {
                     .hasMessageContaining("camelCase")
                     .hasMessageContaining(key);
         }
+    }
+
+    @Test
+    void exposesExpectedTypesForScalarConsumableKeys() {
+        assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.DEVICE_NOVELTY))
+                .contains(FeatureSnapshotScalarType.BOOLEAN);
+        assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.RECENT_TRANSACTION_COUNT))
+                .contains(FeatureSnapshotScalarType.INTEGER);
+        assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW))
+                .contains(FeatureSnapshotScalarType.LONG);
+        assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE))
+                .contains(FeatureSnapshotScalarType.DOUBLE);
+        assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.CURRENCY))
+                .contains(FeatureSnapshotScalarType.STRING);
+        assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN))
+                .contains(FeatureSnapshotScalarType.DECIMAL);
+    }
+
+    @Test
+    void excludesNonScalarOrIdentifierBearingKeysFromAdapterConsumption() {
+        assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS))
+                .isEqualTo(Optional.empty());
+        assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.FEATURE_FLAGS))
+                .isEqualTo(Optional.empty());
     }
 }

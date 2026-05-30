@@ -52,8 +52,7 @@ class FeatureSnapshotReaderTest {
         FeatureSnapshotReader reader = new FeatureSnapshotReader(Map.of(
                 FraudFeatureContract.DEVICE_NOVELTY, "true",
                 FraudFeatureContract.RECENT_TRANSACTION_COUNT, "3",
-                FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, 1,
-                FraudFeatureContract.FEATURE_FLAGS, List.of("DEVICE_NOVELTY")
+                FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, 1
         ));
 
         assertThat(reader.booleanValue(FraudFeatureContract.DEVICE_NOVELTY).status())
@@ -61,8 +60,6 @@ class FeatureSnapshotReaderTest {
         assertThat(reader.integerValue(FraudFeatureContract.RECENT_TRANSACTION_COUNT).status())
                 .isEqualTo(FeatureSnapshotValueStatus.INVALID_TYPE);
         assertThat(reader.longValue(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW).status())
-                .isEqualTo(FeatureSnapshotValueStatus.INVALID_TYPE);
-        assertThat(reader.stringValue(FraudFeatureContract.FEATURE_FLAGS).status())
                 .isEqualTo(FeatureSnapshotValueStatus.INVALID_TYPE);
     }
 
@@ -78,18 +75,113 @@ class FeatureSnapshotReaderTest {
     }
 
     @Test
+    void notAllowedDoesNotExposeRawForbiddenKey() {
+        FeatureSnapshotReader reader = new FeatureSnapshotReader(Map.of());
+
+        FeatureSnapshotValue<String> value = reader.stringValue("authorizationBearerToken_very_sensitive");
+
+        assertThat(value.status()).isEqualTo(FeatureSnapshotValueStatus.NOT_ALLOWED);
+        assertThat(value.key()).isEqualTo(FeatureSnapshotValue.NOT_ALLOWED_REDACTED_KEY);
+        assertThat(value.key().toLowerCase()).doesNotContain("authorization", "token");
+        assertThat(value.value()).isNull();
+        assertThat(value.actualType()).isNull();
+    }
+
+    @Test
+    void notAllowedDoesNotExposeOversizedKey() {
+        FeatureSnapshotReader reader = new FeatureSnapshotReader(Map.of());
+        String rawKey = "raw" + "x".repeat(500);
+
+        FeatureSnapshotValue<String> value = reader.stringValue(rawKey);
+
+        assertThat(value.status()).isEqualTo(FeatureSnapshotValueStatus.NOT_ALLOWED);
+        assertThat(value.key()).doesNotContain(rawKey);
+        assertThat(value.key()).hasSizeLessThan(32);
+    }
+
+    @Test
+    void constructorAllowsDisallowedKeysButAccessReturnsRedactedNotAllowed() {
+        FeatureSnapshotReader reader = new FeatureSnapshotReader(Map.of("rawPayload", "secret"));
+
+        FeatureSnapshotValue<String> value = reader.stringValue("rawPayload");
+
+        assertThat(value.status()).isEqualTo(FeatureSnapshotValueStatus.NOT_ALLOWED);
+        assertThat(value.key()).isEqualTo(FeatureSnapshotValue.NOT_ALLOWED_REDACTED_KEY);
+        assertThat(value.value()).isNull();
+        assertThat(value.actualType()).isNull();
+    }
+
+    @Test
+    void wrongAccessorForKnownKeyDoesNotReturnPresent() {
+        FeatureSnapshotReader reader = new FeatureSnapshotReader(Map.of(
+                FraudFeatureContract.DEVICE_NOVELTY, "true",
+                FraudFeatureContract.CURRENCY, true,
+                FraudFeatureContract.RECENT_TRANSACTION_COUNT, "3"
+        ));
+
+        assertThat(reader.stringValue(FraudFeatureContract.DEVICE_NOVELTY).status())
+                .isEqualTo(FeatureSnapshotValueStatus.INVALID_TYPE);
+        assertThat(reader.booleanValue(FraudFeatureContract.CURRENCY).status())
+                .isEqualTo(FeatureSnapshotValueStatus.INVALID_TYPE);
+        assertThat(reader.stringValue(FraudFeatureContract.RECENT_TRANSACTION_COUNT).status())
+                .isEqualTo(FeatureSnapshotValueStatus.INVALID_TYPE);
+    }
+
+    @Test
+    void nonScalarRegisteredKeysReturnNotAllowed() {
+        FeatureSnapshotReader reader = new FeatureSnapshotReader(Map.of(
+                FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("tx-1"),
+                FraudFeatureContract.FEATURE_FLAGS, List.of("DEVICE_NOVELTY")
+        ));
+
+        FeatureSnapshotValue<String> transactionIds = reader.stringValue(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS);
+        FeatureSnapshotValue<String> featureFlags = reader.stringValue(FraudFeatureContract.FEATURE_FLAGS);
+
+        assertThat(transactionIds.status()).isEqualTo(FeatureSnapshotValueStatus.NOT_ALLOWED);
+        assertThat(transactionIds.key()).isEqualTo(FeatureSnapshotValue.NOT_ALLOWED_REDACTED_KEY);
+        assertThat(featureFlags.status()).isEqualTo(FeatureSnapshotValueStatus.NOT_ALLOWED);
+        assertThat(featureFlags.key()).isEqualTo(FeatureSnapshotValue.NOT_ALLOWED_REDACTED_KEY);
+    }
+
+    @Test
+    void notAllowedNeverExposesForbiddenOrRegisteredNonConsumableKey() {
+        FeatureSnapshotReader reader = new FeatureSnapshotReader(Map.of(
+                "rawPayload", "secret",
+                FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("tx-1"),
+                FraudFeatureContract.FEATURE_FLAGS, List.of("DEVICE_NOVELTY")
+        ));
+
+        assertThat(reader.stringValue("rawPayload").key())
+                .isEqualTo(FeatureSnapshotValue.NOT_ALLOWED_REDACTED_KEY)
+                .doesNotContain("rawPayload");
+        assertThat(reader.stringValue(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS).key())
+                .isEqualTo(FeatureSnapshotValue.NOT_ALLOWED_REDACTED_KEY)
+                .doesNotContain(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS);
+        assertThat(reader.stringValue(FraudFeatureContract.FEATURE_FLAGS).key())
+                .isEqualTo(FeatureSnapshotValue.NOT_ALLOWED_REDACTED_KEY)
+                .doesNotContain(FraudFeatureContract.FEATURE_FLAGS);
+    }
+
+    @Test
     void defensivelyCopiesTopLevelMapWithoutExposingOrDeepCopyingNestedValues() {
         List<String> nested = new ArrayList<>(List.of("DEVICE_NOVELTY"));
         Map<String, Object> source = new HashMap<>();
         source.put(FraudFeatureContract.DEVICE_NOVELTY, true);
-        source.put(FraudFeatureContract.FEATURE_FLAGS, nested);
+        source.put(FraudFeatureContract.CURRENCY, nested);
 
         FeatureSnapshotReader reader = new FeatureSnapshotReader(source);
         source.put(FraudFeatureContract.DEVICE_NOVELTY, false);
+        source.put(FraudFeatureContract.CURRENCY, "PLN");
         nested.add("COUNTRY_MISMATCH");
 
         assertThat(reader.booleanValue(FraudFeatureContract.DEVICE_NOVELTY).value()).isTrue();
-        assertThat(reader.stringValue(FraudFeatureContract.FEATURE_FLAGS).actualType()).isEqualTo("ArrayList");
+        assertThat(reader.stringValue(FraudFeatureContract.CURRENCY).actualType()).isEqualTo("ArrayList");
+        assertThat(FeatureSnapshotReader.class.getDeclaredMethods())
+                .noneMatch(method -> Map.class.isAssignableFrom(method.getReturnType()));
+    }
+
+    @Test
+    void rawMapStillNotExposed() {
         assertThat(FeatureSnapshotReader.class.getDeclaredMethods())
                 .noneMatch(method -> Map.class.isAssignableFrom(method.getReturnType()));
     }

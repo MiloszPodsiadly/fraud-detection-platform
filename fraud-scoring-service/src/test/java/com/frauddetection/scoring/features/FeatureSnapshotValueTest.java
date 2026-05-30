@@ -31,6 +31,17 @@ class FeatureSnapshotValueTest {
     }
 
     @Test
+    void notAllowedFactoryRedactsRawKey() {
+        FeatureSnapshotValue<String> value = FeatureSnapshotValue.notAllowed("rawPayload.secret.token");
+
+        assertThat(value.status()).isEqualTo(FeatureSnapshotValueStatus.NOT_ALLOWED);
+        assertThat(value.key()).isEqualTo(FeatureSnapshotValue.NOT_ALLOWED_REDACTED_KEY);
+        assertThat(value.key()).doesNotContain("rawPayload", "secret", "token");
+        assertThat(value.value()).isNull();
+        assertThat(value.actualType()).isNull();
+    }
+
+    @Test
     void recordsOnlySafeActualTypeForInvalidValue() {
         SensitiveValue actualValue = new SensitiveValue();
 
