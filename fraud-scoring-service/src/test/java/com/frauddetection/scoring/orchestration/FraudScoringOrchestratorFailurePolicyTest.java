@@ -17,6 +17,7 @@ import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorT
 import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorTestSupport.ruleEngine;
 import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorTestSupport.throwingMlEngine;
 import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorTestSupport.throwingRuleEngine;
+import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorTestSupport.warningCodes;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class FraudScoringOrchestratorFailurePolicyTest {
@@ -71,8 +72,13 @@ class FraudScoringOrchestratorFailurePolicyTest {
                 mlEngine(availableResult(mlDescriptor(), 0.72d, RiskLevel.MEDIUM))
         ).evaluate(context());
 
-        assertThat(result.executionWarnings())
-                .contains("REQUIRED_ENGINE_NOT_AVAILABLE", "ENGINE_DEGRADED_RECORDED");
+        assertThat(warningCodes(result))
+                .contains(
+                        FraudScoringExecutionWarningCode.REQUIRED_ENGINE_NOT_AVAILABLE,
+                        FraudScoringExecutionWarningCode.ENGINE_DEGRADED_RECORDED
+                );
+        assertThat(result.executionWarnings().getFirst().engineId()).isEqualTo("rules.primary");
+        assertThat(result.executionWarnings().getFirst().required()).isTrue();
         assertThat(result.status()).isEqualTo(FraudScoringOrchestrationStatus.REQUIRED_ENGINE_FAILED);
         assertNoDecisionFields();
     }
@@ -84,8 +90,13 @@ class FraudScoringOrchestratorFailurePolicyTest {
                 throwingMlEngine(new IllegalStateException("secret token endpoint stacktrace"))
         ).evaluate(context());
 
-        assertThat(result.executionWarnings())
-                .contains("OPTIONAL_ENGINE_NOT_AVAILABLE", "ENGINE_DEGRADED_RECORDED");
+        assertThat(warningCodes(result))
+                .contains(
+                        FraudScoringExecutionWarningCode.OPTIONAL_ENGINE_NOT_AVAILABLE,
+                        FraudScoringExecutionWarningCode.ENGINE_DEGRADED_RECORDED
+                );
+        assertThat(result.executionWarnings().getFirst().engineId()).isEqualTo("ml.python.primary");
+        assertThat(result.executionWarnings().getFirst().required()).isFalse();
         assertThat(result.engineResults().get(1).toString()).doesNotContain("LOW");
         assertThat(result.status()).isEqualTo(FraudScoringOrchestrationStatus.PARTIAL);
         assertNoDecisionFields();

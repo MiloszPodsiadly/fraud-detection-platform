@@ -17,7 +17,7 @@ class FraudScoringOrchestrationResultTest {
     @Test
     void defensivelyCopiesEngineResultsAndWarnings() {
         var engineResults = new ArrayList<>(List.of(availableResult(ruleDescriptor(), 0.42d, RiskLevel.LOW)));
-        var warnings = new ArrayList<>(List.of("REQUIRED_ENGINE_NOT_AVAILABLE"));
+        var warnings = new ArrayList<>(List.of(requiredWarning()));
 
         FraudScoringOrchestrationResult result = new FraudScoringOrchestrationResult(
                 FraudScoringOrchestrationStatus.COMPLETE,
@@ -29,7 +29,7 @@ class FraudScoringOrchestrationResultTest {
         warnings.clear();
 
         assertThat(result.engineResults()).hasSize(1);
-        assertThat(result.executionWarnings()).containsExactly("REQUIRED_ENGINE_NOT_AVAILABLE");
+        assertThat(result.executionWarnings()).containsExactly(requiredWarning());
         assertThatThrownBy(() -> result.engineResults().clear()).isInstanceOf(UnsupportedOperationException.class);
         assertThatThrownBy(() -> result.executionWarnings().clear()).isInstanceOf(UnsupportedOperationException.class);
     }
@@ -86,14 +86,38 @@ class FraudScoringOrchestrationResultTest {
     }
 
     @Test
-    void rejectsUnboundedWarnings() {
+    void rejectsNullWarningEntries() {
+        List<FraudScoringExecutionWarning> warnings = new ArrayList<>();
+        warnings.add(null);
+
         assertThatThrownBy(() -> new FraudScoringOrchestrationResult(
                 FraudScoringOrchestrationStatus.COMPLETE,
                 List.of(availableResult(ruleDescriptor(), 0.42d, RiskLevel.LOW)),
-                List.of("secret token endpoint stacktrace"),
+                warnings,
                 Instant.parse("2026-05-30T10:00:00Z")
         ))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("executionWarnings must not contain null entries");
+    }
+
+    @Test
+    void rejectsInvalidWarningEngineId() {
+        assertThatThrownBy(() -> new FraudScoringExecutionWarning(
+                "secret token endpoint stacktrace",
+                FraudScoringExecutionWarningCode.REQUIRED_ENGINE_NOT_AVAILABLE,
+                com.frauddetection.common.events.engine.FraudEngineStatus.DEGRADED,
+                true
+        ))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("executionWarnings must contain bounded warning codes only");
+                .hasMessage("engineId must be bounded");
+    }
+
+    private FraudScoringExecutionWarning requiredWarning() {
+        return new FraudScoringExecutionWarning(
+                "rules.primary",
+                FraudScoringExecutionWarningCode.REQUIRED_ENGINE_NOT_AVAILABLE,
+                com.frauddetection.common.events.engine.FraudEngineStatus.DEGRADED,
+                true
+        );
     }
 }

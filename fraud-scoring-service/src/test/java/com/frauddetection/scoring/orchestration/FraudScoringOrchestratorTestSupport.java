@@ -132,6 +132,12 @@ final class FraudScoringOrchestratorTestSupport {
                 .toList();
     }
 
+    static List<FraudScoringExecutionWarningCode> warningCodes(FraudScoringOrchestrationResult result) {
+        return result.executionWarnings().stream()
+                .map(FraudScoringExecutionWarning::code)
+                .toList();
+    }
+
     private static FraudEngineResult result(
             FraudEngineDescriptor descriptor,
             FraudEngineStatus status,

@@ -5,16 +5,13 @@ import com.frauddetection.common.events.engine.FraudEngineResult;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
-import java.util.regex.Pattern;
 
 public record FraudScoringOrchestrationResult(
         FraudScoringOrchestrationStatus status,
         List<FraudEngineResult> engineResults,
-        List<String> executionWarnings,
+        List<FraudScoringExecutionWarning> executionWarnings,
         Instant generatedAt
 ) {
-    private static final Pattern BOUNDED_WARNING = Pattern.compile("[A-Z0-9_]{1,64}");
-
     public FraudScoringOrchestrationResult {
         Objects.requireNonNull(status, "status is required");
         Objects.requireNonNull(engineResults, "engineResults is required");
@@ -26,14 +23,12 @@ public record FraudScoringOrchestrationResult(
         executionWarnings = copyWarnings(executionWarnings);
     }
 
-    private static List<String> copyWarnings(List<String> source) {
+    private static List<FraudScoringExecutionWarning> copyWarnings(List<FraudScoringExecutionWarning> source) {
         if (source == null) {
             return List.of();
         }
-        for (String warning : source) {
-            if (warning == null || !BOUNDED_WARNING.matcher(warning).matches()) {
-                throw new IllegalArgumentException("executionWarnings must contain bounded warning codes only");
-            }
+        for (FraudScoringExecutionWarning warning : source) {
+            Objects.requireNonNull(warning, "executionWarnings must not contain null entries");
         }
         return List.copyOf(source);
     }

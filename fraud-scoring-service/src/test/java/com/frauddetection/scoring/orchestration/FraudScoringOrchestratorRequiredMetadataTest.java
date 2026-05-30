@@ -20,6 +20,7 @@ import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorT
 import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorTestSupport.ruleEngine;
 import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorTestSupport.throwingRuleEngine;
 import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorTestSupport.unavailableResult;
+import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorTestSupport.warningCodes;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class FraudScoringOrchestratorRequiredMetadataTest {
@@ -34,7 +35,7 @@ class FraudScoringOrchestratorRequiredMetadataTest {
         assertThat(result.engineResults()).hasSize(2);
         assertThat(engineIds(result)).containsExactly("rules.primary", "ml.python.primary");
         assertThat(result.status()).isEqualTo(FraudScoringOrchestrationStatus.REQUIRED_ENGINE_FAILED);
-        assertThat(result.executionWarnings()).contains("REQUIRED_ENGINE_NOT_AVAILABLE");
+        assertThat(warningCodes(result)).contains(FraudScoringExecutionWarningCode.REQUIRED_ENGINE_NOT_AVAILABLE);
         assertThat(result.engineResults().get(1).status()).isEqualTo(FraudEngineStatus.AVAILABLE);
         assertNoDecisionSurface();
     }
@@ -51,7 +52,7 @@ class FraudScoringOrchestratorRequiredMetadataTest {
         assertThat(result.status()).isEqualTo(FraudScoringOrchestrationStatus.PARTIAL);
         assertThat(result.engineResults().getFirst()).isSameAs(ruleResult);
         assertThat(result.engineResults().get(1).status()).isEqualTo(FraudEngineStatus.UNAVAILABLE);
-        assertThat(result.executionWarnings()).contains("OPTIONAL_ENGINE_NOT_AVAILABLE");
+        assertThat(warningCodes(result)).contains(FraudScoringExecutionWarningCode.OPTIONAL_ENGINE_NOT_AVAILABLE);
         assertNoDecisionSurface();
     }
 
@@ -70,7 +71,7 @@ class FraudScoringOrchestratorRequiredMetadataTest {
         assertThat(result.engineResults().getFirst().riskLevel()).isEqualTo(ruleResult.riskLevel());
         assertThat(result.engineResults().getFirst().reasonCodes()).isEqualTo(ruleResult.reasonCodes());
         assertThat(result.status()).isEqualTo(FraudScoringOrchestrationStatus.REQUIRED_ENGINE_FAILED);
-        assertThat(result.executionWarnings()).contains("REQUIRED_ENGINE_NOT_AVAILABLE");
+        assertThat(warningCodes(result)).contains(FraudScoringExecutionWarningCode.REQUIRED_ENGINE_NOT_AVAILABLE);
     }
 
     @Test

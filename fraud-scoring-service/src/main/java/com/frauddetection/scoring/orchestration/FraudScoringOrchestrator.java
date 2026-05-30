@@ -16,10 +16,6 @@ import java.util.Objects;
 
 public final class FraudScoringOrchestrator {
     private static final String EVIDENCE_SOURCE = "ORCHESTRATOR";
-    private static final String REQUIRED_ENGINE_NOT_AVAILABLE = "REQUIRED_ENGINE_NOT_AVAILABLE";
-    private static final String OPTIONAL_ENGINE_NOT_AVAILABLE = "OPTIONAL_ENGINE_NOT_AVAILABLE";
-    private static final String ENGINE_TIMEOUT_RECORDED = "ENGINE_TIMEOUT_RECORDED";
-    private static final String ENGINE_DEGRADED_RECORDED = "ENGINE_DEGRADED_RECORDED";
 
     private final FraudSignalEngineRegistry registry;
 
@@ -31,7 +27,7 @@ public final class FraudScoringOrchestrator {
         Objects.requireNonNull(context, "context is required");
         Instant generatedAt = context.receivedAt();
         List<FraudEngineResult> engineResults = new ArrayList<>();
-        List<String> executionWarnings = new ArrayList<>();
+        List<FraudScoringExecutionWarning> executionWarnings = new ArrayList<>();
         for (FraudSignalEngineRegistry.RegisteredEngine registeredEngine : registry.registeredEngines()) {
             FraudEngineResult engineResult = evaluateEngine(registeredEngine, context, generatedAt);
             engineResults.add(engineResult);
@@ -99,17 +95,34 @@ public final class FraudScoringOrchestrator {
     private void addWarnings(
             FraudEngineDescriptor descriptor,
             FraudEngineResult result,
-            List<String> executionWarnings
+            List<FraudScoringExecutionWarning> executionWarnings
     ) {
         if (result.status() == FraudEngineStatus.AVAILABLE) {
             return;
         }
-        executionWarnings.add(descriptor.required() ? REQUIRED_ENGINE_NOT_AVAILABLE : OPTIONAL_ENGINE_NOT_AVAILABLE);
+        executionWarnings.add(new FraudScoringExecutionWarning(
+                descriptor.engineId(),
+                descriptor.required()
+                        ? FraudScoringExecutionWarningCode.REQUIRED_ENGINE_NOT_AVAILABLE
+                        : FraudScoringExecutionWarningCode.OPTIONAL_ENGINE_NOT_AVAILABLE,
+                result.status(),
+                descriptor.required()
+        ));
         if (result.status() == FraudEngineStatus.TIMEOUT) {
-            executionWarnings.add(ENGINE_TIMEOUT_RECORDED);
+            executionWarnings.add(new FraudScoringExecutionWarning(
+                    descriptor.engineId(),
+                    FraudScoringExecutionWarningCode.ENGINE_TIMEOUT_RECORDED,
+                    result.status(),
+                    descriptor.required()
+            ));
         }
         if (result.status() == FraudEngineStatus.DEGRADED) {
-            executionWarnings.add(ENGINE_DEGRADED_RECORDED);
+            executionWarnings.add(new FraudScoringExecutionWarning(
+                    descriptor.engineId(),
+                    FraudScoringExecutionWarningCode.ENGINE_DEGRADED_RECORDED,
+                    result.status(),
+                    descriptor.required()
+            ));
         }
     }
 
