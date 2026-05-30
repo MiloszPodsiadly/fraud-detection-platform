@@ -25,6 +25,15 @@ event/API/UI/projection changes, and no `engineResults[]`.
 It must not call `context.featureSnapshot().get(...)`, must not cast raw `Map<String, Object>`,
 and must not use `FeatureSnapshotKeyPolicy.isAllowedFeatureKey` as permission to consume features.
 
+Preflight is intentionally limited to snapshot keys that production rule engine actually consumes
+from `featureSnapshot`. At this stage, that means `rapidTransferFraudCaseCandidate` only. The
+adapter must not degrade based on invalid snapshot values for typed event fields, because
+`RuleBasedFraudScoringEngine` consumes those fields from `TransactionEnrichedEvent`. This avoids
+semantic drift between the adapter and production rule engine.
+
+FDP-87 does not refactor production `RuleBasedFraudScoringEngine` to consume all features through
+`FeatureSnapshotReader`. That refactor, if ever desired, belongs to a separate migration branch.
+
 Feature status semantics:
 
 - `PRESENT` may produce a bounded rule signal.
