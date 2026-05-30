@@ -61,13 +61,17 @@ public final class FeatureSnapshotKeyPolicy {
     public static String requireAllowedFeatureKey(String key) {
         if (!isAllowedFeatureKey(key)) {
             throw new IllegalArgumentException(
-                    "featureSnapshot key must be a registered canonical camelCase key without raw, sensitive, or debug markers: "
-                            + String.valueOf(key)
+                    "featureSnapshot key must be registered, canonical, and safe for policy evaluation"
             );
         }
         return key;
     }
 
+    /**
+     * Validates registered key safety only. This does not mean the key is scalar-consumable by
+     * adapters; adapter consumption must use {@link #expectedTypeFor(String)} or
+     * {@link FeatureSnapshotReader}.
+     */
     public static boolean isAllowedFeatureKey(String key) {
         if (key == null || key.isBlank() || key.length() > MAX_KEY_LENGTH) {
             return false;
@@ -82,6 +86,10 @@ public final class FeatureSnapshotKeyPolicy {
         return ALLOWED_CONTRACT_KEYS.contains(key);
     }
 
+    /**
+     * Adapter-consumption gate for scalar reads. {@link Optional#empty()} means a registered key
+     * may exist in the internal snapshot, but is not v1 scalar-consumable.
+     */
     public static Optional<FeatureSnapshotScalarType> expectedTypeFor(String key) {
         if (!isAllowedFeatureKey(key)) {
             return Optional.empty();

@@ -30,10 +30,17 @@ into another.
 `FraudFeatureContract` feature name lists. New keys require an intentional contract update before
 they can be consumed by a future adapter.
 
+`isAllowedFeatureKey` is not adapter-consumption permission. It means the key is a known feature
+contract key that passed safety checks, not necessarily scalar adapter-consumable. Future adapters
+must use `FeatureSnapshotReader` or `expectedTypeFor`, not `isAllowedFeatureKey` alone.
+
 Keys representing raw payloads, request/response bodies, headers, authorization, tokens/secrets,
 passwords, stack traces/exception text, debug metadata, PAN/card/account identifiers,
 SSN/national identifiers, email/phone, raw device fingerprints, raw user-agent values, or
 host/endpoint/url values are forbidden.
+
+`requireAllowedFeatureKey` exceptions must not expose raw rejected keys, including oversized or
+sensitive key input.
 
 ## Key And Type Consumption Policy
 
@@ -59,7 +66,10 @@ a boolean feature. `booleanValue("currency")` is not a valid way to read a strin
 
 - `PRESENT` means the key exists and its value exactly matches the requested scalar accessor type.
 - `MISSING` means the key is absent.
-- `INVALID_TYPE` means the key exists but its value does not match the requested scalar accessor type.
+- `INVALID_TYPE` means the key exists and the accessor matches policy, but the actual runtime value
+  type does not match the expected Java class.
+- `WRONG_ACCESSOR` means the feature key is scalar-consumable, but the caller used an accessor that
+  does not match the policy-declared scalar type.
 - `NOT_ALLOWED` means the key is forbidden or outside policy.
 
 A missing boolean is not false. A missing number is not zero. A missing string is not empty
@@ -83,6 +93,16 @@ Adapter consumption is controlled at read time by `FeatureSnapshotKeyPolicy`. Di
 unregistered keys return `NOT_ALLOWED`, and disallowed keys are not exposed as raw output.
 `NOT_ALLOWED` results must not expose raw rejected keys. The raw feature map is never exposed.
 Future adapters must not inspect the raw map directly.
+
+## Evidence And Contribution Safety
+
+Some scalar string features such as `customerSegment` and `merchantCategory` may be valid internal
+features. Reading a string feature internally does not authorize exposing the raw value in
+`FraudEngineResult` evidence, analyst explanations, logs, metrics, or UI.
+
+Future adapters must use a bounded/safe evidence policy before including feature values in engine
+outputs. Evidence should prefer bounded labels, reason codes, or safe contribution identifiers
+rather than raw feature values. This belongs to future adapter/result evidence policy, not FDP-85.
 
 ## Null And Nested Values
 

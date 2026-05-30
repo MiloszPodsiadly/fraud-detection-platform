@@ -8,6 +8,7 @@ import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 class FeatureSnapshotKeyPolicyTest {
 
@@ -48,9 +49,32 @@ class FeatureSnapshotKeyPolicyTest {
             assertThatThrownBy(() -> FeatureSnapshotKeyPolicy.requireAllowedFeatureKey(key))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("featureSnapshot key")
-                    .hasMessageContaining("camelCase")
-                    .hasMessageContaining(key);
+                    .hasMessageContaining("policy evaluation");
         }
+    }
+
+    @Test
+    void requireAllowedFeatureKeyDoesNotExposeRejectedRawKey() {
+        String rawKey = "authorizationBearerToken_very_sensitive";
+
+        Throwable thrown = catchThrowable(() -> FeatureSnapshotKeyPolicy.requireAllowedFeatureKey(rawKey));
+
+        assertThat(thrown).isInstanceOf(IllegalArgumentException.class);
+        assertThat(thrown.getMessage())
+                .contains("featureSnapshot key")
+                .doesNotContain(rawKey, "authorization", "Bearer", "bearer", "Token", "token", "sensitive");
+    }
+
+    @Test
+    void requireAllowedFeatureKeyDoesNotExposeOversizedRejectedKey() {
+        String rawKey = "raw" + "x".repeat(500);
+
+        Throwable thrown = catchThrowable(() -> FeatureSnapshotKeyPolicy.requireAllowedFeatureKey(rawKey));
+
+        assertThat(thrown).isInstanceOf(IllegalArgumentException.class);
+        assertThat(thrown.getMessage())
+                .doesNotContain(rawKey)
+                .hasSizeLessThan(160);
     }
 
     @Test
@@ -75,5 +99,25 @@ class FeatureSnapshotKeyPolicyTest {
                 .isEqualTo(Optional.empty());
         assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.FEATURE_FLAGS))
                 .isEqualTo(Optional.empty());
+    }
+
+    @Test
+    void allowedKeyDoesNotMeanScalarConsumable() {
+        assertThat(FeatureSnapshotKeyPolicy.isAllowedFeatureKey(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS))
+                .isTrue();
+        assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS))
+                .isEmpty();
+        assertThat(FeatureSnapshotKeyPolicy.isAllowedFeatureKey(FraudFeatureContract.FEATURE_FLAGS))
+                .isTrue();
+        assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.FEATURE_FLAGS))
+                .isEmpty();
+    }
+
+    @Test
+    void scalarConsumptionMustUseExpectedTypePolicy() {
+        assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.CURRENCY))
+                .contains(FeatureSnapshotScalarType.STRING);
+        assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.FEATURE_FLAGS))
+                .isEmpty();
     }
 }

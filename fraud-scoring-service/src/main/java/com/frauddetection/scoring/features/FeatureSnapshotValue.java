@@ -40,6 +40,10 @@ public record FeatureSnapshotValue<T>(
         return new FeatureSnapshotValue<>(key, FeatureSnapshotValueStatus.INVALID_TYPE, null, actualType);
     }
 
+    public static <T> FeatureSnapshotValue<T> wrongAccessor(String key) {
+        return new FeatureSnapshotValue<>(key, FeatureSnapshotValueStatus.WRONG_ACCESSOR, null, null);
+    }
+
     public static <T> FeatureSnapshotValue<T> notAllowed(String key) {
         return new FeatureSnapshotValue<>(NOT_ALLOWED_REDACTED_KEY, FeatureSnapshotValueStatus.NOT_ALLOWED, null, null);
     }

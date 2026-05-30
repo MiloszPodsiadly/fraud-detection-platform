@@ -55,7 +55,7 @@ public final class FeatureSnapshotReader {
             return FeatureSnapshotValue.notAllowed(key);
         }
         if (policyType != requestedType) {
-            return FeatureSnapshotValue.invalidType(key, requestedType);
+            return FeatureSnapshotValue.wrongAccessor(key);
         }
         if (!featureSnapshot.containsKey(key)) {
             return FeatureSnapshotValue.missing(key);

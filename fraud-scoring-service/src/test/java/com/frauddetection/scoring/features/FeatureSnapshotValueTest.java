@@ -28,6 +28,7 @@ class FeatureSnapshotValueTest {
         assertThat(FeatureSnapshotValue.missing("deviceNovelty").value()).isNull();
         assertThat(FeatureSnapshotValue.notAllowed("authToken").value()).isNull();
         assertThat(FeatureSnapshotValue.invalidType("deviceNovelty", "true").value()).isNull();
+        assertThat(FeatureSnapshotValue.wrongAccessor("deviceNovelty").value()).isNull();
     }
 
     @Test
@@ -52,6 +53,16 @@ class FeatureSnapshotValueTest {
     }
 
     @Test
+    void createsWrongAccessorWithoutValueOrActualType() {
+        FeatureSnapshotValue<String> value = FeatureSnapshotValue.wrongAccessor("deviceNovelty");
+
+        assertThat(value.status()).isEqualTo(FeatureSnapshotValueStatus.WRONG_ACCESSOR);
+        assertThat(value.value()).isNull();
+        assertThat(value.actualType()).isNull();
+        assertThat(value.status()).isNotEqualTo(FeatureSnapshotValueStatus.INVALID_TYPE);
+    }
+
+    @Test
     void rejectsInvalidRecordCombinationsAndMissingRequiredFields() {
         assertThatThrownBy(() -> FeatureSnapshotValue.missing(null))
                 .isInstanceOf(NullPointerException.class);
@@ -60,6 +71,12 @@ class FeatureSnapshotValueTest {
         assertThatThrownBy(() -> new FeatureSnapshotValue<>(
                 "deviceNovelty",
                 FeatureSnapshotValueStatus.MISSING,
+                true,
+                null
+        )).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new FeatureSnapshotValue<>(
+                "deviceNovelty",
+                FeatureSnapshotValueStatus.WRONG_ACCESSOR,
                 true,
                 null
         )).isInstanceOf(IllegalArgumentException.class);
