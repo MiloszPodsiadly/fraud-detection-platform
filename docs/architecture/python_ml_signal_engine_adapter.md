@@ -34,6 +34,9 @@ and must not use `FeatureSnapshotKeyPolicy.isAllowedFeatureKey` as permission to
 ML unavailable is not low risk. ML timeout is not low risk. ML invalid response is not available.
 Missing score is degraded. Score out of range is degraded. Missing model availability metadata is
 degraded. Invalid model availability metadata is degraded. Raw exception details are never exposed.
+When source output explicitly reports `modelAvailable=false`, the adapter returns
+`ML_MODEL_UNAVAILABLE` before validating score, risk level, or model metadata; unavailable ML output
+does not require those fields.
 
 Unavailable and timeout outputs use bounded `UNAVAILABLE` or `TIMEOUT` status with null score,
 null risk level, `UNKNOWN` confidence, deterministic `generatedAt` from `ScoringContext.receivedAt()`,
