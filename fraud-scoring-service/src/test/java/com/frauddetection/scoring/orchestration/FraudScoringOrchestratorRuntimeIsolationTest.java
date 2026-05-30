@@ -34,20 +34,28 @@ class FraudScoringOrchestratorRuntimeIsolationTest {
                 "FraudScoringOrchestrationResult.java",
                 orchestrationRoot.resolve("FraudScoringOrchestrationResult.java")
         );
+        assertOnlyProductionSourceNamed(
+                repositoryRoot,
+                "FraudScoringExecutionWarning.java",
+                orchestrationRoot.resolve("FraudScoringExecutionWarning.java")
+        );
         assertThat(commonEvents)
                 .doesNotContain("FraudScoringOrchestrator")
                 .doesNotContain("FraudScoringOrchestrationResult")
+                .doesNotContain("FraudScoringExecutionWarning")
                 .doesNotContain("engineResults")
                 .doesNotContain("orchestrationStatus");
         assertThat(alertService)
                 .doesNotContain("FraudScoringOrchestrator")
                 .doesNotContain("FraudScoringOrchestrationResult")
+                .doesNotContain("FraudScoringExecutionWarning")
                 .doesNotContain("FraudEngineResult")
                 .doesNotContain("engineResults")
                 .doesNotContain("orchestrationStatus");
         assertThat(ui)
                 .doesNotContain("FraudScoringOrchestrator")
                 .doesNotContain("FraudScoringOrchestrationResult")
+                .doesNotContain("FraudScoringExecutionWarning")
                 .doesNotContain("FraudEngineResult")
                 .doesNotContain("engineResults")
                 .doesNotContain("orchestrationStatus");

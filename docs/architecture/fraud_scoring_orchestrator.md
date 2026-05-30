@@ -26,14 +26,27 @@ Execution order is deterministic:
 
 The registry is explicit. FDP-89 does not rely on Spring bean order, reflection, classpath discovery,
 `HashMap` order, or `Set` order. Unknown engine IDs fail fast in v1 so the ordered surface stays
-reviewable. FDP-89 requires both `rules.primary` and `ml.python.primary`; missing `rules.primary`
-fails with `ENGINE_REGISTRY_REQUIRED_ENGINE_MISSING`, and missing `ml.python.primary` fails with
-`ENGINE_REGISTRY_EXPECTED_ENGINE_MISSING`.
+reviewable.
+
+## Registry Boundary
+
+FDP-89 registry is intentionally strict. FDP-89 requires `rules.primary` and `ml.python.primary`.
+Missing `rules.primary` is deployment/construction failure. Missing `ml.python.primary` is FDP-89
+composition failure. Missing `rules.primary` fails with `ENGINE_REGISTRY_REQUIRED_ENGINE_MISSING`,
+and missing `ml.python.primary` fails with `ENGINE_REGISTRY_EXPECTED_ENGINE_MISSING`.
+
+Runtime ML unavailable is different from missing ML registration. ML unavailable can produce
+`PARTIAL`. Missing ML registration fails registry construction. FDP-89 is not a general-purpose
+plugin system. Future dynamic engine discovery belongs to a later branch.
 
 `FraudScoringOrchestrationResult` has an internal-only `FraudScoringOrchestrationStatus`:
 `COMPLETE`, `PARTIAL`, or `REQUIRED_ENGINE_FAILED`. The status summarizes adapter availability for
 future internal callers only. It does not approve, decline, calculate final risk, calculate final
 score, publish events, or change runtime scoring behavior.
+
+`COMPLETE` is not a safe/final outcome. `PARTIAL` is not low risk. `REQUIRED_ENGINE_FAILED` is not
+decline/block. Status is internal execution completeness only. Final decisioning belongs to future
+explicit decision policy, not FDP-89.
 
 ## Timeout Boundary
 
@@ -57,6 +70,18 @@ no recommendedAction, no finalDecision, no final risk, and no final score.
 Required/optional metadata from `FraudEngineDescriptor` is used only for bounded internal execution
 warnings and internal orchestration status. These warnings and status values are not external
 contracts and do not decide payment, alert, or analyst workflow outcomes.
+
+`FraudScoringExecutionWarning` values are structured internal execution warnings containing bounded
+engine ID, warning code, engine status, and required/optional context. They are not event fields, API
+DTOs, UI model fields, alert projections, or decision policy inputs.
+
+## Evidence Type Limitation
+
+FDP-89 uses existing `FraudEngineEvidenceType.OPERATIONAL_FALLBACK` for bounded orchestration failure
+evidence. This does not mean the orchestrator performed business fallback decisioning. It only
+indicates an operational engine execution failure was represented safely. A dedicated `ENGINE_STATUS`
+or `ORCHESTRATION_STATUS` evidence type may be considered in a future common-events hardening branch.
+FDP-89 does not change common-events evidence taxonomy.
 
 ## Runtime Isolation
 
