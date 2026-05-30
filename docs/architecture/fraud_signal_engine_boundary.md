@@ -9,8 +9,8 @@ connects `ScoringContext` as input, `FraudEngineResult` as output, and
 `FraudEngineDescriptor` as static engine identity/capability metadata.
 
 `FraudSignalEngine` belongs in `fraud-scoring-service`. It is not a `common-events` contract, not a
-Kafka event, not an API DTO, not an orchestrator, not a decisioning mechanism, and not a final
-banking decision source. This foundation makes no runtime scoring behavior change.
+Kafka event, not an API DTO, not a decisioning mechanism, and not a final banking decision source.
+This foundation makes no runtime scoring behavior change.
 
 ## Descriptor Semantics
 
@@ -28,9 +28,9 @@ expanded; `other` is not a preferred language value.
 not imply deployment support, does not imply execution sandboxing, does not imply operational
 approval, and does not imply bank approval for that implementation language.
 
-`required` is descriptive only in FDP-84. It has no runtime fallback semantics, no failure
-semantics, no routing semantics, and no decisioning semantics. Orchestrator policy belongs to a
-later branch.
+`required` is descriptive only at the interface boundary. FDP-89 uses it only for bounded internal
+orchestration warnings in `FraudScoringOrchestrator`; it still has no external fallback semantics, no
+routing semantics, and no decisioning semantics.
 
 ## FeatureSnapshot Consumption Precondition
 
@@ -51,9 +51,15 @@ FDP-88 adds an isolated `PythonMlSignalEngine` adapter documented in
 boundary, is not a Spring component, is not wired into runtime scoring, and does not make ML a
 final decision source.
 
+FDP-89 adds an internal-only `FraudScoringOrchestrator` documented in
+`docs/architecture/fraud_scoring_orchestrator.md`. It executes isolated adapters in deterministic
+order and returns internal `FraudScoringOrchestrationResult`; it is not Spring-managed, is not wired
+into runtime scoring, does not replace `CompositeFraudScoringEngine`, does not change
+`TransactionScoredEvent`, and does not add public `engineResults[]`.
+
 ## Out Of Scope
 
-No `FraudScoringOrchestrator` or `FraudIntelligenceResult` is included. There is no
-`engineResults[]`, no `TransactionScoredEvent` change, no Kafka event change, no alert-service
-projection, no API/UI, no engine wrappers, no feedback loop, no scoring mode change, no fallback
-behavior change, no automated approval or decline, and no final payment decisioning.
+No `FraudIntelligenceResult` is included. There is no public `engineResults[]`, no
+`TransactionScoredEvent` change, no Kafka event change, no alert-service projection, no API/UI, no
+feedback loop, no scoring mode change, no production runtime migration, no automated approval or
+decline, and no final payment decisioning.
