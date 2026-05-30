@@ -28,6 +28,10 @@ class FraudScoringOrchestratorArchitectureDocsTest {
                 .contains("deterministic order")
                 .contains("rules.primary")
                 .contains("ml.python.primary")
+                .contains("engine_registry_required_engine_missing")
+                .contains("engine_registry_expected_engine_missing")
+                .contains("fraudscoringorchestrationstatus")
+                .contains("required_engine_failed")
                 .contains("does not change `transactionscoredevent`")
                 .contains("does not add `engineresults[]`")
                 .contains("no kafka event schema change")
@@ -41,7 +45,11 @@ class FraudScoringOrchestratorArchitectureDocsTest {
                 .contains("timeout is not low risk")
                 .contains("bounded per-engine failure result")
                 .contains("no raw exception messages")
-                .contains("no async/executor/cancellation in fdp-89");
+                .contains("does not enforce engine execution deadlines")
+                .contains("a hanging engine can still block the caller")
+                .contains("only preserves `timeout` statuses returned by adapters")
+                .contains("timeout enforcement belongs to fdp-90")
+                .contains("do not claim production resilience from fdp-89");
 
         assertThat(docs)
                 .doesNotContain("event schema changed")

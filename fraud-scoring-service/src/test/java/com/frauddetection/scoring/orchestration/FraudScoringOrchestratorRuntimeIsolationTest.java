@@ -15,32 +15,42 @@ import static org.assertj.core.api.Assertions.assertThat;
 class FraudScoringOrchestratorRuntimeIsolationTest {
 
     @Test
-    void orchestratorExistsOnlyInFraudScoringInternalPackage() throws Exception {
+    void fraudScoringOrchestratorExistsOnlyAsInternalUnwiredFoundation() throws Exception {
         Path repositoryRoot = repositoryRoot();
         String commonEvents = javaSources(repositoryRoot.resolve("common-events/src/main/java"));
         String alertService = javaSources(repositoryRoot.resolve("alert-service/src/main/java"));
         String ui = sourceFiles(repositoryRoot.resolve("analyst-console-ui/src"));
+        Path orchestrationRoot = repositoryRoot.resolve(
+                "fraud-scoring-service/src/main/java/com/frauddetection/scoring/orchestration"
+        );
 
-        assertThat(repositoryRoot.resolve(
-                "fraud-scoring-service/src/main/java/com/frauddetection/scoring/orchestration/FraudScoringOrchestrator.java"
-        )).exists();
-        assertThat(repositoryRoot.resolve(
-                "fraud-scoring-service/src/main/java/com/frauddetection/scoring/orchestration/FraudScoringOrchestrationResult.java"
-        )).exists();
+        assertOnlyProductionSourceNamed(
+                repositoryRoot,
+                "FraudScoringOrchestrator.java",
+                orchestrationRoot.resolve("FraudScoringOrchestrator.java")
+        );
+        assertOnlyProductionSourceNamed(
+                repositoryRoot,
+                "FraudScoringOrchestrationResult.java",
+                orchestrationRoot.resolve("FraudScoringOrchestrationResult.java")
+        );
         assertThat(commonEvents)
                 .doesNotContain("FraudScoringOrchestrator")
                 .doesNotContain("FraudScoringOrchestrationResult")
-                .doesNotContain("engineResults");
+                .doesNotContain("engineResults")
+                .doesNotContain("orchestrationStatus");
         assertThat(alertService)
                 .doesNotContain("FraudScoringOrchestrator")
                 .doesNotContain("FraudScoringOrchestrationResult")
                 .doesNotContain("FraudEngineResult")
-                .doesNotContain("engineResults");
+                .doesNotContain("engineResults")
+                .doesNotContain("orchestrationStatus");
         assertThat(ui)
                 .doesNotContain("FraudScoringOrchestrator")
                 .doesNotContain("FraudScoringOrchestrationResult")
                 .doesNotContain("FraudEngineResult")
-                .doesNotContain("engineResults");
+                .doesNotContain("engineResults")
+                .doesNotContain("orchestrationStatus");
     }
 
     @Test
@@ -61,22 +71,37 @@ class FraudScoringOrchestratorRuntimeIsolationTest {
 
     @Test
     void compositeRuntimeDoesNotReferenceOrchestrator() throws Exception {
-        String composite = Files.readString(repositoryRoot().resolve(
-                "fraud-scoring-service/src/main/java/com/frauddetection/scoring/service/CompositeFraudScoringEngine.java"
-        ));
+        Path scoringRoot = repositoryRoot().resolve("fraud-scoring-service/src/main/java/com/frauddetection/scoring");
+        String composite = Files.readString(scoringRoot.resolve("service/CompositeFraudScoringEngine.java"));
+        String ruleRuntime = Files.readString(scoringRoot.resolve("service/RuleBasedFraudScoringEngine.java"));
+        String mlRuntime = Files.readString(scoringRoot.resolve("service/MlFraudScoringEngine.java"));
+        String controllers = javaSources(scoringRoot.resolve("controller"));
+        String kafkaRuntime = javaSources(scoringRoot.resolve("messaging"));
 
         assertThat(composite)
+                .doesNotContain("FraudScoringOrchestrator")
+                .doesNotContain("FraudScoringOrchestrationResult");
+        assertThat(ruleRuntime)
+                .doesNotContain("FraudScoringOrchestrator")
+                .doesNotContain("FraudScoringOrchestrationResult");
+        assertThat(mlRuntime)
+                .doesNotContain("FraudScoringOrchestrator")
+                .doesNotContain("FraudScoringOrchestrationResult");
+        assertThat(controllers)
+                .doesNotContain("FraudScoringOrchestrator")
+                .doesNotContain("FraudScoringOrchestrationResult");
+        assertThat(kafkaRuntime)
                 .doesNotContain("FraudScoringOrchestrator")
                 .doesNotContain("FraudScoringOrchestrationResult");
     }
 
     @Test
     void orchestratorDoesNotUseExternalRuntimeChannels() throws Exception {
-        String orchestrator = Files.readString(repositoryRoot().resolve(
-                "fraud-scoring-service/src/main/java/com/frauddetection/scoring/orchestration/FraudScoringOrchestrator.java"
+        String orchestrationPackage = javaSources(repositoryRoot().resolve(
+                "fraud-scoring-service/src/main/java/com/frauddetection/scoring/orchestration"
         ));
 
-        assertThat(orchestrator)
+        assertThat(orchestrationPackage)
                 .doesNotContain("@Component")
                 .doesNotContain("@Service")
                 .doesNotContain("@Bean")
@@ -87,11 +112,16 @@ class FraudScoringOrchestratorRuntimeIsolationTest {
                 .doesNotContain("alert-service")
                 .doesNotContain("Controller")
                 .doesNotContain("Repository")
+                .doesNotContain("TransactionScoredEvent")
+                .doesNotContain("ApiDto")
                 .doesNotContain("RuleBasedFraudScoringEngine")
                 .doesNotContain("MlFraudScoringEngine");
     }
 
     private String javaSources(Path root) throws IOException {
+        if (!Files.exists(root)) {
+            return "";
+        }
         return sourceFiles(root, ".java");
     }
 
@@ -113,6 +143,19 @@ class FraudScoringOrchestratorRuntimeIsolationTest {
             return filename.endsWith(".js") || filename.endsWith(".jsx");
         }
         return Arrays.stream(suffixes).anyMatch(filename::endsWith);
+    }
+
+    private void assertOnlyProductionSourceNamed(Path repositoryRoot, String filename, Path expectedPath) throws IOException {
+        try (Stream<Path> files = Files.walk(repositoryRoot)) {
+            assertThat(files.filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().equals(filename))
+                    .filter(path -> path.toString().contains("\\src\\main\\java\\")
+                            || path.toString().contains("/src/main/java/"))
+                    .map(Path::toAbsolutePath)
+                    .map(Path::normalize)
+                    .toList())
+                    .containsExactly(expectedPath.toAbsolutePath().normalize());
+        }
     }
 
     private Path repositoryRoot() {

@@ -26,11 +26,23 @@ Execution order is deterministic:
 
 The registry is explicit. FDP-89 does not rely on Spring bean order, reflection, classpath discovery,
 `HashMap` order, or `Set` order. Unknown engine IDs fail fast in v1 so the ordered surface stays
-reviewable.
+reviewable. FDP-89 requires both `rules.primary` and `ml.python.primary`; missing `rules.primary`
+fails with `ENGINE_REGISTRY_REQUIRED_ENGINE_MISSING`, and missing `ml.python.primary` fails with
+`ENGINE_REGISTRY_EXPECTED_ENGINE_MISSING`.
 
-FDP-89 has no async/executor/cancellation in FDP-89. There is no thread pool, scheduler, kill switch,
-or orchestrator-level timeout policy. Adapter-returned `TIMEOUT`, `UNAVAILABLE`, and `DEGRADED`
-statuses are preserved.
+`FraudScoringOrchestrationResult` has an internal-only `FraudScoringOrchestrationStatus`:
+`COMPLETE`, `PARTIAL`, or `REQUIRED_ENGINE_FAILED`. The status summarizes adapter availability for
+future internal callers only. It does not approve, decline, calculate final risk, calculate final
+score, publish events, or change runtime scoring behavior.
+
+## Timeout Boundary
+
+FDP-89 does not enforce engine execution deadlines.
+
+FDP-89 has no executor, thread pool, async execution, cancellation, scheduler, kill switch, or
+orchestrator-level timeout. A hanging engine can still block the caller in FDP-89. FDP-89 only
+preserves `TIMEOUT` statuses returned by adapters. Real timeout enforcement belongs to FDP-90 or a
+later runtime-hardening branch. Do not claim production resilience from FDP-89.
 
 ## Failure Boundary
 
@@ -43,8 +55,8 @@ or warnings. Unavailable is not low risk. Timeout is not low risk. FDP-89 adds n
 no recommendedAction, no finalDecision, no final risk, and no final score.
 
 Required/optional metadata from `FraudEngineDescriptor` is used only for bounded internal execution
-warnings such as required or optional engine not available. These warnings are not external contracts
-and do not decide payment, alert, or analyst workflow outcomes.
+warnings and internal orchestration status. These warnings and status values are not external
+contracts and do not decide payment, alert, or analyst workflow outcomes.
 
 ## Runtime Isolation
 
