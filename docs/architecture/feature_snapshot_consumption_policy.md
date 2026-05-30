@@ -116,15 +116,17 @@ feature support requires an explicit policy and tests.
 
 ## Runtime Isolation
 
-FDP-85 contains no `RuleBasedSignalEngine`, no `PythonMlSignalEngine`, no
-`FraudScoringOrchestrator`, no `FraudIntelligenceResult`, no `engineResults[]`, and no event/API/UI
-integration. It does not wire `FeatureSnapshotReader` into `CompositeFraudScoringEngine` and does
+FDP-85 introduced only the consumption policy and contained no adapters. FDP-87 adds an isolated
+`RuleBasedSignalEngine` adapter that must use this reader policy, remains internal to
+`fraud-scoring-service`, and is not wired into `CompositeFraudScoringEngine`. The current runtime
+still contains no `PythonMlSignalEngine`, no `FraudScoringOrchestrator`, no
+`FraudIntelligenceResult`, no `engineResults[]`, and no event/API/UI integration. This policy does
 not change current rule-based or ML scoring behavior.
 
 Future adapters must use `FeatureSnapshotReader` and the policy layer. They must not directly
 cast values from `Map<String, Object>` or call `context.featureSnapshot().get(...)` directly.
 
-## Next Branch
+## Current Adapter
 
-FDP-86 may add `RuleBasedSignalEngine` only after it uses the policy/accessor and does not read
-`context.featureSnapshot().get(...)` directly.
+The current rule adapter boundary is documented in
+`docs/architecture/rule_based_signal_engine_adapter.md`.

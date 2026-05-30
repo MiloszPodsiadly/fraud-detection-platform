@@ -39,10 +39,17 @@ runtime shape. A featureSnapshot consumption policy must be defined before adapt
 allowed keys, allowed value types, raw payload boundaries, missing/unknown/unavailable semantics,
 and nested structure policy.
 
+## Current Adapter Boundary
+
+FDP-84 introduced the interface foundation only. FDP-87 adds an isolated `RuleBasedSignalEngine`
+adapter documented in `docs/architecture/rule_based_signal_engine_adapter.md`; it is not a Spring
+component, is not wired into runtime scoring, and does not make `FraudSignalEngine` an orchestrated
+production scoring path.
+
 ## Out Of Scope
 
-No `RuleBasedSignalEngine`, `PythonMlSignalEngine`, `FraudScoringOrchestrator`, or
-`FraudIntelligenceResult` is included. There is no `engineResults[]`, no
-`TransactionScoredEvent` change, no Kafka event change, no alert-service projection, no API/UI,
-no engine wrappers, no feedback loop, no scoring mode change, no fallback behavior change, no ML
-availability behavior change, no automated approval or decline, and no final payment decisioning.
+No `PythonMlSignalEngine`, `FraudScoringOrchestrator`, or `FraudIntelligenceResult` is included.
+There is no `engineResults[]`, no `TransactionScoredEvent` change, no Kafka event change, no
+alert-service projection, no API/UI, no engine wrappers, no feedback loop, no scoring mode change,
+no fallback behavior change, no ML availability behavior change, no automated approval or decline,
+and no final payment decisioning.
