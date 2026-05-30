@@ -48,13 +48,11 @@ class FraudEngineContractRuntimeIsolationTest {
 
         assertThat(scoringRuntime)
                 .doesNotContain("FraudScoringOrchestrator")
-                .doesNotContain("RuleBasedSignalEngine")
                 .doesNotContain("PythonMlSignalEngine")
                 .doesNotContain("VelocitySignalEngine")
                 .doesNotContain("DeviceSignalEngine")
                 .doesNotContain("MerchantSignalEngine")
                 .doesNotContain("ExperimentalSignalEngine")
-                .doesNotContain("implements FraudSignalEngine")
                 .doesNotContain("FraudIntelligenceResult")
                 .doesNotContain("engineResults");
     }
@@ -73,7 +71,9 @@ class FraudEngineContractRuntimeIsolationTest {
                     .containsExactlyInAnyOrder(
                             "FraudSignalEngine.java",
                             "FraudEngineDescriptor.java",
-                            "FraudEngineDescriptorValuePolicy.java"
+                            "FraudEngineDescriptorValuePolicy.java",
+                            "rules/RuleBasedSignalEngine.java",
+                            "rules/RuleBasedSignalReasonCode.java"
                     );
         }
     }
@@ -105,9 +105,10 @@ class FraudEngineContractRuntimeIsolationTest {
     void featureSnapshotConsumptionPolicyRemainsInternalAndUnwired() throws Exception {
         Path scoringRoot = repositoryRoot().resolve("fraud-scoring-service/src/main/java/com/frauddetection/scoring");
         Path featuresRoot = scoringRoot.resolve("features");
+        Path engineRoot = scoringRoot.resolve("engine");
         String features = javaSources(featuresRoot);
-        String runtimeOutsidePolicy = javaSourcesExcept(scoringRoot, featuresRoot);
-        String adapterFoundation = javaSources(scoringRoot.resolve("engine"));
+        String runtimeOutsidePolicy = javaSourcesExcept(scoringRoot, featuresRoot, engineRoot);
+        String adapterFoundation = javaSources(engineRoot);
 
         assertThat(features)
                 .contains("enum FeatureSnapshotValueStatus")
@@ -124,10 +125,61 @@ class FraudEngineContractRuntimeIsolationTest {
                 .doesNotContain("FeatureSnapshotKeyPolicy")
                 .doesNotContain("FeatureSnapshotReaderFactory");
         assertThat(adapterFoundation)
-                .doesNotContain("FeatureSnapshotReader")
                 .doesNotContain("FeatureSnapshotScalarType")
                 .doesNotContain("context.featureSnapshot().get(")
                 .doesNotContain("featureSnapshot().get(");
+    }
+
+    @Test
+    void ruleBasedSignalEngineRemainsInternalAdapterOnly() throws Exception {
+        Path repositoryRoot = repositoryRoot();
+        Path scoringRoot = repositoryRoot.resolve("fraud-scoring-service/src/main/java/com/frauddetection/scoring");
+        Path adapterPath = scoringRoot.resolve("engine/rules/RuleBasedSignalEngine.java");
+        String adapter = Files.readString(adapterPath);
+        String runtimeOutsideAdapterPackage = javaSourcesExcept(scoringRoot, scoringRoot.resolve("engine/rules"));
+        String compositeRuntime = Files.readString(scoringRoot.resolve("service/CompositeFraudScoringEngine.java"));
+        String ruleRuntime = Files.readString(scoringRoot.resolve("service/RuleBasedFraudScoringEngine.java"));
+        String mlRuntime = Files.readString(scoringRoot.resolve("service/MlFraudScoringEngine.java"));
+        String alertRuntime = javaSources(repositoryRoot.resolve("alert-service/src/main/java"));
+        String uiRuntime = sourceFiles(repositoryRoot.resolve("analyst-console-ui/src"));
+
+        assertThat(adapterPath).exists();
+        assertThat(adapter)
+                .contains("public final class RuleBasedSignalEngine implements FraudSignalEngine")
+                .contains("FeatureSnapshotReaderFactory")
+                .doesNotContain("@Component")
+                .doesNotContain("@Service")
+                .doesNotContain("@Bean")
+                .doesNotContain("@Configuration")
+                .doesNotContain("context.featureSnapshot().get(")
+                .doesNotContain("featureSnapshot().get(")
+                .doesNotContain("Map<String, Object>")
+                .doesNotContain("FeatureSnapshotKeyPolicy.isAllowedFeatureKey");
+
+        assertThat(runtimeOutsideAdapterPackage)
+                .doesNotContain("RuleBasedSignalEngine")
+                .doesNotContain("PythonMlSignalEngine")
+                .doesNotContain("FraudScoringOrchestrator")
+                .doesNotContain("FraudIntelligenceResult")
+                .doesNotContain("engineResults[]");
+        assertThat(compositeRuntime)
+                .doesNotContain("RuleBasedSignalEngine")
+                .doesNotContain("FraudSignalEngine")
+                .doesNotContain("FraudScoringOrchestrator")
+                .doesNotContain("FraudIntelligenceResult")
+                .doesNotContain("engineResults");
+        assertThat(ruleRuntime).doesNotContain("RuleBasedSignalEngine");
+        assertThat(mlRuntime).doesNotContain("RuleBasedSignalEngine");
+        assertThat(alertRuntime)
+                .doesNotContain("RuleBasedSignalEngine")
+                .doesNotContain("FraudSignalEngine")
+                .doesNotContain("FraudEngineResult")
+                .doesNotContain("engineResults");
+        assertThat(uiRuntime)
+                .doesNotContain("RuleBasedSignalEngine")
+                .doesNotContain("FraudEngineResult")
+                .doesNotContain("engineResults")
+                .doesNotContain("TransactionRiskIntelligence");
     }
 
     @Test
@@ -179,12 +231,12 @@ class FraudEngineContractRuntimeIsolationTest {
         return sourceFiles(root, ".java");
     }
 
-    private String javaSourcesExcept(Path root, Path excludedRoot) throws IOException {
+    private String javaSourcesExcept(Path root, Path... excludedRoots) throws IOException {
         try (Stream<Path> files = Files.walk(root)) {
             StringBuilder content = new StringBuilder();
             for (Path file : files.filter(Files::isRegularFile)
                     .filter(path -> path.toString().endsWith(".java"))
-                    .filter(path -> !path.startsWith(excludedRoot))
+                    .filter(path -> Arrays.stream(excludedRoots).noneMatch(path::startsWith))
                     .toList()) {
                 content.append(Files.readString(file)).append('\n');
             }

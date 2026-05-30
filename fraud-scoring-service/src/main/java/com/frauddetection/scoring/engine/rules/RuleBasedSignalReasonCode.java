@@ -1,0 +1,19 @@
+package com.frauddetection.scoring.engine.rules;
+
+public enum RuleBasedSignalReasonCode {
+    DEVICE_NOVELTY_SIGNAL,
+    COUNTRY_MISMATCH_SIGNAL,
+    PROXY_OR_VPN_SIGNAL,
+    RAPID_TRANSFER_BURST_SIGNAL,
+    HIGH_RISK_FLAGS_PRESENT,
+    VELOCITY_THRESHOLD_EXCEEDED,
+    AMOUNT_ACTIVITY_THRESHOLD_EXCEEDED,
+    RAPID_TRANSFER_PATTERN_MATCHED,
+    FEATURE_STATUS_INVALID,
+    FEATURE_STATUS_WRONG_ACCESSOR,
+    FEATURE_STATUS_NOT_ALLOWED;
+
+    public String wireValue() {
+        return name();
+    }
+}

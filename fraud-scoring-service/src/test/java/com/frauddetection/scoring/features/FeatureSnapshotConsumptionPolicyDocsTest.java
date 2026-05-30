@@ -78,12 +78,14 @@ class FeatureSnapshotConsumptionPolicyDocsTest {
                 .contains("metrics")
                 .contains("ui")
                 .contains("safe contribution identifiers")
-                .contains("no `rulebasedsignalengine`")
+                .contains("fdp-87 adds an isolated")
+                .contains("`rulebasedsignalengine` adapter")
+                .contains("is not wired into `compositefraudscoringengine`")
                 .contains("no `pythonmlsignalengine`")
                 .contains("no `fraudscoringorchestrator`")
                 .contains("no `engineresults[]`")
                 .contains("no event/api/ui")
-                .contains("fdp-86 may add `rulebasedsignalengine` only after it uses the policy/accessor")
+                .contains("rule_based_signal_engine_adapter.md")
                 .contains("must not directly cast values from `map<string, object>`")
                 .contains("must not directly")
                 .contains("context.featuresnapshot().get(...)");
@@ -101,6 +103,7 @@ class FeatureSnapshotConsumptionPolicyDocsTest {
                 .doesNotContain("raw payload consumption is allowed")
                 .doesNotContain("registered key automatically consumable")
                 .doesNotContain("raw rejected key is returned")
+                .doesNotContain("rulebasedsignalengine is wired")
                 .doesNotContain("runtime scoring behavior is changed");
     }
 
