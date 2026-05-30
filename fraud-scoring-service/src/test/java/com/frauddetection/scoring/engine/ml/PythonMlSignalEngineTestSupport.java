@@ -1,6 +1,11 @@
 package com.frauddetection.scoring.engine.ml;
 
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
+import com.frauddetection.common.events.evidence.ScoringEvidenceItem;
+import com.frauddetection.common.events.evidence.ScoringEvidenceSeverity;
+import com.frauddetection.common.events.evidence.ScoringEvidenceSource;
+import com.frauddetection.common.events.evidence.ScoringEvidenceStatus;
+import com.frauddetection.common.events.evidence.ScoringEvidenceType;
 import com.frauddetection.common.events.engine.FraudEngineResult;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
@@ -8,6 +13,7 @@ import com.frauddetection.scoring.config.ScoringMode;
 import com.frauddetection.scoring.context.ScoringContext;
 import com.frauddetection.scoring.domain.FraudScoreResult;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
+import com.frauddetection.scoring.domain.MlModelOutput;
 import com.frauddetection.scoring.observability.ScoringMetrics;
 import com.frauddetection.scoring.service.MlFraudScoringEngine;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -33,6 +39,10 @@ final class PythonMlSignalEngineTestSupport {
         return new RecordingMlSource(request -> {
             throw exception;
         });
+    }
+
+    static MlFraudScoringEngine realSourceReturning(MlModelOutput output) {
+        return new MlFraudScoringEngine(input -> output, new ScoringMetrics(new SimpleMeterRegistry()));
     }
 
     static FraudScoreResult validResult(double score, RiskLevel riskLevel) {
@@ -93,6 +103,39 @@ final class PythonMlSignalEngineTestSupport {
         );
     }
 
+    static FraudScoreResult resultWithUnsafeScoringEvidence() {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("modelAvailable", true);
+        ScoringEvidenceItem unsafeEvidence = new ScoringEvidenceItem(
+                "ML_MODEL:MODEL_HIGH_RISK:0",
+                "MODEL_HIGH_RISK",
+                ScoringEvidenceType.MODEL_EXPLANATION,
+                ScoringEvidenceSource.ML_MODEL,
+                ScoringEvidenceStatus.AVAILABLE,
+                ScoringEvidenceSeverity.HIGH,
+                "raw source scoring evidence title",
+                "raw source scoring evidence endpoint token stacktrace",
+                "rawFeatureVector=VIP",
+                "http://ml-internal",
+                Map.of(),
+                Instant.parse("2026-05-30T09:59:59Z")
+        );
+        return new FraudScoreResult(
+                0.82d,
+                RiskLevel.HIGH,
+                "ML",
+                "python-logistic-fraud-model",
+                "2026-05-30.v1",
+                Instant.parse("2026-05-30T09:59:59Z"),
+                List.of("MODEL_HIGH_RISK"),
+                Map.of(),
+                Map.of(),
+                metadata,
+                true,
+                List.of(unsafeEvidence)
+        );
+    }
+
     static ScoringContext context() {
         TransactionEnrichedEvent event = TransactionFixtures.enrichedTransaction().build();
         return new ScoringContext(
@@ -139,8 +182,30 @@ final class PythonMlSignalEngineTestSupport {
         }
     }
 
-    private static com.frauddetection.scoring.domain.MlModelOutput unavailableModelOutput() {
-        return new com.frauddetection.scoring.domain.MlModelOutput(
+    static MlModelOutput mlModelOutput(
+            boolean available,
+            Double score,
+            RiskLevel riskLevel,
+            String modelName,
+            String modelVersion,
+            List<String> reasonCodes
+    ) {
+        return new MlModelOutput(
+                available,
+                score,
+                riskLevel,
+                modelName,
+                modelVersion,
+                Instant.parse("2026-05-30T09:59:59Z"),
+                reasonCodes,
+                Map.of(),
+                Map.of(),
+                available ? null : "unavailable"
+        );
+    }
+
+    private static MlModelOutput unavailableModelOutput() {
+        return new MlModelOutput(
                 false,
                 0.0d,
                 RiskLevel.LOW,

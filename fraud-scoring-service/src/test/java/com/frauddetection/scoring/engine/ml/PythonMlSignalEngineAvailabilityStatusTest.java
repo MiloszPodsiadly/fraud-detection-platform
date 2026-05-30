@@ -31,6 +31,37 @@ class PythonMlSignalEngineAvailabilityStatusTest {
     }
 
     @Test
+    void missingModelAvailableMetadataDoesNotReturnAvailable() {
+        FraudEngineResult result = new PythonMlSignalEngine(
+                sourceReturning(result(0.82d, RiskLevel.HIGH, "python-logistic-fraud-model", "2026-05-30.v1", null, List.of()))
+        ).evaluate(context());
+
+        assertFailure(result, FraudEngineStatus.DEGRADED, PythonMlSignalReasonCode.ML_AVAILABILITY_METADATA_MISSING);
+    }
+
+    @Test
+    void nonBooleanModelAvailableMetadataDoesNotReturnAvailable() {
+        FraudScoreResult source = new FraudScoreResult(
+                0.82d,
+                RiskLevel.HIGH,
+                "ML",
+                "python-logistic-fraud-model",
+                "2026-05-30.v1",
+                Instant.parse("2026-05-30T09:59:59Z"),
+                List.of(),
+                Map.of(),
+                Map.of(),
+                Map.of("modelAvailable", "false"),
+                true
+        );
+
+        FraudEngineResult result = new PythonMlSignalEngine(sourceReturning(source)).evaluate(context());
+
+        assertFailure(result, FraudEngineStatus.DEGRADED, PythonMlSignalReasonCode.ML_AVAILABILITY_METADATA_INVALID);
+        assertThat(flatten(result)).doesNotContain("false");
+    }
+
+    @Test
     void mlTimeoutDoesNotReturnLowRisk() {
         FraudEngineResult result = new PythonMlSignalEngine(
                 sourceThrowing(new RuntimeException(new TimeoutException("timeout host token stacktrace")))

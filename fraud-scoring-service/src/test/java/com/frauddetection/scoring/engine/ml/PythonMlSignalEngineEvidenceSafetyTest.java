@@ -1,9 +1,11 @@
 package com.frauddetection.scoring.engine.ml;
 
 import com.frauddetection.common.events.engine.FraudEngineEvidence;
+import com.frauddetection.common.events.reason.ReasonCode;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -22,9 +24,7 @@ class PythonMlSignalEngineEvidenceSafetyTest {
         ).evaluate(context());
 
         assertNoUnsafeMlData(result);
-        Set<String> allowedReasonCodes = Arrays.stream(PythonMlSignalReasonCode.values())
-                .map(PythonMlSignalReasonCode::wireValue)
-                .collect(Collectors.toSet());
+        Set<String> allowedReasonCodes = allowedReasonCodes();
         assertThat(result.reasonCodes()).isNotEmpty().allSatisfy(reasonCode ->
                 assertThat(allowedReasonCodes).contains(reasonCode)
         );
@@ -43,6 +43,22 @@ class PythonMlSignalEngineEvidenceSafetyTest {
         ))).evaluate(context());
 
         assertNoUnsafeMlData(result);
+    }
+
+    @Test
+    void sourceScoringEvidenceIsNotCopiedDirectly() {
+        var result = new PythonMlSignalEngine(
+                sourceReturning(PythonMlSignalEngineTestSupport.resultWithUnsafeScoringEvidence())
+        ).evaluate(context());
+
+        assertThat(result.evidence()).extracting(FraudEngineEvidence::reasonCode)
+                .containsExactly(ReasonCode.MODEL_HIGH_RISK.wireValue());
+        assertThat(flatten(result))
+                .doesNotContain("raw source scoring evidence")
+                .doesNotContain("rawFeatureVector=VIP")
+                .doesNotContain("http://ml-internal")
+                .doesNotContain("token")
+                .doesNotContain("stacktrace");
     }
 
     private void assertSafeEvidenceText(FraudEngineEvidence evidence, Set<String> allowedReasonCodes) {
@@ -70,5 +86,16 @@ class PythonMlSignalEngineEvidenceSafetyTest {
                 .doesNotContain("feature vector")
                 .doesNotContain("rawFeatureVector")
                 .doesNotContain("rawModelPayload");
+    }
+
+    private Set<String> allowedReasonCodes() {
+        Set<String> allowed = Arrays.stream(PythonMlSignalReasonCode.values())
+                .map(PythonMlSignalReasonCode::wireValue)
+                .collect(Collectors.toCollection(HashSet::new));
+        Arrays.stream(ReasonCode.values())
+                .filter(reasonCode -> reasonCode != ReasonCode.UNKNOWN)
+                .map(ReasonCode::wireValue)
+                .forEach(allowed::add);
+        return allowed;
     }
 }
