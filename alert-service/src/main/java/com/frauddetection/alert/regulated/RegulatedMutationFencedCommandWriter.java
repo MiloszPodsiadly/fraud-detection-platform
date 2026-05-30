@@ -306,11 +306,18 @@ public class RegulatedMutationFencedCommandWriter {
                 Criteria.where("lease_expires_at").exists(false),
                 Criteria.where("lease_expires_at").is(null)
         );
+        Criteria leaseOwnerFence = document.getLeaseOwner() == null || document.getLeaseOwner().isBlank()
+                ? new Criteria().orOperator(
+                Criteria.where("lease_owner").exists(false),
+                Criteria.where("lease_owner").is(null)
+        )
+                : Criteria.where("lease_owner").is(document.getLeaseOwner());
         Criteria[] criteria = document.getPublicStatus() == null
                 ? new Criteria[]{
                 Criteria.where("_id").is(document.getId()),
                 Criteria.where("state").is(document.getState()),
                 Criteria.where("execution_status").is(document.getExecutionStatus()),
+                leaseOwnerFence,
                 mutationModelCriteria(document.mutationModelVersionOrLegacy()),
                 nonClaimedRecoveryCondition
         }
@@ -319,6 +326,7 @@ public class RegulatedMutationFencedCommandWriter {
                 Criteria.where("state").is(document.getState()),
                 Criteria.where("execution_status").is(document.getExecutionStatus()),
                 Criteria.where("public_status").is(document.getPublicStatus()),
+                leaseOwnerFence,
                 mutationModelCriteria(document.mutationModelVersionOrLegacy()),
                 nonClaimedRecoveryCondition
         };
