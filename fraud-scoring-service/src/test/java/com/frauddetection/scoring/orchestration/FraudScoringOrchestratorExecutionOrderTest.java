@@ -56,6 +56,40 @@ class FraudScoringOrchestratorExecutionOrderTest {
     }
 
     @Test
+    void registryRejectsMissingRequiredRulesEngine() {
+        assertThatThrownBy(() -> new FraudSignalEngineRegistry(List.of(
+                mlEngine(availableResult(mlDescriptor(), 0.72d, RiskLevel.MEDIUM))
+        )))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("ENGINE_REGISTRY_REQUIRED_ENGINE_MISSING")
+                .hasMessageNotContaining("ml.python.primary")
+                .hasMessageNotContaining("FakeFraudSignalEngine");
+    }
+
+    @Test
+    void registryRejectsMissingExpectedMlEngine() {
+        assertThatThrownBy(() -> new FraudSignalEngineRegistry(List.of(
+                ruleEngine(availableResult(ruleDescriptor(), 0.42d, RiskLevel.LOW))
+        )))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("ENGINE_REGISTRY_EXPECTED_ENGINE_MISSING")
+                .hasMessageNotContaining("rules.primary")
+                .hasMessageNotContaining("FakeFraudSignalEngine");
+    }
+
+    @Test
+    void registryAcceptsRulesAndMlInAnyInputOrder() {
+        FraudSignalEngineRegistry registry = new FraudSignalEngineRegistry(List.of(
+                mlEngine(availableResult(mlDescriptor(), 0.72d, RiskLevel.MEDIUM)),
+                ruleEngine(availableResult(ruleDescriptor(), 0.42d, RiskLevel.LOW))
+        ));
+
+        assertThat(registry.orderedEngines().stream()
+                .map(engine -> engine.descriptor().engineId()))
+                .containsExactly("rules.primary", "ml.python.primary");
+    }
+
+    @Test
     void registryRejectsUnknownEngineIds() {
         FraudEngineDescriptor unknownDescriptor = new FraudEngineDescriptor(
                 "velocity.primary",

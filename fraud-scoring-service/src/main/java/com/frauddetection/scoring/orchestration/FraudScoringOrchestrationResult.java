@@ -8,6 +8,7 @@ import java.util.Objects;
 import java.util.regex.Pattern;
 
 public record FraudScoringOrchestrationResult(
+        FraudScoringOrchestrationStatus status,
         List<FraudEngineResult> engineResults,
         List<String> executionWarnings,
         Instant generatedAt
@@ -15,6 +16,7 @@ public record FraudScoringOrchestrationResult(
     private static final Pattern BOUNDED_WARNING = Pattern.compile("[A-Z0-9_]{1,64}");
 
     public FraudScoringOrchestrationResult {
+        Objects.requireNonNull(status, "status is required");
         Objects.requireNonNull(engineResults, "engineResults is required");
         Objects.requireNonNull(generatedAt, "generatedAt is required");
         for (FraudEngineResult engineResult : engineResults) {

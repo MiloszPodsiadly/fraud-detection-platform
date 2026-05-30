@@ -20,6 +20,7 @@ class FraudScoringOrchestrationResultTest {
         var warnings = new ArrayList<>(List.of("REQUIRED_ENGINE_NOT_AVAILABLE"));
 
         FraudScoringOrchestrationResult result = new FraudScoringOrchestrationResult(
+                FraudScoringOrchestrationStatus.COMPLETE,
                 engineResults,
                 warnings,
                 Instant.parse("2026-05-30T10:00:00Z")
@@ -34,8 +35,21 @@ class FraudScoringOrchestrationResultTest {
     }
 
     @Test
+    void rejectsNullStatus() {
+        assertThatThrownBy(() -> new FraudScoringOrchestrationResult(
+                null,
+                List.of(availableResult(ruleDescriptor(), 0.42d, RiskLevel.LOW)),
+                List.of(),
+                Instant.parse("2026-05-30T10:00:00Z")
+        ))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("status is required");
+    }
+
+    @Test
     void rejectsNullEngineResultsList() {
         assertThatThrownBy(() -> new FraudScoringOrchestrationResult(
+                FraudScoringOrchestrationStatus.COMPLETE,
                 null,
                 List.of(),
                 Instant.parse("2026-05-30T10:00:00Z")
@@ -50,6 +64,7 @@ class FraudScoringOrchestrationResultTest {
         engineResults.add(null);
 
         assertThatThrownBy(() -> new FraudScoringOrchestrationResult(
+                FraudScoringOrchestrationStatus.COMPLETE,
                 engineResults,
                 List.of(),
                 Instant.parse("2026-05-30T10:00:00Z")
@@ -61,6 +76,7 @@ class FraudScoringOrchestrationResultTest {
     @Test
     void rejectsNullGeneratedAt() {
         assertThatThrownBy(() -> new FraudScoringOrchestrationResult(
+                FraudScoringOrchestrationStatus.COMPLETE,
                 List.of(availableResult(ruleDescriptor(), 0.42d, RiskLevel.LOW)),
                 List.of(),
                 null
@@ -72,6 +88,7 @@ class FraudScoringOrchestrationResultTest {
     @Test
     void rejectsUnboundedWarnings() {
         assertThatThrownBy(() -> new FraudScoringOrchestrationResult(
+                FraudScoringOrchestrationStatus.COMPLETE,
                 List.of(availableResult(ruleDescriptor(), 0.42d, RiskLevel.LOW)),
                 List.of("secret token endpoint stacktrace"),
                 Instant.parse("2026-05-30T10:00:00Z")

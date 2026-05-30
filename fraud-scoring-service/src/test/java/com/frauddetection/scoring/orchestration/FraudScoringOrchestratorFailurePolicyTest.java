@@ -23,15 +23,17 @@ class FraudScoringOrchestratorFailurePolicyTest {
 
     @Test
     void throwingEngineProducesBoundedFailureResult() {
-        FraudScoringOrchestrationResult result = orchestrator(throwingMlEngine(
-                new IllegalStateException("secret token endpoint stacktrace")
-        )).evaluate(context());
+        FraudScoringOrchestrationResult result = orchestrator(
+                ruleEngine(availableResult(ruleDescriptor(), 0.42d, RiskLevel.LOW)),
+                throwingMlEngine(new IllegalStateException("secret token endpoint stacktrace"))
+        ).evaluate(context());
 
-        assertThat(result.engineResults()).hasSize(1);
-        assertThat(result.engineResults().getFirst().status()).isEqualTo(FraudEngineStatus.DEGRADED);
-        assertThat(result.engineResults().getFirst().statusReason())
+        assertThat(result.engineResults()).hasSize(2);
+        assertThat(result.engineResults().get(1).status()).isEqualTo(FraudEngineStatus.DEGRADED);
+        assertThat(result.engineResults().get(1).statusReason())
                 .isEqualTo(OrchestrationFailureReasonCode.ORCHESTRATOR_ENGINE_EXCEPTION.wireValue());
         assertThat(flatten(result)).doesNotContain("secret", "token", "endpoint", "stacktrace");
+        assertThat(result.status()).isEqualTo(FraudScoringOrchestrationStatus.PARTIAL);
     }
 
     @Test
@@ -46,37 +48,46 @@ class FraudScoringOrchestratorFailurePolicyTest {
                 .containsExactly(FraudEngineStatus.AVAILABLE, FraudEngineStatus.DEGRADED);
         assertThat(result.engineResults().get(1).statusReason())
                 .isEqualTo(OrchestrationFailureReasonCode.ORCHESTRATOR_ENGINE_EXCEPTION.wireValue());
+        assertThat(result.status()).isEqualTo(FraudScoringOrchestrationStatus.PARTIAL);
     }
 
     @Test
     void nullEngineResultProducesBoundedDegradedResult() {
-        FraudScoringOrchestrationResult result = orchestrator(mlEngine(null)).evaluate(context());
+        FraudScoringOrchestrationResult result = orchestrator(
+                ruleEngine(availableResult(ruleDescriptor(), 0.42d, RiskLevel.LOW)),
+                mlEngine(null)
+        ).evaluate(context());
 
-        assertThat(result.engineResults().getFirst().status()).isEqualTo(FraudEngineStatus.DEGRADED);
-        assertThat(result.engineResults().getFirst().statusReason())
+        assertThat(result.engineResults().get(1).status()).isEqualTo(FraudEngineStatus.DEGRADED);
+        assertThat(result.engineResults().get(1).statusReason())
                 .isEqualTo(OrchestrationFailureReasonCode.ORCHESTRATOR_ENGINE_NULL_RESULT.wireValue());
+        assertThat(result.status()).isEqualTo(FraudScoringOrchestrationStatus.PARTIAL);
     }
 
     @Test
     void requiredEngineFailureAddsBoundedWarning() {
-        FraudScoringOrchestrationResult result = orchestrator(throwingRuleEngine(
-                new IllegalStateException("secret token endpoint stacktrace")
-        )).evaluate(context());
+        FraudScoringOrchestrationResult result = orchestrator(
+                throwingRuleEngine(new IllegalStateException("secret token endpoint stacktrace")),
+                mlEngine(availableResult(mlDescriptor(), 0.72d, RiskLevel.MEDIUM))
+        ).evaluate(context());
 
         assertThat(result.executionWarnings())
                 .contains("REQUIRED_ENGINE_NOT_AVAILABLE", "ENGINE_DEGRADED_RECORDED");
+        assertThat(result.status()).isEqualTo(FraudScoringOrchestrationStatus.REQUIRED_ENGINE_FAILED);
         assertNoDecisionFields();
     }
 
     @Test
     void optionalEngineFailureAddsBoundedWarning() {
-        FraudScoringOrchestrationResult result = orchestrator(throwingMlEngine(
-                new IllegalStateException("secret token endpoint stacktrace")
-        )).evaluate(context());
+        FraudScoringOrchestrationResult result = orchestrator(
+                ruleEngine(availableResult(ruleDescriptor(), 0.42d, RiskLevel.LOW)),
+                throwingMlEngine(new IllegalStateException("secret token endpoint stacktrace"))
+        ).evaluate(context());
 
         assertThat(result.executionWarnings())
                 .contains("OPTIONAL_ENGINE_NOT_AVAILABLE", "ENGINE_DEGRADED_RECORDED");
-        assertThat(flatten(result)).doesNotContain("LOW");
+        assertThat(result.engineResults().get(1).toString()).doesNotContain("LOW");
+        assertThat(result.status()).isEqualTo(FraudScoringOrchestrationStatus.PARTIAL);
         assertNoDecisionFields();
     }
 

@@ -5,10 +5,8 @@ import com.frauddetection.scoring.engine.FraudSignalEngine;
 
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 
 public final class FraudSignalEngineRegistry {
     static final String RULES_PRIMARY_ENGINE_ID = "rules.primary";
@@ -24,7 +22,7 @@ public final class FraudSignalEngineRegistry {
     public FraudSignalEngineRegistry(List<FraudSignalEngine> engines) {
         Objects.requireNonNull(engines, "engines is required");
         List<RegisteredEngine> registeredEngines = new ArrayList<>();
-        Set<String> engineIds = new HashSet<>();
+        List<String> engineIds = new ArrayList<>();
         for (FraudSignalEngine engine : engines) {
             if (engine == null) {
                 throw new IllegalArgumentException("ENGINE_REGISTRY_NULL_ENGINE");
@@ -34,10 +32,17 @@ public final class FraudSignalEngineRegistry {
             if (!KNOWN_ENGINE_ORDER.contains(engineId)) {
                 throw new IllegalArgumentException("ENGINE_REGISTRY_UNKNOWN_ENGINE_ID");
             }
-            if (!engineIds.add(engineId)) {
+            if (engineIds.contains(engineId)) {
                 throw new IllegalArgumentException("ENGINE_REGISTRY_DUPLICATE_ENGINE_ID");
             }
+            engineIds.add(engineId);
             registeredEngines.add(new RegisteredEngine(engine, descriptor));
+        }
+        if (!engineIds.contains(RULES_PRIMARY_ENGINE_ID)) {
+            throw new IllegalArgumentException("ENGINE_REGISTRY_REQUIRED_ENGINE_MISSING");
+        }
+        if (!engineIds.contains(PYTHON_ML_PRIMARY_ENGINE_ID)) {
+            throw new IllegalArgumentException("ENGINE_REGISTRY_EXPECTED_ENGINE_MISSING");
         }
         registeredEngines.sort(Comparator.comparingInt(engine -> KNOWN_ENGINE_ORDER.indexOf(engine.descriptor().engineId())));
         this.engines = List.copyOf(registeredEngines);

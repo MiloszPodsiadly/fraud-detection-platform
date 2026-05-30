@@ -37,7 +37,8 @@ public final class FraudScoringOrchestrator {
             engineResults.add(engineResult);
             addWarnings(registeredEngine.descriptor(), engineResult, executionWarnings);
         }
-        return new FraudScoringOrchestrationResult(engineResults, executionWarnings, generatedAt);
+        FraudScoringOrchestrationStatus status = statusFor(registry.registeredEngines(), engineResults);
+        return new FraudScoringOrchestrationResult(status, engineResults, executionWarnings, generatedAt);
     }
 
     private FraudEngineResult evaluateEngine(
@@ -110,5 +111,25 @@ public final class FraudScoringOrchestrator {
         if (result.status() == FraudEngineStatus.DEGRADED) {
             executionWarnings.add(ENGINE_DEGRADED_RECORDED);
         }
+    }
+
+    private FraudScoringOrchestrationStatus statusFor(
+            List<FraudSignalEngineRegistry.RegisteredEngine> registeredEngines,
+            List<FraudEngineResult> engineResults
+    ) {
+        boolean optionalEngineUnavailable = false;
+        for (int index = 0; index < registeredEngines.size(); index++) {
+            FraudEngineStatus status = engineResults.get(index).status();
+            if (status == FraudEngineStatus.AVAILABLE) {
+                continue;
+            }
+            if (registeredEngines.get(index).descriptor().required()) {
+                return FraudScoringOrchestrationStatus.REQUIRED_ENGINE_FAILED;
+            }
+            optionalEngineUnavailable = true;
+        }
+        return optionalEngineUnavailable
+                ? FraudScoringOrchestrationStatus.PARTIAL
+                : FraudScoringOrchestrationStatus.COMPLETE;
     }
 }
