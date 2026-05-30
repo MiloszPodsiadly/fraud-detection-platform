@@ -104,6 +104,27 @@ class PythonMlSignalEngineSourceOfTruthMappingTest {
     }
 
     @Test
+    void realMlOutputUnavailableWithNullScoreAndNullRiskMapsUnavailable() {
+        PythonMlSignalEngine adapter = new PythonMlSignalEngine(realSourceReturning(mlModelOutput(
+                false,
+                null,
+                null,
+                null,
+                null,
+                java.util.List.of(ReasonCode.ML_MODEL_UNAVAILABLE.wireValue())
+        )));
+
+        var result = adapter.evaluate(context());
+
+        assertThat(result.status()).isEqualTo(FraudEngineStatus.UNAVAILABLE);
+        assertThat(result.score()).isNull();
+        assertThat(result.riskLevel()).isNull();
+        assertThat(result.statusReason()).isEqualTo(PythonMlSignalReasonCode.ML_MODEL_UNAVAILABLE.wireValue());
+        assertThat(result.reasonCodes()).containsExactly(PythonMlSignalReasonCode.ML_MODEL_UNAVAILABLE.wireValue());
+        assertThat(flatten(result)).doesNotContain(PythonMlSignalReasonCode.ML_SCORE_MISSING.wireValue(), "LOW");
+    }
+
+    @Test
     void realMlOutputUnsupportedReasonsDoNotLeak() {
         PythonMlSignalEngine adapter = new PythonMlSignalEngine(realSourceReturning(mlModelOutput(
                 true,

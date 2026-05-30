@@ -31,6 +31,16 @@ class PythonMlSignalEngineAvailabilityStatusTest {
     }
 
     @Test
+    void modelAvailableFalseWithNullScoreAndNullRiskMapsToUnavailable() {
+        FraudEngineResult result = new PythonMlSignalEngine(
+                sourceReturning(result(null, null, null, null, false, List.of()))
+        ).evaluate(context());
+
+        assertFailure(result, FraudEngineStatus.UNAVAILABLE, PythonMlSignalReasonCode.ML_MODEL_UNAVAILABLE);
+        assertThat(flatten(result)).doesNotContain("false");
+    }
+
+    @Test
     void missingModelAvailableMetadataDoesNotReturnAvailable() {
         FraudEngineResult result = new PythonMlSignalEngine(
                 sourceReturning(result(0.82d, RiskLevel.HIGH, "python-logistic-fraud-model", "2026-05-30.v1", null, List.of()))
@@ -92,7 +102,7 @@ class PythonMlSignalEngineAvailabilityStatusTest {
     }
 
     @Test
-    void invalidResponseDoesNotReturnAvailable() {
+    void modelAvailableTrueWithMissingRiskReturnsDegraded() {
         FraudEngineResult result = new PythonMlSignalEngine(
                 sourceReturning(result(0.50d, null, "python-logistic-fraud-model", "2026-05-30.v1", true, List.of()))
         ).evaluate(context());
@@ -101,7 +111,7 @@ class PythonMlSignalEngineAvailabilityStatusTest {
     }
 
     @Test
-    void missingScoreReturnsDegraded() {
+    void modelAvailableTrueWithMissingScoreReturnsDegraded() {
         FraudEngineResult result = new PythonMlSignalEngine(
                 sourceReturning(result(null, RiskLevel.HIGH, "python-logistic-fraud-model", "2026-05-30.v1", true, List.of()))
         ).evaluate(context());
@@ -135,7 +145,7 @@ class PythonMlSignalEngineAvailabilityStatusTest {
     }
 
     @Test
-    void emptyResponseReturnsDegraded() {
+    void emptyResponseWithoutAvailabilityMetadataReturnsDegraded() {
         FraudScoreResult empty = new FraudScoreResult(
                 null,
                 null,
@@ -152,11 +162,11 @@ class PythonMlSignalEngineAvailabilityStatusTest {
 
         FraudEngineResult result = new PythonMlSignalEngine(sourceReturning(empty)).evaluate(context());
 
-        assertFailure(result, FraudEngineStatus.DEGRADED, PythonMlSignalReasonCode.ML_SCORE_MISSING);
+        assertFailure(result, FraudEngineStatus.DEGRADED, PythonMlSignalReasonCode.ML_AVAILABILITY_METADATA_MISSING);
     }
 
     @Test
-    void missingModelMetadataUsesBoundedReason() {
+    void modelAvailableTrueWithMissingModelMetadataReturnsDegraded() {
         FraudEngineResult result = new PythonMlSignalEngine(
                 sourceReturning(result(0.82d, RiskLevel.HIGH, null, "2026-05-30.v1", true, List.of()))
         ).evaluate(context());
