@@ -1,0 +1,52 @@
+# Application container hardening overlay for local verification; not a production deployment.
+# Covers Java app services, ML inference and analyst-console-ui only.
+# Kafka, MongoDB, Redis, Prometheus, Grafana, Keycloak and optional Ollama are outside this overlay.
+x-java-hardening: &java-hardening
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 256
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=64m
+
+services:
+  audit-trust-authority:
+    <<: *java-hardening
+
+  transaction-ingest-service:
+    <<: *java-hardening
+
+  transaction-simulator-service:
+    <<: *java-hardening
+
+  feature-enricher-service:
+    <<: *java-hardening
+
+  fraud-scoring-service:
+    <<: *java-hardening
+
+  alert-service:
+    <<: *java-hardening
+
+  ml-inference-service:
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+
+  analyst-console-ui:
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    tmpfs:
+      - /var/cache/nginx:rw,noexec,nosuid,uid=101,gid=101,mode=0755
+      - /var/run:rw,noexec,nosuid,uid=101,gid=101,mode=0755

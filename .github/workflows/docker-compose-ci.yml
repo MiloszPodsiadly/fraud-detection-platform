@@ -1,0 +1,289 @@
+name: Docker Compose CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-compose-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compose-config:
+    name: Compose config / ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: base
+            files: -f deployment/docker-compose.yml
+          - name: dev
+            files: -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml
+          - name: ai-opt-in
+            files: -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.ai.yml
+          - name: oidc
+            files: -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.oidc.yml
+          - name: jwt-service-identity
+            files: -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.service-identity-jwt.yml
+          - name: rs256-service-identity
+            files: -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.service-identity-rs256.yml
+          - name: mtls-service-identity
+            files: -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.service-identity-mtls.yml
+          - name: hardened
+            files: -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.hardened.yml
+          - name: full-local-security-hardened
+            files: -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.oidc.yml -f deployment/docker-compose.service-identity-mtls.yml -f deployment/docker-compose.trust-authority-jwt.yml -f deployment/docker-compose.hardened.yml
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate local identity fixtures for Compose overlays
+        run: bash scripts/bootstrap-local-fixtures.sh
+
+      - name: Validate supported Compose combination
+        run: docker compose --env-file deployment/.env.example ${{ matrix.files }} config --quiet
+
+  resolved-security-config:
+    name: Resolved Compose Security Assertions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify committed local runtime fixture is explicitly scoped
+        run: |
+          test -f deployment/.env
+          grep -F "Committed local runtime fixture" deployment/.env
+          grep -F "intentionally committed for local evaluation" README.md
+
+      - name: Assert base does not publish host ports
+        run: docker compose --env-file deployment/.env.example -f deployment/docker-compose.yml config --format json | node scripts/check-compose-security-config.mjs base
+
+      - name: Assert default dev excludes AI and is localhost-only
+        run: docker compose --env-file deployment/.env.example -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml config --format json | node scripts/check-compose-security-config.mjs dev
+
+      - name: Assert opt-in AI config
+        run: docker compose --env-file deployment/.env.example -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.ai.yml config --format json | node scripts/check-compose-security-config.mjs ai
+
+      - name: Generate local identity fixtures for security overlays
+        run: bash scripts/bootstrap-local-fixtures.sh
+
+      - name: Assert recommended local security demonstration and app hardening
+        run: docker compose --env-file deployment/.env.example -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.oidc.yml -f deployment/docker-compose.service-identity-mtls.yml -f deployment/docker-compose.trust-authority-jwt.yml -f deployment/docker-compose.hardened.yml config --format json | node scripts/check-compose-security-config.mjs security-hardened
+
+  runtime-smoke:
+    name: Runtime Smoke / default dev without AI
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Assert default dev services exclude AI
+        run: |
+          services="$(docker compose --env-file deployment/.env -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml config --services)"
+          printf '%s\n' "$services"
+          if printf '%s\n' "$services" | grep -Fxq -e ollama -e ollama-model-init; then
+            echo "Default dev services unexpectedly include AI." >&2
+            exit 1
+          fi
+
+      - name: Start services and verify health endpoints
+        run: bash scripts/ci/compose-runtime-smoke.sh dev
+
+  app-hardening-runtime-smoke:
+    name: Runtime Smoke / app hardening
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Start services and verify read-only application runtime
+        run: bash scripts/ci/compose-runtime-smoke.sh app-hardening
+
+  full-security-runtime-smoke:
+    name: Runtime Smoke / full security hardened
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate local identity fixtures
+        run: bash scripts/bootstrap-local-fixtures.sh
+
+      - name: Start official complete local security demonstration stack
+        run: bash scripts/ci/compose-runtime-smoke.sh full-security-hardened
+
+  demo-fixture-guard-tests:
+    name: Demo Fixture Guard Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate local identity fixtures for fixture guard tests
+        run: bash scripts/bootstrap-local-fixtures.sh
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Test alert-service fixture guards
+        run: mvn -B -pl alert-service -am -Dsurefire.failIfNoSpecifiedTests=false -Dtest=InternalServiceClientProdGuardTest,AuditTrustAuthorityClientConfigurationTest test
+
+      - name: Test fraud-scoring-service fixture guard
+        run: mvn -B -pl fraud-scoring-service -am -Dsurefire.failIfNoSpecifiedTests=false -Dtest=InternalServiceClientProdGuardTest test
+
+      - name: Test audit-trust-authority fixture guard
+        run: mvn -B -pl audit-trust-authority -am -Dsurefire.failIfNoSpecifiedTests=false -Dtest=TrustAuthorityServiceTest test
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: ml-inference-service/requirements.txt
+
+      - name: Install ML test dependencies
+        working-directory: ml-inference-service
+        run: python -m pip install -r requirements.txt
+
+      - name: Test ML fixture guard
+        working-directory: ml-inference-service
+        run: python -m unittest discover -s tests
+
+  repository-secret-gate:
+    name: Repository Secret Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Reject committed private key material
+        run: bash scripts/ci/assert-no-committed-private-keys.sh
+      - name: Block repository secrets
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: secret
+          format: table
+          exit-code: '1'
+
+  repository-vulnerability-gate:
+    name: Repository High/Critical Vulnerability Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Block high or critical repository vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+  repository-vulnerability-sarif:
+    name: Repository Vulnerability SARIF Upload
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Scan repository filesystem for vulnerability visibility
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln
+          format: sarif
+          output: trivy-fs.sarif
+          severity: LOW,MEDIUM,HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '0'
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-fs.sarif
+
+  backend-images:
+    name: Backend image / ${{ matrix.module }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - transaction-ingest-service
+          - transaction-simulator-service
+          - feature-enricher-service
+          - fraud-scoring-service
+          - alert-service
+          - audit-trust-authority
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend module image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deployment/Dockerfile.backend
+          push: false
+          tags: fdp-local/${{ matrix.module }}:${{ github.sha }}
+          build-args: |
+            MODULE_NAME=${{ matrix.module }}
+          cache-from: type=gha,scope=fdp-backend-${{ matrix.module }}
+          cache-to: type=gha,mode=max,scope=fdp-backend-${{ matrix.module }}
+
+  service-images:
+    name: Service image / ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ml-inference-service
+            dockerfile: deployment/Dockerfile.ml-inference
+          - name: analyst-console-ui
+            dockerfile: deployment/Dockerfile.frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build service image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: false
+          tags: fdp-local/${{ matrix.name }}:${{ github.sha }}
+          cache-from: type=gha,scope=fdp-${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=fdp-${{ matrix.name }}

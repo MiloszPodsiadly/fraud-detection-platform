@@ -1,15 +1,10 @@
 {
     "scope":  "Repository documentation audit inventory. Excludes documents/ prompt inputs, build outputs, dependency folders, .git internals, and local tmp folders.",
     "generated_on":  "2026-05-16",
-    "total_artifacts":  167,
+    "total_artifacts":  166,
     "artifacts":  [
                       {
                           "path":  ".github/PULL_REQUEST_TEMPLATE/fdp_enablement_config_change.md",
-                          "type":  "project",
-                          "status":  "current-source-of-truth"
-                      },
-                      {
-                          "path":  "deployment/service-identity/jwks.json",
                           "type":  "project",
                           "status":  "current-source-of-truth"
                       },

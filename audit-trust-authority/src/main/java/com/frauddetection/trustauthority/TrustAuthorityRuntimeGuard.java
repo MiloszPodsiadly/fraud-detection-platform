@@ -14,11 +14,15 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.Arrays;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Component
 public class TrustAuthorityRuntimeGuard implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(TrustAuthorityRuntimeGuard.class);
+    private static final Set<String> LOCAL_FIXTURE_PROFILES = Set.of("local", "dev", "docker-local");
+    private static final Set<String> TRUTHY_VALUES = Set.of("true", "1", "yes", "on");
+    private static final String DEMO_SECRET_ERROR = "Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context.";
 
     private final TrustAuthorityProperties properties;
     private final Environment environment;
@@ -42,6 +46,11 @@ public class TrustAuthorityRuntimeGuard implements ApplicationRunner {
             throw new IllegalStateException("Trust authority identity mode " + identityMode.configValue() + " is not implemented and fails closed.");
         }
         enforceFdp23Scope();
+        if (identityMode == TrustAuthorityIdentityMode.HMAC_LOCAL
+                && demoSecret(properties.getHmacSecret())
+                && !localFixtureProfile()) {
+            throw new IllegalStateException(DEMO_SECRET_ERROR);
+        }
         if (!prodLike) {
             return;
         }
@@ -89,6 +98,30 @@ public class TrustAuthorityRuntimeGuard implements ApplicationRunner {
                 .anyMatch(profile -> profile.equals("prod")
                         || profile.equals("production")
                         || profile.equals("staging"));
+    }
+
+    private boolean localFixtureProfile() {
+        Set<String> profiles = Arrays.stream(environment.getActiveProfiles())
+                .map(String::trim)
+                .map(String::toLowerCase)
+                .collect(Collectors.toSet());
+        return profiles.stream().anyMatch(LOCAL_FIXTURE_PROFILES::contains)
+                || (profiles.contains("test") && explicitFixtureTestContext());
+    }
+
+    private boolean explicitFixtureTestContext() {
+        return truthy(environment.getProperty("app.local-fixture-test.enabled"))
+                || truthy(environment.getProperty("APP_LOCAL_FIXTURE_TEST_ENABLED"))
+                || truthy(environment.getProperty("LOCAL_FIXTURE_TEST_ENABLED"))
+                || truthy(environment.getProperty("CI"));
+    }
+
+    private boolean truthy(String value) {
+        return value != null && TRUTHY_VALUES.contains(value.trim().toLowerCase());
+    }
+
+    private boolean demoSecret(String value) {
+        return value != null && value.trim().startsWith("local-dev-");
     }
 
     private void requirePersistentPath(String path, String material) {

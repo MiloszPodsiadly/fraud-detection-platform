@@ -733,10 +733,10 @@ Candidate for consolidation:
 ## Docker Compose Build
 
 Purpose:
-- Prove the strongest compose stack config validates and images build.
+- Prove the recommended local security demonstration configuration validates and application images build.
 
 Proves:
-- Compose config with OIDC, service identity mTLS, and trust-authority JWT overlays is syntactically valid and images build.
+- Compose config with the local configuration fixture, generated local service-identity material, dev exposure layer, OIDC, service identity mTLS, trust-authority JWT, and application container hardening overlays is syntactically valid and images build.
 
 Does not prove:
 - Runtime health, enterprise IAM, or every service-to-service request path.
@@ -745,10 +745,33 @@ Required for merge:
 - Yes
 
 Primary proof files:
+- `deployment/.env.example`
+- `Makefile`
+- `scripts/bootstrap-local-fixtures.sh`
+- `scripts/ci/assert-no-committed-private-keys.sh`
 - `deployment/docker-compose.yml`
+- `deployment/docker-compose.dev.yml`
 - `deployment/docker-compose.oidc.yml`
 - `deployment/docker-compose.service-identity-mtls.yml`
 - `deployment/docker-compose.trust-authority-jwt.yml`
+- `deployment/docker-compose.hardened.yml`
+
+Supplementary Docker Compose workflow proof:
+- `Repository Secret Gate` fails when tracked files contain private-key names or PEM private-key blocks; generated local fixture material is not scanned out of existence by suppression.
+- `Resolved Compose Security Assertions` in `.github/workflows/docker-compose-ci.yml` verifies that overlay resolution keeps host publication localhost-only, leaves Ollama opt-in, and resolves the documented mTLS, OIDC/BFF, trust-authority JWT signing and application-container hardening controls.
+- `Runtime Smoke / default dev without AI`, `Runtime Smoke / app hardening` and `Runtime Smoke / full security hardened` boot their documented local paths without Ollama; the complete path bootstraps generated identity material and verifies UI, alert readiness and CA-validated ML HTTPS health under OIDC, mTLS, trust-authority JWT and application hardening overlays. Failure output identifies service health transitions, bounded service log tails and the failed container inspection without printing private-key contents.
+- `Demo Fixture Guard Tests` proves generic `docker` and unmarked `test` profiles reject committed demo-secret patterns while explicitly marked fixture tests remain possible.
+- `Repository High/Critical Vulnerability Gate` blocks merge on fixed, known `HIGH` or `CRITICAL` repository filesystem vulnerabilities.
+- `Repository Vulnerability SARIF Upload` records `LOW`, `MEDIUM`, `HIGH` and `CRITICAL` filesystem vulnerability visibility in Code Scanning without making `LOW` or `MEDIUM` findings merge-blocking by itself; it is not production image provenance.
+- Remaining supply-chain follow-ups are digest pinning, SBOM generation, SLSA/provenance evidence, signed images and automated dependency update policy.
+- The dependency remediation moves the backend to Spring Boot `3.5.14`, a public supported line used to pick up the fixed Spring Security generation required by the critical vulnerability scan; the normal test and runtime evidence remains required for compatibility.
+- These supplementary jobs do not prove production IAM, external secret management, production deployment hardening, or optional AI model runtime behavior.
+
+Supplementary proof files:
+- `.github/workflows/docker-compose-ci.yml`
+- `scripts/check-compose-security-config.mjs`
+- `scripts/ci/compose-runtime-smoke.sh`
+- `deployment/docker-compose.ai.yml`
 
 Related FDP branches:
 - FDP-28

@@ -9,7 +9,7 @@ services:
       INTERNAL_AUTH_MTLS_CA_FILE: /run/service-identity/mtls/local-dev-ca.pem
       INTERNAL_AUTH_MTLS_SPIFFE_TRUST_DOMAIN: fraud-platform
     volumes:
-      - ./service-identity/mtls:/run/service-identity/mtls:ro
+      - ./.local/service-identity/mtls:/run/service-identity/mtls:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import ssl,urllib.request; ctx=ssl.create_default_context(cafile='/run/service-identity/mtls/local-dev-ca.pem'); urllib.request.urlopen('https://localhost:8090/health', context=ctx, timeout=2).read()"]
 
@@ -25,7 +25,7 @@ services:
       INTERNAL_AUTH_MTLS_EXPECTED_SERVER_IDENTITY: ml-inference-service
       INTERNAL_AUTH_MTLS_TRUST_ALL: "false"
     volumes:
-      - ./service-identity/mtls:/run/service-identity/mtls:ro
+      - ./.local/service-identity/mtls:/run/service-identity/mtls:ro
 
   alert-service:
     environment:
@@ -39,4 +39,4 @@ services:
       INTERNAL_AUTH_MTLS_EXPECTED_SERVER_IDENTITY: ml-inference-service
       INTERNAL_AUTH_MTLS_TRUST_ALL: "false"
     volumes:
-      - ./service-identity/mtls:/run/service-identity/mtls:ro
+      - ./.local/service-identity/mtls:/run/service-identity/mtls:ro
