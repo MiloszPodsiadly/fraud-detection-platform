@@ -24,6 +24,7 @@ frontend authorization responsibility. The current diagrams remain valid as revi
 
 | Document | Status | Use for | Do not use for |
 | --- | --- | --- | --- |
+| [Feature snapshot consumption policy](feature_snapshot_consumption_policy.md) | FDP-85 internal adapter-consumption policy only | Typed, allowlisted reads of internal `ScoringContext.featureSnapshot` for future adapters | Claiming adapters, runtime wiring, event, API, UI, or decisioning integration |
 | [Fraud signal engine boundary](fraud_signal_engine_boundary.md) | FDP-84 internal interface foundation only | Internal engine interface and static descriptor boundary | Claiming runtime orchestration, event, API, UI, or decisioning integration |
 | [Scoring context boundary](scoring_context_boundary.md) | FDP-83 internal foundation only | Internal scoring input model boundary | Claiming runtime, event, API, UI, or projection integration |
 | [Multi-engine scoring contract boundary](multi_engine_scoring_architecture.md) | Contract foundation only | FDP-82 shared engine-result boundary | Claiming runtime orchestration or event integration |

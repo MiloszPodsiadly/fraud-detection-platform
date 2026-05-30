@@ -29,6 +29,7 @@ class FraudEngineContractRuntimeIsolationTest {
                 .doesNotContain(
                         "scoringContext",
                         "engineResults",
+                        "featureSnapshotReader",
                         "platformRiskScore",
                         "platformRiskLevel",
                         "primarySource",
@@ -49,6 +50,11 @@ class FraudEngineContractRuntimeIsolationTest {
                 .doesNotContain("FraudScoringOrchestrator")
                 .doesNotContain("RuleBasedSignalEngine")
                 .doesNotContain("PythonMlSignalEngine")
+                .doesNotContain("VelocitySignalEngine")
+                .doesNotContain("DeviceSignalEngine")
+                .doesNotContain("MerchantSignalEngine")
+                .doesNotContain("ExperimentalSignalEngine")
+                .doesNotContain("implements FraudSignalEngine")
                 .doesNotContain("FraudIntelligenceResult")
                 .doesNotContain("engineResults");
     }
@@ -84,10 +90,44 @@ class FraudEngineContractRuntimeIsolationTest {
                 .doesNotContain("FraudEngineResult")
                 .doesNotContain("engineResults");
         assertThat(compositeRuntime)
+                .doesNotContain("FeatureSnapshotReader")
+                .doesNotContain("FeatureSnapshotReaderFactory")
+                .doesNotContain("FeatureSnapshotValue")
+                .doesNotContain("FeatureSnapshotScalarType")
                 .doesNotContain("FraudSignalEngine")
                 .doesNotContain("FraudEngineDescriptor")
+                .doesNotContain("FraudEngineResult")
                 .doesNotContain("FraudScoringOrchestrator")
                 .doesNotContain("engineResults");
+    }
+
+    @Test
+    void featureSnapshotConsumptionPolicyRemainsInternalAndUnwired() throws Exception {
+        Path scoringRoot = repositoryRoot().resolve("fraud-scoring-service/src/main/java/com/frauddetection/scoring");
+        Path featuresRoot = scoringRoot.resolve("features");
+        String features = javaSources(featuresRoot);
+        String runtimeOutsidePolicy = javaSourcesExcept(scoringRoot, featuresRoot);
+        String adapterFoundation = javaSources(scoringRoot.resolve("engine"));
+
+        assertThat(features)
+                .contains("enum FeatureSnapshotValueStatus")
+                .contains("record FeatureSnapshotValue")
+                .contains("enum FeatureSnapshotScalarType")
+                .contains("class FeatureSnapshotKeyPolicy")
+                .contains("class FeatureSnapshotReader")
+                .contains("class FeatureSnapshotReaderFactory");
+        assertThat(runtimeOutsidePolicy)
+                .doesNotContain("FeatureSnapshotReader")
+                .doesNotContain("FeatureSnapshotValue")
+                .doesNotContain("FeatureSnapshotValueStatus")
+                .doesNotContain("FeatureSnapshotScalarType")
+                .doesNotContain("FeatureSnapshotKeyPolicy")
+                .doesNotContain("FeatureSnapshotReaderFactory");
+        assertThat(adapterFoundation)
+                .doesNotContain("FeatureSnapshotReader")
+                .doesNotContain("FeatureSnapshotScalarType")
+                .doesNotContain("context.featureSnapshot().get(")
+                .doesNotContain("featureSnapshot().get(");
     }
 
     @Test
@@ -107,15 +147,27 @@ class FraudEngineContractRuntimeIsolationTest {
                 .doesNotContain("ScoringContextValuePolicy")
                 .doesNotContain("FraudSignalEngine")
                 .doesNotContain("FraudEngineDescriptor")
-                .doesNotContain("FraudEngineDescriptorValuePolicy");
+                .doesNotContain("FraudEngineDescriptorValuePolicy")
+                .doesNotContain("FeatureSnapshotReader")
+                .doesNotContain("FeatureSnapshotValue")
+                .doesNotContain("FeatureSnapshotValueStatus")
+                .doesNotContain("FeatureSnapshotScalarType")
+                .doesNotContain("FeatureSnapshotKeyPolicy")
+                .doesNotContain("FeatureSnapshotReaderFactory");
         assertThat(alertRuntime)
                 .doesNotContain("ScoringContext")
+                .doesNotContain("FeatureSnapshotReader")
+                .doesNotContain("FeatureSnapshotValue")
+                .doesNotContain("FeatureSnapshotScalarType")
                 .doesNotContain("FraudSignalEngine")
                 .doesNotContain("FraudEngineDescriptor")
                 .doesNotContain("FraudEngineResult")
                 .doesNotContain("engineResults");
         assertThat(uiRuntime)
                 .doesNotContain("ScoringContext")
+                .doesNotContain("FeatureSnapshotReader")
+                .doesNotContain("FeatureSnapshotValue")
+                .doesNotContain("FeatureSnapshotScalarType")
                 .doesNotContain("FraudSignalEngine")
                 .doesNotContain("FraudEngineDescriptor")
                 .doesNotContain("FraudEngineResult")
