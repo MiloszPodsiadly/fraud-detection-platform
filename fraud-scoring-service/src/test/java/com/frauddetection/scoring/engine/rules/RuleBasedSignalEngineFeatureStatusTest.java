@@ -11,6 +11,8 @@ import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.config.ScoringMode;
 import com.frauddetection.scoring.config.ScoringProperties;
 import com.frauddetection.scoring.context.ScoringContext;
+import com.frauddetection.scoring.domain.FraudScoreResult;
+import com.frauddetection.scoring.domain.FraudScoringRequest;
 import com.frauddetection.scoring.features.FeatureSnapshotReaderFactory;
 import com.frauddetection.scoring.features.FeatureSnapshotValueStatus;
 import com.frauddetection.scoring.service.RuleBasedFraudScoringEngine;
@@ -59,20 +61,48 @@ class RuleBasedSignalEngineFeatureStatusTest {
     }
 
     @Test
-    void invalidTypesAreNotCoercedAndDoNotProduceValidSignals() {
+    void invalidSnapshotTypeForTypedEventFieldDoesNotDegradeAdapter() {
+        TransactionEnrichedEvent event = event(false, false, false, 5, 0.1d, BigDecimal.TEN,
+                List.of(),
+                Map.of(FraudFeatureContract.RECENT_TRANSACTION_COUNT, "5"));
+        FraudScoreResult production = productionEngine.score(FraudScoringRequest.from(event));
+
+        FraudEngineResult result = engine.evaluate(context(event));
+
+        assertThat(result.status()).isEqualTo(FraudEngineStatus.AVAILABLE);
+        assertThat(result.statusReason()).isNull();
+        assertThat(result.score()).isEqualTo(production.fraudScore());
+        assertThat(result.riskLevel()).isEqualTo(production.riskLevel());
+        assertThat(result.reasonCodes()).containsExactlyElementsOf(production.reasonCodes());
+        assertThat(result.reasonCodes()).containsExactly(ReasonCode.RECENT_TRANSACTION_SPIKE.wireValue());
+        assertThat(flatten(result)).doesNotContain("5");
+    }
+
+    @Test
+    void invalidRapidTransferFraudCaseCandidateSnapshotTypeStillDegrades() {
         FraudEngineResult result = engine.evaluate(context(event(false, false, false, 1, 0.1d, BigDecimal.TEN,
                 List.of(),
-                Map.of(
-                        FraudFeatureContract.DEVICE_NOVELTY, "true",
-                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, "3"
-                ))));
+                Map.of(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, "true"))));
 
         assertThat(result.status()).isEqualTo(FraudEngineStatus.DEGRADED);
         assertThat(result.score()).isNull();
         assertThat(result.riskLevel()).isNull();
         assertThat(result.statusReason()).isEqualTo(RuleBasedSignalReasonCode.FEATURE_STATUS_INVALID.wireValue());
-        assertThat(flatten(result)).doesNotContain("true", "\"3\"");
+        assertThat(flatten(result)).doesNotContain("true");
         assertThat(result.reasonCodes()).containsExactly(RuleBasedSignalReasonCode.FEATURE_STATUS_INVALID.wireValue());
+    }
+
+    @Test
+    void missingRapidTransferFraudCaseCandidateDoesNotDegrade() {
+        FraudEngineResult result = engine.evaluate(context(event(false, false, false, 5, 0.1d, BigDecimal.TEN,
+                List.of(),
+                Map.of())));
+
+        assertThat(result.status()).isEqualTo(FraudEngineStatus.AVAILABLE);
+        assertThat(result.statusReason()).isNull();
+        assertThat(result.reasonCodes()).containsExactly(ReasonCode.RECENT_TRANSACTION_SPIKE.wireValue());
+        assertThat(result.evidence()).extracting(evidence -> evidence.reasonCode())
+                .containsExactly(ReasonCode.RECENT_TRANSACTION_SPIKE.wireValue());
     }
 
     @Test

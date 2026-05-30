@@ -119,18 +119,7 @@ public final class RuleBasedSignalEngine implements FraudSignalEngine {
 
     private FeatureSnapshotValueStatus validateFeatureSnapshot(FeatureSnapshotReader reader) {
         return firstInvalidType(
-                reader.booleanValue(FraudFeatureContract.DEVICE_NOVELTY),
-                reader.booleanValue(FraudFeatureContract.COUNTRY_MISMATCH),
-                reader.booleanValue(FraudFeatureContract.PROXY_OR_VPN_DETECTED),
-                reader.booleanValue(FraudFeatureContract.RAPID_TRANSFER_BURST),
-                reader.booleanValue(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE),
-                reader.integerValue(FraudFeatureContract.RECENT_TRANSACTION_COUNT),
-                reader.integerValue(FraudFeatureContract.HIGH_RISK_FLAG_COUNT),
-                reader.integerValue(FraudFeatureContract.RAPID_TRANSFER_COUNT),
-                reader.doubleValue(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE),
-                reader.decimalValue(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN),
-                reader.decimalValue(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN),
-                reader.decimalValue(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN)
+                reader.booleanValue(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE)
         );
     }
 
