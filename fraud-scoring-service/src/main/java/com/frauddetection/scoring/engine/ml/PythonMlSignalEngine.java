@@ -60,6 +60,16 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
         if (sourceResult == null) {
             return degradedResult(PythonMlSignalReasonCode.ML_MODEL_INVALID_RESPONSE, generatedAt);
         }
+        ModelAvailabilityStatus availabilityStatus = modelAvailabilityStatus(sourceResult);
+        if (availabilityStatus == ModelAvailabilityStatus.UNAVAILABLE) {
+            return unavailableResult(FraudEngineStatus.UNAVAILABLE, PythonMlSignalReasonCode.ML_MODEL_UNAVAILABLE, generatedAt);
+        }
+        if (availabilityStatus == ModelAvailabilityStatus.MISSING) {
+            return degradedResult(PythonMlSignalReasonCode.ML_AVAILABILITY_METADATA_MISSING, generatedAt);
+        }
+        if (availabilityStatus == ModelAvailabilityStatus.INVALID) {
+            return degradedResult(PythonMlSignalReasonCode.ML_AVAILABILITY_METADATA_INVALID, generatedAt);
+        }
         if (sourceResult.fraudScore() == null) {
             return degradedResult(PythonMlSignalReasonCode.ML_SCORE_MISSING, generatedAt);
         }
@@ -71,16 +81,6 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
         }
         if (missingModelMetadata(sourceResult)) {
             return degradedResult(PythonMlSignalReasonCode.ML_MODEL_METADATA_MISSING, generatedAt);
-        }
-        ModelAvailabilityStatus availabilityStatus = modelAvailabilityStatus(sourceResult);
-        if (availabilityStatus == ModelAvailabilityStatus.UNAVAILABLE) {
-            return unavailableResult(FraudEngineStatus.UNAVAILABLE, PythonMlSignalReasonCode.ML_MODEL_UNAVAILABLE, generatedAt);
-        }
-        if (availabilityStatus == ModelAvailabilityStatus.MISSING) {
-            return degradedResult(PythonMlSignalReasonCode.ML_AVAILABILITY_METADATA_MISSING, generatedAt);
-        }
-        if (availabilityStatus == ModelAvailabilityStatus.INVALID) {
-            return degradedResult(PythonMlSignalReasonCode.ML_AVAILABILITY_METADATA_INVALID, generatedAt);
         }
         return availableResult(sourceResult, generatedAt);
     }
