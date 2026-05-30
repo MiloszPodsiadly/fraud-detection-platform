@@ -118,15 +118,20 @@ feature support requires an explicit policy and tests.
 
 FDP-85 introduced only the consumption policy and contained no adapters. FDP-87 adds an isolated
 `RuleBasedSignalEngine` adapter that must use this reader policy, remains internal to
-`fraud-scoring-service`, and is not wired into `CompositeFraudScoringEngine`. The current runtime
-still contains no `PythonMlSignalEngine`, no `FraudScoringOrchestrator`, no
-`FraudIntelligenceResult`, no `engineResults[]`, and no event/API/UI integration. This policy does
-not change current rule-based or ML scoring behavior.
+`fraud-scoring-service`, and is not wired into `CompositeFraudScoringEngine`. FDP-88 adds an
+isolated `PythonMlSignalEngine` adapter. The ML source of truth owns feature extraction for this
+branch, so the Python ML adapter does not read `featureSnapshot`, does not use
+`FeatureSnapshotReader`, and does not preflight snapshot keys. The current runtime still contains
+no `FraudScoringOrchestrator`, no `FraudIntelligenceResult`, no `engineResults[]`, and no
+event/API/UI integration. This policy does not change current rule-based or ML scoring behavior.
 
 Future adapters must use `FeatureSnapshotReader` and the policy layer. They must not directly
 cast values from `Map<String, Object>` or call `context.featureSnapshot().get(...)` directly.
 
-## Current Adapter
+## Current Adapters
 
 The current rule adapter boundary is documented in
-`docs/architecture/rule_based_signal_engine_adapter.md`.
+`docs/architecture/rule_based_signal_engine_adapter.md`. The current Python ML adapter boundary is
+documented in `docs/architecture/python_ml_signal_engine_adapter.md`, and that adapter remains
+outside feature snapshot consumption for FDP-88 because the existing ML scoring boundary owns
+feature extraction.

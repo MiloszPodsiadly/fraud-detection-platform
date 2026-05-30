@@ -24,6 +24,7 @@ frontend authorization responsibility. The current diagrams remain valid as revi
 
 | Document | Status | Use for | Do not use for |
 | --- | --- | --- | --- |
+| [Python ML signal engine adapter](python_ml_signal_engine_adapter.md) | FDP-88 adapter foundation only | Internal `PythonMlSignalEngine` adapter contract, existing ML source-of-truth delegation, unavailable semantics, bounded ML evidence, and runtime isolation | Claiming production scoring migration, orchestration, event/API/UI/projection integration, final decisioning, or `engineResults[]` |
 | [Rule-based signal engine adapter](rule_based_signal_engine_adapter.md) | FDP-87 adapter foundation only | Internal `RuleBasedSignalEngine` adapter contract, safe feature consumption, bounded evidence, and runtime isolation | Claiming production scoring migration, orchestration, event/API/UI/projection integration, or `engineResults[]` |
 | [Feature snapshot consumption policy](feature_snapshot_consumption_policy.md) | FDP-85 internal adapter-consumption policy only | Typed, allowlisted reads of internal `ScoringContext.featureSnapshot` for future adapters | Claiming adapters, runtime wiring, event, API, UI, or decisioning integration |
 | [Fraud signal engine boundary](fraud_signal_engine_boundary.md) | FDP-84 internal interface foundation only | Internal engine interface and static descriptor boundary | Claiming runtime orchestration, event, API, UI, or decisioning integration |
