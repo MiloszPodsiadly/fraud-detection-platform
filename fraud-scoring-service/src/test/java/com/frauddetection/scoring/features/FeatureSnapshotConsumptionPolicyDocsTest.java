@@ -46,6 +46,21 @@ class FeatureSnapshotConsumptionPolicyDocsTest {
                 .contains("pan/card/account identifiers")
                 .contains("canonical feature keys")
                 .contains("camelcase")
+                .contains("adapter consumption is not key-only")
+                .contains("key and expected scalar type")
+                .contains("registered `fraudfeaturecontract` key does not automatically mean scalar adapter-consumable")
+                .contains("some registered keys are intentionally not consumable by the v1 scalar reader")
+                .contains("devicenovelty` is boolean")
+                .contains("recenttransactioncount` is integer")
+                .contains("transactionvelocityperminute` is double")
+                .contains("currency` is string")
+                .contains("rapidtransfertotalpln` is decimal")
+                .contains("rapidtransfertransactionids` is not consumable by v1 scalar reader")
+                .contains("featureflags` is not consumable by v1 scalar reader")
+                .contains("wrong accessor is not valid consumption")
+                .contains("not_allowed` results must not expose raw rejected keys")
+                .contains("featuresnapshotreader` accepts the existing internal snapshot shape")
+                .contains("consumption is controlled at read time")
                 .contains("no `rulebasedsignalengine`")
                 .contains("no `pythonmlsignalengine`")
                 .contains("no `fraudscoringorchestrator`")
@@ -66,7 +81,10 @@ class FeatureSnapshotConsumptionPolicyDocsTest {
                 .doesNotContain("missing means false")
                 .doesNotContain("missing means zero")
                 .doesNotContain("type coercion is allowed")
-                .doesNotContain("raw payload consumption is allowed");
+                .doesNotContain("raw payload consumption is allowed")
+                .doesNotContain("registered key automatically consumable")
+                .doesNotContain("raw rejected key is returned")
+                .doesNotContain("runtime scoring behavior is changed");
     }
 
     private Path docsRoot() {

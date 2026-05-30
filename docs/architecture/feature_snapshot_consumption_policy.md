@@ -35,6 +35,26 @@ passwords, stack traces/exception text, debug metadata, PAN/card/account identif
 SSN/national identifiers, email/phone, raw device fingerprints, raw user-agent values, or
 host/endpoint/url values are forbidden.
 
+## Key And Type Consumption Policy
+
+Adapter consumption is not key-only. A feature is consumable only when both the key and expected
+scalar type are approved by policy. A registered `FraudFeatureContract` key does not automatically
+mean scalar adapter-consumable. Some registered keys are intentionally not consumable by the v1
+scalar reader.
+
+Examples:
+
+- `deviceNovelty` is boolean.
+- `recentTransactionCount` is integer.
+- `transactionVelocityPerMinute` is double.
+- `currency` is string.
+- `rapidTransferTotalPln` is decimal.
+- `rapidTransferTransactionIds` is not consumable by v1 scalar reader.
+- `featureFlags` is not consumable by v1 scalar reader.
+
+Wrong accessor is not valid consumption. `stringValue("deviceNovelty")` is not a valid way to read
+a boolean feature. `booleanValue("currency")` is not a valid way to read a string feature.
+
 ## Value Semantics
 
 - `PRESENT` means the key exists and its value exactly matches the requested scalar accessor type.
@@ -45,11 +65,24 @@ host/endpoint/url values are forbidden.
 A missing boolean is not false. A missing number is not zero. A missing string is not empty
 string. An invalid type is not coerced: string `"true"` is not boolean `true`, string `"3"` is
 not integer `3`, and integer `1` is not boolean `true`. `NOT_ALLOWED` is an explicit outcome and
-must not be silently ignored by future adapters.
+must not be silently ignored by future adapters. `NOT_ALLOWED` results must not expose raw rejected
+keys.
 
 No `UNAVAILABLE` status is defined in FDP-85 because current upstream feature computation does
 not provide an explicit unavailable marker. That semantic can be added only when upstream
 feature computation explicitly supports it.
+
+## Reader Constructor Policy
+
+`FeatureSnapshotReader` accepts the existing internal snapshot shape. The constructor rejects null
+maps, top-level null keys, and top-level null values, then defensively copies the full top-level
+map. It does not filter or reject every disallowed key because upstream snapshots may contain data
+not intended for adapter consumption.
+
+Adapter consumption is controlled at read time by `FeatureSnapshotKeyPolicy`. Disallowed or
+unregistered keys return `NOT_ALLOWED`, and disallowed keys are not exposed as raw output.
+`NOT_ALLOWED` results must not expose raw rejected keys. The raw feature map is never exposed.
+Future adapters must not inspect the raw map directly.
 
 ## Null And Nested Values
 

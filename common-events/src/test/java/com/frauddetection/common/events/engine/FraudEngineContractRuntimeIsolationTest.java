@@ -93,6 +93,7 @@ class FraudEngineContractRuntimeIsolationTest {
                 .doesNotContain("FeatureSnapshotReader")
                 .doesNotContain("FeatureSnapshotReaderFactory")
                 .doesNotContain("FeatureSnapshotValue")
+                .doesNotContain("FeatureSnapshotScalarType")
                 .doesNotContain("FraudSignalEngine")
                 .doesNotContain("FraudEngineDescriptor")
                 .doesNotContain("FraudEngineResult")
@@ -111,6 +112,7 @@ class FraudEngineContractRuntimeIsolationTest {
         assertThat(features)
                 .contains("enum FeatureSnapshotValueStatus")
                 .contains("record FeatureSnapshotValue")
+                .contains("enum FeatureSnapshotScalarType")
                 .contains("class FeatureSnapshotKeyPolicy")
                 .contains("class FeatureSnapshotReader")
                 .contains("class FeatureSnapshotReaderFactory");
@@ -118,10 +120,12 @@ class FraudEngineContractRuntimeIsolationTest {
                 .doesNotContain("FeatureSnapshotReader")
                 .doesNotContain("FeatureSnapshotValue")
                 .doesNotContain("FeatureSnapshotValueStatus")
+                .doesNotContain("FeatureSnapshotScalarType")
                 .doesNotContain("FeatureSnapshotKeyPolicy")
                 .doesNotContain("FeatureSnapshotReaderFactory");
         assertThat(adapterFoundation)
                 .doesNotContain("FeatureSnapshotReader")
+                .doesNotContain("FeatureSnapshotScalarType")
                 .doesNotContain("context.featureSnapshot().get(")
                 .doesNotContain("featureSnapshot().get(");
     }
@@ -147,12 +151,14 @@ class FraudEngineContractRuntimeIsolationTest {
                 .doesNotContain("FeatureSnapshotReader")
                 .doesNotContain("FeatureSnapshotValue")
                 .doesNotContain("FeatureSnapshotValueStatus")
+                .doesNotContain("FeatureSnapshotScalarType")
                 .doesNotContain("FeatureSnapshotKeyPolicy")
                 .doesNotContain("FeatureSnapshotReaderFactory");
         assertThat(alertRuntime)
                 .doesNotContain("ScoringContext")
                 .doesNotContain("FeatureSnapshotReader")
                 .doesNotContain("FeatureSnapshotValue")
+                .doesNotContain("FeatureSnapshotScalarType")
                 .doesNotContain("FraudSignalEngine")
                 .doesNotContain("FraudEngineDescriptor")
                 .doesNotContain("FraudEngineResult")
@@ -161,6 +167,7 @@ class FraudEngineContractRuntimeIsolationTest {
                 .doesNotContain("ScoringContext")
                 .doesNotContain("FeatureSnapshotReader")
                 .doesNotContain("FeatureSnapshotValue")
+                .doesNotContain("FeatureSnapshotScalarType")
                 .doesNotContain("FraudSignalEngine")
                 .doesNotContain("FraudEngineDescriptor")
                 .doesNotContain("FraudEngineResult")
