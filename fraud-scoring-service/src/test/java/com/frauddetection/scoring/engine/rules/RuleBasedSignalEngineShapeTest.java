@@ -5,6 +5,7 @@ import com.frauddetection.scoring.context.ScoringContext;
 import com.frauddetection.scoring.engine.FraudEngineDescriptor;
 import com.frauddetection.scoring.engine.FraudSignalEngine;
 import com.frauddetection.scoring.features.FeatureSnapshotReaderFactory;
+import com.frauddetection.scoring.service.RuleBasedFraudScoringEngine;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Modifier;
@@ -32,7 +33,7 @@ class RuleBasedSignalEngineShapeTest {
         assertThat(RuleBasedSignalEngine.class.getConstructors())
                 .singleElement()
                 .satisfies(constructor -> assertThat(constructor.getParameterTypes())
-                        .containsExactly(FeatureSnapshotReaderFactory.class));
+                        .containsExactly(FeatureSnapshotReaderFactory.class, RuleBasedFraudScoringEngine.class));
         assertThat(Arrays.stream(RuleBasedSignalEngine.class.getAnnotations())
                 .map(annotation -> annotation.annotationType().getSimpleName()))
                 .doesNotContain("Component", "Service", "Repository", "Controller", "Configuration");

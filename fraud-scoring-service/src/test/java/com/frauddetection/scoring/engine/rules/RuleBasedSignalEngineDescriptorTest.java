@@ -1,8 +1,11 @@
 package com.frauddetection.scoring.engine.rules;
 
 import com.frauddetection.common.events.engine.FraudEngineType;
+import com.frauddetection.scoring.config.ScoringMode;
+import com.frauddetection.scoring.config.ScoringProperties;
 import com.frauddetection.scoring.engine.FraudEngineDescriptor;
 import com.frauddetection.scoring.features.FeatureSnapshotReaderFactory;
+import com.frauddetection.scoring.service.RuleBasedFraudScoringEngine;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -14,7 +17,7 @@ class RuleBasedSignalEngineDescriptorTest {
 
     @Test
     void descriptorUsesStaticRulesIdentity() {
-        FraudEngineDescriptor descriptor = new RuleBasedSignalEngine(new FeatureSnapshotReaderFactory()).descriptor();
+        FraudEngineDescriptor descriptor = newAdapter().descriptor();
 
         assertThat(descriptor.engineId()).isEqualTo("rules.primary");
         assertThat(descriptor.engineType()).isEqualTo(FraudEngineType.RULES);
@@ -32,7 +35,7 @@ class RuleBasedSignalEngineDescriptorTest {
 
     @Test
     void requiredFlagRemainsDescriptorMetadataOnly() {
-        FraudEngineDescriptor descriptor = new RuleBasedSignalEngine(new FeatureSnapshotReaderFactory()).descriptor();
+        FraudEngineDescriptor descriptor = newAdapter().descriptor();
 
         assertThat(descriptor.required()).isTrue();
         assertThat(Arrays.stream(RuleBasedSignalEngine.class.getDeclaredMethods()).map(method -> method.getName()))
@@ -44,5 +47,12 @@ class RuleBasedSignalEngineDescriptorTest {
         assertThat(Arrays.stream(RuleBasedSignalEngine.class.getAnnotations())
                 .map(annotation -> annotation.annotationType().getSimpleName()))
                 .doesNotContain("Component", "Service", "Repository", "Controller", "Configuration");
+    }
+
+    private RuleBasedSignalEngine newAdapter() {
+        return new RuleBasedSignalEngine(
+                new FeatureSnapshotReaderFactory(),
+                new RuleBasedFraudScoringEngine(new ScoringProperties(0.75d, 0.90d, ScoringMode.RULE_BASED))
+        );
     }
 }
