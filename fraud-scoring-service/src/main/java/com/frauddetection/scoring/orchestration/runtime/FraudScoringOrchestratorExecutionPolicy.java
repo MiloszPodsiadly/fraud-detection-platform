@@ -11,11 +11,19 @@ import java.util.Set;
 public record FraudScoringOrchestratorExecutionPolicy(
         List<FraudEngineExecutionPolicy> enginePolicies
 ) {
+    private static final Set<String> ALLOWED_ENGINE_IDS = Set.of(
+            FraudSignalEngineRegistry.RULES_PRIMARY_ENGINE_ID,
+            FraudSignalEngineRegistry.PYTHON_ML_PRIMARY_ENGINE_ID
+    );
+
     public FraudScoringOrchestratorExecutionPolicy {
         Objects.requireNonNull(enginePolicies, "enginePolicies is required");
         Set<String> engineIds = new HashSet<>();
         for (FraudEngineExecutionPolicy policy : enginePolicies) {
             Objects.requireNonNull(policy, "enginePolicies must not contain null entries");
+            if (!ALLOWED_ENGINE_IDS.contains(policy.engineId())) {
+                throw new IllegalArgumentException("ENGINE_EXECUTION_POLICY_UNKNOWN_ENGINE_ID");
+            }
             if (!engineIds.add(policy.engineId())) {
                 throw new IllegalArgumentException("ENGINE_EXECUTION_POLICY_DUPLICATE_ENGINE_ID");
             }

@@ -57,7 +57,7 @@ public final class BoundedFraudEngineExecutor implements AutoCloseable {
         try {
             future = executorService.submit(task);
         } catch (RejectedExecutionException exception) {
-            return ExecutionResult.failed();
+            return ExecutionResult.rejected();
         }
         try {
             return ExecutionResult.completed(future.get(deadline.toNanos(), TimeUnit.NANOSECONDS));
@@ -108,6 +108,7 @@ public final class BoundedFraudEngineExecutor implements AutoCloseable {
     public enum ExecutionStatus {
         COMPLETED,
         FAILED,
+        REJECTED,
         TIMED_OUT
     }
 
@@ -125,6 +126,10 @@ public final class BoundedFraudEngineExecutor implements AutoCloseable {
 
         static <T> ExecutionResult<T> failed() {
             return new ExecutionResult<>(ExecutionStatus.FAILED, null);
+        }
+
+        static <T> ExecutionResult<T> rejected() {
+            return new ExecutionResult<>(ExecutionStatus.REJECTED, null);
         }
 
         static <T> ExecutionResult<T> timedOut() {

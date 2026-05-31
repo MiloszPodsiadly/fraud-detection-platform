@@ -66,10 +66,10 @@ public final class FraudScoringOrchestrator implements AutoCloseable {
             FraudEngineResult engineResult = evaluated.result();
             engineResults.add(engineResult);
             addWarnings(policy, engineResult, executionWarnings);
-            recordMetrics(registeredEngine.descriptor(), policy, engineResult, evaluated.latency());
+            recordMetricsSafely(registeredEngine.descriptor(), policy, engineResult, evaluated.latency());
         }
         FraudScoringOrchestrationStatus status = statusFor(registry.registeredEngines(), engineResults);
-        metrics.recordOrchestration(status);
+        recordOrchestrationSafely(status);
         return new FraudScoringOrchestrationResult(status, engineResults, executionWarnings, generatedAt);
     }
 
@@ -102,6 +102,12 @@ public final class FraudScoringOrchestrator implements AutoCloseable {
             case FAILED -> failureResult(
                     registeredEngine.descriptor(),
                     OrchestrationFailureReasonCode.ORCHESTRATOR_ENGINE_EXCEPTION,
+                    generatedAt,
+                    latency
+            );
+            case REJECTED -> failureResult(
+                    registeredEngine.descriptor(),
+                    OrchestrationFailureReasonCode.ORCHESTRATOR_ENGINE_REJECTED,
                     generatedAt,
                     latency
             );
@@ -214,13 +220,42 @@ public final class FraudScoringOrchestrator implements AutoCloseable {
             FraudEngineResult result,
             Duration latency
     ) {
-        metrics.recordEngineResult(descriptor.engineId(), descriptor.engineType(), result.status(), policy.required());
-        metrics.recordEngineLatency(descriptor.engineId(), descriptor.engineType(), result.status(), policy.required(), latency);
+        recordSafely(() -> metrics.recordEngineResult(
+                descriptor.engineId(), descriptor.engineType(), result.status(), policy.required()
+        ));
+        recordSafely(() -> metrics.recordEngineLatency(
+                descriptor.engineId(), descriptor.engineType(), result.status(), policy.required(), latency
+        ));
         if (result.status() == FraudEngineStatus.TIMEOUT) {
-            metrics.recordTimeout(descriptor.engineId(), descriptor.engineType(), policy.required());
+            recordSafely(() -> metrics.recordTimeout(descriptor.engineId(), descriptor.engineType(), policy.required()));
         }
         if (policy.required() && result.status() != FraudEngineStatus.AVAILABLE) {
-            metrics.recordRequiredEngineFailed(descriptor.engineId());
+            recordSafely(() -> metrics.recordRequiredEngineFailed(descriptor.engineId()));
+        }
+    }
+
+    private void recordMetricsSafely(
+            FraudEngineDescriptor descriptor,
+            FraudEngineExecutionPolicy policy,
+            FraudEngineResult result,
+            Duration latency
+    ) {
+        try {
+            recordMetrics(descriptor, policy, result, latency);
+        } catch (RuntimeException ignored) {
+            // Metrics are best-effort and must not affect orchestration results.
+        }
+    }
+
+    private void recordOrchestrationSafely(FraudScoringOrchestrationStatus status) {
+        recordSafely(() -> metrics.recordOrchestration(status));
+    }
+
+    private void recordSafely(Runnable recorder) {
+        try {
+            recorder.run();
+        } catch (RuntimeException ignored) {
+            // Metrics are best-effort and must not affect orchestration results.
         }
     }
 
