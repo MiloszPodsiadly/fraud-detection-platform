@@ -26,9 +26,12 @@ public final class FraudEngineAgreementAnalyzer {
         FraudEngineRiskMismatchStatus mismatch = new FraudEngineRiskMismatchCalculator()
                 .calculate(List.of(rules, ml))
                 .status();
-        return mismatch == FraudEngineRiskMismatchStatus.MATERIAL_RISK_MISMATCH
-                ? FraudEngineAgreementStatus.DISAGREEMENT
-                : FraudEngineAgreementStatus.AGREEMENT;
+        return switch (mismatch) {
+            case SAME_RISK_LEVEL -> FraudEngineAgreementStatus.AGREEMENT;
+            case ADJACENT_RISK_LEVEL -> FraudEngineAgreementStatus.ADJACENT_RISK_VARIANCE;
+            case MATERIAL_RISK_MISMATCH -> FraudEngineAgreementStatus.DISAGREEMENT;
+            case NOT_COMPARABLE -> FraudEngineAgreementStatus.INSUFFICIENT_DATA;
+        };
     }
 
     private boolean isComparable(NormalizedFraudEngineResult result) {

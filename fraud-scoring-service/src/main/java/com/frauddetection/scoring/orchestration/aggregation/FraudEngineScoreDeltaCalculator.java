@@ -10,21 +10,31 @@ public final class FraudEngineScoreDeltaCalculator {
         if (results == null || results.size() < 2) {
             return unavailable(FraudEngineScoreDeltaStatus.UNAVAILABLE_NOT_ENOUGH_COMPARABLE_RESULTS);
         }
-        NormalizedFraudEngineResult first = results.get(0);
-        NormalizedFraudEngineResult second = results.get(1);
-        if (first.status() != FraudEngineStatus.AVAILABLE || second.status() != FraudEngineStatus.AVAILABLE) {
+        NormalizedFraudEngineResult rules = resultFor(results, "rules.primary");
+        NormalizedFraudEngineResult ml = resultFor(results, "ml.python.primary");
+        if (rules == null || ml == null) {
+            return unavailable(FraudEngineScoreDeltaStatus.UNAVAILABLE_NOT_ENOUGH_COMPARABLE_RESULTS);
+        }
+        if (rules.status() != FraudEngineStatus.AVAILABLE || ml.status() != FraudEngineStatus.AVAILABLE) {
             return unavailable(FraudEngineScoreDeltaStatus.UNAVAILABLE_ENGINE_STATUS);
         }
-        if (first.score() == null || second.score() == null) {
+        if (rules.score() == null || ml.score() == null) {
             return unavailable(FraudEngineScoreDeltaStatus.UNAVAILABLE_MISSING_SCORE);
         }
         return new FraudEngineScoreDelta(
                 FraudEngineScoreDeltaStatus.AVAILABLE,
-                Math.abs(first.score() - second.score())
+                Math.abs(rules.score() - ml.score())
         );
     }
 
     private FraudEngineScoreDelta unavailable(FraudEngineScoreDeltaStatus status) {
         return new FraudEngineScoreDelta(status, null);
+    }
+
+    private NormalizedFraudEngineResult resultFor(List<NormalizedFraudEngineResult> results, String engineId) {
+        return results.stream()
+                .filter(result -> engineId.equals(result.engineId()))
+                .findFirst()
+                .orElse(null);
     }
 }

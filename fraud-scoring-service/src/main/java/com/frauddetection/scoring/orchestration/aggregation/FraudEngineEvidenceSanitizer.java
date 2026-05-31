@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Set;
 
 public final class FraudEngineEvidenceSanitizer {
+    private static final String DEFAULT_DESCRIPTION = "Bounded engine signal.";
     private static final Set<String> ALLOWED_SOURCES = Set.of("RULES", "ML_MODEL", "ORCHESTRATOR");
     private final FraudEngineReasonCodeNormalizer reasonCodeNormalizer = new FraudEngineReasonCodeNormalizer();
 
@@ -26,13 +27,17 @@ public final class FraudEngineEvidenceSanitizer {
                 warn(warnings, policy, engineId, FraudEngineAggregationWarningCode.EVIDENCE_LIMIT_APPLIED);
                 break;
             }
-            if (!isSafe(evidence)) {
+            if (!hasSafeShape(evidence) || hasUnsafeReasonCode(evidence)) {
                 warn(warnings, policy, engineId, FraudEngineAggregationWarningCode.EVIDENCE_UNSAFE_DROPPED);
                 continue;
             }
+            if (hasUnsupportedReasonCode(evidence)) {
+                warn(warnings, policy, engineId, FraudEngineAggregationWarningCode.EVIDENCE_UNSUPPORTED_REASON_CODE_DROPPED);
+                continue;
+            }
             String title = truncate(evidence.title(), policy.maxEvidenceTitleLength(), warnings, policy, engineId);
-            String description = evidence.description() == null
-                    ? "Bounded engine signal."
+            String description = evidence.description() == null || evidence.description().isBlank()
+                    ? DEFAULT_DESCRIPTION
                     : truncate(evidence.description(), policy.maxEvidenceDescriptionLength(), warnings, policy, engineId);
             sanitized.add(new BoundedFraudEngineEvidenceSummary(
                     evidence.evidenceType(),
@@ -50,14 +55,26 @@ public final class FraudEngineEvidenceSanitizer {
         return List.copyOf(sanitized);
     }
 
-    private boolean isSafe(FraudEngineEvidence evidence) {
+    private boolean hasSafeShape(FraudEngineEvidence evidence) {
         return evidence != null
+                && evidence.evidenceType() != null
+                && evidence.status() != null
+                && evidence.source() != null
                 && ALLOWED_SOURCES.contains(evidence.source())
-                && (evidence.reasonCode() == null
-                || (FraudEngineAggregationSafety.isSafe(evidence.reasonCode())
-                && reasonCodeNormalizer.isAllowed(evidence.reasonCode())))
+                && evidence.title() != null
+                && !evidence.title().isBlank()
                 && FraudEngineAggregationSafety.isSafe(evidence.title())
-                && FraudEngineAggregationSafety.isSafe(evidence.description());
+                && (evidence.description() == null
+                || evidence.description().isBlank()
+                || FraudEngineAggregationSafety.isSafe(evidence.description()));
+    }
+
+    private boolean hasUnsafeReasonCode(FraudEngineEvidence evidence) {
+        return evidence.reasonCode() != null && !FraudEngineAggregationSafety.isSafe(evidence.reasonCode());
+    }
+
+    private boolean hasUnsupportedReasonCode(FraudEngineEvidence evidence) {
+        return evidence.reasonCode() != null && !reasonCodeNormalizer.isAllowed(evidence.reasonCode());
     }
 
     private String truncate(

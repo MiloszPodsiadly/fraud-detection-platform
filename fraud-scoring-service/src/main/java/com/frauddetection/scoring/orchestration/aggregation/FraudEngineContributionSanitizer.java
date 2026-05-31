@@ -47,6 +47,9 @@ public final class FraudEngineContributionSanitizer {
 
     private boolean isSafe(FraudEngineContribution contribution) {
         return contribution != null
+                && contribution.feature() != null
+                && !contribution.feature().isBlank()
+                && contribution.direction() != null
                 && FraudEngineAggregationSafety.isSafe(contribution.feature())
                 && FraudEngineAggregationSafety.isSafe(contribution.value());
     }

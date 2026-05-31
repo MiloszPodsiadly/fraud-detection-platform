@@ -34,6 +34,27 @@ final class FraudEngineAggregationSafety {
             "password",
             "api key"
     );
+    private static final Set<String> FORBIDDEN_COMPACT_TEXT = Set.of(
+            "transactionid",
+            "txnid",
+            "customerid",
+            "custid",
+            "accountid",
+            "acctid",
+            "cardid",
+            "merchantid",
+            "rawpayload",
+            "rawfeature",
+            "featurevector",
+            "endpoint",
+            "token",
+            "secret",
+            "stacktrace",
+            "exception",
+            "bearer",
+            "password",
+            "apikey"
+    );
 
     private FraudEngineAggregationSafety() {
     }
@@ -43,7 +64,12 @@ final class FraudEngineAggregationSafety {
             return true;
         }
         String normalized = value.toLowerCase(Locale.ROOT);
+        String compact = normalized
+                .replace("_", "")
+                .replace("-", "")
+                .replace(" ", "");
         return FORBIDDEN_TEXT.stream().noneMatch(normalized::contains)
+                && FORBIDDEN_COMPACT_TEXT.stream().noneMatch(compact::contains)
                 && value.chars().noneMatch(Character::isISOControl);
     }
 

@@ -21,6 +21,7 @@ public final class FraudEngineStrongestSignalExtractor {
         List<FraudEngineStrongestSignal> signals = new ArrayList<>();
         for (NormalizedFraudEngineResult result : results) {
             FraudEngineSignalCategory category = result.status() == FraudEngineStatus.AVAILABLE
+                    && result.riskLevel() != null
                     ? FraudEngineSignalCategory.FRAUD_SIGNAL
                     : FraudEngineSignalCategory.OPERATIONAL_SIGNAL;
             FraudEngineEvidenceType evidenceType = result.evidence().isEmpty()
@@ -45,15 +46,16 @@ public final class FraudEngineStrongestSignalExtractor {
 
     private Comparator<FraudEngineStrongestSignal> signalComparator() {
         return Comparator
-                .comparingInt((FraudEngineStrongestSignal signal) -> ENGINE_ORDER.getOrDefault(signal.engineId(), Integer.MAX_VALUE))
-                .thenComparingInt(signal -> signal.signalCategory() == FraudEngineSignalCategory.FRAUD_SIGNAL ? 0 : 1)
+                .comparingInt((FraudEngineStrongestSignal signal) ->
+                        signal.signalCategory() == FraudEngineSignalCategory.FRAUD_SIGNAL ? 0 : 1)
                 .thenComparing(Comparator.comparingInt(this::riskSeverity).reversed())
                 .thenComparing(Comparator.comparingDouble(this::score).reversed())
+                .thenComparingInt(signal -> ENGINE_ORDER.getOrDefault(signal.engineId(), Integer.MAX_VALUE))
                 .thenComparing(FraudEngineStrongestSignal::reasonCode);
     }
 
     private int riskSeverity(FraudEngineStrongestSignal signal) {
-        return signal.riskLevel() == null ? -1 : signal.riskLevel().ordinal();
+        return FraudEngineRiskSeverity.rank(signal.riskLevel());
     }
 
     private double score(FraudEngineStrongestSignal signal) {
