@@ -30,6 +30,20 @@ pool, common pool, parallel stream, or global static executor.
 
 Cancellation is cooperative.
 Timeout result means orchestrator stopped waiting for the engine result; it does not guarantee the underlying work was forcibly terminated unless the engine cooperates with cancellation.
+A non-cooperative engine may continue running after timeout. The bounded executor limits blast
+radius but does not forcibly kill non-cooperative work. Runtime wiring still requires operational
+monitoring for repeated timeouts and saturation.
+
+Executor saturation produces a bounded rejected/degraded result with
+`statusReason = ORCHESTRATOR_ENGINE_REJECTED`. Rejection is not timeout, available, or low risk.
+
+## Executor Lifecycle Boundary
+
+`FraudScoringOrchestrator` default constructor creates an owned internal executor. The owner of an
+orchestrator created this way must call `close()`. FDP-90 does not provide Spring lifecycle
+management. Future runtime wiring must inject an explicitly lifecycle-managed executor. Future
+runtime wiring must not create per-request unmanaged executors. Executor ownership must be decided
+before `CompositeFraudScoringEngine` wiring.
 
 ## Timeout Mapping
 
@@ -47,14 +61,17 @@ already collected from other engines.
 ## Latency Measurement
 
 The orchestrator receives a `Clock` and measures bounded elapsed time for each engine execution.
-Timeout latency uses the bounded deadline. The measured duration is sent to the metrics abstraction
-for every engine execution. For orchestrator-created failure and timeout outcomes, the same measured
-duration is also written to the internal engine result. Adapter-produced results remain unchanged.
+Timeout latency uses the bounded deadline.
+
+FDP-90 records orchestrator-measured latency to metrics for every engine execution.
+FDP-90 does not rewrite adapter-produced successful FraudEngineResult latencyMs.
+For orchestrator-created timeout, rejection, and failure results, latencyMs is the bounded orchestrator-measured duration.
 
 ## Metrics Abstraction
 
 `FraudScoringOrchestratorMetrics` is an internal interface. `NoOpFraudScoringOrchestratorMetrics` is
-the default-safe implementation. FDP-90 adds no vendor-specific integration.
+the default-safe implementation. FDP-90 adds no vendor-specific integration. Metrics recording is
+best-effort: metrics failures do not change engine results or orchestration status.
 
 Metrics use low-cardinality labels only:
 
