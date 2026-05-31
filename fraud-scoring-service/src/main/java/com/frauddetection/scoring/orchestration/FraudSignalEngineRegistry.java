@@ -9,8 +9,8 @@ import java.util.List;
 import java.util.Objects;
 
 public final class FraudSignalEngineRegistry {
-    static final String RULES_PRIMARY_ENGINE_ID = "rules.primary";
-    static final String PYTHON_ML_PRIMARY_ENGINE_ID = "ml.python.primary";
+    public static final String RULES_PRIMARY_ENGINE_ID = "rules.primary";
+    public static final String PYTHON_ML_PRIMARY_ENGINE_ID = "ml.python.primary";
 
     private static final List<String> KNOWN_ENGINE_ORDER = List.of(
             RULES_PRIMARY_ENGINE_ID,

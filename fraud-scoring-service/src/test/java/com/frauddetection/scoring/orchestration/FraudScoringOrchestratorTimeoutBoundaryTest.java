@@ -22,21 +22,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 class FraudScoringOrchestratorTimeoutBoundaryTest {
 
     @Test
-    void orchestrationPackageDoesNotContainFakeTimeoutInfrastructure() throws Exception {
+    void orchestrationPackageContainsBoundedTimeoutInfrastructureOnly() throws Exception {
         String source = sourceFiles(Path.of("src/main/java/com/frauddetection/scoring/orchestration"));
 
         assertThat(source)
-                .doesNotContain("Executor")
-                .doesNotContain("ExecutorService")
-                .doesNotContain("CompletableFuture")
-                .doesNotContain("Future")
-                .doesNotContain("Scheduler")
-                .doesNotContain("ThreadPool")
-                .doesNotContain("cancel")
-                .doesNotContain("await")
-                .doesNotContain("timeoutMillis")
-                .doesNotContain("deadline")
-                .doesNotContain("Duration.of")
+                .contains("BoundedFraudEngineExecutor")
+                .contains("FraudScoringOrchestratorExecutionPolicy")
+                .contains("ArrayBlockingQueue")
+                .contains("future.cancel(true)")
+                .doesNotContain("new Thread(")
+                .doesNotContain("newCachedThreadPool")
+                .doesNotContain("ForkJoinPool.commonPool")
+                .doesNotContain("parallelStream")
+                .doesNotContain("LinkedBlockingQueue")
                 .doesNotContain("Instant.now()");
     }
 
@@ -55,14 +53,14 @@ class FraudScoringOrchestratorTimeoutBoundaryTest {
     }
 
     @Test
-    void timeoutDocsStateNoDeadlineEnforcement() throws Exception {
+    void timeoutDocsPointToInternalRuntimeReadinessFoundation() throws Exception {
         String docs = Files.readString(Path.of("..", "docs", "architecture", "fraud_scoring_orchestrator.md"))
                 .toLowerCase();
 
         assertThat(docs)
-                .contains("fdp-89 does not enforce engine execution deadlines")
-                .contains("a hanging engine can still block the caller")
-                .contains("timeout enforcement belongs to fdp-90");
+                .contains("fdp-90")
+                .contains("bounded executor")
+                .contains("cancellation is cooperative");
     }
 
     private String sourceFiles(Path root) throws Exception {
