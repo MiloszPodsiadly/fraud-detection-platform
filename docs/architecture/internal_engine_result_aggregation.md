@@ -22,7 +22,10 @@ risk does not become low risk.
 
 ## Agreement Semantics
 
-Agreement requires comparable available engine results. Agreement is not proof of fraud.
+Agreement requires comparable available engine results and means exact risk-level alignment between
+those engines. Agreement is not proof of fraud. Adjacent risk variance means comparable engines
+differ by one risk level. Adjacent risk variance is internal diagnostic metadata, not final
+decisioning. Material risk mismatch means comparable engines differ by more than one risk level.
 Disagreement is not final decision. Optional operational failures produce partial comparison
 metadata. Required engine operational failures remain explicitly not comparable.
 
@@ -40,8 +43,11 @@ comparable scores.
 ## Strongest Signal Extraction
 
 Strongest signals are internal diagnostics, not recommended actions. Available engine reason codes
-produce fraud signals. Timeout/unavailable/degraded engine reason codes produce operational signals,
-not fraud signals. Raw descriptions and raw feature values are excluded.
+with a risk level produce fraud signals. Available engines without a risk level and
+timeout/unavailable/degraded engine reason codes produce operational signals, not fraud signals.
+Strongest signals are strongest by bounded internal diagnostic ordering: signal category, risk
+severity, score, engine-order tie-breaker, and reason code. Strongest signals are not final
+decisioning. Raw descriptions and raw feature values are excluded.
 
 ## Evidence Truncation
 
