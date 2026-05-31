@@ -14,11 +14,23 @@ class FraudEngineAgreementAnalyzerTest {
     private final FraudEngineAgreementAnalyzer analyzer = new FraudEngineAgreementAnalyzer();
 
     @Test
-    void availableAlignedResultsAgreeAndMaterialMismatchDisagrees() {
+    void sameRiskLevelsAreAgreement() {
         assertThat(analyze(RiskLevel.HIGH, RiskLevel.HIGH)).isEqualTo(FraudEngineAgreementStatus.AGREEMENT);
         assertThat(analyze(RiskLevel.LOW, RiskLevel.LOW)).isEqualTo(FraudEngineAgreementStatus.AGREEMENT);
+    }
+
+    @Test
+    void adjacentRiskLevelsProduceAdjacentRiskVariance() {
+        assertThat(analyze(RiskLevel.LOW, RiskLevel.MEDIUM)).isEqualTo(FraudEngineAgreementStatus.ADJACENT_RISK_VARIANCE);
+        assertThat(analyze(RiskLevel.MEDIUM, RiskLevel.HIGH)).isEqualTo(FraudEngineAgreementStatus.ADJACENT_RISK_VARIANCE);
+        assertThat(analyze(RiskLevel.HIGH, RiskLevel.CRITICAL)).isEqualTo(FraudEngineAgreementStatus.ADJACENT_RISK_VARIANCE);
+    }
+
+    @Test
+    void materialRiskMismatchProducesDisagreement() {
         assertThat(analyze(RiskLevel.HIGH, RiskLevel.LOW)).isEqualTo(FraudEngineAgreementStatus.DISAGREEMENT);
         assertThat(analyze(RiskLevel.LOW, RiskLevel.HIGH)).isEqualTo(FraudEngineAgreementStatus.DISAGREEMENT);
+        assertThat(analyze(RiskLevel.LOW, RiskLevel.CRITICAL)).isEqualTo(FraudEngineAgreementStatus.DISAGREEMENT);
     }
 
     @Test

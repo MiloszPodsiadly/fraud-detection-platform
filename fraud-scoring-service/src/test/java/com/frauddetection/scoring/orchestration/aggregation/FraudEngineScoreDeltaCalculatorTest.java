@@ -48,6 +48,36 @@ class FraudEngineScoreDeltaCalculatorTest {
                 .doesNotContain("finalScore", "finalRisk", "finalDecision", "recommendedAction");
     }
 
+    @Test
+    void reversedEngineOrderProducesSameScoreDelta() {
+        FraudEngineScoreDelta ordered = calculator.calculate(List.of(
+                result("rules.primary", FraudEngineStatus.AVAILABLE, 0.9d),
+                result("ml.python.primary", FraudEngineStatus.AVAILABLE, 0.4d)
+        ));
+        FraudEngineScoreDelta reversed = calculator.calculate(List.of(
+                result("ml.python.primary", FraudEngineStatus.AVAILABLE, 0.4d),
+                result("rules.primary", FraudEngineStatus.AVAILABLE, 0.9d)
+        ));
+
+        assertThat(reversed).isEqualTo(ordered);
+    }
+
+    @Test
+    void missingNamedEngineProducesUnavailable() {
+        assertThat(calculator.calculate(List.of(
+                result("rules.primary", FraudEngineStatus.AVAILABLE, 0.9d)
+        ))).isEqualTo(new FraudEngineScoreDelta(
+                FraudEngineScoreDeltaStatus.UNAVAILABLE_NOT_ENOUGH_COMPARABLE_RESULTS,
+                null
+        ));
+        assertThat(calculator.calculate(List.of(
+                result("ml.python.primary", FraudEngineStatus.AVAILABLE, 0.4d)
+        ))).isEqualTo(new FraudEngineScoreDelta(
+                FraudEngineScoreDeltaStatus.UNAVAILABLE_NOT_ENOUGH_COMPARABLE_RESULTS,
+                null
+        ));
+    }
+
     private NormalizedFraudEngineResult result(String engineId, FraudEngineStatus status, Double score) {
         return AggregationTestSupport.normalized(engineId, status, score, score == null ? null : RiskLevel.HIGH, "MODEL_HIGH_RISK");
     }

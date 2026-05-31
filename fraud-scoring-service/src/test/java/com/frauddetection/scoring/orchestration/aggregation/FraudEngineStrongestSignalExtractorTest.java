@@ -72,6 +72,48 @@ class FraudEngineStrongestSignalExtractorTest {
         )).hasMessage("AGGREGATION_SIGNAL_SCORE_OUT_OF_RANGE");
     }
 
+    @Test
+    void mlCriticalHighScoreCanRankBeforeRulesLowScore() {
+        List<FraudEngineStrongestSignal> signals = extractor.extract(List.of(
+                result("rules.primary", FraudEngineStatus.AVAILABLE, 0.1d, RiskLevel.LOW, "HIGH_VELOCITY"),
+                result("ml.python.primary", FraudEngineStatus.AVAILABLE, 0.99d, RiskLevel.CRITICAL, "MODEL_HIGH_RISK")
+        ), FraudEngineAggregationPolicy.defaultInternalPolicy());
+
+        assertThat(signals.getFirst().engineId()).isEqualTo("ml.python.primary");
+        assertThat(signals.getFirst().reasonCode()).isEqualTo("MODEL_HIGH_RISK");
+    }
+
+    @Test
+    void engineOrderOnlyBreaksTies() {
+        List<FraudEngineStrongestSignal> signals = extractor.extract(List.of(
+                result("ml.python.primary", FraudEngineStatus.AVAILABLE, 0.8d, RiskLevel.HIGH, "MODEL_HIGH_RISK"),
+                result("rules.primary", FraudEngineStatus.AVAILABLE, 0.8d, RiskLevel.HIGH, "HIGH_VELOCITY")
+        ), FraudEngineAggregationPolicy.defaultInternalPolicy());
+
+        assertThat(signals).extracting(FraudEngineStrongestSignal::engineId)
+                .containsExactly("rules.primary", "ml.python.primary");
+    }
+
+    @Test
+    void availableResultWithoutRiskLevelProducesOperationalSignal() {
+        List<FraudEngineStrongestSignal> signals = extractor.extract(List.of(
+                result("ml.python.primary", FraudEngineStatus.AVAILABLE, 0.8d, null, "MODEL_HIGH_RISK")
+        ), FraudEngineAggregationPolicy.defaultInternalPolicy());
+
+        assertThat(signals).extracting(FraudEngineStrongestSignal::signalCategory)
+                .containsExactly(FraudEngineSignalCategory.OPERATIONAL_SIGNAL);
+    }
+
+    @Test
+    void availableResultWithoutScoreSortsBelowPresentScoreAtSameRisk() {
+        List<FraudEngineStrongestSignal> signals = extractor.extract(List.of(
+                result("rules.primary", FraudEngineStatus.AVAILABLE, null, RiskLevel.HIGH, "HIGH_VELOCITY"),
+                result("ml.python.primary", FraudEngineStatus.AVAILABLE, 0.8d, RiskLevel.HIGH, "MODEL_HIGH_RISK")
+        ), FraudEngineAggregationPolicy.defaultInternalPolicy());
+
+        assertThat(signals.getFirst().engineId()).isEqualTo("ml.python.primary");
+    }
+
     private NormalizedFraudEngineResult result(
             String engineId,
             FraudEngineStatus status,

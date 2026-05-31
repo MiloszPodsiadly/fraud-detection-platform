@@ -55,4 +55,35 @@ class FraudEngineReasonCodeNormalizerTest {
         assertThat(firstWarnings).extracting(FraudEngineAggregationWarning::code)
                 .contains(FraudEngineAggregationWarningCode.REASON_CODE_LIMIT_APPLIED);
     }
+
+    @Test
+    void dropsUnsafeIdentifierVariantsWithoutRawLeakage() {
+        List<String> forbidden = List.of(
+                "transaction_id",
+                "txn_id",
+                "customer_id",
+                "cust_id",
+                "account_id",
+                "acct_id",
+                "card_id",
+                "merchant_id",
+                "merchant-id",
+                "accessToken",
+                "bearerToken",
+                "stack_trace",
+                "exceptionMessage",
+                "raw_feature_vector",
+                "model_endpoint",
+                "apiKey",
+                "authorizationBearer"
+        );
+        List<FraudEngineAggregationWarning> warnings = new ArrayList<>();
+
+        List<String> result = normalizer.normalize("rules.primary", forbidden, policy, warnings);
+
+        assertThat(result).isEmpty();
+        assertThat(warnings).extracting(FraudEngineAggregationWarning::code)
+                .containsOnly(FraudEngineAggregationWarningCode.REASON_CODE_UNSUPPORTED_DROPPED);
+        forbidden.forEach(raw -> assertThat(result + warnings.toString()).doesNotContain(raw));
+    }
 }

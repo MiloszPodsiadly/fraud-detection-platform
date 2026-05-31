@@ -34,6 +34,30 @@ class FraudEngineRiskMismatchCalculatorTest {
         )).toString()).doesNotContain("LOW");
     }
 
+    @Test
+    void reversedEngineOrderProducesSameRiskMismatch() {
+        FraudEngineRiskMismatch ordered = calculator.calculate(List.of(
+                result("rules.primary", FraudEngineStatus.AVAILABLE, RiskLevel.LOW),
+                result("ml.python.primary", FraudEngineStatus.AVAILABLE, RiskLevel.HIGH)
+        ));
+        FraudEngineRiskMismatch reversed = calculator.calculate(List.of(
+                result("ml.python.primary", FraudEngineStatus.AVAILABLE, RiskLevel.HIGH),
+                result("rules.primary", FraudEngineStatus.AVAILABLE, RiskLevel.LOW)
+        ));
+
+        assertThat(reversed).isEqualTo(ordered);
+    }
+
+    @Test
+    void missingNamedEngineProducesNotComparable() {
+        assertThat(calculator.calculate(List.of(
+                result("rules.primary", FraudEngineStatus.AVAILABLE, RiskLevel.HIGH)
+        )).status()).isEqualTo(FraudEngineRiskMismatchStatus.NOT_COMPARABLE);
+        assertThat(calculator.calculate(List.of(
+                result("ml.python.primary", FraudEngineStatus.AVAILABLE, RiskLevel.HIGH)
+        )).status()).isEqualTo(FraudEngineRiskMismatchStatus.NOT_COMPARABLE);
+    }
+
     private FraudEngineRiskMismatchStatus calculate(RiskLevel rules, RiskLevel ml) {
         return calculator.calculate(List.of(
                 result("rules.primary", FraudEngineStatus.AVAILABLE, rules),
