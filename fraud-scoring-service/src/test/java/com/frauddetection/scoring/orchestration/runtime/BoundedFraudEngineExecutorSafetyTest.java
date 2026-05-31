@@ -10,6 +10,7 @@ import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -75,6 +76,15 @@ class BoundedFraudEngineExecutorSafetyTest {
                      new BoundedFraudEngineExecutor(new StubExecutorService(future))) {
             assertThat(executor.execute(() -> "unused", Duration.ofMillis(1)).status())
                     .isEqualTo(BoundedFraudEngineExecutor.ExecutionStatus.TIMED_OUT);
+        }
+    }
+
+    @Test
+    void executorRejectionReturnsRejectedStatus() {
+        try (BoundedFraudEngineExecutor executor =
+                     new BoundedFraudEngineExecutor(new RejectingExecutorService())) {
+            assertThat(executor.execute(() -> "unused", Duration.ofMillis(1)).status())
+                    .isEqualTo(BoundedFraudEngineExecutor.ExecutionStatus.REJECTED);
         }
     }
 
@@ -201,6 +211,46 @@ class BoundedFraudEngineExecutorSafetyTest {
                 throw new TimeoutException("bounded");
             }
             throw new UnsupportedOperationException("not used");
+        }
+    }
+
+    private static final class RejectingExecutorService extends AbstractExecutorService {
+        private boolean shutdown;
+
+        @Override
+        public void shutdown() {
+            shutdown = true;
+        }
+
+        @Override
+        public List<Runnable> shutdownNow() {
+            shutdown = true;
+            return List.of();
+        }
+
+        @Override
+        public boolean isShutdown() {
+            return shutdown;
+        }
+
+        @Override
+        public boolean isTerminated() {
+            return shutdown;
+        }
+
+        @Override
+        public boolean awaitTermination(long timeout, TimeUnit unit) {
+            return shutdown;
+        }
+
+        @Override
+        public void execute(Runnable command) {
+            throw new RejectedExecutionException("queue full raw detail");
+        }
+
+        @Override
+        public <T> Future<T> submit(Callable<T> task) {
+            throw new RejectedExecutionException("queue full raw detail");
         }
     }
 }

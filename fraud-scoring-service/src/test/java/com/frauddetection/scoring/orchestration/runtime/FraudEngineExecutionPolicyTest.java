@@ -69,6 +69,30 @@ class FraudEngineExecutionPolicyTest {
     }
 
     @Test
+    void orchestratorPolicyRejectsUnknownEnginePolicyEntry() {
+        assertThatThrownBy(() -> new FraudScoringOrchestratorExecutionPolicy(List.of(
+                defaultEntries().get(0),
+                defaultEntries().get(1),
+                new FraudEngineExecutionPolicy("merchant.experimental.raw", Duration.ofMillis(10), false)
+        )))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("ENGINE_EXECUTION_POLICY_UNKNOWN_ENGINE_ID")
+                .hasMessageNotContaining("merchant")
+                .hasMessageNotContaining("experimental")
+                .hasMessageNotContaining("raw");
+    }
+
+    @Test
+    void orchestratorPolicyAcceptsOnlyKnownEnginePolicies() {
+        FraudScoringOrchestratorExecutionPolicy policy =
+                new FraudScoringOrchestratorExecutionPolicy(defaultEntries());
+
+        assertThat(policy.enginePolicies())
+                .extracting(FraudEngineExecutionPolicy::engineId)
+                .containsExactlyInAnyOrder("rules.primary", "ml.python.primary");
+    }
+
+    @Test
     void lookupFailsFastWithoutExposingRequestedValue() {
         FraudScoringOrchestratorExecutionPolicy policy =
                 FraudScoringOrchestratorExecutionPolicy.defaultInternalPolicy();

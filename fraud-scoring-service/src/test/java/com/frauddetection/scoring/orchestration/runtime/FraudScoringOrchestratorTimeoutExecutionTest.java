@@ -20,6 +20,8 @@ import com.frauddetection.scoring.orchestration.FraudSignalEngineRegistry;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.RecordComponent;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -30,6 +32,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Deque;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.Callable;
@@ -159,7 +162,7 @@ class FraudScoringOrchestratorTimeoutExecutionTest {
     }
 
     @Test
-    void successfulEngineLatencyIsMeasuredDeterministically() {
+    void adapterProducedSuccessfulResultsRemainUnmodifiedWhileMetricsReceiveMeasuredLatency() throws Exception {
         MutableClock clock = new MutableClock(RECEIVED_AT);
         RecordingMetrics metrics = new RecordingMetrics();
 
@@ -182,6 +185,37 @@ class FraudScoringOrchestratorTimeoutExecutionTest {
 
         assertThat(result.engineResults()).extracting(FraudEngineResult::latencyMs)
                 .containsExactly(0L, 0L);
+        assertThat(metrics.latencyCalls).extracting(LatencyMetricCall::latency)
+                .containsExactly(Duration.ofMillis(7), Duration.ofMillis(19));
+        assertThat(Files.readString(Path.of("..", "docs", "architecture", "orchestrator_runtime_readiness.md"))
+                .toLowerCase(Locale.ROOT))
+                .contains("does not rewrite adapter-produced successful fraudengineresult latencyms");
+    }
+
+    @Test
+    void adapterProducedLatencyIsNotOverwrittenByOrchestrator() {
+        MutableClock clock = new MutableClock(RECEIVED_AT);
+        RecordingMetrics metrics = new RecordingMetrics();
+
+        FraudScoringOrchestrationResult result;
+        try (FraudScoringOrchestrator orchestrator = orchestrator(
+                List.of(ScriptedFutureMode.COMPLETED, ScriptedFutureMode.COMPLETED),
+                clock,
+                metrics,
+                engine(ruleDescriptor(), ignored -> {
+                    clock.advance(Duration.ofMillis(7));
+                    return availableResult(ruleDescriptor(), 0.82d, RiskLevel.HIGH, 123L);
+                }),
+                engine(mlDescriptor(), ignored -> {
+                    clock.advance(Duration.ofMillis(19));
+                    return availableResult(mlDescriptor(), 0.72d, RiskLevel.MEDIUM, 456L);
+                })
+        )) {
+            result = orchestrator.evaluate(context());
+        }
+
+        assertThat(result.engineResults()).extracting(FraudEngineResult::latencyMs)
+                .containsExactly(123L, 456L);
         assertThat(metrics.latencyCalls).extracting(LatencyMetricCall::latency)
                 .containsExactly(Duration.ofMillis(7), Duration.ofMillis(19));
     }
@@ -262,6 +296,15 @@ class FraudScoringOrchestratorTimeoutExecutionTest {
     }
 
     private FraudEngineResult availableResult(FraudEngineDescriptor descriptor, double score, RiskLevel riskLevel) {
+        return availableResult(descriptor, score, riskLevel, 0L);
+    }
+
+    private FraudEngineResult availableResult(
+            FraudEngineDescriptor descriptor,
+            double score,
+            RiskLevel riskLevel,
+            long latencyMs
+    ) {
         return new FraudEngineResult(
                 descriptor.engineId(),
                 descriptor.engineType(),
@@ -273,7 +316,7 @@ class FraudScoringOrchestratorTimeoutExecutionTest {
                 List.of("ENGINE_SIGNAL"),
                 List.of(),
                 List.of(),
-                0L,
+                latencyMs,
                 null,
                 null,
                 null,
