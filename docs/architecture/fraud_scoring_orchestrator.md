@@ -1,6 +1,6 @@
-# Internal Fraud Scoring Orchestrator v1
+# Internal Fraud Scoring Orchestrator
 
-Status: FDP-89 internal-only orchestration foundation.
+Status: FDP-89 internal-only orchestration foundation with FDP-90 internal runtime hardening.
 
 ## Purpose
 
@@ -10,8 +10,8 @@ entries.
 
 This is internal only to `fraud-scoring-service`. It is not an event schema, not an API DTO, not a
 UI model, not an alert projection, not a production runtime migration, and not a final decision
-source. FDP-89 does not change `TransactionScoredEvent`, does not add `engineResults[]`, and does
-not replace `CompositeFraudScoringEngine`.
+source. FDP-89 does not change `TransactionScoredEvent`, does not add `engineResults[]`, and does not
+replace `CompositeFraudScoringEngine`. FDP-90 preserves the same external boundary.
 
 ## Execution Model
 
@@ -50,12 +50,22 @@ explicit decision policy, not FDP-89.
 
 ## Timeout Boundary
 
-FDP-89 does not enforce engine execution deadlines.
+FDP-89 introduced the synchronous baseline without deadline enforcement. FDP-90 adds an internal
+per-engine deadline policy and bounded executor policy. The explicit policy uses a small bounded
+deadline for `rules.primary` and a larger bounded deadline for `ml.python.primary`.
 
-FDP-89 has no executor, thread pool, async execution, cancellation, scheduler, kill switch, or
-orchestrator-level timeout. A hanging engine can still block the caller in FDP-89. FDP-89 only
-preserves `TIMEOUT` statuses returned by adapters. Real timeout enforcement belongs to FDP-90 or a
-later runtime-hardening branch. Do not claim production resilience from FDP-89.
+When the bounded deadline expires, FDP-90 maps the engine execution to a bounded `TIMEOUT` result.
+Timeout is not low risk. Timeout is not available. A required timeout produces
+`REQUIRED_ENGINE_FAILED`; an optional timeout produces `PARTIAL`. Other engine results remain
+available to the internal orchestration result.
+
+Cancellation is cooperative. Timeout result means orchestrator stopped waiting for the engine
+result; it does not guarantee the underlying work was forcibly terminated unless the engine
+cooperates with cancellation.
+
+FDP-90 measures bounded per-engine latency through an injected clock and records the same measured
+duration through an internal metrics abstraction. The default implementation is
+`NoOpFraudScoringOrchestratorMetrics`; FDP-90 adds no vendor-specific metrics integration.
 
 ## Failure Boundary
 
@@ -106,7 +116,12 @@ Out of scope for FDP-89:
 - engine comparison semantics beyond basic ordered collection
 - public `engineResults[]`
 
+## Runtime Readiness Detail
+
+See [Orchestrator runtime readiness foundation](orchestrator_runtime_readiness.md) for FDP-90 policy,
+executor, latency, metrics, and runtime-isolation details.
+
 ## Next
 
-FDP-90 may harden internal comparison/aggregation semantics. FDP-91 may extend Kafka event with
+FDP-91 may extend Kafka event with
 `engineResults[]` only after internal semantics are stable.
