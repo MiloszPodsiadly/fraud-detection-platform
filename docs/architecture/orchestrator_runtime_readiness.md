@@ -45,6 +45,9 @@ management. Future runtime wiring must inject an explicitly lifecycle-managed ex
 runtime wiring must not create per-request unmanaged executors. Executor ownership must be decided
 before `CompositeFraudScoringEngine` wiring.
 
+Future runtime wiring must inject lifecycle-managed executor, metrics, policy, and clock through the
+explicit constructor. The default constructor is not approved for live scoring wiring.
+
 ## Timeout Mapping
 
 An orchestrator-owned timeout becomes an internal bounded `TIMEOUT` result with:
@@ -70,8 +73,8 @@ For orchestrator-created timeout, rejection, and failure results, latencyMs is t
 ## Metrics Abstraction
 
 `FraudScoringOrchestratorMetrics` is an internal interface. `NoOpFraudScoringOrchestratorMetrics` is
-the default-safe implementation. FDP-90 adds no vendor-specific integration. Metrics recording is
-best-effort: metrics failures do not change engine results or orchestration status.
+the default-safe implementation. FDP-90 adds no vendor-specific metrics integration. Metrics
+recording is best-effort: metrics failures do not change engine results or orchestration status.
 
 Metrics use low-cardinality labels only:
 
@@ -96,8 +99,37 @@ Forbidden metric labels and values:
 - token forbidden
 - secret forbidden
 
+## Metrics Validation Boundary
+
+Metrics are best-effort and must not change orchestration results.
+NoOpFraudScoringOrchestratorMetrics validates the low-cardinality label contract.
+A metrics validation failure is intentionally isolated from scoring.
+This prevents observability from becoming a scoring availability dependency.
+It also means a future metrics label drift can create an observability blind spot if not covered by
+tests.
+
+Any new FraudEngineStatus, FraudEngineType, engineId, or metric label must update:
+
+- metrics label allowlist
+- metrics safety tests
+- docs governance tests
+
+If FraudEngineStatus grows, FDP-90 metrics safety tests must be updated intentionally before runtime
+wiring. FDP-90 does not provide production telemetry delivery. FDP-90 provides the safe metrics
+boundary only.
+
+## Required Engine Metrics Boundary
+
+In FDP-90, only rules.primary is required-to-succeed.
+ml.python.primary is required-to-register but optional-to-succeed.
+recordRequiredEngineFailed currently only accepts allowlisted required engines.
+If a future engine becomes required-to-succeed, metrics allowlists and tests must be updated
+intentionally.
+Missing ML registration is construction failure.
+ML runtime timeout/unavailable/rejection is PARTIAL, not REQUIRED_ENGINE_FAILED.
+
 ## Runtime Isolation
 
 Runtime isolation remains intact. FDP-90 changes internal execution readiness only. It adds no
-production migration, no public engine intelligence exposure, no final decision source change, and
+production migration, no public engine intelligence exposure, no final decisioning authority change, and
 no event, projection, controller, or analyst-console integration.
