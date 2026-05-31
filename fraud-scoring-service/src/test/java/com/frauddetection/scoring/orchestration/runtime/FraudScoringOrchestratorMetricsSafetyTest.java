@@ -8,7 +8,9 @@ import org.junit.jupiter.api.Test;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.EnumSet;
 import java.util.Locale;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -86,6 +88,58 @@ class FraudScoringOrchestratorMetricsSafetyTest {
                 .hasMessage("METRICS_UNKNOWN_REQUIRED_ENGINE_ID");
     }
 
+    @Test
+    void metricsStatusAllowlistMustTrackFraudEngineStatusVocabulary() {
+        Set<FraudEngineStatus> reviewedVocabulary = EnumSet.of(
+                FraudEngineStatus.AVAILABLE,
+                FraudEngineStatus.UNAVAILABLE,
+                FraudEngineStatus.DEGRADED,
+                FraudEngineStatus.TIMEOUT,
+                FraudEngineStatus.FALLBACK_USED,
+                FraudEngineStatus.SKIPPED
+        );
+        Set<FraudEngineStatus> allowlistedStatuses = EnumSet.noneOf(FraudEngineStatus.class);
+        for (FraudEngineStatus status : FraudEngineStatus.values()) {
+            if (isMetricsStatusAllowlisted(status)) {
+                allowlistedStatuses.add(status);
+            }
+        }
+
+        assertThat(EnumSet.allOf(FraudEngineStatus.class))
+                .withFailMessage("METRICS_STATUS_ALLOWLIST_REVIEW_REQUIRED")
+                .isEqualTo(reviewedVocabulary);
+        assertThat(allowlistedStatuses)
+                .withFailMessage("METRICS_STATUS_ALLOWLIST_REVIEW_REQUIRED")
+                .containsExactlyInAnyOrder(
+                        FraudEngineStatus.AVAILABLE,
+                        FraudEngineStatus.UNAVAILABLE,
+                        FraudEngineStatus.TIMEOUT,
+                        FraudEngineStatus.DEGRADED
+                );
+    }
+
+    @Test
+    void requiredEngineFailedMetricAllowsOnlyRulesPrimaryForFdp90() {
+        metrics.recordRequiredEngineFailed(FraudSignalEngineRegistry.RULES_PRIMARY_ENGINE_ID);
+
+        assertThatThrownBy(() -> metrics.recordRequiredEngineFailed(FraudSignalEngineRegistry.PYTHON_ML_PRIMARY_ENGINE_ID))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("METRICS_UNKNOWN_REQUIRED_ENGINE_ID");
+    }
+
+    @Test
+    void docsExplainMlRequiredToRegisterButNotRequiredToSucceed() throws Exception {
+        String docs = Files.readString(docsRoot().resolve("architecture/orchestrator_runtime_readiness.md"))
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("\\s+", " ");
+
+        assertThat(docs)
+                .contains("ml.python.primary is required-to-register")
+                .contains("ml.python.primary is required-to-register but optional-to-succeed")
+                .contains("ml runtime timeout/unavailable/rejection is partial")
+                .contains("missing ml registration is construction failure");
+    }
+
     private void assertMetricSourcesDoNotContain(String... forbiddenValues) throws Exception {
         Path runtimeRoot = Path.of("src/main/java/com/frauddetection/scoring/orchestration/runtime");
         StringBuilder source = new StringBuilder();
@@ -97,5 +151,20 @@ class FraudScoringOrchestratorMetricsSafetyTest {
             }
         }
         assertThat(source.toString().toLowerCase(Locale.ROOT)).doesNotContain(forbiddenValues);
+    }
+
+    private boolean isMetricsStatusAllowlisted(FraudEngineStatus status) {
+        try {
+            FraudScoringOrchestratorMetricLabels.validateStatus(status);
+            return true;
+        } catch (IllegalArgumentException exception) {
+            assertThat(exception).hasMessage("METRICS_UNKNOWN_ENGINE_STATUS");
+            return false;
+        }
+    }
+
+    private Path docsRoot() {
+        Path moduleRelative = Path.of("..", "docs");
+        return Files.exists(moduleRelative) ? moduleRelative : Path.of("docs");
     }
 }

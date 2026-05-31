@@ -65,6 +65,36 @@ class OrchestratorRuntimeReadinessDocsTest {
                 );
     }
 
+    @Test
+    void runtimeReadinessDocsDoNotClaimProductionLiveReadiness() throws Exception {
+        String docs = Files.readString(docsRoot().resolve("architecture/orchestrator_runtime_readiness.md"))
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("\\s+", " ");
+
+        assertThat(docs)
+                .doesNotContain(
+                        "production-ready orchestrator",
+                        "ready for live scoring",
+                        "live scoring path enabled",
+                        "production migration complete",
+                        "safe for production traffic",
+                        "runtime wiring complete",
+                        "engine intelligence exposed",
+                        "public engine results",
+                        "final decision source"
+                )
+                .contains(
+                        "internal runtime-hardening foundation only",
+                        "not a production enablement claim",
+                        "no `compositefraudscoringengine` wiring",
+                        "no public engine intelligence exposure",
+                        "future runtime wiring must inject lifecycle-managed executor",
+                        "cancellation is cooperative",
+                        "metrics are best-effort",
+                        "no vendor-specific metrics integration"
+                );
+    }
+
     private Path docsRoot() {
         Path moduleRelative = Path.of("..", "docs");
         return Files.exists(moduleRelative) ? moduleRelative : Path.of("docs");

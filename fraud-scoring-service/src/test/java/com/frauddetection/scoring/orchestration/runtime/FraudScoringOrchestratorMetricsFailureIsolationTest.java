@@ -8,9 +8,12 @@ import com.frauddetection.scoring.orchestration.FraudScoringOrchestrator;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.RecordComponent;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 
 import static com.frauddetection.scoring.orchestration.runtime.RuntimeOrchestratorTestSupport.ExecutionMode.COMPLETED;
 import static com.frauddetection.scoring.orchestration.runtime.RuntimeOrchestratorTestSupport.ExecutionMode.TIMED_OUT;
@@ -70,6 +73,28 @@ class FraudScoringOrchestratorMetricsFailureIsolationTest {
                 .doesNotContain("finalDecision", "approve", "decline", "block", "recommendedAction");
     }
 
+    @Test
+    void noopMetricsValidationFailureDoesNotBreakEvaluateButIsDocumented() throws Exception {
+        FraudScoringOrchestrationResult result;
+        try (FraudScoringOrchestrator orchestrator = orchestrator(
+                List.of(COMPLETED, COMPLETED),
+                new ValidationStyleThrowingMetrics(),
+                new RuntimeOrchestratorTestSupport.MutableClock()
+        )) {
+            result = orchestrator.evaluate(context());
+        }
+        String docs = Files.readString(docsRoot().resolve("architecture/orchestrator_runtime_readiness.md"))
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("\\s+", " ");
+
+        assertThat(result.status()).isEqualTo(FraudScoringOrchestrationStatus.COMPLETE);
+        assertThat(result.engineResults()).hasSize(2);
+        assertThat(result.toString()).doesNotContain("METRICS_UNKNOWN_ENGINE_STATUS");
+        assertThat(docs)
+                .contains("observability blind spot")
+                .contains("any new fraudenginestatus, fraudenginetype, engineid, or metric label must update");
+    }
+
     private FraudScoringOrchestrationResult evaluate(List<RuntimeOrchestratorTestSupport.ExecutionMode> modes, FailurePoint point) {
         try (FraudScoringOrchestrator orchestrator = orchestrator(
                 modes,
@@ -78,6 +103,11 @@ class FraudScoringOrchestratorMetricsFailureIsolationTest {
         )) {
             return orchestrator.evaluate(context());
         }
+    }
+
+    private Path docsRoot() {
+        Path moduleRelative = Path.of("..", "docs");
+        return Files.exists(moduleRelative) ? moduleRelative : Path.of("docs");
     }
 
     private enum FailurePoint {
@@ -130,6 +160,36 @@ class FraudScoringOrchestratorMetricsFailureIsolationTest {
             if (point == candidate) {
                 throw new IllegalStateException("raw-token endpoint payload accountId=123");
             }
+        }
+    }
+
+    private static final class ValidationStyleThrowingMetrics implements FraudScoringOrchestratorMetrics {
+
+        @Override
+        public void recordOrchestration(FraudScoringOrchestrationStatus status) {
+        }
+
+        @Override
+        public void recordEngineResult(String engineId, FraudEngineType engineType, FraudEngineStatus status, boolean required) {
+            throw new IllegalArgumentException("METRICS_UNKNOWN_ENGINE_STATUS");
+        }
+
+        @Override
+        public void recordEngineLatency(
+                String engineId,
+                FraudEngineType engineType,
+                FraudEngineStatus status,
+                boolean required,
+                Duration latency
+        ) {
+        }
+
+        @Override
+        public void recordTimeout(String engineId, FraudEngineType engineType, boolean required) {
+        }
+
+        @Override
+        public void recordRequiredEngineFailed(String engineId) {
         }
     }
 }

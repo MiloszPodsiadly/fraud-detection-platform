@@ -9,6 +9,7 @@ import java.time.Clock;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Locale;
+import java.util.stream.Stream;
 
 import static com.frauddetection.scoring.orchestration.runtime.RuntimeOrchestratorTestSupport.registry;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -51,6 +52,25 @@ class FraudScoringOrchestratorLifecycleTest {
                 .contains("the owner of an orchestrator created this way must call `close()`")
                 .contains("fdp-90 does not provide spring lifecycle management")
                 .contains("future runtime wiring must inject an explicitly lifecycle-managed executor");
+    }
+
+    @Test
+    void productionRuntimeMustNotUseDefaultOrchestratorConstructor() throws Exception {
+        Path productionRoot = Path.of("src", "main", "java");
+        Path orchestratorSource = productionRoot.resolve(
+                "com/frauddetection/scoring/orchestration/FraudScoringOrchestrator.java"
+        ).normalize();
+        StringBuilder productionSources = new StringBuilder();
+        try (Stream<Path> files = Files.walk(productionRoot)) {
+            for (Path file : files.filter(Files::isRegularFile)
+                    .filter(path -> !path.normalize().equals(orchestratorSource))
+                    .toList()) {
+                productionSources.append(Files.readString(file)).append('\n');
+            }
+        }
+
+        assertThat(productionSources.toString())
+                .doesNotContainPattern("new\\s+FraudScoringOrchestrator\\s*\\(");
     }
 
     private Path docsRoot() {

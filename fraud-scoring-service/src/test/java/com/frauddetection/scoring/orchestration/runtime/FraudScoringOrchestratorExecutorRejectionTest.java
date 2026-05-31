@@ -2,16 +2,19 @@ package com.frauddetection.scoring.orchestration.runtime;
 
 import com.frauddetection.common.events.engine.FraudEngineConfidence;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
+import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrationResult;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrationStatus;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrator;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 
 import static com.frauddetection.scoring.orchestration.runtime.RuntimeOrchestratorTestSupport.ExecutionMode.COMPLETED;
 import static com.frauddetection.scoring.orchestration.runtime.RuntimeOrchestratorTestSupport.ExecutionMode.REJECTED;
+import static com.frauddetection.scoring.orchestration.runtime.RuntimeOrchestratorTestSupport.ExecutionMode.TIMED_OUT;
 import static com.frauddetection.scoring.orchestration.runtime.RuntimeOrchestratorTestSupport.context;
 import static com.frauddetection.scoring.orchestration.runtime.RuntimeOrchestratorTestSupport.executionPolicy;
 import static com.frauddetection.scoring.orchestration.runtime.RuntimeOrchestratorTestSupport.orchestrator;
@@ -99,5 +102,110 @@ class FraudScoringOrchestratorExecutorRejectionTest {
 
         assertThat(result.engineResults().get(1).statusReason()).isEqualTo("ORCHESTRATOR_ENGINE_REJECTED");
         assertThat(result.engineResults().get(1).latencyMs()).isEqualTo(9L);
+    }
+
+    @Test
+    void rejectionDoesNotRecordTimeoutMetric() {
+        RecordingMetrics metrics = new RecordingMetrics();
+        FraudScoringOrchestrationResult result;
+        try (FraudScoringOrchestrator orchestrator = orchestrator(
+                List.of(COMPLETED, REJECTED),
+                metrics,
+                new RuntimeOrchestratorTestSupport.MutableClock()
+        )) {
+            result = orchestrator.evaluate(context());
+        }
+
+        assertThat(result.engineResults().get(1).status()).isEqualTo(FraudEngineStatus.DEGRADED);
+        assertThat(result.engineResults().get(1).statusReason()).isEqualTo("ORCHESTRATOR_ENGINE_REJECTED");
+        assertThat(result.engineResults().get(1).toString()).doesNotContain("LOW");
+        assertThat(result.status()).isEqualTo(FraudScoringOrchestrationStatus.PARTIAL);
+        assertThat(metrics.timeoutCalls).isEmpty();
+        assertThat(metrics.engineResultCalls)
+                .contains(new EngineResultMetricCall("ml.python.primary", FraudEngineType.ML_MODEL, FraudEngineStatus.DEGRADED, false));
+        assertThat(metrics.latencyCalls)
+                .contains(new LatencyMetricCall("ml.python.primary", FraudEngineType.ML_MODEL, FraudEngineStatus.DEGRADED));
+    }
+
+    @Test
+    void timeoutDoesNotUseRejectedReason() {
+        RecordingMetrics metrics = new RecordingMetrics();
+        FraudScoringOrchestrationResult result;
+        try (FraudScoringOrchestrator orchestrator = orchestrator(
+                List.of(COMPLETED, TIMED_OUT),
+                metrics,
+                new RuntimeOrchestratorTestSupport.MutableClock()
+        )) {
+            result = orchestrator.evaluate(context());
+        }
+
+        assertThat(result.engineResults().get(1).status()).isEqualTo(FraudEngineStatus.TIMEOUT);
+        assertThat(result.engineResults().get(1).statusReason()).isEqualTo("ORCHESTRATOR_ENGINE_TIMEOUT");
+        assertThat(result.engineResults().get(1).toString()).doesNotContain("ORCHESTRATOR_ENGINE_REJECTED");
+        assertThat(metrics.timeoutCalls).containsExactly("ml.python.primary");
+    }
+
+    @Test
+    void requiredRejectionRecordsRequiredEngineFailedMetric() {
+        RecordingMetrics metrics = new RecordingMetrics();
+        FraudScoringOrchestrationResult result;
+        try (FraudScoringOrchestrator orchestrator = orchestrator(
+                List.of(REJECTED, COMPLETED),
+                metrics,
+                new RuntimeOrchestratorTestSupport.MutableClock()
+        )) {
+            result = orchestrator.evaluate(context());
+        }
+
+        assertThat(result.status()).isEqualTo(FraudScoringOrchestrationStatus.REQUIRED_ENGINE_FAILED);
+        assertThat(metrics.requiredEngineFailedCalls).containsExactly("rules.primary");
+    }
+
+    private static final class RecordingMetrics implements FraudScoringOrchestratorMetrics {
+        private final List<EngineResultMetricCall> engineResultCalls = new ArrayList<>();
+        private final List<LatencyMetricCall> latencyCalls = new ArrayList<>();
+        private final List<String> timeoutCalls = new ArrayList<>();
+        private final List<String> requiredEngineFailedCalls = new ArrayList<>();
+
+        @Override
+        public void recordOrchestration(FraudScoringOrchestrationStatus status) {
+        }
+
+        @Override
+        public void recordEngineResult(String engineId, FraudEngineType engineType, FraudEngineStatus status, boolean required) {
+            engineResultCalls.add(new EngineResultMetricCall(engineId, engineType, status, required));
+        }
+
+        @Override
+        public void recordEngineLatency(
+                String engineId,
+                FraudEngineType engineType,
+                FraudEngineStatus status,
+                boolean required,
+                Duration latency
+        ) {
+            latencyCalls.add(new LatencyMetricCall(engineId, engineType, status));
+        }
+
+        @Override
+        public void recordTimeout(String engineId, FraudEngineType engineType, boolean required) {
+            timeoutCalls.add(engineId);
+        }
+
+        @Override
+        public void recordRequiredEngineFailed(String engineId) {
+            requiredEngineFailedCalls.add(engineId);
+        }
+    }
+
+    private record EngineResultMetricCall(
+            String engineId,
+            FraudEngineType engineType,
+            FraudEngineStatus status,
+            boolean required
+    ) {
+    }
+
+    private record LatencyMetricCall(String engineId, FraudEngineType engineType, FraudEngineStatus status) {
     }
 }
