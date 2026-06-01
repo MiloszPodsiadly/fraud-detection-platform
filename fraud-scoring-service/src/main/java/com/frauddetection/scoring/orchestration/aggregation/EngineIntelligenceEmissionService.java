@@ -45,13 +45,18 @@ public class EngineIntelligenceEmissionService {
                 return Optional.empty();
             }
             Optional<EngineIntelligenceSummary> result = pipeline.enrich(scoringRequest);
-            recordMetrics(metrics::recordSuccess);
-            recordMetrics(() -> metrics.recordLatency(Duration.ofNanos(elapsedNanos(startedAtNanos))));
+            if (result.isPresent()) {
+                recordMetrics(metrics::recordSuccess);
+            } else {
+                recordMetrics(() -> metrics.recordOmitted(EngineIntelligenceEmissionOmissionReason.EMPTY_RESULT));
+            }
             return result;
         } catch (RuntimeException exception) {
             recordMetrics(() -> metrics.recordOmitted(EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE));
             log.warn("Engine intelligence enrichment omitted.");
             return Optional.empty();
+        } finally {
+            recordMetrics(() -> metrics.recordLatency(Duration.ofNanos(elapsedNanos(startedAtNanos))));
         }
     }
 
