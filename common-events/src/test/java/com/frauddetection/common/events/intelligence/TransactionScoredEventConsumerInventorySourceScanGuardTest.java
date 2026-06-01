@@ -6,7 +6,9 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class TransactionScoredEventConsumerDiscoveryTest {
+class TransactionScoredEventConsumerInventorySourceScanGuardTest {
+
+    private static final String MESSAGE = "TRANSACTION_SCORED_EVENT_CONSUMER_INVENTORY_REVIEW_REQUIRED";
 
     private static final List<String> REVIEWED_PRODUCTION_REFERENCES = List.of(
             "alert-service/src/main/java/com/frauddetection/alert/config/AlertKafkaConfig.java",
@@ -31,10 +33,26 @@ class TransactionScoredEventConsumerDiscoveryTest {
     );
 
     @Test
-    void productionReferencesRemainReviewed() throws Exception {
+    void reviewedProductionConsumerInventoryMatchesCurrentSourceScan() throws Exception {
         assertThat(EngineIntelligenceFdp93SourceScanSupport.productionJavaFilesContaining("TransactionScoredEvent"))
-                .withFailMessage("TRANSACTION_SCORED_EVENT_CONSUMER_INVENTORY_REVIEW_REQUIRED")
+                .withFailMessage(MESSAGE)
                 .containsExactlyElementsOf(REVIEWED_PRODUCTION_REFERENCES);
+    }
+
+    @Test
+    void inventoryFailureMessageIsBounded() {
+        assertThat(MESSAGE)
+                .isEqualTo("TRANSACTION_SCORED_EVENT_CONSUMER_INVENTORY_REVIEW_REQUIRED")
+                .hasSizeLessThan(128);
+    }
+
+    @Test
+    void sourceScanIgnoresTestFixturesAndGeneratedOutputs() throws Exception {
+        assertThat(EngineIntelligenceFdp93SourceScanSupport.productionJavaFilesContaining("TransactionScoredEvent"))
+                .noneMatch(path -> path.contains("/src/test/"))
+                .noneMatch(path -> path.contains("/target/"))
+                .noneMatch(path -> path.contains("/generated/"))
+                .noneMatch(path -> path.contains("/fixtures/"));
     }
 
     @Test

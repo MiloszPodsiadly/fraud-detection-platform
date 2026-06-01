@@ -35,9 +35,14 @@ class EngineIntelligenceProducerEmissionNotWiredTest {
     }
 
     @Test
-    void noConfigurationEnablesEngineIntelligenceEmission() throws Exception {
-        assertThat(EngineIntelligenceFdp93SourceScanSupport.sources("fraud-scoring-service/src/main/resources"))
-                .withFailMessage(MESSAGE)
-                .doesNotContain("engine-intelligence", "engineIntelligence", "ENGINE_INTELLIGENCE");
+    void productionConfigDoesNotDefineEngineIntelligenceEmissionFlag() throws Exception {
+        assertThat(EngineIntelligenceFdp93SourceScanSupport.productionConfigurationSources())
+                .withFailMessage("ENGINE_INTELLIGENCE_PRODUCER_FLAG_OUT_OF_SCOPE")
+                .doesNotContain(
+                        "engineIntelligence", "engine-intelligence", "ENGINE_INTELLIGENCE",
+                        "emitEngineIntelligence", "emit-engine-intelligence",
+                        "engineIntelligenceEnabled", "engine-intelligence-enabled",
+                        "publicEngineIntelligence", "public-engine-intelligence"
+                );
     }
 }
