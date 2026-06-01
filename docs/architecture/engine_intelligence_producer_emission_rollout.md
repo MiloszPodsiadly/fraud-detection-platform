@@ -77,8 +77,17 @@ must connect the low-cardinality metrics boundary to production telemetry for:
 - `enrichment_latency_seconds`
 - `enrichment_timeout_total` if applicable
 
-Labels must be low-cardinality only. Transaction, customer, and account IDs must not be metrics
-labels.
+`recordSuccess` means a public `EngineIntelligenceSummary` was actually produced. A completed
+diagnostic pipeline that returns empty is recorded as a bounded omission. Enabled enrichment
+attempts record latency for success, empty result, missing pipeline, and failure. Disabled skips do
+not record enrichment attempt latency.
+
+FDP-94 records `UNKNOWN_FAILURE` for runtime pipeline failures. Stage-specific omission reasons are
+reserved for future pipeline instrumentation.
+
+Metrics are best-effort and must not affect event publishing. Metrics must remain low-cardinality.
+Metrics must not include transaction IDs, customer IDs, account IDs, raw exception messages,
+endpoint URLs, payloads, or feature vectors.
 
 ## Scope Guardrails
 
