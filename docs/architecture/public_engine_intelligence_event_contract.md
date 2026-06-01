@@ -57,6 +57,8 @@ calibration proof. For v1, available scores map to `LOW` for `0.00-0.25`, `MEDIU
 `>0.25-0.50`, `HIGH` for `>0.50-0.75`, and `VERY_HIGH` for `>0.75-1.00`. `NONE` is reserved for an
 explicitly omitted value and is not a missing-score fallback. Comparable score deltas map to `NONE`
 for exact zero, `SMALL` for `>0.00-0.15`, `MEDIUM` for `>0.15-0.35`, and `LARGE` for `>0.35-1.00`.
+For score buckets, `NONE` does not mean score zero and does not mean a missing score. Missing score
+maps to `UNAVAILABLE`.
 
 ## Evidence Exposure Decision
 
@@ -71,8 +73,11 @@ final explanations, payment decision rationale, or proof of fraud.
 ## Timeout/Unavailable/Degraded Semantics
 
 Timeout does not mean low risk. Missing score does not become zero. Missing risk does not become
-LOW. Timeout, unavailable, degraded, skipped, and fallback-used engine score buckets are
-`UNAVAILABLE`.
+LOW. Non-AVAILABLE engine statuses must not carry public `riskLevel`. For `TIMEOUT`, `UNAVAILABLE`,
+`DEGRADED`, `SKIPPED`, and `FALLBACK_USED`, `riskLevel` is omitted. Public consumers must not infer
+LOW risk from missing `riskLevel` or from an `UNAVAILABLE` score bucket. Timeout, unavailable,
+degraded, skipped, and fallback-used engine score buckets are `UNAVAILABLE`. Operational diagnostic
+signals must not carry fraud risk or fraud score buckets.
 
 ## No Final Decisioning
 
