@@ -10,7 +10,8 @@ approve/decline/block.
 ## Aggregation Model
 
 `FraudEngineAggregationService` consumes an internal `FraudScoringOrchestrationResult` and produces
-an internal `FraudEngineAggregationResult`. The service is not wired into production scoring.
+an internal `FraudEngineAggregationResult`. FDP-94 wires it only into disabled-by-default diagnostic
+producer enrichment after baseline scoring. It does not replace baseline scoring.
 Timeout/unavailable/degraded engines remain visible.
 
 ## Normalized Engine Result
@@ -86,8 +87,8 @@ winning engine, recommended action, or decision policy.
 ## FDP-92 Public Contract Extension
 
 FDP-91 prepared semantics for a separate event extension. FDP-92 adds a bounded optional public
-contract and an unwired mapping design. It does not serialize the internal aggregation model 1:1,
-wire producer publication, or add downstream projection. See
+contract and a controlled mapping design. FDP-94 may wire disabled-by-default diagnostic producer
+publication without serializing the internal aggregation model 1:1 or adding downstream projection. See
 [Public engine intelligence event contract](public_engine_intelligence_event_contract.md).
 
 ## Public Contract Boundary For FDP-92

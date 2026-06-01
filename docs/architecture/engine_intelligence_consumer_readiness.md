@@ -86,10 +86,10 @@ Producer emission requires consumer-readiness proof.
 Future producer emission must be disabled by default and guarded by an explicit feature flag.
 Do not implement the feature flag in FDP-93.
 
-FDP-94 adds the separately reviewed disabled-by-default capability boundary documented in
+FDP-94 adds the separately reviewed disabled-by-default runtime producer emission documented in
 [Controlled engine intelligence producer emission rollout](engine_intelligence_producer_emission_rollout.md).
-It does not migrate live scoring to the orchestrator and does not enable production runtime emission
-by default. Runtime orchestration emission requires a separate reviewed future branch.
+It does not migrate baseline scoring decisions to the orchestrator and does not enable production
+runtime emission by default. Explicit `true` enables separate diagnostic enrichment only.
 
 ## Future Producer Emission Gate
 

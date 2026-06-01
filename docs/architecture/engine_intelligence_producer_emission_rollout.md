@@ -1,12 +1,12 @@
 # Controlled Engine Intelligence Producer Emission Rollout
 
-Status: FDP-94 disabled-by-default producer capability boundary only.
+Status: FDP-94 disabled-by-default runtime producer emission.
 
 ## Purpose
 
-FDP-94 adds a controlled producer mapping capability for the bounded public `engineIntelligence`
-summary already defined by FDP-92 and tolerated by consumers under FDP-93. It does not enable
-production runtime emission by default.
+FDP-94 wires optional producer emission for the bounded public `engineIntelligence` summary already
+defined by FDP-92 and tolerated by consumers under FDP-93. The runtime producer emission remains
+disabled by default.
 
 ## Rollout Flag
 
@@ -16,8 +16,8 @@ The only producer rollout flag is:
 fraud.scoring.events.engine-intelligence.emit-enabled=false
 ```
 
-The property is intentionally specific to scoring event emission. Missing and explicit `false`
-values keep emission disabled. Explicit `true` permits the bounded mapping capability only.
+The property is intentionally specific to scoring event emission. Missing config means disabled.
+Explicit `false` means disabled. Explicit `true` enables producer-side diagnostic enrichment.
 The environment override is:
 
 ```text
@@ -31,26 +31,26 @@ An empty optional keeps the pre-FDP-94 event shape and omits the `engineIntellig
 A present optional adds only the bounded public DTO. Internal aggregation objects, raw evidence,
 contributions, and internal diagnostics are not event payload fields.
 
-## Runtime Limitation
+## Runtime Boundary
 
-FDP-94 does not migrate baseline scoring runtime to `FraudScoringOrchestrator`.
-The live `TransactionFraudScoringService` path intentionally keeps the existing two-argument
-mapper call. An orchestration aggregation result is not currently available in that live path.
-Runtime orchestration emission requires a separate reviewed future branch.
+Baseline scoring remains in the existing `FraudScoringEngine` path. Disabled mode keeps the
+pre-FDP-94 serialized event shape and does not invoke orchestrator, aggregation, or public mapper.
+Enabled mode may invoke diagnostic enrichment after baseline scoring and attach bounded public
+`engineIntelligence`. Enabled mode must not change baseline `fraudScore`, `riskLevel`,
+`alertRecommended`, `reasonCodes`, `scoringEvidence`, or `scoreDetails`. Diagnostic enrichment is
+not scoring migration and does not feed back into the baseline result.
 
 ## Failure Isolation
 
-Optional enrichment failures return the base scored event without `engineIntelligence`.
-Failure logging is bounded and does not include raw exception messages. Baseline scoring errors
-remain baseline scoring errors and are not swallowed by optional enrichment handling.
+Enrichment failure returns the base event without `engineIntelligence`. Failure logging is bounded
+and does not include raw exception messages. Baseline scoring failures are not swallowed.
 
 ## Rollout Sequence
 
 1. Keep `fraud.scoring.events.engine-intelligence.emit-enabled=false`.
 2. Verify FDP-92 public-contract and FDP-93 consumer-readiness tests remain green.
-3. Add separately reviewed live runtime orchestration wiring only when the aggregation result is
-   already available without changing baseline scoring decisions.
-4. Enable emission in an explicitly controlled environment after payload and consumer validation.
+3. Enable emission in an explicitly controlled environment after payload and consumer validation.
+4. Verify diagnostic enrichment latency before expanding rollout.
 
 ## Rollback
 
@@ -63,5 +63,5 @@ persistence, API, or UI rollback is required because FDP-94 does not add those c
 - No alert-service projection or persistence.
 - No API or analyst-console UI exposure.
 - No final decisioning, automatic approve, automatic decline, or payment authorization.
-- No production migration to `FraudScoringOrchestrator`.
+- No migration of baseline scoring decisions to `FraudScoringOrchestrator`.
 - No raw or internal aggregation serialization.

@@ -95,12 +95,19 @@ FDP-89 does not change common-events evidence taxonomy.
 
 ## Runtime Isolation
 
-`FraudScoringOrchestrator` is not Spring-managed, is not wired into `CompositeFraudScoringEngine`,
-does not publish Kafka events, does not call alert-service, does not call API/UI, and does not mutate
-`ScoringContext`.
+In FDP-89, `FraudScoringOrchestrator` was not Spring-managed and was not wired into
+`CompositeFraudScoringEngine`. It does not call alert-service, does not call API/UI, and does not
+mutate `ScoringContext`.
 
 No Kafka event schema change, no alert-service projection, no API/UI, no analyst console, no feedback
 workflow, no final decisioning, and no production migration are included in FDP-89.
+
+## FDP-94 Diagnostic Runtime Wiring
+
+FDP-94 Spring-manages the orchestrator for disabled-by-default producer diagnostic enrichment after
+baseline scoring. This does not wire the orchestrator into `CompositeFraudScoringEngine`, replace the
+baseline score result, add public `engineResults[]`, add downstream projection, or add final
+decisioning.
 
 ## Out Of Scope
 
@@ -124,7 +131,7 @@ executor, latency, metrics, and runtime-isolation details.
 ## Next
 
 FDP-91 adds internal-only bounded aggregation and comparison semantics without wiring the
-orchestrator into production scoring and without adding `TransactionScoredEvent.engineResults[]`.
+orchestrator into baseline production scoring and without adding `TransactionScoredEvent.engineResults[]`.
 See [Internal engine result aggregation and comparison](internal_engine_result_aggregation.md).
 
 Any future Kafka event extension belongs to a separate compatibility-reviewed branch after internal

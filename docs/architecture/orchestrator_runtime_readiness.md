@@ -9,7 +9,9 @@ This is an internal runtime-readiness foundation, not a production enablement cl
 FDP-90 does not wire orchestrator into `CompositeFraudScoringEngine`. There is no
 `CompositeFraudScoringEngine` wiring, no `TransactionScoredEvent.engineResults[]`, no Kafka schema
 changes, no alert-service projection, no API/UI, no final decisioning, and no automatic
-approve/decline behavior. The internal orchestrator remains outside the live scoring path.
+approve/decline behavior. The internal orchestrator remains outside the baseline live scoring
+decision path. FDP-94 may invoke it separately for disabled-by-default producer diagnostic
+enrichment after baseline scoring.
 
 ## Per-Engine Deadline Policy
 
@@ -40,13 +42,13 @@ Executor saturation produces a bounded rejected/degraded result with
 ## Executor Lifecycle Boundary
 
 `FraudScoringOrchestrator` default constructor creates an owned internal executor. The owner of an
-orchestrator created this way must call `close()`. FDP-90 does not provide Spring lifecycle
-management. Future runtime wiring must inject an explicitly lifecycle-managed executor. Future
-runtime wiring must not create per-request unmanaged executors. Executor ownership must be decided
-before `CompositeFraudScoringEngine` wiring.
+orchestrator created this way must call `close()`. FDP-94 provides Spring lifecycle management for
+its disabled-by-default diagnostic producer enrichment. Runtime wiring injects an explicitly
+lifecycle-managed executor. Runtime wiring must not create per-request unmanaged executors.
+Executor ownership must be decided before any `CompositeFraudScoringEngine` wiring.
 
-Future runtime wiring must inject lifecycle-managed executor, metrics, policy, and clock through the
-explicit constructor. The default constructor is not approved for live scoring wiring.
+Runtime wiring injects lifecycle-managed executor, metrics, policy, and clock through the explicit
+constructor. The default constructor is not approved for live scoring wiring.
 
 ## Timeout Mapping
 
@@ -130,9 +132,10 @@ ML runtime timeout/unavailable/rejection is PARTIAL, not REQUIRED_ENGINE_FAILED.
 
 ## Runtime Isolation
 
-Runtime isolation remains intact. FDP-90 changes internal execution readiness only. It adds no
-production migration, no public engine intelligence exposure, no final decisioning authority change, and
-no event, projection, controller, or analyst-console integration.
+Runtime isolation remains intact. FDP-90 changes internal execution readiness only. FDP-94 later
+adds disabled-by-default public diagnostic producer enrichment without production scoring migration,
+final decisioning authority change, projection, controller, or analyst-console integration.
 
 FDP-91 adds an internal-only bounded aggregation and comparison package without wiring it into
-production scoring. See [Internal engine result aggregation and comparison](internal_engine_result_aggregation.md).
+baseline production scoring. FDP-94 may use it only for separate opt-in diagnostic enrichment. See
+[Internal engine result aggregation and comparison](internal_engine_result_aggregation.md).
