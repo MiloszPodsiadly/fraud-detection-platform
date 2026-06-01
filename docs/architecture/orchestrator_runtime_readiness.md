@@ -43,7 +43,8 @@ Executor saturation produces a bounded rejected/degraded result with
 
 `FraudScoringOrchestrator` default constructor creates an owned internal executor. The owner of an
 orchestrator created this way must call `close()`. FDP-94 provides Spring lifecycle management for
-its disabled-by-default diagnostic producer enrichment. Runtime wiring injects an explicitly
+its disabled-by-default diagnostic producer enrichment. The diagnostic runtime graph is created only
+when the FDP-94 emission flag is explicitly enabled. Runtime wiring injects an explicitly
 lifecycle-managed executor. Runtime wiring must not create per-request unmanaged executors.
 Executor ownership must be decided before any `CompositeFraudScoringEngine` wiring.
 

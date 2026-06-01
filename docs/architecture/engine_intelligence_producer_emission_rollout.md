@@ -34,11 +34,16 @@ contributions, and internal diagnostics are not event payload fields.
 ## Runtime Boundary
 
 Baseline scoring remains in the existing `FraudScoringEngine` path. Disabled mode keeps the
-pre-FDP-94 serialized event shape and does not invoke orchestrator, aggregation, or public mapper.
-Enabled mode may invoke diagnostic enrichment after baseline scoring and attach bounded public
-`engineIntelligence`. Enabled mode must not change baseline `fraudScore`, `riskLevel`,
-`alertRecommended`, `reasonCodes`, `scoringEvidence`, or `scoreDetails`. Diagnostic enrichment is
-not scoring migration and does not feed back into the baseline result.
+pre-FDP-94 serialized event shape, does not invoke orchestrator, aggregation, or public mapper, and
+does not initialize the conditional diagnostic runtime graph. Enabled mode performs shadow
+diagnostic orchestration after baseline scoring and attaches bounded public `engineIntelligence`.
+Enabled mode may execute rule and ML signal engines in addition to baseline scoring.
+Enabled mode may add latency, ML service calls, executor work, and operational load.
+
+Enabled diagnostic results must not change baseline `fraudScore`, `riskLevel`, `alertRecommended`,
+`reasonCodes`, `scoringEvidence`, or `scoreDetails`. Enabled diagnostic results may differ from the
+baseline scoring result. Such disagreement is diagnostic only and not final decisioning.
+Diagnostic enrichment is not scoring migration and does not feed back into the baseline result.
 
 ## Failure Isolation
 
@@ -49,14 +54,29 @@ and does not include raw exception messages. Baseline scoring failures are not s
 
 1. Keep `fraud.scoring.events.engine-intelligence.emit-enabled=false`.
 2. Verify FDP-92 public-contract and FDP-93 consumer-readiness tests remain green.
-3. Enable emission in an explicitly controlled environment after payload and consumer validation.
-4. Verify diagnostic enrichment latency before expanding rollout.
+3. Keep enabled mode disabled by default until latency and load are validated.
+4. Enable emission gradually in an explicitly controlled environment after payload and consumer validation.
+5. Verify latency, timeout, rejection, and enrichment-omission behavior before expanding rollout.
 
 ## Rollback
 
 Set `fraud.scoring.events.engine-intelligence.emit-enabled=false` and redeploy. Disabled mode omits
 the nested JSON field and restores the old emitted event shape. No alert-service projection,
 persistence, API, or UI rollback is required because FDP-94 does not add those capabilities.
+
+## Operational Observability Debt
+
+FDP-94 has bounded failure isolation but does not yet add dedicated enrichment metrics.
+Before wider rollout, FDP-95/FDP-96 must add low-cardinality metrics for:
+
+- `enrichment_attempt_total`
+- `enrichment_success_total`
+- `enrichment_omitted_total`
+- `enrichment_latency_seconds`
+- `enrichment_timeout_total` if applicable
+
+Labels must be low-cardinality only. Transaction, customer, and account IDs must not be metrics
+labels.
 
 ## Scope Guardrails
 
