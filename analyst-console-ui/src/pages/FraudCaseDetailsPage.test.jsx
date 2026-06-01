@@ -288,6 +288,7 @@ describe("FraudCaseDetailsPage", () => {
     render(page({ caseId: "case-1", apiClient }));
 
     expect(await screen.findByText("Evidence summary")).toBeInTheDocument();
+    await waitFor(() => expect(apiClient.getFraudCaseEvidenceSummary).toHaveBeenCalledTimes(1));
     expect(apiClient.updateFraudCase).not.toHaveBeenCalled();
     expect(apiClient.getFraudCaseEvidenceSummary.mock.calls[0][1]).not.toHaveProperty("onCaseUpdated");
     expect(apiClient.getFraudCaseEvidenceSummary.mock.calls[0][1]).not.toHaveProperty("submitDecision");
