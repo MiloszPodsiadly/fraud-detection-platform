@@ -27,6 +27,11 @@ FDP-93 is consumer-readiness, not product exposure.
 
 The source-scan discovery test fails with `TRANSACTION_SCORED_EVENT_CONSUMER_INVENTORY_REVIEW_REQUIRED`
 when a production reference is added without inventory review.
+Source-scan guards are intentionally strict and may require updates when production references move
+or new consumers are added. A source-scan failure means consumer inventory review is required.
+Source-scan guards are not a substitute for architectural review. New TransactionScoredEvent
+consumers must be added to the inventory intentionally. The bounded failure message is
+`TRANSACTION_SCORED_EVENT_CONSUMER_INVENTORY_REVIEW_REQUIRED`.
 
 ## Fixture Strategy
 
@@ -45,6 +50,13 @@ unchanged.
 The shared event contract and public engine-intelligence DTOs ignore unknown fields. Alert-service
 tests prove tolerance for both unknown nested engine-intelligence fields and an unknown top-level
 event field.
+FDP-93 intentionally requires alert-service tolerance for unknown top-level TransactionScoredEvent
+fields as a forward-compatibility guardrail, not only for engineIntelligence nested fields.
+Unknown top-level tolerance helps future additive event evolution.
+Unknown top-level tolerance does not authorize producers to emit arbitrary fields without contract review.
+Producer branches must still define exact public payload shape.
+Future producer emission must keep strict producer-side contract tests.
+Consumer tolerance is not producer looseness.
 
 ## Payload Tolerance
 

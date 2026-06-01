@@ -37,7 +37,19 @@ class EngineIntelligenceConsumerReadinessDocsTest {
                 "Producer emission must not introduce final decisioning",
                 "Producer emission must not combine projection/API/UI in the same branch unless explicitly scoped and reviewed",
                 "FDP-92 proves the DTO is bounded",
-                "FDP-93 proves consumers tolerate the bounded DTO"
+                "FDP-93 proves consumers tolerate the bounded DTO",
+                "FDP-93 intentionally requires alert-service tolerance for unknown top-level TransactionScoredEvent",
+                "fields as a forward-compatibility guardrail, not only for engineIntelligence nested fields",
+                "Unknown top-level tolerance does not authorize producers to emit arbitrary fields",
+                "Producer branches must still",
+                "define exact public payload shape",
+                "Consumer tolerance is not producer looseness",
+                "Source-scan guards are intentionally strict",
+                "consumer inventory review is required",
+                "Source-scan guards are not a substitute for architectural review",
+                "New TransactionScoredEvent",
+                "consumers must be added to the inventory intentionally",
+                "TRANSACTION_SCORED_EVENT_CONSUMER_INVENTORY_REVIEW_REQUIRED"
         );
     }
 
