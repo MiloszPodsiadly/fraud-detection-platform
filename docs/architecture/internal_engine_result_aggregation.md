@@ -58,6 +58,18 @@ length, and description length are capped deterministically.
 
 Result size is bounded. Policy limits cap engine results, reason codes, evidence summaries,
 contribution summaries, strongest signals, warnings, and text lengths.
+Warning counts may be derived internally from bounded warning codes and must not include raw text.
+
+## FDP-91 Engine Pair Boundary
+
+FDP-91 compares only the allowlisted pair rules.primary and ml.python.primary. FDP-91 is not an
+N-way multi-engine comparison framework. Adding Velocity, Device, Merchant, or any future engine
+requires a separate branch and explicit semantic review.
+
+Adding a new engine requires updates to the engine allowlist, aggregation policy, deterministic
+ordering, score delta semantics, risk mismatch semantics, agreement semantics, strongest signal
+semantics, docs governance, and runtime isolation tests. Unknown engine IDs fail fast and are not
+published externally.
 
 ## Safety And Leakage Prevention
 
@@ -75,3 +87,42 @@ winning engine, recommended action, or decision policy.
 
 FDP-91 prepares for future event extension but does not add it. Any future publication requires a
 separate compatibility-reviewed branch.
+
+## Public Contract Boundary For FDP-92
+
+FraudEngineAggregationResult is an internal model. FDP-92 must not publish
+FraudEngineAggregationResult 1:1. FDP-92 must define a separate compatibility-reviewed public
+event contract. That contract must have its own schema, size limits, backward compatibility review,
+and data safety review.
+
+The public event contract must decide separately whether score, evidence title, evidence
+description, contribution feature, and strongest signal should be exposed, bucketed, templated, or
+omitted. Score may be exposed, bucketed, templated, or omitted. Internal aggregation types must not
+be placed in common-events directly. FDP-91 prepares semantics; it does not define the public Kafka
+schema.
+
+## Strongest Signal Naming Boundary
+
+Strongest signals are bounded internal diagnostic summaries. Strongest signals are not analyst
+recommendations. Strongest signals are not final explanations. Strongest signals are not a payment
+decision rationale. Strongest signals are not a global proof of fraud. Future API/UI may rename or
+reshape this concept before exposing it.
+
+## FDP-92 Readiness Checklist
+
+Before any event/API exposure:
+
+- define separate public DTO/event contract
+- do not reuse internal aggregation record directly
+- decide whether raw score is allowed, bucketed, or omitted
+- decide whether evidence title/description are allowed, templated, or omitted
+- decide whether contribution feature is allowed, categorized, or omitted
+- use allowlist-first public schema
+- enforce payload size limits
+- enforce backward compatibility tests
+- enforce raw leakage tests
+- enforce no final decisioning
+- preserve timeout/unavailable/degraded semantics
+- preserve missing score does not become zero
+- preserve missing risk does not become LOW
+- preserve agreement/disagreement/adjacent variance semantics

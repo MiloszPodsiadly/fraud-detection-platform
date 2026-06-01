@@ -50,6 +50,9 @@ class FraudEngineAggregationRuntimeIsolationTest {
                 "platformrisklevel",
                 "winningengine",
                 "finaldecisionsource",
+                "analystrecommendation",
+                "finalexplanation",
+                "paymentdecisionrationale",
                 "@component",
                 "@service",
                 "@controller"
