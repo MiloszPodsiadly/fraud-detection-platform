@@ -90,12 +90,7 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
     }
 
     private Optional<EngineIntelligenceSummary> engineIntelligence(FraudScoringRequest scoringRequest) {
-        try {
-            return engineIntelligenceEmissionService.emitIfEnabled(scoringRequest);
-        } catch (RuntimeException exception) {
-            log.warn("Engine intelligence enrichment omitted.");
-            return Optional.empty();
-        }
+        return engineIntelligenceEmissionService.emitIfEnabled(scoringRequest);
     }
 
     private boolean fallbackUsed(FraudScoreResult result) {
