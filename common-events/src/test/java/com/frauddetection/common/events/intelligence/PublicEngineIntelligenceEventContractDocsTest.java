@@ -44,7 +44,16 @@ class PublicEngineIntelligenceEventContractDocsTest {
                 "does not add alert-service projection",
                 "does not add api/ui",
                 "does not add final decisioning",
-                "future fdp-93 projection scope"
+                "fdp-93 producer rollout guard",
+                "does not emit `engineintelligence` in production runtime",
+                "must not silently enable producer emission",
+                "separate branch and review",
+                "consumer-first rollout",
+                "historical consumers may reject unknown top-level fields",
+                "producer mapping must preserve timeout does not mean low risk",
+                "operational statuses do not carry `risklevel`",
+                "operational diagnostic signals do not carry fraud score buckets",
+                "diagnostic signals are not recommendations"
         ).doesNotContain(
                 "production decisioning",
                 "analyst console ready",

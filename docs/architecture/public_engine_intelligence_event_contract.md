@@ -89,7 +89,20 @@ FDP-92 does not add final decisioning.
 FDP-92 does not add alert-service projection. FDP-92 does not add API/UI. FDP-92 does not wire the
 public mapper into production scoring or event publication.
 
-## Future FDP-93 Projection Scope
+## FDP-93 Producer Rollout Guard
 
-Future FDP-93 projection scope may add separately reviewed producer wiring and downstream
-consumption. FDP-92 intentionally stops at the public contract and mapping design boundary.
+FDP-92 defines the public contract but does not emit `engineIntelligence` in production runtime.
+FDP-93 must not silently enable producer emission. Producer emission requires a separate branch and
+review and requires a consumer-first rollout. Historical consumers may reject unknown top-level
+fields. Before any producer emits `engineIntelligence`, all required consumers must be compatible
+with the FDP-92 contract.
+
+Producer mapping must use `PublicEngineIntelligenceMapper` or an explicitly reviewed equivalent.
+Producer mapping must preserve timeout does not mean low risk, missing score does not become zero,
+missing risk does not become LOW, operational statuses do not carry `riskLevel`, operational
+diagnostic signals do not carry fraud score buckets, agreement is not approval, disagreement is not
+decline, and diagnostic signals are not recommendations.
+
+Producer rollout must not add alert-service projection, API/UI, or final decisioning in the same
+branch unless explicitly scoped and reviewed. FDP-92 intentionally stops at the public contract and
+mapping design boundary.
