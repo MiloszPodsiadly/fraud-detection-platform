@@ -18,6 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -25,7 +26,7 @@ import static org.mockito.Mockito.when;
 class EngineIntelligenceEmissionMetricsTest {
 
     @Test
-    void disabledRecordsSkippedDisabled() {
+    void disabledDoesNotRecordAttemptOrLatency() {
         EngineIntelligenceEmissionMetrics metrics = mock(EngineIntelligenceEmissionMetrics.class);
         ObjectProvider<EngineIntelligenceDiagnosticEnrichmentPipeline> provider = provider(
                 mock(EngineIntelligenceDiagnosticEnrichmentPipeline.class)
@@ -38,11 +39,15 @@ class EngineIntelligenceEmissionMetricsTest {
 
         assertThat(service.emitIfEnabled(request())).isEmpty();
         verify(metrics).recordSkippedDisabled();
+        verify(metrics, never()).recordAttempt();
+        verify(metrics, never()).recordSuccess();
+        verify(metrics, never()).recordOmitted(any());
+        verify(metrics, never()).recordLatency(any());
         verifyNoInteractions(provider);
     }
 
     @Test
-    void enabledSuccessRecordsAttemptSuccessLatency() {
+    void enabledSuccessRecordsSuccessNotOmitted() {
         EngineIntelligenceEmissionMetrics metrics = mock(EngineIntelligenceEmissionMetrics.class);
         EngineIntelligenceDiagnosticEnrichmentPipeline pipeline =
                 mock(EngineIntelligenceDiagnosticEnrichmentPipeline.class);
@@ -52,37 +57,55 @@ class EngineIntelligenceEmissionMetricsTest {
         assertThat(service(true, pipeline, metrics).emitIfEnabled(request())).contains(summary);
         verify(metrics).recordAttempt();
         verify(metrics).recordSuccess();
+        verify(metrics, never()).recordOmitted(any());
         verify(metrics).recordLatency(any(Duration.class));
     }
 
     @Test
-    void missingPipelineRecordsBoundedOmission() {
+    void enabledPipelineEmptyRecordsOmittedNotSuccess() {
+        EngineIntelligenceEmissionMetrics metrics = mock(EngineIntelligenceEmissionMetrics.class);
+        EngineIntelligenceDiagnosticEnrichmentPipeline pipeline =
+                mock(EngineIntelligenceDiagnosticEnrichmentPipeline.class);
+        when(pipeline.enrich(any())).thenReturn(Optional.empty());
+
+        assertThat(service(true, pipeline, metrics).emitIfEnabled(request())).isEmpty();
+        verify(metrics).recordAttempt();
+        verify(metrics).recordOmitted(EngineIntelligenceEmissionOmissionReason.EMPTY_RESULT);
+        verify(metrics, never()).recordSuccess();
+        verify(metrics).recordLatency(any(Duration.class));
+    }
+
+    @Test
+    void missingPipelineRecordsOmittedAndLatency() {
         EngineIntelligenceEmissionMetrics metrics = mock(EngineIntelligenceEmissionMetrics.class);
 
         assertThat(service(true, null, metrics).emitIfEnabled(request())).isEmpty();
         verify(metrics).recordAttempt();
         verify(metrics).recordOmitted(EngineIntelligenceEmissionOmissionReason.PIPELINE_UNAVAILABLE);
+        verify(metrics, never()).recordSuccess();
+        verify(metrics).recordLatency(any(Duration.class));
     }
 
     @Test
-    void failureRecordsBoundedOmission() {
+    void pipelineFailureRecordsOmittedAndLatency() {
         EngineIntelligenceEmissionMetrics metrics = mock(EngineIntelligenceEmissionMetrics.class);
         EngineIntelligenceDiagnosticEnrichmentPipeline pipeline =
                 mock(EngineIntelligenceDiagnosticEnrichmentPipeline.class);
         when(pipeline.enrich(any())).thenThrow(new IllegalStateException("raw-secret-must-not-be-a-label"));
 
         assertThat(service(true, pipeline, metrics).emitIfEnabled(request())).isEmpty();
+        verify(metrics).recordAttempt();
         verify(metrics).recordOmitted(EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE);
+        verify(metrics, never()).recordSuccess();
+        verify(metrics).recordLatency(any(Duration.class));
     }
 
     @Test
-    void metricsFailureDoesNotChangeEmissionResult() {
+    void metricsFailureDuringFinallyDoesNotChangeResult() {
         EngineIntelligenceEmissionMetrics metrics = mock(EngineIntelligenceEmissionMetrics.class);
         EngineIntelligenceDiagnosticEnrichmentPipeline pipeline =
                 mock(EngineIntelligenceDiagnosticEnrichmentPipeline.class);
         EngineIntelligenceSummary summary = mock(EngineIntelligenceSummary.class);
-        doThrow(new IllegalStateException("metrics-backend-failure")).when(metrics).recordAttempt();
-        doThrow(new IllegalStateException("metrics-backend-failure")).when(metrics).recordSuccess();
         doThrow(new IllegalStateException("metrics-backend-failure")).when(metrics).recordLatency(any());
         when(pipeline.enrich(any())).thenReturn(Optional.of(summary));
 
@@ -112,6 +135,7 @@ class EngineIntelligenceEmissionMetricsTest {
         assertThat(Arrays.asList(EngineIntelligenceEmissionOmissionReason.values())).containsExactly(
                 EngineIntelligenceEmissionOmissionReason.DISABLED,
                 EngineIntelligenceEmissionOmissionReason.PIPELINE_UNAVAILABLE,
+                EngineIntelligenceEmissionOmissionReason.EMPTY_RESULT,
                 EngineIntelligenceEmissionOmissionReason.ORCHESTRATOR_FAILURE,
                 EngineIntelligenceEmissionOmissionReason.AGGREGATION_FAILURE,
                 EngineIntelligenceEmissionOmissionReason.MAPPER_FAILURE,
