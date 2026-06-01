@@ -2,15 +2,19 @@ package com.frauddetection.scoring.service;
 
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.scoring.domain.FraudScoreResult;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
 import com.frauddetection.scoring.config.ScoringProperties;
 import com.frauddetection.scoring.mapper.TransactionScoredEventMapper;
 import com.frauddetection.scoring.messaging.TransactionScoredEventPublisher;
 import com.frauddetection.scoring.observability.ScoringMetrics;
+import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+
+import java.util.Optional;
 
 @Service
 public class TransactionFraudScoringService implements TransactionFraudScoringUseCase {
@@ -22,19 +26,22 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
     private final TransactionScoredEventPublisher transactionScoredEventPublisher;
     private final ScoringProperties scoringProperties;
     private final ScoringMetrics scoringMetrics;
+    private final EngineIntelligenceEmissionService engineIntelligenceEmissionService;
 
     public TransactionFraudScoringService(
             FraudScoringEngine fraudScoringEngine,
             TransactionScoredEventMapper transactionScoredEventMapper,
             TransactionScoredEventPublisher transactionScoredEventPublisher,
             ScoringProperties scoringProperties,
-            ScoringMetrics scoringMetrics
+            ScoringMetrics scoringMetrics,
+            EngineIntelligenceEmissionService engineIntelligenceEmissionService
     ) {
         this.fraudScoringEngine = fraudScoringEngine;
         this.transactionScoredEventMapper = transactionScoredEventMapper;
         this.transactionScoredEventPublisher = transactionScoredEventPublisher;
         this.scoringProperties = scoringProperties;
         this.scoringMetrics = scoringMetrics;
+        this.engineIntelligenceEmissionService = engineIntelligenceEmissionService;
     }
 
     @Override
@@ -48,7 +55,12 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
         try {
             FraudScoringRequest scoringRequest = FraudScoringRequest.from(event);
             FraudScoreResult scoreResult = fraudScoringEngine.score(scoringRequest);
-            TransactionScoredEvent scoredEvent = transactionScoredEventMapper.toEvent(scoringRequest, scoreResult);
+            Optional<EngineIntelligenceSummary> engineIntelligence = engineIntelligence(scoringRequest);
+            TransactionScoredEvent scoredEvent = transactionScoredEventMapper.toEvent(
+                    scoringRequest,
+                    scoreResult,
+                    engineIntelligence
+            );
             transactionScoredEventPublisher.publish(scoredEvent);
 
             scoringMetrics.recordScoringRequest(
@@ -74,6 +86,15 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
                     System.nanoTime() - startedAt
             );
             throw exception;
+        }
+    }
+
+    private Optional<EngineIntelligenceSummary> engineIntelligence(FraudScoringRequest scoringRequest) {
+        try {
+            return engineIntelligenceEmissionService.emitIfEnabled(scoringRequest);
+        } catch (RuntimeException exception) {
+            log.warn("Engine intelligence enrichment omitted.");
+            return Optional.empty();
         }
     }
 
