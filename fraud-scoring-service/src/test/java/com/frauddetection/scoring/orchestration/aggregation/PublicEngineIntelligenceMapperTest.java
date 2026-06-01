@@ -204,6 +204,24 @@ class PublicEngineIntelligenceMapperTest {
     }
 
     @Test
+    void mapperDoesNotUseAgreementStatusValueOf() throws Exception {
+        assertThat(Files.readString(mapperSource()))
+                .doesNotContain("EngineIntelligenceAgreementStatus.valueOf");
+    }
+
+    @Test
+    void mapperDoesNotUseRiskMismatchStatusValueOf() throws Exception {
+        assertThat(Files.readString(mapperSource()))
+                .doesNotContain("EngineIntelligenceRiskMismatchStatus.valueOf");
+    }
+
+    @Test
+    void mapperDoesNotUseSignalCategoryValueOf() throws Exception {
+        assertThat(Files.readString(mapperSource()))
+                .doesNotContain("EngineIntelligenceSignalCategory.valueOf");
+    }
+
+    @Test
     void allInternalAgreementStatusesHavePublicCounterparts() {
         assertPublicCounterparts(FraudEngineAgreementStatus.values(), EngineIntelligenceAgreementStatus.class);
     }

@@ -48,8 +48,8 @@ public final class PublicEngineIntelligenceMapper {
 
     private EngineIntelligenceComparison mapComparison(FraudEngineAggregationResult result) {
         return new EngineIntelligenceComparison(
-                EngineIntelligenceAgreementStatus.valueOf(result.agreementStatus().name()),
-                EngineIntelligenceRiskMismatchStatus.valueOf(result.riskMismatch().status().name()),
+                mapAgreementStatus(result.agreementStatus()),
+                mapRiskMismatchStatus(result.riskMismatch().status()),
                 result.scoreDelta().status() == FraudEngineScoreDeltaStatus.AVAILABLE
                         ? EngineIntelligenceScoreDeltaBucket.fromComparableDelta(result.scoreDelta().absoluteDelta())
                         : EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
@@ -61,7 +61,7 @@ public final class PublicEngineIntelligenceMapper {
                 signal.engineId(),
                 signal.engineType(),
                 signal.status(),
-                EngineIntelligenceSignalCategory.valueOf(signal.signalCategory().name()),
+                mapSignalCategory(signal.signalCategory()),
                 publicSignalRiskLevel(signal),
                 publicSignalScoreBucket(signal),
                 signal.reasonCode()
@@ -83,6 +83,33 @@ public final class PublicEngineIntelligenceMapper {
             return EngineIntelligenceScoreBucket.UNAVAILABLE;
         }
         return EngineIntelligenceScoreBucket.from(signal.status(), signal.score());
+    }
+
+    private EngineIntelligenceAgreementStatus mapAgreementStatus(FraudEngineAgreementStatus status) {
+        return switch (status) {
+            case AGREEMENT -> EngineIntelligenceAgreementStatus.AGREEMENT;
+            case ADJACENT_RISK_VARIANCE -> EngineIntelligenceAgreementStatus.ADJACENT_RISK_VARIANCE;
+            case DISAGREEMENT -> EngineIntelligenceAgreementStatus.DISAGREEMENT;
+            case PARTIAL -> EngineIntelligenceAgreementStatus.PARTIAL;
+            case INSUFFICIENT_DATA -> EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA;
+            case REQUIRED_ENGINE_NOT_COMPARABLE -> EngineIntelligenceAgreementStatus.REQUIRED_ENGINE_NOT_COMPARABLE;
+        };
+    }
+
+    private EngineIntelligenceRiskMismatchStatus mapRiskMismatchStatus(FraudEngineRiskMismatchStatus status) {
+        return switch (status) {
+            case SAME_RISK_LEVEL -> EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL;
+            case ADJACENT_RISK_LEVEL -> EngineIntelligenceRiskMismatchStatus.ADJACENT_RISK_LEVEL;
+            case MATERIAL_RISK_MISMATCH -> EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH;
+            case NOT_COMPARABLE -> EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE;
+        };
+    }
+
+    private EngineIntelligenceSignalCategory mapSignalCategory(FraudEngineSignalCategory category) {
+        return switch (category) {
+            case FRAUD_SIGNAL -> EngineIntelligenceSignalCategory.FRAUD_SIGNAL;
+            case OPERATIONAL_SIGNAL -> EngineIntelligenceSignalCategory.OPERATIONAL_SIGNAL;
+        };
     }
 
     private EngineIntelligenceWarningCode mapWarningCode(FraudEngineAggregationWarningCode code) {
