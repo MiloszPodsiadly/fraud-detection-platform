@@ -11,30 +11,41 @@ import static org.assertj.core.api.Assertions.assertThat;
 class EngineIntelligenceScoreBucketTest {
 
     @Test
-    void missingScoreDoesNotBecomeLow() {
+    void noneIsNotReturnedForMissingScore() {
         assertThat(EngineIntelligenceScoreBucket.from(FraudEngineStatus.AVAILABLE, null))
-                .isEqualTo(EngineIntelligenceScoreBucket.UNAVAILABLE)
-                .isNotEqualTo(EngineIntelligenceScoreBucket.LOW);
+                .isNotEqualTo(EngineIntelligenceScoreBucket.NONE);
     }
 
     @Test
-    void missingScoreDoesNotBecomeZero() {
-        assertThat(EngineIntelligenceScoreBucket.from(FraudEngineStatus.AVAILABLE, null))
-                .isNotEqualTo(EngineIntelligenceScoreBucket.from(FraudEngineStatus.AVAILABLE, 0.0d));
+    void noneIsNotReturnedForZeroScore() {
+        assertThat(EngineIntelligenceScoreBucket.from(FraudEngineStatus.AVAILABLE, 0.0d))
+                .isNotEqualTo(EngineIntelligenceScoreBucket.NONE);
     }
 
     @Test
-    void timeoutScoreBucketIsUnavailable() {
+    void zeroScoreMapsToLow() {
+        assertThat(EngineIntelligenceScoreBucket.from(FraudEngineStatus.AVAILABLE, 0.0d))
+                .isEqualTo(EngineIntelligenceScoreBucket.LOW);
+    }
+
+    @Test
+    void missingScoreMapsToUnavailable() {
+        assertThat(EngineIntelligenceScoreBucket.from(FraudEngineStatus.AVAILABLE, null))
+                .isEqualTo(EngineIntelligenceScoreBucket.UNAVAILABLE);
+    }
+
+    @Test
+    void timeoutMapsToUnavailable() {
         assertUnavailable(FraudEngineStatus.TIMEOUT);
     }
 
     @Test
-    void unavailableScoreBucketIsUnavailable() {
+    void unavailableMapsToUnavailable() {
         assertUnavailable(FraudEngineStatus.UNAVAILABLE);
     }
 
     @Test
-    void degradedScoreBucketIsUnavailable() {
+    void degradedMapsToUnavailable() {
         assertUnavailable(FraudEngineStatus.DEGRADED);
     }
 

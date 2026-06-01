@@ -5,6 +5,7 @@ import com.frauddetection.common.events.engine.FraudEngineStatus;
 import java.util.Objects;
 
 public enum EngineIntelligenceScoreBucket {
+    // Reserved for explicitly omitted public score information. Missing and operational scores use UNAVAILABLE.
     NONE,
     LOW,
     MEDIUM,

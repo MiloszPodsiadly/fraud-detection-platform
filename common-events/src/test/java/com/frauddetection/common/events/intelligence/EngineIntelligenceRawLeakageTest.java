@@ -1,5 +1,7 @@
 package com.frauddetection.common.events.intelligence;
 
+import com.frauddetection.common.events.engine.FraudEngineStatus;
+import com.frauddetection.common.events.engine.FraudEngineType;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -53,5 +55,48 @@ class EngineIntelligenceRawLeakageTest {
         String json = EngineIntelligenceTestSupport.objectMapper().writeValueAsString(EngineIntelligenceTestSupport.summary());
 
         assertThat(json).doesNotContainIgnoringCase("transactionId", "customerId", "accountId", "cardId", "merchantId");
+    }
+
+    @Test
+    void serializedTimeoutEngineResultDoesNotContainRiskLevel() throws Exception {
+        assertSerializedEngineResultOmitsRiskLevel(FraudEngineStatus.TIMEOUT);
+    }
+
+    @Test
+    void serializedUnavailableEngineResultDoesNotContainRiskLevel() throws Exception {
+        assertSerializedEngineResultOmitsRiskLevel(FraudEngineStatus.UNAVAILABLE);
+    }
+
+    @Test
+    void serializedDegradedEngineResultDoesNotContainRiskLevel() throws Exception {
+        assertSerializedEngineResultOmitsRiskLevel(FraudEngineStatus.DEGRADED);
+    }
+
+    @Test
+    void serializedOperationalSignalDoesNotContainRiskLevel() throws Exception {
+        String json = EngineIntelligenceTestSupport.objectMapper().writeValueAsString(new EngineIntelligenceDiagnosticSignal(
+                "rules.primary",
+                FraudEngineType.RULES,
+                FraudEngineStatus.TIMEOUT,
+                EngineIntelligenceSignalCategory.OPERATIONAL_SIGNAL,
+                null,
+                EngineIntelligenceScoreBucket.UNAVAILABLE,
+                "HIGH_VELOCITY"
+        ));
+
+        assertThat(json).doesNotContain("riskLevel");
+    }
+
+    private void assertSerializedEngineResultOmitsRiskLevel(FraudEngineStatus status) throws Exception {
+        String json = EngineIntelligenceTestSupport.objectMapper().writeValueAsString(new EngineIntelligenceEngineResult(
+                "rules.primary",
+                FraudEngineType.RULES,
+                status,
+                null,
+                EngineIntelligenceScoreBucket.UNAVAILABLE,
+                List.of("HIGH_VELOCITY")
+        ));
+
+        assertThat(json).doesNotContain("riskLevel");
     }
 }

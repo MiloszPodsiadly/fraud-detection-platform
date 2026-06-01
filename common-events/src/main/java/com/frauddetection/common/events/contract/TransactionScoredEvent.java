@@ -1,5 +1,6 @@
 package com.frauddetection.common.events.contract;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.frauddetection.common.events.evidence.ScoringEvidenceItem;
 import com.frauddetection.common.events.enums.RiskLevel;
@@ -14,6 +15,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 public record TransactionScoredEvent(
         String eventId,
         String transactionId,

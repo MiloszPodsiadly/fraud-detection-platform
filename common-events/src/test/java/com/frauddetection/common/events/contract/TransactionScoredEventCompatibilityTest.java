@@ -48,6 +48,21 @@ class TransactionScoredEventCompatibilityTest {
     }
 
     @Test
+    void unknownTopLevelFutureFieldIsIgnored() throws Exception {
+        TransactionScoredEvent event = objectMapper().readValue(
+                newJson("").replace(
+                        "\"eventId\": \"evt-1\",",
+                        "\"eventId\": \"evt-1\", \"futureTopLevelField\": \"ignored\","
+                ),
+                TransactionScoredEvent.class
+        );
+
+        assertThat(event.eventId()).isEqualTo("evt-1");
+        assertThat(event.riskLevel()).isEqualTo(RiskLevel.HIGH);
+        assertThat(event.engineIntelligence()).isNotNull();
+    }
+
+    @Test
     void existingTransactionScoredEventFieldsRemainUnchanged() {
         assertThat(Arrays.stream(TransactionScoredEvent.class.getRecordComponents()).map(RecordComponent::getName))
                 .containsSubsequence(
