@@ -34,8 +34,8 @@ contributions, and internal diagnostics are not event payload fields.
 ## Runtime Boundary
 
 Baseline scoring remains in the existing `FraudScoringEngine` path. Disabled mode keeps the
-pre-FDP-94 serialized event shape, does not invoke orchestrator, aggregation, or public mapper, and
-does not initialize the conditional diagnostic runtime graph. Enabled mode performs shadow
+pre-FDP-94 serialized event shape, does not invoke orchestrator, aggregation, public mapper, rules,
+or ML diagnostic path, and does not initialize the conditional diagnostic runtime graph. Enabled mode performs shadow
 diagnostic orchestration after baseline scoring and attaches bounded public `engineIntelligence`.
 Enabled mode may execute rule and ML signal engines in addition to baseline scoring.
 Enabled mode may add latency, ML service calls, executor work, and operational load.
@@ -64,10 +64,12 @@ Set `fraud.scoring.events.engine-intelligence.emit-enabled=false` and redeploy. 
 the nested JSON field and restores the old emitted event shape. No alert-service projection,
 persistence, API, or UI rollback is required because FDP-94 does not add those capabilities.
 
-## Operational Observability Debt
+## Operational Observability Boundary
 
-FDP-94 has bounded failure isolation but does not yet add dedicated enrichment metrics.
-Before wider rollout, FDP-95/FDP-96 must add low-cardinality metrics for:
+FDP-94 includes a no-op metrics boundary for disabled skips, enrichment attempts, successes,
+omissions, and latency. Metrics recording is best-effort and cannot block event publishing.
+Production metrics backend integration remains future scope. Before wider rollout, FDP-95/FDP-96
+must connect the low-cardinality metrics boundary to production telemetry for:
 
 - `enrichment_attempt_total`
 - `enrichment_success_total`

@@ -23,7 +23,8 @@ class EngineIntelligenceProducerEmissionRolloutDocsTest {
                 "Explicit `true` enables producer-side diagnostic enrichment",
                 "omits the `engineIntelligence` JSON field",
                 "Disabled mode keeps the",
-                "does not invoke orchestrator, aggregation, or public mapper",
+                "does not invoke orchestrator, aggregation, public mapper, rules,",
+                "or ML diagnostic path",
                 "does not initialize the conditional diagnostic runtime graph",
                 "Enabled mode performs shadow",
                 "diagnostic orchestration after baseline scoring",
@@ -38,8 +39,11 @@ class EngineIntelligenceProducerEmissionRolloutDocsTest {
                 "Enable emission gradually",
                 "Verify latency, timeout, rejection, and enrichment-omission behavior",
                 "Set `fraud.scoring.events.engine-intelligence.emit-enabled=false` and redeploy",
-                "Operational Observability Debt",
-                "FDP-94 has bounded failure isolation but does not yet add dedicated enrichment metrics",
+                "Operational Observability Boundary",
+                "FDP-94 includes a no-op metrics boundary",
+                "Metrics recording is best-effort and cannot block event publishing",
+                "Production metrics backend integration remains future scope",
+                "Before wider rollout",
                 "`enrichment_attempt_total`",
                 "`enrichment_success_total`",
                 "`enrichment_omitted_total`",
@@ -64,7 +68,11 @@ class EngineIntelligenceProducerEmissionRolloutDocsTest {
                 "alert projection ready",
                 "analyst console ready",
                 "automatic decline enabled",
-                "automatic approve enabled"
+                "automatic approve enabled",
+                "payment authorization enabled",
+                "final decision source",
+                "orchestrator replaces baseline scoring",
+                "engineIntelligence changes fraudScore"
         );
     }
 
