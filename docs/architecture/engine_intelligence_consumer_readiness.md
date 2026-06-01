@@ -19,7 +19,7 @@ FDP-93 is consumer-readiness, not product exposure.
 | Fraud-case path | `FraudCaseManagementService` -> `FraudCaseDocument` and `FraudCaseTransactionDocument` | Inventory only; no engine-intelligence projection |
 | Suspicious transaction path | `SuspiciousTransactionProjectionService` -> `SuspiciousTransactionDocument` | Inventory only; no engine-intelligence projection |
 | Evidence paths | `EvidenceProjectionService` and `AlertEvidenceSnapshotProjectionService` | Inventory only; no engine-intelligence projection |
-| Producer boundary | `TransactionFraudScoringService` -> `TransactionScoredEventMapper` -> `KafkaTransactionScoredEventPublisher` | Mechanically guarded to keep the old emitted shape |
+| Producer boundary | `TransactionFraudScoringService` -> `TransactionScoredEventMapper` -> `KafkaTransactionScoredEventPublisher` | FDP-94 adds a controlled optional public mapper capability while the live service remains mechanically guarded to keep the old emitted shape |
 | Test fixture helper | `common-test-support` `TransactionFixtures` | Existing test-only builder remains documented separately |
 | Integration tests | `AlertServiceIntegrationTest`, `FraudDetectionPlatformEndToEndIntegrationTest`, and `FraudScoringIntegrationTest` | Existing scored-event integration coverage remains in place |
 | Replay and smoke scripts | Repository search found raw-transaction replay input only; no scored-event fixture reader was found | Shared FDP-93 fixtures are the scored-event compatibility source |
@@ -85,6 +85,11 @@ Producer emission requires consumer-readiness proof.
 
 Future producer emission must be disabled by default and guarded by an explicit feature flag.
 Do not implement the feature flag in FDP-93.
+
+FDP-94 adds the separately reviewed disabled-by-default runtime producer emission documented in
+[Controlled engine intelligence producer emission rollout](engine_intelligence_producer_emission_rollout.md).
+It does not migrate baseline scoring decisions to the orchestrator and does not enable production
+runtime emission by default. Explicit `true` enables separate diagnostic enrichment only.
 
 ## Future Producer Emission Gate
 
