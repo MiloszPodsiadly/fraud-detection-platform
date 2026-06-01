@@ -10,7 +10,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class EngineIntelligenceEmissionPropertiesSpringContextTest {
 
     @Test
-    void defaultContextBindsEmitEnabledFalse() {
+    void defaultConfigBindsEmitEnabledFalse() {
         contextRunner().run(context ->
                 assertThat(context.getBean(EngineIntelligenceEmissionProperties.class).emitEnabled()).isFalse()
         );

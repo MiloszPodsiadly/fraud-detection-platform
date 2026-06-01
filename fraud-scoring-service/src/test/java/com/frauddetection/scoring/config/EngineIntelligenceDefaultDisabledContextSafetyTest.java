@@ -57,7 +57,7 @@ class EngineIntelligenceDefaultDisabledContextSafetyTest {
     }
 
     @Test
-    void defaultDisabledScoringPublishesOldShapeWithoutInvokingDiagnosticGraph() {
+    void disabledRequestDoesNotInvokeDiagnosticPath() {
         contextRunner().run(context -> {
             FraudScoringOrchestrator orchestrator = mock(FraudScoringOrchestrator.class);
             FraudEngineAggregationService aggregation = mock(FraudEngineAggregationService.class);
@@ -90,7 +90,7 @@ class EngineIntelligenceDefaultDisabledContextSafetyTest {
     }
 
     @Test
-    void defaultDisabledContextDoesNotRequireExternalMlAvailability() {
+    void disabledContextDoesNotRequireMlRuntime() {
         MlFraudScoringEngine ml = mock(MlFraudScoringEngine.class);
         doThrow(new IllegalStateException("external-ml-must-not-be-called")).when(ml)
                 .score(org.mockito.ArgumentMatchers.any());

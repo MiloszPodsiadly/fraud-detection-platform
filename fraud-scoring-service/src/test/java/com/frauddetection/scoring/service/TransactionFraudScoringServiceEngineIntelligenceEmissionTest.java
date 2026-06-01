@@ -46,7 +46,7 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
     }
 
     @Test
-    void enabledEmissionSummaryIsPassedToMapperAndPublished() throws Exception {
+    void enabledEmissionSummaryIsPassedToMapperAndPublisher() throws Exception {
         var input = TransactionFixtures.enrichedTransaction().build();
         var request = FraudScoringRequest.from(input);
         var scoreResult = scoreResult();
@@ -71,6 +71,7 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
 
         service.score(input);
 
+        verify(scoringEngine).score(request);
         verify(emissionService).emitIfEnabled(request);
         verify(mapper).toEvent(request, scoreResult, Optional.of(summary));
         verify(publisher).publish(scoredEvent);
@@ -78,11 +79,22 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
         assertThat(json(scoredEvent))
                 .contains("\"engineIntelligence\"", "\"contractVersion\":1")
                 .doesNotContain(
-                        "normalizedEngineResults",
-                        "aggregationResult",
-                        "rawEvidence",
-                        "internalDiagnostics",
-                        "\"contributions\""
+                        "FraudEngineAggregationResult",
+                        "NormalizedFraudEngineResult",
+                        "rawScore",
+                        "raw evidence title",
+                        "raw evidence description",
+                        "raw contribution value",
+                        "featureVector",
+                        "endpoint",
+                        "token",
+                        "secret",
+                        "stackTrace",
+                        "finalDecision",
+                        "recommendedAction",
+                        "\"approve\"",
+                        "\"decline\"",
+                        "\"block\""
                 );
     }
 

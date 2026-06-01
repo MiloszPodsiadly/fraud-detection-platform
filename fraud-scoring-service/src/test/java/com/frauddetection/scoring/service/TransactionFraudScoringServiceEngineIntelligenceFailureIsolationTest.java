@@ -24,9 +24,11 @@ import static com.frauddetection.scoring.service.TransactionFraudScoringServiceE
 import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceTestSupport.scoreResult;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -67,7 +69,7 @@ class TransactionFraudScoringServiceEngineIntelligenceFailureIsolationTest {
     }
 
     @Test
-    void emissionServiceExceptionPublishesBaseEventAndKeepsScoringSuccessMetrics() throws Exception {
+    void emissionServiceExceptionPublishesBaseEventWithoutEngineIntelligence() throws Exception {
         var input = TransactionFixtures.enrichedTransaction().build();
         var request = FraudScoringRequest.from(input);
         var scoreResult = scoreResult();
@@ -105,6 +107,8 @@ class TransactionFraudScoringServiceEngineIntelligenceFailureIsolationTest {
         assertThat(baseEvent.riskLevel()).isEqualTo(scoreResult.riskLevel());
         assertThat(baseEvent.alertRecommended()).isEqualTo(scoreResult.alertRecommended());
         assertThat(baseEvent.reasonCodes()).isEqualTo(scoreResult.reasonCodes());
+        assertThat(baseEvent.scoringEvidence()).isEqualTo(scoreResult.scoringEvidence());
+        assertThat(baseEvent.scoreDetails()).isEqualTo(scoreResult.scoreDetails());
         assertThat(json(baseEvent)).doesNotContain("\"engineIntelligence\"", "raw-secret");
     }
 
@@ -121,12 +125,15 @@ class TransactionFraudScoringServiceEngineIntelligenceFailureIsolationTest {
     }
 
     @Test
-    void baselineScoringExceptionStillFailsNormally() {
+    void baselineScoringExceptionIsNotSwallowed() {
         var harness = harness(Optional.empty());
         when(harness.scoringEngine().score(harness.request())).thenThrow(new IllegalStateException("baseline-failure"));
+
         assertThatThrownBy(() -> harness.service().score(harness.input()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("baseline-failure");
+        verify(harness.publisher(), never()).publish(any());
+        verify(harness.emissionService(), never()).emitIfEnabled(any());
     }
 
     private TransactionFraudScoringServiceEngineIntelligenceTestSupport.Harness throwingEnrichmentHarness() {

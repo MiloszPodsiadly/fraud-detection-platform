@@ -26,7 +26,7 @@ import static org.mockito.Mockito.when;
 class EngineIntelligenceEmissionMetricsTest {
 
     @Test
-    void disabledDoesNotRecordAttemptOrLatency() {
+    void disabledRecordsSkippedDisabledOnly() {
         EngineIntelligenceEmissionMetrics metrics = mock(EngineIntelligenceEmissionMetrics.class);
         ObjectProvider<EngineIntelligenceDiagnosticEnrichmentPipeline> provider = provider(
                 mock(EngineIntelligenceDiagnosticEnrichmentPipeline.class)
@@ -47,7 +47,7 @@ class EngineIntelligenceEmissionMetricsTest {
     }
 
     @Test
-    void enabledSuccessRecordsSuccessNotOmitted() {
+    void enabledSuccessRecordsAttemptSuccessLatency() {
         EngineIntelligenceEmissionMetrics metrics = mock(EngineIntelligenceEmissionMetrics.class);
         EngineIntelligenceDiagnosticEnrichmentPipeline pipeline =
                 mock(EngineIntelligenceDiagnosticEnrichmentPipeline.class);
@@ -62,7 +62,7 @@ class EngineIntelligenceEmissionMetricsTest {
     }
 
     @Test
-    void enabledPipelineEmptyRecordsOmittedNotSuccess() {
+    void enabledEmptyRecordsEmptyResultOmissionAndLatency() {
         EngineIntelligenceEmissionMetrics metrics = mock(EngineIntelligenceEmissionMetrics.class);
         EngineIntelligenceDiagnosticEnrichmentPipeline pipeline =
                 mock(EngineIntelligenceDiagnosticEnrichmentPipeline.class);
@@ -76,7 +76,7 @@ class EngineIntelligenceEmissionMetricsTest {
     }
 
     @Test
-    void missingPipelineRecordsOmittedAndLatency() {
+    void missingPipelineRecordsPipelineUnavailableAndLatency() {
         EngineIntelligenceEmissionMetrics metrics = mock(EngineIntelligenceEmissionMetrics.class);
 
         assertThat(service(true, null, metrics).emitIfEnabled(request())).isEmpty();
@@ -87,7 +87,7 @@ class EngineIntelligenceEmissionMetricsTest {
     }
 
     @Test
-    void pipelineFailureRecordsOmittedAndLatency() {
+    void runtimeFailureRecordsUnknownFailureAndLatency() {
         EngineIntelligenceEmissionMetrics metrics = mock(EngineIntelligenceEmissionMetrics.class);
         EngineIntelligenceDiagnosticEnrichmentPipeline pipeline =
                 mock(EngineIntelligenceDiagnosticEnrichmentPipeline.class);
@@ -101,7 +101,7 @@ class EngineIntelligenceEmissionMetricsTest {
     }
 
     @Test
-    void metricsFailureDuringFinallyDoesNotChangeResult() {
+    void metricsFailureDoesNotChangeEmissionResult() {
         EngineIntelligenceEmissionMetrics metrics = mock(EngineIntelligenceEmissionMetrics.class);
         EngineIntelligenceDiagnosticEnrichmentPipeline pipeline =
                 mock(EngineIntelligenceDiagnosticEnrichmentPipeline.class);
@@ -118,7 +118,7 @@ class EngineIntelligenceEmissionMetricsTest {
     }
 
     @Test
-    void metricsDoNotUseHighCardinalityLabels() throws Exception {
+    void metricsApiDoesNotAcceptRawOrHighCardinalityInputs() throws Exception {
         String source = Files.readString(moduleRoot().resolve(
                 "src/main/java/com/frauddetection/scoring/orchestration/aggregation/EngineIntelligenceEmissionMetrics.java"
         ));
