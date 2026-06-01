@@ -83,10 +83,12 @@ FDP-91 adds no event extension, Kafka schema change, alert-service projection, A
 `CompositeFraudScoringEngine` wiring, external engine intelligence publication, final score, final risk,
 winning engine, recommended action, or decision policy.
 
-## Future FDP-92 Event Extension
+## FDP-92 Public Contract Extension
 
-FDP-91 prepares for future event extension but does not add it. Any future publication requires a
-separate compatibility-reviewed branch.
+FDP-91 prepared semantics for a separate event extension. FDP-92 adds a bounded optional public
+contract and an unwired mapping design. It does not serialize the internal aggregation model 1:1,
+wire producer publication, or add downstream projection. See
+[Public engine intelligence event contract](public_engine_intelligence_event_contract.md).
 
 ## Public Contract Boundary For FDP-92
 
