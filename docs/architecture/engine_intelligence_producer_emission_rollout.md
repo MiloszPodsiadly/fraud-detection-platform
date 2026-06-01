@@ -33,10 +33,14 @@ contributions, and internal diagnostics are not event payload fields.
 
 ## Runtime Boundary
 
-Baseline scoring remains in the existing `FraudScoringEngine` path. Disabled mode keeps the
-pre-FDP-94 serialized event shape, does not invoke orchestrator, aggregation, public mapper, rules,
-or ML diagnostic path, and does not initialize the conditional diagnostic runtime graph. Enabled mode performs shadow
-diagnostic orchestration after baseline scoring and attaches bounded public `engineIntelligence`.
+Baseline scoring remains in the existing `FraudScoringEngine` path.
+
+Disabled mode keeps the pre-FDP-94 serialized event shape.
+It does not invoke orchestrator, aggregation, public mapper, rules, or ML diagnostic path.
+It does not initialize the conditional diagnostic runtime graph.
+
+Enabled mode performs shadow diagnostic orchestration after baseline scoring.
+It attaches bounded public `engineIntelligence`.
 Enabled mode may execute rule and ML signal engines in addition to baseline scoring.
 Enabled mode may add latency, ML service calls, executor work, and operational load.
 
