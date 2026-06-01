@@ -2,6 +2,7 @@ package com.frauddetection.common.events.contract;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.Test;
 
@@ -62,13 +63,18 @@ class TransactionScoredEventFixtureCompatibilityTest {
 
     @Test
     void fixtureLoaderReadsAllFixtures() {
-        assertThat(List.of(
-                TransactionScoredEventFixtureLoader.oldWithoutEngineIntelligenceJson(),
-                TransactionScoredEventFixtureLoader.minimalEngineIntelligenceJson(),
-                TransactionScoredEventFixtureLoader.fullBoundedEngineIntelligenceJson(),
-                TransactionScoredEventFixtureLoader.unknownNestedEngineIntelligenceFieldsJson(),
-                TransactionScoredEventFixtureLoader.unknownTopLevelFieldJson()
-        )).allMatch(json -> !json.isBlank());
+        assertThat(fdp93Fixtures()).allMatch(json -> !json.isBlank());
+    }
+
+    @Test
+    void allFdp93FixturesHaveIdenticalBaseTransactionFieldsExceptEngineIntelligenceAndUnknownFields() throws Exception {
+        JsonNode baseline = reviewedBaseTransactionFields(
+                TransactionScoredEventFixtureLoader.oldWithoutEngineIntelligenceJson()
+        );
+
+        for (String fixture : fdp93Fixtures()) {
+            assertThat(reviewedBaseTransactionFields(fixture)).isEqualTo(baseline);
+        }
     }
 
     @Test
@@ -82,6 +88,29 @@ class TransactionScoredEventFixtureCompatibilityTest {
         return objectMapper.readValue(json, TransactionScoredEvent.class);
     }
 
+    private JsonNode reviewedBaseTransactionFields(String json) throws Exception {
+        ObjectNode event = (ObjectNode) objectMapper.readTree(json);
+        removeReviewedUnknownNestedFields(event.path("engineIntelligence"));
+        event.remove("engineIntelligence");
+        event.remove("futureTopLevelField");
+        return event;
+    }
+
+    private void removeReviewedUnknownNestedFields(JsonNode engineIntelligence) {
+        if (!(engineIntelligence instanceof ObjectNode summary)) {
+            return;
+        }
+        summary.remove("futureBoundedSummaryField");
+        for (JsonNode engine : summary.path("engines")) {
+            if (engine instanceof ObjectNode reviewedEngine) {
+                reviewedEngine.remove("futureBoundedEngineField");
+            }
+        }
+        if (summary.path("comparison") instanceof ObjectNode comparison) {
+            comparison.remove("futureBoundedComparisonField");
+        }
+    }
+
     private void assertEngineIntelligenceDoesNotContain(String... forbidden) throws Exception {
         for (String fixture : List.of(
                 TransactionScoredEventFixtureLoader.minimalEngineIntelligenceJson(),
@@ -92,5 +121,15 @@ class TransactionScoredEventFixtureCompatibilityTest {
             JsonNode engineIntelligence = objectMapper.readTree(fixture).path("engineIntelligence");
             assertThat(engineIntelligence.toString()).doesNotContainIgnoringCase(forbidden);
         }
+    }
+
+    private List<String> fdp93Fixtures() {
+        return List.of(
+                TransactionScoredEventFixtureLoader.oldWithoutEngineIntelligenceJson(),
+                TransactionScoredEventFixtureLoader.minimalEngineIntelligenceJson(),
+                TransactionScoredEventFixtureLoader.fullBoundedEngineIntelligenceJson(),
+                TransactionScoredEventFixtureLoader.unknownNestedEngineIntelligenceFieldsJson(),
+                TransactionScoredEventFixtureLoader.unknownTopLevelFieldJson()
+        );
     }
 }
