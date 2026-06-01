@@ -30,6 +30,7 @@ import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEm
 import com.frauddetection.scoring.orchestration.aggregation.FraudEngineAggregationResult;
 import com.frauddetection.scoring.orchestration.aggregation.FraudEngineAggregationService;
 import com.frauddetection.scoring.orchestration.aggregation.OrchestratedEngineIntelligenceDiagnosticEnrichmentPipeline;
+import com.frauddetection.scoring.orchestration.aggregation.NoOpEngineIntelligenceEmissionMetrics;
 import com.frauddetection.scoring.orchestration.aggregation.PublicEngineIntelligenceMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.mockito.ArgumentCaptor;
@@ -70,7 +71,8 @@ final class TransactionFraudScoringServiceEngineIntelligenceJoinedTestSupport {
                 );
         EngineIntelligenceEmissionService emissionService = new EngineIntelligenceEmissionService(
                 new EngineIntelligenceEmissionProperties(enabled),
-                provider(pipeline)
+                provider(pipeline),
+                new NoOpEngineIntelligenceEmissionMetrics()
         );
         when(baseline.score(request)).thenReturn(baselineResult);
         var service = new TransactionFraudScoringService(
@@ -102,7 +104,7 @@ final class TransactionFraudScoringServiceEngineIntelligenceJoinedTestSupport {
                 "rule-based-engine",
                 "v1",
                 Instant.parse("2026-05-31T10:00:00Z"),
-                List.of(),
+                List.of("LOW_MODEL_RISK"),
                 Map.of("finalScore", 0.12d),
                 Map.of("feature", "stable"),
                 Map.of(),
@@ -126,6 +128,28 @@ final class TransactionFraudScoringServiceEngineIntelligenceJoinedTestSupport {
                         EngineIntelligenceAgreementStatus.DISAGREEMENT,
                         EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH,
                         EngineIntelligenceScoreDeltaBucket.LARGE
+                ),
+                List.of(),
+                List.of()
+        );
+    }
+
+    static EngineIntelligenceSummary timeoutDiagnosticSummary() {
+        return new EngineIntelligenceSummary(
+                EngineIntelligenceSummary.CONTRACT_VERSION,
+                Instant.parse("2026-05-31T10:00:01Z"),
+                List.of(new EngineIntelligenceEngineResult(
+                        "ml.python.primary",
+                        FraudEngineType.ML_MODEL,
+                        FraudEngineStatus.TIMEOUT,
+                        null,
+                        EngineIntelligenceScoreBucket.UNAVAILABLE,
+                        List.of("ML_MODEL_TIMEOUT")
+                )),
+                new EngineIntelligenceComparison(
+                        EngineIntelligenceAgreementStatus.PARTIAL,
+                        EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
+                        EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
                 ),
                 List.of(),
                 List.of()

@@ -10,6 +10,7 @@ import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEm
 import com.frauddetection.scoring.orchestration.aggregation.FraudEngineAggregationResult;
 import com.frauddetection.scoring.orchestration.aggregation.FraudEngineAggregationService;
 import com.frauddetection.scoring.orchestration.aggregation.OrchestratedEngineIntelligenceDiagnosticEnrichmentPipeline;
+import com.frauddetection.scoring.orchestration.aggregation.NoOpEngineIntelligenceEmissionMetrics;
 import com.frauddetection.scoring.orchestration.aggregation.PublicEngineIntelligenceMapper;
 import com.frauddetection.scoring.engine.ml.PythonMlSignalEngine;
 import org.junit.jupiter.api.Test;
@@ -96,7 +97,8 @@ class EngineIntelligenceEmissionServiceSpringWiringTest {
                 );
         var service = new EngineIntelligenceEmissionService(
                 new EngineIntelligenceEmissionProperties(true),
-                provider(pipeline)
+                provider(pipeline),
+                new NoOpEngineIntelligenceEmissionMetrics()
         );
 
         assertThat(service.emitIfEnabled(

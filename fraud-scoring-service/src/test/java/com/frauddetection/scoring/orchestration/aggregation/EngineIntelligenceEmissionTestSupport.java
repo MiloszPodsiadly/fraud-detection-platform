@@ -23,9 +23,18 @@ final class EngineIntelligenceEmissionTestSupport {
             boolean enabled,
             EngineIntelligenceDiagnosticEnrichmentPipeline pipeline
     ) {
+        return service(enabled, pipeline, new NoOpEngineIntelligenceEmissionMetrics());
+    }
+
+    static EngineIntelligenceEmissionService service(
+            boolean enabled,
+            EngineIntelligenceDiagnosticEnrichmentPipeline pipeline,
+            EngineIntelligenceEmissionMetrics metrics
+    ) {
         return new EngineIntelligenceEmissionService(
                 new EngineIntelligenceEmissionProperties(enabled),
-                provider(pipeline)
+                provider(pipeline),
+                metrics
         );
     }
 

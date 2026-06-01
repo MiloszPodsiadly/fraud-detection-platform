@@ -4,6 +4,7 @@ import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.scoring.config.EngineIntelligenceEmissionProperties;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceDiagnosticEnrichmentPipeline;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionService;
+import com.frauddetection.scoring.orchestration.aggregation.NoOpEngineIntelligenceEmissionMetrics;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
@@ -68,7 +69,11 @@ class TransactionFraudScoringServiceEngineIntelligenceFailureIsolationTest {
         when(pipeline.enrich(org.mockito.ArgumentMatchers.any()))
                 .thenThrow(new IllegalStateException("raw-secret-must-not-leak"));
         return TransactionFraudScoringServiceEngineIntelligenceTestSupport.harness(
-                new EngineIntelligenceEmissionService(new EngineIntelligenceEmissionProperties(true), provider(pipeline))
+                new EngineIntelligenceEmissionService(
+                        new EngineIntelligenceEmissionProperties(true),
+                        provider(pipeline),
+                        new NoOpEngineIntelligenceEmissionMetrics()
+                )
         );
     }
 

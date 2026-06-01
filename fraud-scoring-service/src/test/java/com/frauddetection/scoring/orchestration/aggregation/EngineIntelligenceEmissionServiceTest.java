@@ -39,7 +39,8 @@ class EngineIntelligenceEmissionServiceTest {
         );
         var service = new EngineIntelligenceEmissionService(
                 new com.frauddetection.scoring.config.EngineIntelligenceEmissionProperties(false),
-                provider
+                provider,
+                new NoOpEngineIntelligenceEmissionMetrics()
         );
 
         assertThat(service.emitIfEnabled(request())).isEmpty();
@@ -83,7 +84,8 @@ class EngineIntelligenceEmissionServiceTest {
         when(pipeline.enrich(any())).thenReturn(Optional.empty());
         var service = new EngineIntelligenceEmissionService(
                 new com.frauddetection.scoring.config.EngineIntelligenceEmissionProperties(true),
-                provider
+                provider,
+                new NoOpEngineIntelligenceEmissionMetrics()
         );
 
         assertThat(service.emitIfEnabled(request())).isEmpty();
