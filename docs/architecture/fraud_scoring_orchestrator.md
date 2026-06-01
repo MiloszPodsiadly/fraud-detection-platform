@@ -123,5 +123,9 @@ executor, latency, metrics, and runtime-isolation details.
 
 ## Next
 
-FDP-91 may extend Kafka event with
-`engineResults[]` only after internal semantics are stable.
+FDP-91 adds internal-only bounded aggregation and comparison semantics without wiring the
+orchestrator into production scoring and without adding `TransactionScoredEvent.engineResults[]`.
+See [Internal engine result aggregation and comparison](internal_engine_result_aggregation.md).
+
+Any future Kafka event extension belongs to a separate compatibility-reviewed branch after internal
+semantics are stable.

@@ -133,3 +133,6 @@ ML runtime timeout/unavailable/rejection is PARTIAL, not REQUIRED_ENGINE_FAILED.
 Runtime isolation remains intact. FDP-90 changes internal execution readiness only. It adds no
 production migration, no public engine intelligence exposure, no final decisioning authority change, and
 no event, projection, controller, or analyst-console integration.
+
+FDP-91 adds an internal-only bounded aggregation and comparison package without wiring it into
+production scoring. See [Internal engine result aggregation and comparison](internal_engine_result_aggregation.md).
