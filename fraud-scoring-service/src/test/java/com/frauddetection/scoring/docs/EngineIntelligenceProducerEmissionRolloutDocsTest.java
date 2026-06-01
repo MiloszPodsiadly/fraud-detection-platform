@@ -10,20 +10,24 @@ import static org.assertj.core.api.Assertions.assertThat;
 class EngineIntelligenceProducerEmissionRolloutDocsTest {
 
     @Test
-    void docsStateFlagRollbackAndLiveRuntimeLimitation() throws Exception {
+    void docsStateFlagRollbackAndLiveRuntimeBoundary() throws Exception {
         String docs = Files.readString(repositoryRoot().resolve(
                 "docs/architecture/engine_intelligence_producer_emission_rollout.md"
         ));
 
         assertThat(docs).contains(
-                "FDP-94 disabled-by-default producer capability boundary only",
+                "FDP-94 disabled-by-default runtime producer emission",
                 "fraud.scoring.events.engine-intelligence.emit-enabled=false",
-                "Missing and explicit `false`",
-                "Explicit `true`",
+                "Missing config means disabled",
+                "Explicit `false` means disabled",
+                "Explicit `true` enables producer-side diagnostic enrichment",
                 "omits the `engineIntelligence` JSON field",
-                "FDP-94 does not migrate baseline scoring runtime to `FraudScoringOrchestrator`",
-                "Runtime orchestration emission requires a separate reviewed future branch",
-                "Optional enrichment failures return the base scored event",
+                "Disabled mode keeps the",
+                "does not invoke orchestrator, aggregation, or public mapper",
+                "Enabled mode may invoke diagnostic enrichment",
+                "must not change baseline `fraudScore`, `riskLevel`,",
+                "Enrichment failure returns the base event",
+                "Baseline scoring failures are not swallowed",
                 "Set `fraud.scoring.events.engine-intelligence.emit-enabled=false` and redeploy",
                 "No alert-service projection or persistence",
                 "No API or analyst-console UI exposure",

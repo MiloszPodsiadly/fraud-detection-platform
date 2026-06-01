@@ -10,18 +10,24 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ProducerEngineIntelligenceDoesNotMigrateScoringRuntimeTest {
 
     @Test
-    void liveScoringServiceKeepsExistingMapperCallAndDoesNotInvokeOrchestrator() throws Exception {
+    void liveScoringServiceUsesOptionalDiagnosticEmissionAfterBaselineScoring() throws Exception {
         String scoringService = Files.readString(moduleRoot().resolve(
                 "src/main/java/com/frauddetection/scoring/service/TransactionFraudScoringService.java"
         ));
 
         assertThat(scoringService)
-                .contains(".toEvent(scoringRequest, scoreResult)")
-                .doesNotContain("FraudScoringOrchestrator", "EngineIntelligenceEmissionService");
+                .contains(
+                        "FraudScoreResult scoreResult = fraudScoringEngine.score(scoringRequest);",
+                        "Optional<EngineIntelligenceSummary> engineIntelligence = engineIntelligence(scoringRequest);",
+                        "engineIntelligenceEmissionService.emitIfEnabled(scoringRequest)",
+                        "scoreResult,",
+                        "engineIntelligence"
+                )
+                .doesNotContain("FraudScoringOrchestrator");
     }
 
     @Test
-    void compositeScoringEngineRemainsUnchangedByProducerCapability() throws Exception {
+    void compositeScoringEngineRemainsUnchangedByProducerWiring() throws Exception {
         assertThat(Files.readString(moduleRoot().resolve(
                 "src/main/java/com/frauddetection/scoring/service/CompositeFraudScoringEngine.java"
         ))).doesNotContain(

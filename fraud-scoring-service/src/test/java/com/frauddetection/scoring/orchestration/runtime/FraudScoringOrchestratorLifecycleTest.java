@@ -50,8 +50,8 @@ class FraudScoringOrchestratorLifecycleTest {
 
         assertThat(docs)
                 .contains("the owner of an orchestrator created this way must call `close()`")
-                .contains("fdp-90 does not provide spring lifecycle management")
-                .contains("future runtime wiring must inject an explicitly lifecycle-managed executor");
+                .contains("fdp-94 provides spring lifecycle management")
+                .contains("runtime wiring injects an explicitly lifecycle-managed executor");
     }
 
     @Test
@@ -60,10 +60,14 @@ class FraudScoringOrchestratorLifecycleTest {
         Path orchestratorSource = productionRoot.resolve(
                 "com/frauddetection/scoring/orchestration/FraudScoringOrchestrator.java"
         ).normalize();
+        Path reviewedRuntimeConfig = productionRoot.resolve(
+                "com/frauddetection/scoring/config/EngineIntelligenceRuntimeConfig.java"
+        ).normalize();
         StringBuilder productionSources = new StringBuilder();
         try (Stream<Path> files = Files.walk(productionRoot)) {
             for (Path file : files.filter(Files::isRegularFile)
                     .filter(path -> !path.normalize().equals(orchestratorSource))
+                    .filter(path -> !path.normalize().equals(reviewedRuntimeConfig))
                     .toList()) {
                 productionSources.append(Files.readString(file)).append('\n');
             }
@@ -71,6 +75,12 @@ class FraudScoringOrchestratorLifecycleTest {
 
         assertThat(productionSources.toString())
                 .doesNotContainPattern("new\\s+FraudScoringOrchestrator\\s*\\(");
+        assertThat(Files.readString(reviewedRuntimeConfig))
+                .contains(
+                        "@Bean(destroyMethod = \"close\")",
+                        "new FraudScoringOrchestrator(registry, executionPolicy, executor, metrics, engineIntelligenceClock)",
+                        "BoundedFraudEngineExecutor.defaultInternalExecutor()"
+                );
     }
 
     private Path docsRoot() {

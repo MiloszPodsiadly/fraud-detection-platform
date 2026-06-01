@@ -87,10 +87,12 @@ class FraudEngineContractRuntimeIsolationTest {
     @Test
     void existingScoringRuntimeDoesNotWireSignalEngineFoundation() throws Exception {
         Path scoringRoot = repositoryRoot().resolve("fraud-scoring-service/src/main/java/com/frauddetection/scoring");
+        Path reviewedProducerWiring = scoringRoot.resolve("config/EngineIntelligenceRuntimeConfig.java");
         String existingScoringRuntime = javaSourcesExcept(
                 scoringRoot,
                 scoringRoot.resolve("engine"),
-                scoringRoot.resolve("orchestration")
+                scoringRoot.resolve("orchestration"),
+                reviewedProducerWiring
         );
         String compositeRuntime = Files.readString(scoringRoot.resolve("service/CompositeFraudScoringEngine.java"));
 
@@ -117,8 +119,11 @@ class FraudEngineContractRuntimeIsolationTest {
         Path featuresRoot = scoringRoot.resolve("features");
         Path engineRoot = scoringRoot.resolve("engine");
         Path orchestrationRoot = scoringRoot.resolve("orchestration");
+        Path reviewedProducerWiring = scoringRoot.resolve("config/EngineIntelligenceRuntimeConfig.java");
         String features = javaSources(featuresRoot);
-        String runtimeOutsidePolicy = javaSourcesExcept(scoringRoot, featuresRoot, engineRoot, orchestrationRoot);
+        String runtimeOutsidePolicy = javaSourcesExcept(
+                scoringRoot, featuresRoot, engineRoot, orchestrationRoot, reviewedProducerWiring
+        );
         String adapterFoundation = javaSources(engineRoot);
 
         assertThat(features)
@@ -146,12 +151,14 @@ class FraudEngineContractRuntimeIsolationTest {
         Path repositoryRoot = repositoryRoot();
         Path scoringRoot = repositoryRoot.resolve("fraud-scoring-service/src/main/java/com/frauddetection/scoring");
         Path adapterPath = scoringRoot.resolve("engine/rules/RuleBasedSignalEngine.java");
+        Path reviewedProducerWiring = scoringRoot.resolve("config/EngineIntelligenceRuntimeConfig.java");
         String adapter = Files.readString(adapterPath);
         String runtimeOutsideAdapterPackage = javaSourcesExcept(
                 scoringRoot,
                 scoringRoot.resolve("engine/rules"),
                 scoringRoot.resolve("engine/ml"),
-                scoringRoot.resolve("orchestration")
+                scoringRoot.resolve("orchestration"),
+                reviewedProducerWiring
         );
         String compositeRuntime = Files.readString(scoringRoot.resolve("service/CompositeFraudScoringEngine.java"));
         String ruleRuntime = Files.readString(scoringRoot.resolve("service/RuleBasedFraudScoringEngine.java"));
@@ -203,12 +210,14 @@ class FraudEngineContractRuntimeIsolationTest {
         Path repositoryRoot = repositoryRoot();
         Path scoringRoot = repositoryRoot.resolve("fraud-scoring-service/src/main/java/com/frauddetection/scoring");
         Path adapterPath = scoringRoot.resolve("engine/ml/PythonMlSignalEngine.java");
+        Path reviewedProducerWiring = scoringRoot.resolve("config/EngineIntelligenceRuntimeConfig.java");
         String adapter = Files.readString(adapterPath);
         String runtimeOutsideAdapterPackage = javaSourcesExcept(
                 scoringRoot,
                 scoringRoot.resolve("engine/rules"),
                 scoringRoot.resolve("engine/ml"),
-                scoringRoot.resolve("orchestration")
+                scoringRoot.resolve("orchestration"),
+                reviewedProducerWiring
         );
         String compositeRuntime = Files.readString(scoringRoot.resolve("service/CompositeFraudScoringEngine.java"));
         String ruleRuntime = Files.readString(scoringRoot.resolve("service/RuleBasedFraudScoringEngine.java"));

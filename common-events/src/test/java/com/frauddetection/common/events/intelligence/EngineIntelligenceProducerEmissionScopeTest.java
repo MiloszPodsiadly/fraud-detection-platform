@@ -25,7 +25,7 @@ class EngineIntelligenceProducerEmissionScopeTest {
     }
 
     @Test
-    void liveProducerPathDoesNotInvokeEngineIntelligenceCapabilityOrOrchestrator() throws Exception {
+    void liveProducerPathUsesOptionalEmissionBoundaryWithoutDirectOrchestratorAccess() throws Exception {
         String publisher = EngineIntelligenceFdp93SourceScanSupport.read(
                 "fraud-scoring-service/src/main/java/com/frauddetection/scoring/messaging/KafkaTransactionScoredEventPublisher.java"
         );
@@ -33,7 +33,7 @@ class EngineIntelligenceProducerEmissionScopeTest {
                 "fraud-scoring-service/src/main/java/com/frauddetection/scoring/service/TransactionFraudScoringService.java"
         );
 
-        assertThat(publisher + scoringService)
+        assertThat(publisher)
                 .withFailMessage(MESSAGE)
                 .doesNotContain(
                         "EngineIntelligenceSummary",
@@ -41,7 +41,16 @@ class EngineIntelligenceProducerEmissionScopeTest {
                         "FraudScoringOrchestrator",
                         "engineIntelligence"
                 );
-        assertThat(scoringService).contains(".toEvent(scoringRequest, scoreResult)");
+        assertThat(scoringService)
+                .withFailMessage(MESSAGE)
+                .contains(
+                        "EngineIntelligenceEmissionService",
+                        "engineIntelligenceEmissionService.emitIfEnabled(scoringRequest)",
+                        "Optional<EngineIntelligenceSummary>",
+                        "scoreResult,",
+                        "engineIntelligence"
+                )
+                .doesNotContain("FraudScoringOrchestrator");
     }
 
     @Test

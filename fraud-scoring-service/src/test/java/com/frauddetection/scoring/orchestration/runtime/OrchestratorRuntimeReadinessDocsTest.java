@@ -87,8 +87,8 @@ class OrchestratorRuntimeReadinessDocsTest {
                         "internal runtime-hardening foundation only",
                         "not a production enablement claim",
                         "no `compositefraudscoringengine` wiring",
-                        "no public engine intelligence exposure",
-                        "future runtime wiring must inject lifecycle-managed executor",
+                        "fdp-94 later adds disabled-by-default public diagnostic producer enrichment",
+                        "runtime wiring injects lifecycle-managed executor",
                         "cancellation is cooperative",
                         "metrics are best-effort",
                         "no vendor-specific metrics integration"
