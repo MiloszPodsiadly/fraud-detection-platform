@@ -13,7 +13,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ProducerEngineIntelligenceEnabledDiagnosticDisagreementTest {
 
     @Test
-    void enabledDiagnosticHighDoesNotOverrideBaselineLow() {
+    void diagnosticHighDoesNotOverrideBaselineLow() {
         var harness = harness(true);
         var summary = highDiagnosticSummary();
         harness.stubSuccessfulEnrichment(summary);

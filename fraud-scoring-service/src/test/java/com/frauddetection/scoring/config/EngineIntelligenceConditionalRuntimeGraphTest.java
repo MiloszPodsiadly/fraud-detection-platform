@@ -7,6 +7,7 @@ import com.frauddetection.scoring.domain.FraudScoringRequest;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrator;
 import com.frauddetection.scoring.orchestration.FraudSignalEngineRegistry;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceDiagnosticEnrichmentPipeline;
+import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionMetrics;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionService;
 import com.frauddetection.scoring.orchestration.aggregation.FraudEngineAggregationService;
 import com.frauddetection.scoring.orchestration.aggregation.NoOpEngineIntelligenceEmissionMetrics;
@@ -28,9 +29,12 @@ import static org.mockito.Mockito.when;
 class EngineIntelligenceConditionalRuntimeGraphTest {
 
     @Test
-    void defaultDisabledContextDoesNotHaveDiagnosticBeans() {
+    void defaultDisabledContextHasLightBoundaryOnly() {
         contextRunner().run(context -> {
             assertThat(context).hasNotFailed();
+            assertThat(context).hasSingleBean(EngineIntelligenceEmissionService.class);
+            assertThat(context).hasSingleBean(EngineIntelligenceEmissionMetrics.class);
+            assertThat(context).hasSingleBean(NoOpEngineIntelligenceEmissionMetrics.class);
             assertThat(context).doesNotHaveBean(EngineIntelligenceDiagnosticEnrichmentPipeline.class);
             assertThat(context).doesNotHaveBean(FraudScoringOrchestrator.class);
             assertThat(context).doesNotHaveBean(FraudSignalEngineRegistry.class);
@@ -43,7 +47,7 @@ class EngineIntelligenceConditionalRuntimeGraphTest {
     }
 
     @Test
-    void enabledContextHasDiagnosticBeans() {
+    void enabledContextCreatesDiagnosticRuntime() {
         enabledContextRunner().run(context -> {
             assertThat(context).hasNotFailed();
             assertThat(context).hasSingleBean(EngineIntelligenceDiagnosticEnrichmentPipeline.class);
