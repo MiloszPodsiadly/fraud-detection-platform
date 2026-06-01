@@ -7,10 +7,12 @@ import com.frauddetection.scoring.features.FeatureSnapshotReaderFactory;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrator;
 import com.frauddetection.scoring.orchestration.FraudSignalEngineRegistry;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceDiagnosticEnrichmentPipeline;
+import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionMetrics;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionService;
 import com.frauddetection.scoring.orchestration.aggregation.FraudEngineAggregationPolicy;
 import com.frauddetection.scoring.orchestration.aggregation.FraudEngineAggregationService;
 import com.frauddetection.scoring.orchestration.aggregation.OrchestratedEngineIntelligenceDiagnosticEnrichmentPipeline;
+import com.frauddetection.scoring.orchestration.aggregation.NoOpEngineIntelligenceEmissionMetrics;
 import com.frauddetection.scoring.orchestration.aggregation.PublicEngineIntelligenceMapper;
 import com.frauddetection.scoring.orchestration.runtime.BoundedFraudEngineExecutor;
 import com.frauddetection.scoring.orchestration.runtime.FraudScoringOrchestratorExecutionPolicy;
@@ -34,9 +36,15 @@ public class EngineIntelligenceRuntimeConfig {
     @Bean
     public EngineIntelligenceEmissionService engineIntelligenceEmissionService(
             EngineIntelligenceEmissionProperties properties,
-            ObjectProvider<EngineIntelligenceDiagnosticEnrichmentPipeline> diagnosticPipeline
+            ObjectProvider<EngineIntelligenceDiagnosticEnrichmentPipeline> diagnosticPipeline,
+            EngineIntelligenceEmissionMetrics metrics
     ) {
-        return new EngineIntelligenceEmissionService(properties, diagnosticPipeline);
+        return new EngineIntelligenceEmissionService(properties, diagnosticPipeline, metrics);
+    }
+
+    @Bean
+    public EngineIntelligenceEmissionMetrics engineIntelligenceEmissionMetrics() {
+        return new NoOpEngineIntelligenceEmissionMetrics();
     }
 
     @Configuration(proxyBeanMethods = false)
