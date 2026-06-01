@@ -1,0 +1,96 @@
+{
+  "eventId": "evt-fdp93-001",
+  "transactionId": "txn-fdp93-001",
+  "correlationId": "corr-fdp93-001",
+  "customerId": "cust-fdp93-001",
+  "accountId": "acct-fdp93-001",
+  "createdAt": "2026-06-01T06:00:00Z",
+  "transactionTimestamp": "2026-06-01T05:59:58Z",
+  "transactionAmount": {
+    "amount": 1249.99,
+    "currency": "PLN"
+  },
+  "merchantInfo": {
+    "merchantId": "merchant-fdp93-001",
+    "merchantName": "Northwind Electronics",
+    "merchantCategoryCode": "5732",
+    "merchantCategory": "Electronics",
+    "acquiringCountryCode": "PL",
+    "channel": "ECOMMERCE",
+    "cardPresent": false,
+    "attributes": {}
+  },
+  "fraudScore": 0.82,
+  "riskLevel": "HIGH",
+  "scoringStrategy": "RULE_BASED",
+  "modelName": "rule-engine",
+  "modelVersion": "v1",
+  "inferenceTimestamp": "2026-06-01T06:00:01Z",
+  "reasonCodes": [
+    "HIGH_VELOCITY"
+  ],
+  "scoreDetails": {},
+  "featureSnapshot": {},
+  "alertRecommended": true,
+  "scoringEvidence": [],
+  "engineIntelligence": {
+    "contractVersion": 1,
+    "generatedAt": "2026-06-01T06:00:01Z",
+    "engines": [
+      {
+        "engineId": "rules.primary",
+        "engineType": "RULES",
+        "status": "AVAILABLE",
+        "riskLevel": "HIGH",
+        "scoreBucket": "HIGH",
+        "reasonCodes": [
+          "HIGH_VELOCITY",
+          "DEVICE_NOVELTY"
+        ]
+      },
+      {
+        "engineId": "ml.python.primary",
+        "engineType": "ML_MODEL",
+        "status": "TIMEOUT",
+        "scoreBucket": "UNAVAILABLE",
+        "reasonCodes": [
+          "ML_MODEL_TIMEOUT"
+        ]
+      }
+    ],
+    "comparison": {
+      "agreementStatus": "PARTIAL",
+      "riskMismatchStatus": "NOT_COMPARABLE",
+      "scoreDeltaBucket": "UNAVAILABLE"
+    },
+    "diagnosticSignals": [
+      {
+        "engineId": "rules.primary",
+        "engineType": "RULES",
+        "engineStatus": "AVAILABLE",
+        "signalCategory": "FRAUD_SIGNAL",
+        "riskLevel": "HIGH",
+        "scoreBucket": "HIGH",
+        "reasonCode": "HIGH_VELOCITY"
+      },
+      {
+        "engineId": "ml.python.primary",
+        "engineType": "ML_MODEL",
+        "engineStatus": "TIMEOUT",
+        "signalCategory": "OPERATIONAL_SIGNAL",
+        "scoreBucket": "UNAVAILABLE",
+        "reasonCode": "ML_MODEL_TIMEOUT"
+      }
+    ],
+    "warnings": [
+      {
+        "code": "EVIDENCE_UNSAFE_DROPPED",
+        "count": 1
+      },
+      {
+        "code": "REASON_CODE_LIMIT_APPLIED",
+        "count": 1
+      }
+    ]
+  }
+}

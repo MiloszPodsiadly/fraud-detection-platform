@@ -1,0 +1,36 @@
+{
+  "eventId": "evt-fdp93-001",
+  "transactionId": "txn-fdp93-001",
+  "correlationId": "corr-fdp93-001",
+  "customerId": "cust-fdp93-001",
+  "accountId": "acct-fdp93-001",
+  "createdAt": "2026-06-01T06:00:00Z",
+  "transactionTimestamp": "2026-06-01T05:59:58Z",
+  "transactionAmount": {
+    "amount": 1249.99,
+    "currency": "PLN"
+  },
+  "merchantInfo": {
+    "merchantId": "merchant-fdp93-001",
+    "merchantName": "Northwind Electronics",
+    "merchantCategoryCode": "5732",
+    "merchantCategory": "Electronics",
+    "acquiringCountryCode": "PL",
+    "channel": "ECOMMERCE",
+    "cardPresent": false,
+    "attributes": {}
+  },
+  "fraudScore": 0.82,
+  "riskLevel": "HIGH",
+  "scoringStrategy": "RULE_BASED",
+  "modelName": "rule-engine",
+  "modelVersion": "v1",
+  "inferenceTimestamp": "2026-06-01T06:00:01Z",
+  "reasonCodes": [
+    "HIGH_VELOCITY"
+  ],
+  "scoreDetails": {},
+  "featureSnapshot": {},
+  "alertRecommended": true,
+  "scoringEvidence": []
+}
