@@ -49,9 +49,22 @@ final class AggregationTestSupport {
             List<FraudEngineContribution> contributions,
             List<FraudEngineEvidence> evidence
     ) {
+        return raw(engineId, engineType(engineId), status, score, riskLevel, reasonCodes, contributions, evidence);
+    }
+
+    static FraudEngineResult raw(
+            String engineId,
+            FraudEngineType engineType,
+            FraudEngineStatus status,
+            Double score,
+            RiskLevel riskLevel,
+            List<String> reasonCodes,
+            List<FraudEngineContribution> contributions,
+            List<FraudEngineEvidence> evidence
+    ) {
         return new FraudEngineResult(
                 engineId,
-                engineType(engineId),
+                engineType,
                 engineId.equals("rules.primary") ? "java" : "python",
                 status,
                 score,

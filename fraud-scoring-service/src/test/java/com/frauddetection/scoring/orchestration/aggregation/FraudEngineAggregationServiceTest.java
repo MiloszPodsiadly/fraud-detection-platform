@@ -1,6 +1,7 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
 import com.frauddetection.common.events.engine.FraudEngineStatus;
+import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrationResult;
 import org.junit.jupiter.api.Test;
@@ -64,6 +65,52 @@ class FraudEngineAggregationServiceTest {
                 AggregationTestSupport.available("rules.primary", 0.9d, RiskLevel.HIGH, "HIGH_VELOCITY"),
                 AggregationTestSupport.available("rules.primary", 0.2d, RiskLevel.LOW, "LOW_TRANSACTION_AMOUNT")
         ))).hasMessage("AGGREGATION_DUPLICATE_ENGINE_ID");
+    }
+
+    @Test
+    void rejectsRulesPrimaryWithMlModelTypeBeforeAggregation() {
+        assertThatThrownBy(() -> service.aggregate(AggregationTestSupport.orchestration(
+                AggregationTestSupport.raw(
+                        "rules.primary",
+                        FraudEngineType.ML_MODEL,
+                        FraudEngineStatus.AVAILABLE,
+                        0.9d,
+                        RiskLevel.HIGH,
+                        List.of("HIGH_VELOCITY"),
+                        List.of(),
+                        List.of()
+                )
+        ))).hasMessage("AGGREGATION_ENGINE_TYPE_MISMATCH")
+                .message()
+                .doesNotContain("rules.primary", "ML_MODEL");
+    }
+
+    @Test
+    void rejectsMlPythonPrimaryWithRulesTypeBeforeAggregation() {
+        assertThatThrownBy(() -> service.aggregate(AggregationTestSupport.orchestration(
+                AggregationTestSupport.raw(
+                        "ml.python.primary",
+                        FraudEngineType.RULES,
+                        FraudEngineStatus.AVAILABLE,
+                        0.9d,
+                        RiskLevel.HIGH,
+                        List.of("MODEL_HIGH_RISK"),
+                        List.of(),
+                        List.of()
+                )
+        ))).hasMessage("AGGREGATION_ENGINE_TYPE_MISMATCH")
+                .message()
+                .doesNotContain("ml.python.primary", "RULES");
+    }
+
+    @Test
+    void rejectsUnknownEngineIdentityBeforeComputingAgreement() {
+        assertThatThrownBy(() -> service.aggregate(AggregationTestSupport.orchestration(
+                AggregationTestSupport.available("rules.primary", 0.9d, RiskLevel.HIGH, "HIGH_VELOCITY"),
+                AggregationTestSupport.available("merchant.experimental", 0.2d, RiskLevel.LOW, "LOW_MODEL_RISK")
+        ))).hasMessage("AGGREGATION_UNKNOWN_ENGINE_ID")
+                .message()
+                .doesNotContain("merchant.experimental");
     }
 
     private String reasonFor(FraudEngineStatus status) {

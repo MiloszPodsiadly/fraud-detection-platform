@@ -34,6 +34,9 @@ public record NormalizedFraudEngineResult(
             throw new IllegalArgumentException("AGGREGATION_UNKNOWN_ENGINE_ID");
         }
         Objects.requireNonNull(engineType, "engineType is required");
+        if (!hasExpectedEngineType(engineId, engineType)) {
+            throw new IllegalArgumentException("AGGREGATION_ENGINE_TYPE_MISMATCH");
+        }
         Objects.requireNonNull(status, "status is required");
         Objects.requireNonNull(confidence, "confidence is required");
         if (score != null && (!Double.isFinite(score) || score < 0.0d || score > 1.0d)) {
@@ -61,6 +64,14 @@ public record NormalizedFraudEngineResult(
             Objects.requireNonNull(item, fieldName + " must not contain null entries");
         }
         return List.copyOf(source);
+    }
+
+    private static boolean hasExpectedEngineType(String engineId, FraudEngineType engineType) {
+        return switch (engineId) {
+            case "rules.primary" -> engineType == FraudEngineType.RULES;
+            case "ml.python.primary" -> engineType == FraudEngineType.ML_MODEL;
+            default -> false;
+        };
     }
 
     private static void requireSize(List<?> source, int maximum, String fieldName) {

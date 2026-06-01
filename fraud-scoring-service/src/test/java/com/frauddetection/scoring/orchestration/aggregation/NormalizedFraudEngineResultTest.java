@@ -37,6 +37,39 @@ class NormalizedFraudEngineResultTest {
     }
 
     @Test
+    void acceptsRulesPrimaryWithRulesType() {
+        assertThat(result("rules.primary", FraudEngineType.RULES, FraudEngineStatus.TIMEOUT, null, List.of()).engineType())
+                .isEqualTo(FraudEngineType.RULES);
+    }
+
+    @Test
+    void acceptsMlPythonPrimaryWithMlModelType() {
+        assertThat(result("ml.python.primary", FraudEngineType.ML_MODEL, FraudEngineStatus.TIMEOUT, null, List.of()).engineType())
+                .isEqualTo(FraudEngineType.ML_MODEL);
+    }
+
+    @Test
+    void rejectsRulesPrimaryWithMlModelType() {
+        assertThatThrownBy(() -> result("rules.primary", FraudEngineType.ML_MODEL, FraudEngineStatus.TIMEOUT, null, List.of()))
+                .hasMessage("AGGREGATION_ENGINE_TYPE_MISMATCH");
+    }
+
+    @Test
+    void rejectsMlPythonPrimaryWithRulesType() {
+        assertThatThrownBy(() -> result("ml.python.primary", FraudEngineType.RULES, FraudEngineStatus.TIMEOUT, null, List.of()))
+                .hasMessage("AGGREGATION_ENGINE_TYPE_MISMATCH");
+    }
+
+    @Test
+    void engineTypeMismatchMessageIsBounded() {
+        assertThatThrownBy(() -> result("rules.primary", FraudEngineType.ML_MODEL, FraudEngineStatus.TIMEOUT, null, List.of()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("AGGREGATION_ENGINE_TYPE_MISMATCH")
+                .message()
+                .doesNotContain("rules.primary", "ml.python.primary", "ML_MODEL", "RULES");
+    }
+
+    @Test
     void rejectsInvalidScoreRange() {
         assertThatThrownBy(() -> result("rules.primary", FraudEngineStatus.AVAILABLE, 1.1d, List.of()))
                 .hasMessage("AGGREGATION_SCORE_OUT_OF_RANGE");
@@ -65,9 +98,19 @@ class NormalizedFraudEngineResultTest {
             Double score,
             List<String> reasons
     ) {
+        return result(engineId, engineType(engineId), status, score, reasons);
+    }
+
+    private NormalizedFraudEngineResult result(
+            String engineId,
+            FraudEngineType engineType,
+            FraudEngineStatus status,
+            Double score,
+            List<String> reasons
+    ) {
         return new NormalizedFraudEngineResult(
                 engineId,
-                FraudEngineType.RULES,
+                engineType,
                 status,
                 score,
                 score == null ? null : com.frauddetection.common.events.enums.RiskLevel.HIGH,
@@ -77,5 +120,9 @@ class NormalizedFraudEngineResultTest {
                 List.of(),
                 0L
         );
+    }
+
+    private FraudEngineType engineType(String engineId) {
+        return "ml.python.primary".equals(engineId) ? FraudEngineType.ML_MODEL : FraudEngineType.RULES;
     }
 }
