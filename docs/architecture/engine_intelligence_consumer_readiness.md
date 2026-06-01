@@ -38,6 +38,11 @@ consumers must be added to the inventory intentionally. The bounded failure mess
 Shared fixtures live under `common-events/src/test/resources/fixtures/transaction-scored-event/`.
 They cover the old event shape, a minimal bounded summary, the full bounded summary, unknown nested
 summary fields, and an unknown top-level event field.
+Fixture name prefix v1/v2 describes the TransactionScoredEvent fixture shape used for compatibility tests.
+`v1_without_engine_intelligence` means the pre-FDP-92 scored-event shape.
+`v2_*_engine_intelligence` means the scored-event shape with optional engineIntelligence present.
+This does not change `EngineIntelligenceSummary.contractVersion`.
+The nested public engine-intelligence contract remains `contractVersion = 1`.
 
 ## Alert-service Readiness
 
@@ -106,3 +111,7 @@ Producer emission must not combine projection/API/UI in the same branch unless e
 A separate reviewed branch may add producer emission behind a disabled-by-default rollout flag after
 consumer-readiness proof. Any projection, persistence, or API/UI work requires a separate scope and
 review.
+FDP-93 fixtures cover valid and forward-compatible event shapes.
+Invalid nested engineIntelligence versions remain a future producer/contract-validation hardening case.
+Future producer emission branch should test that unsupported engineIntelligence contract versions fail safely and boundedly.
+Invalid-version handling must not be interpreted as consumer tolerance.

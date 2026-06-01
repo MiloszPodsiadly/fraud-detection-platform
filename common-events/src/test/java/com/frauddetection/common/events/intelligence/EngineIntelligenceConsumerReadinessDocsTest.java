@@ -49,7 +49,16 @@ class EngineIntelligenceConsumerReadinessDocsTest {
                 "Source-scan guards are not a substitute for architectural review",
                 "New TransactionScoredEvent",
                 "consumers must be added to the inventory intentionally",
-                "TRANSACTION_SCORED_EVENT_CONSUMER_INVENTORY_REVIEW_REQUIRED"
+                "TRANSACTION_SCORED_EVENT_CONSUMER_INVENTORY_REVIEW_REQUIRED",
+                "Fixture name prefix v1/v2 describes the TransactionScoredEvent fixture shape",
+                "pre-FDP-92 scored-event shape",
+                "scored-event shape with optional engineIntelligence present",
+                "does not change `EngineIntelligenceSummary.contractVersion`",
+                "`contractVersion = 1`",
+                "FDP-93 fixtures cover valid and forward-compatible event shapes",
+                "Invalid nested engineIntelligence versions remain a future producer/contract-validation hardening case",
+                "unsupported engineIntelligence contract versions fail safely and boundedly",
+                "Invalid-version handling must not be interpreted as consumer tolerance"
         );
     }
 
