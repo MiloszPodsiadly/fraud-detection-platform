@@ -59,6 +59,9 @@ final class FraudEngineAggregationSafety {
     private FraudEngineAggregationSafety() {
     }
 
+    // Null means "no optional text to scan".
+    // Required-field validation must happen before calling this helper.
+    // Sanitizers must not use isSafe(null) as proof that required text is valid.
     static boolean isSafe(String value) {
         if (value == null) {
             return true;
