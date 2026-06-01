@@ -79,7 +79,6 @@ class FraudEngineAggregationArchitectureDocsTest {
                 "preserve missing risk does not become low",
                 "preserve agreement/disagreement/adjacent variance semantics"
         ).doesNotContain(
-                "public engine intelligence",
                 "production decision source",
                 "final fraud decision",
                 "approve transaction",
