@@ -1,8 +1,11 @@
 package com.frauddetection.scoring.service;
 
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
+import com.frauddetection.scoring.config.EngineIntelligenceEmissionProperties;
+import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceDiagnosticEnrichmentPipeline;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionService;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
 
 import java.util.Optional;
 
@@ -10,7 +13,7 @@ import static com.frauddetection.scoring.service.TransactionFraudScoringServiceE
 import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceTestSupport.json;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -60,9 +63,19 @@ class TransactionFraudScoringServiceEngineIntelligenceFailureIsolationTest {
     }
 
     private TransactionFraudScoringServiceEngineIntelligenceTestSupport.Harness throwingEnrichmentHarness() {
-        var harness = harness(Optional.empty());
-        doThrow(new IllegalStateException("raw-secret-must-not-leak"))
-                .when(harness.emissionService()).emitIfEnabled(harness.request());
-        return harness;
+        EngineIntelligenceDiagnosticEnrichmentPipeline pipeline =
+                mock(EngineIntelligenceDiagnosticEnrichmentPipeline.class);
+        when(pipeline.enrich(org.mockito.ArgumentMatchers.any()))
+                .thenThrow(new IllegalStateException("raw-secret-must-not-leak"));
+        return TransactionFraudScoringServiceEngineIntelligenceTestSupport.harness(
+                new EngineIntelligenceEmissionService(new EngineIntelligenceEmissionProperties(true), provider(pipeline))
+        );
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T> ObjectProvider<T> provider(T value) {
+        ObjectProvider<T> provider = mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(value);
+        return provider;
     }
 }

@@ -38,14 +38,28 @@ final class TransactionFraudScoringServiceEngineIntelligenceTestSupport {
     }
 
     static Harness harness(Optional<EngineIntelligenceSummary> summary) {
+        EngineIntelligenceEmissionService emissionService = mock(EngineIntelligenceEmissionService.class);
         TransactionEnrichedEvent input = TransactionFixtures.enrichedTransaction().build();
         FraudScoringRequest request = FraudScoringRequest.from(input);
+        when(emissionService.emitIfEnabled(request)).thenReturn(summary);
+        return harness(input, request, emissionService);
+    }
+
+    static Harness harness(EngineIntelligenceEmissionService emissionService) {
+        TransactionEnrichedEvent input = TransactionFixtures.enrichedTransaction().build();
+        FraudScoringRequest request = FraudScoringRequest.from(input);
+        return harness(input, request, emissionService);
+    }
+
+    private static Harness harness(
+            TransactionEnrichedEvent input,
+            FraudScoringRequest request,
+            EngineIntelligenceEmissionService emissionService
+    ) {
         FraudScoreResult result = scoreResult();
         FraudScoringEngine scoringEngine = mock(FraudScoringEngine.class);
         TransactionScoredEventPublisher publisher = mock(TransactionScoredEventPublisher.class);
-        EngineIntelligenceEmissionService emissionService = mock(EngineIntelligenceEmissionService.class);
         when(scoringEngine.score(request)).thenReturn(result);
-        when(emissionService.emitIfEnabled(request)).thenReturn(summary);
         var service = new TransactionFraudScoringService(
                 scoringEngine,
                 new TransactionScoredEventMapper(),

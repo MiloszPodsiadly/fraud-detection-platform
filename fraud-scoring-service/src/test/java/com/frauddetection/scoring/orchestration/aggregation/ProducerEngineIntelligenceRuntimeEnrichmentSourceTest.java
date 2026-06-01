@@ -2,11 +2,6 @@ package com.frauddetection.scoring.orchestration.aggregation;
 
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
-import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
-import com.frauddetection.scoring.config.EngineIntelligenceEmissionProperties;
-import com.frauddetection.scoring.config.ScoringMode;
-import com.frauddetection.scoring.config.ScoringProperties;
-import com.frauddetection.scoring.context.ScoringContextFactory;
 import com.frauddetection.scoring.domain.FraudScoreResult;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrationResult;
@@ -24,11 +19,13 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionTestSupport.pipeline;
+import static com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionTestSupport.request;
+import static com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionTestSupport.service;
 
 class ProducerEngineIntelligenceRuntimeEnrichmentSourceTest {
 
-    private final FraudScoringRequest request =
-            FraudScoringRequest.from(TransactionFixtures.enrichedTransaction().build());
+    private final FraudScoringRequest request = request();
     private final FraudScoringOrchestrationResult orchestration = mock(FraudScoringOrchestrationResult.class);
     private final FraudEngineAggregationResult aggregation = mock(FraudEngineAggregationResult.class);
     private final EngineIntelligenceSummary summary = mock(EngineIntelligenceSummary.class);
@@ -99,13 +96,9 @@ class ProducerEngineIntelligenceRuntimeEnrichmentSourceTest {
     }
 
     private EngineIntelligenceEmissionService service(boolean enabled) {
-        return new EngineIntelligenceEmissionService(
-                new EngineIntelligenceEmissionProperties(enabled),
-                new ScoringContextFactory(),
-                new ScoringProperties(0.75d, 0.90d, ScoringMode.RULE_BASED),
-                orchestrator,
-                aggregationService,
-                mapper
+        return EngineIntelligenceEmissionTestSupport.service(
+                enabled,
+                pipeline(orchestrator, aggregationService, mapper)
         );
     }
 

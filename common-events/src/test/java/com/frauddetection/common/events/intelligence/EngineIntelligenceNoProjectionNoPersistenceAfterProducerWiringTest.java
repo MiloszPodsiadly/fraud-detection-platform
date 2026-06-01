@@ -16,4 +16,13 @@ class EngineIntelligenceNoProjectionNoPersistenceAfterProducerWiringTest {
                         "agreement_status", "risk_mismatch", "score_delta"
                 );
     }
+
+    @Test
+    void databaseMigrationsStillDoNotContainEngineIntelligence() throws Exception {
+        assertThat(EngineIntelligenceFdp93SourceScanSupport.sources("alert-service/src/main/resources/db/migration"))
+                .doesNotContain(
+                        "engineIntelligence", "engineResults", "diagnosticSignals",
+                        "engine_intelligence", "engine_results", "diagnostic_signals"
+                );
+    }
 }

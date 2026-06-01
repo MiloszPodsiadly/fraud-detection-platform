@@ -4,15 +4,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
-import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
-import com.frauddetection.scoring.config.EngineIntelligenceEmissionProperties;
-import com.frauddetection.scoring.config.ScoringMode;
-import com.frauddetection.scoring.config.ScoringProperties;
-import com.frauddetection.scoring.context.ScoringContextFactory;
-import com.frauddetection.scoring.domain.FraudScoringRequest;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrator;
 import org.junit.jupiter.api.Test;
 
+import static com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionTestSupport.pipeline;
+import static com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionTestSupport.request;
+import static com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionTestSupport.service;
 import static org.mockito.ArgumentMatchers.any;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -31,15 +28,12 @@ class ProducerEngineIntelligenceEnabledEmissionTest {
                         "ORCHESTRATOR_ENGINE_TIMEOUT"
                 )
         ));
-        var summary = new EngineIntelligenceEmissionService(
-                new EngineIntelligenceEmissionProperties(true),
-                new ScoringContextFactory(),
-                new ScoringProperties(0.75d, 0.90d, ScoringMode.RULE_BASED),
+        var summary = service(true, pipeline(
                 orchestrator,
                 new FraudEngineAggregationService(FraudEngineAggregationPolicy.defaultInternalPolicy()),
                 new PublicEngineIntelligenceMapper()
-        )
-                .emitIfEnabled(FraudScoringRequest.from(TransactionFixtures.enrichedTransaction().build()))
+        ))
+                .emitIfEnabled(request())
                 .orElseThrow();
         String json = new ObjectMapper().findAndRegisterModules().writeValueAsString(summary);
 

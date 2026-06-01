@@ -4,6 +4,7 @@ import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEm
 import org.junit.jupiter.api.Test;
 
 import static com.frauddetection.scoring.config.EngineIntelligenceSpringContextTestSupport.contextRunner;
+import static com.frauddetection.scoring.config.EngineIntelligenceSpringContextTestSupport.enabledContextRunner;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class EngineIntelligenceEmissionPropertiesSpringContextTest {
@@ -17,8 +18,7 @@ class EngineIntelligenceEmissionPropertiesSpringContextTest {
 
     @Test
     void environmentOverrideTrueBindsEmitEnabledTrue() {
-        contextRunner()
-                .withPropertyValues(EngineIntelligenceEmissionProperties.PROPERTY_NAME + "=true")
+        enabledContextRunner()
                 .run(context ->
                         assertThat(context.getBean(EngineIntelligenceEmissionProperties.class).emitEnabled()).isTrue()
                 );
@@ -42,8 +42,7 @@ class EngineIntelligenceEmissionPropertiesSpringContextTest {
 
     @Test
     void emissionServiceBeanReceivesProperties() {
-        contextRunner()
-                .withPropertyValues(EngineIntelligenceEmissionProperties.PROPERTY_NAME + "=true")
+        enabledContextRunner()
                 .run(context ->
                         assertThat(context.getBean(EngineIntelligenceEmissionService.class).emitEnabled()).isTrue()
                 );

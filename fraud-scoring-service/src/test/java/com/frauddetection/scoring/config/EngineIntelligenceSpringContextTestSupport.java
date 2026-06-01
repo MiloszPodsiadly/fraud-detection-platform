@@ -14,7 +14,12 @@ final class EngineIntelligenceSpringContextTestSupport {
     static ApplicationContextRunner contextRunner() {
         return new ApplicationContextRunner()
                 .withUserConfiguration(EngineIntelligenceRuntimeConfig.class)
-                .withBean(ScoringProperties.class, () -> new ScoringProperties(0.75d, 0.90d, ScoringMode.RULE_BASED))
+                .withBean(ScoringProperties.class, () -> new ScoringProperties(0.75d, 0.90d, ScoringMode.RULE_BASED));
+    }
+
+    static ApplicationContextRunner enabledContextRunner() {
+        return contextRunner()
+                .withPropertyValues(EngineIntelligenceEmissionProperties.PROPERTY_NAME + "=true")
                 .withBean(RuleBasedFraudScoringEngine.class, () -> mock(RuleBasedFraudScoringEngine.class))
                 .withBean(MlFraudScoringEngine.class, () -> mock(MlFraudScoringEngine.class));
     }

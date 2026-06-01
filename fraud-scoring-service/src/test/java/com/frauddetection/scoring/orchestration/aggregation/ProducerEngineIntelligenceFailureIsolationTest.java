@@ -2,11 +2,6 @@ package com.frauddetection.scoring.orchestration.aggregation;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.frauddetection.common.events.enums.RiskLevel;
-import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
-import com.frauddetection.scoring.config.EngineIntelligenceEmissionProperties;
-import com.frauddetection.scoring.config.ScoringMode;
-import com.frauddetection.scoring.config.ScoringProperties;
-import com.frauddetection.scoring.context.ScoringContextFactory;
 import com.frauddetection.scoring.domain.FraudScoreResult;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
 import com.frauddetection.scoring.mapper.TransactionScoredEventMapper;
@@ -24,6 +19,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.any;
+import static com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionTestSupport.pipeline;
+import static com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionTestSupport.request;
+import static com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionTestSupport.service;
 
 class ProducerEngineIntelligenceFailureIsolationTest {
 
@@ -31,7 +29,9 @@ class ProducerEngineIntelligenceFailureIsolationTest {
     void aggregationFailureReturnsBaseEventWithoutNestedField() throws Exception {
         FraudScoringOrchestrator orchestrator = mock(FraudScoringOrchestrator.class);
         when(orchestrator.evaluate(any())).thenThrow(new IllegalStateException("raw-secret-must-not-leak"));
-        var intelligence = service(orchestrator, mock(FraudEngineAggregationService.class), new PublicEngineIntelligenceMapper())
+        var intelligence = service(true, pipeline(
+                orchestrator, mock(FraudEngineAggregationService.class), new PublicEngineIntelligenceMapper()
+        ))
                 .emitIfEnabled(request());
         var event = new TransactionScoredEventMapper().toEvent(request(), scoreResult(), intelligence);
         String json = new ObjectMapper().findAndRegisterModules().writeValueAsString(event);
@@ -49,7 +49,7 @@ class ProducerEngineIntelligenceFailureIsolationTest {
         when(orchestrator.evaluate(any())).thenReturn(mock(FraudScoringOrchestrationResult.class));
         when(aggregationService.aggregate(any())).thenReturn(aggregation);
         when(mapper.map(aggregation)).thenThrow(new IllegalStateException("raw-secret-must-not-leak"));
-        var emission = service(orchestrator, aggregationService, mapper);
+        var emission = service(true, pipeline(orchestrator, aggregationService, mapper));
 
         assertThat(emission.emitIfEnabled(request())).isEmpty();
     }
@@ -63,25 +63,6 @@ class ProducerEngineIntelligenceFailureIsolationTest {
         assertThat(Files.readString(source))
                 .contains("log.warn(\"Engine intelligence enrichment omitted.\")")
                 .doesNotContain("exception.getMessage()", "log.warn(\"Engine intelligence enrichment omitted.\", exception)");
-    }
-
-    private FraudScoringRequest request() {
-        return FraudScoringRequest.from(TransactionFixtures.enrichedTransaction().build());
-    }
-
-    private EngineIntelligenceEmissionService service(
-            FraudScoringOrchestrator orchestrator,
-            FraudEngineAggregationService aggregationService,
-            PublicEngineIntelligenceMapper mapper
-    ) {
-        return new EngineIntelligenceEmissionService(
-                new EngineIntelligenceEmissionProperties(true),
-                new ScoringContextFactory(),
-                new ScoringProperties(0.75d, 0.90d, ScoringMode.RULE_BASED),
-                orchestrator,
-                aggregationService,
-                mapper
-        );
     }
 
     private FraudScoreResult scoreResult() {
