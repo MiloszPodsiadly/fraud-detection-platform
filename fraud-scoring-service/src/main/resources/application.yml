@@ -72,3 +72,9 @@ app:
       base-url: ${ML_MODEL_BASE_URL:http://localhost:8090}
       connect-timeout: ${ML_MODEL_CONNECT_TIMEOUT:500ms}
       read-timeout: ${ML_MODEL_READ_TIMEOUT:1500ms}
+
+fraud:
+  scoring:
+    events:
+      engine-intelligence:
+        emit-enabled: ${FRAUD_SCORING_EVENTS_ENGINE_INTELLIGENCE_EMIT_ENABLED:false}

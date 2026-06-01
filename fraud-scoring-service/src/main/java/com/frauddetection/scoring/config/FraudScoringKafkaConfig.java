@@ -37,6 +37,7 @@ import java.util.Map;
         KafkaTopicProperties.class,
         KafkaConsumerProperties.class,
         ScoringProperties.class,
+        EngineIntelligenceEmissionProperties.class,
         MlModelClientProperties.class,
         InternalServiceClientProperties.class
 })
