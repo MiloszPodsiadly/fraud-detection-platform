@@ -67,6 +67,16 @@ engines/signals/warnings. No separate migration is required for this document-st
 policy requires explicit collection/index creation. Future hardening may add secondary indexes or retention/TTL
 based on query and retention needs.
 
+## Operational storage hardening
+
+FDP-95 uses transactionId as Mongo `_id` for idempotent replacement.
+FDP-95 does not add query-optimized secondary indexes.
+FDP-95 does not add a TTL/retention policy.
+Projection growth is expected to be roughly one document per scored transaction with engineIntelligence.
+Before the FDP-96 API read model or broader producer rollout, define a retention policy, a TTL or archival strategy
+if needed, secondary indexes based on read/query patterns, and storage growth monitoring. Storage monitoring must
+not add high-cardinality metric labels such as transactionId, customerId, accountId, or merchantId.
+
 ## No Raw/Internal Storage
 
 Only bounded public event contract fields may be stored. Raw evidence, raw contributions, feature vectors,
@@ -95,6 +105,19 @@ Projection omitted/success/failure metrics are future operational hardening. Met
 Labels must not include transactionId, customerId, accountId, merchantId, raw exception, endpoint, or payload.
 The base projection must never depend on metrics.
 
+Future metrics should include:
+- `engine_intelligence_projection_attempt_total`
+- `engine_intelligence_projection_success_total`
+- `engine_intelligence_projection_omitted_total{reason=bounded_reason}`
+- `engine_intelligence_projection_latency_seconds`
+
+Allowed labels are bounded `result`, `omission_reason`, and `projection_version`. Forbidden labels include
+transactionId, customerId, accountId, cardId, merchantId, raw exception, endpoint, payload, and unbounded reasonCode.
+
 ## Future FDP-96 API Read Model
 
 Any bounded API read model requires separate FDP-96 review. UI rendering remains separate FDP-97 scope.
+FDP-95 source-scan guards are a tripwire proving no API/UI exposure in this branch.
+FDP-96 must add behavior-level API tests before exposing any engine intelligence read model. Those tests must prove
+a bounded response DTO, no raw/internal storage leakage, no decisioning fields, compatibility for old cases without
+projection, authorization boundaries, and no high-cardinality or raw values.
