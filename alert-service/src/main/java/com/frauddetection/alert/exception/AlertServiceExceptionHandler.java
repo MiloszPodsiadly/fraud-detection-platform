@@ -6,6 +6,7 @@ import com.frauddetection.alert.audit.InvalidAuditEventQueryException;
 import com.frauddetection.alert.audit.PostCommitEvidenceIncompleteException;
 import com.frauddetection.alert.audit.external.AuditEvidenceExportRejectedException;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorPublicationRequiredException;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceScoredTransactionNotFoundException;
 import com.frauddetection.alert.fraudcase.FraudCaseNotFoundException;
 import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueQueryException;
@@ -230,6 +231,21 @@ public class AlertServiceExceptionHandler {
                         "Not Found",
                         "Scored transaction not found.",
                         List.of("reason:SCORED_TRANSACTION_NOT_FOUND")
+                )
+        );
+    }
+
+    @ExceptionHandler(EngineIntelligenceProjectionReadUnavailableException.class)
+    public ResponseEntity<ApiErrorResponse> handleEngineIntelligenceProjectionReadUnavailable(
+            EngineIntelligenceProjectionReadUnavailableException exception
+    ) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(
+                new ApiErrorResponse(
+                        Instant.now(),
+                        503,
+                        "Service Unavailable",
+                        "Engine intelligence projection is temporarily unavailable.",
+                        List.of("reason:ENGINE_INTELLIGENCE_PROJECTION_STORE_UNAVAILABLE")
                 )
         );
     }

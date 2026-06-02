@@ -30,9 +30,9 @@ public record EngineIntelligenceReadModel(
             List<EngineIntelligenceDiagnosticSignalReadModel> diagnosticSignals,
             List<EngineIntelligenceWarningReadModel> warnings
     ) {
-        List<EngineIntelligenceEngineReadModel> boundedEngines = List.copyOf(engines);
-        List<EngineIntelligenceDiagnosticSignalReadModel> boundedSignals = List.copyOf(diagnosticSignals);
-        List<EngineIntelligenceWarningReadModel> boundedWarnings = List.copyOf(warnings);
+        List<EngineIntelligenceEngineReadModel> boundedEngines = immutableList(engines);
+        List<EngineIntelligenceDiagnosticSignalReadModel> boundedSignals = immutableList(diagnosticSignals);
+        List<EngineIntelligenceWarningReadModel> boundedWarnings = immutableList(warnings);
         return new EngineIntelligenceReadModel(
                 transactionId,
                 true,
@@ -64,5 +64,9 @@ public record EngineIntelligenceReadModel(
                 null,
                 null
         );
+    }
+
+    private static <T> List<T> immutableList(List<T> values) {
+        return values == null ? List.of() : List.copyOf(values);
     }
 }

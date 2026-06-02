@@ -13,8 +13,29 @@ import java.util.Objects;
 @Component
 public class EngineIntelligenceReadModelMapper {
 
+    private final EngineIntelligenceReadModelPolicy policy;
+
+    public EngineIntelligenceReadModelMapper() {
+        this(new EngineIntelligenceReadModelPolicy());
+    }
+
+    EngineIntelligenceReadModelMapper(EngineIntelligenceReadModelPolicy policy) {
+        this.policy = Objects.requireNonNull(policy, "policy is required");
+    }
+
     public EngineIntelligenceReadModel map(EngineIntelligenceProjection projection) {
+        try {
+            return mapValidated(projection);
+        } catch (EngineIntelligenceProjectionReadUnavailableException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            throw new EngineIntelligenceProjectionReadUnavailableException();
+        }
+    }
+
+    private EngineIntelligenceReadModel mapValidated(EngineIntelligenceProjection projection) {
         EngineIntelligenceProjection source = Objects.requireNonNull(projection, "projection is required");
+        policy.validate(source);
         List<EngineIntelligenceEngineReadModel> engines = bounded(
                 source.getEngines(),
                 EngineIntelligenceProjectionPolicy.MAX_ENGINES,

@@ -15,9 +15,9 @@ public record EngineIntelligenceEngineReadModel(
         FraudEngineStatus status,
         RiskLevel riskLevel,
         EngineIntelligenceScoreBucket scoreBucket,
-        List<String> reasonCodes
+    List<String> reasonCodes
 ) {
     public EngineIntelligenceEngineReadModel {
-        reasonCodes = List.copyOf(reasonCodes);
+        reasonCodes = reasonCodes == null ? List.of() : List.copyOf(reasonCodes);
     }
 }

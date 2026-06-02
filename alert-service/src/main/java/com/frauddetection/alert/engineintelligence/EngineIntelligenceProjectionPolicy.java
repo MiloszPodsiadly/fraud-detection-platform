@@ -53,7 +53,7 @@ public class EngineIntelligenceProjectionPolicy {
             "debug"
     );
 
-    String validatedTransactionId(String transactionId) {
+    public String validatedTransactionId(String transactionId) {
         return boundedString(transactionId);
     }
 
