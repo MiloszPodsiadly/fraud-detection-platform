@@ -100,7 +100,7 @@ Production BFF hardening remains deployment responsibility unless configured in 
 | `GET /oauth2/**`, `GET /login/oauth2/**`, `GET /error` | `SessionAuthorizationRules` | OAuth/session bootstrap | Public auth lifecycle | Framework controlled safe method only | `SecurityMatcherOrderRegressionTest` |
 | `/api/v1/alerts/**` | `AlertAuthorizationRules` | `ALERT_READ`, `ASSISTANT_SUMMARY_READ`, `ALERT_DECISION_SUBMIT` | Protected | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |
 | `GET /api/v1/fraud-cases/work-queue`, `GET /api/v1/fraud-cases/work-queue/summary`, `GET /api/v1/fraud-cases/{caseId}`, `GET /api/v1/fraud-cases/{caseId}/evidence-summary`, `GET /api/v1/fraud-cases/{caseId}/evidence-timeline`, `PATCH /api/v1/fraud-cases/{caseId}` | `FraudCaseAuthorizationRules` | `FRAUD_CASE_READ`, `FRAUD_CASE_UPDATE` | Protected current FDP-81 surface | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest`, `RouteCoverageAgainstMvcMappingsTest` |
-| `GET /api/v1/transactions/scored` | `TransactionAuthorizationRules` | `TRANSACTION_MONITOR_READ` | Protected | Safe method only | `AuthorizationRulesCoverageTest` |
+| `GET /api/v1/transactions/scored`, `GET /api/v1/transactions/scored/{transactionId}/engine-intelligence` | `TransactionAuthorizationRules` | `TRANSACTION_MONITOR_READ` | Protected transaction reads. Engine intelligence is a bounded optional diagnostic subresource. | Safe method only | `AuthorizationRulesCoverageTest`, `RouteCoverageAgainstMvcMappingsTest` |
 | `GET /internal/suspicious-transactions`, `GET /internal/suspicious-transactions/summary`, `GET /internal/suspicious-transactions/{suspiciousTransactionId}` | `SuspiciousTransactionAuthorizationRules` | `SUSPICIOUS_TRANSACTION_READ` | Protected internal read-only API | Safe method only | `AuthorizationRulesCoverageTest` |
 | `GET /internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert` | `SuspiciousTransactionAuthorizationRules` | `SUSPICIOUS_TRANSACTION_READ` + `ALERT_READ` | Protected internal backend-resolved linked-alert read context. Client-selected `alertId` query parameter is rejected. | Safe method only | `AuthorizationRulesCoverageTest`, `SuspiciousTransactionReadControllerAuthorizationTest`, `RouteCoverageAgainstMvcMappingsTest` |
 | `/governance/advisories/**` | `GovernanceAuthorizationRules` | `TRANSACTION_MONITOR_READ`, `GOVERNANCE_ADVISORY_AUDIT_WRITE` | Protected or denied | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |
@@ -135,6 +135,7 @@ The FDP-49 route ownership docs represent these Spring MVC controllers:
 - `OutboxRecoveryController`
 - `RegulatedMutationRecoveryController`
 - `ScoredTransactionController`
+- `EngineIntelligenceReadController`
 - `SuspiciousTransactionReadController`
 - `SystemTrustLevelController`
 - `TrustIncidentController`

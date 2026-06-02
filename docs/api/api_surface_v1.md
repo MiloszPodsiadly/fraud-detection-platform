@@ -255,7 +255,7 @@ Platform Local Trust Authority API:
 
 Sensitive read-access audit:
 
-- Implemented for `GET /api/v1/alerts/{alertId}`, `GET /api/v1/fraud-cases/{caseId}`, `GET /api/v1/transactions/scored`, `GET /governance/advisories`, `GET /governance/advisories/{event_id}`, `GET /governance/advisories/{event_id}/audit`, and `GET /governance/advisories/analytics`.
+- Implemented for `GET /api/v1/alerts/{alertId}`, `GET /api/v1/fraud-cases/{caseId}`, `GET /api/v1/transactions/scored`, `GET /api/v1/transactions/scored/{transactionId}/engine-intelligence`, `GET /governance/advisories`, `GET /governance/advisories/{event_id}`, `GET /governance/advisories/{event_id}/audit`, and `GET /governance/advisories/analytics`.
 - Records authenticated backend principal identity, roles, `action=READ`, resource type/id where applicable, endpoint category, canonical hashed query shape, page/size, bounded result count, outcome, correlation id, source service, schema version, and indexed timestamps.
 - If actor principal is missing, records `actor_id=unknown`, emits a low-cardinality anomaly metric, and logs a bounded warning without URL/query/payload/token content.
 - Does not store raw query parameters, filters, response payloads, transaction data, customer/account/card data, advisory content, full URLs, exception messages, tokens, secrets, or stack traces.
