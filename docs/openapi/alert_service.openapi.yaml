@@ -1250,6 +1250,9 @@ paths:
           required: true
           schema:
             type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[A-Za-z0-9._:-]+$"
       responses:
         "200":
           description: Bounded engine intelligence read model returned. The projection may be unavailable.
@@ -1263,6 +1266,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /governance/advisories:
     get:
       summary: List governance advisories with derived lifecycle status
@@ -4046,6 +4051,8 @@ components:
       properties:
         transactionId:
           type: string
+          minLength: 1
+          maxLength: 128
         available:
           type: boolean
         reason:
@@ -4107,6 +4114,8 @@ components:
       properties:
         engineId:
           type: string
+          minLength: 1
+          maxLength: 128
         engineType:
           type: string
         status:
@@ -4124,6 +4133,8 @@ components:
           maxItems: 5
           items:
             type: string
+            minLength: 1
+            maxLength: 128
     EngineIntelligenceDiagnosticSignalReadModel:
       type: object
       additionalProperties: false
@@ -4131,6 +4142,8 @@ components:
       properties:
         engineId:
           type: string
+          minLength: 1
+          maxLength: 128
         engineType:
           type: string
         engineStatus:
@@ -4148,6 +4161,8 @@ components:
           enum: [NONE, LOW, MEDIUM, HIGH, VERY_HIGH, UNAVAILABLE]
         reasonCode:
           type: string
+          minLength: 1
+          maxLength: 128
     EngineIntelligenceWarningReadModel:
       type: object
       additionalProperties: false
@@ -4155,6 +4170,8 @@ components:
       properties:
         warningCode:
           type: string
+          minLength: 1
+          maxLength: 128
         count:
           type: integer
           minimum: 0

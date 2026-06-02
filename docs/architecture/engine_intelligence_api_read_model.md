@@ -30,10 +30,22 @@ The endpoint reuses `TRANSACTION_MONITOR_READ`, the authority used by scored tra
 Authorization must be checked before projection lookup. The read service also verifies that the scored transaction exists before it
 queries the optional projection.
 
+## Authorization Model
+
+FDP-96 uses the same authority boundary as scored transaction read: TRANSACTION_MONITOR_READ.
+The endpoint is intentionally transaction-monitor scoped because the underlying FDP-95 projection is keyed by transactionId.
+The read service verifies the scored transaction exists before projection lookup.
+If future tenant/case/ownership-level authorization is introduced for scored transaction reads, this endpoint must inherit the same
+resource-level checks before projection lookup.
+Projection repository must not be queried before the scored transaction access/existence boundary is checked.
+
 ## Missing Projection Behavior
 
 Missing projection is normal for old transactions and disabled producer periods. For an existing authorized scored
 transaction, the endpoint returns `200` with `available=false` and `reason=NOT_PROJECTED`.
+
+Projection store failure is not equivalent to a missing projection. The endpoint returns `503` with the stable
+`ENGINE_INTELLIGENCE_PROJECTION_STORE_UNAVAILABLE` reason when the optional projection cannot be read or safely mapped.
 
 ## Operational Status Semantics
 
