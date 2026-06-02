@@ -72,29 +72,12 @@ public class EngineIntelligenceProjectionMapper {
                     existingCreatedAt == null ? now : existingCreatedAt,
                     now
             ));
-        } catch (IllegalArgumentException | NullPointerException exception) {
-            return EngineIntelligenceProjectionResult.omitted(classify(exception.getMessage()));
+        } catch (EngineIntelligenceProjectionValidationException exception) {
+            return EngineIntelligenceProjectionResult.omitted(exception.reason());
         } catch (RuntimeException exception) {
             return EngineIntelligenceProjectionResult.omitted(
                     EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_PROJECTION_FAILED
             );
         }
-    }
-
-    private EngineIntelligenceProjectionOmissionReason classify(String message) {
-        if (contains(message, "UNSUPPORTED_CONTRACT_VERSION")) {
-            return EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_UNSUPPORTED_CONTRACT_VERSION;
-        }
-        if (contains(message, "LIMIT_EXCEEDED")) {
-            return EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_OVERSIZED;
-        }
-        if (contains(message, "REASON_CODE_NOT_ALLOWED")) {
-            return EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED;
-        }
-        return EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE;
-    }
-
-    private boolean contains(String message, String token) {
-        return message != null && message.contains(token);
     }
 }

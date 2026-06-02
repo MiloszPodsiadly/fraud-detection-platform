@@ -18,9 +18,9 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Locale;
-import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 @Component
 public class EngineIntelligenceProjectionPolicy {
@@ -54,109 +54,122 @@ public class EngineIntelligenceProjectionPolicy {
     );
 
     String validatedTransactionId(String transactionId) {
-        return boundedString(transactionId, "TRANSACTION_ID");
+        return boundedString(transactionId);
     }
 
     public EngineIntelligenceSummary validatedCopy(EngineIntelligenceSummary source) {
-        Objects.requireNonNull(source, "engineIntelligence is required");
+        requireShape(source);
         if (source.contractVersion() != EngineIntelligenceSummary.CONTRACT_VERSION) {
-            throw new IllegalArgumentException("ENGINE_INTELLIGENCE_UNSUPPORTED_CONTRACT_VERSION");
+            throw validation(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_UNSUPPORTED_CONTRACT_VERSION);
         }
-        // Alert-service revalidates engine intelligence by reconstructing FDP-92 public DTOs. This keeps the
-        // public event contract as the source of truth for enum/value allowlists while FDP-95 adds
-        // storage-specific size and omission safeguards.
-        return new EngineIntelligenceSummary(
+        // Alert-service projection revalidates engine intelligence through the shared bounded public event
+        // contract. This avoids maintaining a divergent second source of truth for public reason codes and
+        // enum semantics while FDP-95 adds storage-specific size and omission safeguards.
+        return publicContract(() -> new EngineIntelligenceSummary(
                 source.contractVersion(),
                 source.generatedAt(),
-                copyBounded(source.engines(), MAX_ENGINES, "ENGINES", this::validatedEngine),
+                copyBounded(source.engines(), MAX_ENGINES, this::validatedEngine),
                 validatedComparison(source.comparison()),
                 copyBounded(
                         source.diagnosticSignals(),
                         MAX_DIAGNOSTIC_SIGNALS,
-                        "DIAGNOSTIC_SIGNALS",
                         this::validatedDiagnosticSignal
                 ),
-                copyBounded(source.warnings(), MAX_WARNINGS, "WARNINGS", this::validatedWarning)
-        );
+                copyBounded(source.warnings(), MAX_WARNINGS, this::validatedWarning)
+        ));
     }
 
     private EngineIntelligenceEngineResult validatedEngine(EngineIntelligenceEngineResult source) {
-        Objects.requireNonNull(source, "engine must not be null");
-        return new EngineIntelligenceEngineResult(
+        requireShape(source);
+        return publicContract(() -> new EngineIntelligenceEngineResult(
                 allowedEngineId(source.engineId()),
-                boundedEnum(source.engineType(), FraudEngineType.class, "ENGINE_TYPE"),
-                boundedEnum(source.status(), FraudEngineStatus.class, "ENGINE_STATUS"),
-                boundedOptionalEnum(source.riskLevel(), RiskLevel.class, "RISK_LEVEL"),
-                boundedEnum(source.scoreBucket(), EngineIntelligenceScoreBucket.class, "SCORE_BUCKET"),
-                copyBounded(source.reasonCodes(), MAX_REASON_CODES_PER_ENGINE, "REASON_CODES", this::boundedReasonCode)
-        );
+                boundedEnum(source.engineType(), FraudEngineType.class),
+                boundedEnum(source.status(), FraudEngineStatus.class),
+                boundedOptionalEnum(source.riskLevel(), RiskLevel.class),
+                boundedEnum(source.scoreBucket(), EngineIntelligenceScoreBucket.class),
+                copyBounded(source.reasonCodes(), MAX_REASON_CODES_PER_ENGINE, this::boundedPublicReasonCode)
+        ));
     }
 
     private EngineIntelligenceComparison validatedComparison(EngineIntelligenceComparison source) {
-        Objects.requireNonNull(source, "comparison is required");
-        return new EngineIntelligenceComparison(
-                boundedEnum(source.agreementStatus(), EngineIntelligenceAgreementStatus.class, "AGREEMENT_STATUS"),
-                boundedEnum(source.riskMismatchStatus(), EngineIntelligenceRiskMismatchStatus.class, "RISK_MISMATCH_STATUS"),
-                boundedEnum(source.scoreDeltaBucket(), EngineIntelligenceScoreDeltaBucket.class, "SCORE_DELTA_BUCKET")
-        );
+        requireShape(source);
+        return publicContract(() -> new EngineIntelligenceComparison(
+                boundedEnum(source.agreementStatus(), EngineIntelligenceAgreementStatus.class),
+                boundedEnum(source.riskMismatchStatus(), EngineIntelligenceRiskMismatchStatus.class),
+                boundedEnum(source.scoreDeltaBucket(), EngineIntelligenceScoreDeltaBucket.class)
+        ));
     }
 
     private EngineIntelligenceDiagnosticSignal validatedDiagnosticSignal(EngineIntelligenceDiagnosticSignal source) {
-        Objects.requireNonNull(source, "diagnostic signal must not be null");
-        return new EngineIntelligenceDiagnosticSignal(
+        requireShape(source);
+        return publicContract(() -> new EngineIntelligenceDiagnosticSignal(
                 allowedEngineId(source.engineId()),
-                boundedEnum(source.engineType(), FraudEngineType.class, "DIAGNOSTIC_ENGINE_TYPE"),
-                boundedEnum(source.engineStatus(), FraudEngineStatus.class, "DIAGNOSTIC_ENGINE_STATUS"),
-                boundedEnum(source.signalCategory(), EngineIntelligenceSignalCategory.class, "DIAGNOSTIC_SIGNAL_TYPE"),
-                boundedOptionalEnum(source.riskLevel(), RiskLevel.class, "DIAGNOSTIC_RISK_LEVEL"),
-                boundedEnum(source.scoreBucket(), EngineIntelligenceScoreBucket.class, "DIAGNOSTIC_SCORE_BUCKET"),
-                boundedReasonCode(source.reasonCode())
-        );
+                boundedEnum(source.engineType(), FraudEngineType.class),
+                boundedEnum(source.engineStatus(), FraudEngineStatus.class),
+                boundedEnum(source.signalCategory(), EngineIntelligenceSignalCategory.class),
+                boundedOptionalEnum(source.riskLevel(), RiskLevel.class),
+                boundedEnum(source.scoreBucket(), EngineIntelligenceScoreBucket.class),
+                boundedPublicReasonCode(source.reasonCode())
+        ));
     }
 
     private EngineIntelligenceWarningSummary validatedWarning(EngineIntelligenceWarningSummary source) {
-        Objects.requireNonNull(source, "warning must not be null");
-        return new EngineIntelligenceWarningSummary(
-                boundedEnum(source.code(), EngineIntelligenceWarningCode.class, "WARNING_CODE"),
+        requireShape(source);
+        return publicContract(() -> new EngineIntelligenceWarningSummary(
+                boundedEnum(source.code(), EngineIntelligenceWarningCode.class),
                 source.count()
-        );
+        ));
     }
 
     private String allowedEngineId(String engineId) {
-        String safe = boundedString(engineId, "ENGINE_ID");
+        String safe = boundedString(engineId);
         if (!ALLOWED_ENGINE_IDS.contains(safe)) {
-            throw new IllegalArgumentException("ENGINE_INTELLIGENCE_ENGINE_ID_INVALID");
+            throw validation(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
         }
         return safe;
     }
 
-    private String boundedReasonCode(String reasonCode) {
-        return boundedString(reasonCode, "REASON_CODE");
+    private String boundedPublicReasonCode(String reasonCode) {
+        String safe = boundedString(reasonCode);
+        try {
+            new EngineIntelligenceEngineResult(
+                    "rules.primary",
+                    FraudEngineType.RULES,
+                    FraudEngineStatus.AVAILABLE,
+                    RiskLevel.LOW,
+                    EngineIntelligenceScoreBucket.LOW,
+                    List.of(safe)
+            );
+        } catch (RuntimeException exception) {
+            throw validation(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED);
+        }
+        return safe;
     }
 
-    private <T extends Enum<T>> T boundedEnum(T value, Class<T> enumType, String fieldName) {
-        Objects.requireNonNull(value, "ENGINE_INTELLIGENCE_" + fieldName + "_INVALID");
-        boundedString(value.toString(), fieldName);
+    private <T extends Enum<T>> T boundedEnum(T value, Class<T> enumType) {
+        requireShape(value);
+        boundedString(value.toString());
         if (!List.of(enumType.getEnumConstants()).contains(value)) {
-            throw new IllegalArgumentException("ENGINE_INTELLIGENCE_" + fieldName + "_INVALID");
+            throw validation(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
         }
         return value;
     }
 
-    private <T extends Enum<T>> T boundedOptionalEnum(T value, Class<T> enumType, String fieldName) {
+    private <T extends Enum<T>> T boundedOptionalEnum(T value, Class<T> enumType) {
         if (value == null) {
             return null;
         }
-        return boundedEnum(value, enumType, fieldName);
+        return boundedEnum(value, enumType);
     }
 
-    private String boundedString(String value, String fieldName) {
-        if (value == null
-                || value.isBlank()
-                || value.length() > MAX_STRING_LENGTH
+    private String boundedString(String value) {
+        if (value == null || value.isBlank()
                 || value.chars().anyMatch(Character::isISOControl)
                 || containsForbiddenText(value)) {
-            throw new IllegalArgumentException("ENGINE_INTELLIGENCE_" + fieldName + "_INVALID");
+            throw validation(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
+        }
+        if (value.length() > MAX_STRING_LENGTH) {
+            throw validation(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_OVERSIZED);
         }
         return value;
     }
@@ -169,13 +182,34 @@ public class EngineIntelligenceProjectionPolicy {
     private <T, R> List<R> copyBounded(
             List<T> source,
             int maximum,
-            String fieldName,
             Function<T, R> mapper
     ) {
-        Objects.requireNonNull(source, fieldName + " is required");
+        requireShape(source);
         if (source.size() > maximum) {
-            throw new IllegalArgumentException("ENGINE_INTELLIGENCE_" + fieldName + "_LIMIT_EXCEEDED");
+            throw validation(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_OVERSIZED);
         }
         return source.stream().map(mapper).toList();
+    }
+
+    private <T> T publicContract(Supplier<T> factory) {
+        try {
+            return factory.get();
+        } catch (EngineIntelligenceProjectionValidationException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            throw validation(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
+        }
+    }
+
+    private void requireShape(Object value) {
+        if (value == null) {
+            throw validation(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
+        }
+    }
+
+    private EngineIntelligenceProjectionValidationException validation(
+            EngineIntelligenceProjectionOmissionReason reason
+    ) {
+        return new EngineIntelligenceProjectionValidationException(reason);
     }
 }
