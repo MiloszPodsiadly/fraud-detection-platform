@@ -83,6 +83,19 @@ class EngineIntelligenceApiArchitectureGuardTest {
         );
     }
 
+    @Test
+    void openApiStillExposesOnlyOneTransactionScopedEngineIntelligenceEndpoint() throws Exception {
+        String openApi = sources("docs/openapi/alert_service.openapi.yaml");
+
+        assertThat(openApi.split("/engine-intelligence", -1)).hasSize(2);
+        assertThat(openApi).contains("/api/v1/transactions/scored/{transactionId}/engine-intelligence:");
+        assertThat(openApi).doesNotContain(
+                "/api/v1/engine-intelligence:",
+                "/api/v1/engine-intelligence/search:",
+                "/api/v1/fraud-cases/{caseId}/engine-intelligence:"
+        );
+    }
+
     private String sources(String... relativePaths) throws IOException {
         StringBuilder sources = new StringBuilder();
         for (String relativePath : relativePaths) {

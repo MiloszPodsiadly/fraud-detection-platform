@@ -3,6 +3,7 @@ package com.frauddetection.alert.engineintelligence;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModelMapper;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
@@ -17,6 +18,8 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class EngineIntelligenceReadModelMapperTest {
 
@@ -144,8 +147,8 @@ class EngineIntelligenceReadModelMapperTest {
         );
 
         assertThatThrownBy(() -> mapper.map(oversized))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage("engine summaries exceed the bounded API limit");
+                .isInstanceOf(EngineIntelligenceProjectionReadUnavailableException.class)
+                .hasMessage("Engine intelligence projection is temporarily unavailable.");
     }
 
     @Test
@@ -153,6 +156,62 @@ class EngineIntelligenceReadModelMapperTest {
         String serialized = objectMapper.writeValueAsString(EngineIntelligenceReadModel.notProjected("txn-old"));
 
         assertThat(serialized).isEqualTo("{\"transactionId\":\"txn-old\",\"available\":false,\"reason\":\"NOT_PROJECTED\"}");
+    }
+
+    @Test
+    void corruptedProjectionWithRawEvidenceReasonCodeIsNotExposed() {
+        assertRejected(
+                projectionWithEngine("rules.primary", FraudEngineStatus.AVAILABLE, null, List.of("rawEvidence")),
+                "rawEvidence"
+        );
+    }
+
+    @Test
+    void corruptedProjectionWithFeatureSnapshotEngineIdIsNotExposed() {
+        assertRejected(
+                projectionWithEngine("featureSnapshot", FraudEngineStatus.AVAILABLE, null, List.of()),
+                "featureSnapshot"
+        );
+    }
+
+    @Test
+    void corruptedProjectionWithEndpointTokenSecretWarningIsNotExposed() {
+        EngineIntelligenceWarningProjection warning = mock(EngineIntelligenceWarningProjection.class);
+        when(warning.warningCode()).thenThrow(new IllegalStateException("endpoint token secret warning"));
+
+        assertRejected(projection(List.of(), List.of(), List.of(warning)), "endpoint", "token", "secret");
+    }
+
+    @Test
+    void corruptedProjectionWithOverlongEngineIdIsRejected() {
+        assertRejected(
+                projectionWithEngine("x".repeat(129), FraudEngineStatus.AVAILABLE, null, List.of()),
+                "x".repeat(129)
+        );
+    }
+
+    @Test
+    void corruptedProjectionWithOverlongReasonCodeIsRejected() {
+        assertRejected(
+                projectionWithEngine("rules.primary", FraudEngineStatus.AVAILABLE, null, List.of("x".repeat(129))),
+                "x".repeat(129)
+        );
+    }
+
+    @Test
+    void corruptedProjectionWithControlCharacterStringIsRejected() {
+        assertRejected(
+                projectionWithEngine("rules.primary", FraudEngineStatus.AVAILABLE, null, List.of("HIGH\nVELOCITY")),
+                "HIGH\nVELOCITY"
+        );
+    }
+
+    @Test
+    void corruptedOperationalTimeoutWithRiskLevelIsRejectedOrSanitized() {
+        assertRejected(
+                projectionWithEngine("ml.python.primary", FraudEngineStatus.TIMEOUT, com.frauddetection.common.events.enums.RiskLevel.LOW, List.of("ML_MODEL_TIMEOUT")),
+                "LOW"
+        );
     }
 
     private EngineIntelligenceProjection fullProjection() {
@@ -184,5 +243,57 @@ class EngineIntelligenceReadModelMapperTest {
                 now,
                 now
         );
+    }
+
+    private EngineIntelligenceProjection projectionWithEngine(
+            String engineId,
+            FraudEngineStatus status,
+            com.frauddetection.common.events.enums.RiskLevel riskLevel,
+            List<String> reasonCodes
+    ) {
+        return projection(
+                List.of(new EngineIntelligenceEngineProjection(
+                        engineId,
+                        "ml.python.primary".equals(engineId) ? FraudEngineType.ML_MODEL : FraudEngineType.RULES,
+                        status,
+                        riskLevel,
+                        status == FraudEngineStatus.AVAILABLE
+                                ? EngineIntelligenceScoreBucket.NONE
+                                : EngineIntelligenceScoreBucket.UNAVAILABLE,
+                        reasonCodes
+                )),
+                List.of(),
+                List.of()
+        );
+    }
+
+    private EngineIntelligenceProjection projection(
+            List<EngineIntelligenceEngineProjection> engines,
+            List<EngineIntelligenceDiagnosticSignalProjection> diagnosticSignals,
+            List<EngineIntelligenceWarningProjection> warnings
+    ) {
+        Instant now = EngineIntelligenceProjectionTestFixtures.GENERATED_AT;
+        return new EngineIntelligenceProjection(
+                "txn-corrupted",
+                1,
+                now,
+                EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
+                EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
+                EngineIntelligenceScoreDeltaBucket.UNAVAILABLE,
+                engines,
+                diagnosticSignals,
+                warnings,
+                now,
+                now
+        );
+    }
+
+    private void assertRejected(EngineIntelligenceProjection projection, String... rawValues) {
+        var assertion = assertThatThrownBy(() -> mapper.map(projection))
+                .isInstanceOf(EngineIntelligenceProjectionReadUnavailableException.class)
+                .hasMessage("Engine intelligence projection is temporarily unavailable.");
+        for (String rawValue : rawValues) {
+            assertion.hasMessageNotContaining(rawValue);
+        }
     }
 }

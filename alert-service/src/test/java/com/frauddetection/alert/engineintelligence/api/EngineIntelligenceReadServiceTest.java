@@ -14,6 +14,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class EngineIntelligenceReadServiceTest {
@@ -74,5 +75,81 @@ class EngineIntelligenceReadServiceTest {
 
         assertThat(service.read("txn-old").available()).isFalse();
         verify(mapper, never()).map(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void blankTransactionIdReturnsNotFoundWithoutRepositoryLookup() {
+        assertInvalidTransactionId("   ");
+    }
+
+    @Test
+    void overlongTransactionIdReturnsNotFoundWithoutRepositoryLookup() {
+        assertInvalidTransactionId("x".repeat(129));
+    }
+
+    @Test
+    void controlCharacterTransactionIdReturnsNotFoundWithoutRepositoryLookup() {
+        assertInvalidTransactionId("txn-raw\nsecret");
+    }
+
+    @Test
+    void invalidPatternTransactionIdReturnsNotFoundWithoutRepositoryLookup() {
+        assertInvalidTransactionId("txn/raw-secret");
+    }
+
+    @Test
+    void trimmedValidTransactionIdIsUsedForLookup() {
+        when(scoredTransactionRepository.existsById("txn-trimmed")).thenReturn(true);
+        when(projectionRepository.findById("txn-trimmed")).thenReturn(Optional.empty());
+
+        assertThat(service.read("  txn-trimmed  "))
+                .isEqualTo(EngineIntelligenceReadModel.notProjected("txn-trimmed"));
+
+        verify(scoredTransactionRepository).existsById("txn-trimmed");
+        verify(projectionRepository).findById("txn-trimmed");
+    }
+
+    @Test
+    void validTransactionIdAllowsProjectionLookup() {
+        when(scoredTransactionRepository.existsById("txn.valid:001")).thenReturn(true);
+        when(projectionRepository.findById("txn.valid:001")).thenReturn(Optional.empty());
+
+        service.read("txn.valid:001");
+
+        verify(projectionRepository).findById("txn.valid:001");
+    }
+
+    @Test
+    void projectionRepositoryFailureThrowsStableUnavailableException() {
+        when(scoredTransactionRepository.existsById("txn-store-failure")).thenReturn(true);
+        when(projectionRepository.findById("txn-store-failure"))
+                .thenThrow(new IllegalStateException("raw mongodb endpoint token secret"));
+
+        assertThatThrownBy(() -> service.read("txn-store-failure"))
+                .isInstanceOf(EngineIntelligenceProjectionReadUnavailableException.class)
+                .hasMessage("Engine intelligence projection is temporarily unavailable.")
+                .hasMessageNotContaining("mongodb")
+                .hasMessageNotContaining("endpoint")
+                .hasMessageNotContaining("token")
+                .hasMessageNotContaining("secret");
+    }
+
+    @Test
+    void projectionRepositoryFailureDoesNotReturnNotProjected() {
+        when(scoredTransactionRepository.existsById("txn-store-failure")).thenReturn(true);
+        when(projectionRepository.findById("txn-store-failure"))
+                .thenThrow(new IllegalStateException("raw repository failure"));
+
+        assertThatThrownBy(() -> service.read("txn-store-failure"))
+                .isInstanceOf(EngineIntelligenceProjectionReadUnavailableException.class);
+    }
+
+    private void assertInvalidTransactionId(String transactionId) {
+        assertThatThrownBy(() -> service.read(transactionId))
+                .isInstanceOf(EngineIntelligenceScoredTransactionNotFoundException.class)
+                .hasMessage("Scored transaction not found.")
+                .hasMessageNotContaining(transactionId);
+
+        verifyNoInteractions(scoredTransactionRepository, projectionRepository, mapper);
     }
 }

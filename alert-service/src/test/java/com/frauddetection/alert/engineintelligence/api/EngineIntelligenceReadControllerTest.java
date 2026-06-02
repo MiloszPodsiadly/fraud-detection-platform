@@ -15,6 +15,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.time.Instant;
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -79,5 +80,22 @@ class EngineIntelligenceReadControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Scored transaction not found."))
                 .andExpect(jsonPath("$.details[0]").value("reason:SCORED_TRANSACTION_NOT_FOUND"));
+    }
+
+    @Test
+    void controllerMapsProjectionStoreUnavailableTo503WithoutRawRepositoryException() throws Exception {
+        when(service.read("txn-store-failure"))
+                .thenThrow(new EngineIntelligenceProjectionReadUnavailableException());
+
+        String response = mockMvc.perform(get("/api/v1/transactions/scored/txn-store-failure/engine-intelligence"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.message").value("Engine intelligence projection is temporarily unavailable."))
+                .andExpect(jsonPath("$.details[0]")
+                        .value("reason:ENGINE_INTELLIGENCE_PROJECTION_STORE_UNAVAILABLE"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        assertThat(response).doesNotContain("mongodb", "repository", "endpoint", "token", "secret", "stacktrace");
     }
 }

@@ -132,6 +132,7 @@ import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -433,7 +434,7 @@ class AlertSecurityConfigTest {
     }
 
     @Test
-    void shouldUseScoredTransactionAuthorityForEngineIntelligenceRead() throws Exception {
+    void engineIntelligenceEndpointUsesSameAuthorityAsScoredTransactionRead() throws Exception {
         when(engineIntelligenceReadService.read("txn-old"))
                 .thenReturn(EngineIntelligenceReadModel.notProjected("txn-old"));
 
@@ -443,14 +444,24 @@ class AlertSecurityConfigTest {
                 .andExpect(jsonPath("$.available").value(false))
                 .andExpect(jsonPath("$.reason").value("NOT_PROJECTED"));
 
+        verify(engineIntelligenceReadService).read("txn-old");
+    }
+
+    @Test
+    void fraudCaseReadAloneCannotReadEngineIntelligence() throws Exception {
         mockMvc.perform(get("/api/v1/transactions/scored/txn-old/engine-intelligence")
                         .with(authorities(AnalystAuthority.FRAUD_CASE_READ)))
                 .andExpect(status().isForbidden());
 
+        verifyNoInteractions(engineIntelligenceReadService);
+    }
+
+    @Test
+    void anonymousCannotReadEngineIntelligence() throws Exception {
         mockMvc.perform(get("/api/v1/transactions/scored/txn-old/engine-intelligence"))
                 .andExpect(status().isUnauthorized());
 
-        verify(engineIntelligenceReadService, times(1)).read("txn-old");
+        verifyNoInteractions(engineIntelligenceReadService);
     }
 
     @Test
