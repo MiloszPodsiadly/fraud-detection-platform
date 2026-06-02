@@ -27,6 +27,8 @@ import com.frauddetection.alert.controller.FraudCaseEvidenceTimelineController;
 import com.frauddetection.alert.controller.FraudCaseWorkQueueSummaryController;
 import com.frauddetection.alert.controller.ScoredTransactionController;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadController;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadService;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryController;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryProjectionService;
 import com.frauddetection.alert.governance.audit.GovernanceAuditController;
@@ -92,6 +94,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         FraudCaseEvidenceTimelineController.class,
         FraudCaseWorkQueueSummaryController.class,
         ScoredTransactionController.class,
+        EngineIntelligenceReadController.class,
         AuditEventController.class,
         AuditIntegrityController.class,
         ExternalAuditIntegrityController.class,
@@ -142,6 +145,9 @@ class RouteCoverageAgainstMvcMappingsTest {
 
     @MockBean
     private TransactionMonitoringUseCase transactionMonitoringUseCase;
+
+    @MockBean
+    private EngineIntelligenceReadService engineIntelligenceReadService;
 
     @MockBean
     private AlertServiceMetrics alertServiceMetrics;

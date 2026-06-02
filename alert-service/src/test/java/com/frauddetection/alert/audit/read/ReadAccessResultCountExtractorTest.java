@@ -7,6 +7,7 @@ import com.frauddetection.alert.api.FraudCaseTimelineEventType;
 import com.frauddetection.alert.api.FraudCaseTimelineLinkedEntityType;
 import com.frauddetection.alert.evidence.EvidenceSource;
 import com.frauddetection.alert.evidence.EvidenceStatus;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModel;
 import com.frauddetection.alert.suspicious.api.SuspiciousTransactionSummaryResponse;
 import org.junit.jupiter.api.Test;
 
@@ -68,5 +69,13 @@ class ReadAccessResultCountExtractorTest {
         );
 
         assertThat(resultCount).isEqualTo(1);
+    }
+
+    @Test
+    void shouldCountOnlyAvailableEngineIntelligenceProjection() {
+        assertThat(extractor.resultCount(
+                EngineIntelligenceReadModel.notProjected("txn-old"),
+                ReadAccessEndpointCategory.ENGINE_INTELLIGENCE_READ
+        )).isZero();
     }
 }

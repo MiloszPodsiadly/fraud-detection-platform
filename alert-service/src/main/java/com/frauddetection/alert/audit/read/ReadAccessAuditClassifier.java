@@ -47,6 +47,9 @@ public class ReadAccessAuditClassifier {
         if ("/api/v1/transactions/scored".equals(pattern)) {
             return Optional.of(target(ReadAccessEndpointCategory.SCORED_TRANSACTION_SEARCH, ReadAccessResourceType.SCORED_TRANSACTION, null, request));
         }
+        if ("/api/v1/transactions/scored/{transactionId}/engine-intelligence".equals(pattern)) {
+            return Optional.of(target(ReadAccessEndpointCategory.ENGINE_INTELLIGENCE_READ, ReadAccessResourceType.SCORED_TRANSACTION, variables.get("transactionId"), request));
+        }
         if ("/internal/suspicious-transactions".equals(pattern)) {
             return Optional.of(target(ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_SEARCH, ReadAccessResourceType.SUSPICIOUS_TRANSACTION, null, request));
         }

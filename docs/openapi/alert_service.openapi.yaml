@@ -1237,6 +1237,37 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "400":
           $ref: "#/components/responses/BadRequest"
+  /api/v1/transactions/scored/{transactionId}/engine-intelligence:
+    get:
+      summary: Read bounded projected engine intelligence for one scored transaction
+      description: Returns an optional bounded diagnostic read model backed only by the stored alert-service projection. Authorization and scored-transaction existence are checked before projection lookup. A missing projection is normal for old transactions and disabled producer periods and returns available=false with reason=NOT_PROJECTED. The read path does not invoke scoring, ML, rules, orchestration, Kafka, decisioning, list search, or case-level aggregation.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: transactionId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[A-Za-z0-9._:-]+$"
+      responses:
+        "200":
+          description: Bounded engine intelligence read model returned. The projection may be unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EngineIntelligenceReadModel"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /governance/advisories:
     get:
       summary: List governance advisories with derived lifecycle status
@@ -4011,6 +4042,139 @@ components:
           type: array
           items:
             type: string
+    EngineIntelligenceReadModel:
+      type: object
+      additionalProperties: false
+      required:
+        - transactionId
+        - available
+      properties:
+        transactionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        available:
+          type: boolean
+        reason:
+          type: string
+          enum: [NOT_PROJECTED]
+        contractVersion:
+          type: integer
+          minimum: 1
+        generatedAt:
+          type: string
+          format: date-time
+        comparison:
+          $ref: "#/components/schemas/EngineIntelligenceComparisonReadModel"
+        engineCount:
+          type: integer
+          minimum: 0
+          maximum: 2
+        diagnosticSignalCount:
+          type: integer
+          minimum: 0
+          maximum: 5
+        warningCount:
+          type: integer
+          minimum: 0
+          maximum: 10
+        engines:
+          type: array
+          maxItems: 2
+          items:
+            $ref: "#/components/schemas/EngineIntelligenceEngineReadModel"
+        diagnosticSignals:
+          type: array
+          maxItems: 5
+          items:
+            $ref: "#/components/schemas/EngineIntelligenceDiagnosticSignalReadModel"
+        warnings:
+          type: array
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/EngineIntelligenceWarningReadModel"
+    EngineIntelligenceComparisonReadModel:
+      type: object
+      additionalProperties: false
+      required: [agreementStatus, riskMismatchStatus, scoreDeltaBucket]
+      properties:
+        agreementStatus:
+          type: string
+          enum: [AGREEMENT, ADJACENT_RISK_VARIANCE, DISAGREEMENT, PARTIAL, INSUFFICIENT_DATA, REQUIRED_ENGINE_NOT_COMPARABLE]
+        riskMismatchStatus:
+          type: string
+          enum: [SAME_RISK_LEVEL, ADJACENT_RISK_LEVEL, MATERIAL_RISK_MISMATCH, NOT_COMPARABLE]
+        scoreDeltaBucket:
+          type: string
+          enum: [NONE, SMALL, MEDIUM, LARGE, UNAVAILABLE]
+    EngineIntelligenceEngineReadModel:
+      type: object
+      additionalProperties: false
+      required: [engineId, engineType, status, scoreBucket, reasonCodes]
+      properties:
+        engineId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        engineType:
+          type: string
+        status:
+          type: string
+          enum: [AVAILABLE, UNAVAILABLE, DEGRADED, TIMEOUT, FALLBACK_USED, SKIPPED]
+        riskLevel:
+          type: string
+          nullable: true
+          enum: [LOW, MEDIUM, HIGH, CRITICAL]
+        scoreBucket:
+          type: string
+          enum: [NONE, LOW, MEDIUM, HIGH, VERY_HIGH, UNAVAILABLE]
+        reasonCodes:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+    EngineIntelligenceDiagnosticSignalReadModel:
+      type: object
+      additionalProperties: false
+      required: [engineId, engineType, engineStatus, signalCategory, scoreBucket, reasonCode]
+      properties:
+        engineId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        engineType:
+          type: string
+        engineStatus:
+          type: string
+          enum: [AVAILABLE, UNAVAILABLE, DEGRADED, TIMEOUT, FALLBACK_USED, SKIPPED]
+        signalCategory:
+          type: string
+          enum: [FRAUD_SIGNAL, OPERATIONAL_SIGNAL]
+        riskLevel:
+          type: string
+          nullable: true
+          enum: [LOW, MEDIUM, HIGH, CRITICAL]
+        scoreBucket:
+          type: string
+          enum: [NONE, LOW, MEDIUM, HIGH, VERY_HIGH, UNAVAILABLE]
+        reasonCode:
+          type: string
+          minLength: 1
+          maxLength: 128
+    EngineIntelligenceWarningReadModel:
+      type: object
+      additionalProperties: false
+      required: [warningCode, count]
+      properties:
+        warningCode:
+          type: string
+          minLength: 1
+          maxLength: 128
+        count:
+          type: integer
+          minimum: 0
   responses:
     BadRequest:
       description: Request validation failed.

@@ -35,6 +35,25 @@ class ReadAccessAuditClassifierTest {
     }
 
     @Test
+    void shouldClassifyEngineIntelligenceReadAsTransactionScopedSensitiveRead() {
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "GET",
+                "/api/v1/transactions/scored/txn-1/engine-intelligence"
+        );
+        request.setAttribute(
+                HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE,
+                "/api/v1/transactions/scored/{transactionId}/engine-intelligence"
+        );
+        request.setAttribute(HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE, Map.of("transactionId", "txn-1"));
+
+        ReadAccessAuditTarget target = classifier.classify(request).orElseThrow();
+
+        assertThat(target.endpointCategory()).isEqualTo(ReadAccessEndpointCategory.ENGINE_INTELLIGENCE_READ);
+        assertThat(target.resourceType()).isEqualTo(ReadAccessResourceType.SCORED_TRANSACTION);
+        assertThat(target.resourceId()).isEqualTo("txn-1");
+    }
+
+    @Test
     void shouldClassifyGovernanceAuditHistoryRead() {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/governance/advisories/advisory-1/audit");
         request.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/governance/advisories/{eventId}/audit");
