@@ -9,6 +9,8 @@ class TransactionAuthorizationRules implements EndpointAuthorizationRuleGroup {
 
     public void configure(AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry authorize) {
         authorize
-                .requestMatchers(HttpMethod.GET, "/api/v1/transactions/scored").hasAuthority(AnalystAuthority.TRANSACTION_MONITOR_READ);
+                .requestMatchers(HttpMethod.GET, "/api/v1/transactions/scored").hasAuthority(AnalystAuthority.TRANSACTION_MONITOR_READ)
+                .requestMatchers(HttpMethod.GET, "/api/v1/transactions/scored/{transactionId}/engine-intelligence")
+                .hasAuthority(AnalystAuthority.TRANSACTION_MONITOR_READ);
     }
 }

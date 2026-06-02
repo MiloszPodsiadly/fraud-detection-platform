@@ -5,6 +5,7 @@ import com.frauddetection.alert.api.FraudCaseEvidenceSummaryResponse;
 import com.frauddetection.alert.api.FraudCaseEvidenceTimelineResponse;
 import com.frauddetection.alert.api.FraudCaseWorkQueueSliceResponse;
 import com.frauddetection.alert.api.FraudCaseWorkQueueSummaryResponse;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModel;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryAnalyticsResponse;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryListResponse;
 import com.frauddetection.alert.governance.audit.GovernanceAuditHistoryResponse;
@@ -39,6 +40,9 @@ public class ReadAccessResultCountExtractor {
         if (body instanceof SuspiciousTransactionSummaryResponse) {
             return 1;
         }
+        if (body instanceof EngineIntelligenceReadModel response) {
+            return response.available() ? 1 : 0;
+        }
         if (body instanceof AlertLinkedContextResponse response) {
             return response.state() == LinkedAlertContextState.LINKED_ALERT_AVAILABLE ? 1 : 0;
         }
@@ -57,6 +61,7 @@ public class ReadAccessResultCountExtractor {
         return switch (category) {
             case ALERT_DETAIL, FRAUD_CASE_DETAIL, FRAUD_CASE_EVIDENCE_SUMMARY, GOVERNANCE_ADVISORY_DETAIL -> 1;
             case SCORED_TRANSACTION_SEARCH,
+                    ENGINE_INTELLIGENCE_READ,
                     SUSPICIOUS_TRANSACTION_SEARCH,
                     SUSPICIOUS_TRANSACTION_READ,
                     SUSPICIOUS_TRANSACTION_LINKED_ALERT_CONTEXT,

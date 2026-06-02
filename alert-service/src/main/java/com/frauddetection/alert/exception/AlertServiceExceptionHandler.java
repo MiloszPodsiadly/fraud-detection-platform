@@ -6,6 +6,7 @@ import com.frauddetection.alert.audit.InvalidAuditEventQueryException;
 import com.frauddetection.alert.audit.PostCommitEvidenceIncompleteException;
 import com.frauddetection.alert.audit.external.AuditEvidenceExportRejectedException;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorPublicationRequiredException;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceScoredTransactionNotFoundException;
 import com.frauddetection.alert.fraudcase.FraudCaseNotFoundException;
 import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueQueryException;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryLookupUnavailableException;
@@ -215,6 +216,21 @@ public class AlertServiceExceptionHandler {
     public ResponseEntity<ApiErrorResponse> handleFraudCaseNotFound(FraudCaseNotFoundException exception) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(
                 new ApiErrorResponse(Instant.now(), 404, "Not Found", "Fraud case not found.", List.of("reason:FRAUD_CASE_NOT_FOUND"))
+        );
+    }
+
+    @ExceptionHandler(EngineIntelligenceScoredTransactionNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleEngineIntelligenceScoredTransactionNotFound(
+            EngineIntelligenceScoredTransactionNotFoundException exception
+    ) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(
+                new ApiErrorResponse(
+                        Instant.now(),
+                        404,
+                        "Not Found",
+                        "Scored transaction not found.",
+                        List.of("reason:SCORED_TRANSACTION_NOT_FOUND")
+                )
         );
     }
 
